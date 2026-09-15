@@ -180,6 +180,21 @@ async def update_visit(
 ) -> VisitResponse:
     """Full-replace update of a visit, cascade status to parent record."""
     await _visit_scoped_or_404(service, session, visit_id, scope)
+    # GH #263 T2-quality: PUT re-parents the visit — the NEW record_id must
+    # be inside the master's scope (VisitPatch carries no record_id, so
+    # PATCH cannot re-parent and needs no gate).
+    if scope.master_key is not None and data.record_id:
+        parent = await service.get_record_scoped(
+            db_session=session, record_id=data.record_id, master_key=scope.master_key
+        )
+        if not parent:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.RECORD_NOT_FOUND,
+                    message="Parent record not found",
+                ).model_dump(),
+            )
     visit = await service.update(db_session=session, visit_id=visit_id, data=data)
     if not visit:
         raise HTTPException(

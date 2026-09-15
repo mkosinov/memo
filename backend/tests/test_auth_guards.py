@@ -27,6 +27,7 @@ Domain rules: docs/domain-rules/auth.md
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,15 +235,35 @@ class TestMasterMatrix:
         resp = master_client.get(path)
         assert resp.status_code == 200, f"GET {path}: {resp.text}"
 
-    def test_master_records_write_allowed(self, master_client, create_activity) -> None:
-        """records:write — master books a record (booking UI flow)."""
-        activity = create_activity()
-        resp = master_client.post("/api/v1/records", json={
+    def test_master_records_write_allowed(
+        self, api_client, create_service, create_location, login_as,
+    ) -> None:
+        """records:write — master books a record (booking UI flow).
+
+        GH #263 T2-quality: the create gate seals POST /records to the
+        master's scope — the booking flow works on HIS OWN activity, so
+        this guard builds a scoped master (staff card + masters row) and
+        books onto that activity (a random activity would now be 404,
+        cf. test_master_scope_read.py::TestCreateGates).
+        """
+        from tests.conftest import insert_master_user
+
+        staff_id = insert_master_user("+79995551301", hash_password(MASTER_PASSWORD))["staff_id"]
+        client = login_as("+79995551301", MASTER_PASSWORD)
+        svc = create_service()
+        loc = create_location()
+        start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        activity = api_client.post("/api/v1/activities", json={
+            "master_id": staff_id, "service_id": svc["id"], "location_id": loc["id"],
+            "start": start, "duration": 90, "capacity": 10, "is_private": False,
+        }).json()
+        resp = client.post("/api/v1/records", json={
             "activity_id": activity["id"],
             "phone": f"+7999{uuid.uuid4().hex[:7]}",
             "visits": [{"name": "Гость", "price": 2000}],
         })
         assert resp.status_code == 201, resp.text
+        client.cookies.clear()
 
     def test_master_payment_write_allowed(self, master_client, create_record) -> None:
         """GH #263 T1: master holds payments:write now (spec §2.5 superseded).

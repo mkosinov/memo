@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
-from src.auth.scope import ScopeContext, get_scope
+from src.auth.scope import ScopeContext, get_optional_scope, get_scope
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -22,6 +22,7 @@ from src.schemas.record import (
     RecordUpdate,
     RecordViewResponse,
 )
+from src.services.activity import get_activity_service
 from src.services.record import RecordService, get_record_service, map_record
 
 router = APIRouter(tags=["records"])
@@ -117,13 +118,42 @@ async def get_record(
     return map_record(record)
 
 
+async def _activity_scoped_or_404(
+    session: AsyncSession, activity_id: str, scope: ScopeContext,
+) -> None:
+    """GH #263 T2-quality — create/re-target gate on the target activity.
+
+    A scoped master may create a record on (or re-target a record to) an
+    activity ONLY inside his scope: ONE owner query (the ActivityService
+    point-get with the scope folded in) — чужая активность → 404,
+    indistinguishable from «не существует». Admin → no check.
+    """
+    if scope.master_key is None:
+        return
+    activity = await get_activity_service().get_scoped(
+        db_session=session, id=activity_id, master_key=scope.master_key
+    )
+    if not activity:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.ACTIVITY_NOT_FOUND,
+                message="Activity not found",
+            ).model_dump(),
+        )
+
+
 @router.post("", response_model=RecordResponse, status_code=201)
 async def create_record(
     data: RecordCreate,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T2-quality: the booking route stays public, but a scoped
+    # master may only book onto his OWN activities (foreign → 404).
+    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
+    await _activity_scoped_or_404(session, data.activity_id, scope)
     record = await service.create(db_session=session, data=data)
     return map_record(record)
 
@@ -163,6 +193,10 @@ async def update_record(
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
     await _scoped_or_404(service, session, record_id, scope)
+    # GH #263 T2-quality: PUT re-targets the record — the NEW activity_id
+    # must be inside the master's scope (RecordPatch carries no
+    # activity_id, so PATCH cannot re-target and needs no gate).
+    await _activity_scoped_or_404(session, data.activity_id, scope)
     record = await service.update(db_session=session, id=record_id, data=data)
     if not record:
         raise HTTPException(

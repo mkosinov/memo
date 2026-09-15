@@ -54,22 +54,22 @@ class VisitService:
         Items are validated via VisitResponse.model_validate.
         """
         stmt = select(Visit)
-        count_stmt = select(func.count()).select_from(Visit)
         if master_key is not None:
             stmt = (
                 stmt.join(Record, Visit.record_id == Record.id)
                 .join(Activity, Record.activity_id == Activity.id)
                 .where(Activity.master_id == master_key)
             )
-            count_stmt = (
-                count_stmt.join(Record, Visit.record_id == Record.id)
-                .join(Activity, Record.activity_id == Activity.id)
-                .where(Activity.master_id == master_key)
-            )
         if record_id is not None:
             stmt = stmt.where(Visit.record_id == record_id)
-            count_stmt = count_stmt.where(Visit.record_id == record_id)
-        total = (await db_session.execute(count_stmt)).scalar_one()
+        # ONE count shape repo-wide (cf. VisitorService.list): the count
+        # rides a subquery of the filtered stmt — no second hand-mirrored
+        # join chain to keep in sync.
+        total = (
+            await db_session.execute(
+                select(func.count()).select_from(stmt.subquery())
+            )
+        ).scalar_one()
         rows = await db_session.execute(
             stmt.limit(per_page).offset((page - 1) * per_page)
         )

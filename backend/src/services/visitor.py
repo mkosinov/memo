@@ -85,7 +85,7 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         per_page: int = 20,
         q: str | None = None,
         master_key: str | None = None,
-        **filters,
+        **filters: object,
     ) -> PaginatedResponse[VisitorResponse]:
         """Return a paginated page of visitors, scoped + searched (GH #263 T2).
 

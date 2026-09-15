@@ -101,12 +101,12 @@ class TestActivityScope:
         resp = master["client"].get(f"/api/v1/activities/{foreign['id']}")
         assert resp.status_code == 404
 
-    def test_foreign_delete_404_owner_gate_first(
+    def test_own_delete_403_permission_gate_first(
         self, api_client, create_service, create_location, make_master,
     ) -> None:
-        """Scoped foreign delete → 404 (even though write perm is missing,
-        the permission gate fires first — this pins the scope does not
-        WEAKEN anything; the guard order is perm → scope)."""
+        """The PERMISSION gate fires before the scope gate: master holds no
+        activities:write, so even a delete of his OWN activity → 403 (the
+        scope never weakens or replaces the permission layer)."""
         master = make_master()
         svc, loc = create_service(), create_location()
         own = api_client.post("/api/v1/activities", json=_activity_payload(
@@ -285,6 +285,38 @@ class TestRecordScope:
         )
         assert rows, "foreign record must survive the scoped delete"
 
+    # ── PUT /records/{id} re-targeting (T2-quality write gates) ───────────
+
+    def test_record_put_retarget_foreign_activity_404(self, two_records) -> None:
+        """PUT own record with a FOREIGN activity_id → 404 (new-target gate)."""
+        mc = two_records["master"]["client"]
+        own = two_records["own"]
+        resp = mc.put(f"/api/v1/records/{own['id']}", json={
+            "activity_id": two_records["foreign_act"]["id"],
+            "client_id": own["client_id"],
+            "comment": "перенос к чужому",
+            "visits": [],
+        })
+        assert resp.status_code == 404, resp.text
+        # The record did NOT move.
+        rows = query_db(
+            f"SELECT activity_id FROM records WHERE id='{own['id']}'"
+        )
+        assert rows[0]["activity_id"] == own["activity_id"]
+
+    def test_record_put_same_own_activity_200(self, two_records) -> None:
+        """PUT own record keeping its own activity → 200 (unchanged path)."""
+        mc = two_records["master"]["client"]
+        own = two_records["own"]
+        resp = mc.put(f"/api/v1/records/{own['id']}", json={
+            "activity_id": own["activity_id"],
+            "client_id": own["client_id"],
+            "comment": "обновлено на месте",
+            "visits": [{"name": "Новое имя", "price": 100, "status": "waiting"}],
+        })
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["comment"] == "обновлено на месте"
+
     def test_own_delete_204(self, two_records) -> None:
         mc = two_records["master"]["client"]
         own = two_records["own"]
@@ -400,6 +432,62 @@ class TestVisitScope:
         assert resp.status_code == 200, resp.text
         assert resp.json()["status"] == "visited"
 
+    # ── POST /visits + PUT re-parenting (T2-quality write gates) ──────────
+
+    def test_visit_create_own_parent_201(self, two_visits) -> None:
+        mc = two_visits["master"]["client"]
+        own_rec = two_visits["own"]["record"]
+        resp = mc.post("/api/v1/visits", json={
+            "record_id": own_rec["id"],
+            "price": 150,
+            "status": "waiting",
+        })
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["record_id"] == own_rec["id"]
+
+    def test_visit_create_foreign_parent_404(self, two_visits) -> None:
+        mc = two_visits["master"]["client"]
+        foreign_rec = two_visits["foreign"]["record"]
+        resp = mc.post("/api/v1/visits", json={
+            "record_id": foreign_rec["id"],
+            "price": 150,
+            "status": "waiting",
+        })
+        assert resp.status_code == 404, resp.text
+        rows = query_db(
+            f"SELECT id FROM visits WHERE record_id='{foreign_rec['id']}'"
+        )
+        assert len(rows) == 1  # only the seeded visit, nothing added
+
+    def test_visit_put_reparent_foreign_record_404(self, two_visits) -> None:
+        """PUT own visit with a FOREIGN record_id → 404 (new-target gate)."""
+        mc = two_visits["master"]["client"]
+        own_visit = two_visits["own"]["visit"]
+        foreign_rec = two_visits["foreign"]["record"]
+        resp = mc.put(f"/api/v1/visits/{own_visit['id']}", json={
+            "record_id": foreign_rec["id"],
+            "price": own_visit["price"],
+            "status": own_visit["status"],
+        })
+        assert resp.status_code == 404, resp.text
+        # The visit did NOT move.
+        rows = query_db(
+            f"SELECT record_id FROM visits WHERE id='{own_visit['id']}'"
+        )
+        assert rows[0]["record_id"] == own_visit["record_id"]
+
+    def test_visit_put_same_own_record_200(self, two_visits) -> None:
+        """PUT own visit keeping its own record → 200 (unchanged path)."""
+        mc = two_visits["master"]["client"]
+        own_visit = two_visits["own"]["visit"]
+        resp = mc.put(f"/api/v1/visits/{own_visit['id']}", json={
+            "record_id": own_visit["record_id"],
+            "price": 999,
+            "status": own_visit["status"],
+        })
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["price"] == 999
+
     def test_admin_sees_all_regression(self, two_visits, api_client) -> None:
         resp = api_client.get("/api/v1/visits")
         assert resp.json()["total"] == 2
@@ -508,3 +596,120 @@ class TestVisitorScope:
     def test_admin_sees_all_regression(self, two_visitors, api_client) -> None:
         resp = api_client.get("/api/v1/visitors")
         assert resp.json()["total"] == 2
+
+
+class TestCreateGates:
+    """GH #263 T2-quality — create-path owner gates (seal the write side).
+
+    A master session may only create rows INSIDE its scope: records on
+    own activities, visits on own records, visitors for own-context
+    clients. Чужое target → 404 (indistinguishable from «не существует»).
+    """
+
+    @pytest.fixture
+    def scoped_world(self, api_client, create_service, create_location, make_master):
+        """Master + own/foreign activities + own/foreign clients.
+
+        ``own_client`` carries a record on the master's own activity —
+        that is exactly what makes it visible in the master's scope
+        (client-visibility rule: EXISTS record → own activity).
+        """
+        from src.auth.passwords import hash_password
+        from tests.conftest import insert_master_user
+
+        master = make_master()
+        svc, loc = create_service(), create_location()
+        foreign_staff = insert_master_user("+79995551201", hash_password("x"))["staff_id"]
+        own_act = api_client.post("/api/v1/activities", json=_activity_payload(
+            master["staff_id"], service_id=svc["id"], location_id=loc["id"],
+        )).json()
+        foreign_act = api_client.post("/api/v1/activities", json=_activity_payload(
+            foreign_staff, service_id=svc["id"], location_id=loc["id"],
+        )).json()
+        own_client = _client_for(api_client, "Гейт свой клиент")
+        foreign_client = _client_for(api_client, "Гейт чужой клиент")
+        own_rec = api_client.post("/api/v1/records", json={
+            "activity_id": own_act["id"],
+            "client_id": own_client["id"],
+            "visits": [{"name": "Гейт сид-гость", "price": 100, "status": "waiting"}],
+        }).json()
+        return {
+            "master": master,
+            "own_act": own_act, "foreign_act": foreign_act,
+            "own_client": own_client, "foreign_client": foreign_client,
+            "own_rec": own_rec,
+        }
+
+    # ── POST /records ──────────────────────────────────────────────────────
+
+    def test_record_create_own_activity_201(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        resp = mc.post("/api/v1/records", json={
+            "activity_id": scoped_world["own_act"]["id"],
+            "client_id": scoped_world["own_client"]["id"],
+            "comment": "создано мастером",
+            "visits": [{"name": "Гейт гость", "price": 100, "status": "waiting"}],
+        })
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["activity_id"] == scoped_world["own_act"]["id"]
+
+    def test_record_create_foreign_activity_404(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        resp = mc.post("/api/v1/records", json={
+            "activity_id": scoped_world["foreign_act"]["id"],
+            "client_id": scoped_world["own_client"]["id"],
+            "visits": [{"name": "Гейт гость", "price": 100, "status": "waiting"}],
+        })
+        assert resp.status_code == 404, resp.text
+        # Nothing leaked through: no record on the foreign activity.
+        rows = query_db(
+            "SELECT id FROM records WHERE "
+            f"activity_id='{scoped_world['foreign_act']['id']}'"
+        )
+        assert rows == []
+
+    def test_record_create_admin_foreign_activity_still_201(
+        self, scoped_world, api_client,
+    ) -> None:
+        """Admin regression: no scope on create — foreign activity OK."""
+        resp = api_client.post("/api/v1/records", json={
+            "activity_id": scoped_world["foreign_act"]["id"],
+            "client_id": scoped_world["foreign_client"]["id"],
+            "visits": [{"name": "Админ гость", "price": 100, "status": "waiting"}],
+        })
+        assert resp.status_code == 201, resp.text
+
+    # ── POST /visitors ─────────────────────────────────────────────────────
+
+    def test_visitor_create_own_context_201(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        resp = mc.post("/api/v1/visitors", json={
+            "client_id": scoped_world["own_client"]["id"],
+            "name": "Свой посетитель",
+            "age": 25,
+        })
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["client_id"] == scoped_world["own_client"]["id"]
+
+    def test_visitor_create_foreign_context_404(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        resp = mc.post("/api/v1/visitors", json={
+            "client_id": scoped_world["foreign_client"]["id"],
+            "name": "Чужой посетитель",
+        })
+        assert resp.status_code == 404, resp.text
+        rows = query_db(
+            "SELECT id FROM visitors WHERE "
+            f"client_id='{scoped_world['foreign_client']['id']}'"
+        )
+        assert rows == []
+
+    def test_visitor_create_admin_foreign_context_201(
+        self, scoped_world, api_client,
+    ) -> None:
+        """Admin regression: no scope on visitor create."""
+        resp = api_client.post("/api/v1/visitors", json={
+            "client_id": scoped_world["foreign_client"]["id"],
+            "name": "Админ посетитель",
+        })
+        assert resp.status_code == 201, resp.text

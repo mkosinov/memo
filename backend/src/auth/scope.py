@@ -49,6 +49,7 @@ from src.auth.permissions import (
     SESSION_COOKIE,
     AuthedUser,
     require_session,
+    resolve_authed,
 )
 from src.db import db_manager
 from src.models.enums import UserRole
@@ -163,14 +164,9 @@ async def get_optional_scope(
     raised here: the session cookie is simply absent or stale for the
     public surface.
     """
-    token = request.cookies.get(SESSION_COOKIE)
-    if token is None:
-        return ScopeContext(user_id="", role="", master_key=None)
-    # Lazy import (circularity: permissions → service, same as require_session).
-    from src.auth.service import get_auth_service
-
-    async with db_manager.async_session() as auth_session:
-        authed = await get_auth_service().resolve(auth_session, token)
+    # Shared session resolution (same block require_session uses —
+    # extracted so the strict and optional paths cannot drift).
+    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
         return ScopeContext(user_id="", role="", master_key=None)
     return await resolve_scope(db_session, authed)

@@ -129,6 +129,24 @@ def _forbidden() -> HTTPException:
     )
 
 
+async def resolve_authed(token: str | None) -> AuthedUser | None:
+    """Resolve a session token into an ``AuthedUser``, or ``None``.
+
+    The shared resolution core for ``require_session`` (strict: raises
+    401 on miss) and ``get_optional_scope`` (lenient: anonymous /
+    expired → unscoped). One session-cookie lookup shape, no drift
+    between the strict and optional consumers.
+    """
+    if token is None:
+        return None
+    # Lazy import: src.auth.service imports this module (AuthedUser +
+    # ROLE_PERMISSIONS) — a module-level import would be circular.
+    from src.auth.service import get_auth_service
+
+    async with db_manager.async_session() as db_session:
+        return await get_auth_service().resolve(db_session, token)
+
+
 async def require_session(request: Request) -> AuthedUser:
     """Resolve the ``memo_session`` cookie into an ``AuthedUser``.
 
@@ -136,16 +154,7 @@ async def require_session(request: Request) -> AuthedUser:
     expired/archived session — the frontend treats all three as "no
     session" and redirects to login (spec §5).
     """
-    # Lazy import: src.auth.service imports this module (AuthedUser +
-    # ROLE_PERMISSIONS) — a module-level import would be circular.
-    from src.auth.service import get_auth_service
-
-    token = request.cookies.get(SESSION_COOKIE)
-    if token is None:
-        raise _unauthorized()
-
-    async with db_manager.async_session() as db_session:
-        authed = await get_auth_service().resolve(db_session, token)
+    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
         raise _unauthorized()
     return authed

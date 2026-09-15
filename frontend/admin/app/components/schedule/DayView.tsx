@@ -490,12 +490,17 @@ export function DayView() {
               } : undefined}
             />
           ))}
-          {/* GH #267: archived headers — plain (non-sortable), muted, badged */}
+          {/* GH #267: archived headers — plain (non-sortable), badged.
+              Text stays FULL-opacity --ink-mid (#555 → 7.46:1 on the white
+              header bar): Task 9 (90fdc27) rejected opacity-60 (4.08:1 < 4.5:1)
+              and even 70% composites to 3.54:1 for 12px text. Archived state
+              is signalled by the badge's own muted palette (stone-600 on
+              stone-200 = 6.08:1), not by dimming the name. */}
           {archivedColumns.map((col) => (
             <div
               key={col.id}
               data-testid={`archived-column-header-${col.id}`}
-              className="flex-1 text-center py-2 text-xs font-medium uppercase tracking-wide select-none opacity-60 flex items-center justify-center gap-1"
+              className="flex-1 text-center py-2 text-xs font-medium uppercase tracking-wide select-none flex items-center justify-center gap-1"
               style={{ color: 'var(--ink-mid)' }}
             >
               <span>{col.name}</span>
@@ -545,7 +550,10 @@ export function DayView() {
           {archivedColumns.map((col) => {
             const colActivities = activitiesByColumn.get(col.id) ?? [];
             return (
-              <div key={col.id} className="flex flex-col flex-1 opacity-70" data-testid={`archived-day-column-${col.id}`}>
+              // No wrapper opacity: ActivityCard already mutes archived-entity
+              // cards to opacity-70 (see 90fdc27); stacking another 70% here
+              // compounds to ~49% (≈3.3:1, below the 4.5:1 AA bar).
+              <div key={col.id} className="flex flex-col flex-1" data-testid={`archived-day-column-${col.id}`}>
                 <DayColumn
                   dayIndex={0}
                   date={selectedDay}

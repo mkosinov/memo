@@ -638,5 +638,33 @@ describe('DayView', () => {
       expect(header).toBeInTheDocument();
       expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
     });
+
+    it('(е) archived column wrapper has no opacity class (cards mute themselves)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      // Wrapper opacity compounds with ActivityCard's own opacity-70 muting
+      // (0.7 × 0.7 ≈ 0.49 → ~3.3:1 contrast, below AA). The wrapper must not dim.
+      const wrapper = screen.getByTestId('archived-day-column-m-arch');
+      expect(wrapper.className).not.toMatch(/opacity-\d+/);
+    });
+
+    it('(ж) archived header text is NOT opacity-muted (full --ink-mid passes AA)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      // opacity-60 was rejected in 90fdc27 (4.08:1 < 4.5:1); #555 @ any opacity
+      // below 100% also fails on white. Header text keeps full-opacity --ink-mid;
+      // the badge's own muted palette signals archived.
+      const header = screen.getByTestId('archived-column-header-m-arch');
+      expect(header.className).not.toMatch(/opacity-\d+/);
+      expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
+    });
   });
 });

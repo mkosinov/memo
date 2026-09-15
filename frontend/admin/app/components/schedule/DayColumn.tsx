@@ -85,24 +85,18 @@ interface DroppableSlotProps {
 }
 
 /**
- * GH #267: slot WITHOUT droppable registration — used by archived columns,
- * which are never drop targets (a drop would 422 MASTER_NOT_ACTIVE).
- * Same markup/behaviour as DroppableSlot minus the dnd-kit hook.
+ * GH #267: slot WITHOUT droppable registration and WITHOUT create-on-click —
+ * used by archived columns, which are view-only: never a drop target (a drop
+ * would 422 MASTER_NOT_ACTIVE) and never a creation surface. Same base markup
+ * as DroppableSlot minus the dnd-kit hook and interaction handlers.
  */
-function PlainSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, onOpenModal, cellHeight = 60, occupied, children }: DroppableSlotProps) {
-  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && onOpenModal) {
-      onOpenModal(dayIndex, slotMinutes);
-    }
-  };
-
+function PlainSlot({ dayIndex, slotIndex, isHour, isHalfHour, cellHeight = 60, occupied, children }: Pick<DroppableSlotProps, 'dayIndex' | 'slotIndex' | 'isHour' | 'isHalfHour' | 'cellHeight' | 'occupied' | 'children'>) {
   return (
     <div
       data-testid={occupied ? `slot-${dayIndex}-${slotIndex}` : 'empty-slot'}
       data-slot-index={slotIndex}
       className={`${isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}${occupied ? ' pointer-events-none' : ''}`}
       style={{ height: cellHeight }}
-      onClick={handleClick}
     >
       {children}
     </div>
@@ -465,10 +459,8 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
             key={i}
             dayIndex={dayIndex}
             slotIndex={i}
-            slotMinutes={slotMinutes}
             isHour={isHour}
             isHalfHour={isHalfHour}
-            onOpenModal={onOpenCreateModal}
             cellHeight={slotHeight}
             occupied={isOccupied}
           />

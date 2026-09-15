@@ -26,6 +26,7 @@ An Activity is a scheduled instance of a Service. It ties together a Master, Ser
 - master_id, service_id, location_id must reference existing active records (FK enforced)
 - `occupied` is computed on every read, never stored
 - **NO slot-conflict validation, by design (GH #258/#259 spec, 2026-09-14):** several activities MAY overlap in the same time slot for the same master/location — the admin schedules them deliberately by agreement with the master. No uniqueness constraint, no 409, no client-side «slot taken» guard — do not add one.
+- **Activities of archived entities do NOT disappear from the admin schedule (GH #267 spec, 2026-09-14):** the activities API returns them regardless of directory archived state, and the grid must render them. Visibility is gated per entity: archived services are always visible (no toggle); archived masters/locations are shown when the user's settings `show_archived_masters` (default **on**) / `show_archived_locations` (default **off**) are on; a card with several archived entities shows only when all its gates are on. Gate-passed archived cards bypass the master/location id filters — they are not filter members. Data source: `/masters/all?status=all|archived` (GH #267 amendment to #266 D8 «default acting-only») + existing `status` on locations/services; archived rows carry `archived: true`.
 
 ## Business Logic
 

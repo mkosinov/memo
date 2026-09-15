@@ -1,7 +1,7 @@
 # UserSettings — Domain Rules
 
 ## Description
-UserSettings stores per-user UI preferences: theme, language, and column ordering for schedule views (staff, locations). One record per user.
+UserSettings stores per-user UI preferences: theme, language, column ordering for schedule views (staff, locations), and schedule archived-visibility toggles. One record per user.
 
 ## Fields
 | Field | Type | Required | Min | Max | Default | Description |
@@ -11,6 +11,8 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 | language | string | ❌ | — | — | "ru" | UI language |
 | column_order_staff | array | ❌ | — | — | [] | Порядок столбцов сотрудников (GH #266: переименован из `column_order_masters`) |
 | column_order_locations | array | ❌ | — | — | [] | Порядок столбцов локаций |
+| show_archived_masters | boolean | ❌ | — | — | true | Показывать занятия архивных мастеров в расписании (GH #267; чекбокс в попапе фильтров topbar) |
+| show_archived_locations | boolean | ❌ | — | — | false | Показывать занятия архивных локаций в расписании (GH #267; чекбокс в попапе фильтров topbar) |
 
 ## Cross-field Rules
 - None.
@@ -28,6 +30,7 @@ UserSettings stores per-user UI preferences: theme, language, and column orderin
 ### Frontend
 - SettingsPanel reads on mount, writes on change
 - Column drag-and-drop updates `column_order_*` arrays
+- Schedule filter popup (Topbar) renders the two `show_archived_*` checkboxes as dropdown footers and writes them via `updateSettings` (GH #267); missing keys fall back to the defaults above (first frame incl.)
 
 ## API Endpoints
 | Method | Path | Description |

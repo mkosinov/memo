@@ -37,6 +37,17 @@ import { waitForScheduleReady } from './fixtures/helpers';
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 const TOPBAR = '[data-testid="center-content"]';
 
+/**
+ * Format a Date as a local-timezone ISO date (YYYY-MM-DD). Activities are
+ * stored TZ-naive and rendered as local time (precedent: photos-crud.spec.ts
+ * parses `activity.start` and reads local date parts), so navigation targets
+ * must be derived through local getters — never `toISOString()`.
+ */
+function localIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Archive a master (staff card with a master section) via the API. */
 async function archiveStaff(request: APIRequestContext, id: string): Promise<void> {
   const resp = await request.post(`${BACKEND}/api/v1/staff/${id}/archive`);
@@ -72,13 +83,41 @@ async function closeFilterDropdown(page: Page) {
     .catch(() => {});
 }
 
-/** Set an archived-visibility checkbox inside the currently-open dropdown. */
-async function setArchivedToggle(page: Page, testId: string, checked: boolean) {
+/**
+ * Set an archived-visibility checkbox inside the currently-open dropdown.
+ * Idempotent: skips the click (and the persist wait) when the toggle is
+ * already in the target state — a no-op toggle fires no settings PATCH.
+ *
+ * With `waitForPersist`, also waits for the settings PATCH to reach the
+ * backend (updateSettings persists fire-and-forget via a dynamic import —
+ * UserSettingsContext). The response listener is registered BEFORE the
+ * click: the PATCH can complete in tens of milliseconds, and a listener
+ * registered afterwards would miss it entirely.
+ */
+async function setArchivedToggle(
+  page: Page,
+  testId: string,
+  checked: boolean,
+  opts: { waitForPersist?: boolean } = {},
+): Promise<void> {
   const toggle = page.locator(`[data-testid="${testId}"]`);
+  // Idempotency gate BEFORE the persist listener: a no-op toggle fires no
+  // PATCH, and a discarded waitForResponse would reject (timeout) unhandled.
+  if ((await toggle.isChecked()) === checked) return;
+  const patchPromise = opts.waitForPersist
+    ? page.waitForResponse(
+        (r) => r.url().includes('/api/v1/user-settings') && r.request().method() === 'PATCH',
+        { timeout: 10_000 },
+      )
+    : null;
   if (checked) {
     await toggle.check();
   } else {
     await toggle.uncheck();
+  }
+  if (patchPromise) {
+    const resp = await patchPromise;
+    expect(resp.ok()).toBeTruthy();
   }
   expect(await toggle.isChecked()).toBe(checked);
 }
@@ -94,30 +133,25 @@ async function switchToDay(page: Page, date: string) {
 }
 
 /**
- * Toggle an archived-visibility checkbox AND wait for its settings PATCH to
- * reach the backend (updateSettings persists fire-and-forget via a dynamic
- * import — UserSettingsContext). The response listener is registered BEFORE
- * the click: the PATCH can complete in tens of milliseconds, and a listener
- * registered afterwards would miss it entirely.
+ * Deselect every option in the currently-open dropdown EXCEPT the one with
+ * the given id — empty filter = show all, so one option must stay checked.
+ * Mirrors the `keepOnlyOption` pattern from schedule-column-visibility.spec.ts.
  */
-async function toggleArchivedAndWaitForPersist(
-  page: Page,
-  testId: string,
-  checked: boolean,
-): Promise<void> {
-  const patchPromise = page.waitForResponse(
-    (r) => r.url().includes('/api/v1/user-settings') && r.request().method() === 'PATCH',
-    { timeout: 10_000 },
-  );
-  const toggle = page.locator(`[data-testid="${testId}"]`);
-  if (checked) {
-    await toggle.check();
-  } else {
-    await toggle.uncheck();
+async function keepOnlyOption(page: Page, keepId: string): Promise<void> {
+  const options = page.locator('[data-testid^="multiselect-option-"]');
+  const optionCount = await options.count();
+  for (let i = 0; i < optionCount; i++) {
+    const option = options.nth(i);
+    const testId = await option.getAttribute('data-testid');
+    const optionId = testId?.replace('multiselect-option-', '');
+    if (optionId === keepId) continue;
+    const checkboxDiv = option.locator('div').first();
+    const classes = await checkboxDiv.getAttribute('class');
+    if (classes && classes.includes('bg-[var(--brand)]')) {
+      await option.click();
+      await page.waitForTimeout(100);
+    }
   }
-  const resp = await patchPromise;
-  expect(resp.ok()).toBeTruthy();
-  expect(await toggle.isChecked()).toBe(checked);
 }
 
 /**
@@ -206,8 +240,9 @@ test('S2: archived location — hidden by default, toggle reveals card and day-v
     await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
     await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
     // DayView shows the selected day — navigate explicitly to the activity's
-    // own day (ISO date part of the fixed `start`).
-    await switchToDay(page, activity.start.slice(0, 10));
+    // own day. The factory `start` is UTC; convert to the LOCAL date first
+    // (same as S6), so the opened week always contains the card's grid day.
+    await switchToDay(page, localIsoDate(new Date(activity.start)));
     await expect(
       page.locator(`[data-testid="archived-column-header-${location.id}"]`),
     ).toBeVisible({ timeout: 10_000 });
@@ -285,25 +320,10 @@ test('S4: filtering by one active master keeps archived cards visible', async ({
     const card = page.locator(`[data-testid="activity-${archivedActivity.id}"]`);
     await expect(card).toBeVisible({ timeout: 10_000 });
 
-    // Filter down to ONLY the active master through the masters dropdown:
-    // first ensure the archived master's own checkbox is NOT selected
-    // (archived entities are not part of the filter choice — spec D5), then
-    // deselect every active option except the active master.
+    // Filter down to ONLY the active master through the masters dropdown
+    // (archived entities are not part of the filter choice — spec D5).
     await openFilterDropdown(page, 'Мастера');
-    const options = page.locator('[data-testid^="multiselect-option-"]');
-    const optionCount = await options.count();
-    for (let i = 0; i < optionCount; i++) {
-      const option = options.nth(i);
-      const testId = await option.getAttribute('data-testid');
-      const optionId = testId?.replace('multiselect-option-', '');
-      if (optionId === activeMaster.id) continue;
-      const checkboxDiv = option.locator('div').first();
-      const cls = await checkboxDiv.getAttribute('class');
-      if (cls && cls.includes('bg-[var(--brand)]')) {
-        await option.click();
-        await page.waitForTimeout(100);
-      }
-    }
+    await keepOnlyOption(page, activeMaster.id);
     await closeFilterDropdown(page);
 
     // The archived card SURVIVES the filter — archived cards bypass the id
@@ -339,7 +359,7 @@ test('S5: toggle states persist across page reload (user.settings)', async ({ pa
     // 1. Enable the locations checkbox, then reload.
     await waitForScheduleReady(page);
     await openFilterDropdown(page, 'Локации');
-    await toggleArchivedAndWaitForPersist(page, 'show-archived-locations-toggle', true);
+    await setArchivedToggle(page, 'show-archived-locations-toggle', true, { waitForPersist: true });
     await closeFilterDropdown(page);
 
     await page.reload();
@@ -361,7 +381,7 @@ test('S5: toggle states persist across page reload (user.settings)', async ({ pa
     await archiveStaff(request, master.id);
     await waitForScheduleReady(page);
     await openFilterDropdown(page, 'Мастера');
-    await toggleArchivedAndWaitForPersist(page, 'show-archived-masters-toggle', false);
+    await setArchivedToggle(page, 'show-archived-masters-toggle', false, { waitForPersist: true });
     await closeFilterDropdown(page);
 
     await page.reload();
@@ -394,10 +414,8 @@ test('S6: day view by masters — archived column on the day with activities onl
   // Anchor activity: now (current week). A day later — the neighbouring day
   // must NOT gain the column (spec D8: only days with ≥1 gated activity).
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const dayD = isoDate(now);
-  const nextDay = isoDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const dayD = localIsoDate(now);
+  const nextDay = localIsoDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
 
   const activityD = await createTestActivity(request, {
     master_id: master.id,
@@ -410,12 +428,7 @@ test('S6: day view by masters — archived column on the day with activities onl
     await waitForScheduleReady(page);
 
     // Switch to DayView «по мастерам» on day D.
-    await page.evaluate((d: string) => {
-      document.dispatchEvent(
-        new CustomEvent('__memo-switch-to-day-view', { detail: { date: `${d}T12:00:00` } }),
-      );
-    }, dayD);
-    await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 10_000 });
+    await switchToDay(page, dayD);
 
     // Column present on D (and the activity card is inside it).
     await expect(page.locator(`[data-testid="archived-column-header-${master.id}"]`)).toBeVisible({ timeout: 10_000 });
@@ -423,12 +436,7 @@ test('S6: day view by masters — archived column on the day with activities onl
     await expect(page.locator(`[data-testid="activity-${activityD.id}"]`)).toBeVisible();
 
     // Neighbouring day (no activities of the archived master) — no column.
-    await page.evaluate((d: string) => {
-      document.dispatchEvent(
-        new CustomEvent('__memo-switch-to-day-view', { detail: { date: `${d}T12:00:00` } }),
-      );
-    }, nextDay);
-    await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 10_000 });
+    await switchToDay(page, nextDay);
     await expect(page.locator(`[data-testid="archived-column-header-${master.id}"]`)).toHaveCount(0, { timeout: 10_000 });
     await expect(page.locator(`[data-testid="archived-day-column-${master.id}"]`)).toHaveCount(0);
   } finally {
@@ -461,19 +469,19 @@ test('S7: archived master and location — card visible only with both toggles o
 
     // 1. Both OFF → hidden (masters defaults ON, so turn it off first).
     await openFilterDropdown(page, 'Мастера');
-    await toggleArchivedAndWaitForPersist(page, 'show-archived-masters-toggle', false);
+    await setArchivedToggle(page, 'show-archived-masters-toggle', false, { waitForPersist: true });
     await closeFilterDropdown(page);
     await expect(card).toHaveCount(0, { timeout: 10_000 });
 
     // 2. Only masters ON → still hidden (location gate).
     await openFilterDropdown(page, 'Мастера');
-    await toggleArchivedAndWaitForPersist(page, 'show-archived-masters-toggle', true);
+    await setArchivedToggle(page, 'show-archived-masters-toggle', true, { waitForPersist: true });
     await closeFilterDropdown(page);
     await expect(card).toHaveCount(0, { timeout: 10_000 });
 
     // 3. Both ON → visible.
     await openFilterDropdown(page, 'Локации');
-    await toggleArchivedAndWaitForPersist(page, 'show-archived-locations-toggle', true);
+    await setArchivedToggle(page, 'show-archived-locations-toggle', true, { waitForPersist: true });
     await closeFilterDropdown(page);
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card.locator('[data-testid="archived-badge"]')).toBeVisible();

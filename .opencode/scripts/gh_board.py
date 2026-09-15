@@ -142,6 +142,7 @@ def cmd_next_up():
 
 
 CLAIM_TTL_HOURS = 1  # auto-impl: свежесть замков-комментариев (claim и blocked отдыхают одинаково)
+MAX_TOTAL_INFLIGHT = 3  # auto-impl: глобальный бюджет карточек In IMPL (iMac 2 + ноутбук 1); ручные сессии тоже считаются — они двигают карточки так же
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
 _NUM_RE = re.compile(r"#?(\d+)")
 
@@ -201,11 +202,16 @@ def cmd_pick_next():
     Order: Next Up position ascending (99 = unset), then board order.
     Skipped: cards with a fresh (12h) "auto-impl claim:"/"auto-impl blocked:"
     comment, and cards whose body declares `depends-on: #N` with N still OPEN.
-    Deliberately NO global busy check — two machines may hold different cards
-    in parallel; the race on one card is broken by the watcher's claim
-    tiebreak (earliest claim comment wins)."""
+    Deliberately NO per-machine busy check here — but the GLOBAL budget holds:
+    if In IMPL cards >= MAX_TOTAL_INFLIGHT, nothing new starts anywhere.
+    Manual IMPL sessions count too — their hosts move cards to In IMPL the
+    same way."""
     load_status_field()
     items = [it for it in items_with_fields() if it["state"] == "OPEN"]
+    in_flight = sum(1 for it in items if (it["status"] or "").lower() == "in impl")
+    if in_flight >= MAX_TOTAL_INFLIGHT:
+        print("NONE")
+        return
     # статус на борде — "Ready to IMPL (G2)": матч по префиксу, не по точной строке
     ready = [it for it in items if (it["status"] or "").startswith("Ready to IMPL")]
     ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)

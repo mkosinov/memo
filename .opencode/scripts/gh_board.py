@@ -4,7 +4,7 @@
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: NONE | <issue>
-  python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: NONE | <issue>
+  python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "CLAIM host=X"   — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
@@ -245,7 +245,7 @@ def cmd_pick_next():
 
 
 def cmd_pick_next_design():
-    """Token protocol for the DESIGN phase kickoff: NONE | <number>.
+    """Token protocol for the DESIGN phase kickoff: <number> | NONE (reason).
     Capacity invariant: if ANY board card sits in a status starting with
     "In Design", nothing new enters design (one design at a time).
     Candidates: OPEN issues with board status starting with "Backlog".
@@ -253,19 +253,24 @@ def cmd_pick_next_design():
     Order: Next Up position ascending (99 = unset), then board order."""
     all_items = items_with_fields()
     # инвариант мощности: дизайн занят — новых карточек не берём
-    if any((it["status"] or "").startswith("In Design") for it in all_items):
-        print("NONE")
+    busy = [f"#{it['number']}" for it in all_items
+            if (it["status"] or "").startswith("In Design")]
+    if busy:
+        print(f"NONE (design slot busy: {', '.join(busy)})")
         return
     # статус на борде — "Backlog (...)": матч по префиксу, не по точной строке
     backlog = [it for it in all_items
                if it["state"] == "OPEN" and (it["status"] or "").startswith("Backlog")]
+    if not backlog:
+        print("NONE (no Backlog cards)")
+        return
     backlog.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
     for it in backlog:
         if _open_deps(it["number"]):
             continue
         print(it["number"])
         return
-    print("NONE")
+    print("NONE (all Backlog cards blocked by depends-on)")
 
 
 def _auto_impl_log(number: int):

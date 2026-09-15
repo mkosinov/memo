@@ -13,9 +13,15 @@ Board commands: `python3 .opencode/scripts/gh_board.py <subcommand>`.
 
 Run `gh_board.py pick-next-design`.
 
-- Output `NONE` → reply with one short line in Russian: «Очередь пуста» —
-  and end the run. Do nothing else: no files, no board calls, no agents.
 - Output `<N>` → issue `#N` is yours; continue to Step 2.
+- Output `NONE (...)` → nothing was taken. Reply in Russian with the exact
+  reason from the parentheses, then end the run. Do nothing else: no files,
+  no board calls, no agents. Wording:
+  - `NONE (design slot busy: #273)` → «Очередь занята: #273 в дизайне»
+    (busy — a design exists; this is NOT an empty queue);
+  - `NONE (no Backlog cards)` → «Очередь пуста: в Backlog нет карточек»;
+  - `NONE (all Backlog cards blocked by depends-on)` → «Очередь пуста
+    для наблюдателя: все карточки Backlog заблокированы зависимостями».
 
 ## Step 2 — Claim
 

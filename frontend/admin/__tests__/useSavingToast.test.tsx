@@ -10,7 +10,7 @@
  * Topbar provides in the app.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider, useUI } from '../contexts/UIContext';
@@ -36,6 +36,24 @@ function HookHarness() {
   const { toasts } = useUI();
   liveToastIds = toasts.map((t) => t.id);
   return <ToastContainer />;
+}
+
+// Conditional-render host: keeps UIProvider mounted while unmounting only
+// the hook-bearing subtree (test е — non-vacuous unmount-cleanup pin).
+function HookHostToggle() {
+  const [mounted, setMounted] = React.useState(true);
+  if (!mounted) return null;
+  return (
+    <>
+      <HookHostMounter />
+      <button data-testid="unmount-hook-host" onClick={() => setMounted(false)} />
+    </>
+  );
+}
+
+function HookHostMounter() {
+  useSavingToast();
+  return null;
 }
 
 describe('useSavingToast', () => {
@@ -166,26 +184,31 @@ describe('useSavingToast', () => {
     expect(liveToastIds[0]).not.toBe(firstToastId);
   });
 
-  it('(е) removes the toast on unmount while a mutation is live', async () => {
-    const { unmount } = renderHarness();
+  it('(е) removes the toast when only the hook unmounts while a mutation is live', async () => {
+    // ONE UIProvider stays mounted for the whole test — only the hook-hosting
+    // child unmounts (state-driven conditional render). A loading toast has no
+    // auto-dismiss timer, so it would linger forever without the hook's
+    // unmount-cleanup effect; the fresh-provider probe would hide that.
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <UIProvider>
+          <ToastContainer />
+          <HookHostToggle />
+        </UIProvider>
+      </QueryClientProvider>,
+    );
 
     buildPendingMutation(SCHEDULE_ACTIVITY_MUTATION_KEY);
     await waitFor(() => {
       expect(screen.getByTestId('toast-loading')).toBeInTheDocument();
     });
 
-    unmount();
-    // The toast lives in UIProvider — remount a probe to observe the stack.
-    render(
-      <QueryClientProvider client={client}>
-        <UIProvider>
-          <ToastContainer />
-        </UIProvider>
-      </QueryClientProvider>,
-    );
+    fireEvent.click(screen.getByTestId('unmount-hook-host'));
     await waitFor(() => {
       expect(screen.queryByTestId('toast-loading')).not.toBeInTheDocument();
     });
+
+    unmount();
   });
 
   it('(ж) ignores mutations that do not carry the schedule-activity key', async () => {

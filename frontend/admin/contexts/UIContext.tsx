@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
-export type ToastKind = 'info' | 'success' | 'error';
+export type ToastKind = 'info' | 'success' | 'error' | 'loading';
 
 interface Toast {
   id: string;
@@ -15,7 +15,7 @@ interface UIContextType {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
   toasts: Toast[];
-  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => void;
+  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -74,7 +74,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     message: string,
     kindOrUndo?: ToastKind | (() => void),
     undo?: () => void,
-  ) => {
+  ): string => {
     let kind: ToastKind = 'info';
     let undoFn: (() => void) | undefined;
     if (typeof kindOrUndo === 'function') {
@@ -85,12 +85,15 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts(prev => [...prev, { id, kind, message, undo: undoFn }]);
-    const duration = undoFn ? 5000 : 4500; // undo toasts stay 5s
-    const timerId = setTimeout(() => {
-      toastTimers.current.delete(id);
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
-    toastTimers.current.set(id, timerId);
+    if (kind !== 'loading') {
+      const duration = undoFn ? 5000 : 4500; // undo toasts stay 5s
+      const timerId = setTimeout(() => {
+        toastTimers.current.delete(id);
+        setToasts(prev => prev.filter(t => t.id !== id));
+      }, duration);
+      toastTimers.current.set(id, timerId);
+    }
+    return id;
   }, []);
 
   const hideToast = useCallback((id: string) => {

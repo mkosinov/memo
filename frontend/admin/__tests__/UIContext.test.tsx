@@ -18,9 +18,11 @@ function UIConsumer() {
     theme,
     toggleTheme,
   } = useUI();
+  const shownIdRef = React.useRef('');
 
   return (
     <div>
+      <span data-testid="last-shown-toast-id">{shownIdRef.current}</span>
       <span data-testid="delete-mode">{deleteMode.toString()}</span>
       <span data-testid="toast-count">{toasts.length}</span>
       <span data-testid="sidebar-collapsed">{sidebarCollapsed.toString()}</span>
@@ -57,6 +59,20 @@ function UIConsumer() {
       </button>
       <button data-testid="toggle-theme" onClick={toggleTheme}>
         Toggle Theme
+      </button>
+      <button
+        data-testid="show-loading-toast"
+        onClick={() => {
+          shownIdRef.current = showToast('Saving…', 'loading');
+        }}
+      >
+        Show Loading Toast
+      </button>
+      <button
+        data-testid="hide-shown-toast"
+        onClick={() => hideToast(shownIdRef.current)}
+      >
+        Hide Shown Toast
       </button>
     </div>
   );
@@ -173,6 +189,51 @@ describe('UIProvider', () => {
     act(() => {
       vi.advanceTimersByTime(4500);
     });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('keeps a loading toast after 60s (no auto-hide)', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-loading-toast').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    vi.useRealTimers();
+  });
+
+  it('hides a loading toast via hideToast', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-loading-toast').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      screen.getByTestId('hide-toast').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('showToast returns the id of the removed toast', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-loading-toast').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    const shownId = screen.getByTestId('last-shown-toast-id').textContent;
+    expect(shownId).toMatch(/^toast-\d+-/);
+    act(() => {
+      screen.getByTestId('hide-shown-toast').click();
+    });
+    // hiding by the returned id removed exactly the shown toast
     expect(screen.getByTestId('toast-count').textContent).toBe('0');
     vi.useRealTimers();
   });

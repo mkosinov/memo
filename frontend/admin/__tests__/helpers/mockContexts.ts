@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import type { RecordsContextType } from '@/contexts/RecordsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 import { defaultFilters as defaultClientFilters } from '@/contexts/ClientsContext';
+import type { ToastKind } from '@/contexts/UIContext';
 import type {
   PagedListContextValue,
   PagedListFiltersState,
@@ -133,8 +134,8 @@ export function createMockRecordsContext(
 interface UIContextMock {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
-  toasts: Array<{ id: string; kind: 'info' | 'success' | 'error'; message: string; undo?: () => void }>;
-  showToast: (message: string, kindOrUndo?: 'info' | 'success' | 'error' | (() => void), undo?: () => void) => void;
+  toasts: Array<{ id: string; kind: ToastKind; message: string; undo?: () => void }>;
+  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -144,7 +145,7 @@ interface UIContextMock {
   toggleTheme: () => void;
 }
 
-type ToastOverride = { id: string; kind?: 'info' | 'success' | 'error'; message: string; undo?: () => void };
+type ToastOverride = { id: string; kind?: ToastKind; message: string; undo?: () => void };
 
 type UIOverrides = Partial<Omit<UIContextMock, 'toasts'>> & { toasts?: ToastOverride[] };
 

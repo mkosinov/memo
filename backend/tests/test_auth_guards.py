@@ -265,16 +265,37 @@ class TestMasterMatrix:
         assert resp.status_code == 201, resp.text
         client.cookies.clear()
 
-    def test_master_payment_write_allowed(self, master_client, create_record) -> None:
+    def test_master_payment_write_allowed(
+        self, api_client, create_service, create_location, login_as,
+    ) -> None:
         """GH #263 T1: master holds payments:write now (spec §2.5 superseded).
 
-        The guard passes; scoping to payments of OWN records' arrives with
-        the #263 router tasks (D5) — until then no scope filter applies.
+        GH #263 T4-quality: the scope seals payment writes to the master's
+        OWN records (D5) — this guard builds a scoped master (staff card +
+        masters row) and accepts a payment on a record of his own activity
+        (a foreign record would now be 404, cf. test_master_scope_payments.py).
         """
-        resp = master_client.post("/api/v1/payments", json={
-            "record_id": create_record()["id"], "amount": 1000, "method": "cash",
+        from tests.conftest import insert_master_user
+
+        staff_id = insert_master_user("+79995551302", hash_password(MASTER_PASSWORD))["staff_id"]
+        client = login_as("+79995551302", MASTER_PASSWORD)
+        svc = create_service()
+        loc = create_location()
+        start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        activity = api_client.post("/api/v1/activities", json={
+            "master_id": staff_id, "service_id": svc["id"], "location_id": loc["id"],
+            "start": start, "duration": 90, "capacity": 10, "is_private": False,
+        }).json()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "phone": f"+7999{uuid.uuid4().hex[:7]}",
+            "visits": [{"name": "Гость", "price": 2000}],
+        }).json()
+        resp = client.post("/api/v1/payments", json={
+            "record_id": record["id"], "amount": 1000, "method": "cash",
         })
         assert resp.status_code == 201, resp.text
+        client.cookies.clear()
 
     def test_master_photo_write_allowed(self, master_client) -> None:
         """GH #263 T1: photos:write granted (scoping to own activities — D6)."""

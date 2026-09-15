@@ -41,6 +41,7 @@ TIEBREAK_WAIT=6   # сек: окно, в котором второй наблю�
 
 cd "$REPO" || exit 1
 mkdir -p "$STATE"
+touch "$PIDS_FILE"
 exec >>"$LOG" 2>&1
 
 if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
@@ -71,7 +72,7 @@ while true; do
         continue
     fi
 
-    PICK=$(python3 .opencode/scripts/gh_board.py pick-next 2>/dev/null) || { echo "$(date -Is) board query failed"; continue; }
+    PICK=$(python3 .opencode/scripts/gh_board.py pick-next) || { echo "$(date -Is) board query failed: $PICK"; continue; }
     case "$PICK" in
         NONE|"") continue ;;
         *[!0-9]*) echo "$(date -Is) unexpected pick output: $PICK"; continue ;;

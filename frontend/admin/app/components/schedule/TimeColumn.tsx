@@ -18,7 +18,7 @@ export function TimeColumn({ cellHeight = 60, gridFrequency = 30, gridStartMinut
 
   return (
     <div
-      className="sticky left-0 z-20 bg-white"
+      className="sticky left-0 z-[var(--z-grid-panel)] bg-white"
       style={{ width: 64, minWidth: 64 }}
     >
       {slots.map((minutes, i) => {

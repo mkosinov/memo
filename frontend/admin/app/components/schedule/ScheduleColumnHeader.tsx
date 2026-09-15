@@ -8,8 +8,8 @@ import { TIME_COL_WIDTH } from '@/lib/utils';
 interface ScheduleColumnHeaderProps {
   /** Sticky top offset — differs between DayView (has toolbar above) and WeekView */
   stickyTop?: string;
-  /** Z-index — default 25 to layer above the time column grid */
-  zIndex?: number;
+  /** Z-index — default 'var(--z-header)' to layer above the time column grid */
+  zIndex?: number | string;
   /** Column header items rendered inside the flex container */
   children: React.ReactNode;
 }
@@ -22,7 +22,7 @@ interface ScheduleColumnHeaderProps {
  */
 export function ScheduleColumnHeader({
   stickyTop = '0',
-  zIndex = 25,
+  zIndex = 'var(--z-header)',
   children,
 }: ScheduleColumnHeaderProps) {
   return (
@@ -83,7 +83,7 @@ export function SortableColumnHeader({
       style={style}
       data-testid={`column-header-${col.id}`}
       className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 cursor-grab select-none relative group ${
-        isDragging ? 'z-50' : ''
+        isDragging ? 'z-[var(--z-popover)]' : ''
       } ${isDropTarget ? 'border-l-2 border-l-[var(--brand)]' : ''}`}
       {...attributes}
       {...listeners}

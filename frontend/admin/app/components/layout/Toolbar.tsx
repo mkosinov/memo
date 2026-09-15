@@ -64,7 +64,7 @@ export function Toolbar() {
   return (
     <aside
       data-testid="right-panel"
-      className="fixed right-0 top-0 z-20 h-full border-l bg-white transition-all duration-200"
+      className="fixed right-0 top-0 z-[var(--z-grid-panel)] h-full border-l bg-white transition-all duration-200"
       style={{
         width: 'var(--right-w)',
         borderColor: 'var(--line)',

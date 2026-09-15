@@ -62,9 +62,9 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
 
   const shouldHideOriginal = (dndDragging || isDragging) && !isDragCopy;
   const draggingStyle: React.CSSProperties = shouldHideOriginal
-    ? { opacity: 0, zIndex: 50, pointerEvents: 'none' as const }
+    ? { opacity: 0, zIndex: 'var(--z-drag-active)', pointerEvents: 'none' as const }
     : isDragging
-      ? { opacity: 0.5, zIndex: 50, scale: '0.98' }
+      ? { opacity: 0.5, zIndex: 'var(--z-drag-active)', scale: '0.98' }
       : {};
 
   const handleClick = () => {
@@ -202,7 +202,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
               style={{ left: `${fillPct * 100}%`, backgroundColor: 'rgba(0,0,0,0.06)' }}
             />
             {/* Content */}
-            <div className="relative z-10 flex items-center justify-between px-2 py-1.5 text-[13px] text-black">
+            <div className="relative z-[var(--z-base)] flex items-center justify-between px-2 py-1.5 text-[13px] text-black">
               <div className="flex items-center gap-1">
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />

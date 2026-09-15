@@ -9,7 +9,7 @@ export function StampFab() {
   return (
     <button
       onClick={toggleRightPanel}
-      className="fixed bottom-6 right-6 z-50 flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105 active:scale-95"
+      className="fixed bottom-6 right-6 z-[var(--z-popover)] flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105 active:scale-95"
       style={{
         backgroundColor: rightPanelCollapsed ? 'var(--brand)' : 'var(--white)',
         border: `2px solid ${rightPanelCollapsed ? 'var(--brand)' : 'var(--line)'}`,

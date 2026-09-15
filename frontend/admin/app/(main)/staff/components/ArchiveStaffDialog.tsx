@@ -66,7 +66,7 @@ export function ArchiveStaffDialog({ staff, onConfirm, onClose }: ArchiveStaffDi
 
   return (
     <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       data-testid="archive-staff-dialog-overlay"

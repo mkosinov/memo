@@ -39,7 +39,7 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode, createDe
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center"
+      className="fixed inset-0 z-[var(--z-modal-details)] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="activity-modal-title"

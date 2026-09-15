@@ -233,7 +233,7 @@ export default function RemoteSearchSelect<
       </div>
       {isOpen && results.length > 0 && (
         <ul
-          className="absolute z-50 mt-1 w-full rounded-lg shadow-lg max-h-60 overflow-auto"
+          className="absolute z-[var(--z-popover)] mt-1 w-full rounded-lg shadow-lg max-h-60 overflow-auto"
           style={DROPDOWN_STYLE}
           role="listbox"
         >
@@ -254,7 +254,7 @@ export default function RemoteSearchSelect<
       )}
       {isOpen && results.length === 0 && !isLoading && query.length > 0 && (
         <div
-          className="absolute z-50 mt-1 w-full rounded-lg shadow-lg px-3 py-2 text-sm"
+          className="absolute z-[var(--z-popover)] mt-1 w-full rounded-lg shadow-lg px-3 py-2 text-sm"
           style={EMPTY_STYLE}
         >
           Ничего не найдено

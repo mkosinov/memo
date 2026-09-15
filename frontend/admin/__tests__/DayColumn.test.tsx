@@ -749,11 +749,11 @@ describe('DayColumn', () => {
       expect(screen.queryByTestId('overlap-popover')).not.toBeInTheDocument();
     });
 
-    it('badge z-index is above popover z-index so toggle click is not swallowed', () => {
-      // The OverlapPopover renders with position:fixed and z-index:100.
-      // If the badge has z-index below 100, clicking the badge position hits the
-      // popover (which is above), preventing the toggle-close from firing.
-      // Badge must be above 100 to receive clicks when popover is open.
+    it('badge z comes from the --z-badge token, not a raw z number', () => {
+      // jsdom does not resolve var() in getComputedStyle, so we assert at the
+      // class level: the badge must carry the --z-badge token class (layer 26,
+      // below topbar/menubar overlays). The behavioural "popover above badge"
+      // stacking is covered by e2e schedule-z-layering.spec.ts (S2).
       render(
         <DayColumn
           dayIndex={0}
@@ -765,13 +765,8 @@ describe('DayColumn', () => {
 
       const badge = screen.getByRole('button', { name: /2 cards/i });
 
-      // Extract z-index from the Tailwind class (e.g., z-[110] → 110)
-      const classMatch = badge.className.match(/z-\[(\d+)\]/);
-      expect(classMatch).toBeTruthy();
-      const badgeZIndex = parseInt(classMatch![1], 10);
-
-      // Popover uses zIndex: 100 — badge must be above that
-      expect(badgeZIndex).toBeGreaterThan(100);
+      expect(badge.className).toContain('z-[var(--z-badge)]');
+      expect(badge.className).not.toMatch(/z-\[\d+\]/);
     });
 
     it('badge mousedown prevents outside-click handler from interfering with toggle', () => {

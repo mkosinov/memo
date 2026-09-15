@@ -519,9 +519,9 @@ test.describe('Records Page — Table and Filters', () => {
         // Click the client name button
         await clientButton.click();
 
-        // Client card modal should appear (has the client name in a header)
-        // The modal uses fixed positioning with z-50
-        const modal = page.locator('.fixed.z-50');
+        // The records table opens the ClientQuickCard (read-only viewer),
+        // not the clients-page ClientCardModal.
+        const modal = page.locator('[data-testid="client-quick-card"]');
         await expect(modal).toBeVisible({ timeout: 5000 });
 
         // Modal should show the client name

@@ -170,7 +170,7 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
       </button>
       {isOpen && (
         <div
-          className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg"
+          className="absolute z-[var(--z-base)] mt-1 w-full bg-white border rounded-lg shadow-lg"
           style={{ borderColor: 'var(--line, #e5e7eb)' }}
           data-testid="combobox-dropdown"
         >

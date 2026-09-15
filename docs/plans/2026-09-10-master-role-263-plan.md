@@ -73,7 +73,7 @@
 ### Required Docs
 - Спека #263 — шапка («Гейт»).
 
-- [ ] Убедиться: PR #247, PR #266 и PR #262 смержены в main, CI main зелёный (`gh pr view <N>`, `gh run list --branch main`). Любой не смержен — СТОП, план не стартует (карточка ждёт).
+- [ ] Убедиться: PR #247, PR #266 и PR #262 смержены в main, CI на каждом зелёный (`gh pr view <N> --json statusCheckRollup`; push-прогонов на main по схеме CI #245 не бывает). Любой не смержен — СТОП, план не стартует (карточка ждёт).
 - [ ] `git checkout main && git pull --ff-only`; baseline: `cd backend && uv run --extra dev pytest -q` зелёный; `cd frontend/admin && pnpm test && pnpm type-check` зелёные; e2e-стек поднимается (`scripts/e2e-shard-start.sh`).
 - [ ] Сверить, что ожидания спеки живы: `users.staff_id` и `masters.staff_id` в моделях, `AuthContext.can()` во фронте, демо-мастер в сиде (#247 §3.11), экран «Сотрудники» с `StaffModal` существует (#266), админ-storageState в e2e-инре (#247 §4.8). Расхождение — СТОП и комментарий в issue.
 

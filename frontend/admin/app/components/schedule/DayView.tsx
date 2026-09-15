@@ -492,7 +492,7 @@ export function DayView() {
           {isSameDay(selectedDay, today) && nowPos >= 0 && (
             <div
               data-testid="now-line"
-              className="absolute left-0 right-0 z-[22] pointer-events-none"
+              className="absolute left-0 right-0 z-[var(--z-slot-hover)] pointer-events-none"
               style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
             >
               <div className="flex items-center">
@@ -540,7 +540,7 @@ export function DayView() {
           <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
             {draggedSnappedTime != null && (
               <div
-                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[60] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[var(--z-drag-chip)] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
                 style={{ backgroundColor: 'var(--brand, #004D56)' }}
               >
                 {formatTime(draggedSnappedTime)}

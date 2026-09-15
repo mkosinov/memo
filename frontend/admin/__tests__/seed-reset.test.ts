@@ -7,8 +7,9 @@
  *      (children-first incl. orphaned visitors), ev_* activities survive,
  *      seed sort_order restored for staff/locations (row presence and
  *      value asserted separately), staff_positions/positions rebuilt to
- *      seed, non-seed master_tags dropped and users.staff_id detached
- *      (GH #266 four-table staff domain).
+ *      seed, non-seed master_tags dropped, users.staff_id detached
+ *      (GH #266 four-table staff domain), and user_settings wiped whole
+ *      (GH #267 — archived-visibility toggles must not leak between tests).
  *
  * Uses TEST_DB_PATH pointing at a temp file — no backend, no shard stack.
  */
@@ -44,6 +45,7 @@ function createSchema(db: string) {
     CREATE TABLE staff_positions (staff_id TEXT, position_id TEXT, PRIMARY KEY (staff_id, position_id));
     CREATE TABLE master_tags (master_id TEXT, tag_id TEXT, PRIMARY KEY (master_id, tag_id));
     CREATE TABLE users (id TEXT PRIMARY KEY, phone TEXT, staff_id TEXT);
+    CREATE TABLE user_settings (id TEXT PRIMARY KEY, user_id TEXT, show_archived_masters INTEGER);
     CREATE TABLE locations (id TEXT PRIMARY KEY, sort_order INTEGER);
   "`);
 }
@@ -75,6 +77,8 @@ function seedAndPollute(db: string) {
     INSERT INTO positions (id, title, is_system) VALUES ('smm', 'СММ', 0);
     INSERT INTO master_tags (master_id, tag_id) VALUES ('m1', 't1');
     INSERT INTO users (id, phone, staff_id) VALUES ('u1', '+79990000001', 'm1');
+    INSERT INTO user_settings (id, user_id) VALUES ('s1', 'u1');
+    INSERT INTO user_settings (id, user_id) VALUES ('${'s'.repeat(36)}', 'u1');
     INSERT INTO locations (id, sort_order) VALUES ('alpika', 5);
     INSERT INTO locations (id, sort_order) VALUES ('grand', 0);
     INSERT INTO locations (id, sort_order) VALUES ('p1389', 4);
@@ -226,6 +230,16 @@ describe('resetToSeed (against a real temp SQLite DB)', () => {
     expect(count(dbPath, "SELECT COUNT(*) FROM users WHERE id='u2'")).toBe(1); // row kept
     expect(execSync(`sqlite3 "${dbPath}" "SELECT staff_id FROM users WHERE id='u2'"`, { encoding: 'utf-8' }).trim()).toBe('');
     expect(count(dbPath, `SELECT COUNT(*) FROM staff WHERE id='${'u'.repeat(36)}'`)).toBe(0);
+  });
+
+  it('wipes user_settings whole (GH #267 — persisted toggles must not leak between tests)', () => {
+    // user_settings rows are test-created state (created on first toggle —
+    // there are NO seed settings rows), so the reset removes them ALL: a
+    // surviving row would make «default» archived-visibility scenarios
+    // non-deterministic depending on what a previous test persisted.
+    resetToSeed();
+
+    expect(scalar(dbPath, 'SELECT COUNT(*) FROM user_settings')).toBe(0);
   });
 });
 

@@ -65,3 +65,41 @@ class TestUserSettingsPatchSemantic:
         response = api_client.patch("/api/v1/user-settings", json={})
         assert response.status_code == 200
         assert response.json()["theme"] == "light"  # unchanged
+
+
+class TestUserSettingsPatchArchivedVisibility:
+    """PATCH /api/v1/user-settings with the GH #267 visibility toggles."""
+
+    def test_patch_show_archived_masters_false(self, api_client, me) -> None:
+        """PATCH show_archived_masters=false flips it; other fields unchanged."""
+        api_client.post("/api/v1/user-settings", json={"user_id": me})
+
+        response = api_client.patch(
+            "/api/v1/user-settings", json={"show_archived_masters": False}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["show_archived_masters"] is False
+        assert body["show_archived_locations"] is False  # unchanged
+
+    def test_patch_show_archived_locations_true(self, api_client, me) -> None:
+        """PATCH show_archived_locations=true flips it; other fields unchanged."""
+        api_client.post("/api/v1/user-settings", json={"user_id": me})
+
+        response = api_client.patch(
+            "/api/v1/user-settings", json={"show_archived_locations": True}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["show_archived_locations"] is True
+        assert body["show_archived_masters"] is True  # unchanged
+
+    def test_patch_without_toggles_noop(self, api_client, me) -> None:
+        """PATCH without the toggle fields leaves both defaults intact."""
+        api_client.post("/api/v1/user-settings", json={"user_id": me})
+
+        response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["show_archived_masters"] is True
+        assert body["show_archived_locations"] is False

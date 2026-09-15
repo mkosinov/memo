@@ -110,6 +110,16 @@ class TestCreateUserSettings:
         assert body["column_order_staff"] == ["color", "position"]
         assert body["column_order_locations"] == ["name", "capacity"]
 
+    def test_create_archived_visibility_defaults(self, api_client, me) -> None:
+        """GH #267: create without the new toggles → masters ON, locations OFF."""
+        resp = api_client.post("/api/v1/user-settings", json={
+            "user_id": me["id"],
+        })
+        assert resp.status_code == 201, f"Create failed: {resp.text}"
+        body = resp.json()
+        assert body["show_archived_masters"] is True
+        assert body["show_archived_locations"] is False
+
     def test_create_requires_user_id(self, api_client) -> None:
         resp = api_client.post("/api/v1/user-settings", json={
             "theme": "dark",

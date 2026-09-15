@@ -55,6 +55,11 @@ interface DayColumnProps {
   gridEndMinutes?: number;
   /** Column identity (master or location ID) — included in droppable slot data for cross-column DnD. */
   columnId?: string;
+  /**
+   * GH #267: archived column — slots register no droppable and the stamp
+   * preview is off; the column is view-only (never a drop target).
+   */
+  archived?: boolean;
 }
 
 interface DroppableSlotProps {
@@ -77,6 +82,31 @@ interface DroppableSlotProps {
   /** When true, the slot overlaps with an activity card — disable pointer events so clicks reach the card */
   occupied?: boolean;
   children?: React.ReactNode;
+}
+
+/**
+ * GH #267: slot WITHOUT droppable registration — used by archived columns,
+ * which are never drop targets (a drop would 422 MASTER_NOT_ACTIVE).
+ * Same markup/behaviour as DroppableSlot minus the dnd-kit hook.
+ */
+function PlainSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, onOpenModal, cellHeight = 60, occupied, children }: DroppableSlotProps) {
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && onOpenModal) {
+      onOpenModal(dayIndex, slotMinutes);
+    }
+  };
+
+  return (
+    <div
+      data-testid={occupied ? `slot-${dayIndex}-${slotIndex}` : 'empty-slot'}
+      data-slot-index={slotIndex}
+      className={`${isHour ? 'border-t border-line' : isHalfHour ? 'border-t border-dashed border-line' : 'border-t border-dotted border-line/30'}${occupied ? ' pointer-events-none' : ''}`}
+      style={{ height: cellHeight }}
+      onClick={handleClick}
+    >
+      {children}
+    </div>
+  );
 }
 
 // ─── DroppableSlot ────────────────────────────────────────────────────────
@@ -195,7 +225,7 @@ function DroppableSlot({ dayIndex, slotIndex, slotMinutes, isHour, isHalfHour, d
 
 // ─── DayColumn ────────────────────────────────────────────────────────────
 
-export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStartMinutes = 540, gridEndMinutes = 1260, columnId }: DayColumnProps) {
+export function DayColumn({ dayIndex, activities, masters, locations = [], services = [], dragCopy, dragId, ghostHeight, ghostDayIndex, ghostSlotIndex, ghostColumnId, onCreateActivity, onOpenCreateModal, onOpenEditModal, onQuickAdd, stampReady, stamp, cellHeight = 60, gridFrequency = 30, gridStartMinutes = 540, gridEndMinutes = 1260, columnId, archived = false }: DayColumnProps) {
   const [popoverData, setPopoverData] = useState<{
     activities: ScheduleAdminDTO[];
     anchorRect: DOMRect;
@@ -429,7 +459,20 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
           const aEnd = a.startMinutes + a.durationMinutes;
           return aStart < slotEndMinutes && aEnd > slotMinutes;
         });
-        return (
+        // GH #267: archived columns register no droppable (never a drop target)
+        return archived ? (
+          <PlainSlot
+            key={i}
+            dayIndex={dayIndex}
+            slotIndex={i}
+            slotMinutes={slotMinutes}
+            isHour={isHour}
+            isHalfHour={isHalfHour}
+            onOpenModal={onOpenCreateModal}
+            cellHeight={slotHeight}
+            occupied={isOccupied}
+          />
+        ) : (
           <DroppableSlot
             key={i}
             dayIndex={dayIndex}

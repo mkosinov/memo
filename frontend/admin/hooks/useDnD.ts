@@ -21,6 +21,13 @@ interface UseDnDOptions {
   gridFrequency?: number;
   /** When set, cross-column drops update this Activity field (e.g. 'masterId' or 'locationId'). */
   columnField?: 'masterId' | 'locationId';
+  /**
+   * GH #267: archived column ids of the current mode. A drop whose resolved
+   * target column is in this set is ignored without a request — otherwise the
+   * backend answers 422 MASTER_NOT_ACTIVE and the optimistic UI silently
+   * rolls back (ScheduleDataContext updateMutation onError).
+   */
+  archivedColumnIds?: ReadonlySet<string>;
 }
 
 /**
@@ -103,7 +110,7 @@ export function snapToGrid(minutes: number, gridFrequency: number): number {
   return Math.round(minutes / gridFrequency) * gridFrequency;
 }
 
-export function useDnD({ activities, addActivity, updateActivity, showToast, gridFrequency = 30, columnField }: UseDnDOptions) {
+export function useDnD({ activities, addActivity, updateActivity, showToast, gridFrequency = 30, columnField, archivedColumnIds }: UseDnDOptions) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragCopy, setDragCopy] = useState(false);
   const [ghostPosition, setGhostPosition] = useState<GhostPosition | null>(null);
@@ -165,6 +172,17 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
       // Use over.columnId if provided, otherwise fall back to parsed columnId
       const targetColumnId = over.columnId ?? parsedColumnId;
 
+      // GH #267: archived columns are never drop targets — ignore without a
+      // request (avoids 422 MASTER_NOT_ACTIVE + silent optimistic rollback).
+      // Drag state is still cleared so the UI doesn't stay in a dragging limbo.
+      if (targetColumnId && archivedColumnIds?.has(targetColumnId)) {
+        setDragId(null);
+        setDragCopy(false);
+        setGhostPosition(null);
+        setActiveDragActivity(null);
+        return;
+      }
+
       if (dragCopy && activeDragActivity) {
         // Create a copy at the new position (optionally in a different column)
         addActivity({
@@ -214,7 +232,7 @@ export function useDnD({ activities, addActivity, updateActivity, showToast, gri
       setGhostPosition(null);
       setActiveDragActivity(null);
     },
-    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast, gridFrequency, columnField],
+    [dragId, dragCopy, activeDragActivity, activities, addActivity, updateActivity, showToast, gridFrequency, columnField, archivedColumnIds],
   );
 
   const handleDragCancel = useCallback(() => {

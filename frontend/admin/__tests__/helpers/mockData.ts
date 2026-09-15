@@ -290,6 +290,20 @@ export const mockMasterResponse2: MasterViewResponse = {
   updated_at: '2024-05-01T12:00:00Z',
 };
 
+/** An ARCHIVED master row (status=all slice, GH #267) — feeds DayView archived columns. */
+export const mockMasterResponseArchived: MasterViewResponse = {
+  id: 'm-arch',
+  first_name: 'Пётр',
+  last_name: 'Архивов',
+  color: '#9A5870',
+  specialty: 'графика',
+  avatar_url: null,
+  sort_order: 5,
+  archived: true,
+  created_at: '2023-03-01T10:00:00Z',
+  updated_at: '2024-02-01T12:00:00Z',
+};
+
 /** Factory for creating MasterViewResponse objects with overrides. */
 export function createMockMasterResponse(
   overrides: Partial<MasterViewResponse> = {},

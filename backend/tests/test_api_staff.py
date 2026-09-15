@@ -850,6 +850,86 @@ class TestMastersReadOnly:
         assert resp.json()["total"] == 1
 
 
+class TestMastersArchivedVisibility:
+    """GH #267 — ``status`` on GET /api/v1/masters/all + ``archived`` field.
+
+    The bare /all list gains the ``status`` query param (active default /
+    archived / all — same contract as locations/services /all). Every view
+    row always carries ``archived: bool``; the paginated GET "" stays
+    acting-only with ``archived`` always false.
+    """
+
+    def _create_master(self, api_client) -> dict:
+        resp = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def _archive(self, api_client, staff_id: str) -> None:
+        resp = api_client.post(f"/api/v1/staff/{staff_id}/archive")
+        assert resp.status_code == 200, resp.text
+
+    def test_all_default_returns_active_only(self, api_client) -> None:
+        acting = self._create_master(api_client)
+        archived = self._create_master(api_client)
+        self._archive(api_client, archived["id"])
+
+        body = api_client.get("/api/v1/masters/all").json()
+
+        assert [m["id"] for m in body] == [acting["id"]]
+        assert all(m["archived"] is False for m in body)
+
+    def test_all_status_all_includes_archived_with_flag(
+        self, api_client
+    ) -> None:
+        acting = self._create_master(api_client)
+        archived = self._create_master(api_client)
+        self._archive(api_client, archived["id"])
+
+        body = api_client.get(
+            "/api/v1/masters/all", params={"status": "all"}
+        ).json()
+
+        by_id = {m["id"]: m for m in body}
+        assert set(by_id) == {acting["id"], archived["id"]}
+        assert by_id[acting["id"]]["archived"] is False
+        assert by_id[archived["id"]]["archived"] is True
+
+    def test_all_status_archived_returns_archived_only(
+        self, api_client
+    ) -> None:
+        acting = self._create_master(api_client)
+        archived = self._create_master(api_client)
+        self._archive(api_client, archived["id"])
+
+        body = api_client.get(
+            "/api/v1/masters/all", params={"status": "archived"}
+        ).json()
+
+        assert [m["id"] for m in body] == [archived["id"]]
+        assert all(m["archived"] is True for m in body)
+
+    def test_all_invalid_status_rejected(self, api_client) -> None:
+        resp = api_client.get("/api/v1/masters/all", params={"status": "foo"})
+        assert resp.status_code == 422
+
+    def test_paginated_list_unchanged_always_active_archived_false(
+        self, api_client
+    ) -> None:
+        acting = self._create_master(api_client)
+        archived = self._create_master(api_client)
+        self._archive(api_client, archived["id"])
+
+        body = api_client.get("/api/v1/masters").json()
+
+        assert body["total"] == 1
+        item = body["items"][0]
+        assert item["id"] == acting["id"]
+        assert "archived" in item
+        assert item["archived"] is False
+
+
 def _seed_user(staff_id: str, *, is_active: int = 1, phone: str | None = None) -> str:
     """Insert a linked users row directly; return its id."""
     user_id = f"{_uuid.uuid4()}"

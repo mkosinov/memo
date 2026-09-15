@@ -14,11 +14,14 @@
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
 #
 # Метка хоста: /root/.local/state/opencode/auto-impl-host ("imac"/"laptop").
-# Ёмкость машины (сколько сессий opencode всего допускается):
+# Ёмкость машины (сколько ЗАПУСКОВ наблюдателя может быть в полёте):
 #   1) env AUTO_IMPL_MAX_SESSIONS (compose, применяется при recreate контейнера);
 #   2) файл /root/.local/state/opencode/auto-impl-max (перекрывает env, читается
 #      каждый цикл — можно менять на живую без recreate).
-# По умолчанию 1. Считаются ВСЕ процессы opencode, кроме сервера opencode web.
+# По умолчанию 1. «Занято» = число живых PID в реестре запусков наблюдателя
+# (auto-impl.pids: "PID issue"); процесс менеджера завершился → слот свободен.
+# Открытые UI/TUI-окна и ручные сессии юзера ёмкость НЕ занимают (грабли
+# 14.09: открытые окна блокировали конвейер).
 # Выбор карточки: gh_board.py pick-next (Next Up → первая Ready to IMPL;
 # пропуск карточек со свежими замками и с незакрытыми depends-on из тела issue).
 # Захваченная карточка имеет префикс комментария "auto-impl claim:",
@@ -32,6 +35,7 @@ REPO=/root/workspace/memo
 STATE=/root/.local/state/opencode
 LOG="$STATE/auto-impl-watch.log"
 LOCK=/tmp/auto-impl-watch.lock
+PIDS_FILE="$STATE/auto-impl.pids"
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
 TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает поставить свой claim
 
@@ -54,19 +58,16 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # локальная ёмкость: считаем ВСЕ живые процессы opencode (TUI-сессии и
-    # CLI-прогоны; постоянный сервер `opencode web` не считаем). Если их
-    # уже MAX_SESSIONS — машина заполнена, наблюдатель ждёт.
+    # локальная ёмкость: живые запуски ТОЛЬКО этого наблюдателя (реестр PID).
+    # Мёртвые PID вычищаются на каждом цикле: процесс менеджера завершился —
+    # слот свободен. UI/TUI-окна и ручные сессии юзера не считаются.
     MAX=$(cat "$STATE/auto-impl-max" 2>/dev/null || echo "${AUTO_IMPL_MAX_SESSIONS:-1}")
-    COUNT=0
-    for p in $(pgrep -x opencode 2>/dev/null); do
-        CMD=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
-        case "$CMD" in
-            *"opencode web"*) : ;;
-            opencode*) COUNT=$((COUNT+1)) ;;
-        esac
-    done
-    if [ "$COUNT" -ge "$MAX" ]; then
+    if [ -f "$PIDS_FILE" ]; then
+        awk '{ if (system("kill -0 " $1 " 2>/dev/null") == 0) print }' "$PIDS_FILE" > "$PIDS_FILE.tmp" \
+            && mv "$PIDS_FILE.tmp" "$PIDS_FILE"
+    fi
+    COUNT=$(wc -l < "$PIDS_FILE" 2>/dev/null || echo 0)
+    if [ "${COUNT:-0}" -ge "$MAX" ]; then
         continue
     fi
 
@@ -108,5 +109,6 @@ while true; do
     # --attach: сессия создаётся на работающем сервере (:4096) — сразу видна в вебе
     nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
         --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
+    echo "$! #$N" >> "$PIDS_FILE"
     echo "$(date -Is) #$N launched (pid $!), title: $TITLE, session log: $STATE/auto-impl-$N.log"
 done

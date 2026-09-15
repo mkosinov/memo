@@ -243,9 +243,28 @@ async def list_client_visitors(
     client_id: str,
     visitor_service: _VisitorServiceDep,
     session: SessionDep,
+    # GH #263 T3-fix: the path client must be visible in the caller's
+    # scope (чужой/missing → 404, one scope-aware query), and the
+    # returned visitors carry the T2 visibility predicate — visitors
+    # without visits on the master's records stay invisible. Admin
+    # (master_key=None): unchanged, all visitors.
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> list[VisitorResponse]:
     """Return all visitors for a given client."""
-    visitors = await visitor_service.list_by_client(db_session=session, client_id=client_id)
+    client = await _get_client_service().get_scoped(
+        db_session=session, id=client_id, master_key=scope.master_key
+    )
+    if client is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
+    visitors = await visitor_service.list_by_client(
+        db_session=session, client_id=client_id, master_key=scope.master_key
+    )
     return [VisitorResponse.model_validate(v) for v in visitors]
 
 

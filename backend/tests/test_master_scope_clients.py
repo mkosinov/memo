@@ -396,3 +396,119 @@ class TestClientMutationGuards:
             f"/api/v1/clients/{guard_world['client']['id']}/restore"
         )
         assert resp.status_code == 403
+
+
+class TestClientVisitorsScope:
+    """GH #263 T3-fix — GET /clients/{id}/visitors under master.
+
+    Coherence with the T2 visitor scope («посетитель без визитов мастера
+    невидим»): the path client must be visible in the master's scope
+    (чужой/несуществующий → 404), and the returned visitors are narrowed
+    by the visitor visibility predicate (ONLY visitors with visits on
+    the master's records — an in-scope client may also have visitors
+    from another master's records). Admin: unchanged, all visitors.
+    """
+
+    @pytest.fixture
+    def visitors_world(self, api_client, create_service, create_location, make_master):
+        """Master + in-scope client with own AND foreign visitors.
+
+        ``own_client`` has a record on the master's activity (visit →
+        «Свой посетитель») AND a record on a foreign activity (visit →
+        «Чужой посетитель») — the client itself is in scope, but only
+        the first visitor passes the visitor visibility predicate.
+        ``foreign_client`` has a record ONLY on the foreign activity.
+        """
+        from src.auth.passwords import hash_password
+        from tests.conftest import insert_master_user
+
+        master = make_master()
+        svc, loc = create_service(), create_location()
+        foreign_staff = insert_master_user("+79995551304", hash_password("x"))["staff_id"]
+        own_act = api_client.post("/api/v1/activities", json={
+            "master_id": master["staff_id"],
+            "service_id": svc["id"], "location_id": loc["id"],
+            "start": TOMORROW, "duration": 90, "capacity": 10,
+            "is_private": False,
+        }).json()
+        foreign_act = api_client.post("/api/v1/activities", json={
+            "master_id": foreign_staff,
+            "service_id": svc["id"], "location_id": loc["id"],
+            "start": TOMORROW, "duration": 90, "capacity": 10,
+            "is_private": False,
+        }).json()
+
+        def _client(name: str, phone: str) -> dict:
+            resp = api_client.post("/api/v1/clients", json={
+                "name": name, "phone": phone, "channel": "telegram",
+            })
+            assert resp.status_code == 201, resp.text
+            return resp.json()
+
+        own_client = _client("Клиент с гостями", "+79310001122")
+        foreign_client = _client("Клиент чужой", "+79310003344")
+        own_rec = api_client.post("/api/v1/records", json={
+            "activity_id": own_act["id"], "client_id": own_client["id"],
+            "visits": [{"name": "Свой посетитель", "price": 100, "status": "waiting"}],
+        }).json()
+        foreign_rec_own_client = api_client.post("/api/v1/records", json={
+            "activity_id": foreign_act["id"], "client_id": own_client["id"],
+            "visits": [{"name": "Чужой посетитель", "price": 200, "status": "waiting"}],
+        }).json()
+        foreign_rec = api_client.post("/api/v1/records", json={
+            "activity_id": foreign_act["id"], "client_id": foreign_client["id"],
+            "visits": [{"name": "Только чужой", "price": 300, "status": "waiting"}],
+        }).json()
+        return {
+            "master": master,
+            "own_client": own_client,
+            "foreign_client": foreign_client,
+            "own_visitor_id": own_rec["visits"][0]["visitor_id"],
+            "foreign_visitor_id_of_own_client": foreign_rec_own_client["visits"][0]["visitor_id"],
+            "foreign_visitor_id": foreign_rec["visits"][0]["visitor_id"],
+        }
+
+    def test_own_client_only_own_visitors(self, visitors_world) -> None:
+        """In-scope client → 200 with ONLY visitors having visits on the
+        master's records (the same client's foreign-activity visitor is
+        invisible)."""
+        mc = visitors_world["master"]["client"]
+        resp = mc.get(f"/api/v1/clients/{visitors_world['own_client']['id']}/visitors")
+        assert resp.status_code == 200, resp.text
+        ids = [v["id"] for v in resp.json()]
+        assert visitors_world["own_visitor_id"] in ids
+        assert visitors_world["foreign_visitor_id_of_own_client"] not in ids
+
+    def test_foreign_client_404(self, visitors_world) -> None:
+        mc = visitors_world["master"]["client"]
+        resp = mc.get(
+            f"/api/v1/clients/{visitors_world['foreign_client']['id']}/visitors"
+        )
+        assert resp.status_code == 404
+
+    def test_missing_client_404(self, visitors_world) -> None:
+        mc = visitors_world["master"]["client"]
+        resp = mc.get(
+            "/api/v1/clients/00000000-0000-0000-0000-000000000000/visitors"
+        )
+        assert resp.status_code == 404
+
+    def test_empty_scope_master_404_any_client(self, visitors_world, make_master) -> None:
+        """Master without a masters row: EMPTY scope — any client is
+        invisible (never «the whole studio»), even one with records."""
+        empty_master = make_master(with_masters_row=False)
+        # visitors_world's own_client belongs to a REAL master — an
+        # empty-scope master must not see it.
+        mc = empty_master["client"]
+        resp = mc.get(f"/api/v1/clients/{visitors_world['own_client']['id']}/visitors")
+        assert resp.status_code == 404
+
+    def test_admin_all_visitors_regression(self, visitors_world, api_client) -> None:
+        """Admin: no scope — ALL visitors of the client (both masters')."""
+        resp = api_client.get(
+            f"/api/v1/clients/{visitors_world['own_client']['id']}/visitors"
+        )
+        assert resp.status_code == 200, resp.text
+        ids = [v["id"] for v in resp.json()]
+        assert visitors_world["own_visitor_id"] in ids
+        assert visitors_world["foreign_visitor_id_of_own_client"] in ids

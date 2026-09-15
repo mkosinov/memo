@@ -136,12 +136,25 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         return (await db_session.execute(stmt)).scalar_one_or_none() is not None
 
     async def list_by_client(
-        self, db_session: AsyncSession, client_id: str
+        self,
+        db_session: AsyncSession,
+        client_id: str,
+        master_key: str | None = None,
     ) -> Sequence[Visitor]:
-        """Return all visitors for a given client."""
-        result = await db_session.execute(
-            select(Visitor).where(Visitor.client_id == client_id)
-        )
+        """Return all visitors for a given client.
+
+        GH #263 T3-fix: for a scoped (master) caller the visitor
+        visibility predicate (visits → records → activities of THIS
+        master) narrows the result — an in-scope client may also carry
+        visitors from another master's records, and those stay invisible
+        (the T2 rule «посетитель без визитов мастера невидим»).
+        ``master_key=None`` (admin) → unchanged, all visitors.
+        """
+        stmt = select(Visitor).where(Visitor.client_id == client_id)
+        predicate = self._visibility_predicate(master_key)
+        if predicate is not None:
+            stmt = stmt.where(predicate)
+        result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
     async def _delete_cascade(self, db_session: AsyncSession, visitor_id: str) -> bool:

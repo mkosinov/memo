@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Design spec: `docs/specs/2026-09-14-saving-toast-design.md` (on main)
   - Plan: `docs/plans/2026-09-14-saving-toast-plan.md` (on main)
   - Status: `docs/status/2026-09-15-saving-toast-261.md`
+- **#134 — tech-debt: единый enum `VisitStatus` (канон `src/domain/visit_status.py`); дубль из `models/enums.py` удалён, сырые литералы статусов в `backend/src` (schemas/services/seed) заменены членами enum** — поведение не меняется; единственная дельта: фильтр записей по статусу принимает и имя статуса капсом (`CANCELLED`), раньше — 422. Тесты и миграции намеренно остались на строках (спека §2.2). Tests: полный pytest + e2e-якоря S1–S6 и API-якорь S7 зелёные.
+  - Closes: #134.
+  - Design spec: `docs/specs/2026-09-15-visit-status-dedup-design.md`
+  - Plan: `docs/plans/2026-09-15-visit-status-dedup-plan.md`
 
 ## [Unreleased] — 2026-09-14
 

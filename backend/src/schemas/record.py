@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.models.enums import VisitStatus
+from src.domain.visit_status import VisitStatus
 from src.schemas.pagination import PaginationParams
 
 
@@ -140,7 +140,6 @@ RecordSortBy = Literal[
     "guests", "status", "total", "payment",
 ]
 RecordSortOrder = Literal["asc", "desc"]
-RecordStatusFilter = Literal["waiting", "visited", "missed", "cancelled"]
 
 
 class RecordListParams(PaginationParams):
@@ -156,7 +155,7 @@ class RecordListParams(PaginationParams):
     location_id: str | None = None
     service_id: str | None = None
     master_id: str | None = None
-    status: RecordStatusFilter | None = None
+    status: VisitStatus | None = None
     sort_by: RecordSortBy = "date"
     sort_order: RecordSortOrder = "asc"
     q: str | None = Field(default=None, min_length=2, max_length=100)

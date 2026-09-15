@@ -15,13 +15,6 @@ class RecordStatus(str, enum.Enum):
     NO_SHOW = "no_show"
 
 
-class VisitStatus(str, enum.Enum):
-    WAITING = "waiting"
-    VISITED = "visited"
-    MISSED = "missed"
-    CANCELLED = "cancelled"
-
-
 class PaymentMethod(str, enum.Enum):
     CASH = "cash"
     CARD = "card"

@@ -26,3 +26,16 @@ export function useMastersRaw() {
     staleTime: DICT_STALE_TIME,
   });
 }
+
+/**
+ * Schedule grid dictionary (GH #267): FULL list incl. archived via status=all,
+ * OWN key nested under the ['masters'] prefix — prefix-invalidation from
+ * lib/invalidate.ts and the SSE channel reaches it untouched.
+ */
+export function useScheduleMasters() {
+  return useQuery<MasterViewResponse[]>({
+    queryKey: qk.scheduleMasters,
+    queryFn: () => getAllMasters({ status: 'all' }),
+    staleTime: DICT_STALE_TIME,
+  });
+}

@@ -13,6 +13,7 @@ import type {
   VisitResponse,
   PaymentResponse,
   LocationResponse,
+  ServiceResponse,
   MasterViewResponse,
   StaffResponse,
   PositionResponse,
@@ -217,6 +218,39 @@ export function createMockLocationResponse(
 ): LocationResponse {
   return {
     ...mockLocationResponse,
+    ...overrides,
+  };
+}
+
+// ─── ServiceResponse (API shape, GH #267 schedule dictionary consumers) ───
+
+export const mockServiceResponse: ServiceResponse = {
+  id: 's1',
+  title: 'Картина маслом',
+  description: '',
+  image_url: '',
+  specialty: '',
+  min_age: 12,
+  max_age: 99,
+  duration: 150,
+  record_info: '',
+  tariffs: [
+    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
+    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+  ],
+  tags: [],
+  materials: [],
+  archived: false,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+/** Factory for creating ServiceResponse objects with overrides. */
+export function createMockServiceResponse(
+  overrides: Partial<ServiceResponse> = {},
+): ServiceResponse {
+  return {
+    ...mockServiceResponse,
     ...overrides,
   };
 }

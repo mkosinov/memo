@@ -126,6 +126,9 @@ function DataConsumer() {
     masters,
     services,
     locations,
+    // GH #267: FULL schedule dictionaries (status=all, archived included).
+    scheduleMasters: fullScheduleMasters,
+    scheduleLocations: fullScheduleLocations,
     addActivity,
     updateActivity,
     deleteActivity,
@@ -143,6 +146,8 @@ function DataConsumer() {
       <span data-testid="master-count">{masters.length}</span>
       <span data-testid="service-count">{services.length}</span>
       <span data-testid="location-count">{locations.length}</span>
+      <span data-testid="schedule-master-count">{fullScheduleMasters.length}</span>
+      <span data-testid="schedule-location-count">{fullScheduleLocations.length}</span>
       <span data-testid="loading">{loading.toString()}</span>
       <span data-testid="error">{error ? error.message : 'null'}</span>
       <span data-testid="grid-start">{gridStartMinutes}</span>
@@ -525,6 +530,55 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
   });
 
   // ─── С4: per-directory filter initialization (spec §6) ─────────────────────
+
+  // ─── GH #267: schedule dictionaries — own keys, status=all, active slice ────
+
+  it('requests the schedule dictionaries with status=all (GH #267)', async () => {
+    renderDataProvider();
+    await waitFor(() => {
+      expect(getAllMasters).toHaveBeenCalledWith({ status: 'all' });
+    });
+    expect(getAllServices).toHaveBeenCalledWith({ status: 'all' });
+    expect(getAllLocations).toHaveBeenCalledWith({ status: 'all' });
+  });
+
+  it('exposes FULL schedule lists (incl. archived) while domain slices stay active-only (GH #267)', async () => {
+    const archivedMaster = { ...masterM1, id: 'm-arch', first_name: 'Архивный', archived: true };
+    const archivedLocation = { ...locationAlpika, id: 'loc-arch', name: 'Архивная студия', archived: true };
+    seedDictionaries(
+      [masterM1, archivedMaster],
+      [serviceS1],
+      [locationAlpika, archivedLocation],
+    );
+
+    renderDataProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schedule-master-count').textContent).toBe('2');
+    });
+    expect(screen.getByTestId('schedule-location-count').textContent).toBe('2');
+    // Domain slices for existing consumers keep ACTIVE-only semantics.
+    expect(screen.getByTestId('master-count').textContent).toBe('1');
+    expect(screen.getByTestId('location-count').textContent).toBe('1');
+    expect(screen.getByTestId('service-count').textContent).toBe('1');
+  });
+
+  it('seeds filter init from the ACTIVE slice only — archived rows are not in the options (GH #267)', async () => {
+    const setFilterMasterIds = vi.fn();
+    const setFilterLocationIds = vi.fn();
+    const archivedMaster = { ...masterM1, id: 'm-arch', archived: true };
+    const archivedLocation = { ...locationAlpika, id: 'loc-arch', archived: true };
+    seedDictionaries([masterM1, archivedMaster], [serviceS1], [locationAlpika, archivedLocation]);
+
+    renderDataProvider({ setFilterMasterIds, setFilterLocationIds });
+
+    await waitFor(() => {
+      expect(setFilterMasterIds).toHaveBeenCalledWith(['m1']);
+    });
+    await waitFor(() => {
+      expect(setFilterLocationIds).toHaveBeenCalledWith(['alpika']);
+    });
+  });
 
   it('initializes master filters even when the locations dictionary is EMPTY (С4)', async () => {
     const setFilterMasterIds = vi.fn();

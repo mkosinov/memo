@@ -8,6 +8,10 @@
 //   use<Entity>Table      factory paged-list state (createPagedListContext)
 //   use<Entity>Mutations  mutation family
 //   point hooks (useClient, useActivity, …) — single-entity reads
+//   useSchedule<Entity>   schedule grid build (GH #267): `* + 'schedule'` key,
+//                         status=all response — the pair with the shared key is
+//                         for reference consumers, the `+ 'schedule'` variant is
+//                         for the grid (archived included).
 // `useClients` is PERMANENTLY RESERVED-VACANT (list = useClientsTable).
 //
 // Raw/lookup hook pairs share a key ⇒ they MUST share staleTime
@@ -31,6 +35,12 @@ export const qk = {
   visitors: (clientId: string) => ['visitors', clientId] as const,
   recordPayments: (recordId: string) => ['payments', recordId] as const,
   record: (id: string) => ['record', id] as const,
+  // GH #267: schedule grid dictionaries — NESTED under the family prefix, so
+  // prefix-invalidation (`['masters']` from lib/invalidate.ts, SSE map) reaches
+  // both the reference pair and the schedule build without touching invalidate.ts.
+  scheduleMasters: ['masters', 'schedule'] as const,
+  scheduleServices: ['services', 'schedule'] as const,
+  scheduleLocations: ['locations', 'schedule'] as const,
   // ── List prefixes (factory contexts + invalidation targets) ──
   clients: ['clients'] as const,
   records: ['records'] as const,

@@ -23,7 +23,7 @@ import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataCo
 import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
 import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 import type { ClientWithStats } from '@memo/api-client';
-import { mockMasters, mockServices, mockLocations } from './mockData';
+import { mockMasters, mockServices, mockLocations, mockMasterResponse, mockServiceResponse, mockLocationResponse } from './mockData';
 
 // ─── Schedule split contexts (GH #141) ────────────────────────────────────
 
@@ -34,6 +34,11 @@ export function createMockScheduleData(
     masters: mockMasters,
     services: mockServices,
     locations: mockLocations,
+    // GH #267: FULL schedule dictionaries (status=all). Defaults hold one
+    // active row each; override per-test (e.g. to add archived rows).
+    scheduleMasters: [mockMasterResponse],
+    scheduleServices: [mockServiceResponse],
+    scheduleLocations: [mockLocationResponse],
     activities: [],
     scheduleIndex: {
       byId: new Map(),

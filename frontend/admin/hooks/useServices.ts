@@ -15,11 +15,24 @@ export function useServices() {
   });
 }
 
-/** Raw services incl. `archived` — SAME key as useServices (dedupe); keep staleTimes aligned. */
+/** Raw services (active rows — no status param) — SAME key as useServices (dedupe); keep staleTimes aligned. */
 export function useServicesRaw() {
   return useQuery<ServiceResponse[]>({
     queryKey: qk.services,
     queryFn: () => getAllServices(),
+    staleTime: DICT_STALE_TIME,
+  });
+}
+
+/**
+ * Schedule grid dictionary (GH #267): FULL list incl. archived via status=all,
+ * OWN key nested under the ['services'] prefix — prefix-invalidation from
+ * lib/invalidate.ts and the SSE channel reaches it untouched.
+ */
+export function useScheduleServices() {
+  return useQuery<ServiceResponse[]>({
+    queryKey: qk.scheduleServices,
+    queryFn: () => getAllServices({ status: 'all' }),
     staleTime: DICT_STALE_TIME,
   });
 }

@@ -60,6 +60,8 @@ import {
   ChangePasswordSchema,
   UserSettingsCreateSchema,
   UserSettingsResponseSchema,
+  UserSettingsUpdateSchema,
+  type UserSettingsResponse,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
@@ -304,6 +306,7 @@ const validMasterView = {
   color: '#FF6B6B',
   avatar_url: 'https://example.com/avatar.jpg',
   sort_order: 0,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -326,15 +329,27 @@ describe('MasterViewResponseSchema', () => {
     expect(() => MasterViewResponseSchema.parse(without)).toThrow();
   });
 
-  it('view carries NO archived and NO position (acting masters only, D8)', () => {
+  it('parses archived flag (GH #267: mirrors masters.is_active)', () => {
+    const result: MasterViewResponse = MasterViewResponseSchema.parse({
+      ...validMasterView,
+      archived: true,
+    });
+    expect(result.archived).toBe(true);
+    expect(MasterViewResponseSchema.parse(validMasterView).archived).toBe(false);
+  });
+
+  it('rejects missing archived field', () => {
+    const { archived: _archived, ...without } = validMasterView;
+    expect(() => MasterViewResponseSchema.parse(without)).toThrow();
+  });
+
+  it('view carries NO position (positions live on the staff card, D8)', () => {
     // Response schemas are non-strict by convention (stray keys are dropped);
-    // the CONTRACT is that the backend never emits these fields.
+    // the CONTRACT is that the backend never emits this field.
     const result = MasterViewResponseSchema.parse({
       ...validMasterView,
-      archived: false,
       position: 'мастер',
     });
-    expect(result).not.toHaveProperty('archived');
     expect(result).not.toHaveProperty('position');
   });
 });
@@ -1653,6 +1668,8 @@ describe('UserSettings column rename (GH #266: column_order_masters → column_o
     language: 'ru',
     column_order_staff: ['5f8a1c2d-0001-4000-8000-000000000001'],
     column_order_locations: ['5f8a1c2d-0002-4000-8000-000000000002'],
+    show_archived_masters: true,
+    show_archived_locations: false,
     created_at: '2024-01-15T10:00:00Z',
     updated_at: '2024-06-01T12:00:00Z',
   };
@@ -1675,6 +1692,63 @@ describe('UserSettings column rename (GH #266: column_order_masters → column_o
       column_order_staff: ['id-1'],
     });
     expect(withCols.column_order_staff).toEqual(['id-1']);
+  });
+});
+
+// ─── Archived visibility toggles (GH #267) ──────────────────────────────────
+// Backend mirrors masters.is_active / locations.is_active as user_settings
+// booleans: response always carries them; create defaults true/false
+// (masters shown by default, locations hidden); update is partial.
+
+describe('UserSettings archived visibility toggles (GH #267)', () => {
+  const validSettings = {
+    id: '5f8a1c2d-0008-4000-8000-000000000008',
+    user_id: '5f8a1c2d-0009-4000-8000-000000000009',
+    theme: 'light',
+    language: 'ru',
+    column_order_staff: [],
+    column_order_locations: [],
+    show_archived_masters: true,
+    show_archived_locations: false,
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-06-01T12:00:00Z',
+  };
+
+  it('UserSettingsResponseSchema parses both toggles (required)', () => {
+    const parsed: UserSettingsResponse = UserSettingsResponseSchema.parse(validSettings);
+    expect(parsed.show_archived_masters).toBe(true);
+    expect(parsed.show_archived_locations).toBe(false);
+  });
+
+  it('UserSettingsResponseSchema rejects missing toggles (required fields)', () => {
+    const { show_archived_masters: _m, show_archived_locations: _l, ...without } = validSettings;
+    expect(() => UserSettingsResponseSchema.parse(without)).toThrow();
+  });
+
+  it('UserSettingsCreateSchema defaults: masters true, locations false', () => {
+    const parsed = UserSettingsCreateSchema.parse({});
+    expect(parsed.show_archived_masters).toBe(true);
+    expect(parsed.show_archived_locations).toBe(false);
+  });
+
+  it('UserSettingsCreateSchema accepts explicit overrides', () => {
+    const parsed = UserSettingsCreateSchema.parse({
+      show_archived_masters: false,
+      show_archived_locations: true,
+    });
+    expect(parsed.show_archived_masters).toBe(false);
+    expect(parsed.show_archived_locations).toBe(true);
+  });
+
+  it('UserSettingsUpdateSchema accepts partial toggles, strips user_id', () => {
+    const parsed = UserSettingsUpdateSchema.parse({ show_archived_locations: true });
+    expect(parsed).toEqual({ show_archived_locations: true });
+    // user_id is omitted from the update contract: zod strips unknown keys.
+    const withUser = UserSettingsUpdateSchema.parse({
+      user_id: 'u-1',
+      show_archived_masters: false,
+    } as never);
+    expect(withUser).toEqual({ show_archived_masters: false });
   });
 });
 

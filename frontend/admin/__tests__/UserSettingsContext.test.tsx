@@ -59,6 +59,8 @@ const remoteSettings = {
   language: 'ru' as const,
   column_order_staff: ['m1', 'm2'],
   column_order_locations: ['l1'],
+  show_archived_masters: true,
+  show_archived_locations: false,
   created_at: '2026-09-08T00:00:00Z',
   updated_at: '2026-09-08T00:00:00Z',
 };

@@ -223,9 +223,11 @@ export function createMockLocationResponse(
 
 // ─── MasterViewResponse (read-only /masters view, GH #266) ────────────────
 // The view returns ACTING masters only (masters.is_active = true), so there is
-// no `archived` and no `position` field — positions live on the staff card
-// (StaffResponse). Consumers no longer client-filter by archived (S2: an
-// archived master simply leaves the list server-side).
+// no `position` field — positions live on the staff card (StaffResponse).
+// `archived` (GH #267) mirrors masters.is_active: the paginated list stays
+// acting-only (always false here); /all with status=all|archived can differ.
+// Consumers no longer client-filter by archived (S2: an archived master
+// simply leaves the list server-side).
 
 export const mockMasterResponse: MasterViewResponse = {
   id: 'm1',
@@ -235,6 +237,7 @@ export const mockMasterResponse: MasterViewResponse = {
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
   sort_order: 0,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -248,6 +251,7 @@ export const mockMasterResponse2: MasterViewResponse = {
   specialty: 'керамика',
   avatar_url: null,
   sort_order: 1,
+  archived: false,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
 };

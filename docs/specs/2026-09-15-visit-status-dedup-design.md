@@ -92,7 +92,7 @@ OpenAPI-схема параметра остаётся перечисление�
 
 1. `backend/src/models/enums.py` не содержит `VisitStatus`; в backend ровно одно определение enum.
 2. Оба импортера схем перепривязаны; поиск `from src.models.enums import VisitStatus` пуст.
-3. В `backend/src` нет сырых литералов четырёх значений `VisitStatus` вне определений enum, alembic-миграций и тестов (seed конвертирован); проверка механическая — grep по `"waiting"/"visited"/"missed"/"cancelled"` в `backend/src` пуст вне `domain/visit_status.py`, `alembic/` и `tests/`.
+3. В `backend/src` нет сырых литералов четырёх значений `VisitStatus` вне определений enum, alembic-миграций и тестов (seed конвертирован); проверка механическая — grep по `"waiting"/"visited"/"missed"/"cancelled"` в `backend/src` пуст вне `domain/visit_status.py`, `models/enums.py` (легаси-член `RecordStatus.CANCELLED = "cancelled"` намеренно остаётся — RecordStatus вне скоупа), `alembic/` и `tests/`.
 4. Юнит-тесты домена (`test_compute_record_status.py`, `test_record_visits.py`) и полный pytest зелёные.
 5. E2E-якоря S1–S6 зелёные — поведение не изменилось.
 6. Контракт API не изменился (покрывается существующими API-тестами без их правок).

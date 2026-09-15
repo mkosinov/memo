@@ -3,6 +3,7 @@ import {
   waitForScheduleReady,
   delayActivityMutations,
 } from './fixtures/helpers';
+import { openCombobox } from './helpers/combobox';
 
 /**
  * GH #261 — «Сохраняем…» loading toast in the common toast stack (spec §6).
@@ -50,6 +51,44 @@ async function submitCreateDialog(
   await dialog.getByTestId('create-service').selectOption({ index: 1 });
   await dialog.getByTestId('create-location').selectOption({ index: 1 });
   await dialog.getByTestId('btn-create-activity').click();
+}
+
+/**
+ * Make the stamp panel ready (master + service + first location) so empty
+ * slot clicks create activities directly, without the dialog — the proven
+ * pattern of schedule-empty-week.spec.ts S4.
+ */
+async function makeStampReady(page: import('@playwright/test').Page) {
+  const rightPanel = page.locator('[data-testid="right-panel"]');
+  if (!(await rightPanel.isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: 'Открыть панель инструментов' }).click();
+  }
+
+  // Master: Combobox inside the stamp master picker (index 0 is the pinned
+  // clear option «Не выбран» — pick the first real option).
+  const masterTrigger = page
+    .getByTestId('stamp-master-picker')
+    .getByTestId('combobox-trigger');
+  await expect(masterTrigger).toBeVisible();
+  await openCombobox(page, masterTrigger);
+  await page
+    .locator('[data-testid^="combobox-option-"]:not([data-testid="combobox-option-clear"])')
+    .first()
+    .click();
+
+  // Service: Combobox labelled «Услуга» (first real option).
+  const serviceTrigger = page.getByRole('button', { name: 'Услуга' });
+  await expect(serviceTrigger).toBeVisible();
+  await openCombobox(page, serviceTrigger);
+  await page
+    .locator('[data-testid^="combobox-option-"]:not([data-testid="combobox-option-clear"])')
+    .first()
+    .click();
+
+  // Location: check the first checkbox in the stamp locations block.
+  await rightPanel.locator('input[type="checkbox"]').first().check();
+
+  await expect(page.getByTestId('stamp-summary')).toBeVisible();
 }
 
 test.describe('«Сохраняем…» toast during schedule mutations (GH #261)', () => {
@@ -136,23 +175,21 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
   test('S3: two overlapping creates keep exactly one loading toast', async ({
     page,
   }) => {
-    await openCreateDialog(page);
-    // Submit create #1 — the dialog stays open (locked) while in flight.
-    const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-    await dialog.getByTestId('create-master').selectOption({ index: 1 });
-    await dialog.getByTestId('create-service').selectOption({ index: 1 });
-    await dialog.getByTestId('create-location').selectOption({ index: 1 });
-    await dialog.getByTestId('btn-create-activity').click();
+    // Both creates go through the stamp path (ready stamp + empty slot
+    // click → direct POST, no dialog — schedule-empty-week.spec.ts S4).
+    // The dialog path cannot overlap with itself: while create #1 is in
+    // flight the dialog stays open with saving=true, so a second submit
+    // would hit a disabled button instead of firing a second mutation.
+    await makeStampReady(page);
 
-    // While #1 is in the delay window, start create #2: openCreateModal has
-    // no "already open" guard, so a dispatched click on a (backdrop-covered)
-    // empty slot re-opens a fresh dialog — the same handler a real click runs.
-    await page.locator('[data-testid="empty-slot"]').first().dispatchEvent('click');
-    await expect(dialog).toBeVisible();
-    await dialog.getByTestId('create-master').selectOption({ index: 1 });
-    await dialog.getByTestId('create-service').selectOption({ index: 1 });
-    await dialog.getByTestId('create-location').selectOption({ index: 1 });
-    await dialog.getByTestId('btn-create-activity').click();
+    // Create #1 — POST held in the delay window.
+    await page.locator('[data-testid="empty-slot"]').first().click();
+
+    // Create #2 while #1 is still in flight — grid has not updated yet,
+    // so the next slot is still rendered as empty-slot.
+    const slots = page.locator('[data-testid="empty-slot"]');
+    await expect(slots.nth(1)).toBeVisible();
+    await slots.nth(1).click();
 
     // Throughout BOTH operations: exactly one loading toast (counter, not N).
     await expect(page.getByTestId('toast-loading')).toBeVisible();
@@ -168,6 +205,7 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
     page,
   }) => {
     // Override the mutation route for this test: POST → 500 (GET passes).
+    // Later-registered routes take precedence over beforeEach's delay.
     await page.route('**/api/v1/activities*', async (route) => {
       if (route.request().method() === 'POST') {
         return route.fulfill({

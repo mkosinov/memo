@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+from typing import TypeVar
 
-from sqlalchemy import func, not_, select
+from sqlalchemy import ColumnElement, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.scope import mask_phone
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.enums import ArchiveStatus
@@ -25,6 +27,41 @@ from src.schemas.client import (
 from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
 from src.services.visitor import VisitorService, get_visitor_service
+
+ResponseT = TypeVar("ResponseT", bound=ClientResponse)
+
+
+def _client_scope_predicate(master_key: str) -> ColumnElement[bool]:
+    """EXISTS «есть запись клиента к активности этого мастера» (D1).
+
+    Records are hard-delete (``AbstractModel``, no ``is_active``) — every
+    existing row is non-archived, so the predicate is a plain EXISTS over
+    records → activities. Single implementation for BOTH consumer paths:
+    ``ClientService`` (generic list / point get) and the manual
+    ``list_clients_with_stats`` builder.
+    """
+    return (
+        select(Record.id)
+        .join(Activity, Record.activity_id == Activity.id)
+        .where(
+            Record.client_id == Client.id,
+            Activity.master_id == master_key,
+        )
+        .exists()
+    )
+
+
+def _mask_client_contacts(item: ResponseT) -> ResponseT:
+    """GH #263 D3 — contact mask on a client-bearing response (master).
+
+    ``phone`` → ``mask_phone`` (last 4 digits visible), ``email`` →
+    ``None``; name/channel stay as-is. Applied ONLY on read paths —
+    mutations keep the full number (the master just typed it, WYSIWYG
+    #221). In-place on the Pydantic model; returned for chaining.
+    """
+    item.phone = mask_phone(item.phone)
+    item.email = None
+    return item
 
 
 class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
@@ -66,6 +103,89 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         SearchField(Client.id, kind="uuid"),
     ]
 
+    # ── GH #263 T3 — per-master scope + contact mask (D1/D3/D4) ─────────
+
+    @staticmethod
+    def _visibility_predicate(master_key: str | None) -> ColumnElement[bool] | None:
+        """Client scope predicate (D1, «всё через записи»).
+
+        A client is visible to a scoped master iff he has at least one
+        record on one of the master's activities. ``None`` (admin) → no
+        predicate. Shared implementation — see
+        :func:`_client_scope_predicate`.
+        """
+        if master_key is None:
+            return None
+        return _client_scope_predicate(master_key)
+
+    async def list(
+        self,
+        db_session: AsyncSession,
+        page: int = 1,
+        per_page: int = 20,
+        order_by=None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        q: str | None = None,
+        master_key: str | None = None,
+        **filters,
+    ) -> PaginatedResponse[ClientResponse]:
+        """Paginated clients with the master scope + contact mask (T3).
+
+        Scope rule (D1/D4): the EXISTS visibility predicate applies ONLY
+        when the caller did NOT pass a ``phone`` filter — the phone
+        typeahead (``service.list(phone=...)`` behind
+        ``GET /clients/get?phone=`` and the digits-mode list filter)
+        searches ALL active studio clients. Mask (D3) applies whenever
+        the request is scoped (``master_key is not None``) — search
+        results included: the full number is a search KEY, never response
+        data. Both predicates land BEFORE the COUNT, so ``total`` stays
+        honest (generic list contract).
+        """
+        phone = filters.pop("phone", None)
+        stmt = self._list_stmt(status=status, **filters)
+        if phone is not None:
+            stmt = stmt.where(Client.phone == phone)
+        if phone is None:
+            predicate = self._visibility_predicate(master_key)
+            if predicate is not None:
+                stmt = stmt.where(predicate)
+        if q:
+            stmt = stmt.where(search_predicate(q, self.search_fields or []))
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await db_session.execute(count_stmt)).scalar_one()
+        rows = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
+        )
+        items_orm = list(rows.scalars().all())
+        items = [self._response_schema.model_validate(o) for o in items_orm]
+        if master_key is not None:
+            items = [_mask_client_contacts(i) for i in items]
+        return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+
+    async def get_scoped(
+        self, db_session: AsyncSession, id: str, master_key: str | None
+    ) -> ClientResponse | None:
+        """Point get with the per-master scope in ONE query (T3).
+
+        The EXISTS visibility predicate folds into the same SELECT —
+        чужой client is indistinguishable from missing (``None`` → the
+        route renders 404; 404-fast-path, plan T7). Scoped responses are
+        masked (D3); ``master_key=None`` (admin) → unfiltered, unmasked.
+        """
+        stmt = select(Client).where(Client.id == id)
+        predicate = self._visibility_predicate(master_key)
+        if predicate is not None:
+            stmt = stmt.where(predicate)
+        client = (await db_session.execute(stmt)).scalar_one_or_none()
+        if client is None:
+            return None
+        item = ClientResponse.model_validate(client)
+        if master_key is not None:
+            return _mask_client_contacts(item)
+        return item
+
 
 @lru_cache
 def get_client_service() -> ClientService:
@@ -86,12 +206,20 @@ def get_client_service() -> ClientService:
 async def list_clients_with_stats(
     db_session: AsyncSession,
     params: ClientListParams,
+    master_key: str | None = None,
 ) -> PaginatedResponse[ClientWithStats]:
     """Return paginated clients with aggregated record/payment stats.
 
     Accepted exception to repo-owned list (GH #206): non-ORM projection +
     separate count query excluding correlated stat subqueries. Stays
     service-owned; CQRS read-side evaluation tracked in GH #217.
+
+    GH #263 T3 (D1/D3/D4): the per-master EXISTS scope narrows rows ONLY
+    when the caller did NOT pass the ``phone`` digits-filter (phone
+    search spans ALL active studio clients — D4); both predicates land
+    before BOTH queries (``total`` honest). Masked contacts on every
+    scoped (master) response — the second of the TWO Client assembly
+    points (domain rules clients.md, «Two mapper paths»).
     """
 
     # 1. Correlated scalar subqueries — one per stat, each reads ONE relation
@@ -162,6 +290,15 @@ async def list_clients_with_stats(
     elif params.status == ArchiveStatus.ARCHIVED:
         query = query.where(not_(Client.is_active))
         count_query = count_query.where(not_(Client.is_active))
+
+    # 5b. GH #263 T3 — per-master scope (D1/D4): EXISTS «есть запись
+    #     клиента к своей активности», UNLESS this is a phone search —
+    #     ``?phone=`` spans ALL active studio clients (D4). Lands on BOTH
+    #     queries so ``total`` reflects the scoped set.
+    if master_key is not None and params.phone is None:
+        scope_pred = _client_scope_predicate(master_key)
+        query = query.where(scope_pred)
+        count_query = count_query.where(scope_pred)
 
     # 6. Apply other filters
     # GH #212: shared search predicate (was hand-rolled search ilike) — must
@@ -276,6 +413,11 @@ async def list_clients_with_stats(
                 missed_records=row.missed_records or 0,
             )
         )
+
+    # GH #263 T3 (D3): contact mask on the scoped (master) response —
+    # applied AFTER assembly so the stats builder stays schema-first.
+    if master_key is not None:
+        items = [_mask_client_contacts(i) for i in items]
 
     return PaginatedResponse(
         items=items,

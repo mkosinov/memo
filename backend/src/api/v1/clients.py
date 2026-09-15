@@ -11,6 +11,7 @@ from src.auth.permissions import (
     require_permission,
     verify_fetch_metadata,
 )
+from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -72,9 +73,15 @@ async def get_client_by_phone(
     service: _ServiceDep,
     session: SessionDep,
     phone: str = Query(..., min_length=3),
+    # GH #263 T3 (D4): the phone lookup is scope-free — ALL active studio
+    # clients — but the scoped (master) response is still MASKED (D3):
+    # the number is a search key, not response data.
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> ClientResponse:
     """Get an active client by exact phone (GH #212; was /clients/search)."""
-    result = await service.list(db_session=session, phone=phone)
+    result = await service.list(
+        db_session=session, phone=phone, master_key=scope.master_key
+    )
     if not result.items:
         raise HTTPException(
             status_code=404,
@@ -90,9 +97,15 @@ async def get_client_by_phone(
 async def list_clients(
     session: SessionDep,
     params: ClientListParams = Depends(),
+    # GH #263 T3 (D1/D4): EXISTS-scope «есть запись клиента к своей
+    # активности» for the plain list; ``?phone=`` searches studio-wide,
+    # both paths masked for a scoped (master) caller (D3).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> PaginatedResponse[ClientWithStats]:
     """Return paginated clients with stats aggregation, filtering, and sorting."""
-    return await list_clients_with_stats(db_session=session, params=params)
+    return await list_clients_with_stats(
+        db_session=session, params=params, master_key=scope.master_key
+    )
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
@@ -100,9 +113,14 @@ async def get_client(
     client_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T3 (D1): свой → 200 (masked), чужой → 404 — one scope-aware
+    # query, indistinguishable from «не существует» (404-fast-path, T7).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> ClientResponse:
     """Return a single client by ID."""
-    client = await service.get(db_session=session, id=client_id)
+    client = await service.get_scoped(
+        db_session=session, id=client_id, master_key=scope.master_key
+    )
     if not client:
         raise HTTPException(
             status_code=404,

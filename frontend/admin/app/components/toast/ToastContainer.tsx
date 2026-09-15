@@ -8,12 +8,14 @@ export function ToastContainer() {
 
   if (toasts.length === 0) return null;
 
-  const visible = toasts.slice(-5);
+  const loading = toasts.filter((t) => t.kind === 'loading');
+  const visible = [...toasts.filter((t) => t.kind !== 'loading').slice(-5), ...loading];
 
   const BORDER_BY_KIND: Record<string, string> = {
     info: 'border-transparent',
     success: 'border-l-4 border-l-emerald-400',
     error: 'border-l-4 border-l-red-400',
+    loading: 'border-transparent',
   };
 
   return (
@@ -29,6 +31,19 @@ export function ToastContainer() {
           data-testid={`toast-${toast.kind}`}
           className={`flex items-center gap-3 bg-sidebar text-white px-4 py-3 rounded-lg shadow-lg text-sm animate-slide-up ${BORDER_BY_KIND[toast.kind] ?? BORDER_BY_KIND.info}`}
         >
+          {toast.kind === 'loading' && (
+            <svg
+              className="animate-spin shrink-0"
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+              <path d="M10.5 6A4.5 4.5 0 006 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          )}
           <span className="flex-1">{toast.message}</span>
           {toast.undo && (
             <button
@@ -41,13 +56,15 @@ export function ToastContainer() {
               Отменить
             </button>
           )}
-          <button
-            onClick={() => hideToast(toast.id)}
-            className="text-white/50 hover:text-white ml-1"
-            aria-label="Закрыть"
-          >
-            ×
-          </button>
+          {toast.kind !== 'loading' && (
+            <button
+              onClick={() => hideToast(toast.id)}
+              className="text-white/50 hover:text-white ml-1"
+              aria-label="Закрыть"
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
     </div>

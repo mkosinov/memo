@@ -205,9 +205,14 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
     page,
   }) => {
     // Override the mutation route for this test: POST → 500 (GET passes).
-    // Later-registered routes take precedence over beforeEach's delay.
-    await page.route('**/api/v1/activities*', async (route) => {
+    // Routes are consulted LIFO, so this handler REPLACES beforeEach's
+    // delay route for every matched request — the 1.5 s window therefore
+    // lives HERE (a fallback chain back to the delay route would work too,
+    // but an explicit sleep keeps the override self-contained).
+    await page.route('**/api/v1/activities**', async (route) => {
       if (route.request().method() === 'POST') {
+        // Deterministic in-flight window before the 500 lands.
+        await new Promise((r) => setTimeout(r, 1500));
         return route.fulfill({
           status: 500,
           contentType: 'application/json',

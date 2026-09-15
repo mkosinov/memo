@@ -55,7 +55,7 @@ vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
   useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
-import { useScheduleData, SCHEDULE_ACTIVITY_MUTATION_KEY } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 
@@ -316,45 +316,8 @@ describe('Topbar', () => {
   });
 
   // ── Saving indicator + leave guard (GH #141 spec §5) ───────────────────
-
-  describe('saving indicator', () => {
-    it('renders the "Сохраняем…" status chip while a schedule mutation is in flight', () => {
-      vi.mocked(useMutationState).mockReturnValue([true]);
-      renderTopbar();
-
-      const chip = screen.getByRole('status');
-      expect(chip).toBeInTheDocument();
-      expect(chip).toHaveAttribute('aria-live', 'polite');
-      expect(chip).toHaveTextContent('Сохраняем');
-    });
-
-    it('hides the status chip when no schedule mutation is pending', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
-      renderTopbar();
-
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    });
-
-    it('subscribes to the schedule-activity mutation key only', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
-      renderTopbar();
-
-      const options = vi.mocked(useMutationState).mock.calls[0]?.[0] as {
-        filters?: { mutationKey?: readonly string[] };
-      };
-      expect(options?.filters?.mutationKey).toEqual(SCHEDULE_ACTIVITY_MUTATION_KEY);
-    });
-
-    it('shows the chip when the save starts mid-flight (rerender)', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
-      const { rerender } = renderTopbar();
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-
-      vi.mocked(useMutationState).mockReturnValue([true]);
-      rerender(providersElement());
-      expect(screen.getByRole('status')).toHaveTextContent('Сохраняем');
-    });
-  });
+  // The visible chip moved into the toast stack (GH #261) — its asserts live
+  // in __tests__/useSavingToast.test.tsx now. Only the guard stays here.
 
   describe('unsaved-changes guard', () => {
     it('attaches a beforeunload listener while a save is in flight', () => {

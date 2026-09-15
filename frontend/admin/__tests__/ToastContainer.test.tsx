@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { ToastContainer } from '../app/components/toast/ToastContainer';
-import { UIProvider, useUI } from '../contexts/UIContext';
+import { UIProvider, useUI, type ToastKind } from '../contexts/UIContext';
 
 function renderWithProvider() {
   return render(
@@ -13,11 +13,15 @@ function renderWithProvider() {
 }
 
 function renderWithToasts(messages: string[], undoCallbacks?: (() => void)[]) {
+  return renderWithToastSpecs(messages.map((message) => ({ message, kind: 'info' as ToastKind })), undoCallbacks);
+}
+
+function renderWithToastSpecs(specs: { message: string; kind: ToastKind }[], undoCallbacks?: (() => void)[]) {
   function TestHarness() {
     const { showToast } = useUI();
     React.useEffect(() => {
-      messages.forEach((msg, i) => {
-        showToast(msg, undoCallbacks?.[i]);
+      specs.forEach((spec, i) => {
+        showToast(spec.message, spec.kind, undoCallbacks?.[i]);
       });
     }, []);
     return <ToastContainer />;
@@ -78,5 +82,41 @@ describe('ToastContainer', () => {
     expect(screen.queryByText('Two')).not.toBeInTheDocument();
     expect(screen.getByText('Three')).toBeInTheDocument();
     expect(screen.getByText('Seven')).toBeInTheDocument();
+  });
+
+  it('keeps loading toast visible alongside last 5 regular toasts (D5a)', () => {
+    renderWithToastSpecs([
+      { message: 'One', kind: 'info' },
+      { message: 'Two', kind: 'info' },
+      { message: 'Three', kind: 'info' },
+      { message: 'Four', kind: 'info' },
+      { message: 'Five', kind: 'info' },
+      { message: 'Six', kind: 'info' },
+      { message: 'Seven', kind: 'info' },
+      { message: 'Сохраняем…', kind: 'loading' },
+    ]);
+    // only the last 5 regular toasts are rendered
+    expect(screen.queryByText('One')).not.toBeInTheDocument();
+    expect(screen.queryByText('Two')).not.toBeInTheDocument();
+    expect(screen.getByText('Three')).toBeInTheDocument();
+    expect(screen.getByText('Seven')).toBeInTheDocument();
+    // loading toast is never pushed out of the stack
+    expect(screen.getByTestId('toast-loading')).toBeInTheDocument();
+    expect(screen.getByText('Сохраняем…')).toBeInTheDocument();
+  });
+
+  it('does not render close button for loading toast', () => {
+    renderWithToastSpecs([{ message: 'Сохраняем…', kind: 'loading' }]);
+    const toast = screen.getByTestId('toast-loading');
+    expect(within(toast).queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument();
+  });
+
+  it('renders spinner for loading toast', () => {
+    renderWithToastSpecs([{ message: 'Сохраняем…', kind: 'loading' }]);
+    const toast = screen.getByTestId('toast-loading');
+    const spinner = toast.querySelector('svg');
+    expect(spinner).not.toBeNull();
+    expect(spinner).toHaveClass('animate-spin');
+    expect(spinner).toHaveAttribute('aria-hidden', 'true');
   });
 });

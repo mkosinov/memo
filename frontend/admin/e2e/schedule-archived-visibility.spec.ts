@@ -440,7 +440,8 @@ test('S6: day view by masters — archived column on the day with activities onl
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// S7. Master AND location archived → visible only when BOTH toggles are on
+// S7. Master AND location archived → full three-state toggle progression:
+//     both off → hidden; masters on only → hidden; both on → visible
 // ────────────────────────────────────────────────────────────────────────────
 test('S7: archived master and location — card visible only with both toggles on', async ({ page, request }) => {
   const master = await createTestMaster(request);
@@ -458,18 +459,21 @@ test('S7: archived master and location — card visible only with both toggles o
 
     const card = page.locator(`[data-testid="activity-${activity.id}"]`);
 
-    // Both OFF → hidden (location gate is the blocker).
-    await expect(card).toHaveCount(0, { timeout: 10_000 });
-
-    // Only masters ON → still hidden (location gate).
+    // 1. Both OFF → hidden (masters defaults ON, so turn it off first).
     await openFilterDropdown(page, 'Мастера');
-    await setArchivedToggle(page, 'show-archived-masters-toggle', true);
+    await toggleArchivedAndWaitForPersist(page, 'show-archived-masters-toggle', false);
     await closeFilterDropdown(page);
     await expect(card).toHaveCount(0, { timeout: 10_000 });
 
-    // Both ON → visible.
+    // 2. Only masters ON → still hidden (location gate).
+    await openFilterDropdown(page, 'Мастера');
+    await toggleArchivedAndWaitForPersist(page, 'show-archived-masters-toggle', true);
+    await closeFilterDropdown(page);
+    await expect(card).toHaveCount(0, { timeout: 10_000 });
+
+    // 3. Both ON → visible.
     await openFilterDropdown(page, 'Локации');
-    await setArchivedToggle(page, 'show-archived-locations-toggle', true);
+    await toggleArchivedAndWaitForPersist(page, 'show-archived-locations-toggle', true);
     await closeFilterDropdown(page);
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card.locator('[data-testid="archived-badge"]')).toBeVisible();

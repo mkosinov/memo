@@ -39,11 +39,15 @@ export function WeekView() {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
-  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
+  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd' | 'create'>('edit');
+  const [modalDayIndex, setModalDayIndex] = useState(0);
+  const [modalStartMinutes, setModalStartMinutes] = useState(0);
 
   const openCreateModal = useCallback((dayIndex: number, startMinutes: number) => {
+    setModalDayIndex(dayIndex);
+    setModalStartMinutes(startMinutes);
     setModalActivity(null);
-    setModalMode('edit');
+    setModalMode('create');
     setModalOpen(true);
   }, []);
 
@@ -198,142 +202,148 @@ export function WeekView() {
     );
   }
 
-  if (activities.length === 0) {
-    // Check if there are activities but all hidden by filters
-    const hasFilters = filterMasterIds.length > 0 || filterLocationIds.length > 0;
-    return (
-      <div className="flex items-center justify-center h-full text-text-secondary">
-        <span>{hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}</span>
-      </div>
-    );
-  }
+  const hasFilters = filterMasterIds.length > 0 || filterLocationIds.length > 0;
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={(event) => {
-        const nativeEvent = event.activatorEvent as MouseEvent | undefined;
-        const dragData = event.active.data?.current as Record<string, unknown> | undefined;
-        onDragStart(
-          { active: { id: event.active.id, data: { current: { activity: dragData?.activity as ScheduleAdminDTO | undefined } } } },
-          { altKey: nativeEvent?.altKey },
-        );
-      }}
-      onDragOver={(event) => {
-        onDragOver({
-          over: event.over
-            ? { id: event.over.id, data: { current: event.over.data?.current } }
-            : null,
-        });
-      }}
-      onDragEnd={(event) => {
-        onDragEnd({
-          active: { id: event.active.id },
-          over: event.over ? { id: event.over.id } : null,
-        });
-      }}
-      onDragCancel={() => {
-        handleDragCancel();
-      }}
-    >
-      <div className="min-w-[800px] h-full flex flex-col">
-        {/* Header row — sticky above cards */}
-        <ScheduleColumnHeader>
-          {days.map((day, i) => (
-            <div
-              key={i}
-              className="flex-1 text-center py-2 text-xs font-medium"
-              style={{ color: isSameDay(day, today) ? 'var(--brand)' : 'var(--ink-mid)' }}
-            >
-              <div className="uppercase tracking-wide">{DAYS[i]}</div>
-              <div className={`text-base font-bold ${isSameDay(day, today) ? 'text-brand' : ''}`}>
-                {day.getDate()}
-              </div>
-            </div>
-          ))}
-        </ScheduleColumnHeader>
-
-        {/* Grid row — scrollable */}
-        <div className="flex-1 flex overflow-auto relative">
-          <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStartMinutes={gridStartMinutes} gridEndMinutes={gridEndMinutes} />
-          {days.map((day, i) => (
-            <DayColumn
-              key={i}
-              dayIndex={i}
-              date={day}
-              activities={resolveById(activitiesByDate.get(toISODate(day)) ?? [], scheduleIndex.byId)}
-              masters={masters}
-              locations={locations}
-              services={services}
-              dragCopy={dragCopy}
-              dragId={dragId}
-              ghostHeight={ghostHeight}
-              ghostDayIndex={ghostPosition?.dayIndex ?? null}
-              ghostSlotIndex={ghostPosition?.slotIndex ?? null}
-              onCreateActivity={handleCreateActivity}
-              onOpenCreateModal={openCreateModal}
-              onOpenEditModal={openEditModal}
-              onQuickAdd={openQuickAdd}
-              stampReady={stamp.ready}
-              stamp={stamp}
-              cellHeight={cellHeight}
-              gridFrequency={gridFrequency}
-              gridStartMinutes={gridStartMinutes}
-              gridEndMinutes={gridEndMinutes}
-            />
-          ))}
-
-          {/* NowLine — full width across all columns, red */}
-          {showNowLine && (
-            <div
-              data-testid="now-line"
-              className="absolute left-0 right-0 z-[var(--z-slot-hover)] pointer-events-none"
-              style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
-            >
-              <div className="flex items-center">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
-                <div className="flex-1 h-[2px] bg-red-500" />
-              </div>
-            </div>
-          )}
+    <>
+      {activities.length === 0 && (
+        <div
+          data-testid="schedule-empty-hint"
+          role="status"
+          aria-live="polite"
+          className="px-4 py-2 text-sm"
+          style={{ color: 'var(--ink-light)' }}
+        >
+          {hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на эту неделю'}
         </div>
-      </div>
-
-      <DragOverlay dropAnimation={null}>
-        {activeDragActivity && dragMaster ? (
-          <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
-            {/* Time preview label — shows snapped position while dragging */}
-            {draggedSnappedTime != null && (
+      )}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={(event) => {
+          const nativeEvent = event.activatorEvent as MouseEvent | undefined;
+          const dragData = event.active.data?.current as Record<string, unknown> | undefined;
+          onDragStart(
+            { active: { id: event.active.id, data: { current: { activity: dragData?.activity as ScheduleAdminDTO | undefined } } } },
+            { altKey: nativeEvent?.altKey },
+          );
+        }}
+        onDragOver={(event) => {
+          onDragOver({
+            over: event.over
+              ? { id: event.over.id, data: { current: event.over.data?.current } }
+              : null,
+          });
+        }}
+        onDragEnd={(event) => {
+          onDragEnd({
+            active: { id: event.active.id },
+            over: event.over ? { id: event.over.id } : null,
+          });
+        }}
+        onDragCancel={() => {
+          handleDragCancel();
+        }}
+      >
+        <div className="min-w-[800px] h-full flex flex-col">
+          {/* Header row — sticky above cards */}
+          <ScheduleColumnHeader>
+            {days.map((day, i) => (
               <div
-                className="absolute -top-6 left-1/2 -translate-x-1/2 z-[var(--z-drag-chip)] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
-                style={{ backgroundColor: 'var(--brand, #004D56)' }}
+                key={i}
+                className="flex-1 text-center py-2 text-xs font-medium"
+                style={{ color: isSameDay(day, today) ? 'var(--brand)' : 'var(--ink-mid)' }}
               >
-                {formatTime(draggedSnappedTime)}
+                <div className="uppercase tracking-wide">{DAYS[i]}</div>
+                <div className={`text-base font-bold ${isSameDay(day, today) ? 'text-brand' : ''}`}>
+                  {day.getDate()}
+                </div>
+              </div>
+            ))}
+          </ScheduleColumnHeader>
+
+          {/* Grid row — scrollable */}
+          <div className="flex-1 flex overflow-auto relative">
+            <TimeColumn cellHeight={cellHeight} gridFrequency={gridFrequency} gridStartMinutes={gridStartMinutes} gridEndMinutes={gridEndMinutes} />
+            {days.map((day, i) => (
+              <DayColumn
+                key={i}
+                dayIndex={i}
+                date={day}
+                activities={resolveById(activitiesByDate.get(toISODate(day)) ?? [], scheduleIndex.byId)}
+                masters={masters}
+                locations={locations}
+                services={services}
+                dragCopy={dragCopy}
+                dragId={dragId}
+                ghostHeight={ghostHeight}
+                ghostDayIndex={ghostPosition?.dayIndex ?? null}
+                ghostSlotIndex={ghostPosition?.slotIndex ?? null}
+                onCreateActivity={handleCreateActivity}
+                onOpenCreateModal={openCreateModal}
+                onOpenEditModal={openEditModal}
+                onQuickAdd={openQuickAdd}
+                stampReady={stamp.ready}
+                stamp={stamp}
+                cellHeight={cellHeight}
+                gridFrequency={gridFrequency}
+                gridStartMinutes={gridStartMinutes}
+                gridEndMinutes={gridEndMinutes}
+              />
+            ))}
+
+            {/* NowLine — full width across all columns, red */}
+            {showNowLine && (
+              <div
+                data-testid="now-line"
+                className="absolute left-0 right-0 z-[var(--z-slot-hover)] pointer-events-none"
+                style={{ top: nowPos, marginLeft: TIME_COL_WIDTH }}
+              >
+                <div className="flex items-center">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm" />
+                  <div className="flex-1 h-[2px] bg-red-500" />
+                </div>
               </div>
             )}
-            <ActivityCard
-              activity={
-                draggedSnappedTime != null
-                  ? { ...activeDragActivity, startMinutes: draggedSnappedTime }
-                  : activeDragActivity
-              }
-              master={dragMaster}
-              locations={locations}
-              style={{ top: 0 }}
-            />
           </div>
-        ) : null}
-      </DragOverlay>
+        </div>
 
-      {modalActivity && (
-        <ActivityDetailsModal
-          isOpen={modalOpen}
-          onClose={closeModal}
-          activity={modalActivity}
-          mode={modalMode}
-        />
-      )}
-    </DndContext>
+        <DragOverlay dropAnimation={null}>
+          {activeDragActivity && dragMaster ? (
+            <div className="opacity-80 scale-95 relative" style={{ width: '180px' }} data-drag-ghost="true">
+              {/* Time preview label — shows snapped position while dragging */}
+              {draggedSnappedTime != null && (
+                <div
+                  className="absolute -top-6 left-1/2 -translate-x-1/2 z-[var(--z-drag-chip)] px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-lg whitespace-nowrap"
+                  style={{ backgroundColor: 'var(--brand, #004D56)' }}
+                >
+                  {formatTime(draggedSnappedTime)}
+                </div>
+              )}
+              <ActivityCard
+                activity={
+                  draggedSnappedTime != null
+                    ? { ...activeDragActivity, startMinutes: draggedSnappedTime }
+                    : activeDragActivity
+                }
+                master={dragMaster}
+                locations={locations}
+                style={{ top: 0 }}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+
+        {modalOpen && (
+          <ActivityDetailsModal
+            isOpen
+            onClose={closeModal}
+            activity={modalActivity}
+            mode={modalMode}
+            createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
+          />
+        )}
+      </DndContext>
+    </>
   );
 }

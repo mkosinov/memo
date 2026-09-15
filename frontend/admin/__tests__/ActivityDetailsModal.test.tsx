@@ -24,10 +24,14 @@ import {
   createMockGridSettings,
   createMockUIContext,
 } from './helpers/mockContexts';
+import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
 vi.mock('@memo/api-client', () => ({
+  // parseApiError does `err instanceof ApiError` — create mode's error path
+  // reaches it, so the mock must expose the class (same as ClientRecordTab).
+  ApiError: class ApiError extends Error {},
   getClientByPhone: vi.fn(),
   getClientsPaged: vi.fn(),
   createClient: vi.fn(),
@@ -684,10 +688,13 @@ describe('ActivityDetailsModal — activity records via useActivityRecords (#140
   });
 
   it('disables the records fetch when the modal is closed', () => {
+    // GH #258/#259: the parent returns null when closed, so the record-hook
+    // subtree never mounts — no fetch call happens at all (stronger than the
+    // old enabled=false probe).
     render(
       <ActivityDetailsModal isOpen={false} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
     );
-    expect(mockUseActivityRecords).toHaveBeenCalledWith(mockActivity.id, false);
+    expect(mockUseActivityRecords).not.toHaveBeenCalled();
   });
 });
 
@@ -1208,5 +1215,104 @@ describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () =>
     expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
       expect.objectContaining({ kind: 'unpicked' }),
     );
+  });
+});
+
+// ─── GH #258/#259: режим create (клик по свободному слоту, spec §2.1) ────────
+// Модалка монтируется при activity=null: единственная вкладка «Создание
+// занятия», без клиентских вкладок/кнопки «+ Запись», без футера удаления;
+// заголовок «Новое занятие» доступен по aria-labelledby. Крестик и клик мимо
+// заблокированы, пока CreateActivityTab сообщает saving=true.
+
+describe('create mode', () => {
+  it('renders «Новое занятие» with a single tab and the create form', () => {
+    render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        activity={null}
+        mode="create"
+        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+      />,
+    );
+
+    // Title accessible via aria-labelledby on the dialog.
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveAttribute('aria-labelledby', 'activity-modal-title');
+    const heading = within(dialog).getByRole('heading', { level: 2 });
+    expect(heading).toHaveTextContent('Новое занятие');
+
+    // Tab nav renders with exactly ONE tab («Создание занятия»).
+    const tabNav = screen.getByTestId('tab-nav');
+    const tabs = within(tabNav).getAllByRole('button');
+    expect(tabs).toHaveLength(1);
+    expect(within(tabNav).getByText('Создание занятия')).toBeInTheDocument();
+
+    // No settings tab, no client tabs, no «+ Запись», no delete footer.
+    expect(screen.queryByTestId('tab-settings')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/^tab-client-/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tab-add')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('btn-delete-activity')).not.toBeInTheDocument();
+
+    // The create form is visible.
+    expect(screen.getByTestId('create-master')).toBeInTheDocument();
+  });
+
+  it('edit mode keeps tabs and delete footer (regression perimeter)', () => {
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    expect(screen.getByTestId('tab-settings')).toBeInTheDocument();
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-add')).toBeInTheDocument();
+    expect(screen.getByTestId('btn-delete-activity')).toBeInTheDocument();
+  });
+
+  it('blocks close via backdrop and close button while saving, closes otherwise', () => {
+    // Saving is driven through the real form: addActivity hangs (no callback)
+    // → CreateActivityTab reports saving=true; resolving via onError → false.
+    const addActivity = vi.fn<ScheduleDataContextType['addActivity']>();
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ addActivity }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={onClose}
+        activity={null}
+        mode="create"
+        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+      />,
+    );
+
+    // Make the form valid and submit — saving becomes true and stays true
+    // (mutate is fire-and-forget; callbacks own the resolution).
+    fireEvent.change(screen.getByTestId('create-master'), { target: { value: 'm1' } });
+    fireEvent.change(screen.getByTestId('create-service'), { target: { value: 's1' } });
+    fireEvent.change(screen.getByTestId('create-location'), { target: { value: 'grand' } });
+    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '60' } });
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    expect(addActivity).toHaveBeenCalledTimes(1);
+
+    // While saving=true: no close-cross rendered, backdrop click is inert.
+    expect(() => screen.getByLabelText('Закрыть')).toThrow();
+    fireEvent.click(screen.getByTestId('details-modal-backdrop'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Once the mutation resolves (error path keeps the form open), both close
+    // paths work again.
+    const callbacks = addActivity.mock.calls[0][1];
+    act(() => {
+      callbacks?.onError?.(new Error('server down'));
+    });
+    fireEvent.click(screen.getByTestId('details-modal-backdrop'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // The close button («крестик») is back as well.
+    expect(screen.getByLabelText('Закрыть')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Закрыть'));
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

@@ -54,15 +54,16 @@ describe('Schedule Page', () => {
     vi.mocked(getPaymentTotals).mockClear();
   });
 
-  it('shows loading state initially, then empty state when no activities for the week', async () => {
+  it('shows loading state initially, then grid with empty hint when no activities for the week', async () => {
     renderPage();
-    // Initially loading, then transitions to empty state when query resolves
-    expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
+    // Initially loading, then transitions to grid + hint when query resolves
+    expect(await screen.findByTestId('schedule-empty-hint')).toHaveTextContent('Нет занятий на эту неделю');
+    expect(screen.getByTestId('day-column-0')).toBeInTheDocument();
   });
 
   it('does not mount RecordsProvider — zero records-context queries fire (GH #213 §6.6)', async () => {
     renderPage();
-    expect(await screen.findByText('Нет занятий на эту неделю')).toBeInTheDocument();
+    expect(await screen.findByTestId('schedule-empty-hint')).toBeInTheDocument();
     expect(getRecordsView).not.toHaveBeenCalled();
     expect(getPaymentTotals).not.toHaveBeenCalled();
   });

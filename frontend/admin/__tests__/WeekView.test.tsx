@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { DAYS } from '../lib/utils';
 import {
   createMockScheduleData,
@@ -41,7 +41,12 @@ vi.mock('@/app/components/schedule/TimeColumn', () => ({
 }));
 
 vi.mock('@/app/components/schedule/DayColumn', () => ({
-  DayColumn: (props: { dayIndex: number }) => <div data-testid={`day-column-${props.dayIndex}`} />,
+  DayColumn: (props: { dayIndex: number; onOpenCreateModal?: (dayIndex: number, startMinutes: number) => void }) => (
+    <div
+      data-testid={`day-column-${props.dayIndex}`}
+      onClick={() => props.onOpenCreateModal?.(1, 540)}
+    />
+  ),
 }));
 
 vi.mock('@/app/components/schedule/ActivityCard', () => ({
@@ -49,8 +54,20 @@ vi.mock('@/app/components/schedule/ActivityCard', () => ({
 }));
 
 vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () => ({
-  ActivityDetailsModal: (props: { isOpen: boolean; mode?: string }) =>
-    props.isOpen ? <div data-testid="activity-details-modal" data-mode={props.mode} /> : null,
+  ActivityDetailsModal: (props: {
+    isOpen: boolean;
+    mode?: string;
+    activity?: unknown;
+    createDefaults?: unknown;
+  }) =>
+    props.isOpen ? (
+      <div
+        data-testid="activity-details-modal"
+        data-mode={props.mode}
+        data-has-activity={String(!!props.activity)}
+        data-defaults={JSON.stringify(props.createDefaults ?? null)}
+      />
+    ) : null,
 }));
 
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
@@ -90,11 +107,18 @@ describe('WeekView', () => {
     });
   });
 
-  describe('empty state', () => {
-    it('shows empty message when there are no activities', () => {
+  describe('empty week', () => {
+    it('renders grid with empty hint when there are no activities', () => {
       renderWeekView({ activities: [], loading: false, error: null });
-      expect(screen.getByText('Нет занятий на эту неделю')).toBeInTheDocument();
-      expect(screen.queryByTestId(/day-column/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent('Нет занятий на эту неделю');
+      for (let i = 0; i < 7; i++) {
+        expect(screen.getByTestId(`day-column-${i}`)).toBeInTheDocument();
+      }
+    });
+
+    it('shows filters hint when filters are active and there are no activities', () => {
+      renderWeekView({ activities: [], loading: false, error: null, filterMasterIds: ['x'] });
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent('Нет занятий по выбранным фильтрам');
     });
   });
 
@@ -149,6 +173,20 @@ describe('WeekView', () => {
     it('does not render ActivityDetailsModal when closed', () => {
       renderWeekView(normalContext);
       expect(screen.queryByTestId('activity-details-modal')).not.toBeInTheDocument();
+    });
+
+    it('opens create modal with slot coordinates when a slot is clicked', () => {
+      renderWeekView(normalContext);
+
+      fireEvent.click(screen.getByTestId('day-column-0'));
+
+      const modal = screen.getByTestId('activity-details-modal');
+      expect(modal).toHaveAttribute('data-mode', 'create');
+      expect(modal).toHaveAttribute('data-has-activity', 'false');
+      expect(modal).toHaveAttribute(
+        'data-defaults',
+        JSON.stringify({ dayIndex: 1, startMinutes: 540 }),
+      );
     });
   });
 });

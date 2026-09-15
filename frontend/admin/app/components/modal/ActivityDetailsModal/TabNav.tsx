@@ -13,7 +13,8 @@ interface TabNavProps {
   tabs: Tab[];
   activeTab: string;
   onTabChange: (id: string) => void;
-  onAddClick: () => void;
+  /** Optional — hidden when absent (create mode renders no «+ Запись»). */
+  onAddClick?: () => void;
 }
 
 export function TabNav({ tabs, activeTab, onTabChange, onAddClick }: TabNavProps) {
@@ -50,17 +51,19 @@ export function TabNav({ tabs, activeTab, onTabChange, onAddClick }: TabNavProps
       </div>
 
       {/* Add button at bottom — height matches ClientTab footer (py-3 + text content) */}
-      <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--line)' }}>
-        <button
-          onClick={onAddClick}
-          aria-label="Добавить запись"
-          data-testid="tab-add"
-          className="w-full flex items-center justify-center gap-1 h-5 text-sm
-                     text-ink-light hover:bg-white/60 hover:text-brand transition-colors"
-        >
-          + Запись
-        </button>
-      </div>
+      {onAddClick && (
+        <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--line)' }}>
+          <button
+            onClick={onAddClick}
+            aria-label="Добавить запись"
+            data-testid="tab-add"
+            className="w-full flex items-center justify-center gap-1 h-5 text-sm
+                       text-ink-light hover:bg-white/60 hover:text-brand transition-colors"
+          >
+            + Запись
+          </button>
+        </div>
+      )}
     </div>
   );
 }

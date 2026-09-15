@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import {
@@ -55,7 +55,16 @@ vi.mock('@/app/components/schedule/TimeColumn', () => ({
 }));
 
 vi.mock('@/app/components/schedule/DayColumn', () => ({
-  DayColumn: (props: { dayIndex: number }) => <div data-testid={`day-column-${props.dayIndex}`} />,
+  DayColumn: (props: {
+    dayIndex: number;
+    columnId?: string;
+    onOpenCreateModal?: (dayIndex: number, startMinutes: number) => void;
+  }) => (
+    <div
+      data-testid={`day-column-${props.columnId ?? props.dayIndex}`}
+      onClick={() => props.onOpenCreateModal?.(0, 600)}
+    />
+  ),
 }));
 
 vi.mock('@/app/components/schedule/ActivityCard', () => ({
@@ -63,8 +72,20 @@ vi.mock('@/app/components/schedule/ActivityCard', () => ({
 }));
 
 vi.mock('@/app/components/modal/ActivityDetailsModal/ActivityDetailsModal', () => ({
-  ActivityDetailsModal: (props: { isOpen: boolean; mode?: string }) =>
-    props.isOpen ? <div data-testid="activity-details-modal" data-mode={props.mode} /> : null,
+  ActivityDetailsModal: (props: {
+    isOpen: boolean;
+    mode?: string;
+    activity?: unknown;
+    createDefaults?: unknown;
+  }) =>
+    props.isOpen ? (
+      <div
+        data-testid="activity-details-modal"
+        data-mode={props.mode}
+        data-has-activity={String(!!props.activity)}
+        data-defaults={JSON.stringify(props.createDefaults ?? null)}
+      />
+    ) : null,
 }));
 
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
@@ -392,6 +413,80 @@ describe('DayView', () => {
       const grandIndex = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-grand');
       const alpikaIndex = Array.from(headers).findIndex(h => h.getAttribute('data-testid') === 'column-header-alpika');
       expect(grandIndex).toBeLessThan(alpikaIndex);
+    });
+  });
+
+  describe('empty day', () => {
+    it('shows empty-day hint banner when the day has no activities', () => {
+      renderDayView({
+        selectedDay: new Date(2026, 5, 15),
+        activities: [],
+        loading: false,
+        error: null,
+      });
+      const hint = screen.getByTestId('schedule-empty-hint');
+      expect(hint).toHaveAttribute('role', 'status');
+      expect(hint).toHaveAttribute('aria-live', 'polite');
+      expect(hint).toHaveTextContent('Нет занятий на этот день');
+    });
+
+    it('shows filters hint when filters are active and the day has no activities', () => {
+      renderDayView({
+        selectedDay: new Date(2026, 5, 15),
+        activities: [],
+        filterMasterIds: ['nonexistent'],
+        loading: false,
+        error: null,
+      });
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent(
+        'Нет занятий по выбранным фильтрам',
+      );
+    });
+
+    it('shows hint when a column exists but has zero activities on the day', () => {
+      // Activity exists in the schedule, but on a DIFFERENT day than selectedDay —
+      // the selected day's columns render, yet none has activities.
+      renderDayView({
+        selectedDay: new Date(2026, 5, 15), // June 15
+        activities: [createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-16' })],
+        loading: false,
+        error: null,
+      });
+      // Column header still renders (grid is not removed)
+      expect(screen.getByText('Ольга Середа')).toBeInTheDocument();
+      expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent(
+        'Нет занятий на этот день',
+      );
+    });
+  });
+
+  describe('ActivityDetailsModal wiring', () => {
+    const normalContext = {
+      loading: false,
+      error: null,
+      selectedDay: new Date(2026, 5, 15),
+      activities: [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+      ],
+    };
+
+    it('does not render ActivityDetailsModal when closed', () => {
+      renderDayView(normalContext);
+      expect(screen.queryByTestId('activity-details-modal')).not.toBeInTheDocument();
+    });
+
+    it('opens create modal with slot coordinates when a slot is clicked', () => {
+      renderDayView(normalContext);
+
+      fireEvent.click(screen.getByTestId('day-column-m1'));
+
+      const modal = screen.getByTestId('activity-details-modal');
+      expect(modal).toHaveAttribute('data-mode', 'create');
+      expect(modal).toHaveAttribute('data-has-activity', 'false');
+      expect(modal).toHaveAttribute(
+        'data-defaults',
+        JSON.stringify({ dayIndex: 0, startMinutes: 600 }),
+      );
     });
   });
 });

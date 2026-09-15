@@ -80,11 +80,15 @@ export function DayView() {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
-  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd'>('edit');
+  const [modalMode, setModalMode] = useState<'edit' | 'quickAdd' | 'create'>('edit');
+  const [modalDayIndex, setModalDayIndex] = useState(0);
+  const [modalStartMinutes, setModalStartMinutes] = useState(0);
 
-  const openCreateModal = useCallback((_dayIndex: number, _startMinutes: number) => {
+  const openCreateModal = useCallback((dayIndex: number, startMinutes: number) => {
+    setModalDayIndex(dayIndex);
+    setModalStartMinutes(startMinutes);
     setModalActivity(null);
-    setModalMode('edit');
+    setModalMode('create');
     setModalOpen(true);
   }, []);
 
@@ -343,9 +347,23 @@ export function DayView() {
     );
   }
 
+  const hasFilters = filterMasterIds.length > 0 || filterLocationIds.length > 0;
+
   return (
-    <DndContext
-      sensors={sensors}
+    <>
+      {dayActivities.length === 0 && (
+        <div
+          data-testid="schedule-empty-hint"
+          role="status"
+          aria-live="polite"
+          className="px-4 py-2 text-sm"
+          style={{ color: 'var(--ink-light)' }}
+        >
+          {hasFilters ? 'Нет занятий по выбранным фильтрам' : 'Нет занятий на этот день'}
+        </div>
+      )}
+      <DndContext
+        sensors={sensors}
       collisionDetection={separatedCollisionDetection}
       onDragStart={(event) => {
         const activeData = event.active.data?.current as Record<string, unknown> | undefined;
@@ -431,11 +449,6 @@ export function DayView() {
               } : undefined}
             />
           ))}
-          {orderedColumns.length === 0 && (
-            <div className="flex-1 text-center py-2 text-xs" style={{ color: 'var(--ink-light)' }}>
-              Нет занятий на этот день
-            </div>
-          )}
         </ScheduleColumnHeader>
       </SortableContext>
 
@@ -547,14 +560,16 @@ export function DayView() {
         ) : null}
       </DragOverlay>
 
-      {modalActivity && (
+      {modalOpen && (
         <ActivityDetailsModal
-          isOpen={modalOpen}
+          isOpen
           onClose={closeModal}
           activity={modalActivity}
           mode={modalMode}
+          createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
         />
       )}
     </DndContext>
+    </>
   );
 }

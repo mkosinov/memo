@@ -53,7 +53,7 @@ export interface ScheduleDataContextType {
     capacity: number;
     isPrivate?: boolean;
     comment?: string;
-  }) => void;
+  }, callbacks?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => void;
   updateActivity: (id: string, updates: {
     dayIndex?: number;
     startMinutes?: number;
@@ -207,7 +207,7 @@ export function ScheduleDataProvider({
     capacity: number;
     isPrivate?: boolean;
     comment?: string;
-  }) => {
+  }, callbacks?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => {
     const start = composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
 
     createMutation.mutate({
@@ -220,7 +220,7 @@ export function ScheduleDataProvider({
       is_private: activity.isPrivate ?? false,
       comment: activity.comment ?? null,
       record_info: null,
-    });
+    }, callbacks);
     // Dep is the STABLE `mutate` (v5 useCallback over a once-created observer),
     // not the mutation result object — that object is rebuilt every render and
     // would give the data context value a new identity on every provider

@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -17,13 +21,30 @@
         "name": "next"
       }
     ],
-    "types": ["vitest/globals"],
+    "types": [
+      "vitest/globals"
+    ],
     "paths": {
-      "@/*": ["./*"],
-      "@memo/domain": ["../../packages/domain/src/index.ts"],
-      "@memo/api-client": ["../../packages/api-client/src/index.ts"]
+      "@/*": [
+        "./*"
+      ],
+      "@memo/domain": [
+        "../../packages/domain/src/index.ts"
+      ],
+      "@memo/api-client": [
+        "../../packages/api-client/src/index.ts"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next-shard-1/types/**/*.ts",
+    ".next-shard-2/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

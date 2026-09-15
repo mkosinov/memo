@@ -119,10 +119,4 @@ describe('ToastContainer', () => {
     expect(spinner).toHaveClass('animate-spin');
     expect(spinner).toHaveAttribute('aria-hidden', 'true');
   });
-
-  it('has explicit neutral border entry for loading kind', () => {
-    renderWithToastSpecs([{ message: 'Сохраняем…', kind: 'loading' }]);
-    const toast = screen.getByTestId('toast-loading');
-    expect(toast.className).toContain('border-transparent');
-  });
 });

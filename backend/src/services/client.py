@@ -8,6 +8,7 @@ from functools import lru_cache
 from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.domain.visit_status import VisitStatus
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.enums import ArchiveStatus
@@ -114,7 +115,7 @@ async def list_clients_with_stats(
         select(func.count(Record.id))
         .where(
             Record.client_id == Client.id,
-            Record.status == "missed",
+            Record.status == VisitStatus.MISSED,
         )
         .correlate(Client)
         .scalar_subquery()

@@ -22,6 +22,7 @@ from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
 )
+from src.domain.visit_status import VisitStatus
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -709,7 +710,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     tariff_id=visit_item.get("tariff_id"),
                     price=visit_item["price"],
                     custom_price=visit_item.get("custom_price"),
-                    status=visit_item.get("status", "waiting"),
+                    status=visit_item.get("status", VisitStatus.WAITING),
                 )
                 db_session.add(visit)
 

@@ -26,6 +26,15 @@ vi.mock('@memo/api-client', () => ({
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  getUserSettings: vi.fn(),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn(),
+}));
+
+// GH #267: UserSettingsProvider gates loading on useAuth().status — mock the
+// auth hook to report `authenticated` so the settings provider settles.
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
 }));
 
 import {
@@ -39,7 +48,11 @@ import {
   createActivity,
   patchActivity,
   deleteActivity,
+  getUserSettings,
+  createUserSettings,
+  patchUserSettings,
 } from '@memo/api-client';
+import { UserSettingsProvider, useUserSettings } from '../../contexts/UserSettingsContext';
 
 // ─── Date helpers (floating-local, GH #142) ─────────────────────────────────
 
@@ -208,6 +221,42 @@ interface DataProviderOpts {
   setFilterLocationIds?: (ids: string[]) => void;
   workingHoursStart?: number;
   workingHoursEnd?: number;
+  /** GH #267: initial archived-visibility settings for the real UserSettingsProvider. */
+  showArchivedMasters?: boolean;
+  showArchivedLocations?: boolean;
+}
+
+/**
+ * Renders children under the REAL UserSettingsProvider, pre-seeded via mocked
+ * api-client remote settings (getUserSettings resolves the given toggles).
+ * updateSettings from tests flips state → the data gate re-memoizes.
+ */
+function SettingsGate({
+  showArchivedMasters = true,
+  showArchivedLocations = false,
+  settingsRef,
+  children,
+}: {
+  showArchivedMasters?: boolean;
+  showArchivedLocations?: boolean;
+  settingsRef?: { current: { showArchivedMasters: boolean; showArchivedLocations: boolean } };
+  children: React.ReactNode;
+}) {
+  const { settings, updateSettings } = useUserSettings();
+  if (settingsRef) settingsRef.current = settings;
+  return (
+    <>
+      <button
+        data-testid="toggle-archived-masters"
+        onClick={() => updateSettings({ showArchivedMasters: !settings.showArchivedMasters })}
+      />
+      <button
+        data-testid="toggle-archived-locations"
+        onClick={() => updateSettings({ showArchivedLocations: !settings.showArchivedLocations })}
+      />
+      {children}
+    </>
+  );
 }
 
 /** Render ScheduleDataProvider directly with explicit inputs (isolates data logic). */
@@ -215,19 +264,36 @@ function renderDataProvider(opts: DataProviderOpts = {}) {
   const queryClient = createTestQueryClient();
   const setFilterMasterIds = opts.setFilterMasterIds ?? vi.fn();
   const setFilterLocationIds = opts.setFilterLocationIds ?? vi.fn();
+  // Settings fixture: remote GET resolves the toggles; PUT/PATCH no-op.
+  vi.mocked(getUserSettings).mockResolvedValue({
+    user_id: 'u1',
+    theme: 'light',
+    language: 'ru',
+    column_order_staff: [],
+    column_order_locations: [],
+    show_archived_masters: opts.showArchivedMasters ?? true,
+    show_archived_locations: opts.showArchivedLocations ?? false,
+  } as never);
+  vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
+  vi.mocked(patchUserSettings).mockResolvedValue({} as never);
+
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <NavigationProvider>
-        <ScheduleDataProvider
-          filterMasterIds={opts.filterMasterIds ?? []}
-          filterLocationIds={opts.filterLocationIds ?? []}
-          setFilterMasterIds={setFilterMasterIds}
-          setFilterLocationIds={setFilterLocationIds}
-          workingHoursStart={opts.workingHoursStart ?? 9}
-          workingHoursEnd={opts.workingHoursEnd ?? 21}
-        >
-          <DataConsumer />
-        </ScheduleDataProvider>
+        <UserSettingsProvider>
+          <ScheduleDataProvider
+            filterMasterIds={opts.filterMasterIds ?? []}
+            filterLocationIds={opts.filterLocationIds ?? []}
+            setFilterMasterIds={setFilterMasterIds}
+            setFilterLocationIds={setFilterLocationIds}
+            workingHoursStart={opts.workingHoursStart ?? 9}
+            workingHoursEnd={opts.workingHoursEnd ?? 21}
+          >
+            <SettingsGate showArchivedMasters={opts.showArchivedMasters} showArchivedLocations={opts.showArchivedLocations}>
+              <DataConsumer />
+            </SettingsGate>
+          </ScheduleDataProvider>
+        </UserSettingsProvider>
       </NavigationProvider>
     </QueryClientProvider>,
   );
@@ -237,10 +303,25 @@ function renderDataProvider(opts: DataProviderOpts = {}) {
 /** Render the FULL composition (settings → view → data gate). */
 function renderWithSchedule(children: React.ReactNode) {
   const queryClient = createTestQueryClient();
+  // Settings API mocks — the real app mounts UserSettingsProvider in
+  // app/providers.tsx ABOVE ScheduleProvider; mirror that composition here.
+  vi.mocked(getUserSettings).mockResolvedValue({
+    user_id: 'u1',
+    theme: 'light',
+    language: 'ru',
+    column_order_staff: [],
+    column_order_locations: [],
+    show_archived_masters: true,
+    show_archived_locations: false,
+  } as never);
+  vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
+  vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <NavigationProvider>
-        <ScheduleProvider>{children}</ScheduleProvider>
+        <UserSettingsProvider>
+          <ScheduleProvider>{children}</ScheduleProvider>
+        </UserSettingsProvider>
       </NavigationProvider>
     </QueryClientProvider>,
   );
@@ -613,6 +694,94 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
       expect(setFilterMasterIds).toHaveBeenCalledWith(['m1', 'm2']);
     });
     expect(setFilterLocationIds).not.toHaveBeenCalled();
+  });
+
+  // ─── GH #267: archived-visibility gate on enrichedData.items ────────────────
+
+  const archivedMasterM2 = { ...masterM2, id: 'm-arch', first_name: 'Архивный', archived: true };
+  const archivedLocationLoc = { ...locationAlpika, id: 'loc-arch', name: 'Архивная студия', archived: true };
+  const archivedServiceS = { ...serviceS1, id: 's-arch', title: 'Архивная услуга', archived: true };
+
+  it('shows a card on an ARCHIVED master by default (showArchivedMasters=true) (GH #267)', async () => {
+    seedDictionaries([masterM1, archivedMasterM2], [serviceS1], [locationAlpika]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      activityA1(0, 600),
+      { ...activityA1(1, 840), id: 'a2', master_id: 'm-arch' },
+    ]));
+
+    renderDataProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('2');
+    });
+  });
+
+  it('hides a card on an ARCHIVED location by default (showArchivedLocations=false) (GH #267)', async () => {
+    seedDictionaries([masterM1], [serviceS1], [locationAlpika, archivedLocationLoc]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      activityA1(0, 600), // active location
+      { ...activityA1(1, 840), id: 'a2', location_id: 'loc-arch' }, // archived location
+    ]));
+
+    renderDataProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    // Only the active-location card survives the default gate.
+    expect(screen.getByTestId('activity-count').textContent).toBe('1');
+  });
+
+  it('reveals archived-location cards the moment the toggle flips on (GH #267)', async () => {
+    seedDictionaries([masterM1], [serviceS1], [locationAlpika, archivedLocationLoc]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      activityA1(0, 600),
+      { ...activityA1(1, 840), id: 'a2', location_id: 'loc-arch' },
+    ]));
+
+    renderDataProvider({ showArchivedLocations: false });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('toggle-archived-locations').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('2');
+    });
+  });
+
+  it('keeps archived-master cards visible even when the id-filter names only an active master (GH #267)', async () => {
+    seedDictionaries([masterM1, archivedMasterM2], [serviceS1], [locationAlpika]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      activityA1(0, 600),
+      { ...activityA1(1, 840), id: 'a2', master_id: 'm-arch' },
+    ]));
+
+    // id-filter: only the ACTIVE master m1 — without the gate exemption the
+    // archived card would vanish here.
+    renderDataProvider({ filterMasterIds: ['m1'] });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('2');
+    });
+  });
+
+  it('shows a card on an archived SERVICE without any toggle (services are not gated) (GH #267)', async () => {
+    seedDictionaries([masterM1], [archivedServiceS, serviceS1], [locationAlpika]);
+    vi.mocked(getActivities).mockResolvedValue(wrap([
+      activityA1(0, 600),
+      { ...activityA1(1, 840), id: 'a2', service_id: 's-arch' },
+    ]));
+
+    renderDataProvider({ showArchivedMasters: false, showArchivedLocations: false });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('2');
+    });
   });
 
   // ─── С2: no artificial timeout on the update mutation (spec §5) ────────────

@@ -21,6 +21,7 @@ import { qk } from '@/lib/queryKeys';
 import { invalidateEntities } from '@/lib/invalidate';
 import { composeLocalISO, dayIndexToDate, calculateGridTimeRange } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 // Mutation key shared by create/update/delete — feeds the Topbar indicator
 // via useMutationState (spec §5; no isSaving field on any context).
@@ -295,13 +296,43 @@ export function ScheduleDataProvider({
     [activitiesRaw, scheduleMasters, scheduleServices, scheduleLocations, currentWeek],
   );
 
-  // Filter items based on active filters (multi-select: empty = show all)
+  // GH #267: archived-visibility gate inputs. The settings provider wraps the
+  // whole tree (app/providers.tsx renders it above ScheduleProvider), so this
+  // hook is always resolvable here. `?? true/false` guards against a stale
+  // localStorage cache object missing the new keys (undefined → defaults).
+  const { settings } = useUserSettings();
+  const showMasters = settings.showArchivedMasters ?? true;
+  const showLocations = settings.showArchivedLocations ?? false;
+
+  // Filter + visibility gate — SINGLE derivation site (GH #267). Order matters:
+  //
+  //   1. The ARCHIVE GATE drops items whose master/location rows are archived
+  //      unless the matching setting is on. Services never gate.
+  //   2. The id-filter (multi-select, empty = show all) applies ONLY to items
+  //      with no archived entity at all (`!hasArchived`) — archived cards that
+  //      passed the gate are NEVER fed through it (the options lists don't
+  //      contain archived rows, so the filter would otherwise permanently hide
+  //      them). Result = activePassed(idFilter) ∪ archivedPassed.
   const filteredItems = useMemo(() => {
-    let result = enrichedData.items;
-    if (filterMasterIds.length > 0) result = result.filter(a => filterMasterIds.includes(a.masterId));
-    if (filterLocationIds.length > 0) result = result.filter(a => filterLocationIds.includes(a.locationId));
-    return result;
-  }, [enrichedData.items, filterMasterIds, filterLocationIds]);
+    const activePassed: ScheduleAdminDTO[] = [];
+    const archivedPassed: ScheduleAdminDTO[] = [];
+    for (const a of enrichedData.items) {
+      const masterArchived = a.masterArchived ?? false;
+      const locationArchived = a.locationArchived ?? false;
+      if (masterArchived || locationArchived) {
+        // Archive gate: both toggles must permit every archived entity involved.
+        if ((!masterArchived || showMasters) && (!locationArchived || showLocations)) {
+          archivedPassed.push(a); // past the gate → immune to the id-filter
+        }
+      } else {
+        // Fully active item: gate passes trivially; the id-filter still applies.
+        const masterOk = filterMasterIds.length === 0 || filterMasterIds.includes(a.masterId);
+        const locationOk = filterLocationIds.length === 0 || filterLocationIds.includes(a.locationId);
+        if (masterOk && locationOk) activePassed.push(a);
+      }
+    }
+    return [...activePassed, ...archivedPassed];
+  }, [enrichedData.items, filterMasterIds, filterLocationIds, showMasters, showLocations]);
 
   // Adaptive grid bounds in integer minutes — SINGLE derivation site (GH #142).
   // Views read gridStartMinutes/gridEndMinutes instead of calling

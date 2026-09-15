@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import SchedulePage from '../app/(main)/schedule/page';
 import React from 'react';
 
@@ -21,8 +22,25 @@ vi.mock('@memo/api-client', () => {
   // mocked for RecordsContext, so a stray provider would hit the network).
   getRecordsView: vi.fn(),
   getPaymentTotals: vi.fn(),
+  // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
+  getUserSettings: vi.fn().mockResolvedValue({
+    user_id: 'u1', theme: 'light', language: 'ru',
+    column_order_staff: [], column_order_locations: [],
+    show_archived_masters: true, show_archived_locations: false,
+  }),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn().mockResolvedValue({}),
   });
 });
+
+// GH #267: UserSettingsProvider gates loading on useAuth().status — report
+// `authenticated` so the settings provider settles.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({
+    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated',
+    login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn(),
+  })),
+}));
 
 import { getRecordsView, getPaymentTotals } from '@memo/api-client';
 
@@ -39,9 +57,11 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <NavigationProvider>
-          <ScheduleProvider>
-            <SchedulePage />
-          </ScheduleProvider>
+          <UserSettingsProvider>
+            <ScheduleProvider>
+              <SchedulePage />
+            </ScheduleProvider>
+          </UserSettingsProvider>
         </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>,

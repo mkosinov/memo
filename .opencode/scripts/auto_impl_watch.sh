@@ -27,10 +27,10 @@
 # 14.09: открытые окна блокировали конвейер).
 # Выбор карточки: gh_board.py pick-next (Next Up → первая Ready to IMPL;
 # пропуск карточек со свежими замками и с незакрытыми depends-on из тела issue).
-# Захваченная карточка имеет префикс комментария "auto-impl claim:",
-# менеджер при неготовом гейте возвращает её в Ready to IMPL с комментарием
-# "auto-impl blocked: ..." — оба префикса дают карточке отдых CLAIM_TTL_HOURS
-# (1ч, константа в gh_board.py), чтобы конвейер не долбил её впустую.
+# Все события карточки пишутся в ОДИН комментарий на issue «auto-impl log:»
+# (новые записи внизу — вся история остаётся в одном месте): CLAIM при захвате,
+# BLOCKED при гейт-фейле менеджера. Последняя запись свежее CLAIM_TTL_HOURS
+# (1ч, константа в gh_board.py) — карточка в полёте или отдыхает.
 
 set -uo pipefail
 
@@ -83,17 +83,15 @@ while true; do
     N="$PICK"
 
     echo "$(date -Is) claiming #$N on $HOST_LABEL"
-    gh issue comment "$N" --body "auto-impl claim: host=$HOST_LABEL at $(date -Is)" >/dev/null 2>&1 \
-        || { echo "$(date -Is) claim comment failed — skip"; continue; }
+    python3 .opencode/scripts/gh_board.py auto-log "$N" "CLAIM host=$HOST_LABEL" \
+        || { echo "$(date -Is) claim log failed — skip"; continue; }
 
-    # тайбрейк гонки: среди ЗАМЕЖКОВ ЗА ПОСЛЕДНИЕ 15 минут самый ранний — наш?
-    # (без окна «первый за всю историю» всегда побеждал бы древний замок и
-    # карточка никогда бы не бралась другим хостом)
+    # тайбрейк гонки: после TIEBREAK_WAIT последняя запись в логе должна быть
+    # нашей (один общий лог-комментарий; чужая запись поверх нашей = проигрыш)
     sleep "$TIEBREAK_WAIT"
-    FIRST=$(gh issue view "$N" --json comments \
-        --jq '[.comments[] | select(.body | startswith("auto-impl claim:")) | select((now - (.createdAt | fromdateiso8601)) < 900)] | sort_by(.createdAt) | first | .body // empty' 2>/dev/null) || FIRST=""
-    case "$FIRST" in
-        *"host=$HOST_LABEL "*) : ;;
+    LAST=$(python3 .opencode/scripts/gh_board.py auto-state "$N" 2>/dev/null) || LAST=""
+    case "$LAST" in
+        *"host=$HOST_LABEL"*) : ;;
         *) echo "$(date -Is) #$N lost claim race — back off"; continue ;;
     esac
 
@@ -123,7 +121,7 @@ while true; do
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --session "$SID" "$MSG" > "$STATE/auto-impl-$N.log" 2>&1 &
     else
-        HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, оставь на issue комментарий, начинающийся с «auto-impl blocked: <причина>», и остановись, ничего не начиная. Блокеры по ходу работы — тоже комментарий «auto-impl blocked: …» на issue; карточку при этом в Ready to IMPL не возвращать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
+        HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, а на issue ДОПОЛНИ комментарий, начинающийся с «auto-impl log:», строкой «auto-impl blocked: <причина>» (gh issue view $N --json comments → найди id → gh api -X PATCH repos/mkosinov/memo/issues/comments/<id> -f body=<весь текст с новой строкой>; не выходит — создай обычный комментарий с тем же началом), и остановись, ничего не начиная. Блокеры по ходу работы — так же допиши «auto-impl blocked: …»; карточку в Ready to IMPL не возвращать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
         # --attach: сессия создаётся на работающем сервере (:4096) — сразу видна в вебе
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &

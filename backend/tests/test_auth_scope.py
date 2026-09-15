@@ -38,7 +38,7 @@ from src.auth.scope import (
     resolve_scope,
 )
 from src.models.enums import UserRole
-from tests.conftest import insert_user
+from tests.conftest import insert_user, query_db_params
 
 # ─── mask_phone — pure table (no DB) ───────────────────────────────────────────
 
@@ -77,8 +77,8 @@ class TestMaskPhone:
         assert mask_phone(None) is None
 
     def test_last_four_digits_identified_by_position_not_value(self) -> None:
-        """Visibility is positional (last FOUR digits), not value-based."""
-        # digits 000012345678 → last four = 6,7,8... wait: 12 digits, tail «5678».
+        """Visibility is positional (the last FOUR digits), not value-based."""
+        # 12 digits → first 8 masked, tail «5678» visible.
         assert mask_phone("000012345678") == "••••••••5678"
 
 
@@ -143,17 +143,15 @@ class TestResolveScope:
         db_session,
     ) -> None:
         """master_key = masters.staff_id — the value activities.master_id holds."""
-        from tests.test_auth_api import _query_db
-
         staff_id = "staff-scope-1"
-        _query_db(
+        query_db_params(
             "INSERT INTO staff (id, first_name, last_name, sort_order, "
             "is_active, created_at, updated_at) "
             "VALUES (:id, 'Скоуп', 'Мастеров', 0, 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )
-        _query_db(
+        query_db_params(
             "INSERT INTO masters (staff_id, specialty, color, is_active, "
             "created_at, updated_at) VALUES (:id, 'живопись', '#5B8C7A', 1, "
             "datetime('now'), datetime('now'))",
@@ -177,10 +175,8 @@ class TestResolveScope:
         db_session,
     ) -> None:
         """Staff row exists but no masters extension → sentinel, NOT None."""
-        from tests.test_auth_api import _query_db
-
         staff_id = "staff-scope-2"
-        _query_db(
+        query_db_params(
             "INSERT INTO staff (id, first_name, last_name, sort_order, "
             "is_active, created_at, updated_at) "
             "VALUES (:id, 'Не', 'Мастер', 0, 1, "
@@ -219,17 +215,15 @@ class TestResolveScope:
 
     async def test_archived_masters_row_keeps_key_alive(self, db_session) -> None:
         """masters.is_active=False (distribution off) — history stays visible."""
-        from tests.test_auth_api import _query_db
-
         staff_id = "staff-scope-3"
-        _query_db(
+        query_db_params(
             "INSERT INTO staff (id, first_name, last_name, sort_order, "
             "is_active, created_at, updated_at) "
             "VALUES (:id, 'Архив', 'Мастеров', 0, 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )
-        _query_db(
+        query_db_params(
             "INSERT INTO masters (staff_id, specialty, color, is_active, "
             "created_at, updated_at) VALUES (:id, 'керамика', '#AA0000', 0, "
             "datetime('now'), datetime('now'))",
@@ -317,10 +311,9 @@ class _ScopeProbeMaster:
     @staticmethod
     def make(db_has_masters_row: bool):
         from src.auth.passwords import hash_password
-        from tests.test_auth_api import _query_db
 
         staff_id = "staff-probe-master"
-        _query_db(
+        query_db_params(
             "INSERT OR IGNORE INTO staff (id, first_name, last_name, "
             "sort_order, is_active, created_at, updated_at) "
             "VALUES (:id, 'Проба', 'Скопов', 0, 1, "
@@ -328,7 +321,7 @@ class _ScopeProbeMaster:
             {"id": staff_id},
         )
         if db_has_masters_row:
-            _query_db(
+            query_db_params(
                 "INSERT OR IGNORE INTO masters (staff_id, specialty, color, "
                 "is_active, created_at, updated_at) "
                 "VALUES (:id, 'живопись', '#5B8C7A', 1, "

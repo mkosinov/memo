@@ -897,6 +897,24 @@ def query_db(sql: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def query_db_params(sql: str, params: dict | None = None) -> None:
+    """Execute a parameterized WRITE against the test database (no results).
+
+    The bound-parameter variant of ``query_db`` for writes: values never
+    splice into the SQL text (GH #263 review — suites were re-importing a
+    private helper for exactly this). Usage::
+
+        query_db_params(
+            "INSERT INTO staff (id, first_name) VALUES (:id, :name)",
+            {"id": staff_id, "name": "Ольга"},
+        )
+    """
+    conn = sqlite3.connect(_db_file.name)
+    conn.execute(sql, params or {})
+    conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
+    conn.close()
+
+
 def insert_user(
     phone: str, password_hash: str, role: str = "admin", master_id: str | None = None
 ) -> dict:

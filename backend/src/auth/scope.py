@@ -11,8 +11,8 @@ docs/specs/2026-09-10-master-role-design.md D1): the anchor is
 Rules (D1, domain rules «Per-master data scoping»):
 
 * **admin → no scope**: ``master_key=None`` means «no filter»;
-* **master with a masters row → scoped**: one join users → staff →
-  masters yields the key; the scope ignores ``masters.is_active`` (the
+* **master with a masters row → scoped**: one select users → masters
+  yields the key; the scope ignores ``masters.is_active`` (the
   schedule flag) — an ARCHIVED masters row keeps the key alive so
   history stays visible;
 * **master without a masters row → EMPTY scope, not «no filter»**:
@@ -48,7 +48,6 @@ from src.auth.permissions import AuthedUser, require_session
 from src.db import db_manager
 from src.models.enums import UserRole
 from src.models.master import Master
-from src.models.staff import Staff
 from src.models.user import User
 
 # Sentinel master_key for «master without a masters row» (and, defensively,
@@ -105,7 +104,7 @@ async def resolve_scope(db_session: AsyncSession, authed: AuthedUser) -> ScopeCo
     """Build the scope context for an authenticated principal.
 
     Admin → context without scope, no query. Master → ONE select joining
-    users → staff → masters for the account's masters row; found → its
+    users → masters for the account's masters row; found → its
     ``staff_id`` (regardless of ``masters.is_active``), missing → the
     empty-scope sentinel. Any other role → the sentinel (never unfiltered).
     """
@@ -114,12 +113,13 @@ async def resolve_scope(db_session: AsyncSession, authed: AuthedUser) -> ScopeCo
 
     master_key: str | None = EMPTY_SCOPE_KEY
     if authed.role == UserRole.MASTER.value:
-        # One join users → staff → masters (the key doubles as masters PK).
+        # One select users → masters: ``masters.staff_id`` is BOTH the
+        # masters PK and the FK to staff.id, so ``User.staff_id`` joins it
+        # directly — the intermediate staff hop adds nothing to the key.
         row = (
             await db_session.execute(
                 select(Master.staff_id)
-                .join(Staff, Staff.id == Master.staff_id)
-                .join(User, User.staff_id == Staff.id)
+                .join(User, User.staff_id == Master.staff_id)
                 .where(User.id == authed.id)
                 .limit(1)
             )

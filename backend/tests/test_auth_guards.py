@@ -260,7 +260,7 @@ class TestMasterMatrix:
         resp = master_client.post("/api/v1/photos", json={
             "filename": f"m-{uuid.uuid4().hex[:8]}.jpg",
         })
-        assert resp.status_code < 500, resp.text  # guard passed (4xx = entity validation)
+        assert resp.status_code == 201, resp.text
 
     def test_master_client_create_allowed(self, master_client) -> None:
         """GH #263 T1: clients:write = create-only (booking flow #221)."""

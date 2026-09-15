@@ -15,9 +15,8 @@
 #
 # Метка хоста: /root/.local/state/opencode/auto-impl-host ("imac"/"laptop").
 # Повторные попытки по issue ПРОДОЛЖАЮТ существующую сессию менеджера
-# (opencode run --session <id>), а не плодят новые: соответствие
-# issue→session хранится в auto-impl-sessions ("issue session_id"),
-# первая сессия ищется в БД по названию "<N> IMPL. ...".
+# (opencode run --session <id>): id берётся из БД — последняя сессия с
+# названием «<N> IMPL. …». Отдельного реестра сессий нет, БД = источник истины.
 # Ёмкость машины (сколько ЗАПУСКОВ наблюдателя может быть в полёте):
 #   1) env AUTO_IMPL_MAX_SESSIONS (compose, применяется при recreate контейнера);
 #   2) файл /root/.local/state/opencode/auto-impl-max (перекрывает env, читается
@@ -40,7 +39,6 @@ STATE=/root/.local/state/opencode
 LOG="$STATE/auto-impl-watch.log"
 LOCK=/tmp/auto-impl-watch.lock
 PIDS_FILE="$STATE/auto-impl.pids"
-SESSIONS_FILE="$STATE/auto-impl-sessions"
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
 TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает поставить свой claim
 
@@ -106,14 +104,10 @@ while true; do
     # свежий харнесс перед стартом
     git pull --ff-only >/dev/null 2>&1 || echo "$(date -Is) WARN: git pull failed, starting on current tree"
 
-    # сессия менеджера по issue: повторный запуск ПРОДОЛЖАЕТ существующую
-    # сессию (--session), а не плодит новые; первая ищется в БД по названию
-    SID=$(awk -v n="$N" '$1==n {print $2}' "$SESSIONS_FILE" 2>/dev/null)
-    if [ -z "$SID" ]; then
-        SID=$(sqlite3 /root/.local/share/opencode/opencode.db \
-            "select id from session where title like '${N} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
-        [ -n "$SID" ] && echo "$N $SID" >> "$SESSIONS_FILE"
-    fi
+    # сессия менеджера по issue: повторный запуск ПРОДОЛЖАЕТ существующую.
+    # Источник истины — БД: последняя сессия с названием «<N> IMPL. …»
+    SID=$(sqlite3 /root/.local/share/opencode/opencode.db \
+        "select id from session where title like '${N} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
 
     # шаблон названия сессии: "#issue IMPL. 1-5 ключевых слова" (из заголовка issue)
     ITITLE=$(gh issue view "$N" --json title --jq .title 2>/dev/null || echo "")
@@ -131,13 +125,6 @@ while true; do
         # --attach: сессия создаётся на работающем сервере (:4096) — сразу видна в вебе
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
-        # запомнить id новой сессии (появляется в БД через несколько секунд)
-        (
-            sleep 10
-            NEW_SID=$(sqlite3 /root/.local/share/opencode/opencode.db \
-                "select id from session where title like '${N} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
-            [ -n "$NEW_SID" ] && echo "$N $NEW_SID" >> "$SESSIONS_FILE"
-        ) &
     fi
     echo "$! #$N" >> "$PIDS_FILE"
     echo "$(date -Is) #$N launched (pid $!, session: ${SID:-new}, title: $TITLE, log: $STATE/auto-impl-$N.log)"

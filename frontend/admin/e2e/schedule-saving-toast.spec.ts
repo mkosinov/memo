@@ -271,9 +271,12 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
     await deleteResponse;
 
     // After: loading hidden, then the sequential undo toast («удалено»).
+    // Scoped to toast-info (the undo toast's kind) — the generic
+    // `[data-testid^="toast-"]` prefix also matches `toast-container`
+    // (GH #260 added the container testid).
     await expect(page.getByTestId('toast-loading')).toBeHidden();
     await expect(
-      page.locator('[data-testid^="toast-"]').filter({ hasText: 'удалено' }),
+      page.getByTestId('toast-info').filter({ hasText: 'удалено' }),
     ).toBeVisible();
   });
 });

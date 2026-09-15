@@ -43,8 +43,13 @@ from sqlalchemy import select
 # dependency signatures at registration time (same as Request in
 # permissions.py) — hence the TC002 noqa.
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
+from starlette.requests import Request  # runtime — get_type_hints (see above)
 
-from src.auth.permissions import AuthedUser, require_session
+from src.auth.permissions import (
+    SESSION_COOKIE,
+    AuthedUser,
+    require_session,
+)
 from src.db import db_manager
 from src.models.enums import UserRole
 from src.models.master import Master
@@ -141,4 +146,31 @@ async def get_scope(
     401 from ``require_session`` for anonymous/expired requests; the
     scope never broadens what the session authenticated.
     """
+    return await resolve_scope(db_session, authed)
+
+
+async def get_optional_scope(
+    db_session: Annotated[AsyncSession, Depends(db_manager.get_db_session)],
+    request: Request,
+) -> ScopeContext:
+    """Scope dependency for PUBLIC routes that narrow for a logged-in master.
+
+    ``GET /activities`` (+ ``/{id}``) are PUBLIC_ROUTES (the public site
+    reads the schedule), yet a logged-in ``master`` must see only his own
+    rows (D1). Anonymous / expired sessions resolve to an UNSCOPED
+    context (``master_key=None``) — the public behaviour is untouched;
+    a valid session resolves exactly as ``get_scope``. No 401 is ever
+    raised here: the session cookie is simply absent or stale for the
+    public surface.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    if token is None:
+        return ScopeContext(user_id="", role="", master_key=None)
+    # Lazy import (circularity: permissions → service, same as require_session).
+    from src.auth.service import get_auth_service
+
+    async with db_manager.async_session() as auth_session:
+        authed = await get_auth_service().resolve(auth_session, token)
+    if authed is None:
+        return ScopeContext(user_id="", role="", master_key=None)
     return await resolve_scope(db_session, authed)

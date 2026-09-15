@@ -56,9 +56,12 @@ def test_list_activities_query_count_is_bounded(
     assert len(resp.json()["items"]) == 5
     # Before fix: ~1 (list) + 5 (per-activity SUM) = 6+. After: list + ONE batch SUM.
     # Pagination adds one extra count query. GH #212 adds ONE bounded bulk
-    # service_title query (populated on every list item, spec §5.3 point 7):
-    # settled value 4. < 5 leaves buffer.
-    assert counter["n"] <= 5, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
+    # service_title query (populated on every list item, spec §5.3 point 7).
+    # GH #263 T2: the activities list resolves the optional per-master
+    # scope — +2 constant SELECTs (session + user resolve) for a
+    # cookie-bearing client (anonymous → 0). The bound protects the
+    # INVARIANT (constant, never 1-per-activity); settled value 6.
+    assert counter["n"] <= 7, f"N+1 regression: {counter['n']} SELECTs for 5 activities"
 
 
 def test_list_activities_query_count_is_bounded_with_q(
@@ -93,6 +96,8 @@ def test_list_activities_query_count_is_bounded_with_q(
 
     assert resp.status_code == 200
     assert len(resp.json()["items"]) == 5
-    # q path: count + list (Service join) + batch SUM + ONE bulk titles query = 4.
-    # Assert bounded (constant), not scaling with N.
-    assert counter["n"] <= 5, f"N+1 regression on q path: {counter['n']} SELECTs for 5 activities"
+    # q path: count + list (Service join) + batch SUM + ONE bulk titles query
+    # + 2 constant scope-resolve SELECTs for a cookie-bearing client
+    # (GH #263 T2 — see the no-q variant). Assert bounded (constant), not
+    # scaling with N.
+    assert counter["n"] <= 7, f"N+1 regression on q path: {counter['n']} SELECTs for 5 activities"

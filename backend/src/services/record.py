@@ -127,19 +127,29 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
-    def _build_list_stmt(self, params: RecordListParams) -> Select[tuple[Record]]:
+    def _build_list_stmt(
+        self, params: RecordListParams, master_key: str | None = None,
+    ) -> Select[tuple[Record]]:
         """Assemble the shared records-list query (GH #213 DRY-glue).
 
         Activity INNER join + business filters + ``q`` predicates (Client /
         Service LEFT OUTER joins ONLY when ``q`` is present) + eager visits.
         ``list()`` and ``list_view()`` share this builder — the view is the
         same query plus extra labeled display columns (§5).
+
+        GH #263 T2 (D2): ``master_key`` (the requester's scope) ANDs
+        conjunctively with the client-supplied ``params.master_id`` — a
+        master filtering by someone else's key gets an EMPTY result, never
+        the other master's rows; ``None`` (admin) adds nothing.
         """
         stmt = (
             select(Record)
             .join(Activity, Record.activity_id == Activity.id)
             .options(selectinload(Record.visits))
         )
+        # --- Server scope (GH #263) — conjunctive with everything below ---
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
         # --- Filter ---
         from_dt, to_dt = day_range(params.date_from, params.date_to)
         if from_dt is not None:
@@ -170,16 +180,18 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         return stmt
 
     async def list(
-        self, db_session: AsyncSession, params: RecordListParams
+        self, db_session: AsyncSession, params: RecordListParams,
+        master_key: str | None = None,
     ) -> PaginatedResponse:  # items are ORM Record instances
         """Return a paginated page of records (ORM items, visits eagerly loaded).
 
         Filter → Sort → Paginate, fully server-side (#191).
         Business filters are hand-written in ``_build_list_stmt`` (G1a
         principle); pagination/date mechanics are shared helpers
-        (BaseRepository.list_entity, day_range).
+        (BaseRepository.list_entity, day_range). ``master_key`` — the
+        per-master scope (GH #263); see the builder.
         """
-        stmt = self._build_list_stmt(params)
+        stmt = self._build_list_stmt(params, master_key=master_key)
         # --- Sort (whitelist map) + Paginate (COUNT before ORDER BY) ---
         items, total = await self._repository.list_entity(
             db_session,
@@ -193,7 +205,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
 
     async def list_view(
-        self, db_session: AsyncSession, params: RecordListParams
+        self, db_session: AsyncSession, params: RecordListParams,
+        master_key: str | None = None,
     ) -> PaginatedResponse[RecordViewResponse]:
         """Return a records page enriched with display fields (GH #213 §5).
 
@@ -254,7 +267,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             .correlate(Record)
             .scalar_subquery()
         )
-        stmt = self._build_list_stmt(params).add_columns(
+        stmt = self._build_list_stmt(params, master_key=master_key).add_columns(
             client_name.label("client_name"),
             Activity.start.label("activity_start"),
             Activity.is_private.label("is_private"),
@@ -359,6 +372,27 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         else:
             ordered = [c.asc().nullsfirst() for c in columns]
         return [*ordered, Record.id.asc()]  # deterministic tiebreak — cross-page stability
+
+    async def get_scoped(
+        self, db_session: AsyncSession, id: str, master_key: str | None
+    ) -> Record | None:
+        """Point get with the per-master scope in ONE query (GH #263 T2).
+
+        Join record → activity and fold ``Activity.master_id == master_key``
+        into the same SELECT (visits eagerly loaded) — a scoped master gets
+        ``None`` for чужие records, indistinguishable from missing (route
+        renders 404; 404-fast-path, plan T7). ``master_key=None`` (admin)
+        → unfiltered.
+        """
+        stmt = (
+            select(Record)
+            .join(Activity, Record.activity_id == Activity.id)
+            .where(Record.id == id)
+            .options(selectinload(Record.visits))
+        )
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
 
     async def get(
         self, db_session: AsyncSession, id: str

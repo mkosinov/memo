@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
+from src.auth.scope import ScopeContext, get_optional_scope
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.activity import (
@@ -64,6 +65,11 @@ async def list_activities(
     date_to: date | None = Query(None),
     q: str | None = Query(None, min_length=2, max_length=100),
     service_id: str | None = Query(None),
+    # GH #263 T2 (D1): the route stays PUBLIC, but a logged-in master
+    # sees only his own activities — master_key (or the empty-scope
+    # sentinel) becomes the ``master_id`` equality kwarg; anonymous /
+    # admin → master_key=None → no filter (unchanged behaviour).
+    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range and service.
 
@@ -71,11 +77,13 @@ async def list_activities(
     exact id equality for a full UUID; ``service_id`` narrows by service;
     ``total`` reflects the filtered count. len<2 / len>100 → 422
     VALIDATION_ERROR. List items carry ``service_title`` (single-item
-    endpoints leave it None).
+    endpoints leave it None). Master role (GH #263): server-side scope —
+    only ``master_id == master_key`` rows; empty scope → empty result.
     """
     result = await service.list(
         db_session=session, page=pagination.page, per_page=pagination.per_page,
         date_from=date_from, date_to=date_to, q=q, service_id=service_id,
+        master_id=scope.master_key,
     )
     occupied_map = await service.sum_active_seats_bulk(
         db_session=session, activity_ids=[a.id for a in result.items]
@@ -93,9 +101,17 @@ async def get_activity(
     activity_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T2: public route + master narrowing (see list_activities).
+    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
 ) -> ActivityResponse:
-    """Return a single activity by ID with computed occupied count."""
-    activity = await service.get(db_session=session, id=activity_id)
+    """Return a single activity by ID with computed occupied count.
+
+    Scoped master + чужая активность → 404 (indistinguishable from
+    «не существует»); single scope-aware query (404-fast-path, T7).
+    """
+    activity = await service.get_scoped(
+        db_session=session, id=activity_id, master_key=scope.master_key
+    )
     if not activity:
         raise HTTPException(
             status_code=404,

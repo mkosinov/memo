@@ -251,17 +251,23 @@ async def list_client_visitors(
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> list[VisitorResponse]:
     """Return all visitors for a given client."""
-    client = await _get_client_service().get_scoped(
-        db_session=session, id=client_id, master_key=scope.master_key
-    )
-    if client is None:
-        raise HTTPException(
-            status_code=404,
-            detail=ErrorDetail(
-                code=ErrorCode.CLIENT_NOT_FOUND,
-                message="Client not found",
-            ).model_dump(),
+    # GH #263 T3-fix (S7 admin regression): the visibility gate is a
+    # MASTER-scope gate — apply it ONLY when the caller carries a scope
+    # key (master incl. the empty-scope sentinel). Admin (master_key
+    # None) keeps the pre-#263 contract byte-identical: the client_id is
+    # taken as given (nonexistent → 200 []), no existence probe.
+    if scope.master_key is not None:
+        client = await _get_client_service().get_scoped(
+            db_session=session, id=client_id, master_key=scope.master_key
         )
+        if client is None:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.CLIENT_NOT_FOUND,
+                    message="Client not found",
+                ).model_dump(),
+            )
     visitors = await visitor_service.list_by_client(
         db_session=session, client_id=client_id, master_key=scope.master_key
     )

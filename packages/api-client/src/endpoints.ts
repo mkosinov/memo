@@ -94,6 +94,12 @@ import {
   type PaginatedResponse,
   AuthMeSchema,
   type AuthMe,
+  MyProfileSchema,
+  type MyProfile,
+  type MyProfileUpdate,
+  PortraitResponseSchema,
+  type PortraitResponse,
+  type ChangePassword,
 } from './schemas';
 import { ApiError } from './client';
 
@@ -933,6 +939,42 @@ export async function getMe(): Promise<AuthMe | null> {
     if (e instanceof ApiError && e.status === 401) return null;
     throw e;
   }
+}
+
+// POST /auth/change-password (GH #262 spec §4): wrong current password →
+// 401 AUTH_INVALID_CREDENTIALS, policy breach → 422 PASSWORD_POLICY; 204
+// keeps the current session and revokes all others (server-side).
+export async function changePassword(data: ChangePassword): Promise<void> {
+  await api('/api/v1/auth/change-password', z.any(), {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// ─── My profile (GH #262 spec §4 — own data, session-guarded) ─────────────
+
+export async function getMyProfile(): Promise<MyProfile> {
+  return api('/api/v1/my', MyProfileSchema);
+}
+
+// Partial update: only sent keys apply, explicit null clears a nullable
+// field (domain-rules/profile.md). Returns the full flat profile.
+export async function updateMyProfile(data: MyProfileUpdate): Promise<MyProfile> {
+  return api('/api/v1/my', MyProfileSchema, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// Multipart portrait upload — the browser sets the boundary Content-Type
+// itself (client.ts skips the JSON default for FormData bodies).
+export async function uploadPortrait(file: File): Promise<PortraitResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  return api('/api/v1/my/portrait', PortraitResponseSchema, {
+    method: 'POST',
+    body: form,
+  });
 }
 
 // ─── User Settings ────────────────────────────────────────────────────

@@ -59,3 +59,40 @@ class ColorRequiredError(Exception):
 
     The router maps this to 422 ``COLOR_REQUIRED``.
     """
+
+
+class ProfileOwnerNotFoundError(Exception):
+    """The /my owner user row no longer resolves (GH #262).
+
+    A session can outlive its user (row deleted server-side); the
+    ProfileService raises this instead of a runtime ``assert`` (stripped
+    under ``python -O``). The /my router maps it to 401
+    ``AUTH_UNAUTHORIZED`` — the same envelope the session guard emits for
+    a dead session, so the frontend's 401 → /login redirect covers it.
+    """
+
+
+class ProfileNoStaffCardError(Exception):
+    """Portrait upload without a staff card (GH #262 Task 2).
+
+    The portrait is card-bound (it becomes ``Staff.avatar_url``); a user
+    without a live card has nothing to attach it to. The /my portrait
+    router maps this to 422 — the modal hides the upload row for
+    cardless users, so this is a contract guard, not a user-facing flow.
+    """
+
+
+class FileTooLargeError(Exception):
+    """Upload exceeds the 5 MB avatar limit (GH #262 Task 2, spec §3.4).
+
+    Raised by the Content-Length precheck (before reading the body) or by
+    the streaming byte cap; the router maps it to 413 ``FILE_TOO_LARGE``.
+    """
+
+
+class FileInvalidTypeError(Exception):
+    """Upload magic bytes are not JPEG/PNG/WebP (GH #262 Task 2, §3.4).
+
+    Renamed/foreign files are rejected regardless of filename; the router
+    maps this to 415 ``FILE_INVALID_TYPE``.
+    """

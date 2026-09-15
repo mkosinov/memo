@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "alembic>=1.18.4",
     "pwdlib[argon2]>=0.3.1",
+    # GH #262 Task 2 — multipart/form-data parsing for POST /my/portrait
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]

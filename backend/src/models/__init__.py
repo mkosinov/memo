@@ -30,6 +30,7 @@ from src.models.tag import (
 )
 from src.models.tariff import Tariff
 from src.models.user import User
+from src.models.user_profile import UserProfile
 from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
@@ -56,6 +57,7 @@ __all__ = [
     "Tariff",
     "User",
     "UserRole",
+    "UserProfile",
     "UserSettings",
     "Visit",
     "Visitor",

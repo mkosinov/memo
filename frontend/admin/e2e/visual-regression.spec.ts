@@ -23,6 +23,18 @@ import {
  * First run creates baselines; subsequent runs compare against them.
  */
 
+// GH #262 §6 — pin the theme to LIGHT before every visual shot. The cabinet
+// popup lets a user switch to dark and persists it in localStorage
+// (`memo-theme`); a leaked dark choice would re-skin every baseline. An
+// addInitScript runs before any page JS, so the document is light from the
+// first paint and the pre-hydration bootstrap (app/layout.tsx) never applies
+// a stale dark value. Top-level hook → applies to EVERY describe in this file.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try { window.localStorage.setItem('memo-theme', 'light'); } catch { /* ignore */ }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Records Page — Visual Regression
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { RESET_SQL, resolveSeedDbPath, resetToSeed } from '../e2e/fixtures/seed-reset';
+import { RESET_SQL, resolveSeedDbPath, resolveTestFilesDir, resetToSeed, wipeAvatarsDir } from '../e2e/fixtures/seed-reset';
 
 let tmpDir: string;
 let dbPath: string;
@@ -226,5 +226,76 @@ describe('resetToSeed (against a real temp SQLite DB)', () => {
     expect(count(dbPath, "SELECT COUNT(*) FROM users WHERE id='u2'")).toBe(1); // row kept
     expect(execSync(`sqlite3 "${dbPath}" "SELECT staff_id FROM users WHERE id='u2'"`, { encoding: 'utf-8' }).trim()).toBe('');
     expect(count(dbPath, `SELECT COUNT(*) FROM staff WHERE id='${'u'.repeat(36)}'`)).toBe(0);
+  });
+});
+
+describe('resolveTestFilesDir (call-time resolution, GH #262)', () => {
+  const ORIGINAL = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.SHARD_ID;
+    delete process.env.TEST_FILES_DIR;
+    delete process.env.FILES_DIR;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it('SHARD_ID wins over TEST_FILES_DIR/FILES_DIR and anchors at <repo>/backend', () => {
+    process.env.SHARD_ID = '2';
+    process.env.TEST_FILES_DIR = '/tmp/should-be-ignored';
+    // Mirrors e2e-shard-start.sh: backend/test_files_shard{id}.
+    const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
+    expect(resolveTestFilesDir()).toBe(path.join(repoBackend, 'test_files_shard2'));
+  });
+
+  it('TEST_FILES_DIR is used when SHARD_ID is unset', () => {
+    process.env.TEST_FILES_DIR = '/tmp/custom-files';
+    expect(resolveTestFilesDir()).toBe('/tmp/custom-files');
+  });
+
+  it('FILES_DIR is used when SHARD_ID and TEST_FILES_DIR are unset', () => {
+    process.env.FILES_DIR = '/tmp/env-files';
+    expect(resolveTestFilesDir()).toBe('/tmp/env-files');
+  });
+
+  it('falls back to backend/files by default (backend cwd-relative ./files)', () => {
+    const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
+    expect(resolveTestFilesDir()).toBe(path.join(repoBackend, 'files'));
+  });
+});
+
+describe('wipeAvatarsDir (GH #262 §6)', () => {
+  const ORIGINAL = { ...process.env };
+  let filesRoot: string;
+
+  beforeEach(() => {
+    delete process.env.SHARD_ID;
+    filesRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'files-dir-test-'));
+    process.env.TEST_FILES_DIR = filesRoot;
+  });
+
+  afterEach(() => {
+    fs.rmSync(filesRoot, { recursive: true, force: true });
+    process.env = { ...ORIGINAL };
+  });
+
+  it('removes the avatars dir (and only that) under FILES_DIR', () => {
+    const avatars = path.join(filesRoot, 'avatars');
+    const keep = path.join(filesRoot, 'other');
+    fs.mkdirSync(avatars, { recursive: true });
+    fs.mkdirSync(keep, { recursive: true });
+    fs.writeFileSync(path.join(avatars, 'portrait.png'), 'bytes');
+
+    wipeAvatarsDir();
+
+    expect(fs.existsSync(avatars)).toBe(false);
+    expect(fs.existsSync(keep)).toBe(true); // siblings untouched
+  });
+
+  it('is a no-op when the avatars dir is absent (force:true)', () => {
+    expect(() => wipeAvatarsDir()).not.toThrow();
+    expect(fs.existsSync(path.join(filesRoot, 'avatars'))).toBe(false);
   });
 });

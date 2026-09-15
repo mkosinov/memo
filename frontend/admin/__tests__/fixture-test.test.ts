@@ -47,12 +47,17 @@ vi.mock('@playwright/test', () => ({
 }));
 
 // Mock seed-reset so the fixture body can be invoked without sqlite3 spawns
-// and we can assert call ORDER (guard → snapshot → reset).
+// and we can assert call ORDER (guard → snapshot → reset → wipe).
 const calls = hoisted.calls;
 vi.mock('../e2e/fixtures/seed-reset', () => ({
   resetToSeed: () => {
     calls.push('reset');
     return 'reset-output';
+  },
+  // GH #262 §6 — the fixture also wipes the test-scoped avatars dir together
+  // with the DB so a portrait uploaded by one test never leaks into the next.
+  wipeAvatarsDir: () => {
+    calls.push('wipe');
   },
   snapshotDb: (testInfo: { outputDir: string }) => {
     calls.push(`snapshot:${testInfo.outputDir}`);
@@ -119,12 +124,13 @@ describe('e2e/fixtures/test wrapper module', () => {
 
   it('resets to seed on a first attempt (no snapshot) and calls use()', async () => {
     const { useCalled } = await runFixture(makeTestInfo(1, 0));
-    expect(calls).toEqual(['reset', 'use']);
+    // GH #262 §6 — reset, then wipe the avatars dir, then use().
+    expect(calls).toEqual(['reset', 'wipe', 'use']);
     expect(useCalled).toBe(true);
   });
 
   it('snapshots the DB BEFORE reset on a retry attempt', async () => {
     await runFixture(makeTestInfo(1, 1));
-    expect(calls).toEqual(['snapshot:/fake-output-dir', 'reset', 'use']);
+    expect(calls).toEqual(['snapshot:/fake-output-dir', 'reset', 'wipe', 'use']);
   });
 });

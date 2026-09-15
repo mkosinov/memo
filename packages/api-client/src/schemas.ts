@@ -673,6 +673,9 @@ export type AuthUser = z.infer<typeof AuthUserSchema>;
 export const MasterSnapshotSchema = z.object({
   first_name: z.string(),
   last_name: z.string(),
+  // GH #262: the card portrait served under /api/v1/files/avatar/… — null
+  // when the card has none. Optional for old bodies (additive field).
+  avatar_url: z.string().nullable().optional(),
 });
 export type MasterSnapshot = z.infer<typeof MasterSnapshotSchema>;
 
@@ -682,6 +685,72 @@ export const AuthMeSchema = z.object({
   master: MasterSnapshotSchema.nullable().optional(),
 });
 export type AuthMe = z.infer<typeof AuthMeSchema>;
+
+// ─── My profile (GH #262 spec §4 — mirrors backend src/schemas/my.py) ─────
+// One flat shape for GET and PUT. PUT semantics (domain-rules/profile.md):
+// an omitted key KEEPS its value; an explicit null CLEARS it (nullable
+// columns only — first_name/last_name reject null server-side). The names
+// and avatar_url write the linked STAFF CARD; specialties is read-only here
+// (the admin owns the master section, #266 D5).
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
+export const MyProfileSchema = z.object({
+  role: z.string(),
+  has_staff: z.boolean(),
+  has_master: z.boolean(),
+  // Public half — the linked staff card / master section; null when
+  // has_staff/has_master is false.
+  first_name: z.string().nullable(),
+  last_name: z.string().nullable(),
+  avatar_url: z.string().nullable(),
+  specialties: z.array(z.string()).nullable(),
+  // Private half — the owner-only user_profiles columns.
+  patronymic: z.string().nullable(),
+  birth_date: isoDate.nullable(),
+  residence_address: z.string().nullable(),
+  birth_place: z.string().nullable(),
+  passport_series_number: z.string().nullable(),
+  passport_issued_date: isoDate.nullable(),
+  passport_issued_by: z.string().nullable(),
+  registration_address: z.string().nullable(),
+});
+export type MyProfile = z.infer<typeof MyProfileSchema>;
+
+// PUT body — every key optional (omitted = keep, null = clear a nullable
+// field). Mirrors backend extra="forbid" via strict(). first_name/last_name
+// are non-nullable when present (the card columns are NOT NULL — a null is
+// a 422 server-side, so the type itself forbids it).
+export const MyProfileUpdateSchema = z.strictObject({
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
+  avatar_url: z.string().max(2048).nullable(),
+  // Read-only — accepted for round-tripping, ignored by the server.
+  specialties: z.array(z.string()).nullable(),
+  patronymic: z.string().max(100).nullable(),
+  birth_date: isoDate.nullable(),
+  residence_address: z.string().max(255).nullable(),
+  birth_place: z.string().max(255).nullable(),
+  passport_series_number: z.string().max(30).nullable(),
+  passport_issued_date: isoDate.nullable(),
+  passport_issued_by: z.string().max(255).nullable(),
+  registration_address: z.string().max(255).nullable(),
+}).partial();
+export type MyProfileUpdate = z.input<typeof MyProfileUpdateSchema>;
+
+// POST /my/portrait success body (GH #262 Task 2).
+export const PortraitResponseSchema = z.object({
+  avatar_url: z.string(),
+});
+export type PortraitResponse = z.infer<typeof PortraitResponseSchema>;
+
+// POST /auth/change-password body (GH #262 spec §4) — mirrors backend
+// ChangePasswordRequest: wrong current → 401, policy breach → 422.
+export const ChangePasswordSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(1),
+});
+export type ChangePassword = z.input<typeof ChangePasswordSchema>;
 
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,

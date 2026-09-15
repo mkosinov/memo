@@ -42,11 +42,11 @@ test.describe('User Scenario 2 — master signs in, same interface', () => {
     }
     await directoriesBtn.click();
 
-    // User block: linked master profile (m1) → display name «Ольга Середа»
-    // (master profile name, §4.5) and the «Мастер» role label.
+    // User block: linked staff card (m1) → display name «Ольга Середа»
+    // (snapshot first+last name, GH #262 §5.1). NO role label — removed by
+    // the cabinet spec rev 3 (D1: the plate shows avatar + name only).
     const userBlock = page.locator('[data-testid="user-avatar"]').locator('..');
     await expect(userBlock).toContainText('Ольга Середа');
-    await expect(userBlock).toContainText('Мастер');
 
     // Forbidden write: add a payment in the activity modal's client tab
     // → standard API error toast (AUTH_FORBIDDEN, 403 from the backend).

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1346,6 +1346,65 @@ describe('getMe', () => {
     vi.mocked(api).mockRejectedValue(new ApiError(500, 'Server error'));
     await expect(getMe()).rejects.toThrow(ApiError);
   });
+});
+
+// ─── My profile (GH #262 spec §4 — own data, session-guarded) ─────────────
+
+describe('getMyProfile', () => {
+  it('calls GET /api/v1/my', async () => {
+    vi.mocked(api).mockResolvedValue({ role: 'admin', has_staff: false, has_master: false });
+    await getMyProfile();
+    expect(api).toHaveBeenCalledWith('/api/v1/my', expect.anything());
+  });
+});
+
+describe('updateMyProfile', () => {
+  it('calls PUT /api/v1/my with JSON body', async () => {
+    vi.mocked(api).mockResolvedValue({ role: 'admin', has_staff: false, has_master: false });
+    await updateMyProfile({ patronymic: 'Сергеевна' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/my',
+      expect.anything(),
+      {
+        method: 'PUT',
+        body: JSON.stringify({ patronymic: 'Сергеевна' }),
+      },
+    );
+  });
+});
+
+describe('uploadPortrait', () => {
+  it('calls POST /api/v1/my/portrait with multipart FormData (field "file")', async () => {
+    vi.mocked(api).mockResolvedValue({ avatar_url: '/api/v1/files/avatar/x.png' });
+    const file = new File([new Uint8Array([1, 2, 3])], 'portrait.png', { type: 'image/png' });
+    await uploadPortrait(file);
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/my/portrait',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(FormData),
+      }),
+    );
+    const [, , init] = vi.mocked(api).mock.calls[0] as unknown as [string, unknown, RequestInit];
+    const body = init.body as FormData;
+    expect(body.get('file')).toBe(file);
+  });
+});
+
+describe('changePassword', () => {
+  it('calls POST /api/v1/auth/change-password with the pair', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await changePassword({ current_password: 'old123', new_password: 'new456' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/change-password',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ current_password: 'old123', new_password: 'new456' }),
+      },
+    );
+   });
 });
 
 describe('getTag', () => {

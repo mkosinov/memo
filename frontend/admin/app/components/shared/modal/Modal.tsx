@@ -25,7 +25,7 @@ export interface ModalProps {
   testId?: string;
   /** Whether to render a footer separator (border-t). Default true when footer is present. */
   footerBorder?: boolean;
-  /** Modal size preset. 'small' uses h-[60vh] + max-w-lg. Default uses h-[85vh] + max-w-2xl. */
+  /** Modal size preset. 'small' uses max-h-[60vh] + max-w-lg. Default uses max-h-[85vh] + max-w-2xl. */
   size?: 'default' | 'small';
 }
 

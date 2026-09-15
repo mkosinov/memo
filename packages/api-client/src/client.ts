@@ -43,7 +43,9 @@ function isAuthPath(path: string): boolean {
 async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, options?: RequestInit): Promise<T> {
   const method = options?.method;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // FormData bodies (GH #262 portrait upload) must NOT carry a hand-set
+    // Content-Type — only the browser knows the multipart boundary.
+    ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options?.headers as Record<string, string>),
   };
   // Mutating requests only (spec §3.3): GETs never announce tab identity.

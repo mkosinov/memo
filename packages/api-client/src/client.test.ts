@@ -217,6 +217,38 @@ describe('api() credentials', () => {
   });
 });
 
+// ─── Multipart bodies (GH #262 portrait upload) ──────────────────────────────
+// FormData must reach fetch WITHOUT a Content-Type header — the browser
+// alone must set multipart/form-data; boundary, a hand-set JSON (or even
+// multipart) Content-Type would corrupt the body.
+
+describe('api() FormData bodies', () => {
+  it('omits Content-Type when the body is FormData (browser sets the boundary)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array([1])], { type: 'image/png' }), 'p.png');
+    await api('/test', schema, { method: 'POST', body: form });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(form);
+    expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    // Still a mutating request — tab identity applies to uploads too.
+    expect((init.headers as Record<string, string>)['X-Memo-Tab-Id']).toBe(getTabId());
+  });
+
+  it('keeps Content-Type: application/json for string bodies', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema, { method: 'POST', body: '{}' });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+});
+
 describe('401 unauthorized handler', () => {
   afterEach(() => {
     setUnauthorizedHandler(null);

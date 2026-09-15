@@ -27,6 +27,18 @@ interface UIContextType {
 
 const UIContext = createContext<UIContextType | null>(null);
 
+const THEME_STORAGE_KEY = 'memo-theme';
+
+function readStoredTheme(): 'light' | 'dark' | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : null;
+  } catch {
+    return null; // storage blocked (private mode / SSR) — fall back to light
+  }
+}
+
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const [deleteMode, setDeleteMode] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -34,6 +46,17 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // #262 §5.4: restore persisted theme on mount. The pre-hydration script in
+  // app/layout.tsx already applied data-theme before React hydrated, so this
+  // only syncs React state (and re-applies the attribute defensively).
+  useEffect(() => {
+    const stored = readStoredTheme();
+    if (stored) {
+      setTheme(stored);
+      document.documentElement.setAttribute('data-theme', stored);
+    }
+  }, []);
 
   // Clean up all pending toast timers on unmount
   useEffect(() => {
@@ -92,6 +115,13 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       const next = prev === 'light' ? 'dark' : 'light';
       if (typeof document !== 'undefined') {
         document.documentElement.setAttribute('data-theme', next);
+      }
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(THEME_STORAGE_KEY, next);
+        } catch {
+          // storage unavailable — theme still applies for this session
+        }
       }
       return next;
     });

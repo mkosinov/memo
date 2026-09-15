@@ -463,12 +463,21 @@ export function seedUser(overview: {
   role?: 'admin' | 'master';
   masterId?: string;
   isActive?: number;
+  /**
+   * GH #262 S6 — explicit "no staff card". Forces `staff_id = NULL` even when
+   * `masterId` is supplied, so the scenario reads clearly at the call site
+   * (a user may legitimately have no card — spec D7/D9, «Аноним» fallback).
+   * Without the flag the default is already NULL (`masterId ?? null`).
+   */
+  noStaffId?: boolean;
 }): string {
   const id = crypto.randomUUID();
+  // noStaffId wins over masterId: a cardless user links to NO staff row.
+  const staffId = overview.noStaffId ? null : (overview.masterId ?? null);
   executeSQL(
     // GH #247 T1 added the lockout-ladder columns (failed_login_attempts,
     // lock_level, locked_until) — NOT NULL, so the INSERT must set them.
-    `INSERT INTO users (id, phone, email, password_hash, role, staff_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(overview.masterId ?? null)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
+    `INSERT INTO users (id, phone, email, password_hash, role, staff_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(staffId)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
   );
   return id;
 }

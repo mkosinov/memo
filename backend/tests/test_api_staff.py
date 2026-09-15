@@ -620,6 +620,38 @@ class TestStaffDelete:
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
 
+    def test_delete_cascades_user_profiles(
+        self, api_client
+    ) -> None:
+        """GH #262: the linked user's private profile row dies with the
+        account in the card hard-delete (FK_MATRIX user_profiles dep)."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION),
+        ).json()
+        user_id = str(_uuid.uuid4())
+        profile_id = str(_uuid.uuid4())
+        query_db(
+            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{user_id}', '+79997778899', 'x', 'master', "
+            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
+        query_db(
+            f"INSERT INTO user_profiles (id, user_id, patronymic, created_at, updated_at) "
+            f"VALUES ('{profile_id}', '{user_id}', 'Петровна', "
+            f"datetime('now'), datetime('now'))"
+        )
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204
+        assert query_db(f"SELECT * FROM users WHERE id='{user_id}'") == []
+        assert query_db(
+            f"SELECT * FROM user_profiles WHERE user_id='{user_id}'"
+        ) == []
+
 
 class TestNoStaffReorder:
     """PUT /reorder is NOT carried over from masters (spec «API (после)»)."""

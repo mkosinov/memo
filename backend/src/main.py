@@ -1,6 +1,7 @@
 """Memo backend — FastAPI application factory."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.admin.setup import setup_admin
 from src.api.v1.activities import router as activities_router
@@ -16,6 +18,7 @@ from src.api.v1.clients import router as clients_router
 from src.api.v1.locations import router as locations_router
 from src.api.v1.masters import router as masters_router
 from src.api.v1.materials import router as materials_router
+from src.api.v1.my import router as my_router
 from src.api.v1.payments import router as payments_router
 from src.api.v1.photos import router as photos_router
 from src.api.v1.position import router as position_router
@@ -41,6 +44,10 @@ async def lifespan(_app: FastAPI):
     # In test env: conftest handles table creation, skip alembic
     if settings.ENV != "testing":
         await run_alembic_upgrade(str(settings.DATABASE_URL))
+    # GH #262 Task 2 — the avatar storage dir exists from the first boot
+    # (StaticFiles 404s cleanly on a missing dir at import time, but the
+    # upload path needs the dir anyway; mkdir once here, idempotent).
+    (Path(settings.FILES_DIR) / "avatars").mkdir(parents=True, exist_ok=True)
     try:
         yield
     finally:
@@ -50,6 +57,32 @@ async def lifespan(_app: FastAPI):
 
 
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+class NoSniffStaticFiles(StaticFiles):
+    """StaticFiles with ``X-Content-Type-Options: nosniff`` (GH #262 T2).
+
+    Spec §3.4: avatar responses must carry the header so a mislabeled
+    content type can never be sniffed into script execution. Injected at
+    the ASGI ``http.response.start`` message — works for 200 file
+    responses and Starlette-generated error responses alike.
+    """
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await super().__call__(scope, receive, send)
+            return
+
+        async def send_with_nosniff(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append(
+                    (b"x-content-type-options", b"nosniff")
+                )
+                message = {**message, "headers": headers}  # type: ignore[arg-type]
+            await send(message)
+
+        await super().__call__(scope, receive, send_with_nosniff)
 
 
 class EventOriginMiddleware:
@@ -200,11 +233,25 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #262 — own-data profile (session-guarded, no permission token).
+    app.include_router(my_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
     # GH #247 — login / logout / me are PUBLIC_ROUTES by design (spec §3.6);
     # the router itself carries no blanket guards.
     app.include_router(auth_router, prefix="/api/v1/auth")
+
+    # GH #262 Task 2 — public avatar serving (spec §3.4): StaticFiles
+    # rooted at FILES_DIR/avatars, confined to that one directory by
+    # construction (a request can never resolve into another dir), with
+    # X-Content-Type-Options: nosniff injected on every response.
+    avatars_dir = Path(settings.FILES_DIR) / "avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/api/v1/files/avatar",
+        NoSniffStaticFiles(directory=str(avatars_dir)),
+        name="avatar_files",
+    )
 
     return app
 

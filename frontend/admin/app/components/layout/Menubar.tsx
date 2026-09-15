@@ -11,6 +11,7 @@ import type { ViewModeType } from '@/contexts/schedule/ScheduleViewContext';
 import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
+import { UserMenu } from './UserMenu';
 import type { Master } from '@memo/domain';
 
 // ─── SVG Icon Components ──────────────────────────────────────────────────
@@ -126,29 +127,8 @@ function ImageIcon({ className }: { className?: string }) {
   );
 }
 
-function SunIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-function MoonIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-    </svg>
-  );
-}
+// GH #262 §5.1: SunIcon/MoonIcon moved into UserMenu — the theme slider now
+// lives in the user popup, not in the sidebar bottom row.
 
 // ─── Navigation Items ─────────────────────────────────────────────────────
 
@@ -471,19 +451,10 @@ function MasterLegend({ collapsed, masters }: MasterLegendProps) {
 export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
-  const { sidebarCollapsed, toggleSidebar, theme, toggleTheme } = useUI();
-  const { user, master, status, logout } = useAuth();
+  const { sidebarCollapsed, toggleSidebar } = useUI();
+  const { status } = useAuth();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-
-  // GH #247 §4.5: real user identity in the bottom-left block — master
-  // profile name when linked, else the login phone; role label Админ/Мастер.
-  const displayName = useMemo(() => {
-    if (master) return `${master.first_name} ${master.last_name}`;
-    return user?.phone ?? '';
-  }, [master, user]);
-  const avatarInitial = displayName ? displayName.charAt(0).toUpperCase() : '—';
-  const roleLabel = user?.role === 'master' ? 'Мастер' : 'Админ';
 
   // Track viewMode & selectedDay via custom events from ScheduleContext
   // (Menubar lives outside ScheduleProvider in the component tree)
@@ -685,60 +656,12 @@ export function Menubar() {
 
       {/* ── Bottom Section ── */}
       <div className="border-t border-white/10">
-        {/* User Avatar — real session user (GH #247 §4.5) */}
-        {!sidebarCollapsed && status === 'authenticated' && (
-          <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-            <div
-              data-testid="user-avatar"
-              className="w-7 h-7 rounded-full bg-brand-light flex items-center justify-center text-xs text-white font-medium flex-shrink-0"
-            >
-              {avatarInitial}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-white/90 truncate">{displayName}</div>
-              <div className="text-[10px] text-white/50 truncate">{roleLabel}</div>
-            </div>
-            <button
-              onClick={() => void logout()}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors flex-shrink-0"
-              aria-label="Выйти"
-              title="Выйти"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </button>
-          </div>
-        )}
+        {/* User plate → UserMenu popup (GH #262 §5.1). Collapsed sidebar:
+            avatar-only circular trigger (was hidden entirely before). */}
+        {status === 'authenticated' && <UserMenu collapsed={sidebarCollapsed} />}
 
-        {/* Theme Toggle (slider) + Collapse */}
-        <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-2 py-3' : 'justify-between px-3 py-2'}`}>
-          {/* Theme slider switch */}
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-1 bg-white/10 rounded-full p-0.5 cursor-pointer transition-colors hover:bg-white/15"
-            aria-label="Переключить тему"
-            title="Переключить тему"
-          >
-            <div className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'light' ? 'bg-white/20 text-white' : 'text-white/40'}`}>
-              <SunIcon />
-            </div>
-            <div className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'bg-white/20 text-white' : 'text-white/40'}`}>
-              <MoonIcon />
-            </div>
-          </button>
-
+        {/* Collapse — the theme slider moved into the UserMenu popup (§5.1) */}
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-end'} px-3 py-2`}>
           <button
             onClick={toggleSidebar}
             className="flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:bg-white/10 hover:text-white/90 transition-colors"

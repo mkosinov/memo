@@ -25,6 +25,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3002",
     ]
     LOG_LEVEL: str = "INFO"
+    # GH #262 §3.4 — root of the ONLY file storage (avatars). Cwd-relative
+    # like DATABASE_URL; public static serving roots at FILES_DIR/avatars.
+    FILES_DIR: str = "./files"
     # Signs the sqladmin session cookie (GH #247 §2.8). API sessions are
     # random opaque tokens — no SECRET_KEY involved there.
     SECRET_KEY: str = ""

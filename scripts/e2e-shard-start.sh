@@ -61,6 +61,17 @@ if [[ ! "$ABS_DB_PATH" = /* ]]; then
 fi
 export DATABASE_URL="sqlite+aiosqlite:///$ABS_DB_PATH"
 
+# GH #262 §6 — test-scoped avatar storage (FILES_DIR). Mirrors
+# e2e/fixtures/seed-reset.ts:resolveTestFilesDir (SHARD_ID branch) so the
+# backend serves/writes portraits into the SAME dir the Playwright reset wipes.
+# Shards must NOT share the dev ./files dir or each other's (cross-shard
+# avatar leaks + a wipe racing a live upload). Cwd-relative like DATABASE_URL;
+# uvicorn runs from $BACKEND_DIR, so resolve to an absolute path.
+ABS_FILES_DIR="$ROOT_DIR/backend/test_files_shard${SHARD_ID}"
+export FILES_DIR="$ABS_FILES_DIR"
+export TEST_FILES_DIR="$ABS_FILES_DIR"
+echo "[shard-$SHARD_ID] Files dir: $ABS_FILES_DIR"
+
 echo "[shard-$SHARD_ID] Starting stack: frontend=:$SHARD_PORT backend=:$BACKEND_PORT db=$ABS_DB_PATH"
 
 # #152: wipe shard DB so seed runs on an empty schema. alembic recreates
@@ -74,6 +85,16 @@ if [[ "$ABS_DB_PATH" != *"test_memo"* ]]; then
 fi
 rm -f "$ABS_DB_PATH"
 echo "[shard-$SHARD_ID] Wiped shard DB: $ABS_DB_PATH"
+
+# GH #262 §6 — wipe the shard's avatars dir together with the DB (only after
+# the test-DB guard above passes, so a rejected run touches no storage) so the
+# stack starts clean — seed users carry no avatars. The backend re-creates
+# FILES_DIR/avatars on boot (main.py lifespan).
+rm -rf "$ABS_FILES_DIR"
+
+# GH #264 — stale .next poisoning is solved by NEXT_DIST_DIR build isolation
+# (each shard compiles into its own .next-shard-<id>, exported above); the
+# legacy port-guarded wipe of the shared frontend/admin/.next is retired.
 
 # ── Start FastAPI backend ──────────────────────────────────────────────────
 # Backend starts first so Alembic can create/migrate tables.

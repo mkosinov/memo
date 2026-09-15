@@ -54,6 +54,10 @@ class ErrorCode(str, Enum):
     SPECIALTY_REQUIRED = "SPECIALTY_REQUIRED"    # 422 — мастер-секция без специальности
     COLOR_REQUIRED = "COLOR_REQUIRED"            # 422 — мастер-секция без цвета
 
+    # 413 / 415 — avatar uploads (GH #262 Task 2, spec §3.4)
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"            # 413 — over the 5 MB limit
+    FILE_INVALID_TYPE = "FILE_INVALID_TYPE"      # 415 — not JPEG/PNG/WebP
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -103,6 +107,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.POSITION_IS_SYSTEM: "Встроенная должность не удаляется",
     ErrorCode.SPECIALTY_REQUIRED: "Укажите специальность мастера",
     ErrorCode.COLOR_REQUIRED: "Укажите цвет мастера",
+    ErrorCode.FILE_TOO_LARGE: "Файл больше 5 МБ",
+    ErrorCode.FILE_INVALID_TYPE: "Поддерживаются только JPEG, PNG и WebP",
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

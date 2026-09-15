@@ -54,6 +54,10 @@ import {
   RecordViewResponseSchema,
   type RecordView,
   AuthMeSchema,
+  MasterSnapshotSchema,
+  MyProfileSchema,
+  MyProfileUpdateSchema,
+  ChangePasswordSchema,
   UserSettingsCreateSchema,
   UserSettingsResponseSchema,
 } from './schemas';
@@ -1671,5 +1675,114 @@ describe('UserSettings column rename (GH #266: column_order_masters → column_o
       column_order_staff: ['id-1'],
     });
     expect(withCols.column_order_staff).toEqual(['id-1']);
+  });
+});
+
+// ─── My profile (GH #262 spec §4 — mirrors backend src/schemas/my.py) ─────
+
+describe('MyProfileSchema (GH #262)', () => {
+  const validProfile = {
+    role: 'master',
+    has_staff: true,
+    has_master: true,
+    first_name: 'Анна',
+    last_name: 'Иванова',
+    avatar_url: null,
+    specialties: ['живопись', 'керамика'],
+    patronymic: null,
+    birth_date: null,
+    residence_address: null,
+    birth_place: null,
+    passport_series_number: null,
+    passport_issued_date: null,
+    passport_issued_by: null,
+    registration_address: null,
+  };
+
+  it('parses a full flat profile', () => {
+    const parsed = MyProfileSchema.parse(validProfile);
+    expect(parsed.role).toBe('master');
+    expect(parsed.has_staff).toBe(true);
+    expect(parsed.specialties).toEqual(['живопись', 'керамика']);
+  });
+
+  it('requires the status trio (role/has_staff/has_master)', () => {
+    const { role: _r, ...noRole } = validProfile;
+    expect(() => MyProfileSchema.parse(noRole)).toThrow();
+  });
+
+  it('date fields parse as YYYY-MM-DD strings', () => {
+    const parsed = MyProfileSchema.parse({
+      ...validProfile,
+      birth_date: '1990-05-01',
+      passport_issued_date: '2015-03-10',
+    });
+    expect(parsed.birth_date).toBe('1990-05-01');
+    expect(parsed.passport_issued_date).toBe('2015-03-10');
+  });
+});
+
+describe('MyProfileUpdateSchema (GH #262 — omitted=keep, null=clear)', () => {
+  it('every key is optional (omitted = keep current value)', () => {
+    const parsed = MyProfileUpdateSchema.parse({});
+    expect(parsed.first_name).toBeUndefined();
+    expect(parsed.patronymic).toBeUndefined();
+  });
+
+  it('explicit null clears a nullable column', () => {
+    const parsed = MyProfileUpdateSchema.parse({ patronymic: null });
+    expect(parsed.patronymic).toBeNull();
+  });
+
+  it('accepts specialties (read-only — server ignores it, #266 D5)', () => {
+    const parsed = MyProfileUpdateSchema.parse({ specialties: ['керамика'] });
+    expect(parsed.specialties).toEqual(['керамика']);
+  });
+
+  it('accepts avatar_url for round-tripping the response shape', () => {
+    const parsed = MyProfileUpdateSchema.parse({ avatar_url: '/api/v1/files/avatar/x.webp' });
+    expect(parsed.avatar_url).toBe('/api/v1/files/avatar/x.webp');
+  });
+
+  it('rejects an unknown key (backend extra=forbid)', () => {
+    expect(() => MyProfileUpdateSchema.parse({ nope: 1 })).toThrow();
+  });
+});
+
+describe('ChangePasswordSchema (GH #262)', () => {
+  it('requires both current and new password', () => {
+    expect(() => ChangePasswordSchema.parse({ current_password: 'a' })).toThrow();
+    expect(() => ChangePasswordSchema.parse({ new_password: 'b' })).toThrow();
+  });
+
+  it('parses the pair', () => {
+    const parsed = ChangePasswordSchema.parse({
+      current_password: 'old123',
+      new_password: 'new456',
+    });
+    expect(parsed.current_password).toBe('old123');
+    expect(parsed.new_password).toBe('new456');
+  });
+});
+
+describe('MasterSnapshotSchema.avatar_url (GH #262)', () => {
+  it('parses with avatar_url present (nullable, optional — old bodies lack it)', () => {
+    const withAvatar = MasterSnapshotSchema.parse({
+      first_name: 'Анна',
+      last_name: 'Иванова',
+      avatar_url: '/api/v1/files/avatar/abc.png',
+    });
+    expect(withAvatar.avatar_url).toBe('/api/v1/files/avatar/abc.png');
+    const without = MasterSnapshotSchema.parse({ first_name: 'Анна', last_name: 'Иванова' });
+    expect(without.avatar_url).toBeUndefined();
+  });
+
+  it('parses a null avatar_url', () => {
+    const parsed = MasterSnapshotSchema.parse({
+      first_name: 'Анна',
+      last_name: 'Иванова',
+      avatar_url: null,
+    });
+    expect(parsed.avatar_url).toBeNull();
   });
 });

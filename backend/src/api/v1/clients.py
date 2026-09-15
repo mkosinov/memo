@@ -6,7 +6,11 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from src.auth.permissions import require_permission, verify_fetch_metadata
+from src.auth.permissions import (
+    require_admin,
+    require_permission,
+    verify_fetch_metadata,
+)
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -49,6 +53,15 @@ _ServiceDep = Annotated[ClientService, Depends(_get_client_service)]
 # CSRF fetch-metadata secondary line (verify_fetch_metadata).
 _WRITE_GUARD = [
     Depends(require_permission("clients:write")),
+    Depends(verify_fetch_metadata),
+]
+# GH #263 D7: master's clients:write is CREATE-ONLY — mutations of an
+# EXISTING client (update/delete/archive/restore) stay admin-only. The
+# clients:write token is kept on the guard stack too (admin passes both;
+# the role check is what excludes master).
+_ADMIN_WRITE_GUARD = [
+    Depends(require_permission("clients:write")),
+    Depends(require_admin),
     Depends(verify_fetch_metadata),
 ]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
@@ -112,7 +125,7 @@ async def create_client(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.put("/{client_id}", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def update_client(
     client_id: str,
     data: ClientUpdate,
@@ -132,7 +145,7 @@ async def update_client(
     return client
 
 
-@router.patch("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.patch("/{client_id}", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def patch_client(
     client_id: str,
     data: ClientPatch,
@@ -152,7 +165,7 @@ async def patch_client(
     return client
 
 
-@router.delete("/{client_id}", status_code=204, dependencies=_WRITE_GUARD)
+@router.delete("/{client_id}", status_code=204, dependencies=_ADMIN_WRITE_GUARD)
 async def delete_client(
     client_id: str,
     service: _ServiceDep,
@@ -218,7 +231,7 @@ async def list_client_visitors(
     return [VisitorResponse.model_validate(v) for v in visitors]
 
 
-@router.post("/{client_id}/archive", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.post("/{client_id}/archive", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def archive_client(
     client_id: str,
     service: _ServiceDep,
@@ -243,7 +256,7 @@ async def archive_client(
     return await _refetch_or_404(service, session, client_id)
 
 
-@router.post("/{client_id}/restore", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.post("/{client_id}/restore", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def restore_client(
     client_id: str,
     service: _ServiceDep,

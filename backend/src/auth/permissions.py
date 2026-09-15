@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException
+
 # ``Request`` MUST stay a runtime import (not TYPE_CHECKING): FastAPI
 # resolves dependency signatures via get_type_hints at registration time.
 from starlette.requests import Request
@@ -34,11 +35,11 @@ from src.models.enums import UserRole
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-# Canonical token list (spec §3.5). Master (user-approved set, incl.
-# payments:read — «мастеру надо видеть какие записи уже оплачены»):
-# full working data (records, visits, visitors), read-only dictionaries
-# (masters, locations, services, tags, activities, photos), read-only
-# clients and payments. No materials, no management writes. Admin = everything.
+# Canonical token list (spec §3.5 + GH #263 T1 delta). The #263 master
+# gains payments:write / photos:write / clients:write — the per-master
+# SCOPE (src/auth/scope.py, D5/D6/D7) cuts these down to «own»/create-only
+# at the router layer; clients:write is create-only by router guards.
+# No materials, no management writes. Admin = everything.
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     UserRole.ADMIN.value: frozenset({"*"}),
     UserRole.MASTER.value: frozenset({
@@ -46,8 +47,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "visits:read", "visits:write",
         "visitors:read", "visitors:write",
         "masters:read", "locations:read", "services:read", "tags:read",
-        "activities:read", "photos:read",
-        "clients:read", "payments:read",
+        "activities:read", "photos:read", "photos:write",
+        "clients:read", "clients:write",
+        "payments:read", "payments:write",
     }),
 }
 
@@ -164,3 +166,19 @@ def require_permission(perm: str) -> Callable[..., Awaitable[AuthedUser]]:
         return authed
 
     return _guard
+
+
+async def require_admin(
+    authed: AuthedUser = Depends(require_session),
+) -> AuthedUser:
+    """Role check beyond the token matrix — admin ONLY.
+
+    Needed where a token master now holds must still not grant a route:
+    GH #263 D7 gives master ``clients:write`` as CREATE-ONLY, so the
+    client mutation routes (PUT/PATCH/DELETE/archive/restore) are pinned
+    to admin here instead of the token (they keep ``clients:write`` too —
+    admin passes both).
+    """
+    if authed.role != UserRole.ADMIN.value:
+        raise _forbidden()
+    return authed

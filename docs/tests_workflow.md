@@ -28,20 +28,25 @@ The full local suite (`pnpm test:all` via `scripts/test-all.sh`) uses **2 Playwr
 - `shard-rest` (port 3003 / backend 8002) — everything else
 
 Each shard stack is orchestrated by `scripts/test-all.sh`:
-1. Master DB (`test_memo.db`) is seeded if missing or has <5 tables
-2. Master DB is copied to per-shard DBs (`test_memo_shard{1,2}.db`)
-3. Each shard's backend starts (uvicorn on `:8001` / `:8002`)
-4. Backprop runs (maps API IDs to internal IDs) via shared `test_backprop.csv`
-5. Each shard's frontend starts (Next.js on `:3002` / `:3003`)
-6. Playwright runs with `reuseExistingServer: true` (skips the `webServer` config in shard mode — see the `SHARD_ID` conditional in `playwright.config.ts`)
-7. Cleanup kills all background processes and removes shard DBs
+ 1. Master DB (`test_memo.db`) is seeded if missing or has <5 tables
+ 2. Orphaned shard-port listeners are killed, then `frontend/admin/.next-shard-*` dirs are wiped unconditionally (a clean machine with nothing to wipe is a success; a failed wipe of an existing dir is a fail-fast)
+ 3. Master DB is copied to per-shard DBs (`test_memo_shard{1,2}.db`)
+ 4. Each shard's backend starts (uvicorn on `:8001` / `:8002`)
+ 5. Backprop runs (maps API IDs to internal IDs) via shared `test_backprop.csv`
+ 6. Each shard's frontend starts (Next.js on `:3002` / `:3003`, building into `.next-shard-N`)
+ 7. Playwright runs with `reuseExistingServer: true` (skips the `webServer` config in shard mode — see the `SHARD_ID` conditional in `playwright.config.ts`)
+ 8. Cleanup kills all background processes and removes shard DBs
 
 Each shard's servers start via `scripts/e2e-shard-start.sh`:
-- Sets `SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`
+- Sets `SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_DIST_DIR`
 - Backend starts in background, frontend in foreground
 - Waits for backend health check (Alembic runs migrations automatically during startup)
 - Seeds DB with test data (idempotent — skips if tables already exist)
 - Waits for frontend to respond on its port
+
+**Build isolation (GH #264):** each shard builds into its own `frontend/admin/.next-shard-N` (one per shard, recreated from scratch by every `test-all.sh` run — chunks never leak between shards or into the default `.next`). Contract: `e2e-shard-start.sh` is the sole producer of `NEXT_DIST_DIR` (`.next-shard-${SHARD_ID}`), consumed by `next.config.mjs` (`distDir: process.env.NEXT_DIST_DIR || '.next'`). The default `.next` belongs to the dev stack / standalone e2e — shards never read or wipe it.
+
+**Cleanup is bounded (GH #122):** the EXIT trap of `test-all.sh` runs `cleanup_shards` (`scripts/lib/shard-helpers.sh`): TERM to shard wrapper PIDs → bounded wait (10 s budget, 0.5 s poll) → `kill -9` survivors → control sweep by port **and** command mask (`next dev -p <port>` / `next-server (v` title / `uvicorn`, each gated on holding a shard port; no bare port kills, no global next-server pkill) → shard DBs removed. Any exit path — including Ctrl-C — finishes in ≤ ~15 s without hanging and without touching unrelated processes.
 
 **reuseExistingServer pattern:** When `SHARD_ID` is set, `playwright.config.ts` omits the `webServer` block entirely. This avoids a Playwright edge case where `reuseExistingServer` health check fails under load, causing `EADDRINUSE` when Playwright tries to start a second Next.js on the same port.
 

@@ -86,10 +86,12 @@ while true; do
     gh issue comment "$N" --body "auto-impl claim: host=$HOST_LABEL at $(date -Is)" >/dev/null 2>&1 \
         || { echo "$(date -Is) claim comment failed — skip"; continue; }
 
-    # тайбрейк гонки: через TIEBREAK_WAIT самый ранний claim должен быть нашим
+    # тайбрейк гонки: среди ЗАМЕЖКОВ ЗА ПОСЛЕДНИЕ 15 минут самый ранний — наш?
+    # (без окна «первый за всю историю» всегда побеждал бы древний замок и
+    # карточка никогда бы не бралась другим хостом)
     sleep "$TIEBREAK_WAIT"
     FIRST=$(gh issue view "$N" --json comments \
-        --jq '[.comments[] | select(.body | startswith("auto-impl claim:"))] | sort_by(.createdAt) | first | .body // empty' 2>/dev/null) || FIRST=""
+        --jq '[.comments[] | select(.body | startswith("auto-impl claim:")) | select((now - (.createdAt | fromdateiso8601)) < 900)] | sort_by(.createdAt) | first | .body // empty' 2>/dev/null) || FIRST=""
     case "$FIRST" in
         *"host=$HOST_LABEL "*) : ;;
         *) echo "$(date -Is) #$N lost claim race — back off"; continue ;;

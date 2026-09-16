@@ -770,6 +770,52 @@ async def test_patch_position_set_applies_role_template(db_session) -> None:
     assert role == "admin"
 
 
+async def test_patch_explicit_role_without_positions_applies(db_session) -> None:
+    """PATCH role-only branch: an explicit role with NO position-set change
+    still applies (ручная правка роли остаётся) — the template is not fired
+    (no anchors sent, none consulted)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+    await db_session.execute(
+        staff_positions.insert().values(staff_id=staff.id, position_id="master")
+    )
+    await db_session.flush()
+    await _add_user(db_session, staff.id, role="admin")
+
+    patched = await get_staff_service().patch(
+        db_session, staff.id, StaffPatch(role="master"),
+    )
+
+    assert patched is not None
+    # Positions untouched by the role-only PATCH...
+    linked = (await db_session.execute(
+        select(staff_positions.c.position_id)
+        .where(staff_positions.c.staff_id == staff.id)
+    )).scalars().all()
+    assert linked == ["master"]
+    # ...and the explicit role applied.
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "master"
+
+
+async def test_patch_without_role_keys_keeps_role(db_session) -> None:
+    """PATCH without role and without positions → role untouched."""
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="admin")
+
+    patched = await get_staff_service().patch(
+        db_session, staff.id, StaffPatch(first_name="В"),
+    )
+
+    assert patched is not None
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "admin"
+
+
 async def test_update_explicit_role_beats_template(db_session) -> None:
     """An explicit role in the body beats the position template."""
     await _add_position(db_session, id="master", title="Мастер", is_system=True)

@@ -466,11 +466,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         positions_sent = "position_ids" in payload
         position_ids = payload.pop("position_ids", None)
         payload.pop("master", None)
-        # Three-state role (GH #263 D10): absent = keep the role as is;
-        # sent = the explicit value wins over the template (a null body
-        # value carries no override — the template decides when the set
-        # changes). ``role_sent`` tracks key presence.
-        role_sent = "role" in payload
+        # Role (GH #263 D10): absent or null body value = no override →
+        # the template decides when the set changes; a sent value wins.
+        # ``explicit_role is not None`` below already implies the key was
+        # sent with a value.
         payload.pop("role", None)
         return await self._patch_composite(
             db_session, id, payload,
@@ -478,7 +477,6 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             master_section=master_section,
             positions_sent=positions_sent,
             position_ids=cast("list[str] | None", position_ids),
-            role_sent=role_sent,
             explicit_role=data.role,
         )
 
@@ -493,7 +491,6 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         master_section: MasterSection | None,
         positions_sent: bool,
         position_ids: list[str] | None,
-        role_sent: bool = False,
         explicit_role: UserRole | None = None,
     ) -> StaffResponse | None:
         staff = await self._repository.get(db_session, self._model, id)
@@ -511,7 +508,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             await self._apply_role_template(
                 db_session, id, position_ids, explicit_role=explicit_role
             )
-        elif role_sent and explicit_role is not None:
+        elif explicit_role is not None:
             # Role sent WITHOUT a position-set change — manual override only
             # (ручная правка роли остаётся: the body beats the template).
             # Empty position ids → template yields None → explicit applies.

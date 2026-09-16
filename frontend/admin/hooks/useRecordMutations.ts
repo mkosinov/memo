@@ -164,22 +164,33 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       // 3. Default price from first tariff if any
       const firstTariff = serviceTariffs[0];
 
-      // 4. Create record
+      // 4. Create record — #257 unified visitors model: the unfilled tail is
+      //    appended to `visits` as ANONYMOUS visit elements (no visitor_id);
+      //    default tariff/price = first tariff of the service (same default as
+      //    the draft row «+ Добавить» and the booking form). seats = len(visits)
+      //    — derived on the backend; no separate counter field exists anymore.
       await createRecord({
         activity_id: activityId,
         client_id: clientId,
-        anonym_visits: input.seats,
-        visits: visitData.map((vd) => {
-          // Lookup tariff price by id; fall back to firstTariff
-          const tariff = vd.tariffId
-            ? serviceTariffs.find((t) => t.id === vd.tariffId)
-            : firstTariff;
-          return {
-            visitor_id: vd.visitorId,
-            tariff_id: vd.tariffId || undefined,
-            price: tariff?.price ?? 0,
-          };
-        }),
+        visits: [
+          ...visitData.map((vd) => {
+            // Lookup tariff price by id; fall back to firstTariff
+            const tariff = vd.tariffId
+              ? serviceTariffs.find((t) => t.id === vd.tariffId)
+              : firstTariff;
+            return {
+              visitor_id: vd.visitorId,
+              tariff_id: vd.tariffId || undefined,
+              price: tariff?.price ?? 0,
+            };
+          }),
+          ...Array.from({ length: input.seats }, () => ({
+            // Незаполненный хвост — анонимные визиты: visitor_id отсутствует,
+            // тариф/цена дефолтные (US1); бэкенд резолвит отсутствие как anonymous.
+            tariff_id: firstTariff?.id || undefined,
+            price: firstTariff?.price ?? 0,
+          })),
+        ],
       });
 
       // 5. Invalidate readers of the new record
@@ -325,15 +336,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [recordId, queryClient, invalidateRecordAndLists],
   );
 
-  const updateAnonymVisits = useCallback(
-    async (recordId: string, anonymVisits: number) => {
-      await patchRecord(recordId, { anonym_visits: anonymVisits });
-      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
-      invalidateRecordAndLists();
-    },
-    [invalidateRecordAndLists],
-  );
-
   const updateVisitStatus = useCallback(
     async (visitId: string, status: string) => {
       await apiUpdateVisitStatus(visitId, status);
@@ -388,6 +390,64 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await apiDeleteVisit(visitId);
     },
     [recordId, queryClient],
+  );
+
+  // ── #257 unified visitors model: anonymous seats are visits with visitor_id = null ──
+
+  /**
+   * Stepper +1 (US2): append ONE anonymous visit (visitor_id = null) with the
+   * service's default tariff (first tariff — the same default as the draft row
+   * and the booking form). Capacity is enforced by the backend VisitService.
+   * Cache shape mirrors `addVisit` minus the createVisitor step.
+   */
+  const addAnonymousVisit = useCallback(
+    async (defaultTariff?: { id: string; price: number }) => {
+      const visit = await createVisit({
+        record_id: recordId,
+        visitor_id: null,
+        tariff_id: defaultTariff?.id || undefined,
+        price: defaultTariff?.price ?? 0,
+      });
+      // Optimistic cache update — helper syncs canonical ['record',id] + every ['records',...] list.
+      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
+      upsertVisit(queryClient, recordId, visit);
+      invalidateRecordAndLists();
+      return visit;
+    },
+    [recordId, queryClient, invalidateRecordAndLists],
+  );
+
+  /**
+   * Stepper conversion (D7/US2): bind an anonymous visit to a NEW visitor via a
+   * single point PATCH /visits/{id} {visitor_id} — never a visits-array rewrite
+   * (D7: no 409 even at full capacity). Visitor creation mirrors
+   * `addVisitorToRecord` (fetchQuery record + client_id guard); the failure
+   * rollback deletes the freshly created visitor — between createVisitor and
+   * the PATCH no visit↔visitor link exists, so deletion cannot orphan visits.
+   */
+  const convertAnonymousVisit = useCallback(
+    async (visitId: string, name: string, age: number | null) => {
+      const record = await queryClient.fetchQuery({
+        queryKey: qk.record(recordId),
+        queryFn: () => import('@memo/api-client').then((m) => m.getRecord(recordId)),
+      });
+      const clientId = record.client_id;
+      if (!clientId) throw new Error('Record has no client');
+
+      const visitor = await createVisitor({ client_id: clientId, name, age: age ?? undefined });
+      try {
+        const visit = await patchVisit(visitId, { visitor_id: visitor.id });
+        // Reader: ClientInfoTab visitors list (['visitors', clientId]) — pattern of addVisit.
+        queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
+        return visit;
+      } catch (e) {
+        // Rollback: do not leave an orphan visitor behind.
+        await apiDeleteVisitor(visitor.id);
+        queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
+        throw e;
+      }
+    },
+    [recordId, queryClient, patchVisit],
   );
 
   const patchPayment = useCallback(
@@ -491,11 +551,12 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     addPayment,
     deletePayment,
     addVisitorToRecord,
-    updateAnonymVisits,
     updateVisitStatus,
     addVisit,
     patchVisit,
     deleteVisit,
+    addAnonymousVisit,
+    convertAnonymousVisit,
     patchPayment,
     deleteVisitDeferred,
     deletePaymentDeferred,

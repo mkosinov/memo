@@ -421,9 +421,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
    * Stepper conversion (D7/US2): bind an anonymous visit to a NEW visitor via a
    * single point PATCH /visits/{id} {visitor_id} — never a visits-array rewrite
    * (D7: no 409 even at full capacity). Visitor creation mirrors
-   * `addVisitorToRecord` (fetchQuery record + client_id guard); the failure
-   * rollback deletes the freshly created visitor — between createVisitor and
-   * the PATCH no visit↔visitor link exists, so deletion cannot orphan visits.
+   * `addVisitorToRecord` (fetchQuery record + client_id guard). On PATCH
+   * failure the rollback re-fetches the record first: if the PATCH landed
+   * server-side the bound visitor is KEPT (a blind delete would cascade-destroy
+   * the visit); otherwise the fresh visitor is deleted (best-effort — never
+   * masking the original error).
    */
   const convertAnonymousVisit = useCallback(
     async (visitId: string, name: string, age: number | null) => {
@@ -441,8 +443,33 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
         return visit;
       } catch (e) {
-        // Rollback: do not leave an orphan visitor behind.
-        await apiDeleteVisitor(visitor.id);
+        // Reconcile before rollback (review fix): a transport error may hide a
+        // COMMITTED PATCH — a blind visitor deletion would then trigger the
+        // backend cascade (VisitorService._delete_cascade) and destroy the
+        // now-linked anonymous visit. The rollback is best-effort: its failure
+        // must never mask the original PATCH error, and ['visitors'] must be
+        // invalidated either way.
+        try {
+          const fresh = await queryClient.fetchQuery({
+            queryKey: qk.record(recordId),
+            queryFn: () => import('@memo/api-client').then((m) => m.getRecord(recordId)),
+          });
+          const freshVisit = fresh.visits.find((v) => v.id === visitId);
+          if (freshVisit && freshVisit.visitor_id === visitor.id) {
+            // The PATCH actually landed → conversion succeeded; return the
+            // reconciled visit (simplest caller contract: success = bound visit).
+            // Reader: ClientInfoTab visitors list — pattern of addVisit.
+            queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
+            return freshVisit;
+          }
+          // Visit still anonymous (or gone) → the visitor is a safe orphan.
+          await apiDeleteVisitor(visitor.id);
+        } catch {
+          // Swallow rollback failures — the original error below is what the
+          // caller must see.
+        }
+        // Reader: ClientInfoTab visitors list — changed either way (created;
+        // possibly deleted by the rollback).
         queryClient.invalidateQueries({ queryKey: qk.visitors(clientId) });
         throw e;
       }

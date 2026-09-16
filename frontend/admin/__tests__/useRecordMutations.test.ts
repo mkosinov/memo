@@ -1706,6 +1706,53 @@ describe('useRecordMutations', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
     });
 
+    it('rollback failure → ORIGINAL PATCH error propagates, [visitors] still invalidated', async () => {
+      // PATCH fails AND the rollback deleteVisitor fails too.
+      mockPatchVisit.mockRejectedValue(new Error('patch failed') as never);
+      mockDeleteVisitor.mockRejectedValue(new Error('delete failed') as never);
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('patch failed');
+
+      // The rollback was attempted but its failure must not mask the original
+      // error, and the visitors invalidation must NOT be skipped.
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new');
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('ambiguous failure — PATCH landed server-side → visitor kept (no cascade), resolves with the bound visit', async () => {
+      // 1st fetch (hook start): visit still anonymous.
+      // 2nd fetch (reconcile in catch): the PATCH actually landed — visit bound.
+      mockGetRecord
+        .mockResolvedValueOnce({ ...mockRecordResponse, visits: [mockAnonymousVisitResponse] } as never)
+        .mockResolvedValueOnce({
+          ...mockRecordResponse,
+          visits: [{ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' }],
+        } as never);
+      mockPatchVisit.mockRejectedValue(new Error('transport down') as never);
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+      });
+
+      // Blind delete would cascade-destroy the now-linked visit — must NOT happen.
+      expect(mockDeleteVisitor).not.toHaveBeenCalled();
+      // Reconciled success: the visit IS bound server-side.
+      expect(returned).toEqual({ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' });
+      // The client's visitors list changed either way — still invalidated.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
     it('record without client → guard throws, no visitor created, no PATCH', async () => {
       mockGetRecord.mockResolvedValue({ ...mockRecordResponse, client_id: null } as never);
       const { wrapper } = createQueryClientWrapper();

@@ -5,9 +5,15 @@ import { ServicesTable } from './components/ServicesTable';
 import { MaterialsTable } from './components/MaterialsTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
 import { MaterialsProvider } from '@/contexts/MaterialsContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function ServicesPage() {
   const [view, setView] = useState<'services' | 'materials'>('services');
+  // GH #263 T9: the «Материалы» block is the materials surface on this page —
+  // without materials:read (master) the toggle must not render; switching to
+  // it would fire a 403 fetch. Admin keeps both tabs (no regression).
+  const { can } = useAuth();
+  const canReadMaterials = can('materials:read');
 
   return (
     <div className="p-4 space-y-4">
@@ -30,16 +36,18 @@ export default function ServicesPage() {
           >
             Услуги
           </button>
-          <button
-            onClick={() => setView('materials')}
-            className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
-            style={{
-              backgroundColor: view === 'materials' ? 'var(--brand)' : 'transparent',
-              color: view === 'materials' ? 'white' : 'var(--ink-light)',
-            }}
-          >
-            Материалы
-          </button>
+          {canReadMaterials && (
+            <button
+              onClick={() => setView('materials')}
+              className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+              style={{
+                backgroundColor: view === 'materials' ? 'var(--brand)' : 'transparent',
+                color: view === 'materials' ? 'white' : 'var(--ink-light)',
+              }}
+            >
+              Материалы
+            </button>
+          )}
         </div>
       </div>
 

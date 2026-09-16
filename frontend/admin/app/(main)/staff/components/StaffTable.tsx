@@ -84,7 +84,8 @@ export function StaffTable() {
       sort_order: data.sort_order,
       master: data.master ? { specialty: data.master.specialty, color: data.master.color } : null,
       position_ids: data.position_ids,
-      // D6: create-only account flag ({phone, password} | false).
+      // D6: create-only account flag ({phone, password, role?} | false);
+      // D10: role — a sent value beats the backend position template.
       create_user: data.create_user,
     };
     try {
@@ -114,6 +115,9 @@ export function StaffTable() {
           }
         : null,
       position_ids: data.position_ids,
+      // D10: manual role override for the linked account — sent only when the
+      // field has a value; absent → the backend position template decides.
+      ...(data.role !== undefined ? { role: data.role } : {}),
     };
     try {
       await updateStaff.mutateAsync({ id: editStaff.id, data: payload });

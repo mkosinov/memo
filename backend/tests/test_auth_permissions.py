@@ -30,14 +30,17 @@ from src.models.enums import UserRole
 
 pytestmark = pytest.mark.pure_unit
 
-# The canonical master token list — spec §3.5, verbatim.
+# The canonical master token list — GH #263 T1 (base: spec §3.5 #247 + the
+# #263 delta: payments:write / photos:write / clients:write; scope D5/D6/D7
+# cuts the writes down to «own», clients:write = create-only).
 SPEC_MASTER_PERMISSIONS = {
     "records:read", "records:write",
     "visits:read", "visits:write",
     "visitors:read", "visitors:write",
     "masters:read", "locations:read", "services:read", "tags:read",
-    "activities:read", "photos:read",
-    "clients:read", "payments:read",
+    "activities:read", "photos:read", "photos:write",
+    "clients:read", "clients:write",
+    "payments:read", "payments:write",
 }
 
 
@@ -73,9 +76,24 @@ class TestRolePermissions:
         perms = ROLE_PERMISSIONS[UserRole.MASTER.value]
         assert has_permission(perms, "payments:read") is True
 
-    def test_master_lacks_payments_write(self) -> None:
+    def test_master_delta_three_new_write_tokens(self) -> None:
+        """GH #263 T1: payments:write + photos:write + clients:write granted.
+
+        Scope (D5/D6/D7) — not the matrix — cuts these down to «own»/
+        create-only; that arrives with the router tasks.
+        """
         perms = ROLE_PERMISSIONS[UserRole.MASTER.value]
-        assert has_permission(perms, "payments:write") is False
+        for token in ("payments:write", "photos:write", "clients:write"):
+            assert has_permission(perms, token) is True, token
+
+    def test_master_still_lacks_materials_and_user_writes(self) -> None:
+        """The delta must NOT leak into admin-only surfaces."""
+        perms = ROLE_PERMISSIONS[UserRole.MASTER.value]
+        assert has_permission(perms, "materials:read") is False
+        assert has_permission(perms, "materials:write") is False
+        assert has_permission(perms, "masters:write") is False
+        assert has_permission(perms, "staff:write") is False
+        assert has_permission(perms, "records:delete") is False
 
     def test_master_lacks_materials_read(self) -> None:
         perms = ROLE_PERMISSIONS[UserRole.MASTER.value]

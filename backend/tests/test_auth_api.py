@@ -208,7 +208,9 @@ class TestLogin:
             "avatar_url": None,
         }
         assert "records:read" in body["permissions"]
-        assert "payments:write" not in body["permissions"]
+        # GH #263 T1 delta: master now HOLDS payments:write (scope cuts it
+        # to own records' payments at the router layer, D5).
+        assert "payments:write" in body["permissions"]
 
     def test_login_wrong_password_401_invalid_credentials(self, anon_client, _admin_user) -> None:
         resp = _login(anon_client, _admin_user["phone"], password="wrong-password")
@@ -327,7 +329,9 @@ def guarded_app(app):
 
     The route lives ONLY in tests — production routers stay clean (T7
     applies the guards broadly). Module-scoped: one mount, reused by the
-    three smoke tests.
+    three smoke tests. The probed token is ``materials:read`` — still
+    admin-only after the GH #263 T1 matrix delta (payments:write etc.
+    moved to master).
     """
     from fastapi import APIRouter, Depends
 
@@ -335,7 +339,7 @@ def guarded_app(app):
 
     smoke = APIRouter()
 
-    @smoke.post("/_guard_smoke", dependencies=[Depends(require_permission("payments:write"))])
+    @smoke.post("/_guard_smoke", dependencies=[Depends(require_permission("materials:read"))])
     async def _guard_smoke():
         return {"ok": True}
 
@@ -344,8 +348,8 @@ def guarded_app(app):
 
 
 class TestRequirePermissionSmoke:
-    """``require_permission("payments:write")`` — anonymous 401, admin 200,
-    master 403 (admin-only permission, spec §3.5 matrix)."""
+    """``require_permission("materials:read")`` — anonymous 401, admin 200,
+    master 403 (admin-only permission, GH #263 T1 matrix)."""
 
     ENDPOINT = "/api/v1/_guard_smoke"
 

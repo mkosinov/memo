@@ -881,6 +881,76 @@ async def sample_visits(api_client, db_session):
     return visits
 
 
+# ─── Master test client (GH #263 T2) ────────────────────────────────────────
+
+
+def insert_master_user(
+    phone: str, password_hash: str, with_masters_row: bool = True
+) -> dict:
+    """Insert staff card (+ masters extension) + users row for a master (T2).
+
+    Returns {id, phone, staff_id}. ``with_masters_row=False`` → staff card
+    WITHOUT the masters extension (empty-scope master). Real masters row →
+    the scoped case: ``master_key = staff_id``.
+    """
+    import uuid as _uuid
+
+    staff_id = f"staff-{_uuid.uuid4().hex[:8]}"
+    query_db_params(
+        "INSERT OR IGNORE INTO staff (id, first_name, last_name, "
+        "sort_order, is_active, created_at, updated_at) "
+        "VALUES (:id, 'Тест', 'Мастеров', 0, 1, "
+        "datetime('now'), datetime('now'))",
+        {"id": staff_id},
+    )
+    if with_masters_row:
+        query_db_params(
+            "INSERT OR IGNORE INTO masters (staff_id, specialty, color, "
+            "is_active, created_at, updated_at) "
+            "VALUES (:id, 'живопись', '#5B8C7A', 1, "
+            "datetime('now'), datetime('now'))",
+            {"id": staff_id},
+        )
+    user = insert_user(phone, password_hash, role="master", master_id=staff_id)
+    return {**user, "staff_id": staff_id}
+
+
+@pytest.fixture
+def make_master(app, _admin_hash):
+    """Factory: a scoped master user + a logged-in TestClient for it.
+
+    Usage::
+
+        master = make_master()                    # scoped master (real key)
+        master["client"].get("/api/v1/records")   # master's own view
+        master["staff_id"]                        # = master_key = activities.master_id
+
+    Creating a purpose-built master (not the seed one) keeps tests
+    self-contained: the suite composes its own activities/records via
+    ``create_activity(master_id=master["staff_id"], ...)``.
+    """
+    import uuid as _uuid
+
+    from src.auth.passwords import hash_password
+
+    def factory(phone: str | None = None, with_masters_row: bool = True) -> dict:
+        phone = phone or f"+7999{99000000 + _uuid.uuid4().int % 999999:08d}"
+        password = "master-scope-1"
+        row = insert_master_user(
+            phone,
+            hash_password(password),
+            with_masters_row=with_masters_row,
+        )
+        c = TestClient(app)
+        resp = c.post(
+            "/api/v1/auth/login", json={"phone": phone, "password": password}
+        )
+        assert resp.status_code == 200, f"master login failed: {resp.text}"
+        return {**row, "client": c}
+
+    return factory
+
+
 def query_db(sql: str) -> list[dict]:
     """Execute SQL against the test database.
 
@@ -895,6 +965,24 @@ def query_db(sql: str) -> list[dict]:
     conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def query_db_params(sql: str, params: dict | None = None) -> None:
+    """Execute a parameterized WRITE against the test database (no results).
+
+    The bound-parameter variant of ``query_db`` for writes: values never
+    splice into the SQL text (GH #263 review — suites were re-importing a
+    private helper for exactly this). Usage::
+
+        query_db_params(
+            "INSERT INTO staff (id, first_name) VALUES (:id, :name)",
+            {"id": staff_id, "name": "Ольга"},
+        )
+    """
+    conn = sqlite3.connect(_db_file.name)
+    conn.execute(sql, params or {})
+    conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
+    conn.close()
 
 
 def insert_user(

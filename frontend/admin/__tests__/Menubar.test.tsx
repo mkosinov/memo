@@ -323,3 +323,70 @@ describe('Menubar user block (GH #262 §5.1)', () => {
     expect(screen.queryByText('Ольга Середа')).not.toBeInTheDocument();
   });
 });
+
+// ─── GH #263 T9: menu filtering by role ───────────────────────────────────
+// Master loses the admin-only destinations: Клиенты (nav) + Сотрудники,
+// Локации, Теги, Должности (directories). Allowed items (Расписание, Записи,
+// Услуги, Фото) and the #262 bottom block stay untouched.
+
+describe('Menubar role filtering (GH #263)', () => {
+  beforeEach(() => {
+    vi.setSystemTime(MOCK_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  function renderAsMaster() {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({ role: 'master' as const }),
+    );
+    renderWithProviders();
+  }
+
+  it('master does NOT see the Клиенты nav item', () => {
+    renderAsMaster();
+    expect(screen.queryByRole('link', { name: 'Клиенты' })).not.toBeInTheDocument();
+  });
+
+  it('master does NOT see Сотрудники/Локации/Теги/Должности in directories', () => {
+    renderAsMaster();
+    fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
+    expect(screen.queryByRole('link', { name: 'Сотрудники' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Локации' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Теги' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Должности' })).not.toBeInTheDocument();
+  });
+
+  it('master still sees allowed items: Расписание, Записи, Услуги, Фото', () => {
+    renderAsMaster();
+    expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Записи' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
+    expect(screen.getByRole('link', { name: 'Услуги' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Фото' })).toBeInTheDocument();
+  });
+
+  it('master does NOT see the Мастера collapsible button', () => {
+    renderAsMaster();
+    expect(screen.queryByRole('button', { name: 'Мастера' })).not.toBeInTheDocument();
+  });
+
+  it('master keeps the #262 bottom block (user menu + collapse + version)', () => {
+    renderAsMaster();
+    expect(screen.getByRole('button', { name: 'Меню пользователя' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Свернуть|Развернуть/i })).toBeInTheDocument();
+    expect(screen.getByText(/v0\.0\.1/i)).toBeInTheDocument();
+  });
+
+  it('admin keeps ALL items (no regression)', () => {
+    mockUseAuth.mockReturnValue(mockAuthState());
+    renderWithProviders();
+    expect(screen.getByRole('link', { name: 'Клиенты' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
+    expect(screen.getByRole('link', { name: 'Сотрудники' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
+  });
+});

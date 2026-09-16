@@ -108,6 +108,35 @@ async def _user_presence(
     return {staff_id: True for (staff_id,) in rows.all()}
 
 
+# GH #263 D10 — role template anchored on the FIXED system position ids
+# (never on title, D4 #266: titles are freely editable). Seniority:
+# admin > master — several anchored positions collapse to the senior one.
+_POSITION_ROLE_TEMPLATE: dict[str, UserRole] = {
+    "admin": UserRole.ADMIN,
+    "master": UserRole.MASTER,
+}
+
+
+def _template_role(position_ids: Sequence[str]) -> UserRole | None:
+    """Highest template role among *position_ids* (admin > master).
+
+    ``None`` = none of the anchored positions present — «прочие должности
+    роль не трогают». Deliberate edge (D10): a set that LOSES master/admin
+    also yields ``None`` → the linked account keeps its current role
+    (removal is not a downgrade; roles are manual outside the template).
+    """
+    roles = [
+        _POSITION_ROLE_TEMPLATE[pid]
+        for pid in dict.fromkeys(position_ids)
+        if pid in _POSITION_ROLE_TEMPLATE
+    ]
+    if UserRole.ADMIN in roles:
+        return UserRole.ADMIN
+    if roles:
+        return UserRole.MASTER
+    return None
+
+
 def _require_section_fields(section: MasterSection | None) -> None:
     """D5: a present master section must carry a non-blank specialty + color.
 
@@ -346,19 +375,29 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
                 )
             )
 
-        # 4. Account checkbox (D6, create-only). Role: a card WITH a master
-        # section is a schedule master; without — admin (#247 two roles).
+        # 4. Account checkbox (D6, create-only). Role (GH #263 D10):
+        # explicit role in the body wins (ручная правка); otherwise the
+        # position template (master → master, admin → admin, senior
+        # admin > master); no anchored position → the legacy #247 fallback
+        # (master section → master, else admin) keeps bare cards sensible.
         if data.create_user:
             password = validate_password(data.create_user.password)
+            template = _template_role(data.position_ids)
+            if data.create_user.role is not None:
+                role: UserRole = data.create_user.role
+            elif template is not None:
+                role = template
+            else:
+                role = (
+                    UserRole.MASTER
+                    if data.master is not None
+                    else UserRole.ADMIN
+                )
             db_session.add(
                 User(
                     phone=data.create_user.phone,
                     password_hash=hash_password(password),
-                    role=(
-                        UserRole.MASTER.value
-                        if data.master is not None
-                        else UserRole.ADMIN.value
-                    ),
+                    role=role.value,
                     staff_id=staff.id,
                 )
             )
@@ -405,6 +444,13 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         # 3. Positions full replace.
         await self._replace_positions(db_session, id, data.position_ids)
 
+        # 4. Role template (GH #263 D10): position set is part of the PUT
+        # contract → the linked account follows the template unless the
+        # body carries an explicit role.
+        await self._apply_role_template(
+            db_session, id, data.position_ids, explicit_role=data.role
+        )
+
         await db_session.flush()
         return await self.get(db_session, id)
 
@@ -420,12 +466,18 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         positions_sent = "position_ids" in payload
         position_ids = payload.pop("position_ids", None)
         payload.pop("master", None)
+        # Role (GH #263 D10): absent or null body value = no override →
+        # the template decides when the set changes; a sent value wins.
+        # ``explicit_role is not None`` below already implies the key was
+        # sent with a value.
+        payload.pop("role", None)
         return await self._patch_composite(
             db_session, id, payload,
             master_sent=master_sent,
             master_section=master_section,
             positions_sent=positions_sent,
             position_ids=cast("list[str] | None", position_ids),
+            explicit_role=data.role,
         )
 
     @transactional
@@ -439,6 +491,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         master_section: MasterSection | None,
         positions_sent: bool,
         position_ids: list[str] | None,
+        explicit_role: UserRole | None = None,
     ) -> StaffResponse | None:
         staff = await self._repository.get(db_session, self._model, id)
         if staff is None:
@@ -452,6 +505,16 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             )
         if positions_sent and position_ids is not None:
             await self._replace_positions(db_session, id, position_ids)
+            await self._apply_role_template(
+                db_session, id, position_ids, explicit_role=explicit_role
+            )
+        elif explicit_role is not None:
+            # Role sent WITHOUT a position-set change — manual override only
+            # (ручная правка роли остаётся: the body beats the template).
+            # Empty position ids → template yields None → explicit applies.
+            await self._apply_role_template(
+                db_session, id, [], explicit_role=explicit_role
+            )
 
         await db_session.flush()
         return await self.get(db_session, id)
@@ -533,6 +596,36 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             if section.archived is not None:
                 ext.is_active = not section.archived
         mark_changed("masters")
+
+    async def _apply_role_template(
+        self,
+        db_session: AsyncSession,
+        staff_id: str,
+        position_ids: Sequence[str],
+        *,
+        explicit_role: UserRole | None = None,
+    ) -> None:
+        """GH #263 D10 — the position set templates the linked account role.
+
+        Applied when the position set changes (PUT always carries the set;
+        PATCH only when ``position_ids`` was sent). Template = highest
+        anchor (admin > master); explicit ``role`` in the request body
+        beats the template (ручная правка роли остаётся). No anchored
+        position → the role is NOT touched (СММ и пользовательские
+        должности не влияют; losing master/admin is not a downgrade).
+
+        No linked account → nothing to template (no-op).
+        """
+        role = explicit_role if explicit_role is not None else _template_role(position_ids)
+        if role is None:
+            return
+        result = await db_session.execute(
+            update(User)
+            .where(User.staff_id == staff_id)
+            .values(role=role.value)
+        )
+        if result.rowcount:
+            mark_changed("users")
 
     async def _assert_section_removable(
         self, db_session: AsyncSession, staff_id: str

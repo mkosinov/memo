@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from fastapi import HTTPException
-from sqlalchemy import delete, or_, select
+from sqlalchemy import ColumnElement, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -49,13 +49,45 @@ def _merged_owner_conflict(existing: Photo, changes: dict) -> str | None:
     return ", ".join(active) if len(active) > 1 else None
 
 
+def _activity_scope_predicate(master_key: str | None) -> ColumnElement[bool] | None:
+    """Per-master photo scope as a correlated EXISTS (GH #263 T5).
+
+    «Photo → activity → ``activities.master_id``»: a photo is visible to a
+    scoped master only when its ``activity_id`` points at an activity whose
+    ``master_id`` equals ``master_key``. Photos owned by clients / services /
+    locations and owner-less photos have no activity_id — the correlated
+    subselect matches nothing for them, so they are invisible (D6). The
+    empty-scope sentinel (master without a masters row) matches a
+    deliberately EMPTY set — never «the whole studio» (D1).
+
+    ``master_key=None`` (admin / anonymous) → ``None``: no predicate, the
+    caller adds no scope condition. EXISTS (not a JOIN) so the
+    service_id-filter LEFT JOIN path in ``list`` stays untouched.
+    ``.correlate(Photo)`` pins the correlation to the photos row — without
+    it, when ``list`` ALSO joins ``Activity`` (the service_id filter),
+    auto-correlation would bind the EXISTS to that join and blow up with
+    «returned no FROM clauses».
+    """
+    if master_key is None:
+        return None
+    return exists(
+        select(Activity.id)
+        .where(
+            Activity.id == Photo.activity_id,
+            Activity.master_id == master_key,
+        )
+        .correlate(Photo)
+    )
+
+
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
     """Extended photo service with tag handling + paginated list."""
 
     NOT_NULL_FIELDS = {"filename", "is_public"}
 
     async def list(
-        self, db_session: AsyncSession, params: PhotoListParams
+        self, db_session: AsyncSession, params: PhotoListParams,
+        master_key: str | None = None,
     ) -> tuple[list[PhotoResponse], int]:
         """Paginated photo list riding the repo row core (GH #213 §5.2).
 
@@ -68,6 +100,14 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         slice; ordering arrives via its ``order_by=`` parameter (the
         ``RecordService.list`` convention).
 
+        GH #263 T5: a scoped master (``master_key`` not ``None``) gets the
+        EXISTS-ветка folded in — only photos attached (via
+        ``activity_id``) to HIS activities; client/service/location-owned
+        and owner-less photos are invisible (D6). ``master_key=None``
+        (admin) → no scope condition. The scope is conjunctive with the
+        query params; the LEFT JOIN path of the service_id filter is
+        untouched.
+
         Returns ``(items, total)``; the router assembles the
         ``PaginatedResponse`` envelope echoing the client's page/per_page.
         """
@@ -75,6 +115,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
 
         conds = []
+        scope = _activity_scope_predicate(master_key)
+        if scope is not None:
+            conds.append(scope)
         if params.q is not None:
             conds.append(search_predicate(params.q, [SearchField(column=Photo.filename, kind="substring")]))
         if params.client_id is not None:
@@ -130,6 +173,39 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         if orm is None:
             return None
         return self._response_schema.model_validate(orm)
+
+    async def get_scoped(
+        self, db_session: AsyncSession, id: str, master_key: str | None
+    ) -> Photo | None:
+        """Point get with the per-master scope in ONE query (GH #263 T5).
+
+        Scope: photo → activity (correlated EXISTS) — чужой, owner-less and
+        client/service/location-owned photos are indistinguishable from
+        missing (``None`` → the route renders 404; 404-fast-path, plan T7).
+        ``master_key=None`` (admin) → unfiltered. Tags stay lazy: the ORM
+        object feeds a session flush/check, not a response.
+        """
+        stmt = select(Photo).where(Photo.id == id)
+        scope = _activity_scope_predicate(master_key)
+        if scope is not None:
+            stmt = stmt.where(scope)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
+
+    async def get_activity_scoped(
+        self, db_session: AsyncSession, activity_id: str, master_key: str | None
+    ) -> Activity | None:
+        """Target-activity owner gate for create / PUT / PATCH (GH #263 T5).
+
+        ONE query on ``activities``: foreign (or nonexistent) activity_id →
+        ``None`` → the route renders the same 404 as «родитель не найден».
+        Reuses the ActivityService.get_scoped shape (T2/T4 precedent) via
+        the plain predicate — the photo router holds no activity service.
+        ``master_key=None`` (admin) → unfiltered existence check.
+        """
+        stmt = select(Activity).where(Activity.id == activity_id)
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
 
     @transactional
     async def create(

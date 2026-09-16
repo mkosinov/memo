@@ -8,13 +8,19 @@ vi.mock('../e2e/fixtures/warmup-routes', () => ({ WARMUP_ROUTES: [] }));
 // GH #247 T14: globalSetup now logs the seeded admin in via Playwright's
 // request API after the diagnostics. Stub the request context so the
 // happy-path tests can complete without a live backend.
+// GH #263 T8: a SECOND login (the demo master, +79990000002) was added —
+// the stub is role-aware per the phone in the POST body, otherwise the
+// master login's role assertion aborts the run.
 vi.mock('@playwright/test', () => ({
   request: {
     newContext: vi.fn(async () => ({
-      post: vi.fn(async () => ({
-        ok: () => true,
-        json: async () => ({ user: { role: 'admin' } }),
-      })),
+      post: vi.fn(async (_url: string, opts?: { data?: { phone?: string } }) => {
+        const role = opts?.data?.phone === '+79990000002' ? 'master' : 'admin';
+        return {
+          ok: () => true,
+          json: async () => ({ user: { role } }),
+        };
+      }),
       storageState: vi.fn(async () => ({ cookies: [], origins: [] })),
       dispose: vi.fn(async () => undefined),
     })),

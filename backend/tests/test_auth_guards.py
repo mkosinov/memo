@@ -27,6 +27,7 @@ Domain rules: docs/domain-rules/auth.md
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,23 +235,82 @@ class TestMasterMatrix:
         resp = master_client.get(path)
         assert resp.status_code == 200, f"GET {path}: {resp.text}"
 
-    def test_master_records_write_allowed(self, master_client, create_activity) -> None:
-        """records:write — master books a record (booking UI flow)."""
-        activity = create_activity()
-        resp = master_client.post("/api/v1/records", json={
+    def test_master_records_write_allowed(
+        self, api_client, create_service, create_location, login_as,
+    ) -> None:
+        """records:write — master books a record (booking UI flow).
+
+        GH #263 T2-quality: the create gate seals POST /records to the
+        master's scope — the booking flow works on HIS OWN activity, so
+        this guard builds a scoped master (staff card + masters row) and
+        books onto that activity (a random activity would now be 404,
+        cf. test_master_scope_read.py::TestCreateGates).
+        """
+        from tests.conftest import insert_master_user
+
+        staff_id = insert_master_user("+79995551301", hash_password(MASTER_PASSWORD))["staff_id"]
+        client = login_as("+79995551301", MASTER_PASSWORD)
+        svc = create_service()
+        loc = create_location()
+        start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        activity = api_client.post("/api/v1/activities", json={
+            "master_id": staff_id, "service_id": svc["id"], "location_id": loc["id"],
+            "start": start, "duration": 90, "capacity": 10, "is_private": False,
+        }).json()
+        resp = client.post("/api/v1/records", json={
             "activity_id": activity["id"],
             "phone": f"+7999{uuid.uuid4().hex[:7]}",
             "visits": [{"name": "Гость", "price": 2000}],
         })
         assert resp.status_code == 201, resp.text
+        client.cookies.clear()
 
-    def test_master_payment_write_forbidden(self, master_client, create_record) -> None:
-        """payments:write — 403 AUTH_FORBIDDEN (spec §2.5)."""
-        resp = master_client.post("/api/v1/payments", json={
-            "record_id": create_record()["id"], "amount": 1000, "method": "cash",
+    def test_master_payment_write_allowed(
+        self, api_client, create_service, create_location, login_as,
+    ) -> None:
+        """GH #263 T1: master holds payments:write now (spec §2.5 superseded).
+
+        GH #263 T4-quality: the scope seals payment writes to the master's
+        OWN records (D5) — this guard builds a scoped master (staff card +
+        masters row) and accepts a payment on a record of his own activity
+        (a foreign record would now be 404, cf. test_master_scope_payments.py).
+        """
+        from tests.conftest import insert_master_user
+
+        staff_id = insert_master_user("+79995551302", hash_password(MASTER_PASSWORD))["staff_id"]
+        client = login_as("+79995551302", MASTER_PASSWORD)
+        svc = create_service()
+        loc = create_location()
+        start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        activity = api_client.post("/api/v1/activities", json={
+            "master_id": staff_id, "service_id": svc["id"], "location_id": loc["id"],
+            "start": start, "duration": 90, "capacity": 10, "is_private": False,
+        }).json()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "phone": f"+7999{uuid.uuid4().hex[:7]}",
+            "visits": [{"name": "Гость", "price": 2000}],
+        }).json()
+        resp = client.post("/api/v1/payments", json={
+            "record_id": record["id"], "amount": 1000, "method": "cash",
         })
-        assert resp.status_code == 403
-        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
+        assert resp.status_code == 201, resp.text
+        client.cookies.clear()
+
+    def test_master_photo_write_allowed(self, master_client) -> None:
+        """GH #263 T1: photos:write granted (scoping to own activities — D6)."""
+        resp = master_client.post("/api/v1/photos", json={
+            "filename": f"m-{uuid.uuid4().hex[:8]}.jpg",
+        })
+        assert resp.status_code == 201, resp.text
+
+    def test_master_client_create_allowed(self, master_client) -> None:
+        """GH #263 T1: clients:write = create-only (booking flow #221)."""
+        resp = master_client.post("/api/v1/clients", json={
+            "name": "Мастер", "phone": f"+7999{uuid.uuid4().hex[:7]}",
+            "email": None, "channel": "telegram",
+        })
+        assert resp.status_code == 201, resp.text
 
     def test_master_materials_forbidden(self, master_client) -> None:
         """materials — master holds NO tokens at all: read 403, write 403."""
@@ -262,11 +322,23 @@ class TestMasterMatrix:
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
 
-    def test_master_client_delete_forbidden(self, master_client, create_client) -> None:
-        """clients:write — master cannot delete a client (read-only)."""
-        resp = master_client.delete(f"/api/v1/clients/{create_client()['id']}")
-        assert resp.status_code == 403
-        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
+    def test_master_client_mutations_forbidden(
+        self, master_client, create_client,
+    ) -> None:
+        """clients:write is CREATE-only for master (#263 D7): PUT/PATCH/
+        DELETE/archive/restore stay admin-only → 403 AUTH_FORBIDDEN."""
+        client = create_client()
+        cid = client["id"]
+        for method, path, json_body in (
+            ("PUT", f"/api/v1/clients/{cid}", {"name": "Нет"}),
+            ("PATCH", f"/api/v1/clients/{cid}", {"name": "Нет"}),
+            ("DELETE", f"/api/v1/clients/{cid}", None),
+            ("POST", f"/api/v1/clients/{cid}/archive", None),
+            ("POST", f"/api/v1/clients/{cid}/restore", None),
+        ):
+            resp = master_client.request(method, path, json=json_body)
+            assert resp.status_code == 403, f"{method} {cid}: {resp.text}"
+            assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
 
     def test_master_dictionary_write_forbidden(self, master_client) -> None:
         """staff:write — the staff directory is admin-only."""

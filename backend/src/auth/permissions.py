@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException
+
 # ``Request`` MUST stay a runtime import (not TYPE_CHECKING): FastAPI
 # resolves dependency signatures via get_type_hints at registration time.
 from starlette.requests import Request
@@ -34,11 +35,11 @@ from src.models.enums import UserRole
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-# Canonical token list (spec §3.5). Master (user-approved set, incl.
-# payments:read — «мастеру надо видеть какие записи уже оплачены»):
-# full working data (records, visits, visitors), read-only dictionaries
-# (masters, locations, services, tags, activities, photos), read-only
-# clients and payments. No materials, no management writes. Admin = everything.
+# Canonical token list (spec §3.5 + GH #263 T1 delta). The #263 master
+# gains payments:write / photos:write / clients:write — the per-master
+# SCOPE (src/auth/scope.py, D5/D6/D7) cuts these down to «own»/create-only
+# at the router layer; clients:write is create-only by router guards.
+# No materials, no management writes. Admin = everything.
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     UserRole.ADMIN.value: frozenset({"*"}),
     UserRole.MASTER.value: frozenset({
@@ -46,8 +47,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "visits:read", "visits:write",
         "visitors:read", "visitors:write",
         "masters:read", "locations:read", "services:read", "tags:read",
-        "activities:read", "photos:read",
-        "clients:read", "payments:read",
+        "activities:read", "photos:read", "photos:write",
+        "clients:read", "clients:write",
+        "payments:read", "payments:write",
     }),
 }
 
@@ -127,6 +129,24 @@ def _forbidden() -> HTTPException:
     )
 
 
+async def resolve_authed(token: str | None) -> AuthedUser | None:
+    """Resolve a session token into an ``AuthedUser``, or ``None``.
+
+    The shared resolution core for ``require_session`` (strict: raises
+    401 on miss) and ``get_optional_scope`` (lenient: anonymous /
+    expired → unscoped). One session-cookie lookup shape, no drift
+    between the strict and optional consumers.
+    """
+    if token is None:
+        return None
+    # Lazy import: src.auth.service imports this module (AuthedUser +
+    # ROLE_PERMISSIONS) — a module-level import would be circular.
+    from src.auth.service import get_auth_service
+
+    async with db_manager.async_session() as db_session:
+        return await get_auth_service().resolve(db_session, token)
+
+
 async def require_session(request: Request) -> AuthedUser:
     """Resolve the ``memo_session`` cookie into an ``AuthedUser``.
 
@@ -134,16 +154,7 @@ async def require_session(request: Request) -> AuthedUser:
     expired/archived session — the frontend treats all three as "no
     session" and redirects to login (spec §5).
     """
-    # Lazy import: src.auth.service imports this module (AuthedUser +
-    # ROLE_PERMISSIONS) — a module-level import would be circular.
-    from src.auth.service import get_auth_service
-
-    token = request.cookies.get(SESSION_COOKIE)
-    if token is None:
-        raise _unauthorized()
-
-    async with db_manager.async_session() as db_session:
-        authed = await get_auth_service().resolve(db_session, token)
+    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
         raise _unauthorized()
     return authed
@@ -164,3 +175,19 @@ def require_permission(perm: str) -> Callable[..., Awaitable[AuthedUser]]:
         return authed
 
     return _guard
+
+
+async def require_admin(
+    authed: AuthedUser = Depends(require_session),
+) -> AuthedUser:
+    """Role check beyond the token matrix — admin ONLY.
+
+    Needed where a token master now holds must still not grant a route:
+    GH #263 D7 gives master ``clients:write`` as CREATE-ONLY, so the
+    client mutation routes (PUT/PATCH/DELETE/archive/restore) are pinned
+    to admin here instead of the token (they keep ``clients:write`` too —
+    admin passes both).
+    """
+    if authed.role != UserRole.ADMIN.value:
+        raise _forbidden()
+    return authed

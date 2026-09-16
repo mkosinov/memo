@@ -110,6 +110,22 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         await self._populate_service_titles(db_session, items, items_orm)
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
 
+    async def get_scoped(
+        self, db_session: AsyncSession, id: str, master_key: str | None
+    ) -> Activity | None:
+        """GH #263 T2 — point get with the per-master scope in ONE query.
+
+        ``master_key=None`` (admin / anonymous) → unfiltered. A scoped
+        master gets ``Activity.master_id == master_key`` folded into the
+        same SELECT — чужое and не-существующее are indistinguishable
+        (both ``None`` → the route renders 404; 404-fast-path, plan T7:
+        no separate owner round-trip).
+        """
+        stmt = select(Activity).where(Activity.id == id)
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
+
     async def _populate_service_titles(
         self,
         db_session: AsyncSession,

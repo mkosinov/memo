@@ -5,8 +5,10 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
+from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.common import PaginatedResponse
@@ -64,6 +66,31 @@ def _map_visit(visit) -> VisitResponse:
     )
 
 
+async def _visit_scoped_or_404(
+    service: VisitService,
+    session: AsyncSession,
+    visit_id: str,
+    scope: ScopeContext,
+) -> None:
+    """GH #263 T2 — shared point-op owner gate for visit mutations.
+
+    ONE scope-aware query (visit → record → activity); a scoped master
+    whose visit is foreign gets the same 404 as a missing visit
+    (404-fast-path). Admin (``master_key=None``) passes untouched.
+    """
+    visit = await service.get_scoped(
+        db_session=session, visit_id=visit_id, master_key=scope.master_key
+    )
+    if not visit:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.VISIT_NOT_FOUND,
+                message="Visit not found",
+            ).model_dump(),
+        )
+
+
 # ─── CRUD handlers ─────────────────────────────────────────────────────────
 
 
@@ -73,9 +100,15 @@ async def list_visits(
     session: SessionDep,
     pagination: PaginationParams = Depends(),
     record_id: str | None = None,
+    # GH #263 T2: scope via visit → record → activity («всё через записи»);
+    # conjunctive with the record_id param. Admin → no filter.
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> PaginatedResponse[VisitResponse]:
     """List active visits, optionally filtered by record_id."""
-    return await service.list(db_session=session, page=pagination.page, per_page=pagination.per_page, record_id=record_id)
+    return await service.list(
+        db_session=session, page=pagination.page, per_page=pagination.per_page,
+        record_id=record_id, master_key=scope.master_key,
+    )
 
 
 @router.get("/{visit_id}", response_model=VisitResponse)
@@ -83,9 +116,13 @@ async def get_visit(
     visit_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T2: чужой визит → 404 (single scope-aware query).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> VisitResponse:
     """Return a single visit by ID."""
-    visit = await service.get(db_session=session, visit_id=visit_id)
+    visit = await service.get_scoped(
+        db_session=session, visit_id=visit_id, master_key=scope.master_key
+    )
     if not visit:
         raise HTTPException(
             status_code=404,
@@ -103,8 +140,24 @@ async def create_visit(
     data: VisitCreate,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T2: a master may add visits only to his own records — the
+    # parent record's activity must be his (чужая → 404, same code as
+    # «родитель не найден»).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> VisitResponse:
     """Create a new visit, cascade status + seats to parent record."""
+    if scope.master_key is not None:
+        parent = await service.get_record_scoped(
+            db_session=session, record_id=data.record_id, master_key=scope.master_key
+        )
+        if not parent:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.RECORD_NOT_FOUND,
+                    message="Parent record not found",
+                ).model_dump(),
+            )
     visit = await service.create(db_session=session, data=data)
     if not visit:
         raise HTTPException(
@@ -123,8 +176,25 @@ async def update_visit(
     data: VisitUpdate,
     service: _ServiceDep,
     session: SessionDep,
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> VisitResponse:
     """Full-replace update of a visit, cascade status to parent record."""
+    await _visit_scoped_or_404(service, session, visit_id, scope)
+    # GH #263 T2-quality: PUT re-parents the visit — the NEW record_id must
+    # be inside the master's scope (VisitPatch carries no record_id, so
+    # PATCH cannot re-parent and needs no gate).
+    if scope.master_key is not None and data.record_id:
+        parent = await service.get_record_scoped(
+            db_session=session, record_id=data.record_id, master_key=scope.master_key
+        )
+        if not parent:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.RECORD_NOT_FOUND,
+                    message="Parent record not found",
+                ).model_dump(),
+            )
     visit = await service.update(db_session=session, visit_id=visit_id, data=data)
     if not visit:
         raise HTTPException(
@@ -143,8 +213,10 @@ async def patch_visit(
     data: VisitPatch,
     service: _ServiceDep,
     session: SessionDep,
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> VisitResponse:
     """Partial update of a visit, cascade status to parent record."""
+    await _visit_scoped_or_404(service, session, visit_id, scope)
     visit = await service.patch(db_session=session, visit_id=visit_id, data=data)
     if not visit:
         raise HTTPException(
@@ -162,8 +234,10 @@ async def delete_visit(
     visit_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> None:
     """Hard-delete a visit, cascade status + seats to parent record."""
+    await _visit_scoped_or_404(service, session, visit_id, scope)
     deleted = await service.delete(db_session=session, visit_id=visit_id)
     if not deleted:
         raise HTTPException(
@@ -181,8 +255,10 @@ async def update_visit_status(
     data: VisitStatusUpdate,
     service: _ServiceDep,
     session: SessionDep,
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> VisitResponse:
     """Update a visit's status only."""
+    await _visit_scoped_or_404(service, session, visit_id, scope)
     visit = await service.update_status(db_session=session, visit_id=visit_id, status=data.status)
     if not visit:
         raise HTTPException(

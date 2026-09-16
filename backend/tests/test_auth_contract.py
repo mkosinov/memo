@@ -57,17 +57,21 @@ def _normalize(path: str) -> str:
 
 
 def _is_auth_depend(call: Any) -> bool:
-    """True for the two session-guard callables.
+    """True for the session-guard callables.
 
     * ``require_session`` — module-level function, identity check;
     * ``require_permission(perm)`` — returns a fresh ``_guard`` closure per
       call, so identity is useless; its qualname is
-      ``require_permission.<locals>._guard`` and is stable.
+      ``require_permission.<locals>._guard`` and is stable;
+    * ``require_admin`` (GH #263) — module-level async function, identity
+      check; a role guard, still an authenticating dependency.
 
     ``verify_fetch_metadata`` is deliberately NOT an auth dependency — it
     only rejects cross-site browser fetches and authenticates nobody.
     """
-    if call is require_session:
+    from src.auth.permissions import require_admin
+
+    if call is require_session or call is require_admin:
         return True
     return getattr(call, "__qualname__", "").startswith("require_permission")
 

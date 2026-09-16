@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useUI } from '@/contexts/UIContext';
+import { CountdownRing } from './CountdownRing';
 
 export function ToastContainer() {
   const { toasts, hideToast } = useUI();
@@ -44,6 +45,7 @@ export function ToastContainer() {
               <path d="M10.5 6A4.5 4.5 0 006 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           )}
+          {toast.countdownMs !== undefined && <CountdownRing countdownMs={toast.countdownMs} />}
           <span className="flex-1">{toast.message}</span>
           {toast.undo && (
             <button

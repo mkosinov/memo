@@ -453,7 +453,7 @@ class TestRecordCreatePhoneFlow:
         assert body["visits"] == []
 
 
-class TestAnonymVisits:
+class TestAnonymousVisits:
     """Tests for anonymous visits on Record (#82, unified model #257).
 
     Anonymous guest = a visit element with ``visitor_id: None`` (and no
@@ -464,7 +464,7 @@ class TestAnonymVisits:
     def _anonymous(price: int = 0, status: str = "waiting") -> dict:
         return {"visitor_id": None, "price": price, "status": status}
 
-    def test_create_record_with_anonym_visits_only(self, api_client, create_activity, create_client) -> None:
+    def test_create_record_with_anonymous_visits_only(self, api_client, create_activity, create_client) -> None:
         """POST /api/records with 5 anonymous visit elements → seats=5, all visitor_id NULL."""
         activity = create_activity()
         client = create_client()
@@ -481,7 +481,7 @@ class TestAnonymVisits:
         assert len(body["visits"]) == 5
         assert all(v["visitor_id"] is None for v in body["visits"])
 
-    def test_create_record_with_visits_and_anonym_visits(self, api_client, create_activity, create_client) -> None:
+    def test_create_record_with_visits_and_anonymous_visits(self, api_client, create_activity, create_client) -> None:
         """POST /api/records with 2 named visits + 3 anonymous → seats=5."""
         activity = create_activity()
         client = create_client()
@@ -505,7 +505,7 @@ class TestAnonymVisits:
         assert len(named) == 2
         assert len(anonymous) == 3
 
-    def test_create_record_default_anonym_visits_zero(self, api_client, create_activity, create_client) -> None:
+    def test_create_record_default_anonymous_visits_zero(self, api_client, create_activity, create_client) -> None:
         """POST /api/records without anonymous elements → seats = len(visits)."""
         activity = create_activity()
         client = create_client()
@@ -522,7 +522,7 @@ class TestAnonymVisits:
         assert len(body["visits"]) == 1
         assert body["visits"][0]["visitor_id"] is not None
 
-    def test_patch_anonym_visits_updates_seats(self, api_client, create_record) -> None:
+    def test_patch_anonymous_visits_updates_seats(self, api_client, create_record) -> None:
         """PATCH /api/records/{id} with anonymous visit elements recalculates seats."""
         record = create_record()  # default: 1 named visit, seats=1
 
@@ -538,7 +538,7 @@ class TestAnonymVisits:
         anonymous = [v for v in body["visits"] if v["visitor_id"] is None]
         assert len(anonymous) == 4
 
-    def test_put_record_with_anonym_visits(self, api_client, create_activity, create_client, create_record) -> None:
+    def test_put_record_with_anonymous_visits(self, api_client, create_activity, create_client, create_record) -> None:
         """PUT /api/records/{id} with anonymous visit elements computes seats correctly.
 
         Named visits are passed ID-based: PUT does not resolve ``name``

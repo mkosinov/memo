@@ -85,13 +85,15 @@ def _insert_record(conn, rid: str, status: str, anonym_visits: int) -> None:
     ), {"id": rid, "status": status, "anonym": anonym_visits})
 
 
-def _insert_named_visit(conn, rid: str, vid: str, status: str) -> None:
+def _insert_named_visit(conn, rid: str, visit_id: str, status: str) -> None:
+    """Named visit: visitor_id gets a fresh non-NULL uuid (legacy shape)."""
     conn.execute(text(
         "INSERT INTO visits (id, record_id, visitor_id, tariff_id, price,"
         " custom_price, status, created_at, updated_at)"
-        " VALUES (:id, :rid, :vid, NULL, 1000, NULL, :status,"
+        " VALUES (:id, :rid, :visitor_id, NULL, 1000, NULL, :status,"
         " datetime('now'), datetime('now'))"
-    ), {"id": vid, "rid": rid, "vid": str(uuid.uuid4()), "status": status})
+    ), {"id": visit_id, "rid": rid,
+        "visitor_id": str(uuid.uuid4()), "status": status})
 
 
 def _anonymous_visit_rows(conn, rid: str) -> list:

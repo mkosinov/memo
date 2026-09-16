@@ -41,8 +41,8 @@ async def recompute_record_seats(
             Visit.record_id == record_id,
         )
     )
-    active_count = result.scalar() or 0
-    record.seats = active_count
+    visit_count = result.scalar() or 0
+    record.seats = visit_count
     record.updated_at = datetime.now(UTC)
     await db_session.flush()
     return record

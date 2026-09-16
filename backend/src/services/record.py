@@ -693,11 +693,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             # recompute_record_seats counts visits still in the DB (0 if we
             # just deleted them for a visits-patch).
             await recompute_record_seats(db_session, record.id)
-            effective_seats = (
-                len(update_data["visits"])
-                if "visits" in update_data
-                else len(record.visits)
-            )
+            effective_seats = len(update_data["visits"])
             await check_activity_capacity(
                 db_session, record.activity_id, seats=effective_seats
             )

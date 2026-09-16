@@ -236,6 +236,38 @@ describe('StaffCreateSchema', () => {
     });
     expect(result.master?.archived).toBeUndefined();
   });
+
+  // GH #263 D10: manual role override in the account section — absent →
+  // the position template decides; a sent value always wins (ручная правка).
+  it('create_user accepts an optional role (GH #263 D10)', () => {
+    const result = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      create_user: { phone: '+79991234567', password: 'secret123', role: 'master' },
+    });
+    expect(result.create_user).toMatchObject({ phone: '+79991234567', role: 'master' });
+  });
+
+  it('create_user role defaults to undefined (None = template decides)', () => {
+    const result = StaffCreateSchema.parse({ first_name: 'И', last_name: 'П' });
+    expect(result.create_user).toBe(false);
+    const withUser = StaffCreateSchema.parse({
+      first_name: 'И',
+      last_name: 'П',
+      create_user: { phone: '+79991234567', password: 'secret123' },
+    });
+    expect(withUser.create_user).not.toHaveProperty('role');
+  });
+
+  it('rejects a role outside the UserRole enum (admin|master)', () => {
+    expect(() =>
+      StaffCreateSchema.parse({
+        first_name: 'И',
+        last_name: 'П',
+        create_user: { phone: '+79991234567', password: 'secret123', role: 'superuser' },
+      }),
+    ).toThrow();
+  });
 });
 
 // ─── StaffUpdate / StaffPatch (PUT full / PATCH three-state master) ─────────
@@ -272,6 +304,28 @@ describe('StaffUpdateSchema', () => {
   it('rejects a stray is_active (backend extra="forbid")', () => {
     expect(() =>
       StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И', is_active: true }),
+    ).toThrow();
+  });
+
+  // GH #263 D10: manual role override rides the PUT body — explicit beats
+  // the position template; undefined = the template decides.
+  it('accepts an optional role (GH #263 D10 manual override)', () => {
+    const result = StaffUpdateSchema.parse({
+      first_name: 'П',
+      last_name: 'И',
+      role: 'admin',
+    });
+    expect(result.role).toBe('admin');
+  });
+
+  it('role defaults to undefined (template decides when omitted)', () => {
+    const result = StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И' });
+    expect(result.role).toBeUndefined();
+  });
+
+  it('rejects a role outside the UserRole enum (admin|master)', () => {
+    expect(() =>
+      StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И', role: 'superuser' }),
     ).toThrow();
   });
 });

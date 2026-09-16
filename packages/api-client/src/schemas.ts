@@ -53,6 +53,9 @@ export const CreateUserSectionSchema = z
   .object({
     phone: z.string().min(1).max(20),
     password: z.string().min(1).max(64),
+    // GH #263 D10: manual role override — a sent value beats the position
+    // template; omitted → the backend template decides (admin > master).
+    role: z.enum(['admin', 'master']).nullable().optional(),
   })
   .strict();
 export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
@@ -68,6 +71,10 @@ const StaffCardSchema = z
     sort_order: z.number().optional().default(0),
     master: MasterSectionInputSchema.nullable().optional().default(null),
     position_ids: z.array(z.string()).optional().default([]),
+    // GH #263 D10: manual role override for the linked account — a sent
+    // value beats the position template; omitted → the template decides
+    // (anchors admin > master, fixed position ids, D4 #266).
+    role: z.enum(['admin', 'master']).nullable().optional(),
   })
   .strict();
 

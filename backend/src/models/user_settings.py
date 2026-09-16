@@ -1,6 +1,7 @@
 """User settings ORM model — stores per-user preferences."""
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text
+import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.abstract import AbstractModel
@@ -21,4 +22,12 @@ class UserSettings(AbstractModel):
     )
     column_order_locations: Mapped[str] = mapped_column(
         Text, default="[]",
+    )
+    # GH #267: schedule archived-visibility toggles (masters default ON,
+    # locations default OFF — docs/domain-rules/user_settings.md).
+    show_archived_masters: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true(),
+    )
+    show_archived_locations: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false(),
     )

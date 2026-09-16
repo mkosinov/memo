@@ -16,6 +16,7 @@ const masterFixture: MasterViewResponse = {
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
   sort_order: 0,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };

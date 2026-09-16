@@ -35,4 +35,8 @@ export interface ScheduleAdminDTO extends ScheduleDTO {
   minAge: string; // resolved from services reference
   maxAge?: string; // resolved from services reference (null = no upper limit)
   comment: string; // required, empty string as default
+  /** GH #267: archived flags from reference lists — card is kept, visibility gated by consumers. */
+  masterArchived?: boolean;
+  serviceArchived?: boolean;
+  locationArchived?: boolean;
 }

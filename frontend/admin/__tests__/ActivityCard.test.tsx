@@ -293,6 +293,49 @@ describe('ActivityCard', () => {
     );
   });
 
+  // ─── Archived visibility (GH #267 Task 9) ──────────────────────────────
+
+  describe('archived state', () => {
+    it.each([
+      ['masterArchived', ['мастер']],
+      ['serviceArchived', ['услуга']],
+      ['locationArchived', ['локация']],
+    ] as const)('mutes card and shows badge when %s', (flag, parts) => {
+      const { container } = render(
+        <ActivityCard activity={{ ...mockActivity, [flag]: true }} master={mockMaster} />
+      );
+      const card = container.querySelector('[data-testid="activity-ev_1"]') as HTMLElement;
+      expect(card).toHaveClass('opacity-70');
+      const badge = screen.getByTestId('archived-badge');
+      expect(badge).toHaveAttribute('aria-label', `Архив: ${parts[0]}`);
+    });
+
+    it('badge aria-label enumerates all archived parts', () => {
+      render(
+        <ActivityCard
+          activity={{
+            ...mockActivity,
+            masterArchived: true,
+            serviceArchived: true,
+            locationArchived: true,
+          }}
+          master={mockMaster}
+        />
+      );
+      expect(screen.getByTestId('archived-badge')).toHaveAttribute(
+        'aria-label',
+        'Архив: мастер, услуга, локация'
+      );
+    });
+
+    it('no badge and no muting when no archived flags', () => {
+      const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+      const card = container.querySelector('[data-testid="activity-ev_1"]') as HTMLElement;
+      expect(card).not.toHaveClass('opacity-70');
+      expect(screen.queryByTestId('archived-badge')).not.toBeInTheDocument();
+    });
+  });
+
   // ─── Compact capacity placement ────────────────────────────────────────
 
   describe('compact capacity', () => {

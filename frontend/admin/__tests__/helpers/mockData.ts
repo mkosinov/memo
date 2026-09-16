@@ -13,6 +13,7 @@ import type {
   VisitResponse,
   PaymentResponse,
   LocationResponse,
+  ServiceResponse,
   MasterViewResponse,
   StaffResponse,
   PositionResponse,
@@ -221,11 +222,46 @@ export function createMockLocationResponse(
   };
 }
 
+// ─── ServiceResponse (API shape, GH #267 schedule dictionary consumers) ───
+
+export const mockServiceResponse: ServiceResponse = {
+  id: 's1',
+  title: 'Картина маслом',
+  description: '',
+  image_url: '',
+  specialty: '',
+  min_age: 12,
+  max_age: 99,
+  duration: 150,
+  record_info: '',
+  tariffs: [
+    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
+    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+  ],
+  tags: [],
+  materials: [],
+  archived: false,
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+/** Factory for creating ServiceResponse objects with overrides. */
+export function createMockServiceResponse(
+  overrides: Partial<ServiceResponse> = {},
+): ServiceResponse {
+  return {
+    ...mockServiceResponse,
+    ...overrides,
+  };
+}
+
 // ─── MasterViewResponse (read-only /masters view, GH #266) ────────────────
 // The view returns ACTING masters only (masters.is_active = true), so there is
-// no `archived` and no `position` field — positions live on the staff card
-// (StaffResponse). Consumers no longer client-filter by archived (S2: an
-// archived master simply leaves the list server-side).
+// no `position` field — positions live on the staff card (StaffResponse).
+// `archived` (GH #267) mirrors masters.is_active: the paginated list stays
+// acting-only (always false here); /all with status=all|archived can differ.
+// Consumers no longer client-filter by archived (S2: an archived master
+// simply leaves the list server-side).
 
 export const mockMasterResponse: MasterViewResponse = {
   id: 'm1',
@@ -235,6 +271,7 @@ export const mockMasterResponse: MasterViewResponse = {
   specialty: 'живопись',
   avatar_url: 'https://example.com/avatar.jpg',
   sort_order: 0,
+  archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
 };
@@ -248,8 +285,23 @@ export const mockMasterResponse2: MasterViewResponse = {
   specialty: 'керамика',
   avatar_url: null,
   sort_order: 1,
+  archived: false,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
+};
+
+/** An ARCHIVED master row (status=all slice, GH #267) — feeds DayView archived columns. */
+export const mockMasterResponseArchived: MasterViewResponse = {
+  id: 'm-arch',
+  first_name: 'Пётр',
+  last_name: 'Архивов',
+  color: '#9A5870',
+  specialty: 'графика',
+  avatar_url: null,
+  sort_order: 5,
+  archived: true,
+  created_at: '2023-03-01T10:00:00Z',
+  updated_at: '2024-02-01T12:00:00Z',
 };
 
 /** Factory for creating MasterViewResponse objects with overrides. */

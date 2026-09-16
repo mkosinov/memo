@@ -14,6 +14,11 @@ export interface MultiSelectProps<T> {
   getGroup?: (item: T) => string;
   /** Optional custom label renderer — receives the item and its checked state. */
   renderItemLabel?: (item: T, isChecked: boolean) => React.ReactNode;
+  /**
+   * Optional content rendered below the scrollable list, still inside the
+   * dropdown container (clicks there do NOT close the dropdown).
+   */
+  footer?: React.ReactNode;
 }
 
 interface GroupedSection<T> {
@@ -52,6 +57,7 @@ export function MultiSelect<T>({
   getLabel,
   getGroup,
   renderItemLabel,
+  footer,
 }: MultiSelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [opensUpward, setOpensUpward] = useState(false);
@@ -232,6 +238,14 @@ export function MultiSelect<T>({
                   Нет элементов
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Footer — below the scrollable list, still inside the dropdown
+              container (outside-click only fires for clicks outside it). */}
+          {footer && (
+            <div className="border-t" style={{ borderColor: 'var(--line, #e5e7eb)' }}>
+              {footer}
             </div>
           )}
         </div>

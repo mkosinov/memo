@@ -4,9 +4,10 @@ import React, { createContext, useContext, useCallback, useMemo, useEffect, useR
 import type { Master, Service, Location, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
-import { useMasters, useMastersRaw } from '@/hooks/useMasters';
-import { useServices, useServicesRaw } from '@/hooks/useServices';
-import { useLocations, useLocationsRaw } from '@/hooks/useLocations';
+import type { MasterViewResponse, ServiceResponse, LocationResponse } from '@memo/api-client';
+import { useScheduleMasters } from '@/hooks/useMasters';
+import { useScheduleServices } from '@/hooks/useServices';
+import { useScheduleLocations } from '@/hooks/useLocations';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   getActivities,
@@ -15,10 +16,12 @@ import {
   deleteActivity as apiDeleteActivity,
 } from '@memo/api-client';
 import type { ActivityResponse, ActivityPatch } from '@memo/api-client';
+import { transformMaster, transformService, transformLocation } from '@/lib/transformers';
 import { qk } from '@/lib/queryKeys';
 import { invalidateEntities } from '@/lib/invalidate';
 import { composeLocalISO, dayIndexToDate, calculateGridTimeRange } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 // Mutation key shared by create/update/delete — feeds the Topbar indicator
 // via useMutationState (spec §5; no isSaving field on any context).
@@ -41,6 +44,10 @@ export interface ScheduleDataContextType {
   masters: Master[];
   services: Service[];
   locations: Location[];
+  /** FULL schedule dictionaries incl. archived (GH #267) — grid build / DayView. */
+  scheduleMasters: MasterViewResponse[];
+  scheduleServices: ServiceResponse[];
+  scheduleLocations: LocationResponse[];
   loading: boolean;
   error: Error | null;
   addActivity: (activity: {
@@ -92,21 +99,33 @@ export function ScheduleDataProvider({
   // setCurrentWeek STATE lives in the view context, not here).
   const currentWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
 
-  // Raw API data (shared cache keys with domain hooks — same fetch, different select)
+  // Raw API data (activities use the week-range key; see GH #142).
   const { data: activitiesRaw = [], isLoading: activitiesLoading, error: activitiesError } = useQuery<ActivityResponse[]>({
     queryKey: qk.activityRange(weekStart, weekEnd),
     queryFn: () => getActivities({ date_from: weekStart, date_to: weekEnd, per_page: 100 }).then(r => r.items),
   });
-  const { data: mastersRaw = [] } = useMastersRaw();
-  const { data: servicesRaw = [] } = useServicesRaw();
-  const { data: locationsRaw = [] } = useLocationsRaw();
 
-  // Domain types for context consumers (select transforms use same cache as raw
-  // queries). Destructured with defaults (old-code style) so the values stay
-  // referentially clean for the memos below; `isSuccess` drives filter init.
-  const { data: masters = [], isSuccess: mastersSuccess } = useMasters();
-  const { data: services = [] } = useServices();
-  const { data: locations = [], isSuccess: locationsSuccess } = useLocations();
+  // GH #267: the schedule owns its dictionary slices — FULL status=all lists on
+  // the `* + 'schedule'` keys (own cache entries; prefix-invalidation from
+  // lib/invalidate.ts / SSE reaches them via the shared family prefix).
+  const { data: scheduleMasters = [], isSuccess: mastersSuccess } = useScheduleMasters();
+  const { data: scheduleServices = [] } = useScheduleServices();
+  const { data: scheduleLocations = [], isSuccess: locationsSuccess } = useScheduleLocations();
+
+  // Domain slices for existing consumers — ACTIVE-only (archived dropped),
+  // transformed to domain types. Referentially stable thanks to the memo deps.
+  const masters = useMemo(
+    () => scheduleMasters.filter((m) => !m.archived).map(transformMaster),
+    [scheduleMasters],
+  );
+  const services = useMemo(
+    () => scheduleServices.filter((s) => !s.archived).map(transformService),
+    [scheduleServices],
+  );
+  const locations = useMemo(
+    () => scheduleLocations.filter((l) => !l.archived).map(transformLocation),
+    [scheduleLocations],
+  );
 
   // ── Filter initialization — per-directory, settled-success, initialize-once ──
   // (spec §6; REPLACES the old both-non-empty gate that deadlocked on an empty
@@ -263,25 +282,57 @@ export function ScheduleDataProvider({
     // Stub: will be implemented when API-based copy-last-week is needed
   }, []);
 
-  // Build enriched schedule using buildAdminSchedule (raw API data)
+  // Build enriched schedule using buildAdminSchedule — GH #267: fed with the
+  // FULL status=all dictionaries so activities on archived rows still resolve
+  // (map lookups by id; archived entries simply render like any other).
   const enrichedData = useMemo(
     () => buildAdminSchedule(
       activitiesRaw,
-      mastersRaw,
-      servicesRaw,
-      locationsRaw,
+      scheduleMasters,
+      scheduleServices,
+      scheduleLocations,
       currentWeek,
     ),
-    [activitiesRaw, mastersRaw, servicesRaw, locationsRaw, currentWeek],
+    [activitiesRaw, scheduleMasters, scheduleServices, scheduleLocations, currentWeek],
   );
 
-  // Filter items based on active filters (multi-select: empty = show all)
+  // GH #267: archived-visibility gate inputs. The settings provider wraps the
+  // whole tree (app/providers.tsx renders it above ScheduleProvider), so this
+  // hook is always resolvable here. `?? true/false` guards against a stale
+  // localStorage cache object missing the new keys (undefined → defaults).
+  const { settings } = useUserSettings();
+  const showMasters = settings.showArchivedMasters ?? true;
+  const showLocations = settings.showArchivedLocations ?? false;
+
+  // Filter + visibility gate — SINGLE derivation site (GH #267). Order matters:
+  //
+  //   1. The ARCHIVE GATE drops items whose master/location rows are archived
+  //      unless the matching setting is on. Services never gate.
+  //   2. The id-filter (multi-select, empty = show all) applies ONLY to items
+  //      with no archived entity at all (`!hasArchived`) — archived cards that
+  //      passed the gate are NEVER fed through it (the options lists don't
+  //      contain archived rows, so the filter would otherwise permanently hide
+  //      them). Result = activePassed(idFilter) ∪ archivedPassed.
   const filteredItems = useMemo(() => {
-    let result = enrichedData.items;
-    if (filterMasterIds.length > 0) result = result.filter(a => filterMasterIds.includes(a.masterId));
-    if (filterLocationIds.length > 0) result = result.filter(a => filterLocationIds.includes(a.locationId));
-    return result;
-  }, [enrichedData.items, filterMasterIds, filterLocationIds]);
+    const activePassed: ScheduleAdminDTO[] = [];
+    const archivedPassed: ScheduleAdminDTO[] = [];
+    for (const a of enrichedData.items) {
+      const masterArchived = a.masterArchived ?? false;
+      const locationArchived = a.locationArchived ?? false;
+      if (masterArchived || locationArchived) {
+        // Archive gate: both toggles must permit every archived entity involved.
+        if ((!masterArchived || showMasters) && (!locationArchived || showLocations)) {
+          archivedPassed.push(a); // past the gate → immune to the id-filter
+        }
+      } else {
+        // Fully active item: gate passes trivially; the id-filter still applies.
+        const masterOk = filterMasterIds.length === 0 || filterMasterIds.includes(a.masterId);
+        const locationOk = filterLocationIds.length === 0 || filterLocationIds.includes(a.locationId);
+        if (masterOk && locationOk) activePassed.push(a);
+      }
+    }
+    return [...activePassed, ...archivedPassed];
+  }, [enrichedData.items, filterMasterIds, filterLocationIds, showMasters, showLocations]);
 
   // Adaptive grid bounds in integer minutes — SINGLE derivation site (GH #142).
   // Views read gridStartMinutes/gridEndMinutes instead of calling
@@ -304,6 +355,9 @@ export function ScheduleDataProvider({
     masters,
     services,
     locations,
+    scheduleMasters,
+    scheduleServices,
+    scheduleLocations,
     loading: activitiesLoading,
     error: activitiesError ?? null,
     addActivity,
@@ -314,6 +368,7 @@ export function ScheduleDataProvider({
     gridEndMinutes,
   }), [
     filteredItems, scheduleIndex, masters, services, locations,
+    scheduleMasters, scheduleServices, scheduleLocations,
     activitiesLoading, activitiesError,
     addActivity, updateActivityFn, deleteActivityById, copyLastWeek,
     gridStartMinutes, gridEndMinutes,

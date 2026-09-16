@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider } from '../contexts/UIContext';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { WeekView } from '../app/components/schedule/WeekView';
 
 // ─── Helper: compute a date in the current week ──────────────────────────────
@@ -34,6 +35,23 @@ vi.mock('@memo/api-client', () => ({
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
+  getUserSettings: vi.fn().mockResolvedValue({
+    user_id: 'u1', theme: 'light', language: 'ru',
+    column_order_staff: [], column_order_locations: [],
+    show_archived_masters: true, show_archived_locations: false,
+  }),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn().mockResolvedValue({}),
+}));
+
+// GH #267: UserSettingsProvider gates loading on useAuth().status — report
+// `authenticated` so the settings provider settles.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({
+    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated',
+    login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn(),
+  })),
 }));
 
 import {
@@ -96,6 +114,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         specialty: 'живопись',
         avatar_url: null,
         sort_order: 0,
+        archived: false,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -176,9 +195,11 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
       <QueryClientProvider client={queryClient}>
         <UIProvider>
           <NavigationProvider>
+            <UserSettingsProvider>
             <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
@@ -204,9 +225,11 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
       <QueryClientProvider client={queryClient}>
         <UIProvider>
           <NavigationProvider>
+            <UserSettingsProvider>
             <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
@@ -235,6 +258,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         specialty: 'живопись',
         avatar_url: null,
         sort_order: 0,
+        archived: false,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -309,9 +333,11 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
       <QueryClientProvider client={queryClient}>
         <UIProvider>
           <NavigationProvider>
+            <UserSettingsProvider>
             <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
@@ -348,9 +374,11 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
       <QueryClientProvider client={queryClient}>
         <UIProvider>
           <NavigationProvider>
+            <UserSettingsProvider>
             <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,

@@ -7,7 +7,7 @@
  * boundary is mocked so no network happens.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 vi.mock('@memo/api-client', async (importOriginal) => {
@@ -24,7 +24,7 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: vi.fn(),
 }));
 
-import { getUserSettings, createUserSettings } from '@memo/api-client';
+import { getUserSettings, createUserSettings, patchUserSettings } from '@memo/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserSettingsProvider, useUserSettings } from '../contexts/UserSettingsContext';
 
@@ -59,18 +59,28 @@ const remoteSettings = {
   language: 'ru' as const,
   column_order_staff: ['m1', 'm2'],
   column_order_locations: ['l1'],
+  show_archived_masters: true,
+  show_archived_locations: false,
   created_at: '2026-09-08T00:00:00Z',
   updated_at: '2026-09-08T00:00:00Z',
 };
 
 /** Consumer exposing the context for assertions (UIContext.test.tsx pattern). */
 function SettingsConsumer() {
-  const { settings, ready } = useUserSettings();
+  const { settings, ready, updateSettings } = useUserSettings();
   return (
     <div>
       <span data-testid="ready">{String(ready)}</span>
       <span data-testid="theme">{settings.theme}</span>
       <span data-testid="col-masters">{settings.columnOrderMasters.join(',')}</span>
+      <span data-testid="archived-masters">{String(settings.showArchivedMasters)}</span>
+      <span data-testid="archived-locations">{String(settings.showArchivedLocations)}</span>
+      <button data-testid="toggle-archived-masters" onClick={() => updateSettings({ showArchivedMasters: false })}>
+        toggle
+      </button>
+      <button data-testid="toggle-archived-locations" onClick={() => updateSettings({ showArchivedLocations: true })}>
+        toggle
+      </button>
     </div>
   );
 }
@@ -143,5 +153,108 @@ describe('UserSettingsContext auth gating (GH #247 §4.6)', () => {
       expect.objectContaining({ user_id: authUser.id }),
     );
     expect(screen.getByTestId('ready')).toHaveTextContent('true');
+  });
+});
+
+describe('UserSettingsContext archived visibility (GH #267)', () => {
+  const mockPatchUserSettings = vi.mocked(patchUserSettings);
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockGetUserSettings.mockReset();
+    mockCreateUserSettings.mockReset();
+    mockPatchUserSettings.mockReset();
+    mockPatchUserSettings.mockResolvedValue(remoteSettings);
+    mockUseAuth.mockReturnValue(mockAuthState('authenticated'));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('defaults to showArchivedMasters=true / showArchivedLocations=false on empty cache + API failure', async () => {
+    mockGetUserSettings.mockRejectedValue(new Error('404'));
+    mockCreateUserSettings.mockRejectedValue(new Error('network down'));
+    renderConsumer();
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    expect(screen.getByTestId('archived-masters')).toHaveTextContent('true');
+    expect(screen.getByTestId('archived-locations')).toHaveTextContent('false');
+  });
+
+  it('reads show_archived_* keys from remote settings', async () => {
+    mockGetUserSettings.mockResolvedValue({
+      ...remoteSettings,
+      show_archived_masters: false,
+      show_archived_locations: true,
+    });
+    renderConsumer();
+    await waitFor(() => {
+      expect(screen.getByTestId('archived-masters')).toHaveTextContent('false');
+    });
+    expect(screen.getByTestId('archived-locations')).toHaveTextContent('true');
+  });
+
+  it('restores show_archived_* keys from localStorage cache (merge keeps defaults for missing keys)', async () => {
+    mockGetUserSettings.mockRejectedValue(new Error('404'));
+    mockCreateUserSettings.mockRejectedValue(new Error('network down'));
+    localStorage.setItem(
+      'memo-user-settings',
+      JSON.stringify({ theme: 'dark', language: 'ru', columnOrderMasters: [], columnOrderLocations: [] }),
+    );
+    renderConsumer();
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    // Cached settings without the new keys → defaults apply (no flash of hidden masters).
+    expect(screen.getByTestId('archived-masters')).toHaveTextContent('true');
+    expect(screen.getByTestId('archived-locations')).toHaveTextContent('false');
+  });
+
+  it('restores persisted show_archived_* values present in the cache', async () => {
+    mockGetUserSettings.mockRejectedValue(new Error('404'));
+    mockCreateUserSettings.mockRejectedValue(new Error('network down'));
+    localStorage.setItem(
+      'memo-user-settings',
+      JSON.stringify({
+        theme: 'dark',
+        language: 'ru',
+        columnOrderMasters: [],
+        columnOrderLocations: [],
+        showArchivedMasters: false,
+        showArchivedLocations: true,
+      }),
+    );
+    renderConsumer();
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    expect(screen.getByTestId('archived-masters')).toHaveTextContent('false');
+    expect(screen.getByTestId('archived-locations')).toHaveTextContent('true');
+  });
+
+  it('PATCHes show_archived_* wire keys when toggled', async () => {
+    mockGetUserSettings.mockResolvedValue(remoteSettings);
+    renderConsumer();
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+
+    fireEvent.click(screen.getByTestId('toggle-archived-masters'));
+    await waitFor(() => {
+      expect(mockPatchUserSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ show_archived_masters: false }),
+      );
+    });
+    expect(screen.getByTestId('archived-masters')).toHaveTextContent('false');
+
+    fireEvent.click(screen.getByTestId('toggle-archived-locations'));
+    await waitFor(() => {
+      expect(mockPatchUserSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ show_archived_locations: true }),
+      );
+    });
+    expect(screen.getByTestId('archived-locations')).toHaveTextContent('true');
   });
 });

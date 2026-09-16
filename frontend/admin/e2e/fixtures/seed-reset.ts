@@ -54,6 +54,9 @@ const inList = (ids: string[]) => ids.map((id) => `'${id}'`).join(',');
  *      explicitly before their masters row);
  *   3. staff_positions wiped whole, then the 6 canonical seed links re-inserted
  *      («восстановление позиций сида»);
+ *   3b. user_settings wiped whole (GH #267): settings rows are test-created
+ *      state (persisted archived-visibility toggles; NO seed rows exist) —
+ *      a surviving row would make «default» scenarios non-deterministic;
  *   4. users.staff_id DETACHED for non-seed cards — users/sessions are NEVER
  *      deleted (the auth cookie must survive per-test resets, #252 §3.1), but
  *      a dangling staff_id would be FK-unclean once its card is deleted;
@@ -77,6 +80,10 @@ export const RESET_SQL = `
   DELETE FROM clients    WHERE length(id) > 3;
   DELETE FROM master_tags      WHERE master_id NOT IN (${inList(SEED_STAFF)});
   DELETE FROM staff_positions;
+  -- GH #267: user_settings rows are test-created state (persisted toggles);
+  -- NO seed rows exist, so wipe the table whole — a surviving row would make
+  -- «default» archived-visibility scenarios depend on the previous test.
+  DELETE FROM user_settings;
   UPDATE users SET staff_id = NULL WHERE staff_id IS NOT NULL AND staff_id NOT IN (${inList(SEED_STAFF)});
   DELETE FROM masters   WHERE staff_id NOT IN (${inList(SEED_STAFF)});
   DELETE FROM staff     WHERE id NOT IN (${inList(SEED_STAFF)});

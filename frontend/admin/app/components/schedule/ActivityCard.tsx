@@ -7,6 +7,7 @@ import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
 import { formatTime } from '@/lib/datetime';
+import { ArchiveBadge, type ArchivePart } from '@/app/components/shared/ArchiveBadge';
 
 interface ActivityCardProps {
   activity: ScheduleAdminDTO;
@@ -99,13 +100,23 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
   const foundLocation = locations.find(l => l.id === activity.locationId);
   const locationShortName = foundLocation?.shortTitle || foundLocation?.name || '';
 
+  // GH #267: archived reference entities — card stays but is muted and badged.
+  // opacity-70 (not 60): worst-case palette (#9A5870) keeps black text ≥4.5:1
+  // after compositing on white (WCAG 1.4.3); opacity-60 yields 4.08:1.
+  // parts order: мастер, услуга, локация (matches badge aria-label test).
+  const archiveParts: Array<ArchivePart> = [];
+  if (activity.masterArchived) archiveParts.push('мастер');
+  if (activity.serviceArchived) archiveParts.push('услуга');
+  if (activity.locationArchived) archiveParts.push('локация');
+  const isArchived = archiveParts.length > 0;
+
   return (
     <div
       ref={setNodeRef}
       {...attributes}
       {...listeners}
       onClick={handleClick}
-      className={`absolute left-1 right-1 rounded-lg overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md ${deleting ? 'opacity-0 scale-95' : ''}`}
+      className={`absolute left-1 right-1 rounded-lg overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md ${deleting ? 'opacity-0 scale-95' : ''} ${isArchived ? 'opacity-70' : ''}`}
       style={{
         top: topPx,
         height: heightPx,
@@ -146,6 +157,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
           >
             {activity.serviceTitle}
           </div>
+          {isArchived && <ArchiveBadge parts={archiveParts} className="flex-shrink-0 mt-0.5" />}
           <span className="flex-shrink-0 text-[12px] text-black/70 font-normal">
             {activity.minAge}{activity.maxAge ? `–${activity.maxAge}` : '+'}
           </span>

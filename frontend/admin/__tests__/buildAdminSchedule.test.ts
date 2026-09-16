@@ -12,6 +12,7 @@ const mockMaster: MasterViewResponse = {
   avatar_url: null,
   specialty: 'ceramics',
   sort_order: 0,
+  archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
@@ -136,6 +137,52 @@ describe('buildAdminSchedule', () => {
       MONDAY,
     );
     expect(items).toHaveLength(0);
+  });
+
+  // GH #267 Task 6 — archived flags instead of dropping rows
+  it('keeps archived master card with masterArchived flag (GH #267)', () => {
+    const archivedMaster: MasterViewResponse = { ...mockMaster, archived: true };
+    const { items } = buildAdminSchedule(
+      [makeActivity()],
+      [archivedMaster],
+      [mockService],
+      [mockLocation],
+      MONDAY,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].masterArchived).toBe(true);
+    expect(items[0].serviceArchived).toBe(false);
+    expect(items[0].locationArchived).toBe(false);
+  });
+
+  it('keeps archived service card with serviceArchived flag (GH #267)', () => {
+    const archivedService: ServiceResponse = { ...mockService, archived: true };
+    const { items } = buildAdminSchedule(
+      [makeActivity()],
+      [mockMaster],
+      [archivedService],
+      [mockLocation],
+      MONDAY,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].serviceArchived).toBe(true);
+    expect(items[0].masterArchived).toBe(false);
+    expect(items[0].locationArchived).toBe(false);
+  });
+
+  it('keeps archived location card with locationArchived flag (GH #267)', () => {
+    const archivedLocation: LocationResponse = { ...mockLocation, archived: true };
+    const { items } = buildAdminSchedule(
+      [makeActivity()],
+      [mockMaster],
+      [mockService],
+      [archivedLocation],
+      MONDAY,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].locationArchived).toBe(true);
+    expect(items[0].masterArchived).toBe(false);
+    expect(items[0].serviceArchived).toBe(false);
   });
 
   it('builds byDate index via generic buildSchedule', () => {

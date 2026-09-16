@@ -20,11 +20,29 @@ vi.mock('@memo/api-client', () => {
     updateActivity: update,
     patchActivity: update,
     deleteActivity: vi.fn(),
+    // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
+    getUserSettings: vi.fn().mockResolvedValue({
+      user_id: 'u1', theme: 'light', language: 'ru',
+      column_order_staff: [], column_order_locations: [],
+      show_archived_masters: true, show_archived_locations: false,
+    }),
+    createUserSettings: vi.fn(),
+    patchUserSettings: vi.fn().mockResolvedValue({}),
   };
 });
 
+// GH #267: UserSettingsProvider gates loading on useAuth().status — report
+// `authenticated` so the settings provider settles.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({
+    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated',
+    login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn(),
+  })),
+}));
+
 import { updateActivity as apiUpdateActivity, getActivities as apiGetActivities } from '@memo/api-client';
 import type { ActivityResponse } from '@memo/api-client';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -80,9 +98,11 @@ function renderWithContext() {
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <NavigationProvider>
-        <ScheduleProvider>
-          <TestUpdater />
-        </ScheduleProvider>
+        <UserSettingsProvider>
+          <ScheduleProvider>
+            <TestUpdater />
+          </ScheduleProvider>
+        </UserSettingsProvider>
       </NavigationProvider>
     </QueryClientProvider>,
   );

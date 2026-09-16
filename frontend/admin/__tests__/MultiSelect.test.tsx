@@ -204,6 +204,52 @@ describe('MultiSelect', () => {
     });
   });
 
+  describe('footer', () => {
+    const footer = <div data-testid="ms-footer">Показывать архивные</div>;
+
+    function renderWithFooter(selectedIds: string[] = []) {
+      const onSelectionChange = vi.fn();
+      render(
+        <MultiSelect<TestItem>
+          items={flatItems}
+          selectedIds={selectedIds}
+          onSelectionChange={onSelectionChange}
+          label="Локации"
+          getId={(item) => item.id}
+          getLabel={(item) => item.name}
+          footer={footer}
+        />,
+      );
+      return { onSelectionChange };
+    }
+
+    it('renders footer content inside the dropdown below the list', () => {
+      renderWithFooter();
+      openDropdown();
+      const dropdown = screen.getByTestId('multiselect-dropdown');
+      const footerEl = screen.getByTestId('ms-footer');
+      expect(dropdown).toContainElement(footerEl);
+    });
+
+    it('clicking the footer does not close the dropdown', () => {
+      renderWithFooter();
+      openDropdown();
+      expect(screen.getByTestId('multiselect-dropdown')).toBeInTheDocument();
+      // mouseDown is what the outside-click handler listens for — clicking
+      // inside the container (footer included) must keep the dropdown open.
+      fireEvent.mouseDown(screen.getByTestId('ms-footer'));
+      fireEvent.click(screen.getByTestId('ms-footer'));
+      expect(screen.getByTestId('multiselect-dropdown')).toBeInTheDocument();
+    });
+
+    it('selection toggles still work with a footer present', () => {
+      const { onSelectionChange } = renderWithFooter();
+      openDropdown();
+      fireEvent.click(screen.getByTestId('multiselect-option-loc1'));
+      expect(onSelectionChange).toHaveBeenCalledWith(['loc1']);
+    });
+  });
+
   describe('trigger display', () => {
     it('shows count of selected items in trigger', () => {
       renderGrouped(['m1', 'm2']);

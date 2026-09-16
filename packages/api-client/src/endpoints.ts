@@ -582,7 +582,7 @@ export async function resolveDeleteRecord(id: string, resolutions: Record<string
   await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
 }
 
-export async function patchRecord(id: string, data: Partial<Pick<RecordResponse, 'status' | 'comment' | 'custom_price' | 'anonym_visits'> & { visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; price: number; custom_price?: number | null; status?: string }> }>): Promise<RecordResponse> {
+export async function patchRecord(id: string, data: Partial<Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & { visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; price: number; custom_price?: number | null; status?: string }> }>): Promise<RecordResponse> {
   return api(`/api/v1/records/${id}`, RecordResponseSchema, {
     method: 'PATCH',
     body: JSON.stringify(data),

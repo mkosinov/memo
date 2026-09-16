@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
@@ -46,10 +46,11 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     addPayment,
     patchPayment,
     deletePayment,
-    updateAnonymVisits,
     updateRecord,
     addVisit,
     patchVisit,
+    deleteVisit,
+    addAnonymousVisit,
     deleteVisitDeferred,
   } = useRecordMutations(record?.activity_id ?? '', recordId);
 
@@ -86,6 +87,35 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   }, [record]);
 
   const markChanged = useCallback(() => setHasChanges(true), []);
+
+  // ── Anonymous visits stepper (#257 unified visitors model) ──────────────
+  // Anonymous seats are real visits with visitor_id = null; the header
+  // stepper +/− creates/deletes them one at a time. The counter is derived
+  // from record.visits — no extra query.
+  const lastAnonymousVisit = useMemo(
+    () => [...(record?.visits ?? [])].reverse().find((v) => v.visitor_id == null),
+    [record?.visits],
+  );
+
+  const handleAddAnonymousVisit = useCallback(async () => {
+    try {
+      // tariffs[0] — the same first-tariff default as makeEmptyVisitRow;
+      // no service tariffs → undefined → the visit is created with price 0.
+      await addAnonymousVisit(tariffs[0]);
+    } catch (err) {
+      // Capacity re-check failures (409) surface here.
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [addAnonymousVisit, tariffs, showToast]);
+
+  const handleDeleteAnonymousVisit = useCallback(async () => {
+    if (!lastAnonymousVisit) return;
+    try {
+      await deleteVisit(lastAnonymousVisit.id);
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [deleteVisit, lastAnonymousVisit, showToast]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -179,9 +209,11 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     [clientId, queryClient, showToast],
   );
 
-  const handleAnonymChange = useCallback((value: number) => {
-    updateAnonymVisits(recordId, value);
-  }, [recordId, updateAnonymVisits]);
+  const handleAnonymChange = useCallback(() => {
+    // T7 (#257): RecordVisitsTable's counter props are removed there — this
+    // wiring is dead until then (the table declares the callback but never
+    // renders the counter input).
+  }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -210,9 +242,13 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
 
   return (
     <div className="space-y-4 p-4" data-testid="client-record-tab">
-      {/* Record header with status badge + anonym_visits */}
+      {/* Record header with status badge + anonymous-visits stepper (#257) */}
       {headerData && (
-        <RecordHeader data={headerData} onAnonymVisitsChange={handleAnonymChange} />
+        <RecordHeader
+          data={headerData}
+          onAddAnonymousVisit={handleAddAnonymousVisit}
+          onDeleteAnonymousVisit={lastAnonymousVisit ? handleDeleteAnonymousVisit : undefined}
+        />
       )}
 
       {/* Client statistics */}
@@ -265,12 +301,14 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         </div>
       </div>
 
-      {/* Visitors table — visits read from canonical record.visits, no optimistic layer */}
+      {/* Visitors table — visits read from canonical record.visits, no optimistic layer.
+          T7 (#257): anonymVisits/onAnonymVisitsChange props are removed there —
+          until then they compile against a derived count and a no-op. */}
       <RecordVisitsTable
         visits={visits}
         visitorsMap={visitorsMap}
         tariffs={tariffs}
-        anonymVisits={record.anonym_visits ?? 0}
+        anonymVisits={visits.filter((v) => v.visitor_id == null).length}
         totalCost={total}
         recordStatus={status}
         clientId={clientId}

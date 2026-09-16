@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { RecordHeader } from '../RecordHeader';
 import type { RecordWithDerived } from '../types';
-import type { ClientResponse, VisitResponse, PaymentResponse, TariffResponse } from '@memo/api-client';
+import type { ClientResponse, VisitResponse } from '@memo/api-client';
 
 const mockClient: ClientResponse = {
   id: 'c1',
@@ -15,10 +15,22 @@ const mockClient: ClientResponse = {
   archived: false,
 };
 
-const mockVisit: VisitResponse = {
+const mockNamedVisit: VisitResponse = {
   id: 'v1',
   record_id: 'r1',
   visitor_id: 'vis1',
+  price: 3500,
+  custom_price: null,
+  status: 'waiting',
+  created_at: '',
+  updated_at: '',
+};
+
+/** #257: anonymous seats are real visits with visitor_id = null. */
+const mockAnonymousVisit: VisitResponse = {
+  id: 'v2',
+  record_id: 'r1',
+  visitor_id: null,
   price: 3500,
   custom_price: null,
   status: 'waiting',
@@ -33,15 +45,14 @@ function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived
       activity_id: 'ev_1',
       client_id: 'c1',
       seats: 1,
-      anonym_visits: 0,
       comment: null,
       custom_price: null,
       created_at: '2026-05-10T10:00:00',
       updated_at: '2026-05-10T10:00:00',
-      visits: [mockVisit],
+      visits: [mockNamedVisit],
     },
     status: 'waiting',
-    visits: [mockVisit],
+    visits: [mockNamedVisit],
     payments: [],
     client: mockClient,
     tariffs: [],
@@ -50,13 +61,6 @@ function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived
 }
 
 describe('RecordHeader', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it('renders client name and phone', () => {
     render(<RecordHeader data={makeData()} />);
     expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
@@ -74,30 +78,100 @@ describe('RecordHeader', () => {
   });
 
   it('shows seats summary with correct pluralization', () => {
-    render(<RecordHeader data={makeData({ visits: [mockVisit] })} />);
+    render(<RecordHeader data={makeData({ visits: [mockNamedVisit] })} />);
     expect(screen.getByText(/1 место/)).toBeInTheDocument();
   });
 
-  it('debounces anonym_visits change and calls onAnonymVisitsChange', async () => {
-    const onAnonymVisitsChange = vi.fn();
+  it('derives the anonymous count from visits (visitor_id = null)', () => {
     render(
       <RecordHeader
-        data={makeData()}
-        onAnonymVisitsChange={onAnonymVisitsChange}
+        data={makeData({ visits: [mockNamedVisit, mockAnonymousVisit] })}
+      />,
+    );
+    expect(screen.getByText('1 анонимных')).toBeInTheDocument();
+  });
+
+  it('calls onAddAnonymousVisit on inc click', async () => {
+    const onAddAnonymousVisit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <RecordHeader data={makeData()} onAddAnonymousVisit={onAddAnonymousVisit} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('anonym-visits-inc'));
+    });
+
+    expect(onAddAnonymousVisit).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onDeleteAnonymousVisit on dec click', async () => {
+    const onDeleteAnonymousVisit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <RecordHeader
+        data={makeData({ visits: [mockNamedVisit, mockAnonymousVisit] })}
+        onDeleteAnonymousVisit={onDeleteAnonymousVisit}
       />,
     );
 
-    const input = screen.getByTestId('anonym-visits-input');
-    fireEvent.change(input, { target: { value: '3' } });
-
-    // Not called yet (debounced 500ms)
-    expect(onAnonymVisitsChange).not.toHaveBeenCalled();
-
-    // Advance timer past debounce
-    act(() => {
-      vi.advanceTimersByTime(600);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('anonym-visits-dec'));
     });
 
-    expect(onAnonymVisitsChange).toHaveBeenCalledWith(3);
+    expect(onDeleteAnonymousVisit).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables dec when there are no anonymous visits', () => {
+    render(
+      <RecordHeader data={makeData({ visits: [] })} onAddAnonymousVisit={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId('anonym-visits-dec')).toBeDisabled();
+  });
+
+  it('hides the stepper zone in read-only mode', () => {
+    render(
+      <RecordHeader
+        data={makeData({ visits: [mockNamedVisit, mockAnonymousVisit] })}
+        isReadOnly
+      />,
+    );
+
+    expect(screen.queryByTestId('anonym-visits-inc')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('anonym-visits-dec')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 анонимных')).not.toBeInTheDocument();
+  });
+
+  it('ignores repeated inc clicks while onAddAnonymousVisit is pending', async () => {
+    let resolveAdd!: () => void;
+    const onAddAnonymousVisit = vi.fn(
+      () =>
+        new Promise<void>((res) => {
+          resolveAdd = res;
+        }),
+    );
+    render(
+      <RecordHeader data={makeData()} onAddAnonymousVisit={onAddAnonymousVisit} />,
+    );
+
+    const inc = screen.getByTestId('anonym-visits-inc');
+    await act(async () => {
+      fireEvent.click(inc);
+    });
+
+    expect(onAddAnonymousVisit).toHaveBeenCalledTimes(1);
+    // Button is pending → disabled
+    expect(inc).toBeDisabled();
+
+    // Repeated click while pending — handler not invoked again
+    await act(async () => {
+      fireEvent.click(inc);
+    });
+    expect(onAddAnonymousVisit).toHaveBeenCalledTimes(1);
+
+    // Resolve → button re-enables
+    await act(async () => {
+      resolveAdd();
+    });
+    expect(inc).toBeEnabled();
   });
 });

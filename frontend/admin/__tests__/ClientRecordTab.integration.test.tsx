@@ -148,9 +148,10 @@ describe('ClientRecordTab — integration with shared atoms', () => {
     expect(screen.getByTestId('status-badge-waiting')).toBeInTheDocument();
   });
 
-  it('renders anonym-visits input in RecordHeader', () => {
+  it('renders the anonymous-visits stepper in RecordHeader (#257)', () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
-    expect(screen.getByTestId('anonym-visits-input')).toBeInTheDocument();
+    expect(screen.getByTestId('anonym-visits-inc')).toBeInTheDocument();
+    expect(screen.getByTestId('anonym-visits-dec')).toBeInTheDocument();
   });
 
   // ─── RecordVisitRow atom ───────────────────────────────────────────

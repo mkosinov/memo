@@ -17,7 +17,6 @@ export const mockRecord: RecordResponse = {
   client_id: 'c1',
   status: 'visited',
   seats: 1,
-  anonym_visits: 0,
   comment: null,
   custom_price: null,
   created_at: '2026-05-10T10:00:00',

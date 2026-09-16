@@ -1,11 +1,12 @@
 /**
  * auth-roles.spec.ts — GH #247 User Scenario 2, G2-revised (spec §6);
- * forbidden-write assertion re-targeted by GH #263 T8.
+ * forbidden-write assertion re-targeted by GH #263 T8; nav expectations
+ * re-targeted by GH #263 T9 (role menu): the master no longer sees the
+ * admin-only sections (Клиенты link, Справочники minus Услуги, Мастера) —
+ * S4 of the #263 design supersedes the #247 «identical nav» G2 decision.
  *
- * The master sees the SAME interface as the admin (identical nav/sections —
- * display tuning per role is a recorded future task, spec §8). The user
- * block shows the master's name. A forbidden write surfaces as the standard
- * error toast — the enforcing layer in v1.
+ * The user block shows the master's name. A forbidden write surfaces as
+ * the standard error toast / API 403 — the enforcing layer.
  *
  * GH #263 T1 granted the master `payments:write` (scoped to own records),
  * so the original «payment POST → 403» expectation is obsolete BY DESIGN.
@@ -17,33 +18,34 @@ import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
 
-test.describe('User Scenario 2 — master signs in, same interface', () => {
+test.describe('User Scenario 2 — master signs in (role menu)', () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
-  test('master sees identical nav, own user block, and client mutation is rejected', async ({ page }) => {
+  test('master signs in: role menu, own user block, client mutation rejected', async ({ page }) => {
     await page.goto('/login');
     await page.locator('#login-phone').fill('+79990000002');
     await page.locator('#login-password').fill('master12345');
     await page.getByRole('button', { name: 'Войти' }).click();
 
-    // Same app shell as the admin (no nav filtering in v1 — G2 decision).
+    // Same app shell, role-filtered nav (GH #263 T9).
     await expect(page).toHaveURL(/\/$/);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
 
-    // Identical nav as admin: top-level items + Справочники submenu (Услуги/
-    // Локации/Теги render only after the submenu expands — navigation.spec's
-    // pattern), + Фото.
-    for (const label of ['Расписание', 'Записи', 'Клиенты', 'Фото']) {
+    // Role-filtered nav (GH #263 T9): top-level items the master keeps —
+    // Клиенты is ADMIN-ONLY now (S4b in master-role-menu.spec.ts pins its
+    // absence); Услуги/Локации/Теги render only after the submenu expands.
+    for (const label of ['Расписание', 'Записи', 'Фото']) {
       await expect(menubar.locator(`a[aria-label="${label}"]`)).toHaveCount(1);
     }
+    await expect(menubar.locator('a[aria-label="Клиенты"]')).toHaveCount(0);
     const directoriesBtn = menubar.getByRole('button', { name: 'Справочники' });
     await expect(directoriesBtn).toHaveCount(1);
     await directoriesBtn.click();
-    for (const label of ['Услуги', 'Локации', 'Теги']) {
-      // Directory links render text only (no aria-label) — same locator
-      // pattern as navigation.spec.ts.
-      await expect(menubar.locator('a', { hasText: label }).first()).toBeVisible();
+    await expect(menubar.locator('a', { hasText: 'Услуги' }).first()).toBeVisible();
+    // Локации/Теги/Сотрудники/Должности are admin-only — hidden (S4b).
+    for (const label of ['Локации', 'Теги', 'Сотрудники', 'Должности']) {
+      await expect(menubar.locator('a', { hasText: label })).toHaveCount(0);
     }
     await directoriesBtn.click();
 

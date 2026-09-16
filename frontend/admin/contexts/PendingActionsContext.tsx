@@ -51,14 +51,22 @@ export function PendingActionsProvider({ children }: { children: React.ReactNode
       // 2. Show the toast with the undo callback. The undo callback:
       //    - runs the user-supplied rollback
       //    - clears + deletes the pending timer so commit() never fires.
-      showToast(action.message, () => {
-        action.undo();
-        const t = timersRef.current.get(action.id);
-        if (t) {
-          clearTimeout(t);
-          timersRef.current.delete(action.id);
-        }
-      });
+      // #94 (spec D3): the undo window (delayMs) rides as the toast's
+      // `countdownMs` — countdown ring, toast lifetime and the commit timer
+      // below all derive from this single value.
+      showToast(
+        action.message,
+        () => {
+          action.undo();
+          const t = timersRef.current.get(action.id);
+          if (t) {
+            clearTimeout(t);
+            timersRef.current.delete(action.id);
+          }
+        },
+        undefined, // kind slot — unused on the kindless undo path
+        action.delayMs,
+      );
 
       // 3. Schedule commit after the undo window.
       const timer = setTimeout(async () => {

@@ -40,10 +40,22 @@ function UIConsumer() {
         Show Toast
       </button>
       <button
+        data-testid="show-toast-undo-countdown"
+        onClick={() => showToast('Удалено', () => {}, 3000)}
+      >
+        Show Toast w/ Undo + Countdown
+      </button>
+      <button
         data-testid="show-toast-undo"
         onClick={() => showToast('Undoable', () => {})}
       >
         Show Toast w/ Undo
+      </button>
+      <button
+        data-testid="show-toast-info-countdown"
+        onClick={() => showToast('Info', 'info', undefined, 3000)}
+      >
+        Show Info Toast w/ Countdown Param
       </button>
       <button
         data-testid="hide-toast"
@@ -188,6 +200,60 @@ describe('UIProvider', () => {
     expect(screen.getByTestId('toast-count').textContent).toBe('1');
     act(() => {
       vi.advanceTimersByTime(4500);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('auto-removes an undo toast after its countdownMs window', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-undo-countdown').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(2999);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('auto-removes an undo toast without countdownMs after 5s', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-undo').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(4999);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('ignores countdownMs for non-undo toasts (still 4500ms)', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-info-countdown').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(4499);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(1);
     });
     expect(screen.getByTestId('toast-count').textContent).toBe('0');
     vi.useRealTimers();

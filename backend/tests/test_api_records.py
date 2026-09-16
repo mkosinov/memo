@@ -349,7 +349,6 @@ class TestRecordPatch:
         assert patched["comment"] == "original comment"
         assert patched["custom_price"] == 3000
         assert patched["seats"] == record["seats"]
-        assert patched["anonym_visits"] == record["anonym_visits"]
         assert patched["status"] == record["status"]
 
     def test_patch_record_advances_updated_at(self, api_client, create_record) -> None:
@@ -455,49 +454,59 @@ class TestRecordCreatePhoneFlow:
 
 
 class TestAnonymVisits:
-    """Tests for the anonym_visits field on Record (#82)."""
+    """Tests for anonymous visits on Record (#82, unified model #257).
+
+    Anonymous guest = a visit element with ``visitor_id: None`` (and no
+    name) — the counter field is gone.
+    """
+
+    @staticmethod
+    def _anonymous(price: int = 0, status: str = "waiting") -> dict:
+        return {"visitor_id": None, "price": price, "status": status}
 
     def test_create_record_with_anonym_visits_only(self, api_client, create_activity, create_client) -> None:
-        """POST /api/records with anonym_visits=5, visits=[] → seats=5."""
+        """POST /api/records with 5 anonymous visit elements → seats=5, all visitor_id NULL."""
         activity = create_activity()
         client = create_client()
         payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "anonym_visits": 5,
-            "visits": [],
+            "visits": [self._anonymous() for _ in range(5)],
         }
 
         response = api_client.post("/api/v1/records", json=payload)
         assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
         body = response.json()
         assert body["seats"] == 5
-        assert body["anonym_visits"] == 5
-        assert body["visits"] == []
+        assert len(body["visits"]) == 5
+        assert all(v["visitor_id"] is None for v in body["visits"])
 
     def test_create_record_with_visits_and_anonym_visits(self, api_client, create_activity, create_client) -> None:
-        """POST /api/records with 2 visits + anonym_visits=3 → seats=5."""
+        """POST /api/records with 2 named visits + 3 anonymous → seats=5."""
         activity = create_activity()
         client = create_client()
         payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
-            "anonym_visits": 3,
             "visits": [
                 {"name": "Alice", "price": 1500},
                 {"name": "Bob", "price": 1500},
+                *(self._anonymous(price=0) for _ in range(3)),
             ],
         }
 
         response = api_client.post("/api/v1/records", json=payload)
         assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
         body = response.json()
-        assert body["seats"] == 5  # 2 visits + 3 anonym
-        assert body["anonym_visits"] == 3
-        assert len(body["visits"]) == 2
+        assert body["seats"] == 5  # 2 named + 3 anonymous visits
+        assert len(body["visits"]) == 5
+        named = [v for v in body["visits"] if v["visitor_id"] is not None]
+        anonymous = [v for v in body["visits"] if v["visitor_id"] is None]
+        assert len(named) == 2
+        assert len(anonymous) == 3
 
     def test_create_record_default_anonym_visits_zero(self, api_client, create_activity, create_client) -> None:
-        """POST /api/records without anonym_visits → seats = len(visits), anonym_visits=0."""
+        """POST /api/records without anonymous elements → seats = len(visits)."""
         activity = create_activity()
         client = create_client()
         payload = {
@@ -510,37 +519,55 @@ class TestAnonymVisits:
         assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
         body = response.json()
         assert body["seats"] == 1
-        assert body["anonym_visits"] == 0
+        assert len(body["visits"]) == 1
+        assert body["visits"][0]["visitor_id"] is not None
 
     def test_patch_anonym_visits_updates_seats(self, api_client, create_record) -> None:
-        """PATCH /api/records/{id} with anonym_visits recalculates seats."""
-        record = create_record()  # default: 1 visit, seats=1, anonym_visits=0
+        """PATCH /api/records/{id} with anonymous visit elements recalculates seats."""
+        record = create_record()  # default: 1 named visit, seats=1
 
         resp = api_client.patch(f"/api/v1/records/{record['id']}", json={
-            "anonym_visits": 4,
-        })
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
-        body = resp.json()
-        assert body["anonym_visits"] == 4
-        assert body["seats"] == 5  # 1 visit + 4 anonym
-
-    def test_put_record_with_anonym_visits(self, api_client, create_activity, create_client, create_record) -> None:
-        """PUT /api/records/{id} with anonym_visits computes seats correctly."""
-        record = create_record()  # 1 visit
-
-        resp = api_client.put(f"/api/v1/records/{record['id']}", json={
-            "activity_id": record["activity_id"],
-            "client_id": record["client_id"],
-            "anonym_visits": 2,
             "visits": [
-                {"name": "Guest1", "price": 1000},
-                {"name": "Guest2", "price": 1000},
+                *record["visits"],
+                *(self._anonymous() for _ in range(4)),
             ],
         })
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert body["seats"] == 4  # 2 visits + 2 anonym
-        assert body["anonym_visits"] == 2
+        assert body["seats"] == 5  # 1 named + 4 anonymous
+        anonymous = [v for v in body["visits"] if v["visitor_id"] is None]
+        assert len(anonymous) == 4
+
+    def test_put_record_with_anonym_visits(self, api_client, create_activity, create_client, create_record) -> None:
+        """PUT /api/records/{id} with anonymous visit elements computes seats correctly.
+
+        Named visits are passed ID-based: PUT does not resolve ``name``
+        payloads (pre-existing behavior — resolution happens on create).
+        """
+        record = create_record()  # 1 named visit
+        visitor_a = api_client.post("/api/v1/visitors", json={
+            "client_id": record["client_id"], "name": "Guest1", "age": None,
+        }).json()
+        visitor_b = api_client.post("/api/v1/visitors", json={
+            "client_id": record["client_id"], "name": "Guest2", "age": None,
+        }).json()
+
+        resp = api_client.put(f"/api/v1/records/{record['id']}", json={
+            "activity_id": record["activity_id"],
+            "client_id": record["client_id"],
+            "visits": [
+                {"visitor_id": visitor_a["id"], "price": 1000},
+                {"visitor_id": visitor_b["id"], "price": 1000},
+                *(self._anonymous() for _ in range(2)),
+            ],
+        })
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["seats"] == 4  # 2 named + 2 anonymous visits
+        anonymous = [v for v in body["visits"] if v["visitor_id"] is None]
+        named = [v for v in body["visits"] if v["visitor_id"] is not None]
+        assert len(anonymous) == 2
+        assert len(named) == 2
 
 
 class TestRecordTariffId:
@@ -827,7 +854,10 @@ class TestRecordsListSearch:
             api_client, master_id=master["id"], service_id=svc["id"],
             location_id=location["id"], start=datetime(2026, 8, 5, 10, 0),
         )
-        anon = create_record(activity_id=a["id"], client_id=None, visits=[], anonym_visits=2)
+        anon = create_record(
+            activity_id=a["id"], client_id=None,
+            visits=[{"visitor_id": None, "price": 0, "status": "waiting"}],
+        )
         other = create_record()  # decoy: default service title must NOT match
         ids = self._ids(api_client.get("/api/v1/records", params={"q": "летени"}))
         assert anon["id"] in ids and other["id"] not in ids  # LEFT OUTER join keeps NULL-client rows findable
@@ -837,7 +867,10 @@ class TestRecordsListSearch:
     ):
         cl = create_client(name="Серафима")
         named = create_record(client_id=cl["id"])
-        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        anon = create_record(
+            client_id=None,
+            visits=[{"visitor_id": None, "price": 0, "status": "waiting"}],
+        )
         resp = api_client.get("/api/v1/records", params={"q": "ерафим"})  # no error either way
         ids = self._ids(resp)
         assert named["id"] in ids and anon["id"] not in ids
@@ -869,25 +902,42 @@ class TestRecordsListSorting:
 
     def test_sort_client_name_anonymous_first_on_asc(self, api_client, create_client, create_record):
         named = create_record(client_id=create_client(name="Анна")["id"])
-        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        anon = create_record(
+            client_id=None,
+            visits=[{"visitor_id": None, "price": 0, "status": "waiting"}],
+        )
         asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "asc"}))
         assert asc.index(anon["id"]) < asc.index(named["id"])  # NULLS FIRST on asc (mirrors ''-first comparator)
 
     def test_sort_client_name_anonymous_last_on_desc(self, api_client, create_client, create_record):
         named = create_record(client_id=create_client(name="Анна")["id"])
-        anon = create_record(client_id=None, visits=[], anonym_visits=1)
+        anon = create_record(
+            client_id=None,
+            visits=[{"visitor_id": None, "price": 0, "status": "waiting"}],
+        )
         desc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "client", "sort_order": "desc"}))
         assert desc.index(named["id"]) < desc.index(anon["id"])  # NULLS LAST on desc
 
-    def test_sort_guests_counts_live_visits_not_anonym_seats(self, api_client, create_record):
-        # BLOCKER-guard test: anonym-visits record must sort by live visits count (seats - anonym_visits)
-        anon = create_record(visits=[], anonym_visits=3)   # seats=3, live visits=0
-        two = create_record(visits=[
-            {"name": "А", "price": 1000, "status": "waiting"},
-            {"name": "Б", "price": 1000, "status": "waiting"},
-        ])  # seats=2, live visits=2
+    def test_sort_guests_counts_named_visits_not_raw_seats(self, api_client, create_record):
+        # BLOCKER-guard test (#257): guests sort = seats - named_visit_count,
+        # i.e. only NAMED visits count. Anonymous-only record (A: 2 named +
+        # 3 anonymous → seats=5, named=2) must rank BELOW a 4-named record
+        # (B: seats=4, named=4) on asc — a raw-seats sort would invert them.
+        anon_heavy = create_record(visits=[
+            {"name": "А1", "price": 1000, "status": "waiting"},
+            {"name": "А2", "price": 1000, "status": "waiting"},
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+        ])  # seats=5, named visits=2
+        four = create_record(visits=[
+            {"name": "Б1", "price": 1000, "status": "waiting"},
+            {"name": "Б2", "price": 1000, "status": "waiting"},
+            {"name": "Б3", "price": 1000, "status": "waiting"},
+            {"name": "Б4", "price": 1000, "status": "waiting"},
+        ])  # seats=4, named visits=4
         asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
-        assert asc.index(anon["id"]) < asc.index(two["id"])  # 0 < 2; raw-seats sort would invert
+        assert asc.index(anon_heavy["id"]) < asc.index(four["id"])  # 2 < 4; raw-seats sort would invert
 
     def test_sort_guests_desc(self, api_client, create_record):
         one = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])

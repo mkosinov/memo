@@ -420,14 +420,13 @@ class TestActivityEdgeCases:
         assert len(r1["visits"]) == 3
 
         # Sanity: activity now full → a new booking is rejected.
-        # Use anonym_visits=1 to avoid the unrelated NOT NULL constraint
-        # on visitors.client_id (visitors.client_id is NOT NULL, and the
-        # capacity check 409s BEFORE any visitor insert, so this is fine
-        # for the sanity check).
+        # Use an anonymous visit element to avoid the unrelated NOT NULL
+        # constraint on visitors.client_id (visitors.client_id is NOT NULL,
+        # and the capacity check 409s BEFORE any visitor insert, so this is
+        # fine for the sanity check).
         full = api_client.post("/api/v1/records", json={
             "activity_id": act_id,
-            "visits": [],
-            "anonym_visits": 1,
+            "visits": [{"visitor_id": None, "price": 0, "status": "waiting"}],
         })
         assert full.status_code == 409, f"expected full: {full.text}"
 
@@ -438,13 +437,12 @@ class TestActivityEdgeCases:
                 json={"status": "cancelled"},
             )
 
-        # Now the same booking must succeed (anonym_visits avoids the
+        # Now the same booking must succeed (anonymous visits avoid the
         # visitor/client_id insert path entirely — we are only testing
         # the capacity check, not the visitor resolver).
         after = api_client.post("/api/v1/records", json={
             "activity_id": act_id,
-            "visits": [],
-            "anonym_visits": 1,
+            "visits": [{"visitor_id": None, "price": 0, "status": "waiting"}],
         })
         assert after.status_code == 201, f"seat should be free after cancel: {after.text}"
 
@@ -471,8 +469,7 @@ class TestActivityEdgeCases:
 
         after = api_client.post("/api/v1/records", json={
             "activity_id": act_id,
-            "visits": [],
-            "anonym_visits": 1,
+            "visits": [{"visitor_id": None, "price": 0, "status": "waiting"}],
         })
         assert after.status_code == 201, f"seat should be free after missed: {after.text}"
 
@@ -506,8 +503,10 @@ class TestActivityEdgeCases:
         # check agrees: a 2-seat booking is admitted (not 409)
         after = api_client.post("/api/v1/records", json={
             "activity_id": act_id,
-            "visits": [],
-            "anonym_visits": 2,
+            "visits": [
+                {"visitor_id": None, "price": 0, "status": "waiting"},
+                {"visitor_id": None, "price": 0, "status": "waiting"},
+            ],
         })
         assert after.status_code == 201, f"view/check disagree: {after.text}"
 

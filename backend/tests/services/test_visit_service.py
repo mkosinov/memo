@@ -40,7 +40,7 @@ async def test_visit_service_create_cascades_to_record(db_session, sample_record
     from src.schemas.visit import VisitCreate
 
     service = VisitService(get_base_repository())
-    original_seats = sample_record.seats  # API set seats=2, anonym_visits=1 set via SQL
+    original_seats = sample_record.seats  # 3: 2 named visits + 1 anonymous visit (SQL)
     visit = await service.create(
         db_session=db_session,
         data=VisitCreate(
@@ -51,7 +51,7 @@ async def test_visit_service_create_cascades_to_record(db_session, sample_record
     assert visit is not None
     assert visit.record_id == sample_record.id
     assert visit.price == 100
-    # Verify cascade: recompute_record_seats corrects seats = active_count + anonym_visits
+    # Verify cascade: recompute_record_seats corrects seats = visit count
     await db_session.refresh(sample_record)
     assert sample_record.seats >= original_seats  # seats should have been recomputed
 

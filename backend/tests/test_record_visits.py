@@ -27,11 +27,12 @@ def test_active_record_filter_returns_two_conditions():
 
 @pytest.mark.asyncio
 async def test_recompute_record_seats_counts_active_visits(db_session, sample_record):
-    """Scenario 16: recompute_record_seats sets seats = count(active visits) + anonym_visits."""
+    """Scenario 16: recompute_record_seats sets seats = count(visits) (#257:
+    anonymous guests are visits too, so seats == len(visits))."""
     from src.domain.record_visits import recompute_record_seats
 
     record = await recompute_record_seats(db_session, sample_record.id)
-    assert record.seats == len(sample_record.visits) + sample_record.anonym_visits
+    assert record.seats == len(sample_record.visits)
 
 
 @pytest.mark.asyncio

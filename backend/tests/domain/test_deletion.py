@@ -564,7 +564,7 @@ class TestCollectDependenciesClient:
         )
         from src.models.record import Record
         record = Record(activity_id=activity.id, client_id=client.id,
-                        status="pending", seats=0, anonym_visits=0)
+                        status="pending", seats=0)
         db_session.add(record)
         await db_session.flush()
 
@@ -622,7 +622,7 @@ class TestCollectDependenciesRecord:
             db_session, master=master, service=service, location=location,
         )
         record = Record(activity_id=activity.id, client_id=None,
-                        status="pending", seats=0, anonym_visits=0)
+                        status="pending", seats=0)
         db_session.add(record)
         await db_session.flush()
         # 3 visits (anonymous — visitor_id=None), 2 payments, 2 record_tags.
@@ -656,7 +656,7 @@ class TestCollectDependenciesRecord:
             db_session, master=master, service=service, location=location,
         )
         record = Record(activity_id=activity.id, client_id=None,
-                        status="pending", seats=0, anonym_visits=0)
+                        status="pending", seats=0)
         db_session.add(record)
         await db_session.flush()
         await _add_visit(db_session, record=record)
@@ -680,7 +680,7 @@ class TestCollectDependenciesRecord:
             db_session, master=master, service=service, location=location,
         )
         record = Record(activity_id=activity.id, client_id=None,
-                        status="pending", seats=0, anonym_visits=0)
+                        status="pending", seats=0)
         db_session.add(record)
         await db_session.commit()
 

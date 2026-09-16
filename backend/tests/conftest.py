@@ -601,7 +601,9 @@ async def db_session(db_engine):
 
 @pytest.fixture
 async def sample_record(api_client, db_session):
-    """Create a Record with 2 active visits + anonym_visits=1 via API, return ORM object.
+    """Create a Record with 2 named visits + 1 anonymous visit (visitor_id NULL),
+    return ORM object. Same "3 seats" shape as the pre-#257 fixture
+    (2 visits + anonym_visits=1), but in the unified visitor model.
 
     Used by test_recompute_record_seats.
     """
@@ -643,10 +645,15 @@ async def sample_record(api_client, db_session):
     assert record_resp.status_code == 201
     record_id = record_resp.json()["id"]
 
-    # Set anonym_visits=1 directly in DB
+    # Add one anonymous visit directly in DB (visitor_id NULL — #257 model)
     await db_session.execute(
-        text("UPDATE records SET anonym_visits = 1 WHERE id = :id"),
-        {"id": record_id},
+        text(
+            "INSERT INTO visits (id, record_id, visitor_id, tariff_id, price,"
+            " custom_price, status, created_at, updated_at)"
+            " VALUES (:id, :record_id, NULL, NULL, 0, NULL, 'waiting',"
+            " datetime('now'), datetime('now'))"
+        ),
+        {"id": str(_uuid.uuid4()), "record_id": record_id},
     )
     await db_session.commit()
 

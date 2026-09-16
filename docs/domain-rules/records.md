@@ -9,11 +9,12 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | activity_id | string | ✅ | — | — | — | FK to Activity |
 | client_id | string | ❌ | — | — | null | FK to Client (nullable for anonymous) |
 | status | enum | ❌ | — | — | waiting | **DERIVED** from VisitStatus (see [RecordStatus derivation](#recordstatus-derivation)). Same enum as VisitItem.status: waiting / visited / missed / cancelled |
-| seats | integer | ✅ | — | — | — | Computed: len(visits) + anonym_visits, never set by user |
-| anonym_visits | integer | ❌ | — | — | 0 | Number of "anonymous" seats (no visitor assigned). Adds to seats count without a Visit row. Used for "walk-ins" / phone reservations. |
+| seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
 | visits | array | ✅ | — | — | — | List of VisitItems |
+
+An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it is created as a Visit row with `visitor_id = NULL` (#257) and carries a real tariff/price/status like any other visit — there is no separate counter field anymore.
 
 ## VisitItem (nested in Record)
 | Field | Type | Required | Description |
@@ -26,12 +27,12 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 | status | enum | ❌ | waiting / visited / missed / cancelled (default: waiting) |
 
 ## Cross-field Rules
-- `seats` MUST equal `len(visits) + anonym_visits` at all times (recomputed via `recompute_record_seats()` in `src/domain/record_visits.py`)
+- `seats` MUST equal `len(visits)` at all times: always recomputed via `recompute_record_seats()` (`src/domain/record_visits.py`); changes ONLY through the recompute points (record create/update/patch, `VisitService.create/delete`) — never set directly
 - Either `name` or `visitor_id` should be provided for each visit (or neither for anonymous)
 - `custom_price` at Record level overrides sum of visit prices
 
 ## ⚠️ FUTURE REQUIREMENT: Flexible Seats
-**Status:** Not implemented. Currently `seats = len(visits) + anonym_visits` always.
+**Status:** Not implemented. Currently `seats = len(visits)` always.
 
 **Planned behavior (hybrid):**
 - User can EITHER specify `seats` count manually OR add visitors one by one
@@ -69,14 +70,16 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - Backend: No changes needed (Client fields all nullable)
 
 ## Invariants
-- Capacity check: `occupied + seats <= activity.capacity` (on create only)
+- Capacity check: `occupied + seats <= activity.capacity` (on create, and again on PUT / PATCH whenever the visits array is replaced; comment/custom_price-only patches skip the capacity query)
 - Activity must exist and be active (FK enforced)
 - Client is optional (anonymous booking possible)
 - **Record.status === derived from VisitItems.status** (see below). Record status is NEVER set independently.
 
 ## RecordStatus derivation
 
-`Record.status` is **always computed** from the statuses of its `VisitItem`s. The Record has no user-editable status field; the user edits per-visit statuses (or `anonym_visits` slots) and the Record status updates automatically.
+`Record.status` is **always computed** from the statuses of its `VisitItem`s. The Record has no user-editable status field; the user edits per-visit statuses and the Record status updates automatically.
+
+**Record-level status change is visit-level work (D4 cascade):** switching status via the record-level StatusPicker does NOT write the Record row — the coarse handler sets the picked status on ALL of the record's visits, including anonymous ones (`visitor_id = NULL`); the record status then re-derives from its visits. Record status is never set independently.
 
 | Condition | Record.status |
 |-----------|---------------|
@@ -92,7 +95,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 4. Else → `'waiting'`
 
 **Edge cases:**
-- Record with **0 visits** (only `anonym_visits` slots): status = `'waiting'` (no derivation possible)
+- Record with **0 visits** (e.g. created with an empty visits list): status = `'waiting'` (nothing to derive from)
 - Record with **1 visit**: status = that visit's status
 - Mixed (e.g. 2 visited + 1 waiting): status = `'visited'` (rule 1 wins)
 
@@ -101,7 +104,7 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 **API contract:**
 - POST/PUT/PATCH `Record` payload does NOT accept `status` field — server returns 422 if provided
 - GET `Record` response includes `status` (derived, read-only) for UI convenience
-- The UI can edit `visits[].status` (and `anonym_visits` slots) but never the Record-level status
+- The UI can edit `visits[].status` but never the Record-level status (a record-level status change is applied to all visits — see the D4 cascade note above)
 
 **UI implication:**
 - One `StatusPicker` component, one `VISIT_STATUS_CONFIG` (waiting/visited/missed/cancelled) — used both for per-visit edits AND for the read-only Record-level badge
@@ -117,11 +120,11 @@ A Record is a booking for an Activity. It links a Client to an Activity and cont
 - **Visitor resolution (triple flow):**
   - Name-based: find-or-create Visitor by (client_id, name)
   - ID-based: link existing Visitor
-  - Anonymous: visitor is None
-- **Seats = len(visits) + anonym_visits:** Always computed — `recompute_record_seats()` recalculates on create/update/patch; never user-set
+  - Anonymous: no Visitor linked — the Visit row is created with `visitor_id = NULL` and still carries a real tariff/price/status (#257)
+- **Seats = len(visits):** Always recomputed by `recompute_record_seats()` — recalculates on record create/update/patch and on `VisitService.create/delete`; never user-set
 - **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
-- **Update (PUT):** Full replacement, old Visits soft-deactivated, new Visits created, seats recalculated. NO capacity re-check.
-- **Patch:** Partial update. If visits in payload → old visits soft-deactivated, new created. NO capacity re-check.
+- **Update (PUT):** Full replacement — record's own visit rows hard-deleted, new Visits created, seats recomputed; capacity re-checked (409 when over)
+- **Patch:** Partial update. If `visits` in payload → old visit rows hard-deleted, new created, seats recomputed and capacity re-checked (409). A comment/custom_price-only patch skips the capacity query.
 - **Delete:** Two-phase hard delete (Addendum 13 / GH #139): bare DELETE is a dry-run — 204 when no deps, 409 + dependency tree when deps exist; second DELETE with `{resolutions}` body executes the cascade hard-delete (Visits + Payments + record_tags join rows hard-deleted; Record row physically removed). Deps: visits/payments cascade (auto=False, user must resolve), record_tags cascade (auto=True, resolved server-side).
 - **Delayed delete:** REMOVED (Addendum 13) — the old 5-second setTimeout + undo toast was replaced by the DeleteDialog dry-run flow (explicit confirmation, no undo).
 
@@ -192,7 +195,7 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 | service | `Service.title` (correlated subquery on `Activity.service_id`) |
 | master | `Master.last_name, Master.first_name` |
 | location | `Location.name` (correlated subquery on activity) |
-| guests | `Record.seats - Record.anonym_visits` (live visits count) |
+| guests | `COUNT(Visit)` with `visitor_id IS NOT NULL` (correlated subquery — named visits count; anonymous visits don't count as guests, #257) |
 | status | `Record.status` |
 | total | `SUM(Visit.price)` (coalesced to 0) |
 | payment | 3-level bucket over paid vs total — see [payments.md](payments.md) |
@@ -207,7 +210,7 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 
 **Query params:** IDENTICAL to `GET /api/v1/records` — the same `RecordListParams` class (single class, single injection idiom `Annotated[RecordListParams, Query()]` → no param drift possible). Same validation → same 422 VALIDATION_ERROR matrix. Same `_sort_columns` whitelist — sorting order is shared, guaranteeing sort parity with `/records`.
 
-**Response:** `PaginatedResponse[RecordViewResponse]` — `{items, total, page, per_page}`. `RecordViewResponse` inherits `RecordResponse` (id, activity_id, client_id, status, seats, anonym_visits, comment, custom_price, created_at, updated_at, visits[]) and adds 8 display fields:
+**Response:** `PaginatedResponse[RecordViewResponse]` — `{items, total, page, per_page}`. `RecordViewResponse` inherits `RecordResponse` (id, activity_id, client_id, status, seats, comment, custom_price, created_at, updated_at, visits[]) and adds 8 display fields:
 
 | Field | Type | Source | Null when |
 |-------|------|--------|-----------|
@@ -242,8 +245,8 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 **Single enum: `VisitStatus`.** Record status is a derived field that mirrors the same values. There is no separate `RecordStatus` enum anywhere in code, schema, or API.
 
 ## Acceptance Criteria
-- [ ] Capacity check prevents overbooking on create
-- [ ] seats = len(visits) + anonym_visits always
+- [ ] Capacity check prevents overbooking on create (re-checked on PUT / PATCH visit replacement)
+- [ ] seats = len(visits) always
 - [ ] Client resolution works (phone-based and ID-based)
 - [ ] Visitor resolution works (name-based, ID-based, anonymous)
 - [ ] Delete cascades to Visits and Payments

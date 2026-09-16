@@ -16,6 +16,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from src.models.enums import UserRole
+
 # Sort whitelist for GET /api/v1/staff (#266 «API (после)»): position is
 # EXCLUDED — a person holds several positions (M2M), server-side sort over
 # the join is ambiguous. Keys = the StaffTable column keys.
@@ -62,12 +64,18 @@ class MasterSectionView(BaseModel):
 
 
 class CreateUserSection(BaseModel):
-    """Account-creation checkbox (D6): phone + password, create-only."""
+    """Account-creation checkbox (D6): phone + password, create-only.
+
+    ``role`` (GH #263 D10): the manual role override. ``None`` (absent) →
+    the service fills the role from the position template; a sent value
+    always wins (ручная правка роли остаётся).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     phone: str = Field(min_length=1, max_length=20)
     password: str = Field(min_length=1, max_length=64)
+    role: UserRole | None = None
 
 
 class StaffBase(BaseModel):
@@ -106,6 +114,10 @@ class StaffUpdate(StaffBase):
 
     master: MasterSection | None = None
     position_ids: list[str] = []
+    # GH #263 D10: the manual role override for the linked account — a sent
+    # value beats the position template; absent → the template decides (and
+    # applies only when the position set is part of the update).
+    role: UserRole | None = None
 
 
 class StaffPatch(BaseModel):
@@ -124,6 +136,9 @@ class StaffPatch(BaseModel):
     sort_order: int | None = None
     master: MasterSection | None = None
     position_ids: list[str] | None = None
+    # GH #263 D10: manual role override for the linked account (wins over
+    # the position template).
+    role: UserRole | None = None
 
 
 class StaffResponse(StaffBase):

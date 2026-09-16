@@ -384,10 +384,23 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   const deleteVisit = useCallback(
     async (visitId: string) => {
+      // Snapshot BEFORE the optimistic remove — rollback needs the visit data
+      // if the server keeps it.
+      const saved = queryClient
+        .getQueryData<RecordResponse>(qk.record(recordId))
+        ?.visits.find((v) => v.id === visitId);
       // Optimistic: remove visit from BOTH canonical and list caches via helper.
       // Reader: ScheduleActivityCard + RecordModal
       removeVisit(queryClient, recordId, visitId);
-      await apiDeleteVisit(visitId);
+      try {
+        await apiDeleteVisit(visitId);
+      } catch (e) {
+        // Server kept the visit → restore the cache so the header count/seats
+        // don't drift until an unrelated refetch. Rethrow: existing
+        // catch/toast callers keep working.
+        if (saved) upsertVisit(queryClient, recordId, saved);
+        throw e;
+      }
     },
     [recordId, queryClient],
   );

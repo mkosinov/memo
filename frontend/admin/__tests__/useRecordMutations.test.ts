@@ -948,6 +948,39 @@ describe('useRecordMutations', () => {
       // r2 untouched
       expect(listCache?.items[1]?.id).toBe('r2');
     });
+
+    it('restores the visit to the cache and rethrows when the API rejects', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
+      mockDeleteVisit.mockRejectedValue(new Error('delete failed'));
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.deleteVisit('visit-1');
+        }),
+      ).rejects.toThrow('delete failed');
+
+      // Server kept the visit → cache is restored, no drift
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits).toHaveLength(1);
+      expect(canonical?.visits[0]?.id).toBe('visit-1');
+    });
   });
 
   describe('patchPayment', () => {

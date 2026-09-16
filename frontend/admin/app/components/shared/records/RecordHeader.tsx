@@ -28,7 +28,6 @@ export function RecordHeader({
   // Anonymous seats are real visits with visitor_id = null (#257) — the
   // counter is derived from the visits the card already has, no extra query.
   const anonymousCount = visits.filter((v) => v.visitor_id == null).length;
-  const totalSeats = visits.length;
 
   const handleAdd = async () => {
     if (busy || !onAddAnonymousVisit) return;
@@ -92,9 +91,6 @@ export function RecordHeader({
               +
             </button>
           </>
-        )}
-        {totalSeats !== visits.length && (
-          <span className="text-gray-500">(итого {totalSeats})</span>
         )}
       </div>
     </div>

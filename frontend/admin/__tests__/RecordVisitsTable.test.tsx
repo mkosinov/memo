@@ -475,10 +475,24 @@ describe('RecordVisitsTable — saved anonymous row conversion (#257)', () => {
     );
   });
 
-  it('rejected conversion returns the row to «Аноним»', async () => {
+  it('failed conversion (production wrapper shape: toast + swallow) returns the row to «Аноним»', async () => {
     // D7: "При ошибке API строка возвращается в состояние «Аноним»."
+    // The PRODUCTION wrappers (ClientTab/ClientRecordTab) catch the raw
+    // rejection, toast and RESOLVE — the table must reset the row on
+    // settlement, not rely on a rejection contract (review-fix 1).
     const mocks = makeMocks();
-    vi.mocked(mocks.onConvertAnonymousVisit).mockRejectedValue(new Error('409'));
+    const raw = vi.fn().mockRejectedValue(new Error('409'));
+    const wrapperToast = vi.fn();
+    mocks.onConvertAnonymousVisit = vi.fn(
+      async (visitId: string, name: string, age: number | null) => {
+        try {
+          await raw(visitId, name, age);
+        } catch (err) {
+          wrapperToast((err as Error).message);
+          // Swallowed — resolves normally, like the production wrappers.
+        }
+      },
+    );
 
     const { showToast } = renderVisitsTable({ visits: [ANON_VISIT], mocks });
 
@@ -488,11 +502,71 @@ describe('RecordVisitsTable — saved anonymous row conversion (#257)', () => {
     await waitFor(() =>
       expect(mocks.onConvertAnonymousVisit).toHaveBeenCalledWith('v1', 'Анна', null),
     );
-    // The typed name is dropped — the input shows the placeholder again.
+    expect(wrapperToast).toHaveBeenCalledWith('409');
+    // The row is fully reset on settle — name/age cleared, back to «Аноним».
     await waitFor(() => expect(getNameInput().value).toBe(''));
-    // The error toast comes from the caller's wrapper — the table itself must
-    // not toast (the wrapper owns parseApiError + showToast).
+    expect((screen.getByTestId('visit-v1-age') as HTMLSelectElement).value).toBe('adult');
+    // The table itself must not toast — the wrapper owns parseApiError + showToast.
     expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second anonymous-branch commit while a conversion is pending', async () => {
+    // Review-fix 2: the natural «type name, then pick age» flow must not
+    // re-enter the anonymous branch — no duplicate createVisitor/PATCH, no
+    // extra toast while conversion #1 is in flight.
+    const mocks = makeMocks();
+    let resolveConvert!: () => void;
+    mocks.onConvertAnonymousVisit = vi.fn(
+      () =>
+        new Promise<void>((res) => {
+          resolveConvert = res;
+        }),
+    );
+
+    const { showToast } = renderVisitsTable({ visits: [ANON_VISIT], mocks });
+
+    // 1. Name commit → conversion #1 (pending)
+    fireEvent.change(getNameInput(), { target: { value: 'Анна' } });
+    fireEvent.blur(getNameInput());
+    await waitFor(() =>
+      expect(mocks.onConvertAnonymousVisit).toHaveBeenCalledTimes(1),
+    );
+
+    // 2. Age pick while pending → ignored entirely
+    fireEvent.change(screen.getByTestId('visit-v1-age'), { target: { value: '7' } });
+    expect(mocks.onConvertAnonymousVisit).toHaveBeenCalledTimes(1);
+    expect(showToast).not.toHaveBeenCalled();
+
+    // 3. Settle → the row resets to «Аноним» (settle-reset in finally)
+    resolveConvert();
+    await waitFor(() => expect(getNameInput().value).toBe(''));
+    expect((screen.getByTestId('visit-v1-age') as HTMLSelectElement).value).toBe('adult');
+  });
+
+  it('after a successful conversion the cells show the bound visitor from the cache', async () => {
+    // Success path: the settle-reset is harmless — the row re-renders named
+    // from the cache (visitorsMap), name AND age.
+    const mocks = makeMocks();
+    const rendered = renderVisitsTable({ visits: [ANON_VISIT], mocks });
+
+    fireEvent.change(getNameInput(), { target: { value: 'Анна' } });
+    fireEvent.blur(getNameInput());
+    await waitFor(() =>
+      expect(mocks.onConvertAnonymousVisit).toHaveBeenCalledWith('v1', 'Анна', null),
+    );
+
+    // Parent re-renders: the visit is now bound to the new visitor (age 7).
+    const boundVisit: VisitResponse = { ...ANON_VISIT, visitor_id: 'vis_new' };
+    const visitorsMap = new Map([['vis_new', { name: 'Анна', age: 7 }]]);
+    rerender(rendered, { visits: [boundVisit], visitorsMap, mocks });
+
+    await waitFor(() => {
+      const nameInput = screen
+        .getByTestId('visit-row-v1')
+        .querySelector('input[type="text"]') as HTMLInputElement;
+      expect(nameInput.value).toBe('Анна');
+    });
+    expect((screen.getByTestId('visit-v1-age') as HTMLSelectElement).value).toBe('7');
   });
 
   it('named saved row keeps the existing onChangeVisitor path (no conversion)', async () => {

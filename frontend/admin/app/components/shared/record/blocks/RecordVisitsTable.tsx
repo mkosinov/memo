@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useUI } from '@/contexts/UIContext';
@@ -235,6 +235,11 @@ export function RecordVisitsTable({
   // "preserve submitted values behavior" window.
   const [drafts, setDrafts] = useState<VisitRow[]>([]);
 
+  // Review-fix 2 (#257): per-visit in-flight guard — while a conversion for a
+  // visit is pending, further anonymous-branch commits on that row are ignored
+  // (no duplicate createVisitor/PATCH, no extra toast).
+  const convertingRef = useRef<Set<string>>(new Set());
+
   // ── Row mutations ─────────────────────────────────────────────────────────
 
   /** Add a new empty draft row (id === null). */
@@ -344,6 +349,29 @@ export function RecordVisitsTable({
               const visitor = visitorsMap.get(r.visitor_id ?? '');
               const tariff = tariffs.find((t) => t.id === r.tariff_id);
 
+              /**
+               * #257 D7 conversion of a saved anonymous row (review-fixes):
+               * fire-and-forget with a settle-reset — independent of the
+               * promise outcome, because the production wrappers (ClientTab/
+               * ClientRecordTab) swallow API errors and resolve normally.
+               * On success the row re-renders named from the cache (the reset
+               * is harmless); on error the row returns to «Аноним» (D7).
+               * Callers guard with convertingRef — never re-enters in flight.
+               */
+              const convertAnonymousRow = (name: string, age: number | null) => {
+                const visitId = r.id as string;
+                convertingRef.current.add(visitId);
+                onConvertAnonymousVisit(visitId, name, age)
+                  .catch(() => {
+                    // Rejection swallowed — the consumer's wrapper owns the error toast.
+                  })
+                  .finally(() => {
+                    convertingRef.current.delete(visitId);
+                    handleChange('name', '');
+                    handleChange('age', null);
+                  });
+              };
+
               return {
                 name: isReadOnly ? (
                   <span className={`truncate ${formState.name ? 'text-ink' : 'text-ink-light italic'}`}>
@@ -359,12 +387,14 @@ export function RecordVisitsTable({
                       } else if (r.id && r.visitor_id == null) {
                         // #257 D7: convert the saved anonymous row — one point
                         // PATCH /visits/{id} {visitor_id}. Track the typed name
-                        // in formState (the age commit reads formState.name);
-                        // on API error the row returns to «Аноним» (D7).
-                        handleChange('name', v);
-                        onConvertAnonymousVisit(r.id, v, formState.age ?? null).catch(() => {
-                          handleChange('name', '');
-                        });
+                        // in formState so the settle-reset below produces a real
+                        // value-prop change (InlineEditCell re-syncs only on a
+                        // changed value). In-flight guard: a pending conversion
+                        // for this visit ignores re-entry.
+                        if (!convertingRef.current.has(r.id)) {
+                          handleChange('name', v);
+                          convertAnonymousRow(v, formState.age ?? null);
+                        }
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { name: v });
                       }
@@ -382,13 +412,17 @@ export function RecordVisitsTable({
                   </span>
                 ) : (
                   <AgeSelect
-                    value={formState.age}
+                    value={isNew ? formState.age : (visitor?.age ?? formState.age)}
                     onChange={(age) => {
                       if (isNew) {
                         handleChange('age', age);
                       } else if (r.id && r.visitor_id == null) {
-                        // Keep the picked age in formState either way — the
-                        // subsequent name commit converts the visitor with it.
+                        // In-flight guard first: a pending conversion for this
+                        // visit ignores the re-entry entirely (no second call,
+                        // no toast).
+                        if (convertingRef.current.has(r.id)) return;
+                        // Keep the picked age in formState — the subsequent
+                        // name commit converts the visitor with it.
                         handleChange('age', age);
                         if (!formState.name) {
                           // A visitor without a name is impossible — the row
@@ -396,10 +430,7 @@ export function RecordVisitsTable({
                           showToast('Введите имя посетителя', 'error');
                         } else {
                           // #257 D7: conversion with the tracked name + age.
-                          onConvertAnonymousVisit(r.id, formState.name, age).catch(() => {
-                            // Rejected conversion: the row stays anonymous;
-                            // the error toast is owned by the caller's wrapper.
-                          });
+                          convertAnonymousRow(formState.name, age);
                         }
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { age });

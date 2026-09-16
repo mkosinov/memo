@@ -16,10 +16,62 @@
  * so length checks distinguish them from UUID test data.
  */
 import path from 'path';
-import { resolveAuthStatePath } from './fixtures/auth-state';
+import { masterAuthStatePath, resolveAuthStatePath } from './fixtures/auth-state';
 import { RESET_SQL, wipeAvatarsDir } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
+
+/**
+ * GH #263 T8 — issue ONE API login and persist the session cookie as a
+ * Playwright storageState file. Shared by the admin block (GH #247 T14)
+ * and the master block below: both roles' files are written per run so
+ * master-role specs opt in via `useMasterSession()` with a live token.
+ */
+async function loginAndSaveStorageState(
+  backendBase: string,
+  phone: string,
+  password: string,
+  expectedRole: string,
+  storageStatePath: string,
+): Promise<void> {
+  const { request: playwrightRequest } = await import('@playwright/test');
+  const loginUrl = `${backendBase}/api/v1/auth/login`;
+  const ctx = await playwrightRequest.newContext({
+    baseURL: backendBase,
+    // Full origin incl. port (same as auth-session.spec's API login): CORS
+    // echoes the request Origin and the CSRF line checks Sec-Fetch-Site —
+    // the port is part of the origin and must not be stripped.
+    extraHTTPHeaders: { Origin: backendBase, 'Sec-Fetch-Site': 'same-origin' },
+  });
+  try {
+    const loginResp = await ctx.post(loginUrl, {
+      data: { phone, password },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!loginResp.ok()) {
+      throw new Error(
+        `[globalSetup] Login as ${phone} failed at ${loginUrl}: HTTP ${loginResp.status()} ${await loginResp.text()}`,
+      );
+    }
+    const me = await loginResp.json() as { user?: { role?: string } };
+    if (me.user?.role !== expectedRole) {
+      throw new Error(`[globalSetup] Login as ${phone} returned unexpected payload: ${JSON.stringify(me).slice(0, 200)}`);
+    }
+    // Persist in the STANDARD domain+path cookie form (ctx.storageState's
+    // own output): browser contexts host-match `domain: 127.0.0.1` on any
+    // port — same-site with both the frontend (127.0.0.1:{SHARD_PORT}) and
+    // the API (BACKEND_URL is 127.0.0.1 too) — and request contexts
+    // (factories via apiRequest.newContext) REQUIRE domain+path. (A
+    // `url`-only cookie breaks request contexts; sameSite=Lax holds because
+    // scheme+host match, ports are exempt from the site definition.)
+    const fs = await import('fs');
+    fs.mkdirSync(path.dirname(storageStatePath), { recursive: true });
+    await ctx.storageState({ path: storageStatePath });
+    console.log(`[globalSetup] ${expectedRole} storageState saved: ${storageStatePath}`);
+  } finally {
+    await ctx.dispose();
+  }
+}
 
 export default async function globalSetup() {
   // Per-shard DB: test_memo_shard{id}.db
@@ -139,47 +191,29 @@ export default async function globalSetup() {
   // resets. HttpOnly is preserved in the storageState; SameSite=Lax holds
   // because the frontend baseURL is 127.0.0.1 (same site as the API).
   // The filename is shard-scoped (shared helper — playwright.config.ts
-  // derives the SAME path): parallel shards must not read each other's
+  // derives the SAME admin path, fixtures/master-session.ts the SAME
+  // master path): parallel shards must not read each other's
   // foreign-DB tokens.
-  const { request: playwrightRequest } = await import('@playwright/test');
-  const storageStatePath = resolveAuthStatePath();
-  const authDir = path.dirname(storageStatePath);
-  const loginUrl = `${backendBase}/api/v1/auth/login`;
-  const ctx = await playwrightRequest.newContext({
-    baseURL: backendBase,
-    // Full origin incl. port (same as auth-session.spec's API login): CORS
-    // echoes the request Origin and the CSRF line checks Sec-Fetch-Site —
-    // the port is part of the origin and must not be stripped.
-    extraHTTPHeaders: { Origin: backendBase, 'Sec-Fetch-Site': 'same-origin' },
-  });
-  try {
-    const loginResp = await ctx.post(loginUrl, {
-      data: { phone: '+79990000001', password: 'admin12345' },
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!loginResp.ok()) {
-      throw new Error(
-        `[globalSetup] Admin login failed at ${loginUrl}: HTTP ${loginResp.status()} ${await loginResp.text()}`,
-      );
-    }
-    const me = await loginResp.json() as { user?: { role?: string } };
-    if (me.user?.role !== 'admin') {
-      throw new Error(`[globalSetup] Login as seeded admin returned unexpected payload: ${JSON.stringify(me).slice(0, 200)}`);
-    }
-    // Persist in the STANDARD domain+path cookie form (ctx.storageState's
-    // own output): browser contexts host-match `domain: 127.0.0.1` on any
-    // port — same-site with both the frontend (127.0.0.1:{SHARD_PORT}) and
-    // the API (BACKEND_URL is 127.0.0.1 too) — and request contexts
-    // (factories via apiRequest.newContext) REQUIRE domain+path. (A
-    // `url`-only cookie breaks request contexts; sameSite=Lax holds because
-    // scheme+host match, ports are exempt from the site definition.)
-    const fs = await import('fs');
-    fs.mkdirSync(authDir, { recursive: true });
-    await ctx.storageState({ path: storageStatePath });
-    console.log(`[globalSetup] Admin storageState saved: ${storageStatePath}`);
-  } finally {
-    await ctx.dispose();
-  }
+  await loginAndSaveStorageState(
+    backendBase,
+    '+79990000001',
+    'admin12345',
+    'admin',
+    resolveAuthStatePath(),
+  );
+
+  // GH #263 T8: second login — the seeded DEMO MASTER (#247 §3.11). The
+  // token lands in a separate shard-scoped file; master-role specs (T9/T10)
+  // opt in via `useMasterSession()` (fixtures/master-session.ts). Admin
+  // projects and login-flow specs are unaffected. Failures abort the run
+  // loudly, same as the admin login above.
+  await loginAndSaveStorageState(
+    backendBase,
+    '+79990000002',
+    'master12345',
+    'master',
+    masterAuthStatePath(),
+  );
 
   // #126: standalone mode has no shell warmup — pre-compile routes so the
   // first test doesn't race Next.js dev compilation (404 _next/static).

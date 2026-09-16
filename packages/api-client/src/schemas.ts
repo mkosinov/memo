@@ -60,9 +60,11 @@ export const CreateUserSectionSchema = z
   .strict();
 export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
 
-// Shared card shape: Create and Update differ ONLY by the create-only
-// account flag (D6) — everything else is the same wire contract. `.strict()`
-// on the base is inherited by extend() (zod keeps unknownKeys).
+// Shared card shape: Create and Update differ by the create-only account
+// flag (D6) AND the update-only top-level role override (D10) — backend
+// StaffCreate has NO top-level role (extra="forbid"); on create the role
+// rides ONLY inside CreateUserSection. `.strict()` on the base is inherited
+// by extend() (zod keeps unknownKeys).
 const StaffCardSchema = z
   .object({
     first_name: z.string().min(1).max(100),
@@ -71,10 +73,6 @@ const StaffCardSchema = z
     sort_order: z.number().optional().default(0),
     master: MasterSectionInputSchema.nullable().optional().default(null),
     position_ids: z.array(z.string()).optional().default([]),
-    // GH #263 D10: manual role override for the linked account — a sent
-    // value beats the position template; omitted → the template decides
-    // (anchors admin > master, fixed position ids, D4 #266).
-    role: z.enum(['admin', 'master']).nullable().optional(),
   })
   .strict();
 
@@ -86,7 +84,12 @@ export type StaffCreate = z.input<typeof StaffCreateSchema>;
 // is_active is NOT accepted (#207): archive/restore is via POST endpoints.
 // .strict() mirrors backend extra="forbid" — a stray is_active is rejected (422).
 // create_user is CREATE-ONLY (an account is created exactly once).
-export const StaffUpdateSchema = StaffCardSchema;
+// GH #263 D10: the top-level manual role override for the linked account is
+// UPDATE-only — a sent value beats the position template; omitted → the
+// template decides (anchors admin > master, fixed position ids, D4 #266).
+export const StaffUpdateSchema = StaffCardSchema.extend({
+  role: z.enum(['admin', 'master']).nullable().optional(),
+});
 export type StaffUpdate = z.input<typeof StaffUpdateSchema>;
 
 // PATCH three-state master: absent = keep, null = remove, payload = upsert.

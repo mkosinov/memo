@@ -268,6 +268,19 @@ describe('StaffCreateSchema', () => {
       }),
     ).toThrow();
   });
+
+  // GH #263 D10 contract: the top-level role override is UPDATE-only —
+  // backend StaffCreate has no such field (extra="forbid"). On create the
+  // role rides ONLY inside the CreateUserSection.
+  it('rejects a top-level role (update-only override; create role lives in create_user)', () => {
+    expect(() =>
+      StaffCreateSchema.parse({
+        first_name: 'И',
+        last_name: 'П',
+        role: 'admin',
+      }),
+    ).toThrow();
+  });
 });
 
 // ─── StaffUpdate / StaffPatch (PUT full / PATCH three-state master) ─────────

@@ -52,6 +52,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     deleteVisit,
     addAnonymousVisit,
     deleteVisitDeferred,
+    convertAnonymousVisit,
   } = useRecordMutations(record?.activity_id ?? '', recordId);
 
   // Delete — Addendum 13 / GH #139 T8-FE2a: unbound dry-run hook + dialog.
@@ -209,11 +210,22 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     [clientId, queryClient, showToast],
   );
 
-  const handleAnonymChange = useCallback(() => {
-    // T7 (#257): RecordVisitsTable's counter props are removed there — this
-    // wiring is dead until then (the table declares the callback but never
-    // renders the counter input).
-  }, []);
+  /**
+   * #257 D7: convert a saved anonymous visit into a named visitor — one point
+   * PATCH /visits/{id} {visitor_id}. On API failure the row stays anonymous
+   * (the cache is untouched — upsertVisit runs only after a successful PATCH).
+   * Mirrors the ClientTab Task 7 pattern.
+   */
+  const handleConvertAnonymousVisit = useCallback(
+    async (visitId: string, name: string, age: number | null) => {
+      try {
+        await convertAnonymousVisit(visitId, name, age);
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
+      }
+    },
+    [convertAnonymousVisit, showToast],
+  );
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -302,13 +314,11 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
       </div>
 
       {/* Visitors table — visits read from canonical record.visits, no optimistic layer.
-          T7 (#257): anonymVisits/onAnonymVisitsChange props are removed there —
-          until then they compile against a derived count and a no-op. */}
+          Saved anonymous rows (visitor_id = null) convert inline (#257 D7). */}
       <RecordVisitsTable
         visits={visits}
         visitorsMap={visitorsMap}
         tariffs={tariffs}
-        anonymVisits={visits.filter((v) => v.visitor_id == null).length}
         totalCost={total}
         recordStatus={status}
         clientId={clientId}
@@ -316,7 +326,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         onPatchVisit={patchVisit}
         onDeleteVisit={deleteVisitDeferred}
         onChangeVisitor={handleVisitorChange}
-        onAnonymVisitsChange={handleAnonymChange}
+        onConvertAnonymousVisit={handleConvertAnonymousVisit}
       />
 
       {/* Custom price override (unique to /clients) */}

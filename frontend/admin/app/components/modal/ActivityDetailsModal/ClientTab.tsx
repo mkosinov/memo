@@ -61,6 +61,7 @@ export function ClientTab({
     addPayment,
     patchPayment,
     deletePaymentDeferred,
+    convertAnonymousVisit,
   } = useRecordMutations(activityId, recordId);
 
   // Delete — Addendum 13 / GH #139 T8-FE2a: replaces the legacy 5-second
@@ -187,15 +188,20 @@ export function ClientTab({
     [record?.visits, recordId, updateRecord, showToast],
   );
 
-  const handleAnonymChange = useCallback(
-    async (value: number) => {
+  /**
+   * #257 D7: convert a saved anonymous visit into a named visitor — one point
+   * PATCH /visits/{id} {visitor_id}. On API failure the row stays anonymous
+   * (the cache is untouched — upsertVisit runs only after a successful PATCH).
+   */
+  const handleConvertAnonymousVisit = useCallback(
+    async (visitId: string, name: string, age: number | null) => {
       try {
-        await updateRecord(recordId, { anonym_visits: value } as any);
-      } catch {
-        showToast('Ошибка изменения анонимных посетителей', 'error');
+        await convertAnonymousVisit(visitId, name, age);
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
       }
     },
-    [recordId, updateRecord, showToast],
+    [convertAnonymousVisit, showToast],
   );
 
   const handleCommentChange = useCallback(
@@ -261,7 +267,6 @@ export function ClientTab({
           visits={visits}
           visitorsMap={visitorsMap}
           tariffs={tariffs}
-          anonymVisits={record?.anonym_visits ?? 0}
           totalCost={totalCost}
           recordStatus={derivedStatus}
           clientId={clientId}
@@ -269,7 +274,7 @@ export function ClientTab({
           onPatchVisit={patchVisit}
           onDeleteVisit={(visitId: string) => deleteVisitDeferred(visitId)}
           onChangeVisitor={handleVisitorChange}
-          onAnonymVisitsChange={handleAnonymChange}
+          onConvertAnonymousVisit={handleConvertAnonymousVisit}
         />
 
         {/* Payments table */}

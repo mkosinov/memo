@@ -114,7 +114,6 @@ export interface RecordVisitsTableProps {
   visits: VisitResponse[];
   visitorsMap: Map<string, { name: string; age: number | null }>;
   tariffs: TariffResponse[];
-  anonymVisits: number;
   totalCost: number;
   recordStatus: VisitStatus;
   /** The record's client — needed for addVisit (createVisitor requires client_id). */
@@ -128,7 +127,12 @@ export interface RecordVisitsTableProps {
   onDeleteVisit: (visitId: string) => Promise<void>;
   /** Update visitor name/age (calls patchVisitor API — PATCH /visitors/{id}). */
   onChangeVisitor: (visitorId: string, data: { name?: string; age?: number | null }) => void;
-  onAnonymVisitsChange: (value: number) => void;
+  /**
+   * #257 D7: convert a saved anonymous visit (visitor_id = null) into a named
+   * one — createVisitor + a single point PATCH /visits/{id} {visitor_id}.
+   * The caller owns error handling (toast); on failure the row stays anonymous.
+   */
+  onConvertAnonymousVisit: (visitId: string, name: string, age: number | null) => Promise<void>;
 }
 
 // ── Age select options (shared between new & existing rows) ───────────────────
@@ -204,7 +208,6 @@ export function RecordVisitsTable({
   visits,
   visitorsMap,
   tariffs,
-  anonymVisits,
   totalCost,
   recordStatus,
   clientId,
@@ -213,7 +216,7 @@ export function RecordVisitsTable({
   onPatchVisit,
   onDeleteVisit,
   onChangeVisitor,
-  onAnonymVisitsChange,
+  onConvertAnonymousVisit,
 }: RecordVisitsTableProps) {
   const { showToast } = useUI();
 
@@ -231,14 +234,6 @@ export function RecordVisitsTable({
   // up and the useMemo produces the same id from props. This is the
   // "preserve submitted values behavior" window.
   const [drafts, setDrafts] = useState<VisitRow[]>([]);
-
-  const [anonymInput, setAnonymInput] = useState(anonymVisits);
-
-  const handleAnonymChange = useCallback((value: number) => {
-    setAnonymInput(value);
-    const t = setTimeout(() => onAnonymVisitsChange(value), 500);
-    return () => clearTimeout(t);
-  }, [onAnonymVisitsChange]);
 
   // ── Row mutations ─────────────────────────────────────────────────────────
 
@@ -361,6 +356,15 @@ export function RecordVisitsTable({
                       if (isNew) {
                         handleChange('name', v);
                         // Save is triggered by row-level handleSave (Enter/blur)
+                      } else if (r.id && r.visitor_id == null) {
+                        // #257 D7: convert the saved anonymous row — one point
+                        // PATCH /visits/{id} {visitor_id}. Track the typed name
+                        // in formState (the age commit reads formState.name);
+                        // on API error the row returns to «Аноним» (D7).
+                        handleChange('name', v);
+                        onConvertAnonymousVisit(r.id, v, formState.age ?? null).catch(() => {
+                          handleChange('name', '');
+                        });
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { name: v });
                       }
@@ -382,6 +386,21 @@ export function RecordVisitsTable({
                     onChange={(age) => {
                       if (isNew) {
                         handleChange('age', age);
+                      } else if (r.id && r.visitor_id == null) {
+                        // Keep the picked age in formState either way — the
+                        // subsequent name commit converts the visitor with it.
+                        handleChange('age', age);
+                        if (!formState.name) {
+                          // A visitor without a name is impossible — the row
+                          // stays anonymous.
+                          showToast('Введите имя посетителя', 'error');
+                        } else {
+                          // #257 D7: conversion with the tracked name + age.
+                          onConvertAnonymousVisit(r.id, formState.name, age).catch(() => {
+                            // Rejected conversion: the row stays anonymous;
+                            // the error toast is owned by the caller's wrapper.
+                          });
+                        }
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { age });
                       }

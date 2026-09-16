@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-15
 
+### Added
+- **GH #267 — Занятия архивированных мастеров/локаций/услуг видимы в расписании** — branch `feature/schedule-archived-visibility-267` (16 commits: `55084e8..3584c40`, base `ff4ab97`):
+  - **Domain/API:** `GET /masters/all?status=` (по умолчанию активные, `status=all` — вместе с архивными);
+    словари расписания (`useMasters`/`useLocations`/`useServices`) — собственные queryKeys и активные
+    domain-срезы; `buildAdminSchedule` больше не выбрасывает архивные reference-rows, а отдаёт карточки
+    с флагами `masterArchived`/`serviceArchived`/`locationArchived`; api-client — archived-поля в
+    `MasterViewResponse` и `show_archived_*` в user_settings (zod).
+  - **Видимость по умолчанию:** архивные мастера видимы (карточка приглушена `opacity-70` + `ArchiveBadge`),
+    архивные услуги видимы всегда, архивные локации — по чекбоксу (default off); гейт живёт в
+    `ScheduleDataContext` (id-фильтр из настроек минует гейт для явно выбранных карточек).
+  - **UI/настройки:** чекбоксы «Показывать архивные» в дропдаунах мастеров/локаций топбара
+    (`MultiSelect.footer`), персист в `user.settings` (localStorage + fire-and-forget PATCH; новые ключи
+    `showArchivedMasters` default true / `showArchivedLocations` default false); `ArchiveBadge` — pill
+    как у `StatusBadge` (`aria-label` «Архив: …», `data-testid=archived-badge`).
+  - **DayView:** архивные колонки (мастер/локация) — view-only: вне reorder (`column_order_*`) и DnD
+    (дропы в архивную колонку игнорируются без запроса), пустые слоты не создают занятие.
+  - **Tests:** backend `pytest` **1969 passed / 8 skipped**; admin `vitest` **1969 passed**
+    (128 файлов); e2e расписание (`schedule`, `schedule-filters`, `week-view`,
+    `schedule-archived-visibility`, `schedule-column-visibility`) **36/36** (2 load-флейка зелёные
+    в изоляции); `npm run lint` — **0 errors** (36 pre-existing warnings); visual — известное
+    семейство env font-drift (#182), снапшоты осознанно не перезаписывались.
+
 ### Changed
 - **GH #261 — «Сохраняем…»: индикатор сохранения в общем стеке тостов** — branch `feature/saving-toast-261` (9 commits: `ac7883ad..125f1df1`, base `6a337bba`; план T0–T5, 6/6 задач):
   - **Вид `loading` (`ac7883ad`):** `UIContext` — `'loading'` в `ToastKind`: спиннер, без автоскрытия

@@ -10,11 +10,12 @@ color, ``avatar_url``, ``sort_order``. Mutations, ``GET /{id}`` and
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import asc
 
 from src.auth.permissions import require_permission
 from src.db import SessionDep
+from src.models.enums import ArchiveStatus
 from src.models.staff import Staff
 from src.schemas.common import PaginatedResponse
 from src.schemas.master import MasterViewResponse
@@ -65,13 +66,21 @@ async def list_masters(
 async def list_all_masters(
     service: _ServiceDep,
     session: SessionDep,
+    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
 ) -> list[MasterViewResponse]:
-    """Bare array of ACTING masters (GH #205), capped by BARE_LIST_MAX_ROWS.
+    """Bare array of masters (GH #205), capped by BARE_LIST_MAX_ROWS.
 
-    Sorted by ``sort_order ASC, first_name ASC, id ASC``. Consumed by
-    dropdowns (activity/record master pickers — S4: only acting masters).
+    Sorted by ``sort_order ASC, first_name ASC, id ASC``. ``status``
+    (GH #267): ``active`` (default) / ``archived`` / ``all`` — same
+    contract as the locations/services dictionaries; invalid values →
+    422 via FastAPI's enum validation.
+
+    Default (active) serves the dropdowns (activity/record master
+    pickers — S4: only acting masters); archived/all serve the schedule
+    visibility of archived entities (GH #267).
     """
     return await service.list_all(
         db_session=session,
         order_by=_DEFAULT_ORDER,
+        status=status,
     )

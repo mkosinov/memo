@@ -13,19 +13,17 @@
 | Activity | Scheduled instance | belongs to Service, Master, Location | Medium |
 | Client | Customer | has contacts, stats | Medium |
 | Visitor | Individual attendee | belongs to Client | Low |
-| Record | Booking | belongs to Activity, Client; has Visits | **High** |
+| Record | Данные — результат бронирования | belongs to Activity, Client; has Visits | **High** |
 | Visit | Attendance | belongs to Record, Visitor | Low |
 | Payment | Transaction | belongs to Record | Low |
 
 ## Shared Enums
 
 ### RecordStatus
-| Value | Label | Description |
-|-------|-------|-------------|
-| pending | Ожидает | Newly created |
-| confirmed | Подтверждена | Client confirmed |
-| cancelled | Отменена | Cancelled |
-| no_show | Неявка | Client did not attend |
+
+Record status is **derived** from the Visit statuses via `computeRecordStatus` (`packages/domain/src/visit_status.ts`): every Visit carries a `VisitStatus` value, and the Record's status follows the rule table in `docs/business-logic.md §1`. The derived value may be materialized (pre-computed) in `records.status` for performance — see `records.md` (RecordStatus derivation; capacity check reads `Record.status IN ('waiting','visited')`).
+
+The legacy code enum with values `pending / confirmed / cancelled / no_show` (backend `models/enums.py`, `packages/domain/src/index.ts`) is kept as legacy code — out of this rule's scope (see #134).
 
 ### VisitStatus
 | Value | Label | Description |
@@ -57,7 +55,8 @@
 | Мастер (расписание) | `Master` | ~~Artist~~ | Только ведущие: master-строка, master_id, /api/v1/masters, masterName |
 | Должность | `Position` | ~~Role~~, ~~JobTitle~~ | Словарь зарплаты; роль доступа — отдельно (`users.role`) |
 | Мастер-класс | `Activity` | ~~Class~~, ~~Workshop~~ | Запланированное занятие |
-| Запись | `Record` | ~~Booking~~ | Бронирование клиентом |
+| Запись | `Record` | ~~Booking~~ | Данные — результат бронирования клиентом |
+| Бронирование (процесс) | `Booking` | — | booking = процесс бронирования клиентом (форма / флоу / шаги); данные-результат = `Record` |
 | Посещение | `Visit` | ~~Attendance~~ | Факт прихода конкретного гостя |
 | Студия / Локация | `Location` | ~~Studio~~, ~~Room~~ | Помещение для проведения |
 | Услуга | `Service` | ~~Course~~, ~~Type~~ | Тип мастер-класса |

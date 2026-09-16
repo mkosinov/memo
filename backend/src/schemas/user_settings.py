@@ -16,6 +16,8 @@ class UserSettingsResponse(BaseModel):
     language: str
     column_order_staff: list[str]
     column_order_locations: list[str]
+    show_archived_masters: bool
+    show_archived_locations: bool
     created_at: datetime
     updated_at: datetime
 
@@ -28,6 +30,8 @@ class UserSettingsCreate(BaseModel):
     language: str = "ru"
     column_order_staff: list[str] = []
     column_order_locations: list[str] = []
+    show_archived_masters: bool = True
+    show_archived_locations: bool = False
 
 
 class UserSettingsUpdate(BaseModel):
@@ -42,6 +46,8 @@ class UserSettingsUpdate(BaseModel):
     language: str | None = None
     column_order_staff: list[str] | None = None
     column_order_locations: list[str] | None = None
+    show_archived_masters: bool | None = None
+    show_archived_locations: bool | None = None
 
 
 class UserSettingsPatch(BaseModel):
@@ -55,3 +61,5 @@ class UserSettingsPatch(BaseModel):
     language: str | None = None
     column_order_staff: list[str] | None = None
     column_order_locations: list[str] | None = None
+    show_archived_masters: bool | None = None
+    show_archived_locations: bool | None = None

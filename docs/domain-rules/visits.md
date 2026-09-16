@@ -1,7 +1,7 @@
 # Visit — Domain Rules
 
 ## Description
-A Visit is the attendance record of a single Visitor within a Record (booking). Each seat in a Record is one Visit. A Visit carries the pricing (tariff/price/custom_price) and the attendance status for that seat. Note: a Visit is distinct from a Visitor — name/age live on the Visitor, not the Visit.
+A Visit is the attendance record of a single Visitor within a Record. Each seat in a Record is one Visit. A Visit carries the pricing (tariff/price/custom_price) and the attendance status for that seat. Note: a Visit is distinct from a Visitor — name/age live on the Visitor, not the Visit.
 
 ## Fields
 | Field | Type | Required | Min | Max | Default | Description |

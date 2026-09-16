@@ -1,7 +1,7 @@
 ---
 description: Backend developer — implements FastAPI API, SQLite database, business logic, and integrations.
 mode: subagent
-model: omniroute/zai/glm-5.3-flash
+model: omniroute/opencode-go/glm-5.3-flash
 variant: max
 temperature: 0.3
 permission:

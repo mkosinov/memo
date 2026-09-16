@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-15
+
+### Added
+- **GH #267 — Занятия архивированных мастеров/локаций/услуг видимы в расписании** — branch `feature/schedule-archived-visibility-267` (16 commits: `55084e8..3584c40`, base `ff4ab97`):
+  - **Domain/API:** `GET /masters/all?status=` (по умолчанию активные, `status=all` — вместе с архивными);
+    словари расписания (`useMasters`/`useLocations`/`useServices`) — собственные queryKeys и активные
+    domain-срезы; `buildAdminSchedule` больше не выбрасывает архивные reference-rows, а отдаёт карточки
+    с флагами `masterArchived`/`serviceArchived`/`locationArchived`; api-client — archived-поля в
+    `MasterViewResponse` и `show_archived_*` в user_settings (zod).
+  - **Видимость по умолчанию:** архивные мастера видимы (карточка приглушена `opacity-70` + `ArchiveBadge`),
+    архивные услуги видимы всегда, архивные локации — по чекбоксу (default off); гейт живёт в
+    `ScheduleDataContext` (id-фильтр из настроек минует гейт для явно выбранных карточек).
+  - **UI/настройки:** чекбоксы «Показывать архивные» в дропдаунах мастеров/локаций топбара
+    (`MultiSelect.footer`), персист в `user.settings` (localStorage + fire-and-forget PATCH; новые ключи
+    `showArchivedMasters` default true / `showArchivedLocations` default false); `ArchiveBadge` — pill
+    как у `StatusBadge` (`aria-label` «Архив: …», `data-testid=archived-badge`).
+  - **DayView:** архивные колонки (мастер/локация) — view-only: вне reorder (`column_order_*`) и DnD
+    (дропы в архивную колонку игнорируются без запроса), пустые слоты не создают занятие.
+  - **Tests:** backend `pytest` **1969 passed / 8 skipped**; admin `vitest` **1969 passed**
+    (128 файлов); e2e расписание (`schedule`, `schedule-filters`, `week-view`,
+    `schedule-archived-visibility`, `schedule-column-visibility`) **36/36** (2 load-флейка зелёные
+    в изоляции); `npm run lint` — **0 errors** (36 pre-existing warnings); visual — известное
+    семейство env font-drift (#182), снапшоты осознанно не перезаписывались.
+
+### Changed
+- **GH #261 — «Сохраняем…»: индикатор сохранения в общем стеке тостов** — branch `feature/saving-toast-261` (9 commits: `ac7883ad..125f1df1`, base `6a337bba`; план T0–T5, 6/6 задач):
+  - **Вид `loading` (`ac7883ad`):** `UIContext` — `'loading'` в `ToastKind`: спиннер, без автоскрытия
+    (таймер заводится только для не-loading видов) и кнопки закрытия, вне лимита «видимо 5» (новое
+    D5a — loading-тосты всегда видимы и сохраняют хронологическое место, обычный стек не изменился);
+    `showToast` начинает возвращать id (раньше `void`; обратно совместимо — 40+ вызовов игнорируют
+    возврат, хуку нужен id для `hideToast`).
+  - **Рендер (`a0ed3deb`):** `ToastContainer` — явная `loading`-запись в `BORDER_BY_KIND` (как у
+    `info`), SVG-спиннер (перенесён из чипа Topbar) с `aria-hidden="true"` перед сообщением.
+  - **Хук (`253c4ee6`):** новый `hooks/useSavingToast.ts` — `useMutationState` по
+    `SCHEDULE_ACTIVITY_MUTATION_KEY`, один тост «Сохраняем…» на пачку мутаций расписания (id в ref,
+    снимается, когда in-flight счётчик вернулся к 0 — успех и ошибка), unmount-cleanup — единственная
+    страховка от «вечного» тоста (kill-таймер отклонён решением юзера); чип в Topbar удалён,
+    `isSaving` + `useUnsavedChangesGuard(isSaving)` сохранены — beforeunload-guard жив;
+    результатные тосты и локальная блокировка кнопки модалки создания (#258/#259) не тронуты.
+  - **TDD:** e2e RED до хука — `schedule-saving-toast.spec.ts` S1–S5 (попадает в shard-schedule через
+    `schedule*` testMatch) + хелпер `delayActivityMutations` (route-задержка мутаций `**/api/v1/activities*`,
+    GET пропускаются); все пять RED → GREEN.
+  - **Tests:** admin vitest **1815 passed / 0 failed** (121 файлов; `Topbar.saving-indicator.test.tsx`
+    удалён, юнит-сьют `useSavingToast` добавлен); `tsc` 0; e2e shard-schedule **104/104** (2 timing-флейка
+    зелёные на повторе, оба спека не относятся к путям #261), saving-toast **5/5**, visual week-view
+    **4/4** pixel-identical (17 прочих локальных расхождений — известное семейство env drift, CI
+    авторитетен).
+  - **Closes:** #261.
+  - Design spec: `docs/specs/2026-09-14-saving-toast-design.md` (on main)
+  - Plan: `docs/plans/2026-09-14-saving-toast-plan.md` (on main)
+  - Status: `docs/status/2026-09-15-saving-toast-261.md`
+- **#134 — tech-debt: единый enum `VisitStatus` (канон `src/domain/visit_status.py`); дубль из `models/enums.py` удалён, сырые литералы статусов в `backend/src` (schemas/services/seed) заменены членами enum** — поведение не меняется; единственная дельта: фильтр записей по статусу принимает и имя статуса капсом (`CANCELLED`), раньше — 422. Тесты и миграции намеренно остались на строках (спека §2.2). Tests: полный pytest + e2e-якоря S1–S6 и API-якорь S7 зелёные.
+  - Closes: #134.
+  - Design spec: `docs/specs/2026-09-15-visit-status-dedup-design.md`
+  - Plan: `docs/plans/2026-09-15-visit-status-dedup-plan.md`
+
 ## [Unreleased] — 2026-09-14
 
 ### Added

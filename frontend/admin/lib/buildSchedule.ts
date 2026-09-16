@@ -78,6 +78,10 @@ export function buildAdminSchedule(
       minAge: `${service.min_age}`,
       maxAge: service.max_age != null ? `${service.max_age}` : undefined,
       comment: act.comment ?? '',
+      // GH #267: archived reference rows keep their cards; consumers decide visibility.
+      masterArchived: master.archived,
+      serviceArchived: service.archived,
+      locationArchived: location.archived,
     };
 
     items.push(item);

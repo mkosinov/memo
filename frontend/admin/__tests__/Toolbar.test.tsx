@@ -6,6 +6,7 @@ import { Toolbar } from '../app/components/layout/Toolbar';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
@@ -18,8 +19,25 @@ vi.mock('@memo/api-client', () => {
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
+  getUserSettings: vi.fn().mockResolvedValue({
+    user_id: 'u1', theme: 'light', language: 'ru',
+    column_order_staff: [], column_order_locations: [],
+    show_archived_masters: true, show_archived_locations: false,
+  }),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn().mockResolvedValue({}),
   });
 });
+
+// GH #267: UserSettingsProvider gates loading on useAuth().status — report
+// `authenticated` so the settings provider settles.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({
+    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated',
+    login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn(),
+  })),
+}));
 
 function createQueryWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -29,9 +47,11 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <NavigationProvider>
         <UIProvider>
-          <ScheduleProvider>
-            {children}
-          </ScheduleProvider>
+          <UserSettingsProvider>
+            <ScheduleProvider>
+              {children}
+            </ScheduleProvider>
+          </UserSettingsProvider>
         </UIProvider>
       </NavigationProvider>
     </QueryClientProvider>

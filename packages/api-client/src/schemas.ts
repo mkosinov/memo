@@ -108,8 +108,10 @@ export type StaffArchiveRequest = z.infer<typeof StaffArchiveRequestSchema>;
 // ─── MasterViewResponse (GH #266 D8 — read-only /masters view) ──────────────
 // /api/v1/masters is a VIEW over staff ⨝ masters serving ACTING masters only
 // (masters.is_active = true): schedule filters + the client site #48. The
-// write-side fields are gone — `id` = staff_id; no `archived` (the list only
-// returns acting masters) and no `position` (positions live on the staff card).
+// write-side fields are gone — `id` = staff_id; no `position` (positions live
+// on the staff card). `archived` (GH #267) mirrors masters.is_active: the
+// paginated list stays acting-only (always false), while bare /all with
+// status=all|archived can return archived rows.
 
 export const MasterViewResponseSchema = z.object({
   id: z.string(), // = staff_id (master extension PK)
@@ -119,6 +121,7 @@ export const MasterViewResponseSchema = z.object({
   color: z.string(),
   avatar_url: z.string().nullable(),
   sort_order: z.number(),
+  archived: z.boolean(), // = not masters.is_active (GH #267)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
@@ -645,6 +648,9 @@ export const UserSettingsResponseSchema = z.object({
   // (backend src/schemas/user_settings.py already serializes the new key).
   column_order_staff: z.array(z.string()),
   column_order_locations: z.array(z.string()),
+  // GH #267: archived visibility toggles (mirror masters/locations is_active).
+  show_archived_masters: z.boolean(),
+  show_archived_locations: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -659,6 +665,9 @@ export const UserSettingsCreateSchema = z.object({
   language: z.string().optional().default('ru'),
   column_order_staff: z.array(z.string()).optional().default([]),
   column_order_locations: z.array(z.string()).optional().default([]),
+  // GH #267 defaults match the backend: masters visible, locations hidden.
+  show_archived_masters: z.boolean().optional().default(true),
+  show_archived_locations: z.boolean().optional().default(false),
 });
 
 export type UserSettingsCreate = z.infer<typeof UserSettingsCreateSchema>;

@@ -8,6 +8,8 @@ export interface UserSettings {
   language: 'ru' | 'en';
   columnOrderMasters: string[];
   columnOrderLocations: string[];
+  showArchivedMasters: boolean;
+  showArchivedLocations: boolean;
 }
 
 interface UserSettingsContextType {
@@ -25,6 +27,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   language: 'ru',
   columnOrderMasters: [],
   columnOrderLocations: [],
+  showArchivedMasters: true,
+  showArchivedLocations: false,
 };
 
 // GH #247 §3.8/§4.6: user-settings are session-scoped — the server derives
@@ -37,7 +41,13 @@ function loadFromStorage(): UserSettings | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    // GH #267: defaults spread first — keys missing from an older cached
+    // object (pre-archived-visibility) fall back to defaults instead of
+    // `undefined`, so the first frame never flashes with archived masters
+    // hidden.
+    const cached = JSON.parse(raw) as Partial<UserSettings>;
+    return { ...DEFAULT_SETTINGS, ...cached };
   } catch {
     return null;
   }
@@ -87,6 +97,9 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
             // is unchanged (D2); only the persisted key moved.
             columnOrderMasters: remote.column_order_staff,
             columnOrderLocations: remote.column_order_locations,
+            // GH #267: archived-visibility toggles.
+            showArchivedMasters: remote.show_archived_masters,
+            showArchivedLocations: remote.show_archived_locations,
           };
           if (mountedRef.current) {
             setSettings(remoteSettings);
@@ -104,12 +117,18 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
                 // GH #266 Gap C: renamed wire key (column_order_staff).
                 column_order_staff: DEFAULT_SETTINGS.columnOrderMasters,
                 column_order_locations: DEFAULT_SETTINGS.columnOrderLocations,
+                // GH #267: archived-visibility defaults (masters visible,
+                // locations hidden — mirrors backend defaults since b0d17bb).
+                show_archived_masters: DEFAULT_SETTINGS.showArchivedMasters,
+                show_archived_locations: DEFAULT_SETTINGS.showArchivedLocations,
               });
               const createdSettings: UserSettings = {
                 theme: created.theme as 'light' | 'dark',
                 language: created.language as 'ru' | 'en',
                 columnOrderMasters: created.column_order_staff,
                 columnOrderLocations: created.column_order_locations,
+                showArchivedMasters: created.show_archived_masters,
+                showArchivedLocations: created.show_archived_locations,
               };
               if (mountedRef.current) {
                 setSettings(createdSettings);
@@ -142,6 +161,9 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
         if (partial.language !== undefined) apiPartial.language = partial.language;
         if (partial.columnOrderMasters !== undefined) apiPartial.column_order_staff = partial.columnOrderMasters;
         if (partial.columnOrderLocations !== undefined) apiPartial.column_order_locations = partial.columnOrderLocations;
+        // GH #267: archived-visibility toggles.
+        if (partial.showArchivedMasters !== undefined) apiPartial.show_archived_masters = partial.showArchivedMasters;
+        if (partial.showArchivedLocations !== undefined) apiPartial.show_archived_locations = partial.showArchivedLocations;
         patchUserSettings(apiPartial).catch(() => {});
       }).catch(() => {});
       return next;

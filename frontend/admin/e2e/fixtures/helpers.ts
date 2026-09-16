@@ -301,6 +301,25 @@ export async function openAddTab(
 }
 
 /**
+ * Delay all non-GET requests to the activities API by `ms` milliseconds.
+ *
+ * Used to make the «Сохраняем…» loading-toast window deterministic in
+ * e2e specs (GH #261): GET requests (grid load) pass through immediately,
+ * while POST/PUT/PATCH/DELETE (create/update/delete mutations) are held in
+ * flight for `ms` before continuing to the real backend. The `activities**`
+ * glob covers BOTH the collection (`/api/v1/activities`, `/api/v1/activities?…`)
+ * and detail URLs (`/api/v1/activities/{id}`) — a single trailing `*` cannot
+ * cross `/`, so it would miss the detail mutations entirely.
+ */
+export async function delayActivityMutations(page: Page, ms = 1500) {
+  await page.route('**/api/v1/activities**', async (route) => {
+    if (route.request().method() === 'GET') return route.continue();
+    await new Promise((r) => setTimeout(r, ms));
+    return route.continue();
+  });
+}
+
+/**
  * Wait for a toast notification to appear.
  */
 export async function waitForToast(page: Page, textPattern?: string | RegExp) {

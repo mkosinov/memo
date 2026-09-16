@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider, useMutationState } from '@tanstack/re
 import { Topbar } from '../app/components/layout/Topbar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
+import { getUserSettings, createUserSettings, patchUserSettings } from '@memo/api-client';
 import {
   createMockScheduleData,
   createMockScheduleView,
@@ -24,8 +26,17 @@ vi.mock('@memo/api-client', () => {
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  getUserSettings: vi.fn(),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn(),
   });
 });
+
+// GH #267: Topbar now consumes useUserSettings — provider is auth-gated, so
+// mock the auth hook to report `authenticated`.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
+}));
 
 // Partial mock — real QueryClient/QueryClientProvider stay intact; only
 // useMutationState (the saving-indicator source, spec §5) is faked.
@@ -75,7 +86,9 @@ function renderTopbar(overrides: TopbarMockOverrides = {}) {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <NavigationProvider>
-          <Topbar />
+          <UserSettingsProvider>
+            <Topbar />
+          </UserSettingsProvider>
         </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>,
@@ -86,6 +99,18 @@ describe('Topbar — Cell Height Zoom Control', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useMutationState).mockReturnValue([]);
+    // Settings fixture: remote GET resolves; PUT/PATCH no-op.
+    vi.mocked(getUserSettings).mockResolvedValue({
+      user_id: 'u1',
+      theme: 'light',
+      language: 'ru',
+      column_order_staff: [],
+      column_order_locations: [],
+      show_archived_masters: true,
+      show_archived_locations: false,
+    } as never);
+    vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
+    vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   });
 
   afterEach(() => {

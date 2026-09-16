@@ -28,6 +28,7 @@ from sqlalchemy import select
 from src.auth.passwords import hash_password
 from src.db.base import Base
 from src.db.database import DBManager
+from src.domain.visit_status import VisitStatus
 from src.models import (
     Activity,
     Client,
@@ -429,12 +430,12 @@ async def _seed_visitors(session) -> None:
 
 async def _seed_records(session) -> None:
     records = [
-        {"id": "r1", "activity_id": "ev_fixed_0", "client_id": "c1", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r2", "activity_id": "ev_fixed_1", "client_id": "c2", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r3", "activity_id": "ev_fixed_2", "client_id": "c3", "status": "visited", "seats": 2, "comment": None},
-        {"id": "r4", "activity_id": "ev_fixed_3", "client_id": "c1", "status": "visited", "seats": 1, "comment": None},
-        {"id": "r5", "activity_id": "ev_fixed_5", "client_id": "c5", "status": "waiting", "seats": 2, "comment": None},
-        {"id": "r6", "activity_id": "ev_fixed_8", "client_id": "c4", "status": "waiting", "seats": 1, "comment": None},
+        {"id": "r1", "activity_id": "ev_fixed_0", "client_id": "c1", "status": VisitStatus.VISITED, "seats": 2, "comment": None},
+        {"id": "r2", "activity_id": "ev_fixed_1", "client_id": "c2", "status": VisitStatus.VISITED, "seats": 2, "comment": None},
+        {"id": "r3", "activity_id": "ev_fixed_2", "client_id": "c3", "status": VisitStatus.VISITED, "seats": 2, "comment": None},
+        {"id": "r4", "activity_id": "ev_fixed_3", "client_id": "c1", "status": VisitStatus.VISITED, "seats": 1, "comment": None},
+        {"id": "r5", "activity_id": "ev_fixed_5", "client_id": "c5", "status": VisitStatus.WAITING, "seats": 2, "comment": None},
+        {"id": "r6", "activity_id": "ev_fixed_8", "client_id": "c4", "status": VisitStatus.WAITING, "seats": 1, "comment": None},
     ]
     for r in records:
         session.add(Record(**r))
@@ -442,16 +443,16 @@ async def _seed_records(session) -> None:
 
 async def _seed_visits(session) -> None:
     visits = [
-        {"id": "v1", "record_id": "r1", "visitor_id": "vis1", "tariff_id": "t7a", "price": 3500, "status": "visited"},
-        {"id": "v2", "record_id": "r1", "visitor_id": "vis2", "tariff_id": "t7c", "price": 2500, "status": "visited"},
-        {"id": "v3", "record_id": "r2", "visitor_id": "vis3", "tariff_id": "t5a", "price": 2200, "status": "visited"},
-        {"id": "v4", "record_id": "r2", "visitor_id": "vis4", "tariff_id": "t5c", "price": 1800, "status": "visited"},
-        {"id": "v5", "record_id": "r3", "visitor_id": "vis5", "tariff_id": "t2a", "price": 2800, "status": "visited"},
-        {"id": "v6", "record_id": "r3", "visitor_id": "vis6", "tariff_id": "t2c", "price": 2000, "status": "visited"},
-        {"id": "v7", "record_id": "r4", "visitor_id": "vis1", "tariff_id": "t3a", "price": 2000, "status": "visited"},
-        {"id": "v8", "record_id": "r5", "visitor_id": "vis8", "tariff_id": "t7a", "price": 3800, "status": "waiting"},
-        {"id": "v9", "record_id": "r5", "visitor_id": "vis9", "tariff_id": "t7c", "price": 2800, "status": "waiting"},
-        {"id": "v10", "record_id": "r6", "visitor_id": "vis7", "tariff_id": "t7a", "price": 3800, "status": "waiting"},
+        {"id": "v1", "record_id": "r1", "visitor_id": "vis1", "tariff_id": "t7a", "price": 3500, "status": VisitStatus.VISITED},
+        {"id": "v2", "record_id": "r1", "visitor_id": "vis2", "tariff_id": "t7c", "price": 2500, "status": VisitStatus.VISITED},
+        {"id": "v3", "record_id": "r2", "visitor_id": "vis3", "tariff_id": "t5a", "price": 2200, "status": VisitStatus.VISITED},
+        {"id": "v4", "record_id": "r2", "visitor_id": "vis4", "tariff_id": "t5c", "price": 1800, "status": VisitStatus.VISITED},
+        {"id": "v5", "record_id": "r3", "visitor_id": "vis5", "tariff_id": "t2a", "price": 2800, "status": VisitStatus.VISITED},
+        {"id": "v6", "record_id": "r3", "visitor_id": "vis6", "tariff_id": "t2c", "price": 2000, "status": VisitStatus.VISITED},
+        {"id": "v7", "record_id": "r4", "visitor_id": "vis1", "tariff_id": "t3a", "price": 2000, "status": VisitStatus.VISITED},
+        {"id": "v8", "record_id": "r5", "visitor_id": "vis8", "tariff_id": "t7a", "price": 3800, "status": VisitStatus.WAITING},
+        {"id": "v9", "record_id": "r5", "visitor_id": "vis9", "tariff_id": "t7c", "price": 2800, "status": VisitStatus.WAITING},
+        {"id": "v10", "record_id": "r6", "visitor_id": "vis7", "tariff_id": "t7a", "price": 3800, "status": VisitStatus.WAITING},
     ]
     for v in visits:
         session.add(Visit(**v))

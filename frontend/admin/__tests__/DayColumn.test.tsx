@@ -2020,4 +2020,60 @@ describe('DayColumn', () => {
       expect(g1Card).toHaveStyle({ opacity: '0.3' });
     });
   });
+
+  // ─── GH #267: archived column — no droppable, no create-on-click ────────
+
+  describe('archived column (GH #267)', () => {
+    it('registers no droppable slots (useDroppable never called)', () => {
+      mockUseDroppable.mockClear();
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          masters={MOCK_MASTERS}
+          archived
+        />,
+      );
+
+      // The primary defense layer: archived columns render PlainSlots that
+      // never register with dnd-kit, so a drop can never target them.
+      expect(mockUseDroppable).not.toHaveBeenCalled();
+    });
+
+    it('active column still registers droppable slots (contrast to archived)', () => {
+      mockUseDroppable.mockClear();
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          masters={MOCK_MASTERS}
+        />,
+      );
+
+      // Default grid (540–1260 @ 30min) → 24 slots, each calls useDroppable
+      expect(mockUseDroppable).toHaveBeenCalled();
+    });
+
+    it('click on an archived column slot does not open the create modal', () => {
+      const onOpenCreateModal = vi.fn();
+      render(
+        <DayColumn
+          dayIndex={0}
+          date={new Date()}
+          activities={[]}
+          masters={MOCK_MASTERS}
+          archived
+          onOpenCreateModal={onOpenCreateModal}
+        />,
+      );
+
+      // Click a background slot (e.target === e.currentTarget path)
+      const slot = screen.getAllByTestId('empty-slot')[0];
+      fireEvent.click(slot);
+
+      expect(onOpenCreateModal).not.toHaveBeenCalled();
+    });
+  });
 });

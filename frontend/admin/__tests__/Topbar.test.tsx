@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider, useMutationState } from '@tanstack/react-query';
 import { Topbar } from '../app/components/layout/Topbar';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
+import { UserSettingsProvider } from '../contexts/UserSettingsContext';
+import { getUserSettings, createUserSettings, patchUserSettings } from '@memo/api-client';
 import {
   createMockScheduleData,
   createMockScheduleView,
@@ -24,8 +26,17 @@ vi.mock('@memo/api-client', () => {
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  getUserSettings: vi.fn(),
+  createUserSettings: vi.fn(),
+  patchUserSettings: vi.fn(),
   });
 });
+
+// GH #267: UserSettingsProvider gates loading on useAuth().status — mock the
+// auth hook to report `authenticated` so the settings provider settles.
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
+}));
 
 // Partial mock — real QueryClient/QueryClientProvider stay intact; only
 // useMutationState (the saving-indicator source, spec §5) is faked.
@@ -55,7 +66,7 @@ vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
   useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
-import { useScheduleData, SCHEDULE_ACTIVITY_MUTATION_KEY } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 
@@ -76,7 +87,9 @@ function providersElement() {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <NavigationProvider>
-          <Topbar />
+          <UserSettingsProvider>
+            <Topbar />
+          </UserSettingsProvider>
         </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>
@@ -98,6 +111,18 @@ describe('Topbar', () => {
     document.documentElement.removeAttribute('data-theme');
     vi.clearAllMocks();
     vi.mocked(useMutationState).mockReturnValue([]);
+    // Settings fixture: remote GET resolves the toggles; PUT/PATCH no-op.
+    vi.mocked(getUserSettings).mockResolvedValue({
+      user_id: 'u1',
+      theme: 'light',
+      language: 'ru',
+      column_order_staff: [],
+      column_order_locations: [],
+      show_archived_masters: true,
+      show_archived_locations: false,
+    } as never);
+    vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
+    vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -316,43 +341,66 @@ describe('Topbar', () => {
   });
 
   // ── Saving indicator + leave guard (GH #141 spec §5) ───────────────────
+  // The visible chip moved into the toast stack (GH #261) — its asserts live
+  // in __tests__/useSavingToast.test.tsx now. Only the guard stays here.
 
-  describe('saving indicator', () => {
-    it('renders the "Сохраняем…" status chip while a schedule mutation is in flight', () => {
-      vi.mocked(useMutationState).mockReturnValue([true]);
+  // ── Archived-visibility toggles in filter dropdowns (GH #267) ────────
+
+  describe('archived-visibility toggles', () => {
+    it('renders «Показывать архивные» checkbox inside masters dropdown, checked per settings', async () => {
       renderTopbar();
-
-      const chip = screen.getByRole('status');
-      expect(chip).toBeInTheDocument();
-      expect(chip).toHaveAttribute('aria-live', 'polite');
-      expect(chip).toHaveTextContent('Сохраняем');
+      fireEvent.click(screen.getByLabelText('Мастера'));
+      const toggle = await screen.findByTestId('show-archived-masters-toggle');
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toBeChecked();
     });
 
-    it('hides the status chip when no schedule mutation is pending', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
+    it('renders «Показывать архивные» checkbox inside locations dropdown, unchecked per settings', async () => {
       renderTopbar();
-
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('Локации'));
+      const toggle = await screen.findByTestId('show-archived-locations-toggle');
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).not.toBeChecked();
     });
 
-    it('subscribes to the schedule-activity mutation key only', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
+    it('toggling masters checkbox calls updateSettings with showArchivedMasters=next (persisted via PATCH)', async () => {
       renderTopbar();
+      fireEvent.click(screen.getByLabelText('Мастера'));
+      const toggle = await screen.findByTestId('show-archived-masters-toggle');
 
-      const options = vi.mocked(useMutationState).mock.calls[0]?.[0] as {
-        filters?: { mutationKey?: readonly string[] };
-      };
-      expect(options?.filters?.mutationKey).toEqual(SCHEDULE_ACTIVITY_MUTATION_KEY);
+      fireEvent.click(toggle);
+      expect(toggle).not.toBeChecked(); // instant UI flip
+      await waitFor(() =>
+        expect(patchUserSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ show_archived_masters: false }),
+        ),
+      );
     });
 
-    it('shows the chip when the save starts mid-flight (rerender)', () => {
-      vi.mocked(useMutationState).mockReturnValue([]);
-      const { rerender } = renderTopbar();
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    it('toggling locations checkbox calls updateSettings with showArchivedLocations=next (persisted via PATCH)', async () => {
+      renderTopbar();
+      fireEvent.click(screen.getByLabelText('Локации'));
+      const toggle = await screen.findByTestId('show-archived-locations-toggle');
 
-      vi.mocked(useMutationState).mockReturnValue([true]);
-      rerender(providersElement());
-      expect(screen.getByRole('status')).toHaveTextContent('Сохраняем');
+      fireEvent.click(toggle);
+      expect(toggle).toBeChecked(); // instant UI flip
+      await waitFor(() =>
+        expect(patchUserSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ show_archived_locations: true }),
+        ),
+      );
+    });
+
+    it('persists the toggle to localStorage', async () => {
+      renderTopbar();
+      fireEvent.click(screen.getByLabelText('Локации'));
+      const toggle = await screen.findByTestId('show-archived-locations-toggle');
+
+      fireEvent.click(toggle);
+      await waitFor(() => {
+        const stored = JSON.parse(localStorage.getItem('memo-user-settings') || '{}');
+        expect(stored.showArchivedLocations).toBe(true);
+      });
     });
   });
 

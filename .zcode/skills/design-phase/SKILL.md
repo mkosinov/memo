@@ -1,6 +1,6 @@
 ---
 name: design-phase
-description: DESIGN phase on the host (zcode) in the host/container split topology — brainstorm G1a → spec + 5-reviewer panel G1b → plan + review G2, DoD = push to origin, board = the scripts/gh_board.py script living in memo itself, handoff to the container is «продолжаем траекторию #NNN». Use when the user writes «design #NNN», «продолжаем design», «вернулся #NNN», or asks for a spec/plan for an issue in a host session.
+description: DESIGN phase on the host (zcode) in the host/container split topology — brainstorm G1a → spec + 6-reviewer panel G1b → plan + review G2, DoD = push to origin, board = the scripts/gh_board.py script living in memo itself, handoff to the container is «продолжаем траекторию #NNN». Use when the user writes «design #NNN», «продолжаем design», «вернулся #NNN», or asks for a spec/plan for an issue in a host session.
 ---
 
 # DESIGN phase on the host (split host/container)
@@ -51,10 +51,10 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
 
 ## 4. Panel (host port — body from `.opencode/skills/panel-spec-review`)
 
-1. Dispatch: **5 agents in parallel**, in a single Agent-tool message:
-   `spec-panel-completeness`, `spec-panel-consistency`, `spec-panel-feasibility`, `spec-panel-simplicity`, `spec-panel-best-practices` (files in the repo's `.zcode/agents/`, models `omniroute/panel-*`).
+1. Dispatch: **6 agents in parallel**, in a single Agent-tool message:
+   `spec-panel-completeness`, `spec-panel-consistency`, `spec-panel-feasibility`, `spec-panel-simplicity`, `spec-panel-best-practices`, `spec-panel-security` (files in the repo's `.zcode/agents/`, models `omniroute/panel-*`).
 2. Each prompt: the **spec path** (+ the previous spec revision's path, if there was one). No `gh issue view`, no network — except best-practices, whose design includes WebSearch/WebFetch.
-3. Aggregation: collect the 5 reports → dedupe identical findings → rank **BLOCKER > MAJOR > MINOR** → one consolidated report to the user for the fix decision.
+3. Aggregation: collect the 6 reports → dedupe identical findings → rank **BLOCKER > MAJOR > MINOR** → one consolidated report to the user for the fix decision.
 4. **Availability policy (host adaptation, no subagent audit):** a panelist did not return / crashed → **one** rerun; second failure → mark it `skipped` in the consolidated report, verdict on the rest.
 5. best-practices returned `Verdict: FAILED` (web research unavailable) → note it in the report and exclude it from the verdict — that is its designed refusal, not a crash.
 6. The agent registry is seeded only at session start: `Agent tool: not found` while `.zcode/agents/` files exist → restart the session.
@@ -67,6 +67,8 @@ Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands th
 
 - Only **git and the board** cross the seam. The session does NOT end holding local commits: every passed gate = commit + push to origin/main.
 - **No closing keywords in direct-to-main commits.** Spec/plan/harness commit messages must NOT contain `Closes/Fixes/Resolves #N` — GitHub auto-closes the issue the moment the commit lands, though no IMPL has started (2026-09-14: #261 closed by a "Closes #261 on merge" phrase; #48 the same way). Write "to be closed by the IMPL PR" instead. The closing keyword belongs only in the IMPL PR description.
+- **Issue bodies declare hard dependencies as a `depends-on: #N, #M` line** — empty for independent tasks; examples only inline in backticks, because any line-start `depends-on:` is parsed as a real declaration (`gh_board.py` `_open_deps`, both harness copies) and the auto-impl pipeline skips the card while a referenced issue is OPEN. The stub ships in the issue template `.github/ISSUE_TEMPLATE/issue.md`.
+- **New issues are born attributed and placed**: add the `app:admin|app:web|app:ai` label (attribution for cross-app analysis); an issue belonging to a direction surface (web/ai) is attached as a GitHub sub-issue of its direction/epic umbrella issue (`gh api repos/{owner}/{repo}/issues/<parent>/sub_issues -F sub_issue_id=<db-id>`). Umbrella wrappers never enter the project — the board stays a pure execution queue. Release scope is a milestone; membership changes no board statuses.
 - **All decisions are folded into the artifact texts**: review amendments, constraints like "#NNN strictly after #NNN — shared file" go into the spec/plan, not the chat. Git and the board carry no session context across the seam. This is the DESIGN DoD under Scratchpad Discipline v2: DESIGN writes zero scratchpad state, so the pushed spec/plan are the ONLY carrier — fold every decision and dependency in **before the phase closes**.
 - After G2 tell the user: «скажи менеджеру в opencode: продолжаем траекторию #NNN». The container needs nothing else.
 - Does NOT cross the seam: `.opencode/scratchpad.md` (the container seeds its section at IMPL start — DESIGN itself writes nothing, v2), worktrees, env. The host **never writes or reads** the scratchpad — there are no container operations during the DESIGN phase at all.

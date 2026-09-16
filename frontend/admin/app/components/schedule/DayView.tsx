@@ -17,8 +17,9 @@ import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
 import { ScheduleColumnHeader, SortableColumnHeader } from './ScheduleColumnHeader';
+import { ArchiveBadge } from '@/app/components/shared/ArchiveBadge';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
-import { TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
+import { TIME_COL_WIDTH, isSameDay, displayMasterName } from '@/lib/utils';
 import { formatTime, toISODate } from '@/lib/datetime';
 
 /**
@@ -56,6 +57,8 @@ export function DayView() {
     masters,
     services,
     locations,
+    scheduleMasters,
+    scheduleLocations,
     addActivity,
     updateActivity,
     loading,
@@ -176,6 +179,43 @@ export function DayView() {
   // DnD — must be before `columns` so dragId/activeDragActivity are available
   const columnField = columnMode === 'locations' ? 'locationId' as const : 'masterId' as const;
 
+  // GH #267: archived columns — shown AFTER active ones, outside reorder/DnD.
+  // A column appears only when BOTH hold: its gate toggle is on AND the visible
+  // day has ≥1 activity of this master/location that passed the gates
+  // (dayActivities = context's gated filteredItems for the selected day).
+  // Sorting follows the general directory rule (sort_order, then name). Dedup
+  // with active columns is impossible by definition (archived ids are disjoint).
+  const archivedColumns = useMemo(() => {
+    const cols: Array<{ id: string; name: string }> = [];
+    if (columnMode === 'masters') {
+      if (!settings.showArchivedMasters) return cols;
+      const archived = scheduleMasters
+        .filter((m) => m.archived)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || displayMasterName(a).localeCompare(displayMasterName(b)));
+      for (const m of archived) {
+        if (dayActivities.some((a) => a.masterId === m.id)) {
+          cols.push({ id: m.id, name: displayMasterName(m) });
+        }
+      }
+    } else {
+      if (!settings.showArchivedLocations) return cols;
+      const archived = scheduleLocations
+        .filter((l) => l.archived)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+      for (const l of archived) {
+        if (dayActivities.some((a) => a.locationId === l.id)) {
+          cols.push({ id: l.id, name: l.name });
+        }
+      }
+    }
+    return cols;
+  }, [columnMode, scheduleMasters, scheduleLocations, dayActivities, settings.showArchivedMasters, settings.showArchivedLocations]);
+
+  const archivedColumnIds = useMemo(
+    () => new Set(archivedColumns.map((c) => c.id)),
+    [archivedColumns],
+  );
+
   const {
     dragId,
     dragCopy,
@@ -193,6 +233,7 @@ export function DayView() {
     showToast,
     gridFrequency,
     columnField,
+    archivedColumnIds,
   });
 
   // Determine columns based on filter selection and user column order preference
@@ -449,6 +490,23 @@ export function DayView() {
               } : undefined}
             />
           ))}
+          {/* GH #267: archived headers — plain (non-sortable), badged.
+              Text stays FULL-opacity --ink-mid (#555 → 7.46:1 on the white
+              header bar): Task 9 (90fdc27) rejected opacity-60 (4.08:1 < 4.5:1)
+              and even 70% composites to 3.54:1 for 12px text. Archived state
+              is signalled by the badge's own muted palette (stone-600 on
+              stone-200 = 6.08:1), not by dimming the name. */}
+          {archivedColumns.map((col) => (
+            <div
+              key={col.id}
+              data-testid={`archived-column-header-${col.id}`}
+              className="flex-1 text-center py-2 text-xs font-medium uppercase tracking-wide select-none flex items-center justify-center gap-1"
+              style={{ color: 'var(--ink-mid)' }}
+            >
+              <span>{col.name}</span>
+              <ArchiveBadge parts={columnMode === 'masters' ? ['мастер'] : ['локация']} />
+            </div>
+          ))}
         </ScheduleColumnHeader>
       </SortableContext>
 
@@ -485,6 +543,41 @@ export function DayView() {
                 gridEndMinutes={gridEndMinutes}
                 columnId={col.id}
               />
+            );
+          })}
+
+          {/* GH #267: archived columns — view-only, no droppable, muted */}
+          {archivedColumns.map((col) => {
+            const colActivities = activitiesByColumn.get(col.id) ?? [];
+            return (
+              // No wrapper opacity: ActivityCard already mutes archived-entity
+              // cards to opacity-70 (see 90fdc27); stacking another 70% here
+              // compounds to ~49% (≈3.3:1, below the 4.5:1 AA bar).
+              <div key={col.id} className="flex flex-col flex-1" data-testid={`archived-day-column-${col.id}`}>
+                <DayColumn
+                  dayIndex={0}
+                  date={selectedDay}
+                  activities={colActivities}
+                  masters={masters}
+                  locations={locations}
+                  services={services}
+                  dragCopy={dragCopy}
+                  dragId={dragId}
+                  ghostHeight={null}
+                  ghostDayIndex={null}
+                  ghostSlotIndex={null}
+                  ghostColumnId={null}
+                  onOpenEditModal={openEditModal}
+                  onQuickAdd={openQuickAdd}
+                  stampReady={false}
+                  stamp={stamp}
+                  cellHeight={cellHeight}
+                  gridFrequency={gridFrequency}
+                  gridStartMinutes={gridStartMinutes}
+                  gridEndMinutes={gridEndMinutes}
+                  archived
+                />
+              </div>
             );
           })}
 

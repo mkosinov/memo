@@ -29,6 +29,8 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
         language=model.language,
         column_order_staff=json.loads(model.column_order_staff),
         column_order_locations=json.loads(model.column_order_locations),
+        show_archived_masters=model.show_archived_masters,
+        show_archived_locations=model.show_archived_locations,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -76,6 +78,8 @@ class UserSettingsService:
             language=data.language,
             column_order_staff=json.dumps(data.column_order_staff),
             column_order_locations=json.dumps(data.column_order_locations),
+            show_archived_masters=data.show_archived_masters,
+            show_archived_locations=data.show_archived_locations,
         )
         session.add(orm)
         await session.flush()
@@ -97,7 +101,10 @@ class UserSettingsService:
 
         # Strip null values for NOT NULL columns — client intent is "don't change",
         # not "set to null"
-        _not_null_fields = {"theme", "language", "column_order_staff", "column_order_locations"}
+        _not_null_fields = {
+            "theme", "language", "column_order_staff", "column_order_locations",
+            "show_archived_masters", "show_archived_locations",
+        }
         for field in _not_null_fields:
             if field in update_data and update_data[field] is None:
                 del update_data[field]

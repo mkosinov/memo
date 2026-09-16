@@ -30,15 +30,15 @@ vi.mock('@/contexts/UserSettingsContext', () => ({
 }));
 
 vi.mock('@/hooks/useColumnReorder', () => ({
-  useColumnReorder: ({ columns }: { columns: ReadonlyArray<{ id: string; name: string }> }) => ({
+  useColumnReorder: vi.fn(({ columns }: { columns: ReadonlyArray<{ id: string; name: string }> }) => ({
     columnOrder: columns.map((c) => c.id),
     orderedColumns: columns,
     onColumnDrop: vi.fn(),
-  }),
+  })),
 }));
 
 vi.mock('@/hooks/useDnD', () => ({
-  useDnD: () => ({
+  useDnD: vi.fn(() => ({
     dragId: null,
     dragCopy: null,
     ghostPosition: null,
@@ -47,7 +47,7 @@ vi.mock('@/hooks/useDnD', () => ({
     onDragOver: vi.fn(),
     onDragEnd: vi.fn(),
     handleDragCancel: vi.fn(),
-  }),
+  })),
 }));
 
 vi.mock('@/app/components/schedule/TimeColumn', () => ({
@@ -92,8 +92,11 @@ import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
+import { useColumnReorder } from '@/hooks/useColumnReorder';
+import { useDnD } from '@/hooks/useDnD';
 import { DayView } from '../app/components/schedule/DayView';
 import { buildSchedule } from '@memo/domain';
+import { mockMasterResponseArchived, mockLocationResponseArchived } from './helpers/mockData';
 
 // Shared mock activity factory
 function createMockActivity(overrides: Partial<ScheduleAdminDTO> = {}): ScheduleAdminDTO {
@@ -131,8 +134,12 @@ function renderDayView(contextOverrides?: Record<string, unknown>) {
   // field — pull them out before routing the rest to the three factories.
   const columnOrderMasters = (overrides._columnOrderMasters as string[] | undefined) ?? [];
   const columnOrderLocations = (overrides._columnOrderLocations as string[] | undefined) ?? [];
+  const showArchivedMasters = (overrides._showArchivedMasters as boolean | undefined) ?? true;
+  const showArchivedLocations = (overrides._showArchivedLocations as boolean | undefined) ?? false;
   delete overrides._columnOrderMasters;
   delete overrides._columnOrderLocations;
+  delete overrides._showArchivedMasters;
+  delete overrides._showArchivedLocations;
 
   // Build scheduleIndex from activities if not provided
   if (overrides.activities && Array.isArray(overrides.activities) && !overrides.scheduleIndex) {
@@ -145,7 +152,14 @@ function renderDayView(contextOverrides?: Record<string, unknown>) {
   vi.mocked(useScheduleView).mockReturnValue(createMockScheduleView(view));
   vi.mocked(useGridSettings).mockReturnValue(createMockGridSettings(settings));
   mockUseUserSettings.mockReturnValue({
-    settings: { theme: 'light', language: 'ru', columnOrderMasters, columnOrderLocations },
+    settings: {
+      theme: 'light',
+      language: 'ru',
+      columnOrderMasters,
+      columnOrderLocations,
+      showArchivedMasters,
+      showArchivedLocations,
+    },
     updateSettings: vi.fn(),
     setColumnOrder: vi.fn(),
     getColumnOrder: vi.fn((mode: 'masters' | 'locations') => {
@@ -487,6 +501,170 @@ describe('DayView', () => {
         'data-defaults',
         JSON.stringify({ dayIndex: 0, startMinutes: 600 }),
       );
+    });
+  });
+
+  describe('archived columns (GH #267)', () => {
+    // Full schedule dictionaries: one active master (m1) + one archived (m-arch).
+    const fullMasters = [mockMasterResponseArchived];
+
+    function archivedMasterContext(overrides: Record<string, unknown> = {}) {
+      return {
+        columnMode: 'masters' as const,
+        filterMasterIds: [],
+        filterLocationIds: [],
+        selectedDay: new Date(2026, 5, 15),
+        scheduleMasters: fullMasters,
+        loading: false,
+        error: null,
+        ...overrides,
+      };
+    }
+
+    it('(а) shows archived master column with badge when gate is on and the day has its activities', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      // Archived column header renders with the archived testid prefix (NOT the sortable one)
+      const header = screen.getByTestId('archived-column-header-m-arch');
+      expect(header).toBeInTheDocument();
+      expect(screen.getByText('Архивов Пётр')).toBeInTheDocument();
+      // Badge lives inside the archived header
+      expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
+      // Active column still present
+      expect(screen.getByTestId('column-header-m1')).toBeInTheDocument();
+    });
+
+    it('(а2) archived column is NOT passed to useColumnReorder (outside SortableContext / reorder)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      const mockedReorder = useColumnReorder as ReturnType<typeof vi.fn>;
+      const lastCall = mockedReorder.mock.calls[mockedReorder.mock.calls.length - 1][0] as {
+        columns: Array<{ id: string }>;
+      };
+      const ids = lastCall.columns.map((c) => c.id);
+      expect(ids).toContain('m1');
+      expect(ids).not.toContain('m-arch');
+    });
+
+    it('(а3) passes archived column ids to useDnD guard', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      const mockedDnd = useDnD as ReturnType<typeof vi.fn>;
+      const opts = mockedDnd.mock.calls[mockedDnd.mock.calls.length - 1][0] as {
+        archivedColumnIds: ReadonlySet<string>;
+      };
+      expect(opts.archivedColumnIds.has('m-arch')).toBe(true);
+      expect(opts.archivedColumnIds.has('m1')).toBe(false);
+    });
+
+    it('(б) shows NO archived column on a day without archived-master activities', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      expect(screen.queryByTestId('archived-column-header-m-arch')).not.toBeInTheDocument();
+      expect(screen.queryByText('Архивов Пётр')).not.toBeInTheDocument();
+    });
+
+    it('(б2) archived activity on ANOTHER day does not create the column', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-16' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      expect(screen.queryByTestId('archived-column-header-m-arch')).not.toBeInTheDocument();
+    });
+
+    it('(б3) archived master column hidden when the gate is off', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: false }));
+
+      expect(screen.queryByTestId('archived-column-header-m-arch')).not.toBeInTheDocument();
+    });
+
+    it('(в) does not write archived ids into column order (getColumnOrder untouched, no setColumnOrder)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({
+        activities,
+        _showArchivedMasters: true,
+        _columnOrderMasters: ['m1'],
+      }));
+
+      const mockUseUserSettings = useUserSettings as ReturnType<typeof vi.fn>;
+      const value = mockUseUserSettings.mock.results[
+        mockUseUserSettings.mock.results.length - 1
+      ].value as { setColumnOrder: ReturnType<typeof vi.fn> };
+      // No persistence call happened during render with an archived column
+      expect(value.setColumnOrder).not.toHaveBeenCalled();
+    });
+
+    it('(д) shows archived location column in locations mode when gate is on', () => {
+      const locations = [
+        { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
+      ];
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm1', locationId: 'loc-2', locationName: 'Гранд Отель Поляна', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({
+        columnMode: 'locations',
+        locations,
+        scheduleLocations: [{ ...mockLocationResponseArchived }],
+        activities,
+        _showArchivedLocations: true,
+      }));
+
+      const header = screen.getByTestId('archived-column-header-loc-2');
+      expect(header).toBeInTheDocument();
+      expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
+    });
+
+    it('(е) archived column wrapper has no opacity class (cards mute themselves)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      // Wrapper opacity compounds with ActivityCard's own opacity-70 muting
+      // (0.7 × 0.7 ≈ 0.49 → ~3.3:1 contrast, below AA). The wrapper must not dim.
+      const wrapper = screen.getByTestId('archived-day-column-m-arch');
+      expect(wrapper.className).not.toMatch(/opacity-\d+/);
+    });
+
+    it('(ж) archived header text is NOT opacity-muted (full --ink-mid passes AA)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+        createMockActivity({ id: 'ev_2', masterId: 'm-arch', date: '2026-06-15' }),
+      ];
+      renderDayView(archivedMasterContext({ activities, _showArchivedMasters: true }));
+
+      // opacity-60 was rejected in 90fdc27 (4.08:1 < 4.5:1); #555 @ any opacity
+      // below 100% also fails on white. Header text keeps full-opacity --ink-mid;
+      // the badge's own muted palette signals archived.
+      const header = screen.getByTestId('archived-column-header-m-arch');
+      expect(header.className).not.toMatch(/opacity-\d+/);
+      expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
     });
   });
 });

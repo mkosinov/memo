@@ -675,6 +675,111 @@ describe('useDnD', () => {
     });
   });
 
+  describe('archived column guard (GH #267)', () => {
+    function renderDnDWithArchived(field?: 'masterId' | 'locationId') {
+      return renderHook(() =>
+        useDnD({
+          activities: mocks.activities,
+          addActivity: mocks.addActivity,
+          updateActivity: mocks.updateActivity,
+          showToast: mocks.showToast,
+          columnField: field,
+          archivedColumnIds: new Set(['m-arch']),
+        }),
+      );
+    }
+
+    it('ignores a move whose target column is archived (no PATCH)', () => {
+      const { result } = renderDnDWithArchived('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm-arch' },
+        } as any);
+      });
+      expect(mocks.updateActivity).not.toHaveBeenCalled();
+      expect(mocks.addActivity).not.toHaveBeenCalled();
+      expect(mocks.showToast).not.toHaveBeenCalled();
+    });
+
+    it('ignores a copy-drop onto an archived column (no create)', () => {
+      const { result } = renderDnDWithArchived('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any, { altKey: true });
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-4', columnId: 'm-arch' },
+        } as any);
+      });
+      expect(mocks.addActivity).not.toHaveBeenCalled();
+      expect(mocks.updateActivity).not.toHaveBeenCalled();
+    });
+
+    it('clears drag state after an ignored drop onto archived column', () => {
+      const { result } = renderDnDWithArchived('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      expect(result.current.dragId).toBe('ev_1');
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm-arch' },
+        } as any);
+      });
+      expect(result.current.dragId).toBeNull();
+      expect(result.current.activeDragActivity).toBeNull();
+    });
+
+    it('still allows drops onto active columns while the guard is set', () => {
+      const { result } = renderDnDWithArchived('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-0-2', columnId: 'm2' },
+        } as any);
+      });
+      expect(mocks.updateActivity).toHaveBeenCalledWith('ev_1', {
+        dayIndex: 0,
+        startMinutes: 600,
+        masterId: 'm2',
+      });
+    });
+
+    it('archived guard also applies when target resolves from parsed slot id (no columnId in data)', () => {
+      const { result } = renderDnDWithArchived('masterId');
+      act(() => {
+        result.current.onDragStart({
+          active: { id: 'ev_1', data: { current: { activity: mockActivities[0] } } },
+        } as any);
+      });
+      // slot-m-arch-3 → parsed columnId 'm-arch' (no over.data.columnId)
+      act(() => {
+        result.current.onDragEnd({
+          active: { id: 'ev_1' },
+          over: { id: 'slot-m-arch-3' },
+        } as any);
+      });
+      expect(mocks.updateActivity).not.toHaveBeenCalled();
+    });
+  });
+
   describe('slotIndexToMinutes (exported)', () => {
     it('returns 30-min intervals by default', () => {
       expect(slotIndexToMinutes(0)).toBe(540);

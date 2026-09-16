@@ -61,7 +61,11 @@ async function deleteActivityViaUI(pageB: Page, activityId: string) {
     (r) => r.url().includes(`/api/v1/activities/${activityId}`) && r.request().method() === 'DELETE',
     { timeout: 15_000 },
   );
-  await pageB.locator(`[data-testid="activity-${activityId}"]`).click();
+  // The WeekView carousel demotes overlapping cards to pointer-events:none
+  // (z>0), so a real-mouse click can be permanently hit-test-blocked;
+  // dispatchEvent reaches the same React handler (S5 pattern).
+  const card = pageB.locator(`[data-testid="activity-${activityId}"]`);
+  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
   const resp = await deleteResponse;
   expect(resp.status()).toBe(204);
 }

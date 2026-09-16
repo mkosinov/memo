@@ -4,6 +4,9 @@
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: NONE | <issue>
+  python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
+  python3 .zcode/scripts/gh_board.py auto-log N "CLAIM host=X"   — append an entry to the issue's auto-impl log comment
+  python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
@@ -141,8 +144,9 @@ def cmd_next_up():
         print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}] {it['title']}")
 
 
-CLAIM_TTL_HOURS = 1  # auto-impl: свежесть замков-комментариев (claim и blocked отдыхают одинаково)
+CLAIM_TTL_HOURS = 1  # auto-impl: свежесть последних записей (claim/blocked) в часах
 MAX_TOTAL_INFLIGHT = 3  # auto-impl: глобальный бюджет карточек In IMPL (iMac 2 + ноутбук 1); ручные сессии тоже считаются — они двигают карточки так же
+AUTO_IMPL_LOG_PREFIX = "auto-impl log:"
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
 _NUM_RE = re.compile(r"#?(\d+)")
 
@@ -200,8 +204,10 @@ def cmd_pick_next():
     """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
     Candidates: OPEN issues with board status "Ready to IMPL".
     Order: Next Up position ascending (99 = unset), then board order.
-    Skipped: cards with a fresh (12h) "auto-impl claim:"/"auto-impl blocked:"
-    comment, and cards whose body declares `depends-on: #N` with N still OPEN.
+    Skipped: cards whose auto-impl log comment's LAST entry is a fresh
+    (<= CLAIM_TTL_HOURS) CLAIM/BLOCKED, cards with legacy standalone
+    claim/blocked comments that fresh, and cards whose body declares
+    `depends-on: #N` with N still OPEN.
     Deliberately NO per-machine busy check here — but the GLOBAL budget holds:
     if In IMPL cards >= MAX_TOTAL_INFLIGHT, nothing new starts anywhere.
     Manual IMPL sessions count too — their hosts move cards to In IMPL the
@@ -216,6 +222,19 @@ def cmd_pick_next():
     ready = [it for it in items if (it["status"] or "").startswith("Ready to IMPL")]
     ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
     for it in ready:
+        _, log_body = _auto_impl_log(it["number"])
+        if log_body:
+            entries = [ln[2:] for ln in log_body.splitlines() if ln.startswith("- ")]
+            if entries:
+                m2 = re.match(r"(\S+)\s+(\w+)", entries[-1])
+                if m2:
+                    try:
+                        ts = datetime.fromisoformat(m2.group(1).replace("Z", "+00:00"))
+                        fresh = (datetime.now(timezone.utc) - ts).total_seconds() <= CLAIM_TTL_HOURS * 3600
+                        if fresh and m2.group(2) in ("CLAIM", "BLOCKED"):
+                            continue
+                    except ValueError:
+                        pass
         if _recent_markers(it["number"], ("auto-impl claim:", "auto-impl blocked:")):
             continue
         if _open_deps(it["number"]):
@@ -223,6 +242,87 @@ def cmd_pick_next():
         print(it["number"])
         return
     print("NONE")
+
+
+def cmd_pick_next_design():
+    """Token protocol for the DESIGN phase kickoff: <number> | NONE (reason).
+    Capacity invariant: if ANY board card sits in a status starting with
+    "In Design", nothing new enters design (one design at a time).
+    Candidates: OPEN issues with board status starting with "Backlog".
+    Skipped: cards whose body declares `depends-on: #N` with N still OPEN.
+    Order: Next Up position ascending (99 = unset), then board order."""
+    all_items = items_with_fields()
+    # инвариант мощности: дизайн занят — новых карточек не берём
+    busy = [f"#{it['number']}" for it in all_items
+            if (it["status"] or "").startswith("In Design")]
+    if busy:
+        print(f"NONE (design slot busy: {', '.join(busy)})")
+        return
+    # статус на борде — "Backlog (...)": матч по префиксу, не по точной строке
+    backlog = [it for it in all_items
+               if it["state"] == "OPEN" and (it["status"] or "").startswith("Backlog")]
+    if not backlog:
+        print("NONE (no Backlog cards)")
+        return
+    backlog.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
+    for it in backlog:
+        if _open_deps(it["number"]):
+            continue
+        print(it["number"])
+        return
+    print("NONE (all Backlog cards blocked by depends-on)")
+
+
+def _auto_impl_log(number: int):
+    """The watcher's single log comment (starts with AUTO_IMPL_LOG_PREFIX)
+    → (comment_id, body) or (None, None). Entries are "- <iso-ts> <text>"
+    lines appended chronologically at the bottom.
+    Fetched via REST: the id must be numeric — `gh issue view --json comments`
+    (gh ≥ 2.100) returns GraphQL node ids, and REST PATCH 404s on them."""
+    r = subprocess.run(
+        ["gh", "api", f"repos/{OWNER}/{REPO}/issues/{number}/comments"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return None, None
+    for c in json.loads(r.stdout or "[]"):
+        if c.get("body", "").startswith(AUTO_IMPL_LOG_PREFIX):
+            return c["id"], c["body"]
+    return None, None
+
+
+def cmd_auto_log(number: int, entry: str):
+    """Append "<now> <entry>" to the auto-impl log comment (create if missing).
+    Read-merge-append: the body is re-fetched right before the patch, so a
+    concurrent appender's lines are kept (last writer wins the merge)."""
+    line = f"- {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} {entry}"
+    cid, body = _auto_impl_log(number)
+    if cid is None:
+        r = subprocess.run(
+            ["gh", "issue", "comment", str(number), "--body", f"{AUTO_IMPL_LOG_PREFIX}\n{line}",
+             "--repo", f"{OWNER}/{REPO}"], capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit(f"auto-log create failed: {r.stderr.strip()}")
+        print("log created")
+        return
+    new_body = body.rstrip("\n") + "\n" + line
+    r = subprocess.run(
+        ["gh", "api", "-X", "PATCH", f"repos/{OWNER}/{REPO}/issues/comments/{cid}",
+         "-f", f"body={new_body}"], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"auto-log append failed: {r.stderr.strip()}")
+    print("log appended")
+
+
+def cmd_auto_state(number: int):
+    """Last line of the auto-impl log ("<ts> <entry>") or nothing — the
+    watcher tiebreak reads this: the last CLAIM entry's host owns the card."""
+    _, body = _auto_impl_log(number)
+    if not body:
+        return
+    entries = [ln[2:] for ln in body.splitlines() if ln.startswith("- ")]
+    if entries:
+        print(entries[-1])
 
 
 def cmd_show(arg: str):
@@ -360,6 +460,14 @@ if __name__ == "__main__":
     cmd = args[0]
     if cmd == "next-up":
         cmd_next_up()
+    elif cmd == "pick-next":
+        cmd_pick_next()
+    elif cmd == "pick-next-design":
+        cmd_pick_next_design()
+    elif cmd == "auto-log" and len(args) == 3:
+        cmd_auto_log(int(args[1]), args[2])
+    elif cmd == "auto-state" and len(args) == 2:
+        cmd_auto_state(int(args[1]))
     elif cmd == "pick-next":
         cmd_pick_next()
     elif cmd == "show" and len(args) == 2:

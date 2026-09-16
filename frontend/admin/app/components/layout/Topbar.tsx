@@ -6,6 +6,8 @@ import { useScheduleData, SCHEDULE_ACTIVITY_MUTATION_KEY } from '@/contexts/sche
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
+import { useSavingToast } from '@/hooks/useSavingToast';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { useNavigation } from '@/contexts/NavigationContext';
@@ -49,14 +51,16 @@ export function Topbar() {
     setWorkingHoursEnd,
   } = useGridSettings();
   const { selectDateRange } = useNavigation();
+  const { settings, updateSettings } = useUserSettings();
 
-  // «Сохраняем…» while any schedule mutation is in flight (spec §5). Driven by
-  // the shared mutationKey — no isSaving field on any context.
+  // Beforeunload guard while any schedule mutation is in flight (spec §5).
+  // The visible «Сохраняем…» indicator moved into the toast stack (see useSavingToast).
   const isSaving = useMutationState({
     filters: { mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY },
     select: (mutation) => mutation.state.status === 'pending',
   }).some(Boolean);
   useUnsavedChangesGuard(isSaving);
+  useSavingToast();
 
   // Dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -239,6 +243,13 @@ export function Topbar() {
               <span style={{ color: 'var(--ink, #1a1a1a)' }}>{m.name}</span>
             </span>
           )}
+          footer={
+            <ArchivedToggle
+              testId="show-archived-masters-toggle"
+              checked={settings.showArchivedMasters}
+              onChange={(next) => updateSettings({ showArchivedMasters: next })}
+            />
+          }
         />
         <MultiSelect<Location>
           items={locations}
@@ -247,6 +258,13 @@ export function Topbar() {
           label="Локации"
           getId={(l) => l.id}
           getLabel={(l) => l.name}
+          footer={
+            <ArchivedToggle
+              testId="show-archived-locations-toggle"
+              checked={settings.showArchivedLocations}
+              onChange={(next) => updateSettings({ showArchivedLocations: next })}
+            />
+          }
         />
       </div>
 
@@ -335,33 +353,6 @@ export function Topbar() {
           Неделя
         </button>
       </div>
-
-      {/* ── Saving indicator (spec §5) ── */}
-      {isSaving && (
-        <span
-          className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap"
-          role="status"
-          aria-live="polite"
-          style={{
-            color: 'var(--brand)',
-            backgroundColor: 'var(--surface)',
-            border: '1px solid var(--line)',
-          }}
-        >
-          <svg
-            className="animate-spin"
-            width="10"
-            height="10"
-            viewBox="0 0 12 12"
-            fill="none"
-            aria-hidden="true"
-          >
-            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-            <path d="M10.5 6A4.5 4.5 0 006 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          Сохраняем…
-        </span>
-      )}
 
       {/* ── Zoom icon + popup ── */}
       <div className="relative" ref={zoomRef}>
@@ -485,5 +476,33 @@ export function Topbar() {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────
+
+/** GH #267: «Показывать архивные» checkbox in a filter dropdown footer. */
+function ArchivedToggle({
+  testId,
+  checked,
+  onChange,
+}: {
+  testId: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-50 transition-colors">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="w-3.5 h-3.5 rounded border-gray-300 accent-[var(--brand)] cursor-pointer shrink-0"
+        data-testid={testId}
+      />
+      <span className="text-[11px] font-medium" style={{ color: 'var(--ink, #1a1a1a)' }}>
+        Показывать архивные
+      </span>
+    </label>
   );
 }

@@ -22,6 +22,8 @@ class TestUserSettingsResponse:
             language="en",
             column_order_staff=["first_name", "last_name", "color"],
             column_order_locations=["name", "address", "capacity"],
+            show_archived_masters=True,
+            show_archived_locations=False,
             created_at=now,
             updated_at=now,
         )
@@ -31,6 +33,8 @@ class TestUserSettingsResponse:
         assert schema.language == "en"
         assert schema.column_order_staff == ["first_name", "last_name", "color"]
         assert schema.column_order_locations == ["name", "address", "capacity"]
+        assert schema.show_archived_masters is True
+        assert schema.show_archived_locations is False
 
     def test_response_from_attributes(self):
         """UserSettingsResponse can be built from ORM via from_attributes."""
@@ -43,6 +47,8 @@ class TestUserSettingsResponse:
             language = "ru"
             column_order_staff = ["first_name", "color"]
             column_order_locations = ["name", "address"]
+            show_archived_masters = True
+            show_archived_locations = False
             created_at = datetime.utcnow()
             updated_at = datetime.utcnow()
 

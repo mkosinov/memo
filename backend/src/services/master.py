@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.errors import BareListLimitExceededError
+from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.models.staff import Staff
 from src.schemas.common import PaginatedResponse
@@ -40,6 +41,7 @@ class _MasterViewRow:
     color: str
     avatar_url: str | None
     sort_order: int
+    archived: bool
     created_at: datetime
     updated_at: datetime
 
@@ -53,6 +55,7 @@ class _MasterViewRow:
             color=ext.color,
             avatar_url=staff.avatar_url,
             sort_order=staff.sort_order,
+            archived=not ext.is_active,
             created_at=staff.created_at,
             updated_at=staff.updated_at,
         )
@@ -65,14 +68,15 @@ class MasterViewService:
 
     async def _fetch(
         self, db_session: AsyncSession, order_by=None, limit: int | None = None,
-        offset: int = 0,
+        offset: int = 0, status: ArchiveStatus = ArchiveStatus.ACTIVE,
     ) -> list[tuple[Staff, Master]]:
-        """Acting masters: staff INNER JOIN masters ON is_active — one query."""
-        stmt = (
-            select(Staff, Master)
-            .join(Master, Master.staff_id == Staff.id)
-            .where(Master.is_active)
-        )
+        """staff INNER JOIN masters filtered by archive status — one query."""
+        stmt = select(Staff, Master).join(Master, Master.staff_id == Staff.id)
+        if status is ArchiveStatus.ACTIVE:
+            stmt = stmt.where(Master.is_active.is_(True))
+        elif status is ArchiveStatus.ARCHIVED:
+            stmt = stmt.where(Master.is_active.is_(False))
+        # ALL → no archive filter.
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
         if limit is not None:
@@ -111,11 +115,16 @@ class MasterViewService:
         )
 
     async def list_all(
-        self, db_session: AsyncSession, order_by=None
+        self, db_session: AsyncSession, order_by=None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
     ) -> list[MasterViewResponse]:
-        """Bare /all array with the BARE_LIST_MAX_ROWS guard (GH #205)."""
+        """Bare /all array with the BARE_LIST_MAX_ROWS guard (GH #205).
+
+        ``status`` (GH #267): active (default) / archived / all.
+        """
         pairs = await self._fetch(
-            db_session, order_by=order_by, limit=BARE_LIST_MAX_ROWS + 1
+            db_session, order_by=order_by, limit=BARE_LIST_MAX_ROWS + 1,
+            status=status,
         )
         if len(pairs) > BARE_LIST_MAX_ROWS:
             # Reuse the guard's canonical message via the shared error.

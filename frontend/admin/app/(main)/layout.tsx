@@ -1,16 +1,25 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
-import { Menubar } from '../components/layout/Menubar';
+import { useRouter, usePathname } from 'next/navigation';
+import { Menubar, ADMIN_ONLY_SECTIONS } from '../components/layout/Menubar';
 import { NavigationProvider } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { ErrorBoundary } from '../components/error';
+import { ErrorBoundary, NoAccessScreen } from '../components/error';
+
+/** GH #263 T9: an admin-only section root (or its sub-path) for a master. */
+function isAdminOnlyPath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return (ADMIN_ONLY_SECTIONS as readonly string[]).some(
+    (section) => pathname === section || pathname.startsWith(`${section}/`),
+  );
+}
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   // Client-side guard (GH #247 spec §4.4 — no middleware: the session cookie
   // is opaque and cannot be verified at the edge). loading → spinner shell;
@@ -22,6 +31,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace(`/login?returnTo=${encodeURIComponent(current)}`);
     }
   }, [status, router]);
+
+  // GH #263 T9: role guard — a master deep-linking an admin-only section
+  // gets the NoAccessScreen instead of children. Deliberately NO redirect:
+  // the URL stays, so refresh lands in the same place. Admin (role !==
+  // 'master') always passes.
+  if (status === 'authenticated' && user?.role === 'master' && isAdminOnlyPath(pathname)) {
+    return <NoAccessScreen />;
+  }
 
   if (status === 'loading') {
     return (

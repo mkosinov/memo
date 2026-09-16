@@ -35,16 +35,24 @@ import MainLayout from '../app/(main)/layout';
 const mockUseAuth = vi.mocked(useAuth);
 
 /** Matches AuthContextType minus the fields the guard doesn't read. */
-function mockAuthState(status: string) {
+function mockAuthState(
+  status: string,
+  overrides?: { role?: string; permissions?: string[] },
+) {
   return {
-    user: null,
-    permissions: [] as string[],
+    user:
+      overrides?.role !== undefined
+        ? { id: 'u-1', phone: '+79990000002', role: overrides.role, master_id: 'm1', email: null }
+        : null,
+    permissions: overrides?.permissions ?? ([] as string[]),
     master: undefined,
     status,
     login: vi.fn(),
     logout: vi.fn(),
-    can: vi.fn(() => false),
-  } as React.ComponentProps<never> & ReturnType<typeof useAuth>;
+    can: vi.fn(
+      (p: string) => overrides?.permissions?.includes('*') || overrides?.permissions?.includes(p) || false,
+    ),
+  } as unknown as ReturnType<typeof useAuth>;
 }
 
 function renderLayout(children: React.ReactNode) {
@@ -93,5 +101,77 @@ describe('(main)/layout auth guard (GH #247 §4.4)', () => {
     renderLayout(<div>SECRET CONTENT</div>);
     expect(screen.getByText('SECRET CONTENT')).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GH #263 T9: master-role access guard ─────────────────────────────────
+// An authenticated master hitting an admin-only section URL gets the
+// NoAccessScreen INSTEAD of children — the URL stays (no redirect), so
+// refresh lands in the same place.
+
+describe('(main)/layout master access guard (GH #263 T9)', () => {
+  beforeEach(() => {
+    replaceMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Spec §3.5 master tokens: the dictionaries/read surface, no writes. */
+  const MASTER_PERMS = [
+    'records:read', 'records:write', 'visits:read', 'visits:write',
+    'visitors:read', 'visitors:write', 'services:read', 'locations:read',
+    'tags:read', 'masters:read', 'clients:read', 'payments:read',
+  ];
+
+  function mockMaster() {
+    mockUseAuth.mockReturnValue(
+      mockAuthState('authenticated', { role: 'master', permissions: MASTER_PERMS }),
+    );
+  }
+
+  it.each(['/clients', '/locations', '/tags', '/staff', '/positions'])(
+    'shows NoAccessScreen for %s and withholds children (URL kept)',
+    (section) => {
+      window.history.replaceState(null, '', section);
+      mockMaster();
+      renderLayout(<div>SECRET CONTENT</div>);
+      expect(screen.getByTestId('no-access')).toBeInTheDocument();
+      expect(screen.getByText('Нет доступа к разделу')).toBeInTheDocument();
+      expect(screen.queryByText('SECRET CONTENT')).not.toBeInTheDocument();
+      // No redirect — the URL stays as-is.
+      expect(replaceMock).not.toHaveBeenCalled();
+      expect(window.location.pathname).toBe(section);
+    },
+  );
+
+  it('shows NoAccessScreen for admin-only sub-paths (e.g. /clients/123)', () => {
+    window.history.replaceState(null, '', '/clients/123');
+    mockMaster();
+    renderLayout(<div>SECRET CONTENT</div>);
+    expect(screen.getByTestId('no-access')).toBeInTheDocument();
+    expect(screen.queryByText('SECRET CONTENT')).not.toBeInTheDocument();
+  });
+
+  it.each(['/schedule', '/records', '/services', '/photos'])(
+    'renders children for master on allowed path %s',
+    (section) => {
+      window.history.replaceState(null, '', section);
+      mockMaster();
+      renderLayout(<div>SECRET CONTENT</div>);
+      expect(screen.getByText('SECRET CONTENT')).toBeInTheDocument();
+      expect(screen.queryByTestId('no-access')).not.toBeInTheDocument();
+    },
+  );
+
+  it('admin is never blocked on admin-only sections', () => {
+    window.history.replaceState(null, '', '/clients');
+    mockUseAuth.mockReturnValue(
+      mockAuthState('authenticated', { role: 'admin', permissions: ['*'] }),
+    );
+    renderLayout(<div>SECRET CONTENT</div>);
+    expect(screen.getByText('SECRET CONTENT')).toBeInTheDocument();
+    expect(screen.queryByTestId('no-access')).not.toBeInTheDocument();
   });
 });

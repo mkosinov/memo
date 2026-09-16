@@ -6,6 +6,7 @@ import type { ServiceResponse, ServiceUpdate, DependencyNode } from '@memo/api-c
 import { resolveDeleteService, ApiError } from '@memo/api-client';
 import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useServicesTable } from '@/contexts/ServicesContext';
 import { useMaterialsRaw } from '@/hooks/useMaterials';
 import { ServiceModal } from './ServiceModal';
@@ -21,10 +22,18 @@ import { invalidateEntities } from '@/lib/invalidate';
 export function ServicesTable() {
   // Server pagination/sort/search state (ServicesContext, #205 §5.2 + #139 §6.7)
   const servicesTable = useServicesTable();
+  // GH #263 T9 — permission gates: services:write hides create/edit
+  // affordances, materials:read hides the materials surface (filter select +
+  // modal picker). The backend is the enforcement point; this only keeps the
+  // master's UI honest (no dead buttons).
+  const { can } = useAuth();
+  const canWriteServices = can('services:write');
+  const canReadMaterials = can('materials:read');
   // GH #223 T7 — ACTIVE materials feed the «Материал» filter select
   // (spec §8; source: getAllMaterials /all?status=active, same as the
-  // ServiceModal picker — REUSE the Task 5 hook).
-  const { data: materials = [] } = useMaterialsRaw();
+  // ServiceModal picker — REUSE the Task 5 hook). Without materials:read the
+  // query never mounts (master has no token for it — a fetch would just 403).
+  const { data: materials = [] } = useMaterialsRaw(canReadMaterials);
 
   const updateService = useUpdateService();
   const createService = useCreateService();
@@ -145,7 +154,9 @@ export function ServicesTable() {
         columns={columns}
         tableState={servicesTable}
         actions={actions}
-        onRowClick={setEditingService}
+        // GH #263 T9: without services:write the list is read-only — row
+        // click opens nothing (no dead edit modal behind a 403).
+        onRowClick={canWriteServices ? setEditingService : undefined}
         rowKey={(s) => s.id}
         // Pre-#139 row classes were `border-b cursor-pointer transition-colors
         // hover:opacity-80`; the shared DataTable renders the base three, the
@@ -154,6 +165,10 @@ export function ServicesTable() {
         // Addendum #9: the dict *Filters bar rides in the toolbar's left group —
         // search rewired to context search/setSearch (§6.7 predicate-only),
         // status select already context-wired; bar UI/markup untouched.
+        // GH #263 T9: the «Материал» filter needs materials:read — hidden
+        // otherwise (master's token list carries no materials:read; a fetch
+        // would just 403). The props stay undefined → ServiceFilters omits
+        // the select.
         toolbarLead={
           <ServiceFilters
             search={servicesTable.search}
@@ -161,24 +176,27 @@ export function ServicesTable() {
             onSearchChange={servicesTable.setSearch}
             onStatusChange={(v) => servicesTable.setStatus(v as 'active' | 'all' | 'archived')}
             onReset={() => { servicesTable.setSearch(''); servicesTable.setStatus('active'); servicesTable.resetFilters(); }}
-            materials={materials}
-            materialFilter={servicesTable.filters.material_id}
-            onMaterialFilterChange={(v) => servicesTable.setFilters({ material_id: v })}
+            materials={canReadMaterials ? materials : undefined}
+            materialFilter={canReadMaterials ? servicesTable.filters.material_id : undefined}
+            onMaterialFilterChange={canReadMaterials ? (v) => servicesTable.setFilters({ material_id: v }) : undefined}
           />
         }
         toolbarExtras={
-          <button
-            onClick={() => setCreatingService(true)}
-            className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
-            style={{ backgroundColor: 'var(--brand)' }}
-          >
-            + Добавить услугу
-          </button>
+          canWriteServices ? (
+            <button
+              onClick={() => setCreatingService(true)}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors"
+              style={{ backgroundColor: 'var(--brand)' }}
+            >
+              + Добавить услугу
+            </button>
+          ) : null
         }
       />
 
-      {/* Edit Modal */}
-      {editingService && (
+      {/* Edit Modal — GH #263 T9: only reachable WITH services:write (row
+          click is gated above), so no read-only rendering is needed here. */}
+      {editingService && canWriteServices && (
         <ServiceModal
           mode="edit"
           service={editingService}
@@ -190,7 +208,7 @@ export function ServicesTable() {
       )}
 
       {/* Create Modal */}
-      {creatingService && (
+      {creatingService && canWriteServices && (
         <ServiceModal
           mode="create"
           service={null}

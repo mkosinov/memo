@@ -138,6 +138,21 @@ const NAV_ITEMS = [
   { label: 'Клиенты', icon: 'users', href: '/clients' },
 ] as const;
 
+/**
+ * GH #263 T9 — the section roots a master must NOT reach, single source for
+ * BOTH the menu filter (below) and the (main)/layout access guard. The
+ * backend scope (§3.5) already refuses these reads; this hides the UI paths.
+ * Sub-paths match too (guard uses startsWith), so e.g. /clients/123 is
+ * covered by '/clients'.
+ */
+export const ADMIN_ONLY_SECTIONS = [
+  '/clients',
+  '/locations',
+  '/tags',
+  '/staff',
+  '/positions',
+] as const;
+
 const DIRECTORY_ITEMS = [
   // GH #266: «Сотрудники» — the staff directory screen (/staff). Placed in
   // «Справочники» per the user's 2026-09-10 decision. NOTE: this is NOT the
@@ -150,6 +165,12 @@ const DIRECTORY_ITEMS = [
   // GH #266 T9: the positions dictionary (salary-side; D4).
   { label: 'Должности', href: '/positions' },
 ] as const;
+
+/** GH #263 T9: master menu filter — drop every admin-only destination. */
+const isAdminOnly = (href: string): boolean =>
+  (ADMIN_ONLY_SECTIONS as readonly string[]).some(
+    (section) => href === section || href.startsWith(`${section}/`),
+  );
 
 const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;
 
@@ -452,9 +473,24 @@ export function Menubar() {
   const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar } = useUI();
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  // GH #263 T9: masters lose the admin-only destinations (nav + directories)
+  // and the «Мастера» collapsible; admins see everything (no diff).
+  const isAdmin = user?.role === 'admin';
+  const navItems = useMemo(
+    () => (isAdmin ? NAV_ITEMS : NAV_ITEMS.filter((i) => !isAdminOnly(i.href))),
+    [isAdmin],
+  );
+  const directoryItems = useMemo(
+    () =>
+      isAdmin
+        ? DIRECTORY_ITEMS
+        : DIRECTORY_ITEMS.filter((i) => !isAdminOnly(i.href)),
+    [isAdmin],
+  );
 
   // Track viewMode & selectedDay via custom events from ScheduleContext
   // (Menubar lives outside ScheduleProvider in the component tree)
@@ -529,7 +565,7 @@ export function Menubar() {
         {/* Navigation */}
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
           {/* Regular nav items */}
-          {NAV_ITEMS.map(item => {
+          {navItems.map(item => {
             const IconComponent = ICON_MAP[item.icon];
             const active = isActive(item.href);
             return (
@@ -551,25 +587,27 @@ export function Menubar() {
             );
           })}
 
-          {/* Мастера — collapsible */}
-          <button
-            onClick={() => toggleMenu('masters')}
-            className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
-              text-white/60 hover:bg-white/5 hover:text-white/90
-              ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
-            aria-label="Мастера"
-            aria-expanded={openMenu === 'masters'}
-            title={sidebarCollapsed ? 'Мастера' : undefined}
-          >
-            <PaletteIcon className="text-white/60" />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 text-left">Мастера</span>
-                <ChevronIcon expanded={openMenu === 'masters'} className="text-white/40" />
-              </>
-            )}
-          </button>
-          {openMenu === 'masters' && !sidebarCollapsed && (
+          {/* Мастера — collapsible (admin-only: GH #263 T9) */}
+          {isAdmin && (
+            <button
+              onClick={() => toggleMenu('masters')}
+              className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+                text-white/60 hover:bg-white/5 hover:text-white/90
+                ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+              aria-label="Мастера"
+              aria-expanded={openMenu === 'masters'}
+              title={sidebarCollapsed ? 'Мастера' : undefined}
+            >
+              <PaletteIcon className="text-white/60" />
+              {!sidebarCollapsed && (
+                <>
+                  <span className="flex-1 text-left">Мастера</span>
+                  <ChevronIcon expanded={openMenu === 'masters'} className="text-white/40" />
+                </>
+              )}
+            </button>
+          )}
+          {isAdmin && openMenu === 'masters' && !sidebarCollapsed && (
             <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
               {masters.map(master => (
                 <div
@@ -608,7 +646,7 @@ export function Menubar() {
           </button>
           {openMenu === 'directories' && !sidebarCollapsed && (
             <div className="ml-4 mt-0.5 mb-1 space-y-0.5">
-              {DIRECTORY_ITEMS.map(item => {
+              {directoryItems.map(item => {
                 const active = isActive(item.href);
                 return (
                   <Link

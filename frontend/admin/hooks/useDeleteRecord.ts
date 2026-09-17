@@ -139,6 +139,8 @@ interface PendingActionShape {
   delayMs: number;
   commit: () => Promise<void>;
   undo: () => void;
+  /** #285 D4: optional consumer error handler (wired in Task 7). */
+  onError?: (err: unknown) => void;
 }
 
 export function useDeleteRecord() {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import { ApiError } from '@memo/api-client';
 import { useUI } from './UIContext';
 
 export type PendingActionKind = 'delete';
@@ -17,6 +18,13 @@ export type PendingAction = {
   commit: () => Promise<void>;
   /** Rollback the optimistic change. Called when the user clicks "Отменить". */
   undo: () => void;
+  /**
+   * #285 D4: consumer-specific commit-failure handler. When present it
+   * receives every non-404 commit error and suppresses the default handling
+   * (undo + error toast). The 404 quiet-success branch runs before this —
+   * the commit goal is already achieved (DELETE is idempotent).
+   */
+  onError?: (err: unknown) => void;
 };
 
 interface PendingActionsContextValue {
@@ -49,20 +57,24 @@ export function PendingActionsProvider({ children }: { children: React.ReactNode
       }
 
       // 2. Show the toast with the undo callback. The undo callback:
-      //    - runs the user-supplied rollback
-      //    - clears + deletes the pending timer so commit() never fires.
+      //    - clears + deletes the pending timer so commit() never fires
+      //    - runs the user-supplied rollback (only while the entry exists —
+      //      see the #285 D4 rev8 gating note inside).
       // #94 (spec D3): the undo window (delayMs) rides as the toast's
       // `countdownMs` — countdown ring, toast lifetime and the commit timer
       // below all derive from this single value.
       showToast(
         action.message,
         () => {
-          action.undo();
+          // #285 D4 (rev8): undo is gated on the pending entry. Once the
+          // commit timer fired, the entry is removed BEFORE the commit runs —
+          // a late «Отменить» click would locally resurrect a row the server
+          // has already deleted, so it is a no-op.
           const t = timersRef.current.get(action.id);
-          if (t) {
-            clearTimeout(t);
-            timersRef.current.delete(action.id);
-          }
+          if (!t) return;
+          clearTimeout(t);
+          timersRef.current.delete(action.id);
+          action.undo();
         },
         undefined, // kind slot — unused on the kindless undo path
         action.delayMs,
@@ -70,8 +82,27 @@ export function PendingActionsProvider({ children }: { children: React.ReactNode
 
       // 3. Schedule commit after the undo window.
       const timer = setTimeout(async () => {
-        await action.commit();
+        // #285 D4 (rev8): drop the pending entry BEFORE the commit starts —
+        // from this moment undo() finds no entry and is a no-op. A
+        // re-enqueue of the same id creates a fresh entry and is unaffected.
         timersRef.current.delete(action.id);
+        try {
+          await action.commit();
+        } catch (err) {
+          // D4 (rev8) default handling, domain-independent:
+          // 404 — quiet success: DELETE is idempotent, the target is already
+          // deleted by a competitor, the commit goal is achieved. No undo,
+          // no toast (the cache entry stays removed).
+          if (err instanceof ApiError && err.status === 404) return;
+          // Custom consumer handler overrides the default for every other
+          // error (e.g. the records 409 stale_dependencies branch).
+          if (action.onError) {
+            action.onError(err);
+            return;
+          }
+          action.undo();
+          showToast('Не удалось удалить. Изменение отменено', 'error');
+        }
       }, action.delayMs);
       timersRef.current.set(action.id, timer);
     },

@@ -112,8 +112,11 @@ const mockQueryClient = {
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
   useQueryClient: vi.fn(() => mockQueryClient),
-  // Executing mock (Addendum 13): runs mutationFn + onSuccess so the
-  // useDeleteRecord dry-run flow (204 toast / 409 dialog parking) works.
+  // Executing mock: the tab's remaining mutations (useRecordMutations —
+  // visits/payments/record-level saves) run mutationFn + onSuccess when
+  // invoked; the record delete flow does NOT use useMutation anymore
+  // (#285 — useDeleteRecord calls dryRunDeleteRecord/resolveDeleteRecord
+  // directly via PendingActions).
   useMutation: vi.fn(
     (opts: {
       mutationFn?: (vars: unknown) => Promise<unknown>;

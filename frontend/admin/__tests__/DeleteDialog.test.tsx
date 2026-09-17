@@ -342,7 +342,9 @@ describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () =
 // «и ещё N»). Nodes WITHOUT items keep the legacy counter line.
 
 // Live dry-run tree shape for a record: cascade nodes carry items (id +
-// human-readable label), the auto record_tags node does not (spec D9б).
+// human-readable label). Backend deletion.py registers a collector for
+// record_tags too, so real trees MAY carry tag items — this fixture leaves
+// them off record_tags to keep the no-items fallback branch regression-covered.
 const RECORD_WITH_ITEMS: DependencyNode[] = [
   {
     entity: 'visits',

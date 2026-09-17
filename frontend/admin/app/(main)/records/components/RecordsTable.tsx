@@ -53,11 +53,10 @@ export function RecordsTable() {
 
   // GH #213 Task 7 (§6.2) — the columns factory is lookup-free; cells read the
   // denormalized RecordView row fields. Only the ClientQuickCard opener stays
-  // wired here (row.client_id → setClientModalId). The actions memo is NOT
-  // referentially stable: useDeleteRecord returns a fresh mutation object
-  // identity every render, so handleDelete — and with it this useMemo —
-  // recomputes on every render. Harmless: DataTable does not depend on the
-  // referential stability of `actions`.
+  // wired here (row.client_id → setClientModalId). The actions memo is
+  // referentially stable: useDeleteRecord's removeRecord is a stable
+  // useCallback, so handleDelete — and with it this useMemo — recompute only
+  // when they actually change.
   const columns = useMemo(
     () =>
       recordColumns({

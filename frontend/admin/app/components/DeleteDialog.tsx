@@ -187,14 +187,14 @@ function DepRow({ dep }: { dep: DependencyNode }) {
   const hasItems = Array.isArray(dep.items) && dep.items.length > 0;
   if (hasItems) {
     return (
-      <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
+      <li className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
         <DepItemGroup dep={dep} />
       </li>
     );
   }
   const preview = dep.cascade_preview ? `; визиты: ${dep.cascade_preview.visits ?? '?'}` : '';
   return (
-    <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
+    <li className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
       {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`}
     </li>
   );

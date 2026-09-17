@@ -1720,3 +1720,182 @@ class TestDeleteUnifiedRoute:
         assert resp.status_code == 409
         assert _drain_events(sse_subscriber) == []
         assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+
+class TestDependencyItemsIn409Tree:
+    """D9б/в (#285): the 409 dependency tree for RECORDS carries ``items`` —
+    a one-line human label per dependent row (``{id, label}``), for the
+    visits / payments / record_tags nodes, so the DeleteDialog renders
+    "what exactly will be deleted" entries instead of bare counts.
+
+    Pinned label formats (plan D9б/в):
+      * Visit   → «{service.title}, {price}» (service via ``tariff_id``);
+        ``tariff_id IS NULL`` → «Без тарифа, {price}»; tariff whose
+        service row is missing → fallback «Без тарифа, {price}».
+      * Payment → «{amount}, {method}»; ``method IS NULL`` → «{amount}, —».
+      * record_tags → «{tag name}» per link row (id = tag_id).
+
+    Other entities (e.g. Client) keep the bare tree — ``items`` stays
+    None (§5: their dialogs are unchanged). Both 409 paths
+    (``has_dependencies`` dry-run and ``stale_dependencies`` commit) go
+    through ``collect_dependencies`` → items appear in BOTH.
+    """
+
+    def test_dry_run_409_visits_payments_items(
+        self, api_client, create_record, create_service
+    ) -> None:
+        """(а) dry-run 409: visits/payments nodes carry id + pinned labels."""
+        service = create_service(title="МК Гончарное дело")
+        tariff_id = f"tariff-{_uuid.uuid4().hex[:8]}"
+        query_db(
+            "INSERT INTO tariffs (id, service_id, title, price, is_active, "
+            "created_at, updated_at) VALUES "
+            f"('{tariff_id}', '{service['id']}', 'Adult', 3500, 1, "
+            "datetime('now'), datetime('now'))"
+        )
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": tariff_id},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_t = next(v for v in record["visits"] if v["tariff_id"] == tariff_id)
+        visit_no_t = next(v for v in record["visits"] if v["tariff_id"] is None)
+        payment_cash = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        }).json()
+        payment_free = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 500,
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409, resp.text
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        visits_items = {i["id"]: i["label"] for i in deps["visits"]["items"]}
+        assert visits_items == {
+            visit_t["id"]: f"{service['title']}, 3500",
+            visit_no_t["id"]: "Без тарифа, 2500",
+        }
+        payments_items = {i["id"]: i["label"] for i in deps["payments"]["items"]}
+        assert payments_items == {
+            payment_cash["id"]: "1000, cash",
+            payment_free["id"]: "500, —",
+        }
+
+    def test_dry_run_409_visits_items_tariff_without_service_fallback(
+        self, api_client, create_record, sample_tariff
+    ) -> None:
+        """Fallback (D9б): tariff row exists but its service row doesn't.
+
+        Not reachable via the FK matrix (tariffs.service_id NOT NULL with a
+        real service) but pinned: the title degrades to «Без тарифа», the
+        price stays — «Без тарифа, {price}».
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": sample_tariff},
+            ]
+        )
+        visit_id = record["visits"][0]["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["visits"]["items"] == [
+            {"id": visit_id, "label": "Без тарифа, 3500"},
+        ]
+
+    def test_dry_run_409_items_counts_and_preview_unchanged(
+        self, api_client, create_record, create_service
+    ) -> None:
+        """(д) items are additive: count/cascade_preview stay as before."""
+        service = create_service()
+        tariff_id = f"tariff-{_uuid.uuid4().hex[:8]}"
+        query_db(
+            "INSERT INTO tariffs (id, service_id, title, price, is_active, "
+            "created_at, updated_at) VALUES "
+            f"('{tariff_id}', '{service['id']}', 'Adult', 3500, 1, "
+            "datetime('now'), datetime('now'))"
+        )
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": tariff_id},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["visits"]["count"] == 2 == len(deps["visits"]["items"])
+        assert deps["visits"]["allowed_actions"] == ["cascade"]
+        assert deps["visits"]["cascade_preview"] is None
+        assert deps["payments"]["count"] == 1 == len(deps["payments"]["items"])
+        assert deps["payments"]["cascade_preview"] is None
+
+    def test_dry_run_409_record_tags_items(
+        self, api_client, create_record
+    ) -> None:
+        """(в) record_tags node (when present) items = tag name labels."""
+        record = create_record(visits=[])  # no visits/payments deps
+        tag_id = _link_record_tag(api_client, record["id"], tag_name="VIP")
+        record_id = record["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["record_tags"]["count"] == 1
+        assert deps["record_tags"]["items"] == [{"id": tag_id, "label": "VIP"}]
+
+    def test_stale_dependencies_409_carries_items_too(
+        self, api_client, create_record
+    ) -> None:
+        """Both 409 paths serialize items: stale_dependencies tree too."""
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        payment = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "card",
+        }).json()
+        # The race: the payment landed in the undo window.
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", json={"expected": {}}
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["items"] == [
+            {"id": payment["id"], "label": "1000, card"},
+        ]
+
+    def test_client_409_tree_has_no_items(self, api_client, create_record) -> None:
+        """(г) Other entities: the Client 409 tree stays without items."""
+        record = create_record()
+        client_id = record["client_id"]
+
+        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+
+        assert resp.status_code == 409
+        deps = resp.json()["dependencies"]
+        assert deps, "client with a record must have deps"
+        for dep in deps:
+            assert dep.get("items") is None, dep["entity"]

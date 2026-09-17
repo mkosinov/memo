@@ -13,7 +13,7 @@ pytestmark = pytest.mark.api
 class TestRecordsCrud:
     """Full CRUD round-trip for /api/records with nested visits."""
 
-    def test_create_record_with_visits(self, api_client, create_activity, create_client) -> None:
+    def test_create_record_with_visits(self, api_client, create_activity, create_client, sample_tariff) -> None:
         """POST /api/records creates a record with visits, seats = len(visits)."""
         activity = create_activity()
         client = create_client()
@@ -26,13 +26,16 @@ class TestRecordsCrud:
             "client_id": client["id"], "name": "Bob", "age": 35,
         }).json()
 
+        # GH #257 US1: the booking tail's default tariff must survive the
+        # nested-create path — VisitItem carries tariff_id, the service must
+        # persist it (same field the PUT path round-trips).
         payload = {
             "activity_id": activity["id"],
             "client_id": client["id"],
             "comment": "Test record",
             "visits": [
-                {"visitor_id": v1["id"], "price": 1500},
-                {"visitor_id": v2["id"], "price": 1500},
+                {"visitor_id": v1["id"], "tariff_id": sample_tariff, "price": 1500},
+                {"visitor_id": v2["id"], "tariff_id": sample_tariff, "price": 1500},
             ],
         }
 
@@ -47,6 +50,7 @@ class TestRecordsCrud:
         assert body["comment"] == "Test record"
         assert len(body["visits"]) == 2
         assert body["visits"][0]["visitor_id"] == v1["id"]
+        assert body["visits"][0]["tariff_id"] == sample_tariff
         assert body["visits"][0]["price"] == 1500
         assert body["visits"][0]["status"] == "waiting"
         assert "id" in body

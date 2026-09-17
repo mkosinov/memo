@@ -518,6 +518,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             visit = Visit(
                 record_id=record.id,
                 visitor_id=visitor_ids[i],
+                # GH #257 US1: the booking tail's default tariff rides on the
+                # VisitItem — persist it (parity with the PUT path :646).
+                tariff_id=item.tariff_id,
                 price=item.price,
                 custom_price=item.custom_price,
                 status=item.status.value,

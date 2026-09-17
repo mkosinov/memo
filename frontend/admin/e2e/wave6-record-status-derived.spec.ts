@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, openModal } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, waitForClientsReady } from './fixtures/helpers';
+import {
+  createTestClient,
+  createTestActivity,
+  createTestRecord,
+  cleanup,
+  cleanupRecord,
+} from './fixtures/factories';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -86,27 +93,73 @@ test.describe('Wave 6 — Record status derived from visits', () => {
   });
 
   // ──────────────────────────────────────────────────
-  // Scenario 3: edit anonym_visits → header updates
+  // Scenario 3: header stepper inc/dec — anonymous visits (#257).
+  // Anonymous seats are real visits (visitor_id = null): +1 creates ONE
+  // anonymous visit, −1 deletes it. The counter and the «Аноним» row are
+  // both derived from record.visits — no separate counter field.
   // ──────────────────────────────────────────────────
-  test('Scenario 3: edit anonym_visits updates record header', async ({
+  test('Scenario 3: anonym-visits stepper adds and removes an anonymous row', async ({
     page,
+    request,
   }) => {
-    await page.goto('/schedule');
-    await waitForScheduleReady(page);
-    await openModal(page);
+    // Own factory data (GH #252): the stepper mutates the record's visits.
+    const client = await createTestClient(request, {
+      name: `Wave6 Stepper ${Date.now()}`,
+    });
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id, {
+      visits: [],
+    });
 
-    const clientTabs = page.locator('[data-testid^="tab-client-"]');
-    await clientTabs.first().click();
-    await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
+    try {
+      // The stepper lives in RecordHeader on the client-profile record tab
+      // (the activity modal's ClientTab has no header stepper).
+      await waitForClientsReady(page, { waitForName: client.name });
+      const row = page.locator('table tbody tr').filter({ hasText: client.name });
+      await expect(row).toBeVisible({ timeout: 10_000 });
+      await row.click();
 
-    // Check record seats summary is visible (seats info is inside record-summary)
-    const seatsSummary = page.locator('[data-testid="record-summary"]');
-    await expect(seatsSummary).toBeVisible();
-    const seatsBefore = await seatsSummary.textContent();
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
 
-    // The anonym_visits input may not be visible in the current render
-    // (depends on RecordHeader loading). Verify the seats section exists.
-    expect(seatsBefore).toBeTruthy();
+      const recordTabButton = modal
+        .locator('[data-testid="client-card-left-panel"] button')
+        .nth(1);
+      await expect(recordTabButton).toBeVisible({ timeout: 10_000 });
+      await recordTabButton.click();
+
+      const tab = page.locator('[data-testid="client-record-tab"]');
+      await expect(tab).toBeVisible({ timeout: 10_000 });
+      await page.locator('#record-date').waitFor({ state: 'visible', timeout: 10_000 });
+
+      // Header stepper: counter starts at 0 («Анонимов нет» — visits = []),
+      // − is disabled with nothing to remove.
+      const header = page.locator('[data-testid="record-header"]');
+      await expect(header).toBeVisible();
+      const counter = header.locator('[data-testid="anonym-visits-count"]');
+      await expect(counter).toHaveText('0 анонимных');
+      await expect(header.locator('[data-testid="anonym-visits-dec"]')).toBeDisabled();
+
+      // +1 → the counter grows AND a real «Аноним» row appears in the table.
+      await header.locator('[data-testid="anonym-visits-inc"]').click();
+      await expect(counter).toHaveText('1 анонимных', { timeout: 10_000 });
+
+      const savedRows = tab.locator(
+        '[data-testid^="visit-row-"]:not([data-testid="visit-row-new"]):not([data-testid$="-delete"])',
+      );
+      await expect(savedRows).toHaveCount(1, { timeout: 10_000 });
+      const anonName = savedRows.first().locator('input:not([type="number"])').first();
+      await expect(anonName).toHaveValue('');
+      await expect(anonName).toHaveAttribute('placeholder', 'Аноним');
+
+      // −1 → the row disappears and the counter is back to 0.
+      await header.locator('[data-testid="anonym-visits-dec"]').click();
+      await expect(counter).toHaveText('0 анонимных', { timeout: 10_000 });
+      await expect(savedRows).toHaveCount(0, { timeout: 10_000 });
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
   });
 
   // ──────────────────────────────────────────────────

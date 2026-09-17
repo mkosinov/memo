@@ -88,7 +88,7 @@ async def _insert_record(
     """Insert a Record with N visits and M payments (committed)."""
     record = Record(
         activity_id=activity.id, client_id=client.id, status="pending",
-        seats=num_visits, anonym_visits=0,
+        seats=num_visits,
     )
     db_session.add(record)
     await db_session.flush()
@@ -251,7 +251,7 @@ async def test_visitor_delete_cascades_to_visits(db_session):
     # A record with one visit linked to that visitor
     record = Record(
         activity_id=activity.id, client_id=client.id, status="pending",
-        seats=1, anonym_visits=0,
+        seats=1,
     )
     db_session.add(record)
     await db_session.flush()

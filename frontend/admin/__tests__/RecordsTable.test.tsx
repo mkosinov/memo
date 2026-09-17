@@ -21,7 +21,6 @@ const mockRecord: RecordView = {
   client_id: 'client-1',
   status: 'waiting',
   seats: 2,
-  anonym_visits: 0,
   comment: null,
   custom_price: null,
   created_at: '2024-06-15T10:00:00Z',

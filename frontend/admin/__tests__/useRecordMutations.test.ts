@@ -33,6 +33,7 @@ import {
   createClient,
   getClientByPhone,
   getClientsPaged,
+  getRecord,
   patchRecord,
   patchActivity,
   createPayment,
@@ -51,6 +52,7 @@ const mockCreateRecord = vi.mocked(createRecord);
 const mockCreateClient = vi.mocked(createClient);
 const mockGetClientByPhone = vi.mocked(getClientByPhone);
 const mockGetClientsPaged = vi.mocked(getClientsPaged);
+const mockGetRecord = vi.mocked(getRecord);
 const mockPatchRecord = vi.mocked(patchRecord);
 const mockPatchActivity = vi.mocked(patchActivity);
 const mockCreatePayment = vi.mocked(createPayment);
@@ -119,6 +121,19 @@ const mockVisitResponse = {
   updated_at: '',
 };
 
+/** Anonymous visit (#257): visitor_id = null, default tariff/price. */
+const mockAnonymousVisitResponse = {
+  id: 'visit-anon',
+  record_id: recordId,
+  visitor_id: null,
+  tariff_id: 't1',
+  price: 3500,
+  custom_price: null,
+  status: 'waiting',
+  created_at: '',
+  updated_at: '',
+};
+
 const mockClientResponse = {
   id: 'c-new',
   name: 'Новый клиент',
@@ -165,6 +180,7 @@ describe('useRecordMutations', () => {
     mockCreateVisit.mockResolvedValue(mockVisitResponse as never);
     mockPatchVisit.mockResolvedValue(mockVisitResponse as never);
     mockDeleteVisit.mockResolvedValue(undefined as never);
+    mockGetRecord.mockResolvedValue(mockRecordResponse as never);
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -932,6 +948,39 @@ describe('useRecordMutations', () => {
       // r2 untouched
       expect(listCache?.items[1]?.id).toBe('r2');
     });
+
+    it('restores the visit to the cache and rethrows when the API rejects', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const existingVisit = {
+        id: 'visit-1',
+        record_id: recordId,
+        visitor_id: 'vis-1',
+        tariff_id: 't1',
+        price: 3500,
+        custom_price: null,
+        status: 'waiting',
+        created_at: '',
+        updated_at: '',
+      };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [existingVisit],
+      });
+      mockDeleteVisit.mockRejectedValue(new Error('delete failed'));
+
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.deleteVisit('visit-1');
+        }),
+      ).rejects.toThrow('delete failed');
+
+      // Server kept the visit → cache is restored, no drift
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits).toHaveLength(1);
+      expect(canonical?.visits[0]?.id).toBe('visit-1');
+    });
   });
 
   describe('patchPayment', () => {
@@ -1436,6 +1485,350 @@ describe('useRecordMutations', () => {
       const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
       expect(cached).toHaveLength(1);
       expect(cached![0].id).toBe('pay-existing');
+    });
+  });
+
+  // ─── #257 T5: unified visitors model — anonymous tail, stepper, conversion ───
+
+  describe('createRecord — anonymous tail as visits (US1, #257)', () => {
+    it('appends `seats` anonymous visit items (no visitor_id, default tariff/price) after the named visits', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          {
+            ...baseCreateRecordInput,
+            seats: 2,
+            visitors: [{ name: 'Гость', tariffId: 't1' }],
+          },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockCreateRecord).toHaveBeenCalledTimes(1);
+      const payload = mockCreateRecord.mock.calls[0][0];
+      // One named visit + an anonymous tail of 2 (seats), first-tariff defaults.
+      expect(payload.visits).toEqual([
+        { visitor_id: mockVisitorResponse.id, tariff_id: 't1', price: 3500 },
+        { tariff_id: 't1', price: 3500 },
+        { tariff_id: 't1', price: 3500 },
+      ]);
+    });
+
+    it('never sends anonym_visits (or seats) to the backend', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord({ ...baseCreateRecordInput, seats: 3 }, serviceTariffs);
+      });
+
+      const payload = mockCreateRecord.mock.calls[0][0];
+      expect(payload).not.toHaveProperty('anonym_visits');
+      expect(payload).not.toHaveProperty('seats');
+      // The tail IS present as anonymous visit elements instead.
+      expect(payload.visits).toHaveLength(3);
+      payload.visits?.forEach((v) => expect(v.visitor_id).toBeUndefined());
+    });
+
+    it('seats=0 → only named visits, no anonymous tail', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, seats: 0, visitors: [{ name: 'Гость', tariffId: 't1' }] },
+          serviceTariffs,
+        );
+      });
+
+      const payload = mockCreateRecord.mock.calls[0][0];
+      expect(payload.visits).toEqual([
+        { visitor_id: mockVisitorResponse.id, tariff_id: 't1', price: 3500 },
+      ]);
+    });
+
+    it('no service tariffs → anonymous tail items carry price 0 and no tariff_id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, seats: 1, visitors: [] },
+          [],
+        );
+      });
+
+      const payload = mockCreateRecord.mock.calls[0][0];
+      expect(payload.visits).toHaveLength(1);
+      // price 0 AND no tariff_id (toEqual treats `tariff_id: undefined` as absent,
+      // so a stray non-null tariff value would still fail this assertion).
+      expect(payload.visits?.[0]).toEqual({ tariff_id: undefined, price: 0 });
+    });
+  });
+
+  describe('addAnonymousVisit — stepper +1 (US2, #257)', () => {
+    // The backend returns the anonymous visit shape (visitor_id = null).
+    beforeEach(() => {
+      mockCreateVisit.mockResolvedValue(mockAnonymousVisitResponse as never);
+    });
+
+    it('creates ONE visit with visitor_id null and the default tariff/price', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.addAnonymousVisit({ id: 't1', price: 3500 });
+      });
+
+      expect(mockCreateVisit).toHaveBeenCalledWith({
+        record_id: recordId,
+        visitor_id: null,
+        tariff_id: 't1',
+        price: 3500,
+      });
+      expect(returned).toEqual(mockAnonymousVisitResponse);
+    });
+
+    it('without a default tariff → no tariff_id, price 0', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addAnonymousVisit();
+      });
+
+      expect(mockCreateVisit).toHaveBeenCalledWith({
+        record_id: recordId,
+        visitor_id: null,
+        tariff_id: undefined,
+        price: 0,
+      });
+    });
+
+    it('upserts the new visit into canonical + list caches and invalidates record+lists', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData(['record', recordId], { ...mockRecordResponse, visits: [] });
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [{ ...mockRecordResponse, visits: [] }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      });
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.addAnonymousVisit({ id: 't1', price: 3500 });
+      });
+
+      // Canonical cache contains the anonymous visit
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits.map((v) => v.id)).toContain('visit-anon');
+      // List cache copy too
+      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      expect(listCache?.items[0]?.visits.map((v) => v.id)).toContain('visit-anon');
+      // Readers: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+    });
+  });
+
+  describe('convertAnonymousVisit — single PATCH, no array rewrite (D7, #257)', () => {
+    it('creates a visitor for the record client then PATCHes the visit with visitor_id', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', 12);
+      });
+
+      // The record is fetched fresh (pattern of addVisitorToRecord)
+      expect(mockGetRecord).toHaveBeenCalledWith(recordId);
+      expect(mockCreateVisitor).toHaveBeenCalledWith({
+        client_id: 'c1',
+        name: 'Новый гость',
+        age: 12,
+      });
+      // The conversion itself is ONE point PATCH on the visit — no patchRecord
+      expect(mockPatchVisit).toHaveBeenCalledWith('visit-anon', { visitor_id: 'vis-new' });
+      expect(mockPatchRecord).not.toHaveBeenCalled();
+      expect(returned).toEqual(mockVisitResponse);
+    });
+
+    it('age null → createVisitor without age (adult default, visitors.md)', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.convertAnonymousVisit('visit-anon', 'Взрослый гость', null);
+      });
+
+      expect(mockCreateVisitor).toHaveBeenCalledTimes(1);
+      const arg = mockCreateVisitor.mock.calls[0][0];
+      expect(arg.age).toBeUndefined();
+      expect(arg.client_id).toBe('c1');
+      expect(arg.name).toBe('Взрослый гость');
+    });
+
+    it('invalidates [visitors, clientId] on success (pattern of addVisit)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('syncs the patched visit into the canonical cache via upsertVisit', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [mockAnonymousVisitResponse],
+      });
+      // The backend returns the visit with the visitor bound.
+      mockPatchVisit.mockResolvedValue({ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' } as never);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+      });
+
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      const patched = canonical?.visits.find((v) => v.id === 'visit-anon');
+      expect(patched?.visitor_id).toBe('vis-new');
+    });
+
+    it('PATCH failure → deletes the created visitor (no orphan) and rethrows', async () => {
+      mockPatchVisit.mockRejectedValue(new Error('patch failed') as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('patch failed');
+
+      // Rollback: the freshly created visitor must not survive the failure
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new');
+    });
+
+    it('PATCH failure → also invalidates [visitors, clientId] (rollback path)', async () => {
+      mockPatchVisit.mockRejectedValue(new Error('patch failed') as never);
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('patch failed');
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('rollback failure → ORIGINAL PATCH error propagates, [visitors] still invalidated', async () => {
+      // PATCH fails AND the rollback deleteVisitor fails too.
+      mockPatchVisit.mockRejectedValue(new Error('patch failed') as never);
+      mockDeleteVisitor.mockRejectedValue(new Error('delete failed') as never);
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('patch failed');
+
+      // The rollback was attempted but its failure must not mask the original
+      // error, and the visitors invalidation must NOT be skipped.
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new');
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('ambiguous failure — PATCH landed server-side → visitor kept (no cascade), resolves with the bound visit', async () => {
+      // 1st fetch (hook start): visit still anonymous.
+      // 2nd fetch (reconcile in catch): the PATCH actually landed — visit bound.
+      mockGetRecord
+        .mockResolvedValueOnce({ ...mockRecordResponse, visits: [mockAnonymousVisitResponse] } as never)
+        .mockResolvedValueOnce({
+          ...mockRecordResponse,
+          visits: [{ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' }],
+        } as never);
+      mockPatchVisit.mockRejectedValue(new Error('transport down') as never);
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+      });
+
+      // Blind delete would cascade-destroy the now-linked visit — must NOT happen.
+      expect(mockDeleteVisitor).not.toHaveBeenCalled();
+      // Reconciled success: the visit IS bound server-side.
+      expect(returned).toEqual({ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' });
+      // The client's visitors list changed either way — still invalidated.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
+    });
+
+    it('record without client → guard throws, no visitor created, no PATCH', async () => {
+      mockGetRecord.mockResolvedValue({ ...mockRecordResponse, client_id: null } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('Record has no client');
+
+      expect(mockCreateVisitor).not.toHaveBeenCalled();
+      expect(mockPatchVisit).not.toHaveBeenCalled();
+      expect(mockDeleteVisitor).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateAnonymVisits removed (#257)', () => {
+    it('is no longer exposed by the hook', () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      expect(result.current).not.toHaveProperty('updateAnonymVisits');
+    });
+  });
+
+  describe('deleteVisit — stepper −1 semantics (#257)', () => {
+    it('deletes immediately WITHOUT enqueueing an undo pending action (header per-seat delete)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [mockAnonymousVisitResponse],
+      });
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deleteVisit('visit-anon');
+      });
+
+      // Real DELETE goes out right away (no deferred/undo path for the stepper)
+      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-anon');
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      // The deferred 5s-window variant remains available separately
+      expect(result.current.deleteVisitDeferred).toBeDefined();
     });
   });
 });

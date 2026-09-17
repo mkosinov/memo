@@ -25,9 +25,11 @@ from src.models.visit import Visit
 async def recompute_record_seats(
     db_session: AsyncSession, record_id: str,
 ) -> Record | None:
-    """Recompute record.seats = len(active visits) + anonym_visits.
+    """Recompute record.seats = len(visits).
 
-    Used by VisitService.create/delete (which change len(active_visits))
+    Single source of truth since #257: anonymous guests are visits with
+    ``visitor_id = NULL``, so every seat is a visit row.
+    Used by VisitService.create/delete (which change len(visits))
     and by RecordService.patch (when visits array is replaced).
     Replaces inlined logic at lines 127, 208, 268, 272 of services/record.py.
     """
@@ -39,8 +41,8 @@ async def recompute_record_seats(
             Visit.record_id == record_id,
         )
     )
-    active_count = result.scalar() or 0
-    record.seats = active_count + record.anonym_visits
+    visit_count = result.scalar() or 0
+    record.seats = visit_count
     record.updated_at = datetime.now(UTC)
     await db_session.flush()
     return record

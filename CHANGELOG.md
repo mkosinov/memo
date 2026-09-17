@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-17
+
+### Changed
+- **GH #257 — Единая модель посетителей: аноним = визит с `visitor_id = NULL`** — branch `feat/257-anonymous-visits-unified` (18 commits: `88059f4..fe73c26`, base `0ec854d`; план T1–T11):
+  - **Модель:** анонимный посетитель — больше не отдельный счётчик, а полноценный визит
+    (`visitor_id = NULL`) с настоящими тарифом/ценой/статусом; степпер шапки записи и конвертация
+    строки работают через визиты; счётчики мест и денег — производные от `record.visits`
+    (`seats = len(visits)`).
+  - **BREAKING (API + api-client):** поле `anonym_visits` удалено из `RecordCreate`/`RecordUpdate`/
+    `RecordPatch`/`RecordResponse` (backend schemas) и соответствующих zod-схем `packages/api-client`;
+    места считаются из `visits`.
+  - **Миграция (`dc47abd1ad2d`):** старый счётчик разворачивается в анонимные визиты с наследованием
+    статуса записи, `seats` пересчитывается, колонка `anonym_visits` удаляется; downgrade возвращает
+    колонку пустой (data loss осознан — тестовые базы).
+  - **Backend:** поле удалено из модели/схем/сервисов/domain; guests-сортировка — коррелированный
+    подзапрос по именованным визитам; create-путь сохраняет `VisitItem.tariff_id`.
+  - **Frontend:** `RecordHeader` — степпер (+/− создаёт/удаляет анонимные визиты); `RecordVisitsTable` —
+    inline-конвертация анонимной строки одним PATCH (in-flight guard); места/деньги в карточке —
+    производные от `record.visits`; каскад coarse-статуса сохраняет тарифы.
+  - **Tests:** pytest **1978 passed / 8 skipped** (включая `test_anonymous_visits.py`,
+    `test_migration_anonym_unfold.py`); admin vitest **2004 passed** (128 файлов); `tsc` clean;
+    e2e `anonymous-visits` 6/6, `unified-rows` 22/22, `wave6-record-status-derived` 4/4.
+  - Closes: #257 (в теле IMPL-PR).
+  - Design spec: `docs/specs/2026-09-16-anonymous-visits-unified-design.md`
+  - Plan: `docs/plans/2026-09-16-anonymous-visits-unified-plan.md`
+  - Status: `docs/status/2026-09-17-anonymous-visits-unified-257.md`
+
 ## [Unreleased] — 2026-09-16
 
 ### Added

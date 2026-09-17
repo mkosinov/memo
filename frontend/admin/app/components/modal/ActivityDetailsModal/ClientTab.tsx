@@ -61,6 +61,7 @@ export function ClientTab({
     addPayment,
     patchPayment,
     deletePaymentDeferred,
+    convertAnonymousVisit,
   } = useRecordMutations(activityId, recordId);
 
   // Delete — Addendum 13 / GH #139 T8-FE2a: replaces the legacy 5-second
@@ -169,13 +170,17 @@ export function ClientTab({
 
   // Status change on the record (RecordSummary StatusPicker) — coarse
   // record-level patch: all visits set to the new status in one PATCH.
-  // Spec allows record-level ops to stay via `updateRecord` from the hook.
+  // #257 D4 cascade: the visits array includes anonymous rows (visitor_id
+  // = null) and each visit keeps its money fields (tariff_id, custom_price)
+  // — a rewrite that dropped them would silently reprice the record.
   const handleStatusChange = useCallback(
     async (newStatus: VisitStatus) => {
       const visits = record?.visits ?? [];
       const updatedVisits = visits.map((v) => ({
         visitor_id: v.visitor_id,
+        tariff_id: v.tariff_id,
         price: v.price,
+        custom_price: v.custom_price,
         status: newStatus,
       }));
       try {
@@ -187,15 +192,20 @@ export function ClientTab({
     [record?.visits, recordId, updateRecord, showToast],
   );
 
-  const handleAnonymChange = useCallback(
-    async (value: number) => {
+  /**
+   * #257 D7: convert a saved anonymous visit into a named visitor — one point
+   * PATCH /visits/{id} {visitor_id}. On API failure the row stays anonymous
+   * (the cache is untouched — upsertVisit runs only after a successful PATCH).
+   */
+  const handleConvertAnonymousVisit = useCallback(
+    async (visitId: string, name: string, age: number | null) => {
       try {
-        await updateRecord(recordId, { anonym_visits: value } as any);
-      } catch {
-        showToast('Ошибка изменения анонимных посетителей', 'error');
+        await convertAnonymousVisit(visitId, name, age);
+      } catch (err) {
+        showToast(parseApiError(err).message, 'error');
       }
     },
-    [recordId, updateRecord, showToast],
+    [convertAnonymousVisit, showToast],
   );
 
   const handleCommentChange = useCallback(
@@ -244,11 +254,12 @@ export function ClientTab({
           )}
         </div>
 
-        {/* Summary: cost + status */}
+        {/* Summary: cost + status. seats = len(visits) — anonymous seats
+            are visits with visitor_id = null (#257). */}
         <RecordSummary
           totalCost={totalCost}
           totalPaid={totalPaid}
-          seats={visits.length + (record?.anonym_visits ?? 0)}
+          seats={visits.length}
           status={derivedStatus}
           onStatusChange={handleStatusChange}
         />
@@ -261,7 +272,6 @@ export function ClientTab({
           visits={visits}
           visitorsMap={visitorsMap}
           tariffs={tariffs}
-          anonymVisits={record?.anonym_visits ?? 0}
           totalCost={totalCost}
           recordStatus={derivedStatus}
           clientId={clientId}
@@ -269,7 +279,7 @@ export function ClientTab({
           onPatchVisit={patchVisit}
           onDeleteVisit={(visitId: string) => deleteVisitDeferred(visitId)}
           onChangeVisitor={handleVisitorChange}
-          onAnonymVisitsChange={handleAnonymChange}
+          onConvertAnonymousVisit={handleConvertAnonymousVisit}
         />
 
         {/* Payments table */}

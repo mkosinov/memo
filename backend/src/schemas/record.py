@@ -51,7 +51,6 @@ class RecordBase(BaseModel):
     client_id: str | None = None
     status: str
     seats: int
-    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
 
@@ -71,10 +70,9 @@ class RecordCreate(BaseModel):
     activity_id: str
     phone: str | None = None
     client_id: str | None = None
-    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
-    visits: list[VisitItem]  # seats = len(visits) + anonym_visits
+    visits: list[VisitItem]  # seats = len(visits)
 
 
 class RecordUpdate(BaseModel):
@@ -84,7 +82,6 @@ class RecordUpdate(BaseModel):
 
     activity_id: str
     client_id: str | None = None
-    anonym_visits: int = 0
     comment: str | None = None
     custom_price: int | None = None
     visits: list[VisitItem]  # full replacement
@@ -95,7 +92,6 @@ class RecordPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    anonym_visits: int | None = None
     comment: str | None = None
     custom_price: int | None = None
     visits: list[VisitItem] | None = None

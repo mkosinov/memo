@@ -170,8 +170,11 @@ def _seed_view_world(
     r3 = create_record(
         activity_id=activities[2]["id"],
         client_id=None,
-        visits=[],
-        anonym_visits=3,
+        visits=[
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+            {"visitor_id": None, "price": 0, "status": "waiting"},
+        ],
     )
     r4 = create_record(
         activity_id=activities[3]["id"],
@@ -565,8 +568,10 @@ class TestViewDisplayFields:
         record = create_record(
             activity_id=activity["id"],
             client_id=None,
-            visits=[],
-            anonym_visits=2,
+            visits=[
+                {"visitor_id": None, "price": 0, "status": "waiting"},
+                {"visitor_id": None, "price": 0, "status": "waiting"},
+            ],
         )
 
         item = _item_for(api_client, VIEW_URL, record["id"])

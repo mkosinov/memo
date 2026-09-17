@@ -78,7 +78,6 @@ function makeRecord(
     client_id: 'c1',
     status: 'confirmed',
     seats: 1,
-    anonym_visits: 0,
     comment: null,
     custom_price: null,
     created_at: '2026-01-15T10:00:00',

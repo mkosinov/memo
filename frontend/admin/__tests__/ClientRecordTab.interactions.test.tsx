@@ -153,6 +153,30 @@ describe('ClientRecordTab — interactions', () => {
     expect(screen.getByText('Нет посетителей')).toBeInTheDocument();
   });
 
+  it('shows the anonymous row when a saved visit has visitor_id = null (#257)', () => {
+    // #257 regression mirror of the empty-state test: a saved anonymous
+    // seat is a REAL visit (visitor_id = null), so the «Аноним» row renders
+    // and "Нет посетителей" must NOT appear.
+    buildDefaultQueryImpl(mockUseQuery, {
+      payments: { data: [], isLoading: false, error: null },
+      record: {
+        data: {
+          ...mockRecord,
+          id: 'r4',
+          visits: [{ ...mockRecord.visits[0], id: 'v_anon', visitor_id: null }],
+        },
+        isLoading: false,
+        error: null,
+      },
+    });
+
+    render(<ClientRecordTab recordId="r4" clientId="c1" />);
+    expect(screen.getByTestId('visit-row-v_anon')).toBeInTheDocument();
+    // Anonymous name renders as the «Аноним» placeholder in the name cell.
+    expect(screen.getByPlaceholderText('Аноним')).toBeInTheDocument();
+    expect(screen.queryByText('Нет посетителей')).not.toBeInTheDocument();
+  });
+
   it('calculates total from multiple visits', () => {
     buildDefaultQueryImpl(mockUseQuery, {
       payments: { data: [], isLoading: false, error: null },

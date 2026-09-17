@@ -168,7 +168,7 @@ export const mockPayment: PaymentResponse = {
   updated_at: '',
 };
 
-// ─── Tariffs (used by SettingsTab, NewBookingTab, ClientTab) ──────────────
+// ─── Tariffs (used by SettingsTab, NewRecordTab, ClientTab) ───────────────
 
 export const mockTariffs = [
   { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },

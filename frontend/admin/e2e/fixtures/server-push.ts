@@ -257,7 +257,7 @@ export async function clickFabRobust(page: Page, timeoutMs = 15_000) {
 
 /**
  * Create a record through B's UI (schedule → quick add → new booking tab)
- * so the write carries B's real tab header. The booking lands on an
+ * so the write carries B's real tab header. The record lands on an
  * activity of the CURRENT week so the record is inside the records page's
  * default date range. Returns the record payload from the POST /api/v1/records
  * response (for cleanup).

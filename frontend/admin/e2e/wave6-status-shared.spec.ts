@@ -6,10 +6,10 @@ import { waitForScheduleReady, openModal, waitForRecordsReady } from './fixtures
  *
  * Verifies that StatusPicker renders with the same labels
  * across all 4 call sites:
- * 1. /records filter (BookingFilters)
+ * 1. /records filter (RecordsFilters)
  * 2. /clients modal (ClientCardModal → ClientRecordTab)
  * 3. Activity modal ClientTab (ActivityDetailsModal → ClientTab)
- * 4. BookingFilters (same as #1 but in filter context)
+ * 4. RecordsFilters (same as #1 but in filter context)
  *
  * Uses DOM text comparison instead of visual snapshots for reliability.
  */
@@ -24,8 +24,8 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     await page.goto('/records');
     await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
 
-    // Find the StatusPicker in BookingFilters (testid prefix: "booking-filters-status")
-    const statusFilter = page.locator('[data-testid="booking-filters-status"]');
+    // Find the StatusPicker in RecordsFilters (testid prefix: "records-filters-status")
+    const statusFilter = page.locator('[data-testid="records-filters-status"]');
     if ((await statusFilter.count()) > 0) {
       // Click to open the filter
       const trigger = statusFilter.locator('button').first();

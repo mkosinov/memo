@@ -259,7 +259,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 - Allow null phone when creating Record
 - See records.md for details
 
-### 3. Booking Count Update After Deletion (Activity)
+### 3. Record Count Update After Deletion (Activity)
 - **Bug:** ActivityCard occupied count doesn't refresh after deleting a Record
 - **Fix:** Invalidate activity queries after Record deletion
 - **Where:** ActivityDetailsModal → handleDeleteRecord
@@ -278,4 +278,4 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 ### 6. Fix Console Errors on Booking Creation
 - **Symptom:** Errors in console when creating Record
 - **Investigate:** Empty catch blocks, unhandled promise rejections
-- **Where:** NewBookingTab API calls
+- **Where:** NewRecordTab API calls

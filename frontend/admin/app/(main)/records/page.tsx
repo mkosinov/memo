@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { RecordsProvider, useRecords } from '@/contexts/RecordsContext';
-import { BookingFilters } from './components/BookingFilters';
+import { RecordsFilters } from './components/RecordsFilters';
 import { RecordsTable } from './components/RecordsTable';
 
 function RecordsPageContent() {
@@ -20,7 +20,7 @@ function RecordsPageContent() {
         className="rounded-xl border p-4"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <BookingFilters
+        <RecordsFilters
           locationId={filters.locationId}
           serviceId={filters.serviceId}
           masterId={filters.masterId}

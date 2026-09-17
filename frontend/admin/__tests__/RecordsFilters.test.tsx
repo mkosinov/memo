@@ -1,5 +1,5 @@
 /**
- * Tests for BookingFilters — the records filter bar.
+ * Tests for RecordsFilters — the records filter bar.
  *
  * GH #212 Task 12: LEADING search field — a controlled input whose typing is
  * debounced 300ms (ClientsFilters' local useDebouncedCallback pattern) before
@@ -31,7 +31,7 @@ vi.mock('@memo/api-client', () => ({
 
 import { useNavigation } from '@/contexts/NavigationContext';
 import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
-import { BookingFilters } from '../app/(main)/records/components/BookingFilters';
+import { RecordsFilters } from '../app/(main)/records/components/RecordsFilters';
 import {
   mockLocationResponse,
   mockLocationResponseArchived,
@@ -42,9 +42,9 @@ import type { ServiceResponse } from '@memo/api-client';
 
 const mockUseNavigation = vi.mocked(useNavigation);
 
-type BookingFiltersProps = React.ComponentProps<typeof BookingFilters>;
+type RecordsFiltersProps = React.ComponentProps<typeof RecordsFilters>;
 
-function defaultProps(overrides: Partial<BookingFiltersProps> = {}): BookingFiltersProps {
+function defaultProps(overrides: Partial<RecordsFiltersProps> = {}): RecordsFiltersProps {
   return {
     locationId: '',
     serviceId: '',
@@ -68,11 +68,11 @@ function createTestQueryClient(): QueryClient {
 }
 
 /** Render the bar inside a QueryClientProvider (its own canonical-key queries). */
-function renderFilters(overrides: Partial<BookingFiltersProps> = {}) {
+function renderFilters(overrides: Partial<RecordsFiltersProps> = {}) {
   const queryClient = createTestQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <BookingFilters {...defaultProps(overrides)} />
+      <RecordsFilters {...defaultProps(overrides)} />
     </QueryClientProvider>,
   );
 }
@@ -122,7 +122,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('BookingFilters — search field (GH #212 Task 12)', () => {
+describe('RecordsFilters — search field (GH #212 Task 12)', () => {
   it('renders the search input with label, placeholder and aria-label', () => {
     renderFilters();
     const input = screen.getByLabelText('Поиск по клиенту или услуге');
@@ -149,12 +149,12 @@ describe('BookingFilters — search field (GH #212 Task 12)', () => {
     const queryClient = createTestQueryClient();
     const utils = render(
       <QueryClientProvider client={queryClient}>
-        <BookingFilters {...defaultProps({ search: 'анна' })} />
+        <RecordsFilters {...defaultProps({ search: 'анна' })} />
       </QueryClientProvider>,
     );
     utils.rerender(
       <QueryClientProvider client={queryClient}>
-        <BookingFilters {...defaultProps({ search: '' })} />
+        <RecordsFilters {...defaultProps({ search: '' })} />
       </QueryClientProvider>,
     );
     expect(screen.getByLabelText('Поиск по клиенту или услуге')).toHaveValue('');
@@ -223,7 +223,7 @@ describe('BookingFilters — search field (GH #212 Task 12)', () => {
   });
 });
 
-describe('BookingFilters — selection data via canonical-key queries (GH #213 Task 8)', () => {
+describe('RecordsFilters — selection data via canonical-key queries (GH #213 Task 8)', () => {
   beforeEach(() => {
     vi.mocked(getAllLocations).mockResolvedValue([
       mockLocationResponse,
@@ -298,7 +298,7 @@ describe('BookingFilters — selection data via canonical-key queries (GH #213 T
   });
 
   it('does not read selection maps from RecordsContext anymore', async () => {
-    // BookingFilters imports no RecordsContext at all (GH #213 Task 8) — the
+    // RecordsFilters imports no RecordsContext at all (GH #213 Task 8) — the
     // dropdowns populate purely from the component's own canonical-key
     // queries. The pinned «Все локации» clear + one active location remain.
     renderFilters();

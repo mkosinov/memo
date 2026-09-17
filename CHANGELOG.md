@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Design spec: `docs/specs/2026-09-16-anonymous-visits-unified-design.md`
   - Plan: `docs/plans/2026-09-16-anonymous-visits-unified-plan.md`
   - Status: `docs/status/2026-09-17-anonymous-visits-unified-257.md`
+- **GH #103 — Выравнивание именований booking/record по домен-правилу** — branch `feat/103-record-naming` (7 commits: `280d167..b4b0882`, base `18a57e9`; план T1–T7). Механическое переименование, zero user-visible change: фильтр `BookingFilters`→`RecordsFilters` (props, testid `booking-filters-status`→`records-filters-status`), вкладка модалки занятия `NewBookingTab`→`NewRecordTab` (tab id `new-booking`→`new-record`, testid, HTML id полей, хендлер), vitest/e2e селекторы и комменты, visual-базлайн `modal-new-booking-*.png`→`modal-new-record-*.png` (git rename `R100`, пиксели byte-identical), ссылки в `docs/domain-rules/*` (T7). Backend, API-контракты и `frontend/web` не затронуты.
+  - **Tests:** admin vitest **2052 passed** (131 файл); `tsc` clean; lint 0 errors (31 pre-existing warning не трогались); e2e `records` 23/23, `activity-details-modal` 14/14, `error-messages` 6/6, `wave6-status-shared` 4/4, `anonymous-visits` 6/6, `master-role-record-create` 2/2, `visual-regression` 49/61 (12 — pre-existing environment drift, доказано пиксельно-идентичным прогоном на базовом коммите; CI — авторитетный merge-гейт).
+  - Closes: #103 (в теле IMPL-PR).
+  - Design spec: `docs/specs/2026-09-16-booking-record-naming-alignment-design.md`
+  - Plan: `docs/plans/2026-09-16-booking-record-naming-alignment-plan.md`
+  - Status: `docs/status/2026-09-17-booking-record-naming-103.md`
 
 ## [Unreleased] — 2026-09-16
 

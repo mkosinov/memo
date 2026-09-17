@@ -9,7 +9,7 @@ import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
 import { ClientLabelById } from './ClientLabelById';
-import { NewBookingTab, type NewBookingSubmitData } from './NewBookingTab';
+import { NewRecordTab, type NewRecordSubmitData } from './NewRecordTab';
 import { CreateActivityTab, type CreateDefaults } from './CreateActivityTab';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { useRecordMutations } from '@/hooks/useRecordMutations';
@@ -128,7 +128,7 @@ function ExistingActivityContent({
   const { services, updateActivity, deleteActivity } = useScheduleData();
   const { showToast } = useUI();
 
-  const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-booking' : 'settings');
+  const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-record' : 'settings');
 
   // Extract record ID from active tab (only for client tabs)
   const activeRecordId = activeTab.startsWith('client-')
@@ -146,7 +146,7 @@ function ExistingActivityContent({
     [services, activity.serviceId],
   );
 
-  // Own data — context records is now one server page; activity bookings need
+  // Own data — context records is now one server page; activity records need
   // the full set (#191). GH #140: point hook on ['records','activity',id].
   const { data: activityRecords = [] } = useActivityRecords(activity.id, isOpen);
 
@@ -218,18 +218,18 @@ function ExistingActivityContent({
     [activity.id, updateActivity],
   );
 
-  // Switch to new booking tab
+  // Switch to new record tab
   const handleAddClick = useCallback(() => {
-    setActiveTab('new-booking');
+    setActiveTab('new-record');
   }, []);
 
-  // New booking submit handler — delegates to useRecordMutations hook.
+  // New record submit handler — delegates to useRecordMutations hook.
   // GH #221: the submit payload is a disjoint union — `picked` carries the
   // picked client_id (bind by id, resolve-or-create skipped); `unpicked`
   // carries the visible formatted phone + name (resolve-or-create path,
   // Task 7 replaces it with digits resolution).
-  const handleNewBookingSubmit = useCallback(
-    async (data: NewBookingSubmitData) => {
+  const handleNewRecordSubmit = useCallback(
+    async (data: NewRecordSubmitData) => {
       try {
         await createRecord(data, serviceTariffs);
         showToast('Запись создана');
@@ -251,12 +251,12 @@ function ExistingActivityContent({
 
   // Content renderer per active tab
   const renderContent = () => {
-    if (activeTab === 'new-booking') {
+    if (activeTab === 'new-record') {
       return (
-        <NewBookingTab
+        <NewRecordTab
           activity={activity}
           serviceTariffs={serviceTariffs}
-          onSubmit={handleNewBookingSubmit}
+          onSubmit={handleNewRecordSubmit}
           showToast={showToast}
         />
       );

@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Design spec: `docs/specs/2026-09-16-booking-record-naming-alignment-design.md`
   - Plan: `docs/plans/2026-09-16-booking-record-naming-alignment-plan.md`
   - Status: `docs/status/2026-09-17-booking-record-naming-103.md`
+- fix(api): числовые фильтры статистики /clients (records/paid/missed) отвергают отрицательные значения — `ge=0` → 422 (GH #149)
 
 ## [Unreleased] — 2026-09-16
 

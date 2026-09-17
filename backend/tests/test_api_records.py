@@ -943,6 +943,20 @@ class TestRecordsListSorting:
         asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
         assert asc.index(anon_heavy["id"]) < asc.index(four["id"])  # 2 < 4; raw-seats sort would invert
 
+    def test_sort_guests_counts_active_named_visits(self, api_client, create_record):
+        # #257 review-fix: guests sort counts named AND ACTIVE visits —
+        # cancelled (and missed) named visits don't count, mirroring the
+        # seat-occupancy notion (cancelled/missed free their seats).
+        cancelled_only = create_record(visits=[
+            {"name": "А1", "price": 1000, "status": "cancelled"},
+            {"name": "А2", "price": 1000, "status": "cancelled"},
+        ])  # 2 named, both cancelled → active named count = 0
+        one_active = create_record(visits=[
+            {"name": "Б1", "price": 1000, "status": "waiting"},
+        ])  # 1 active named visit
+        asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
+        assert asc.index(cancelled_only["id"]) < asc.index(one_active["id"])  # 0 < 1
+
     def test_sort_guests_desc(self, api_client, create_record):
         one = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])
         two = create_record(visits=[

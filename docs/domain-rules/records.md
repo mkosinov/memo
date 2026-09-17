@@ -195,7 +195,7 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 | service | `Service.title` (correlated subquery on `Activity.service_id`) |
 | master | `Master.last_name, Master.first_name` |
 | location | `Location.name` (correlated subquery on activity) |
-| guests | `COUNT(Visit)` with `visitor_id IS NOT NULL` (correlated subquery — named visits count; anonymous visits don't count as guests, #257) |
+| guests | `COUNT(Visit)` with `visitor_id IS NOT NULL` AND `status IN (waiting, visited)` (correlated subquery — named ACTIVE visits count; anonymous visits and cancelled/missed visits don't count as guests, #257) |
 | status | `Record.status` |
 | total | `SUM(Visit.price)` (coalesced to 0) |
 | payment | 3-level bucket over paid vs total — see [payments.md](payments.md) |

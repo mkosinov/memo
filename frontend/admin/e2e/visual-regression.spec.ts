@@ -115,7 +115,7 @@ test.describe('Activity Modal — Visual Regression', () => {
     });
   });
 
-  test('activity modal — new booking tab', async ({ page }) => {
+  test('activity modal — new record tab', async ({ page }) => {
     await openAddTab(page);
 
     // Hide the NowLine to avoid time-dependent screenshot differences
@@ -124,7 +124,7 @@ test.describe('Activity Modal — Visual Regression', () => {
       if (nowLine) (nowLine as HTMLElement).style.display = 'none';
     });
 
-    await expect(page).toHaveScreenshot('modal-new-booking.png', {
+    await expect(page).toHaveScreenshot('modal-new-record.png', {
       fullPage: false,
       maxDiffPixels: 2000,
     });

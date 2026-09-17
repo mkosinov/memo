@@ -1,9 +1,13 @@
 """Tests for the Activities CRUD API endpoints with date filtering and occupied."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
+
+from src.errors import ERROR_MESSAGES, ErrorCode
+from src.schemas.activity import ActivityCopyWeekRequest, CopyWeekResult
 
 pytestmark = pytest.mark.api
 
@@ -298,6 +302,63 @@ class TestActivitiesListSearch:
         })
         assert created.status_code == 201, created.text
         assert created.json()["service_title"] is None
+
+
+@pytest.mark.pure_unit
+class TestCopyWeekContracts:
+    """Copy-week request/response schemas + error codes (GH #242, spec §4).
+
+    This task adds ONLY the Pydantic contracts — the route itself lands in
+    Task 3; these tests pin the schema/error-registry contract directly.
+    """
+
+    MONDAY = date(2026, 9, 21)  # a Monday — week_start is the TARGET-week Monday
+
+    def test_empty_locations_rejected(self) -> None:
+        """locations=[] → ValidationError (FastAPI maps to 422 VALIDATION_ERROR)."""
+        with pytest.raises(ValidationError):
+            ActivityCopyWeekRequest(week_start=self.MONDAY, locations=[])
+
+    def test_missing_locations_rejected(self) -> None:
+        """locations is strictly required — no 'None = all' encoding (spec §4)."""
+        with pytest.raises(ValidationError):
+            ActivityCopyWeekRequest(week_start=self.MONDAY)
+
+    def test_valid_request_parses(self) -> None:
+        """Happy path: Monday + explicit location ids parse as-is."""
+        req = ActivityCopyWeekRequest(
+            week_start=self.MONDAY, locations=["loc-1", "loc-2"]
+        )
+        assert req.week_start == self.MONDAY
+        assert req.locations == ["loc-1", "loc-2"]
+
+    def test_copy_week_result_contract(self) -> None:
+        """Response shape: four independent counters (spec §4 example)."""
+        result = CopyWeekResult(
+            copied=8, skipped_duplicates=2, skipped_filtered=1, skipped_no_master=0
+        )
+        assert result.model_dump() == {
+            "copied": 8,
+            "skipped_duplicates": 2,
+            "skipped_filtered": 1,
+            "skipped_no_master": 0,
+        }
+
+    def test_copy_week_error_codes_have_messages(self) -> None:
+        """Each new ErrorCode resolves in ERROR_MESSAGES — no runtime KeyError."""
+        assert (
+            ERROR_MESSAGES[ErrorCode.COPY_WEEK_START_NOT_MONDAY]
+            == "Неделя должна начинаться с понедельника"
+        )
+        assert (
+            ERROR_MESSAGES[ErrorCode.COPY_WEEK_INVALID_LOCATION]
+            == "В списке локаций есть неизвестные локации"
+        )
+        assert (
+            ERROR_MESSAGES[ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE]
+            == "В выбранной области более 100 занятий — скопируйте в несколько "
+            "заходов, сузив выбор локаций"
+        )
 
 
 import asyncio  # noqa: E402

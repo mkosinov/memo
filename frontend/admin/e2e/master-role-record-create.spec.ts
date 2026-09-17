@@ -97,7 +97,7 @@ test.describe('GH #263 S2 — master creates records', () => {
       // The creation flow opens from an OWN card (the only cards there are).
       await openAddTab(page);
       await expect(
-        page.locator('[data-testid="new-booking-tab"]'),
+        page.locator('[data-testid="new-record-tab"]'),
       ).toBeVisible();
 
       // Typeahead по ПОЛНОМУ номеру → the studio-wide client is suggested.

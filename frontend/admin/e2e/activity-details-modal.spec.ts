@@ -58,7 +58,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
       // Add visitor
       await page
-        .locator('[data-testid="new-booking-tab"]')
+        .locator('[data-testid="new-record-tab"]')
         .locator('button:has-text("Добавить посетителя")')
         .click();
       const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
@@ -422,7 +422,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
     // Click "+" tab
     await page.locator('[data-testid="tab-add"]').click();
-    await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
+    await expect(page.locator('[data-testid="new-record-tab"]')).toBeVisible();
     await expect(page.locator('[data-testid="input-phone"]')).toBeVisible();
 
     // Click back to settings

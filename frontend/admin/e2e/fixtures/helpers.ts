@@ -297,7 +297,7 @@ export async function openAddTab(
     state: 'visible',
     timeout: 10_000,
   });
-  await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
+  await expect(page.locator('[data-testid="new-record-tab"]')).toBeVisible();
 }
 
 /**
@@ -345,7 +345,7 @@ export async function clickModalTab(page: Page, tabTestId: string) {
  * (records + denormalized display fields in one shot); the separate
  * /api/v1/activities lookup maps no longer exist. The three dict
  * selection queries (/locations/all, /services/all, /masters/all) are
- * owned by BookingFilters and are not needed for table rows to render.
+ * owned by RecordsFilters and are not needed for table rows to render.
  */
 export async function waitForRecordsReady(page: Page) {
   // Set up the response listener BEFORE navigation so we don't miss the call.

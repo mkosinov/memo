@@ -88,7 +88,7 @@ test.describe('Scenario 1 — Activity at capacity', () => {
       });
 
       // Wait for the new booking tab to be visible
-      await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('[data-testid="new-record-tab"]')).toBeVisible({ timeout: 5_000 });
 
       // Fill phone and name
       await page.locator('[data-testid="input-phone"]').fill('+79991234567');

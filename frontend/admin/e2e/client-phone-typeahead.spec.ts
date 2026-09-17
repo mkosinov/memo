@@ -338,7 +338,7 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
       const header = page.locator('[data-testid="client-tab-header"]');
       await expect(header).toContainText('Правка E2E-221', { timeout: 10_000 });
 
-      // The phone field offers no re-binding in edit mode: the new-booking
+      // The phone field offers no re-binding in edit mode: the new-record
       // typeahead is only on the "+" tab; the record tab shows the frozen
       // client. EXERCISE the edit-save for real: the modal's ClientTab
       // persists a comment change immediately via PATCH /records/{id}

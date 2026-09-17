@@ -9,7 +9,7 @@ import { usePhotosTable } from '@/contexts/PhotosContext';
 import { formatActivityLabel } from '@/lib/utils';
 
 /**
- * Photos filter bar (GH #211 Task 8) — layout modeled on BookingFilters
+ * Photos filter bar (GH #211 Task 8) — layout modeled on RecordsFilters
  * (flex-wrap, label+control markup, records-style reset button). Every control
  * change → context setFilters (page resets to 1 there); Сбросить → resetFilters.
  *
@@ -183,7 +183,7 @@ export function PhotosFilters() {
         />
       </div>
 
-      {/* Сбросить — records' reset button style (BookingFilters) */}
+      {/* Сбросить — records' reset button style (RecordsFilters) */}
       <button
         onClick={handleReset}
         className="px-3 py-1.5 text-xs font-medium transition-colors rounded-lg"

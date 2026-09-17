@@ -11,7 +11,7 @@ import { useServicesRaw } from '@/hooks/useServices';
 import { useMastersRaw } from '@/hooks/useMasters';
 import type { VisitStatus } from '@memo/domain';
 
-interface BookingFiltersProps {
+interface RecordsFiltersProps {
   locationId: string;
   serviceId: string;
   masterId: string;
@@ -34,7 +34,7 @@ function getCurrentWeekRange(): { dateFrom: string; dateTo: string } {
   };
 }
 
-export function BookingFilters({
+export function RecordsFilters({
   locationId,
   serviceId,
   masterId,
@@ -46,7 +46,7 @@ export function BookingFilters({
   onStatusChange,
   onSearchChange,
   onReset,
-}: BookingFiltersProps) {
+}: RecordsFiltersProps) {
   const { dateFrom, dateTo, selectDateRange } = useNavigation();
 
   // Selection data owned by this component (GH #213 §6.4, R2): the shared RAW
@@ -202,7 +202,7 @@ export function BookingFilters({
           value={status === '' ? null : (status as VisitStatus)}
           onChange={(v) => onStatusChange(v ?? '')}
           size="md"
-          testIdPrefix="booking-filters-status"
+          testIdPrefix="records-filters-status"
         />
       </div>
 

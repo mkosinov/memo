@@ -7,7 +7,7 @@ import { ActivityDetailsModal } from '../app/components/modal/ActivityDetailsMod
 import { TabNav } from '../app/components/modal/ActivityDetailsModal/TabNav';
 import { SettingsTab } from '../app/components/modal/ActivityDetailsModal/SettingsTab';
 import { ClientTab } from '../app/components/modal/ActivityDetailsModal/ClientTab';
-import { NewBookingTab } from '../app/components/modal/ActivityDetailsModal/NewBookingTab';
+import { NewRecordTab } from '../app/components/modal/ActivityDetailsModal/NewRecordTab';
 
 // ─── Shared mock data & context factories ────────────────────────────────
 
@@ -172,7 +172,7 @@ const mockUsePaymentTotals = vi.mocked(usePaymentTotals);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Serve the activity's booking records (tab strip source). */
+/** Serve the activity's records (tab strip source). */
 function stubActivityRecords(records: unknown[]) {
   mockUseActivityRecords.mockReturnValue({ data: records } as never);
 }
@@ -408,9 +408,9 @@ describe('ClientTab', () => {
   });
 });
 
-// ─── NewBookingTab Tests ────────────────────────────────────────────────────
+// ─── NewRecordTab Tests ────────────────────────────────────────────────────
 
-describe('NewBookingTab', () => {
+describe('NewRecordTab', () => {
   const defaultProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -419,27 +419,27 @@ describe('NewBookingTab', () => {
   };
 
   it('renders phone input', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByLabelText(/Телефон/)).toBeInTheDocument();
   });
 
   it('renders name input', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByLabelText(/Имя/)).toBeInTheDocument();
   });
 
   it('renders submit button', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByText('Создать запись')).toBeInTheDocument();
   });
 
   it('renders add visitor button', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByText(/Добавить посетителя/)).toBeInTheDocument();
   });
 
   it('renders notifications checkbox', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByText(/отправлять оповещения/)).toBeInTheDocument();
   });
 });
@@ -974,9 +974,9 @@ describe('ClientTab — layout & features', () => {
   });
 });
 
-// ─── NewBookingTab — Feature Tests ──────────────────────────────────────────
+// ─── NewRecordTab — Feature Tests ──────────────────────────────────────────
 
-describe('NewBookingTab — visitor optional, tariff required; typed phone must be complete (GH #221 decision 11)', () => {
+describe('NewRecordTab — visitor optional, tariff required; typed phone must be complete (GH #221 decision 11)', () => {
   const defaultProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -985,29 +985,29 @@ describe('NewBookingTab — visitor optional, tariff required; typed phone must 
   };
 
   it('does not start with any visitors (empty array)', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     // Should not have any visitor form rows initially
     expect(screen.queryAllByTestId('visitor-form-row').length).toBe(0);
   });
 
   it('shows add visitor button', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByText(/\+ Добавить посетителя/)).toBeInTheDocument();
   });
 
   it('adds a visitor when add button is clicked', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     fireEvent.click(screen.getByText(/\+ Добавить посетителя/));
     expect(screen.getAllByTestId('visitor-form-row').length).toBe(1);
   });
 
   it('channel select is always visible (not behind checkbox)', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     expect(screen.getByTestId('select-channel')).toBeInTheDocument();
   });
 
   it('submits with name only — EMPTY phone is a legitimate pre-existing path (spec §10)', () => {
-    render(<NewBookingTab {...defaultProps} />);
+    render(<NewRecordTab {...defaultProps} />);
     // Name-only quick-add with no phone predates #221 and stays untouched
     // (§10). Only a TYPED-BUT-INCOMPLETE number hits the completeness guard.
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
@@ -1019,19 +1019,19 @@ describe('NewBookingTab — visitor optional, tariff required; typed phone must 
   });
 
   it('validates tariff is selected before submit when visitors exist', () => {
-    render(<NewBookingTab {...defaultProps} serviceTariffs={[]} />);
+    render(<NewRecordTab {...defaultProps} serviceTariffs={[]} />);
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
     // With no tariffs and adding a visitor, should handle gracefully
   });
 });
 
-// ─── NewBookingTab — PhoneInput typeahead (GH #221 Task 6) ──────────────────
+// ─── NewRecordTab — PhoneInput typeahead (GH #221 Task 6) ──────────────────
 // Pick = client id: phone+name freeze read-only, × restores typing, and the
 // submit payload switches between { client_id } and { phone, name }.
 // The old onBlur exact-fetch handler is REMOVED (spec §5 Removed).
 
-describe('NewBookingTab — picked client (GH #221)', () => {
+describe('NewRecordTab — picked client (GH #221)', () => {
   // PhoneInput's onSearch is getClientsPaged (mocked at module level above).
   const defaultProps2 = {
     activity: mockActivity,
@@ -1051,7 +1051,7 @@ describe('NewBookingTab — picked client (GH #221)', () => {
 
   async function typeAndPick() {
     mockSearchHit();
-    render(<NewBookingTab {...defaultProps2} />);
+    render(<NewRecordTab {...defaultProps2} />);
     // 4 digits → past the threshold; debounced search fires (fake timers below).
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '9991' } });
     await act(async () => {
@@ -1114,7 +1114,7 @@ describe('NewBookingTab — picked client (GH #221)', () => {
   });
 
   it('submits the unpicked union (visible phone + name) when nothing is picked', () => {
-    render(<NewBookingTab {...defaultProps2} />);
+    render(<NewRecordTab {...defaultProps2} />);
     // The visible string is the AsYouType-formatted value (mask is live even
     // unpicked) — WYSIWYG: it is exactly what reaches the payload.
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
@@ -1135,7 +1135,7 @@ describe('NewBookingTab — picked client (GH #221)', () => {
   });
 
   it('does not call the exact-route getClientByPhone on blur (REMOVED)', () => {
-    render(<NewBookingTab {...defaultProps2} />);
+    render(<NewRecordTab {...defaultProps2} />);
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.blur(screen.getByTestId('input-phone'));
     expect(getClientByPhone).not.toHaveBeenCalled();
@@ -1157,12 +1157,12 @@ describe('NewBookingTab — picked client (GH #221)', () => {
   });
 });
 
-// ─── NewBookingTab — unpicked completeness guard (GH #221 Task 7) ───────────
+// ─── NewRecordTab — unpicked completeness guard (GH #221 Task 7) ───────────
 // Spec §2 decision 11 / §6 step 2: the unpicked save requires a complete
 // valid number (parsePhoneNumberFromString + RU default, same library as the
 // mask). Incomplete → retryable toast, nothing submitted/fetched/created.
 
-describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () => {
+describe('NewRecordTab — unpicked completeness guard (GH #221 Task 7)', () => {
   const guardProps = {
     activity: mockActivity,
     serviceTariffs: mockTariffs,
@@ -1176,7 +1176,7 @@ describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () =>
   });
 
   it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
-    render(<NewBookingTab {...guardProps} />);
+    render(<NewRecordTab {...guardProps} />);
     // Half-typed number: mask shows it, but it is not a valid complete number.
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+7 (999) 123' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
@@ -1193,7 +1193,7 @@ describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () =>
     // TYPED-BUT-INCOMPLETE numbers only. An empty phone quick-add (client
     // with no phone) predates #221 (§10: write paths untouched) and must
     // submit as before.
-    render(<NewBookingTab {...guardProps} />);
+    render(<NewRecordTab {...guardProps} />);
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
 
@@ -1205,7 +1205,7 @@ describe('NewBookingTab — unpicked completeness guard (GH #221 Task 7)', () =>
   });
 
   it('(unpicked, complete) a complete number passes the guard and submits', () => {
-    render(<NewBookingTab {...guardProps} />);
+    render(<NewRecordTab {...guardProps} />);
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));

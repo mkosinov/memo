@@ -9,44 +9,14 @@
 // plate already shows avatar + name. D9: «Аноним» fallback, never the phone.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Moon, Sun, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { MyDataModal } from '@/app/components/modal/MyDataModal';
 import { PasswordModal } from '@/app/components/modal/PasswordModal';
 
-function SunIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-    </svg>
-  );
-}
-
-function LogoutIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}
+// GH #143: hand-written SVGs replaced by lucide-react. Sizing contract: the
+// previous inline SVGs were 14×14, so size={14} keeps the popup geometry.
 
 interface UserMenuProps {
   /** Collapsed sidebar: avatar-only circular trigger (spec §5.1). */
@@ -241,12 +211,12 @@ export function UserMenu({ collapsed }: UserMenuProps) {
               <span
                 className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'light' ? 'bg-white/20 text-white' : 'text-white/40'}`}
               >
-                <SunIcon />
+                <Sun size={14} />
               </span>
               <span
                 className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'bg-white/20 text-white' : 'text-white/40'}`}
               >
-                <MoonIcon />
+                <Moon size={14} />
               </span>
             </span>
           </div>
@@ -291,7 +261,7 @@ export function UserMenu({ collapsed }: UserMenuProps) {
             }}
             className={`${itemClass} text-[var(--danger,#C8503C)] hover:text-white`}
           >
-            <LogoutIcon />
+            <LogOut size={14} />
             Выйти
           </button>
         </div>

@@ -30,12 +30,11 @@ export interface IdRef {
 }
 
 export interface AnonymousRecordSetup {
-  client: IdRef;
   activity: IdRef;
   record: IdRef;
   /** id of the record's first (anonymous) visit — visitor_id = null. */
   visitId: string;
-  /** Deletes the record (cascade visits/payments) then the client. */
+  /** Deletes the record (cascade visits/payments), the client and the activity. */
   cleanupAll: () => Promise<void>;
 }
 
@@ -96,8 +95,11 @@ export async function setupAnonymousRecord(
   const cleanupAll = async () => {
     await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
+    // The activity is test-created too — delete it last (its records are
+    // already gone; the 409-with-cascade path in `cleanup` stays safe).
+    await cleanup(request, `/api/v1/activities/${activity.id}`);
   };
-  return { client, activity, record, visitId, cleanupAll };
+  return { activity, record, visitId, cleanupAll };
 }
 
 /** Fetch a record with nested visits from the API (server truth, no cache). */

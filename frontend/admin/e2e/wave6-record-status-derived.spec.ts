@@ -159,6 +159,8 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
+      // The activity is test-created — delete it too (records already gone).
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });
 

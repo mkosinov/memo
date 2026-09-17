@@ -110,13 +110,22 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       // Name cells = the row's non-number inputs (name text, price is number).
       const nameInputs = savedRows.locator('input:not([type="number"])');
       await expect(nameInputs).toHaveCount(3);
-      const values: string[] = [];
-      for (let i = 0; i < 3; i++) {
-        values.push(await nameInputs.nth(i).inputValue());
-      }
-      const anonymousCount = values.filter((v) => v === '').length;
-      expect(anonymousCount).toBe(2);
-      expect(values).toContain(visitorName);
+      // The named cell renders '' until qk.visitors(clientId) resolves
+      // (RecordVisitsTable renders visitor?.name ?? '') — wait for the
+      // RESOLVED state with a poll: `inputValue()` is an immediate read.
+      // Expected settled state: exactly 2 empty cells + the typed name present.
+      await expect
+        .poll(
+          async () => {
+            const values: string[] = [];
+            for (let i = 0; i < 3; i++) {
+              values.push(await nameInputs.nth(i).inputValue());
+            }
+            return `${values.filter((v) => v === '').length}:${values.includes(visitorName)}`;
+          },
+          { timeout: 10_000, intervals: [200, 500, 1000] },
+        )
+        .toBe('2:true');
 
       // Header seats: «Мест: 3» (all visits, anonymous included — #257 D3).
       await expect(page.locator('[data-testid="record-summary"]')).toContainText(
@@ -219,12 +228,22 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       await expect(savedRows).toHaveCount(2, { timeout: 10_000 });
       const nameInputs = savedRows.locator('input:not([type="number"])');
       await expect(nameInputs).toHaveCount(2);
-      const nameValues: string[] = [];
-      for (let i = 0; i < 2; i++) {
-        nameValues.push(await nameInputs.nth(i).inputValue());
-      }
-      expect(nameValues).toContain(savedVisitor.name);
-      expect(nameValues.filter((v) => v === '')).toHaveLength(1);
+      // The named cell renders '' until qk.visitors(clientId) resolves
+      // (RecordVisitsTable renders visitor?.name ?? '') — wait for the
+      // RESOLVED state with a poll: `inputValue()` is an immediate read.
+      // Expected settled state: 1 empty cell + the saved visitor's name.
+      await expect
+        .poll(
+          async () => {
+            const values: string[] = [];
+            for (let i = 0; i < 2; i++) {
+              values.push(await nameInputs.nth(i).inputValue());
+            }
+            return `${values.filter((v) => v === '').length}:${values.includes(savedVisitor.name)}`;
+          },
+          { timeout: 10_000, intervals: [200, 500, 1000] },
+        )
+        .toBe('1:true');
       // The anonymous tail row (empty name cell) shows the «Аноним» placeholder.
       for (let i = 0; i < 2; i++) {
         const input = nameInputs.nth(i);

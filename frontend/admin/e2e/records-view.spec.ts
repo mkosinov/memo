@@ -32,7 +32,7 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
  *   US-1 — a client beyond the old 100-row cap shows its real name;
  *   US-2 — page load issues exactly ONE /records/view and ZERO legacy
  *          lookup fetches; the three dict /all selection queries (owned by
- *          BookingFilters) are the only other records-page requests and the
+ *          RecordsFilters) are the only other records-page requests and the
  *          dropdowns still populate and filter;
  *   US-3 — archived client/master resolve real names + the master's OWN dot
  *          color; an FK-dangling service renders «—»;
@@ -190,7 +190,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
         apiUrls.filter((u) => u.includes('/api/v1/clients') && u.includes('per_page=100')),
       ).toHaveLength(0);
 
-      // The three dict /all selection queries (BookingFilters, canonical
+      // The three dict /all selection queries (RecordsFilters, canonical
       // keys) are the sanctioned remainder.
       expect(count('/api/v1/locations/all')).toBe(1);
       expect(count('/api/v1/services/all')).toBe(1);

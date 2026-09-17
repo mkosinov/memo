@@ -62,10 +62,10 @@ test.describe('Records Page — Visual Regression', () => {
     await waitForRecordsReady(page);
 
     // Apply status filter via StatusFiltersPicker dropdown
-    const trigger = page.locator('[data-testid="booking-filters-status-trigger"]');
+    const trigger = page.locator('[data-testid="records-filters-status-trigger"]');
     if ((await trigger.count()) > 0) {
       await trigger.click();
-      const option = page.locator('[data-testid="booking-filters-status-option-waiting"]');
+      const option = page.locator('[data-testid="records-filters-status-option-waiting"]');
       if ((await option.count()) > 0) {
         // Wait for the filtered server response (mirrors records.spec.ts test 6)
         // so the table settles to waiting rows before the screenshot.

@@ -36,6 +36,13 @@ vi.mock('@/contexts/PendingActionsContext', () => ({
   usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
 }));
 
+// The stale-aware onError (D4 rev8, plan Task 5 (ж)) calls showToast directly
+// from the hook — mock the UI context to assert the honest-error surface.
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
+
 import {
   dryRunDeleteRecord,
   resolveDeleteRecord,
@@ -431,6 +438,129 @@ describe('useDeleteRecord (deferred #285)', () => {
       await act(async () => {
         await expect(commit()).rejects.toThrow(ApiError);
       });
+    });
+  });
+
+  // ── staleAwareOnError — D4 rev8 honest-error branch (plan Task 5 (ж)) ─────
+
+  describe('staleAwareOnError — commit 409 stale_dependencies (D4 rev8)', () => {
+    /** Re-grab the row into a cache after the optimistic removal — simulates
+     *  the state onError receives (undo must restore from snapshots). */
+    function expectRowRestored(queryClient: QueryClient) {
+      const envelope = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
+        ...DATE_KEY,
+      ]);
+      expect(envelope?.items.find((r) => r.id === recordId)).toBe(mockRecordView);
+      expect(
+        queryClient.getQueryData<RecordResponse[]>([...CLIENT_KEY]),
+      ).toContain(mockRecordView);
+    }
+
+    it('commit throw 409 + dependencies → onError: undo restores rows + stale toast with «Обновить» action', async () => {
+      mockResolveDeleteRecord.mockRejectedValue(
+        new ApiError(409, 'stale_dependencies', undefined, RECORD_DEPS),
+      );
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      seedCaches(queryClient);
+      const { result } = renderHook(() => useDeleteRecord(), { wrapper });
+
+      await act(async () => {
+        await result.current.removeRecord(mockRecordView);
+      });
+      const { onError } = lastEnqueuedAction();
+      expect(onError).toBeDefined();
+
+      // The PendingActions pipeline routes every non-404 commit error into
+      // onError — invoke it as the pipeline would.
+      await act(async () => {
+        onError!(new ApiError(409, 'stale_dependencies', undefined, RECORD_DEPS));
+      });
+
+      // undo ran — both captured caches hold the row again.
+      expectRowRestored(queryClient);
+      // Honest error: stale text + the «Обновить» action slot, no undo button.
+      expect(mockShowToast).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Не удалось удалить: данные изменились',
+        'error',
+        undefined,
+        undefined,
+        { label: 'Обновить', onAction: expect.any(Function) },
+      );
+
+      // The «Обновить» action invalidates the ['records']-family (the shared
+      // map routes ['records'] → ['records'] + ['visitors']).
+      const action = mockShowToast.mock.calls[0][4] as {
+        label: string;
+        onAction: () => void;
+      };
+      expect(action.label).toBe('Обновить');
+      act(() => {
+        action.onAction();
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors'] });
+    });
+
+    it('non-409 commit error → context-default surface: undo + default toast, no action slot', async () => {
+      mockResolveDeleteRecord.mockRejectedValue(
+        new ApiError(500, 'Internal error', 'INTERNAL'),
+      );
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCaches(queryClient);
+      const { result } = renderHook(() => useDeleteRecord(), { wrapper });
+
+      await act(async () => {
+        await result.current.removeRecord(mockRecordView);
+      });
+      const { onError } = lastEnqueuedAction();
+
+      await act(async () => {
+        onError!(new ApiError(500, 'Internal error', 'INTERNAL'));
+      });
+
+      expectRowRestored(queryClient);
+      expect(mockShowToast).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Не удалось удалить. Изменение отменено',
+        'error',
+      );
+    });
+
+    it('cascade path carries the same onError — commit 409 → undo + stale toast', async () => {
+      mockResolveDeleteRecord.mockRejectedValue(
+        new ApiError(409, 'stale_dependencies', undefined, RECORD_DEPS),
+      );
+      const resolvedRecord: RecordView = { ...mockRecordView, id: 'r-cascade' };
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData([...CLIENT_KEY], [resolvedRecord, otherRow]);
+      const { result } = renderHook(() => useDeleteRecord(), { wrapper });
+
+      await act(async () => {
+        await result.current.removeRecordResolved(
+          resolvedRecord,
+          RESOLUTIONS,
+          RECORD_DEPS,
+        );
+      });
+      const { onError } = lastEnqueuedAction();
+
+      await act(async () => {
+        onError!(new ApiError(409, 'stale_dependencies', undefined, RECORD_DEPS));
+      });
+
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Не удалось удалить: данные изменились',
+        'error',
+        undefined,
+        undefined,
+        { label: 'Обновить', onAction: expect.any(Function) },
+      );
+      // The undo restored the cascade row into ITS captured cache.
+      expect(
+        queryClient.getQueryData<RecordResponse[]>([...CLIENT_KEY]),
+      ).toContain(resolvedRecord);
     });
   });
 });

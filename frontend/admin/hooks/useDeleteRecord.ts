@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import {
+  ApiError,
   dryRunDeleteRecord,
   resolveDeleteRecord,
 } from '@memo/api-client';
@@ -21,6 +22,7 @@ import {
   type RecordsListCache,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
+import { useUI } from '@/contexts/UIContext';
 import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 
@@ -42,10 +44,16 @@ import { qk } from '@/lib/queryKeys';
  *   no dry-run (the tree is already in hand); `expected` id-sets are built
  *   from the tree's `items`; dialog closes immediately (enqueue is sync).
  *
- * Error surface (D4): the hook never intercepts — dry-run and commit errors
- * propagate to the PendingActions pipeline (Task 6 adds the default onError:
- * 404 = quiet success, others → undo + error toast). Invalidation failures
- * inside commit are non-fatal: the screen converges via SSE / next load.
+ * Error surface (D4): dry-run errors are never intercepted (409-with-tree
+ * rejects upward to the call site; anything else keeps its existing toast).
+ * COMMIT errors go through the PendingActions pipeline: 404 = quiet success,
+ * and the rev8 stale-aware handler below owns every other failure — a 409
+ * `stale_dependencies` (mid-window expected mismatch) surfaces the honest
+ * error toast «Не удалось удалить: данные изменились» with the «Обновить»
+ * action (invalidates the ['records']-family); any other error falls back to
+ * the context-default surface (undo + generic error toast). Invalidation
+ * failures inside commit are non-fatal: the screen converges via SSE / next
+ * load.
  *
  * Invalidation union (per-site readers, #127 — no 5-key blanket), unchanged:
  *   ['records']  — every list cache (prefix): ScheduleActivityCard
@@ -111,13 +119,59 @@ async function commitDeferredDelete(
   }
 }
 
+/** Toast shower type derived from the UI context (the hook consumes useUI). */
+type ShowToast = ReturnType<typeof useUI>['showToast'];
+
+/**
+ * #285 D4 rev8 (plan Task 5 (ж)) — the RECORDS consumer's commit-failure
+ * handler, kept out of the domain-independent PendingActionsContext.
+ *
+ * - `err.status === 409 && err.dependencies` (commit-time expected mismatch
+ *   — the only 409-with-deps the commit path can receive): undo the
+ *   optimistic removal (the row is back; the server state is untouched) and
+ *   surface the honest error: «Не удалось удалить: данные изменились» with
+ *   the «Обновить» action that re-reads the record lists (['records']-family
+ *   via the shared #239 map → ['records'] + ['visitors']).
+ * - Any other non-404 error reproduces the context-default surface (undo +
+ *   generic error toast). A wired onError suppresses the context's own
+ *   default branch, so the default behavior is mirrored here — the 404
+ *   quiet-success case never reaches onError (the pipeline returns early).
+ */
+function buildStaleAwareOnError(
+  qc: QueryClient,
+  undo: () => void,
+  showToast: ShowToast,
+): (err: unknown) => void {
+  return (err: unknown) => {
+    if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+      undo();
+      showToast(
+        'Не удалось удалить: данные изменились',
+        'error',
+        undefined,
+        undefined,
+        {
+          label: 'Обновить',
+          onAction: () => invalidateEntities(qc, ['records']),
+        },
+      );
+      return;
+    }
+    // Non-409 — the context-default surface (undo + default error toast).
+    undo();
+    showToast('Не удалось удалить. Изменение отменено', 'error');
+  };
+}
+
 /** Shared enqueue shape (dedupe/cancel key + 5s window + by-key undo). */
 function buildDeferredDeleteAction(
   qc: QueryClient,
   record: RecordView,
   payload: ResolveDeleteRecordPayload,
   snapshots: RecordSnapshot[],
+  showToast: ShowToast,
 ): PendingActionShape {
+  const undo = () => restoreRecordSnapshots(qc, snapshots);
   return {
     id: `delete-record-${record.id}`,
     kind: 'delete',
@@ -125,8 +179,10 @@ function buildDeferredDeleteAction(
     delayMs: 5000,
     // Undo (D5): pure by-key restore — no server calls (the dry-run
     // guarantees nothing was deleted during the window), no invalidations.
-    undo: () => restoreRecordSnapshots(qc, snapshots),
+    undo,
     commit: () => commitDeferredDelete(qc, record, payload, snapshots),
+    // D4 rev8: the stale-aware honest-error handler (see above).
+    onError: buildStaleAwareOnError(qc, undo, showToast),
   };
 }
 
@@ -145,6 +201,7 @@ interface PendingActionShape {
 
 export function useDeleteRecord() {
   const queryClient = useQueryClient();
+  const { showToast } = useUI();
   const { enqueuePendingAction } = usePendingActions();
 
   /** Clean deferred delete (D2): snapshots → dry-run → optimistic removal →
@@ -159,10 +216,16 @@ export function useDeleteRecord() {
       await dryRunDeleteRecord(record.id);
       removeRecordRow(queryClient, snapshots);
       enqueuePendingAction(
-        buildDeferredDeleteAction(queryClient, record, { expected: {} }, snapshots),
+        buildDeferredDeleteAction(
+          queryClient,
+          record,
+          { expected: {} },
+          snapshots,
+          showToast,
+        ),
       );
     },
-    [queryClient, enqueuePendingAction],
+    [queryClient, enqueuePendingAction, showToast],
   );
 
   /** Cascade deferred delete (D3): same enqueue mechanics, no dry-run —
@@ -182,10 +245,11 @@ export function useDeleteRecord() {
           record,
           { resolutions, expected: expectedFromDependencies(dependencies) },
           snapshots,
+          showToast,
         ),
       );
     },
-    [queryClient, enqueuePendingAction],
+    [queryClient, enqueuePendingAction, showToast],
   );
 
   return { removeRecord, removeRecordResolved };

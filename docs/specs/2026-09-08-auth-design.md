@@ -100,6 +100,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {   # keys are UserRole values
         "masters:read", "locations:read", "services:read", "tags:read",
         "activities:read", "photos:read",
         "clients:read", "payments:read",
+        # #263 amendment (2026-09-10): scope-limited writes — the scope layer narrows each
+        # to the master's own data (payments of own records, photos of own activities);
+        # clients:write is create-only — mutations of existing clients stay admin-only (D7).
+        "payments:write", "photos:write", "clients:write",
     },
 }
 ```
@@ -129,19 +133,21 @@ Each `api/v1/*.py` router gains dependencies (router-level for reads, decorator-
 | locations | GET | read + write | read |
 | services | GET | read + write | read |
 | tags | GET | read + write | read |
-| activities | GET | read + write | read |
-| photos | GET | read + write | read |
-| records | **POST** (anonymous booking, until #8) | read + write | read + write |
-| visits | — | read + write | read + write |
-| visitors | — | read + write | read + write |
-| clients | — | read + write | read |
-| payments | — | read + write | read |
+| activities | GET | read + write | read *(scoped #263)* |
+| photos | GET | read + write | read + write *(scoped #263)* |
+| records | **POST** (anonymous booking, until #8) | read + write | read + write *(scoped #263)* |
+| visits | — | read + write | read + write *(scoped #263)* |
+| visitors | — | read + write | read + write *(scoped #263)* |
+| clients | — | read + write | read + write, create-only *(scoped #263, D7)* |
+| payments | — | read + write | read + write *(scoped #263)* |
 | materials | — | read + write | — |
 | user-settings | — | own-only (§3.8) | own-only |
 | system `/health` | public | — | — |
 | auth | public (by design) | — | — |
 
 («read + write» = the role holds both `<entity>:read` and `<entity>:write`; the matrix in §3.5 is the canonical token list.) Public method-level exceptions are expressed as decorator-level dependencies on the mutating routes; the open GETs are listed in `PUBLIC_ROUTES`.
+
+**#263 amendment (2026-09-10):** master rows marked *(scoped #263)* are narrowed server-side by the scope layer (`backend/src/auth/scope.py`; domain rules `docs/domain-rules/auth.md` → «Per-master data scoping (#263)»). Binding statement: «master-доступные эндпоинты проходят скоуп-слой или числятся в исключениях; контракт-тест `backend/tests/test_master_scope_contract.py` закрепляет покрытие». Non-owned single rows resolve to 404 in the entity's own code (existence not disclosed); `clients:write` is **create-only** — any mutation (PUT/PATCH/DELETE/archive/restore) of an existing client stays admin-only and returns 403 `AUTH_FORBIDDEN` (#263 D7).
 
 ### 3.8 User-settings scoping (breaking change)
 

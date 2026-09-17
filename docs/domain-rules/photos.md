@@ -54,6 +54,8 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 
 Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная галерея `/photos/web` не трогается.
 
+Mechanics (T5): the list builder folds in a correlated EXISTS (`EXISTS(activities WHERE activities.id = photo.activity_id AND master_id = master_key)`) — an admin (`master_key=None`) adds no predicate, a master without a masters row matches an empty set. Point ops (get/PUT/PATCH/DELETE) gate via one scope-aware query (photo → activity); foreign/owner-less → the same 404 as missing (404-fast-path). POST/PUT/PATCH validate the TARGET `activity_id` the same way (create with a foreign activity → 404; PUT/PATCH re-target to a foreign activity → 404, photo unchanged); PATCH sending `activity_id: null` detaches the photo (legal for one's own photo). The `service_id` filter's LEFT JOIN path is untouched and AND-combines with the scope.
+
 ## API Endpoints
 | Method | Path | Params | Description |
 |--------|------|--------|-------------|

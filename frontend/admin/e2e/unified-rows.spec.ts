@@ -1043,4 +1043,91 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
+
+  // ── Spec S4 (2026-09-16-undo-toast-countdown-ring §6): re-delete after undo ──
+
+  /**
+   * Regression guard (spec §6 S4 + §7): delete visit → «Отменить» in the undo
+   * window (row returns) → delete again → a new undo toast appears → deferred
+   * DELETE fires → after reload the visit is gone.
+   *
+   * No RED phase by design: tasks 1-4 already shipped the undo flow this test
+   * guards, so it is expected green on the first run (spec DoD, §8). Per spec
+   * D6, e2e asserts NO digits (5→4→…) and NO timings — only toast presence.
+   */
+  test('scenario S4: re-delete visit after undo — new toast, deferred DELETE, gone after reload', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — own factory data (per-test seed reset convention)
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id);
+
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
+
+      // Verify the visit row exists and grab its ID from the testId
+      const visitRow = page
+        .locator('[data-testid^="visit-row-"]:not([data-testid="visit-row-new"])')
+        .first();
+      await expect(visitRow).toBeVisible({ timeout: 5_000 });
+      const testId = await visitRow.getAttribute('data-testid');
+      expect(testId).toBeTruthy();
+      const visitId = testId!.replace('visit-row-', '');
+
+      // 2. First delete — toast appears, row disappears (optimistic)
+      await visitRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      const toast = page.locator('[data-testid="toast-info"]');
+      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+      await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).not.toBeVisible({
+        timeout: 3_000,
+      });
+
+      // 3. Undo within the countdown window (window is 5000ms — keep tight)
+      const undoBtn = page.locator('button:has-text("Отменить")');
+      await expect(undoBtn).toBeVisible({ timeout: 3_000 });
+      await undoBtn.click();
+
+      // Row is back after undo
+      await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).toBeVisible({
+        timeout: 3_000,
+      });
+
+      // 4. Second delete — a new undo toast appears (spec D6: no digit/timing
+      // assertions; presence only). Register the deferred-DELETE waiter BEFORE
+      // the click so it can never miss the response.
+      const deferredDelete = page.waitForResponse(
+        (resp) =>
+          resp.request().method() === 'DELETE' &&
+          resp.url().includes(`/api/v1/visits/${visitId}`),
+        { timeout: 10_000 },
+      );
+      await page.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+      await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).not.toBeVisible({
+        timeout: 3_000,
+      });
+
+      // 5. Toast expires → deferred DELETE fires (wait BEFORE reload per spec)
+      const deleteResp = await deferredDelete;
+      expect(deleteResp.request().method()).toBe('DELETE');
+      expect(deleteResp.ok()).toBeTruthy();
+
+      // 6. Reload — the visit must be gone from the backend state
+      await page.reload();
+      await waitForScheduleReady(page);
+      await openClientRecordTab(page, { recordId: record.id });
+      await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).not.toBeVisible({
+        timeout: 5_000,
+      });
+    } finally {
+      // The visit was already deleted by the flow itself.
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
 });

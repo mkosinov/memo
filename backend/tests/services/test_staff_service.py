@@ -623,6 +623,230 @@ async def test_list_returns_cards_with_master_and_positions(db_session) -> None:
     assert by_id[bare.id].position_ids == [position.id]
 
 
+# ─── role template from positions (GH #263 D10) ────────────────────────────
+
+
+async def test_create_user_with_master_position_gets_master_role(db_session) -> None:
+    """D10 template: card created with the fixed-id «мастер» position + the
+    account checkbox → the account lands with role=master (anchor by
+    position ID, not title)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+
+    created = await get_staff_service().create(db_session, _create_payload(
+        position_ids=["master"],
+        create_user={"phone": "+79995556681", "password": "secret12345"},
+    ))
+
+    user = (await db_session.execute(
+        select(User).where(User.staff_id == created.id)
+    )).scalar_one()
+    assert user.role == "master"
+
+
+async def test_create_user_with_admin_position_gets_admin_role(db_session) -> None:
+    """D10: the «админ» position anchors role=admin."""
+    await _add_position(db_session, id="admin", title="Админ", is_system=True)
+
+    created = await get_staff_service().create(db_session, _create_payload(
+        position_ids=["admin"],
+        create_user={"phone": "+79995556682", "password": "secret12345"},
+    ))
+
+    user = (await db_session.execute(
+        select(User).where(User.staff_id == created.id)
+    )).scalar_one()
+    assert user.role == "admin"
+
+
+async def test_create_user_several_positions_senior_wins(db_session) -> None:
+    """D10: several anchored positions → the SENIOR one wins (admin > master)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    await _add_position(db_session, id="admin", title="Админ", is_system=True)
+
+    created = await get_staff_service().create(db_session, _create_payload(
+        position_ids=["master", "admin"],
+        create_user={"phone": "+79995556683", "password": "secret12345"},
+    ))
+
+    user = (await db_session.execute(
+        select(User).where(User.staff_id == created.id)
+    )).scalar_one()
+    assert user.role == "admin"
+
+
+async def test_create_user_explicit_role_beats_template(db_session) -> None:
+    """Manual override stays possible: an explicit role in create_user beats
+    the position template (СММ-подобный случай — должность «мастер», но
+    роль руками выбрана admin)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+
+    created = await get_staff_service().create(db_session, _create_payload(
+        position_ids=["master"],
+        create_user={
+            "phone": "+79995556684", "password": "secret12345", "role": "admin",
+        },
+    ))
+
+    user = (await db_session.execute(
+        select(User).where(User.staff_id == created.id)
+    )).scalar_one()
+    assert user.role == "admin"
+
+
+async def test_update_position_set_to_master_upgrades_role(db_session) -> None:
+    """D10 on position-set change (S8): a linked account gets role=master
+    when the new set contains the «мастер» position."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="admin")
+
+    await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
+    )
+
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "master"
+
+
+async def test_update_position_set_master_to_admin_upgrades_role(db_session) -> None:
+    """S8 «Назначение должности «админ» поверх — роль стала admin»."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    await _add_position(db_session, id="admin", title="Админ", is_system=True)
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="master")
+
+    await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б", position_ids=["master", "admin"]),
+    )
+
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "admin"
+
+
+async def test_update_position_set_non_anchored_keeps_role(db_session) -> None:
+    """D10: positions without master/admin anchors (e.g. СММ) never touch
+    the role — even when the set LOSES the anchors (was master position,
+    removed → role stays as the admin set it manually)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    smm = await _add_position(db_session, title="СММ")
+    staff = await _add_staff(db_session)
+    await db_session.execute(
+        staff_positions.insert().values(staff_id=staff.id, position_id="master")
+    )
+    await db_session.flush()
+    await _add_user(db_session, staff.id, role="master")
+
+    await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б", position_ids=[smm.id]),
+    )
+
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "master"
+
+
+async def test_patch_position_set_applies_role_template(db_session) -> None:
+    """PATCH with position_ids follows the same D10 template."""
+    await _add_position(db_session, id="admin", title="Админ", is_system=True)
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="master")
+
+    patched = await get_staff_service().patch(
+        db_session, staff.id, StaffPatch(position_ids=["admin"]),
+    )
+
+    assert patched is not None
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "admin"
+
+
+async def test_patch_explicit_role_without_positions_applies(db_session) -> None:
+    """PATCH role-only branch: an explicit role with NO position-set change
+    still applies (ручная правка роли остаётся) — the template is not fired
+    (no anchors sent, none consulted)."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+    await db_session.execute(
+        staff_positions.insert().values(staff_id=staff.id, position_id="master")
+    )
+    await db_session.flush()
+    await _add_user(db_session, staff.id, role="admin")
+
+    patched = await get_staff_service().patch(
+        db_session, staff.id, StaffPatch(role="master"),
+    )
+
+    assert patched is not None
+    # Positions untouched by the role-only PATCH...
+    linked = (await db_session.execute(
+        select(staff_positions.c.position_id)
+        .where(staff_positions.c.staff_id == staff.id)
+    )).scalars().all()
+    assert linked == ["master"]
+    # ...and the explicit role applied.
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "master"
+
+
+async def test_patch_without_role_keys_keeps_role(db_session) -> None:
+    """PATCH without role and without positions → role untouched."""
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="admin")
+
+    patched = await get_staff_service().patch(
+        db_session, staff.id, StaffPatch(first_name="В"),
+    )
+
+    assert patched is not None
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "admin"
+
+
+async def test_update_explicit_role_beats_template(db_session) -> None:
+    """An explicit role in the body beats the position template."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+    await _add_user(db_session, staff.id, role="admin")
+
+    await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б",
+                    position_ids=["master"], role="admin"),
+    )
+
+    role = (await db_session.execute(
+        select(User.role).where(User.staff_id == staff.id)
+    )).scalar_one()
+    assert role == "admin"
+
+
+async def test_update_without_user_role_template_is_noop(db_session) -> None:
+    """No linked account → the position template has nothing to apply to;
+    the update succeeds."""
+    await _add_position(db_session, id="master", title="Мастер", is_system=True)
+    staff = await _add_staff(db_session)
+
+    updated = await get_staff_service().update(
+        db_session, staff.id,
+        StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
+    )
+    assert updated is not None
+
+
 # ─── MASTER_NOT_ACTIVE: activity-side TOCTOU guard (spec «Валидация») ──────
 
 

@@ -276,14 +276,16 @@ def cmd_pick_next_design():
 def _auto_impl_log(number: int):
     """The watcher's single log comment (starts with AUTO_IMPL_LOG_PREFIX)
     → (comment_id, body) or (None, None). Entries are "- <iso-ts> <text>"
-    lines appended chronologically at the bottom."""
+    lines appended chronologically at the bottom.
+    Fetched via REST: the id must be numeric — `gh issue view --json comments`
+    (gh ≥ 2.100) returns GraphQL node ids, and REST PATCH 404s on them."""
     r = subprocess.run(
-        ["gh", "issue", "view", str(number), "--json", "comments", "--repo", f"{OWNER}/{REPO}"],
+        ["gh", "api", f"repos/{OWNER}/{REPO}/issues/{number}/comments"],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
         return None, None
-    for c in json.loads(r.stdout or "{}").get("comments", []):
+    for c in json.loads(r.stdout or "[]"):
         if c.get("body", "").startswith(AUTO_IMPL_LOG_PREFIX):
             return c["id"], c["body"]
     return None, None

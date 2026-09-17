@@ -12,7 +12,10 @@ import { Modal } from '@/app/components/shared/modal/Modal';
  *   by activities server-side); a payload = upsert. `archived` is the schedule
  *   flag (D3/Gap A) — sent in edit to toggle the section's archive without
  *   deleting the row; omitted in create (a fresh section is born active).
- * - `create_user`: create-only (D6) — `{phone, password}` or false.
+ * - `create_user`: create-only (D6) — `{phone, password, role?}` or false.
+ *   `role` (GH #263 D10) is the manual override for the linked account.
+ * - `role`: edit-only top-level override (StaffUpdate.role) — sent only when
+ *   the field has a value; absent → the backend position template decides.
  */
 export interface StaffFormData {
   first_name: string;
@@ -21,7 +24,8 @@ export interface StaffFormData {
   sort_order: number;
   position_ids: string[];
   master: { specialty: string; color: string; archived?: boolean } | null;
-  create_user: { phone: string; password: string } | false;
+  create_user: { phone: string; password: string; role?: 'admin' | 'master' } | false;
+  role?: 'admin' | 'master';
 }
 
 export interface StaffModalProps {
@@ -39,11 +43,61 @@ export interface StaffModalProps {
 const TEXT_INPUT =
   'w-full rounded-lg border px-3 py-2 text-sm transition-colors';
 
+/** Fixed position-id anchors (D4 #266) → role (GH #263 D10). */
+const POSITION_ROLE_TEMPLATE: Record<string, 'admin' | 'master'> = {
+  admin: 'admin',
+  master: 'master',
+};
+
+/** Highest template role among position ids (admin > master) — mirrors the
+ *  backend `_template_role`; null = no anchor present (keep current role). */
+function templateRoleOf(positionIds: string[]): 'admin' | 'master' | null {
+  if (positionIds.some((id) => POSITION_ROLE_TEMPLATE[id] === 'admin')) return 'admin';
+  if (positionIds.some((id) => POSITION_ROLE_TEMPLATE[id] === 'master')) return 'master';
+  return null;
+}
+
 function Label({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
   return (
     <label htmlFor={htmlFor} className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>
       {children}
     </label>
+  );
+}
+
+/**
+ * Role select (GH #263 D10) — auto-filled from the position template,
+ * manually editable. Empty value = «не выбрано» → no explicit role in the
+ * payload and the backend template decides.
+ */
+function RoleField({
+  baseId,
+  role,
+  onChange,
+}: {
+  baseId: string;
+  role: 'admin' | 'master' | '';
+  onChange: (role: 'admin' | 'master' | '') => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor={`${baseId}-role`}>Роль учётки</Label>
+      <select
+        id={`${baseId}-role`}
+        data-testid="staff-role-field"
+        value={role}
+        onChange={(e) => onChange(e.target.value as 'admin' | 'master' | '')}
+        className={TEXT_INPUT}
+        style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+      >
+        <option value="">— не выбрана —</option>
+        <option value="admin">Администратор</option>
+        <option value="master">Мастер</option>
+      </select>
+      <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
+        Подставляется по должностям (админ &gt; мастер); можно изменить вручную.
+      </span>
+    </div>
   );
 }
 
@@ -57,6 +111,18 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
 
   // ─── Positions (M2M checkboxes, D4) ─────────────────────────────────────
   const [positionIds, setPositionIds] = useState<string[]>(staff?.position_ids ?? []);
+
+  // ─── Role (GH #263 D10) ──────────────────────────────────────────────────
+  // Manual override for the linked account. Auto-filled from the position
+  // template (admin > master — mirrors the backend `_template_role`); a
+  // MANUAL choice (`roleDirty`) is never stomped by later template runs
+  // within this dialog session («ручная правка остаётся»); the flag resets
+  // on open (fresh mount) and on successful submit. Empty string = no
+  // explicit role → the backend template decides.
+  const [role, setRole] = useState<'admin' | 'master' | ''>(
+    () => templateRoleOf(staff?.position_ids ?? []) ?? '',
+  );
+  const [roleDirty, setRoleDirty] = useState(false);
 
   // ─── Master section (D5) ────────────────────────────────────────────────
   // `masterEnabled` = the section is present. Edit pre-fills from staff.master;
@@ -80,12 +146,28 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
 
   const markDirty = useCallback(() => setIsDirty(true), []);
 
+  const handleRoleChange = useCallback(
+    (next: 'admin' | 'master' | '') => {
+      setRole(next);
+      setRoleDirty(true);
+      markDirty();
+    },
+    [markDirty],
+  );
+
   const togglePosition = useCallback((id: string) => {
     markDirty();
-    setPositionIds((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
-    );
-  }, [markDirty]);
+    const next = positionIds.includes(id)
+      ? positionIds.filter((p) => p !== id)
+      : [...positionIds, id];
+    setPositionIds(next);
+    // D10: re-run the template on every anchored set change — but a MANUAL
+    // role choice wins for the rest of the dialog session («ручная правка
+    // остаётся»). No anchor → keep the current value («прочие должности
+    // роль не трогают»).
+    const suggested = templateRoleOf(next);
+    if (suggested && !roleDirty) setRole(suggested);
+  }, [markDirty, positionIds, roleDirty]);
 
   const validate = useCallback((): boolean => {
     const next: Record<string, string> = {};
@@ -125,8 +207,16 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
         master,
         create_user:
           mode === 'create' && createUserEnabled
-            ? { phone: phone.trim(), password: password.trim() }
+            ? {
+                phone: phone.trim(),
+                password: password.trim(),
+                // D10: explicit role only when set — absent lets the backend
+                // template decide.
+                ...(role !== '' ? { role } : {}),
+              }
             : false,
+        // Edit-only top-level override (StaffUpdate.role); same rule.
+        ...(mode === 'edit' && role !== '' ? { role } : {}),
       };
       await onSubmit(data);
       onClose();
@@ -262,6 +352,17 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
             )}
           </section>
 
+          {/* ── Роль учётки (GH #263 D10, edit) ── */}
+          {/* Edit mode: the account block is create-only (D6), but the role
+              override still applies — PUT carries `role` and the backend
+              templates the linked account. Sits next to the positions it
+              derives from. */}
+          {mode === 'edit' && (
+            <section className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--line)' }}>
+              <RoleField baseId={baseId} role={role} onChange={handleRoleChange} />
+            </section>
+          )}
+
           {/* ── Мастер-секция (D5) ── */}
           <section className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--line)' }}>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -372,13 +473,15 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
                     />
                     {errorEl('password')}
                   </div>
+                  <RoleField baseId={baseId} role={role} onChange={handleRoleChange} />
                 </div>
               )}
             </section>
           )}
 
           {/* Edit-mode account note: an account is created exactly once (with
-              the card); linking/managing logins is #263, not the card. */}
+              the card); linking/managing logins is #263, not the card. The
+              role override itself sits next to the positions section (D10). */}
           {mode === 'edit' && staff?.has_user && (
             <p className="text-xs" style={{ color: 'var(--ink-light)' }}>
               К карточке привязана учётка входа.

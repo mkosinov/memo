@@ -267,6 +267,7 @@ Tailwind: `shadow-card`, `shadow-card-hover`, `shadow-collapse`, `shadow-panel`,
 | Card hover | `box-shadow, transform` | 150ms | `ease` |
 | Card delete | `opacity, transform (scale-95)` | 150ms | `ease` |
 | Toast slide-up | `opacity, translateY(8px→0)` | 200ms | `ease-out` |
+| Undo ring (toast) | stepped fill `stroke-dashoffset`, synced with digit | 1s / step | linear |
 | Accordion | `max-height` | 200ms | `ease` |
 | Nav item | `color, background` | 150ms | `ease` |
 | Theme toggle | `color, background` | 150ms | `ease` |
@@ -470,6 +471,14 @@ Card delete animation: `opacity-0 scale-95` over 150ms.
 ```
 
 Animation: `slide-up 200ms ease-out` (translateY 8px → 0 + opacity 0 → 1).
+
+**Undo countdown ring** — undo toasts with a deferred-deletion window render a countdown ring (`CountdownRing`) left of the message:
+
+- Geometry = existing spinner: viewBox 12, r 4.5, strokeWidth 1.5; two circles — neutral track (`stroke-current` at low opacity) and progress (`stroke-current`).
+- `strokeDasharray = 2π·4.5 ≈ 28.27`; `strokeDashoffset = (1 − remaining/window) · 28.27`; rotated −90° so the fill starts at 12 o'clock.
+- Stepped fill: one `setInterval(1000)` drives both the ring and the digit (5→1) — no CSS keyframes, no inline `animationDuration`; digit is small, `tabular-nums`.
+- Wrapper is `aria-hidden="true"` (purely visual); toast appearance/expiry stays the toast system's job.
+- Behavior: «Отменить» closes the toast and reverts the action; «×» only hides the toast — the deferred action still commits when the window expires.
 
 ---
 

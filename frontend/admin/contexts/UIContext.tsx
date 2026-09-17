@@ -9,13 +9,22 @@ interface Toast {
   kind: ToastKind;
   message: string;
   undo?: () => void;
+  countdownMs?: number;
 }
 
 interface UIContextType {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
   toasts: Toast[];
-  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => string;
+  // #94: `countdownMs` rides in the 3rd slot when the 2nd arg is an undo
+  // function (kindless form — used by enqueuePendingAction), or as the 4th
+  // parameter for the kind form; it is ignored for non-undo toasts.
+  showToast: (
+    message: string,
+    kindOrUndo?: ToastKind | (() => void),
+    undoOrCountdownMs?: (() => void) | number,
+    countdownMs?: number,
+  ) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -73,20 +82,26 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const showToast = useCallback((
     message: string,
     kindOrUndo?: ToastKind | (() => void),
-    undo?: () => void,
+    undoOrCountdownMs?: (() => void) | number,
+    countdownMs?: number,
   ): string => {
     let kind: ToastKind = 'info';
     let undoFn: (() => void) | undefined;
+    // #94: undo toast lifetime equals the deferred action's countdown window
+    // (countdownMs, default 5000); other toasts keep the 4.5s default.
+    let cd: number | undefined = countdownMs;
     if (typeof kindOrUndo === 'function') {
+      // Kindless undo form: 3rd argument is the countdown window.
       undoFn = kindOrUndo;
+      if (typeof undoOrCountdownMs === 'number') cd = undoOrCountdownMs;
     } else if (kindOrUndo) {
       kind = kindOrUndo;
-      undoFn = undo;
+      undoFn = typeof undoOrCountdownMs === 'function' ? undoOrCountdownMs : undefined;
     }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setToasts(prev => [...prev, { id, kind, message, undo: undoFn }]);
+    setToasts(prev => [...prev, { id, kind, message, undo: undoFn, countdownMs: cd }]);
     if (kind !== 'loading') {
-      const duration = undoFn ? 5000 : 4500; // undo toasts stay 5s
+      const duration = undoFn ? (cd ?? 5000) : 4500;
       const timerId = setTimeout(() => {
         toastTimers.current.delete(id);
         setToasts(prev => prev.filter(t => t.id !== id));

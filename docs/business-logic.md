@@ -3,7 +3,7 @@
 > Technical decisions document based on business logic.
 > Created: 2026-05-17
 
-## 1. Visit and Booking Statuses
+## 1. Visit and Record Statuses
 
 ### Visitor Status
 

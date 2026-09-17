@@ -139,8 +139,10 @@ export function createMockRecordsContext(
 interface UIContextMock {
   deleteMode: boolean;
   toggleDeleteMode: () => void;
-  toasts: Array<{ id: string; kind: ToastKind; message: string; undo?: () => void }>;
-  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undo?: () => void) => string;
+  toasts: Array<{ id: string; kind: ToastKind; message: string; undo?: () => void; countdownMs?: number }>;
+  // Mirrors UIContextType.showToast (#94): kindless undo form takes the
+  // countdown window as 3rd arg; kind form takes it as the 4th param.
+  showToast: (message: string, kindOrUndo?: ToastKind | (() => void), undoOrCountdownMs?: (() => void) | number, countdownMs?: number) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;

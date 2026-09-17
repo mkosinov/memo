@@ -1,7 +1,7 @@
 # Record — Domain Rules
 
 ## Description
-A Record is a booking for an Activity. It links a Client to an Activity and contains Visits. Records have financial tracking (custom_price, payments). This is the most complex entity.
+A Record is data that comes from the booking flow. It links a Client to an Activity and contains Visits. Records have financial tracking (custom_price, payments). This is the most complex entity.
 
 ## Fields
 | Field | Type | Required | Min | Max | Default | Description |

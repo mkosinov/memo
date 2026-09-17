@@ -7,7 +7,7 @@ functions. VisitService orchestrates but never calls another service.
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.record_visits import (
@@ -16,6 +16,7 @@ from src.domain.record_visits import (
     recompute_record_status,
 )
 from src.events.emitter import mark_changed
+from src.models.activity import Activity
 from src.models.record import Record
 from src.models.visit import Visit
 from src.repositories.generic import BaseRepository, get_base_repository
@@ -40,18 +41,39 @@ class VisitService:
         page: int = 1,
         per_page: int = 20,
         record_id: str | None = None,
+        master_key: str | None = None,
     ) -> PaginatedResponse[VisitResponse]:
         """Return a paginated page of visits, optionally filtered by record_id.
 
+        GH #263 T2: ``master_key`` (the requester's scope) joins
+        visit → record → activity and filters ``activities.master_id`` —
+        a visit is visible only through its record's activity
+        («всё через записи»); conjunctive with the ``record_id`` filter.
+        ``None`` (admin) → no join filter.
+
         Items are validated via VisitResponse.model_validate.
         """
-        items_orm, total = await self._repository.list(
-            db_session,
-            Visit,
-            filters={"record_id": record_id},
-            limit=per_page,
-            offset=(page - 1) * per_page,
+        stmt = select(Visit)
+        if master_key is not None:
+            stmt = (
+                stmt.join(Record, Visit.record_id == Record.id)
+                .join(Activity, Record.activity_id == Activity.id)
+                .where(Activity.master_id == master_key)
+            )
+        if record_id is not None:
+            stmt = stmt.where(Visit.record_id == record_id)
+        # ONE count shape repo-wide (cf. VisitorService.list): the count
+        # rides a subquery of the filtered stmt — no second hand-mirrored
+        # join chain to keep in sync.
+        total = (
+            await db_session.execute(
+                select(func.count()).select_from(stmt.subquery())
+            )
+        ).scalar_one()
+        rows = await db_session.execute(
+            stmt.limit(per_page).offset((page - 1) * per_page)
         )
+        items_orm = list(rows.scalars().all())
         # VisitResponse has created_at: str / updated_at: str but ORM has datetime.
         # Pydantic v2 strict str doesn't coerce datetime, so convert manually.
         items = [
@@ -69,6 +91,43 @@ class VisitService:
             for v in items_orm
         ]
         return PaginatedResponse(items=items, total=total, page=page, per_page=per_page)
+
+    async def get_scoped(
+        self, db_session: AsyncSession, visit_id: str, master_key: str | None
+    ) -> Visit | None:
+        """Point get with the per-master scope in ONE query (GH #263 T2).
+
+        Scope chain: visit → record → activity (``всё через записи``) —
+        чужой visit is indistinguishable from missing (``None`` → route
+        renders 404; 404-fast-path, plan T7). ``master_key=None`` (admin)
+        → unfiltered.
+        """
+        stmt = (
+            select(Visit)
+            .join(Record, Visit.record_id == Record.id)
+            .join(Activity, Record.activity_id == Activity.id)
+            .where(Visit.id == visit_id)
+        )
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
+
+    async def get_record_scoped(
+        self, db_session: AsyncSession, record_id: str, master_key: str | None
+    ) -> Record | None:
+        """Parent-record owner gate for visit create (GH #263 T2).
+
+        ONE query: record → activity, ``activities.master_id == master_key``
+        when scoped; ``None`` (admin) → unfiltered existence check.
+        """
+        stmt = (
+            select(Record)
+            .join(Activity, Record.activity_id == Activity.id)
+            .where(Record.id == record_id)
+        )
+        if master_key is not None:
+            stmt = stmt.where(Activity.master_id == master_key)
+        return (await db_session.execute(stmt)).scalar_one_or_none()
 
     async def get(self, db_session: AsyncSession, visit_id: str) -> Visit | None:
         """Return a visit by ID, or None if not found."""

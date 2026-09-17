@@ -6,7 +6,12 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from src.auth.permissions import require_permission, verify_fetch_metadata
+from src.auth.permissions import (
+    require_admin,
+    require_permission,
+    verify_fetch_metadata,
+)
+from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
@@ -51,6 +56,15 @@ _WRITE_GUARD = [
     Depends(require_permission("clients:write")),
     Depends(verify_fetch_metadata),
 ]
+# GH #263 D7: master's clients:write is CREATE-ONLY — mutations of an
+# EXISTING client (update/delete/archive/restore) stay admin-only. The
+# clients:write token is kept on the guard stack too (admin passes both;
+# the role check is what excludes master).
+_ADMIN_WRITE_GUARD = [
+    Depends(require_permission("clients:write")),
+    Depends(require_admin),
+    Depends(verify_fetch_metadata),
+]
 _VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
 
 
@@ -59,9 +73,15 @@ async def get_client_by_phone(
     service: _ServiceDep,
     session: SessionDep,
     phone: str = Query(..., min_length=3),
+    # GH #263 T3 (D4): the phone lookup is scope-free — ALL active studio
+    # clients — but the scoped (master) response is still MASKED (D3):
+    # the number is a search key, not response data.
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> ClientResponse:
     """Get an active client by exact phone (GH #212; was /clients/search)."""
-    result = await service.list(db_session=session, phone=phone)
+    result = await service.list(
+        db_session=session, phone=phone, master_key=scope.master_key
+    )
     if not result.items:
         raise HTTPException(
             status_code=404,
@@ -77,9 +97,15 @@ async def get_client_by_phone(
 async def list_clients(
     session: SessionDep,
     params: ClientListParams = Depends(),
+    # GH #263 T3 (D1/D4): EXISTS-scope «есть запись клиента к своей
+    # активности» for the plain list; ``?phone=`` searches studio-wide,
+    # both paths masked for a scoped (master) caller (D3).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> PaginatedResponse[ClientWithStats]:
     """Return paginated clients with stats aggregation, filtering, and sorting."""
-    return await list_clients_with_stats(db_session=session, params=params)
+    return await list_clients_with_stats(
+        db_session=session, params=params, master_key=scope.master_key
+    )
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
@@ -87,9 +113,14 @@ async def get_client(
     client_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    # GH #263 T3 (D1): свой → 200 (masked), чужой → 404 — one scope-aware
+    # query, indistinguishable from «не существует» (404-fast-path, T7).
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> ClientResponse:
     """Return a single client by ID."""
-    client = await service.get(db_session=session, id=client_id)
+    client = await service.get_scoped(
+        db_session=session, id=client_id, master_key=scope.master_key
+    )
     if not client:
         raise HTTPException(
             status_code=404,
@@ -112,7 +143,7 @@ async def create_client(
     return await service.create(db_session=session, data=data)
 
 
-@router.put("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.put("/{client_id}", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def update_client(
     client_id: str,
     data: ClientUpdate,
@@ -132,7 +163,7 @@ async def update_client(
     return client
 
 
-@router.patch("/{client_id}", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.patch("/{client_id}", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def patch_client(
     client_id: str,
     data: ClientPatch,
@@ -152,7 +183,7 @@ async def patch_client(
     return client
 
 
-@router.delete("/{client_id}", status_code=204, dependencies=_WRITE_GUARD)
+@router.delete("/{client_id}", status_code=204, dependencies=_ADMIN_WRITE_GUARD)
 async def delete_client(
     client_id: str,
     service: _ServiceDep,
@@ -212,13 +243,38 @@ async def list_client_visitors(
     client_id: str,
     visitor_service: _VisitorServiceDep,
     session: SessionDep,
+    # GH #263 T3-fix: the path client must be visible in the caller's
+    # scope (чужой/missing → 404, one scope-aware query), and the
+    # returned visitors carry the T2 visibility predicate — visitors
+    # without visits on the master's records stay invisible. Admin
+    # (master_key=None): unchanged, all visitors.
+    scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> list[VisitorResponse]:
     """Return all visitors for a given client."""
-    visitors = await visitor_service.list_by_client(db_session=session, client_id=client_id)
+    # GH #263 T3-fix (S7 admin regression): the visibility gate is a
+    # MASTER-scope gate — apply it ONLY when the caller carries a scope
+    # key (master incl. the empty-scope sentinel). Admin (master_key
+    # None) keeps the pre-#263 contract byte-identical: the client_id is
+    # taken as given (nonexistent → 200 []), no existence probe.
+    if scope.master_key is not None:
+        client = await _get_client_service().get_scoped(
+            db_session=session, id=client_id, master_key=scope.master_key
+        )
+        if client is None:
+            raise HTTPException(
+                status_code=404,
+                detail=ErrorDetail(
+                    code=ErrorCode.CLIENT_NOT_FOUND,
+                    message="Client not found",
+                ).model_dump(),
+            )
+    visitors = await visitor_service.list_by_client(
+        db_session=session, client_id=client_id, master_key=scope.master_key
+    )
     return [VisitorResponse.model_validate(v) for v in visitors]
 
 
-@router.post("/{client_id}/archive", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.post("/{client_id}/archive", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def archive_client(
     client_id: str,
     service: _ServiceDep,
@@ -243,7 +299,7 @@ async def archive_client(
     return await _refetch_or_404(service, session, client_id)
 
 
-@router.post("/{client_id}/restore", response_model=ClientResponse, dependencies=_WRITE_GUARD)
+@router.post("/{client_id}/restore", response_model=ClientResponse, dependencies=_ADMIN_WRITE_GUARD)
 async def restore_client(
     client_id: str,
     service: _ServiceDep,

@@ -164,6 +164,35 @@ vi.mock('@/contexts/UIContext', () => ({
   }),
 }));
 
+// GH #263 T9: ServicesTable gates create/edit + materials on can() from
+// AuthContext — unit tests mock the context module (repo pattern).
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: vi.fn(),
+}));
+
+import { useAuth } from '@/contexts/AuthContext';
+
+const mockUseAuth = vi.mocked(useAuth);
+
+/**
+ * GH #263 T9: auth mock — admin holds '*' (everything visible); master holds
+ * read-only dictionary tokens (no services:write, no materials:read).
+ */
+function mockAuthFor(role: 'admin' | 'master', permissions: string[]) {
+  mockUseAuth.mockReturnValue({
+    user: { id: 'u-1', phone: '+79990000001', role, master_id: null, email: null },
+    permissions,
+    master: null,
+    status: 'authenticated',
+    login: vi.fn(),
+    logout: vi.fn(),
+    can: vi.fn(
+      (p: string) => permissions.includes('*') || permissions.includes(p),
+    ),
+    refresh: vi.fn(),
+  } as unknown as ReturnType<typeof useAuth>);
+}
+
 import { getServices, resolveDeleteService, getAllMaterials, ApiError } from '@memo/api-client';
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
@@ -212,6 +241,8 @@ describe('ServicesTable', () => {
     vi.clearAllMocks();
     localStorage.clear();
     mockGetAllMaterials.mockResolvedValue(MOCK_MATERIALS);
+    // GH #263 T9 default: admin ('*') — the historical hardcoded state.
+    mockAuthFor('admin', ['*']);
   });
 
   afterEach(() => {
@@ -1053,5 +1084,88 @@ describe('ServicesTable', () => {
     await waitFor(() => expect(mockCreateMutateAsync).toHaveBeenCalled());
     const data = mockCreateMutateAsync.mock.calls[0][0] as Record<string, unknown>;
     expect(data.materials).toEqual([{ material_id: 'mat-a' }]);
+  });
+});
+
+// ─── GH #263 T9: permission gating on the services screen ─────────────────
+// can('services:write') gates create/edit affordances; can('materials:read')
+// gates the materials surface (tab on the page is page.tsx's concern — here:
+// the «Материал» filter select + ServiceModal materials picker). Records-
+// style screens stay untouched; the backend still scope-cuts everything.
+
+describe('ServicesTable permission gating (GH #263 T9)', () => {
+  /** Spec §3.5 master tokens: no services:write, no materials:read. */
+  const MASTER_PERMS = [
+    'records:read', 'records:write', 'visits:read', 'visits:write',
+    'visitors:read', 'visitors:write', 'services:read', 'locations:read',
+    'tags:read', 'masters:read', 'clients:read', 'payments:read',
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    mockGetAllMaterials.mockResolvedValue(MOCK_MATERIALS);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('hides «+ Добавить услугу» without services:write', async () => {
+    mockAuthFor('master', MASTER_PERMS);
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.queryByText('+ Добавить услугу')).not.toBeInTheDocument();
+  });
+
+  it('keeps «+ Добавить услугу» with services:write (admin)', async () => {
+    mockAuthFor('admin', ['*']);
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.getByText('+ Добавить услугу')).toBeInTheDocument();
+  });
+
+  it('row click without services:write opens NO edit modal (read-only list)', async () => {
+    mockAuthFor('master', MASTER_PERMS);
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('Картина маслом').closest('tr')!);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('row click WITH services:write still opens the edit modal (admin)', async () => {
+    mockAuthFor('admin', ['*']);
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('Картина маслом').closest('tr')!);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('hides the «Материал» filter select without materials:read', async () => {
+    mockAuthFor('master', MASTER_PERMS);
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.queryByLabelText('Фильтр по материалу')).not.toBeInTheDocument();
+    // search + status filters stay
+    expect(screen.getByLabelText('Поиск по названию')).toBeInTheDocument();
+    expect(screen.getByLabelText('Фильтр по статусу')).toBeInTheDocument();
+  });
+
+  it('keeps the «Материал» filter select with materials:read (admin)', async () => {
+    mockAuthFor('admin', ['*']);
+    setupEnvelope();
+    await renderLoaded();
+    expect(screen.getByLabelText('Фильтр по материалу')).toBeInTheDocument();
+  });
+
+  it('without materials:read the table never fetches getAllMaterials', async () => {
+    mockAuthFor('master', MASTER_PERMS);
+    setupEnvelope();
+    await renderLoaded();
+    // wait a tick for any (wrong) fetch to land
+    await waitFor(() => expect(screen.getByText('Картина маслом')).toBeInTheDocument());
+    expect(mockGetAllMaterials).not.toHaveBeenCalled();
   });
 });

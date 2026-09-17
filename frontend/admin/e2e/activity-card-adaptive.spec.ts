@@ -1,10 +1,5 @@
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
-import * as path from 'path';
-import * as fs from 'fs';
-
-const SCREENSHOTS_DIR = '/tmp/playwright-activity-card';
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 /**
  * Helper: check if activity cards are visible on the page.
@@ -136,20 +131,5 @@ test.describe('Adaptive ActivityCard', () => {
         expect(cardText).toBeTruthy();
       }
     }
-  });
-
-  test('screenshot each card for manual review', async ({ page }) => {
-    const cards = page.locator('[data-testid^="activity-"]');
-    const count = await cards.count();
-
-    for (let i = 0; i < count; i++) {
-      const card = cards.nth(i);
-      const activityId = await card.getAttribute('data-testid');
-      const safeId = activityId?.replace(/[^a-z0-9-]/gi, '_') ?? `card-${i}`;
-      await card.screenshot({
-        path: path.join(SCREENSHOTS_DIR, `${safeId}.png`),
-      });
-    }
-    console.log(`Screenshots saved to ${SCREENSHOTS_DIR}`);
   });
 });

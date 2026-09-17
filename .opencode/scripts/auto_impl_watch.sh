@@ -107,7 +107,7 @@ while true; do
     # сессия менеджера по issue: повторный запуск ПРОДОЛЖАЕТ существующую.
     # Источник истины — БД: последняя сессия с названием «<N> IMPL. …»
     SID=$(sqlite3 /root/.local/share/opencode/opencode.db \
-        "select id from session where title like '${N} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
+        "select id from session where title like '%#${N} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
 
     # шаблон названия сессии: "#issue IMPL. 1-5 ключевых слова" (из заголовка issue)
     ITITLE=$(gh issue view "$N" --json title --jq .title 2>/dev/null || echo "")

@@ -195,6 +195,7 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
 UNSCOPED_ALLOWED_WITHIN_WIRED_ROUTERS: dict[str, dict[tuple[str, str], str]] = {
     "activities": {
         ("POST", "/api/v1/activities"): "activities:write — master has no token → 403",
+        ("POST", "/api/v1/activities/copy-week"): "activities:write — master has no token → 403",
         ("PUT", "/api/v1/activities/{id}"): "activities:write → 403",
         ("PATCH", "/api/v1/activities/{id}"): "activities:write → 403",
         ("DELETE", "/api/v1/activities/{id}"): "activities:write → 403",

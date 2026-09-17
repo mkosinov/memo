@@ -142,11 +142,16 @@ class ClientListParams(PaginationParams):
     created_to: date | None = None
     updated_from: date | None = None
     updated_to: date | None = None
-    min_records: int | None = None
-    max_records: int | None = None
-    min_paid: int | None = None
-    max_paid: int | None = None
-    missed_from: int | None = None
-    missed_to: int | None = None
+    # GH #149: numeric stat filters are counts/sums — negatives are meaningless
+    # (today they degrade to a silent SQL no-op like `records_count >= -5`);
+    # zero is legal (e.g. missed_to=0 = "no missed records"). Schema-level
+    # Field(ge=0) maps to 422 for Depends() query params; model-level
+    # validators are forbidden here (500-trap, see phone comment above).
+    min_records: int | None = Field(default=None, ge=0)
+    max_records: int | None = Field(default=None, ge=0)
+    min_paid: int | None = Field(default=None, ge=0)
+    max_paid: int | None = Field(default=None, ge=0)
+    missed_from: int | None = Field(default=None, ge=0)
+    missed_to: int | None = Field(default=None, ge=0)
     sort_by: str = "name"
     sort_order: str = "asc"

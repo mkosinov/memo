@@ -297,7 +297,7 @@ export async function openAddTab(
     state: 'visible',
     timeout: 10_000,
   });
-  await expect(page.locator('[data-testid="new-booking-tab"]')).toBeVisible();
+  await expect(page.locator('[data-testid="new-record-tab"]')).toBeVisible();
 }
 
 /**

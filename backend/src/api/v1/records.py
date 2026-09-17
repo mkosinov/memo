@@ -1,7 +1,7 @@
 """FastAPI router for record CRUD endpoints with nested visits."""
 
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -10,12 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.auth.scope import ScopeContext, get_optional_scope, get_scope
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.deletion import (
+    ResolutionError,
+    collect_dependencies,
+    collect_dependency_ids,
+    stale_expected_entities,
+)
 from src.errors import ErrorCode, ErrorDetail
 from src.models.record import Record
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
+    RecordDeleteBody,
     RecordListParams,
     RecordPatch,
     RecordResponse,
@@ -231,12 +237,18 @@ async def patch_record(
     return map_record(record)
 
 
-def _has_dependencies_response(deps: list) -> JSONResponse:
-    """The unified 409 preview payload: ``{detail, dependencies}``."""
+def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``.
+
+    ``detail`` distinguishes the two 409s of the deferred-delete contract
+    (#285): ``has_dependencies`` (dry-run preview) and
+    ``stale_dependencies`` (commit-time expected mismatch). The
+    ``dependencies`` array is ``DependencyNode`` dumps either way.
+    """
     return JSONResponse(
         status_code=409,
         content={
-            "detail": "has_dependencies",
+            "detail": detail,
             "dependencies": [d.model_dump() for d in deps],
         },
     )
@@ -247,11 +259,7 @@ async def delete_record(
     record_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None, embed=True),
-    # #285: commit of the deferred delete declares its state — id-sets of
-    # the dependencies the caller saw at dry-run time. Free-form dict for
-    # now; the next task formalizes the body model + expected verification.
-    expected: dict[str, Any] | None = Body(default=None, embed=True),
+    body: RecordDeleteBody | None = Body(default=None),
     dry_run: Annotated[
         bool | None,
         Query(
@@ -264,7 +272,7 @@ async def delete_record(
     ] = None,
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> None:
-    """Unified delete contract — dry-run preview flag / body with expected.
+    """Unified delete contract — dry-run preview flag / commit body (rev7, #285).
 
     Mirrors the masters/clients routes (GH #139, Addendum 13); #285 rev7
     removes the legacy no-body "execute-if-clean" mode. Record deps
@@ -281,25 +289,34 @@ async def delete_record(
       existence probe).
     * No body, no flag → 422 ``{"detail": "expected_state_required"}``
       (rev7): every real deletion must declare its state; rejected
-      before anything else.
-    * Body ``{"expected": ...}`` — execute-if-clean (clean record → 204
-      hard delete; deps → 409 + dependency tree). Interim #285 shape;
-      expected verification lands with the body-model task.
-    * Body ``{"resolutions": {...}}`` → ``service.resolve_delete``
-      validates then executes → 204; ``ResolutionError`` → 422;
-      missing → 404.
+      before anything else. Same for a body whose ``expected`` is absent
+      (e.g. ``{"resolutions": {...}}`` alone — the rejected legacy shape).
+    * Body ``{resolutions?, expected}`` — the deferred-delete commit:
+      existence probe → ``collect_dependencies`` +
+      ``collect_dependency_ids`` → **expected id-set verification
+      (rev5/rev6)** — for every collected non-auto dep
+      ``set(now_ids) ⊆ set(expected[entity])``; mismatch → 409
+      ``stale_dependencies`` + current tree (parsed by
+      ``ApiError.dependencies``). Subset, not equality: a dep that
+      disappeared in the undo window does not block; one that APPEARED
+      does; auto-deps (record_tags) are exempt (§3 D9a). Only on a match
+      → ``service.resolve_delete`` validates ``resolutions`` as today →
+      204 (ResolutionError → 422; missing → 404).
 
     GH #263 T2: the scope gate runs FIRST (one query) — чужая запись →
     404 before any dependency collection or cascade; for the dry-run
     branch the same repository-get doubles as the existence probe
     (``collect_dependencies`` returns [] for a missing id).
     """
+    resolutions = body.resolutions if body is not None else None
+    expected = body.expected if body is not None else None
+
     # Rev7 (#285): bare DELETE without the flag is a contract violation —
     # reject the request shape before any DB access. Literal string detail
     # (same flat shape as the 409 preview) → JSONResponse, not raised:
     # the global HTTPException handler wraps string details into
     # {code, message} — not the pinned contract.
-    if not dry_run and resolutions is None and expected is None:
+    if not dry_run and expected is None:
         return JSONResponse(
             status_code=422,
             content={"detail": "expected_state_required"},
@@ -316,34 +333,25 @@ async def delete_record(
     if dry_run:
         deps = await collect_dependencies(session, Record, record_id)
         if deps:
-            return _has_dependencies_response(deps)
+            return _dependencies_response(deps, detail="has_dependencies")
         return  # 204 — preview only: no service.delete, no SSE marks.
 
-    if resolutions is not None:
-        try:
-            ok = await service.resolve_delete(
-                db_session=session, id=record_id, resolutions=resolutions
-            )
-        except ResolutionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=ErrorDetail(
-                    code=ErrorCode.RECORD_NOT_FOUND,
-                    message="Record not found",
-                ).model_dump(),
-            )
-        return
-
-    # Body carries ``expected`` without resolutions — execute-if-clean
-    # (interim #285: the legacy no-body mode now requires the declared
-    # state in the body).
+    # Body branch: the commit of the deferred delete. Expected id-set
+    # verification FIRST (rev5/rev6) — a stale commit must fail with 409
+    # BEFORE the resolutions validation could turn it into a 422.
     deps = await collect_dependencies(session, Record, record_id)
-    if deps:
-        return _has_dependencies_response(deps)
-    deleted = await service.delete(db_session=session, id=record_id)
-    if not deleted:
+    now_ids = await collect_dependency_ids(session, Record, record_id)
+    if stale_expected_entities(Record, now_ids, expected or {}):
+        return _dependencies_response(deps, detail="stale_dependencies")
+
+    # Match → resolution validation (as today) + execution.
+    try:
+        ok = await service.resolve_delete(
+            db_session=session, id=record_id, resolutions=resolutions
+        )
+    except ResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(

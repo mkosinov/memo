@@ -180,11 +180,15 @@ class TestDeleteCascade:
         detail = api_client.get(f"/api/v1/records/{record_id}").json()
         assert len(detail["visits"]) > 0
 
-        # Hard-delete record (with-body execute — record has visits, GH #139)
+        # Hard-delete record (with-body execute — record has visits, GH #139;
+        # #285 rev7: the commit declares the state confirmed at dry-run)
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [v["id"] for v in detail["visits"]]},
+            },
         )
         assert resp.status_code == 204
 
@@ -212,7 +216,10 @@ class TestDeleteCascade:
         api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [v["id"] for v in record["visits"]]},
+            },
         )
 
         # Visits are hard-deleted — rows are gone
@@ -235,7 +242,13 @@ class TestDeleteCascade:
         api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {
+                    "visits": [v["id"] for v in record["visits"]],
+                    "payments": [payment["id"]],
+                },
+            },
         )
 
         # Visits should be hard-deleted (rows gone)
@@ -263,7 +276,13 @@ class TestDeleteCascade:
         api_client.request(
             "DELETE",
             f"/api/v1/records/{record['id']}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {
+                    "visits": [v["id"] for v in record["visits"]],
+                    "payments": [payment["id"]],
+                },
+            },
         )
 
         # Payment is cascade-deleted — excluded from list

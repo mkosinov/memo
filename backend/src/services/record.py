@@ -446,7 +446,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         self,
         db_session: AsyncSession,
         id: str,
-        resolutions: dict[str, str],
+        resolutions: dict[str, str] | None,
     ) -> bool:
         """Execute the unified DELETE-with-body resolution for records (GH #139).
 
@@ -464,7 +464,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
              Record deps are never blocking (``allowed_actions`` always
              non-empty), but the check stays for defensive consistency.
           4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
-             errors (route → 422 with detail).
+             errors (route → 422 with detail). ``resolutions=None`` means
+             «the commit declared only ``expected``» (clean path) — for a
+             clean record (no deps) that validates trivially; with deps
+             present the missing per-entity actions fail as today.
           5. Execute via ``self.delete`` (the ``@transactional`` cascade
              commits the session — no separate ``@transactional`` needed
              here).
@@ -487,8 +490,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                 "Entity has blocking dependencies — archive instead"
             )
 
-        # 4. Validate resolutions body against the matrix.
-        issues = validate_resolutions(Record, deps, resolutions)
+        # 4. Validate resolutions body against the matrix. ``None`` (clean
+        # path: the commit declared only ``expected``) behaves as {} —
+        # with no deps that validates trivially; with deps present the
+        # missing per-entity actions fail exactly as a partial body would.
+        issues = validate_resolutions(Record, deps, resolutions or {})
         if issues:
             msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
             raise InvalidResolutionError(msg)

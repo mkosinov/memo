@@ -1,5 +1,6 @@
 """Tests for the Records + Visits CRUD API endpoints."""
 
+import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -188,12 +189,18 @@ class TestRecordsCrud:
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
         record_id = create_resp.json()["id"]
+        # #285 rev7: the commit must declare the state it confirmed — the
+        # visit ids from the create response (no payments exist).
+        visit_ids = [v["id"] for v in create_resp.json()["visits"]]
 
         # Delete (with-body execute — record has visits as deps, GH #139)
         response = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": []},
+            },
         )
         assert response.status_code == 204
 
@@ -1132,7 +1139,7 @@ def _drain_events(q) -> list:
 
 class TestDeleteUnifiedRoute:
     """DELETE /api/v1/records/{id} — unified delete contract (dry-run preview /
-    body with expected; no-body forbidden).
+    body with expected id-sets; no-body forbidden).
 
     #285 rev7: the legacy no-body "execute-if-clean" mode is REMOVED. Modes:
       * ?dry_run=true — pure preview: collect_dependencies → empty → 204
@@ -1141,9 +1148,16 @@ class TestDeleteUnifiedRoute:
         body → 422.
       * No body, no flag → 422 {"detail": "expected_state_required"} —
         every real deletion must declare its state.
-      * Body {"expected": {}} (interim #285) — execute-if-clean: clean
-        record → 204 hard delete; deps → 409 + tree.
-      * Body {"resolutions": {...}} — validate + execute cascade → 204.
+      * Body {"expected": {...}} — the deferred-delete commit: ``expected``
+        id-sets (rev6) are verified against the CURRENT dependency tree
+        BEFORE the resolutions validation; mismatch → 409
+        ``stale_dependencies`` + tree. Subset semantics (rev6): a dep that
+        disappeared in the undo window does not block (deleting less than
+        confirmed); a dep that APPEARED does. Auto-deps (record_tags) are
+        exempt. Clean record + {"expected": {}} → 204 hard delete.
+      * Body {"resolutions": {...}, "expected": {...}} — expected check →
+        resolutions validation (§6) → atomic cascade → 204. A cascade
+        commit WITHOUT ``expected`` → 422 expected_state_required.
 
     Record deps (Addendum 13):
       * visits   → cascade, auto=False (user choice)
@@ -1205,11 +1219,14 @@ class TestDeleteUnifiedRoute:
         assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
 
     def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (resolve_delete returns False)."""
+        """With body + nonexistent id → 404 (scope probe fires first)."""
         resp = api_client.request(
             "DELETE",
             "/api/v1/records/nonexistent-record-id",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {},
+            },
         )
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
@@ -1238,6 +1255,230 @@ class TestDeleteUnifiedRoute:
 
         assert resp.status_code == 204
         assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+
+    # ── expected id-set verification (rev5/rev6) — BEFORE resolutions ─────
+
+    def test_expected_payment_appeared_in_window_returns_409_stale(
+        self, api_client, create_record
+    ) -> None:
+        """(б) Payment landed in the undo window → 409 stale_dependencies.
+
+        The record was clean at dry-run time (expected: {}); a payment
+        appeared before the deferred commit → the id-set check must refuse
+        the delete and leave the record AND the payment alive.
+        """
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        # Current tree in DependencyNode shape (parsed by ApiError.dependencies).
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["count"] == 1
+        assert deps["payments"]["allowed_actions"] == ["cascade"]
+        # Nothing deleted.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert query_db(
+            f"SELECT * FROM payments WHERE record_id='{record_id}'"
+        ), "payment must survive the stale commit"
+
+    def test_expected_cascade_matching_ids_executes_204(
+        self, api_client, create_record
+    ) -> None:
+        """(в) 2 visits + resolutions + expected {visits: [id1, id2]} → 204."""
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": []},
+            },
+        )
+
+        assert resp.status_code == 204
+        # Cascade executed: record + visits gone.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 404
+        for vid in visit_ids:
+            assert query_db(f"SELECT * FROM visits WHERE id='{vid}'") == []
+
+    def test_expected_extra_visit_appeared_returns_409_not_422(
+        self, api_client, create_record
+    ) -> None:
+        """(г) Valid resolutions but stale expected (visit appeared) → 409.
+
+        Pins the ORDER: the expected id-set check runs BEFORE the
+        resolutions validation — the commit fails with 409
+        stale_dependencies, not 422, and nothing is deleted.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+        # The race: a third visit appears between dry-run and commit.
+        visitor = api_client.post("/api/v1/visitors", json={
+            "client_id": record["client_id"], "name": "Carol", "age": 40,
+        }).json()
+        extra_visit = api_client.post(
+            "/api/v1/visits",
+            json={
+                "record_id": record_id,
+                "visitor_id": visitor["id"],
+                "price": 1500,
+            },
+        )
+        assert extra_visit.status_code == 201, extra_visit.text
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [visit_ids[0]]},
+            },
+        )
+
+        assert resp.status_code == 409, f"got {resp.status_code}: {resp.text}"
+        assert resp.json()["detail"] == "stale_dependencies"
+        # Nothing deleted — record and BOTH confirmed visits survive.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        for vid in visit_ids:
+            assert query_db(f"SELECT * FROM visits WHERE id='{vid}'") != []
+
+    def test_expected_exchange_same_counter_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """(д) Swap at equal counter: expected [a], DB holds visit b → 409.
+
+        rev6: id-sets, not counters — the counters would both read 1, but
+        the confirmed id is not among the current rows → stale.
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        db_visit_id = record["visits"][0]["id"]
+        ghost_id = str(_uuid.uuid4())
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [ghost_id]},
+            },
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert query_db(f"SELECT * FROM visits WHERE id='{db_visit_id}'") != []
+
+    def test_expected_dep_disappeared_subset_passes_204(
+        self, api_client, create_record
+    ) -> None:
+        """(е) Dependency vanished in the window → subset → 204 (delete less).
+
+        expected claims visit «a»; by commit time the record has no visits.
+        Subset (not equality) semantics: deleting less than confirmed is OK.
+        """
+        record = create_record(visits=[])  # clean by commit time
+        record_id = record["id"]
+        ghost_id = str(_uuid.uuid4())
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"expected": {"visits": [ghost_id]}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 404
+
+    def test_expected_missing_entity_key_that_appeared_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """(ж) expected covers visits but omits the payments key → 409.
+
+        The payment exists in the DB but ``expected`` has no "payments" key
+        at all — the missing key means «nothing was confirmed» for that
+        entity → any current row is a stale dependency.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids},  # no "payments" key
+            },
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["count"] == 1
+        # Nothing deleted.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_resolutions_without_expected_returns_422_expected_state_required(
+        self, api_client, create_record
+    ) -> None:
+        """(з) rev7: cascade body without ``expected`` → 422, row untouched.
+
+        Every real deletion must carry the declared state — a resolutions
+        body alone is the rejected legacy shape.
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert record["visits"], "visits untouched too"
 
     # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
 
@@ -1370,11 +1611,15 @@ class TestDeleteUnifiedRoute:
         )
         assert resp.status_code == 409
 
-        # With-body execute → 204.
+        # With-body execute → 204. The commit carries both the user's
+        # resolutions and the state confirmed at dry-run (rev7).
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": [payment_id]},
+            },
         )
         assert resp.status_code == 204
 
@@ -1395,15 +1640,21 @@ class TestDeleteUnifiedRoute:
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
         record_id = record["id"]
+        visit_id = record["visits"][0]["id"]
         # Add a payment so both non-auto deps are present.
-        api_client.post("/api/v1/payments", json={
+        payment = api_client.post("/api/v1/payments", json={
             "record_id": record_id, "amount": 500, "method": "cash",
-        })
+        }).json()
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "nullify", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "nullify", "payments": "cascade"},
+                # expected matches the DB — the 422 must come from the
+                # resolutions validation, not from the expected check.
+                "expected": {"visits": [visit_id], "payments": [payment["id"]]},
+            },
         )
 
         assert resp.status_code == 422
@@ -1418,15 +1669,21 @@ class TestDeleteUnifiedRoute:
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
         record_id = record["id"]
+        visit_id = record["visits"][0]["id"]
         # Add a payment so payments is a required non-auto dep.
-        api_client.post("/api/v1/payments", json={
+        payment = api_client.post("/api/v1/payments", json={
             "record_id": record_id, "amount": 500, "method": "cash",
-        })
+        }).json()
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade"}},  # no payments resolution
+            json={
+                "resolutions": {"visits": "cascade"},  # no payments resolution
+                # expected matches the DB — the 422 must come from the
+                # resolutions validation, not from the expected check.
+                "expected": {"visits": [visit_id], "payments": [payment["id"]]},
+            },
         )
 
         assert resp.status_code == 422

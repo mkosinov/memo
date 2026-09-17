@@ -5,6 +5,9 @@ mechanism. The unified DELETE route (Task 9) reads :func:`collect_dependencies`
 and the :class:`BlockingDepsError`/:class:`InvalidResolutionError` exceptions;
 the ``resolve_delete`` executor (Task 10) consumes :data:`FK_MATRIX`,
 :func:`has_blocking_deps`, :func:`validate_resolutions` and the exceptions.
+The #285 deferred-delete commit additionally reads
+:func:`collect_dependency_ids` + :func:`stale_expected_entities` — the
+``expected`` id-set verification of the record DELETE body (spec rev5/rev6).
 
 Spec: ``docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md``
   * §4  — FK matrix (the full per-entity table).
@@ -513,6 +516,96 @@ def has_blocking_deps(nodes: list[DependencyNode]) -> bool:
     Such an entity cannot be deleted by either DELETE mode — only archived.
     """
     return any(not n.allowed_actions for n in nodes)
+
+
+# ─── #285: id-collectors for the expected-state check (rev5/rev6) ──────────────
+# Mirror of ``_COUNTERS``: same (model, entity) dispatch, but each collector
+# returns the dependent rows' IDs instead of a count — the input for the
+# deferred-delete commit's ``expected`` id-set verification.
+# Join tables have no single-column PK: a record_tags link row is identified
+# by its ``tag_id`` within the parent record's scope.
+
+type _IdsFn = Callable[[AsyncSession, str], Awaitable[list[str]]]
+
+
+async def _ids_r_visits(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Visit.id).where(Visit.record_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_r_payments(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Payment.id).where(Payment.record_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_r_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(record_tags.c.tag_id).where(record_tags.c.record_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
+_ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
+    (Record, "visits"): _ids_r_visits,
+    (Record, "payments"): _ids_r_payments,
+    (Record, "record_tags"): _ids_r_record_tags,
+}
+
+
+async def collect_dependency_ids(
+    session: AsyncSession, model: type, entity_id: str,
+) -> dict[str, list[str]]:
+    """Collect the id-lists of dependent rows per FK entity (#285 rev6).
+
+    Returns ``{entity: [dependent row ids]}`` for every relation wired in
+    :data:`_ID_COLLECTORS` (only non-empty lists are included). This is the
+    CURRENT state side of the deferred-delete ``expected`` verification:
+    the route compares these sets against the id-sets the caller confirmed
+    at dry-run time (subset semantics — spec §3 D9a).
+
+    Auto-deps (e.g. ``record_tags``) ARE collected here (the task's payload
+    is per-entity and complete); whether they participate in the check is
+    decided by :func:`stale_expected_entities`.
+    """
+    deps = FK_MATRIX.get(model, [])
+    if not deps:
+        return {}
+    out: dict[str, list[str]] = {}
+    for dep in deps:
+        collector = _ID_COLLECTORS.get((model, dep.entity))
+        if collector is None:  # defensive — mirrors _COUNTERS wiring.
+            continue
+        ids = await collector(session, entity_id)
+        if ids:
+            out[dep.entity] = ids
+    return out
+
+
+def stale_expected_entities(
+    model: type,
+    now_ids: dict[str, list[str]],
+    expected: dict[str, list[str]],
+) -> list[str]:
+    """Entity keys whose CURRENT id-set is NOT a subset of ``expected`` (#285).
+
+    Subset, not equality (spec §3 D9a): a dependency that disappeared during
+    the undo window does NOT block (deleting less than was confirmed); a
+    dependency that APPEARED does block. A missing ``expected`` key means
+    «nothing was confirmed» for that entity — any current row is stale.
+
+    Auto-deps (``FKDependency.auto``, e.g. record_tags) NEVER participate:
+    they resolve themselves during execution, so the user could not have
+    confirmed them and a mid-window tag link is not a race.
+    """
+    matrix = {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
+    stale: list[str] = []
+    for entity, ids in now_ids.items():
+        dep = matrix.get(entity)
+        if dep is None or dep.auto:
+            continue  # unknown/auto entities are never verified.
+        if not set(ids) <= set(expected.get(entity, [])):
+            stale.append(entity)
+    return stale
 
 
 def validate_resolutions(

@@ -325,11 +325,15 @@ class TestRecordScope:
         mc = two_records["master"]["client"]
         own = two_records["own"]
         # Own record carries a visit → dry-run DELETE would 409; the
-        # execute path (visit cascade — visits never block) → 204.
+        # execute path (visit cascade — visits never block) → 204. #285
+        # rev7: the commit carries the state confirmed at dry-run.
         resp = mc.request(
             "DELETE",
             f"/api/v1/records/{own['id']}",
-            json={"resolutions": {"visits": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade"},
+                "expected": {"visits": [own["visits"][0]["id"]]},
+            },
         )
         assert resp.status_code == 204
 

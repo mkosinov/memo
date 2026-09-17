@@ -11,7 +11,8 @@ The #285 deferred-delete commit additionally reads
 
 Spec: ``docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md``
   * §4  — FK matrix (the full per-entity table).
-  * §5  — 409 Conflict response shape (counters + ``cascade_preview`` only).
+  * §5  — 409 Conflict response shape (counters + ``cascade_preview``;
+    #285 D9б/в additionally carries per-row ``items`` on record-dep nodes).
   * §6  — resolutions body rules.
   * §11 — context facts (Activity has no ``is_active``; Material has zero FK deps).
   * §16 — auto-deps ignored when sent in the resolutions body.
@@ -254,15 +255,18 @@ class DependencyItem(BaseModel):
 class DependencyNode(BaseModel):
     """One entry in the 409 ``dependencies`` array.
 
-    Matches spec §5: ``{"entity", "count", "allowed_actions", "message",
-    "cascade_preview"}`` plus the human ``relation`` label. Built manually by
-    :func:`collect_dependencies` (no ORM ``from_attributes`` mapping needed) so
-    the 409 carries counters + sums only — never individual row data.
+    Original spec §5 shape: ``{"entity", "count", "allowed_actions",
+    "message", "cascade_preview"}`` plus the human ``relation`` label —
+    built manually by :func:`collect_dependencies` (no ORM
+    ``from_attributes`` mapping needed). Historically counters + sums
+    only, never individual row data.
 
     #285 D9б/в: for RECORD deps (``visits`` / ``payments`` /
     ``record_tags``) the node additionally carries ``items`` — one
-    ``{id, label}`` entry per dependent row. Other entities keep
-    ``items=None`` (§5 boundary — their dialogs are unchanged).
+    ``{id, label}`` entry per dependent row, so the tree does expose
+    individual rows there. Other entities keep
+    ``items=None`` (§5 boundary — their dialogs are unchanged) and stay
+    counters + sums only.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -267,6 +267,12 @@ class DependencyNode(BaseModel):
     individual rows there. Other entities keep
     ``items=None`` (§5 boundary — their dialogs are unchanged) and stay
     counters + sums only.
+
+    rev8: ``auto`` mirrors :attr:`FKDependency.auto` (copied from the
+    matrix in :func:`collect_dependencies` — no entity-name hardcode) so
+    the client filters server-resolved deps (record_tags) by field
+    instead of hardcoding entity names. Serialized ALWAYS — ``bool``
+    is never None, ``False`` survives ``model_dump(exclude_none=True)``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -275,6 +281,7 @@ class DependencyNode(BaseModel):
     relation: str
     count: int
     allowed_actions: list[str]
+    auto: bool = False
     message: str | None = None
     cascade_preview: dict[str, int] | None = None
     items: list[DependencyItem] | None = None
@@ -587,6 +594,9 @@ async def collect_dependencies(
     ``cascade_preview`` = ``{"visits": N}`` (NO payments per §5); Record
     deps (#285 D9б/в) additionally carry ``items`` = one ``{id, label}``
     per dependent row (other entities → ``items=None``, §5 boundary).
+    Every node also carries ``auto`` = the matrix's ``FKDependency.auto``
+    (rev8: server-resolved deps like record_tags are flagged so the
+    client can filter them without hardcoding entity names).
 
     Used by Task 9's unified DELETE route — the no-body 409 builder AND
     both #285 409 paths (``has_dependencies`` dry-run + ``stale_dependencies``
@@ -614,6 +624,7 @@ async def collect_dependencies(
                 relation=dep.relation,
                 count=count,
                 allowed_actions=list(dep.allowed_actions),
+                auto=dep.auto,
                 message=dep.message,
                 cascade_preview=preview,
                 items=items,

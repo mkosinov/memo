@@ -244,12 +244,15 @@ def _dependencies_response(deps: list, detail: str) -> JSONResponse:
     (#285): ``has_dependencies`` (dry-run preview) and
     ``stale_dependencies`` (commit-time expected mismatch). The
     ``dependencies`` array is ``DependencyNode`` dumps either way.
+    rev8: ``exclude_none`` — optional-None node fields (``message`` /
+    ``cascade_preview`` / ``items``) are OMITTED, not null; non-optional
+    fields (entity/relation/count/allowed_actions/auto) always serialize.
     """
     return JSONResponse(
         status_code=409,
         content={
             "detail": detail,
-            "dependencies": [d.model_dump() for d in deps],
+            "dependencies": [d.model_dump(exclude_none=True) for d in deps],
         },
     )
 

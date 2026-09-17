@@ -1522,7 +1522,8 @@ class TestDeleteUnifiedRoute:
         deps = {d["entity"]: d for d in body["dependencies"]}
         assert deps["visits"]["count"] == 1
         assert deps["visits"]["allowed_actions"] == ["cascade"]
-        assert deps["visits"]["cascade_preview"] is None
+        # rev8: optional-null fields are OMITTED (exclude_none), not null.
+        assert "cascade_preview" not in deps["visits"]
         assert deps["payments"]["count"] == 1
         assert deps["payments"]["allowed_actions"] == ["cascade"]
         assert deps["record_tags"]["count"] == 1
@@ -1843,9 +1844,10 @@ class TestDependencyItemsIn409Tree:
         deps = {d["entity"]: d for d in resp.json()["dependencies"]}
         assert deps["visits"]["count"] == 2 == len(deps["visits"]["items"])
         assert deps["visits"]["allowed_actions"] == ["cascade"]
-        assert deps["visits"]["cascade_preview"] is None
+        # rev8: optional-null fields are OMITTED (exclude_none), not null.
+        assert "cascade_preview" not in deps["visits"]
         assert deps["payments"]["count"] == 1 == len(deps["payments"]["items"])
-        assert deps["payments"]["cascade_preview"] is None
+        assert "cascade_preview" not in deps["payments"]
 
     def test_dry_run_409_record_tags_items(
         self, api_client, create_record
@@ -1887,8 +1889,16 @@ class TestDependencyItemsIn409Tree:
             {"id": payment["id"], "label": "1000, card"},
         ]
 
-    def test_client_409_tree_has_no_items(self, api_client, create_record) -> None:
-        """(г) Other entities: the Client 409 tree stays without items."""
+    def test_client_409_tree_has_no_items_and_explicit_auto_false(
+        self, api_client, create_record
+    ) -> None:
+        """(г) Other entities: the Client 409 tree stays without items.
+
+        rev8: ``items`` is OMITTED (never serialized as ``null``) — the
+        client-side absence filter keys on the missing field, not on a
+        null value. Non-record nodes still carry ``"auto": false``
+        explicitly (bool False survives ``exclude_none``).
+        """
         record = create_record()
         client_id = record["client_id"]
 
@@ -1898,4 +1908,80 @@ class TestDependencyItemsIn409Tree:
         deps = resp.json()["dependencies"]
         assert deps, "client with a record must have deps"
         for dep in deps:
-            assert dep.get("items") is None, dep["entity"]
+            assert "items" not in dep, dep["entity"]
+            assert dep["auto"] is False, dep["entity"]
+
+
+class TestDependencyTreeAutoFlags:
+    """Spec rev8 addendum (#285): ``DependencyNode.auto`` in the 409 tree.
+
+    ``auto`` marks server-resolved deps (record_tags — the join rows the
+    record delete sweeps unconditionally) so the CLIENT filters them by
+    field instead of hardcoding entity names (DeleteDialog.tsx used to
+    hardcode). The flag mirrors ``FKDependency.auto`` from FK_MATRIX —
+    no entity name is hardcoded in the node-building code.
+
+    Serialization invariants (``model_dump(exclude_none=True)``):
+      * ``auto`` is ALWAYS present in JSON — ``bool`` is never None, so
+        ``False`` survives ``exclude_none`` (record nodes: visits/
+        payments/record_tags → false/false/true; other entities: false).
+      * optional-None fields (``message`` / ``cascade_preview`` /
+        ``items``) are OMITTED, not null — other entities' 409 no longer
+        carry ``"items": null``.
+      * non-optional fields (entity/relation/count/allowed_actions) are
+        unaffected by ``exclude_none``.
+    """
+
+    def test_dry_run_409_record_nodes_carry_auto_flags(
+        self, api_client, create_record
+    ) -> None:
+        """(а) dry-run 409: record_tags auto=true; visits/payments auto=false."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        # record_tags is the auto-resolved join sweep → true.
+        assert deps["record_tags"]["auto"] is True
+        # User-choice deps → false, but EXPLICITLY present (bool not None).
+        assert deps["visits"]["auto"] is False
+        assert deps["payments"]["auto"] is False
+        # items still serialize fully on record nodes (non-None → kept).
+        assert deps["visits"]["items"] and deps["record_tags"]["items"]
+        # Optional-None fields are omitted, not null (record nodes carry
+        # neither cascade_preview nor message).
+        assert "cascade_preview" not in deps["visits"]
+        assert "message" not in deps["visits"]
+
+    def test_stale_dependencies_409_nodes_carry_auto_flags(
+        self, api_client, create_record
+    ) -> None:
+        """(г) stale_dependencies 409: same invariants as the dry-run tree."""
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "card",
+        })
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", json={"expected": {}}
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["payments"]["auto"] is False
+        assert deps["payments"]["items"], "payments items serialize in stale tree too"
+        assert "cascade_preview" not in deps["payments"]
+        assert "message" not in deps["payments"]

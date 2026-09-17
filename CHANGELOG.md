@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **GH #242 — Копирование прошлой недели расписания** — branch `feat/242-copy-last-week`
-  (9 commits: `aef08be..e1b001e`; спека `docs/specs/2026-09-17-copy-last-week-design.md`):
+  (10 commits: `aef08be..851422a`, base `80aa34f`; спека `docs/specs/2026-09-17-copy-last-week-design.md`):
   - **Backend:** атомарный `POST /api/v1/activities/copy-week` (один `@transactional`, прямые ORM-вставки):
     source = прошлая неделя, target = целевая (`week_start` — понедельник, иначе 422 `COPY_WEEK_START_NOT_MONDAY`);
     merge-дедуп по ключу (мастер, услуга, старт+7д, длительность — локация/capacity вне ключа) против
@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     8/8 (чистая копия на те же слоты; повтор → «Всё уже есть»; merge в частично занятую неделю;
     приватные не копируются; архивная локация; ремап архивного мастера по каноническому порядку борда;
     снятая галка локации с явным списком; пустая прошлая неделя).
+  - Plan: `docs/plans/2026-09-17-copy-last-week-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-17-copy-last-week-242.md`
 
 ### Changed
 - **GH #257 — Единая модель посетителей: аноним = визит с `visitor_id = NULL`** — branch `feat/257-anonymous-visits-unified` (18 commits: `88059f4..fe73c26`, base `0ec854d`; план T1–T11):

@@ -33,7 +33,7 @@
 - **S4. Теги в услугах.** В карточке услуги теги отображаются; пикер тегов фильтрует по названию тега. → `frontend/admin/e2e/combobox-dictionaries.spec.ts`.
 - **S5. Фото по тегам.** Фильтр фото по тегам и чипы в модалке показывают названия тегов. → `frontend/admin/e2e/photos-crud.spec.ts`.
 - **S6. Расписание по локациям.** Фильтр расписания по локациям работает, занятия отображают локацию. → `frontend/admin/e2e/schedule-filters.spec.ts`.
-- **S7. Web-бронирование.** Фильтры web по локациям и тегам рендерят названия. **Гейт — юнит-тесты web:** `frontend/web/app/__tests__/LocationFilter.test.tsx`, `frontend/web/app/__tests__/page.test.tsx`, `frontend/web/app/hooks/__tests__/useSchedule.test.tsx` — тесты ассертят `title`/текст label'а на рендере, а не `.name`. Уточнение по факту панели: web e2e в репо **существует** (`frontend/web/playwright.config.ts:4` → `tests/*.spec.ts`), но **не подключён** к прогонам (нет `test:e2e`-скрипта в `frontend/web/package.json`, нет в root `package.json`) — его подключение вне скоупа (§4).
+- **S7. Web-бронирование.** Фильтры web по локациям и тегам рендерят названия. **Гейт — юнит-тесты web (существующие):** `frontend/web/app/__tests__/page.test.tsx`, `frontend/web/app/hooks/__tests__/useSchedule.test.tsx`, `frontend/web/app/lib/api/__tests__/locations.test.ts`, маппер-тесты `lib/mappers/__tests__/*` — тесты ассертят `title`/текст label'а на рендере, а не `.name` (файла `__tests__/LocationFilter.test.tsx` в дереве нет — поправлено ревью плана). Уточнение по факту панели: web e2e в репо **существует** (`frontend/web/playwright.config.ts:4` → `tests/*.spec.ts`), но **не подключён** к прогонам (нет `test:e2e`-скрипта в `frontend/web/package.json`, нет в root `package.json`) — его подключение вне скоупа (§4).
 
 ## 3. Изменения по слоям
 
@@ -92,7 +92,7 @@
 - **ORM-конструкторы** (`Location(name=…)` — 21 хит в 7 файлах; `Tag(tag=…)`): `test_models.py` (5× Location + 6× Tag), `tests/services/test_staff_service.py` (3×), `tests/services/test_archive_service.py`, `tests/services/test_delete_cascades.py`, `domain/test_deletion.py`, `test_repository_list.py`, `test_location_short_title.py:29` (`LocationBase(name=...)`).
 - **API-payload-сайты** (другая форма правки — тела запросов): `test_api_locations.py` (хелперы `create_location(name=…)`), `test_api_tags.py` (`create_tag(tag=…)`).
 - **Общий контрактный конфиг:** `tests/generic_contract.py` — `:237-260` (Location: `create_data={"name": …}`, `not_null_field="name"`), `:395-418` (Tag: `create_data={"tag": …}`, `not_null_field="tag"`, `unique_row_field="tag"`).
-- **JSON-фикстуры:** `backend/tests/fixtures/locations.json` (ключи `name` → `title`) + соседние tag-фикстуры; постятся в API через `tests/fixtures/seed.py` (:75-84) — под новым полем иначе 422.
+- **JSON-фикстуры:** `backend/tests/fixtures/locations.json` (ключи `name` → `title`), постится в API через `tests/fixtures/seed.py` (:75-84) — под новым полем иначе 422. tag-JSON-фикстур в fixtures нет — теги конструируются инлайн в `test_models.py` и через API (поправлено ревью плана).
 
 Поведение тестов не меняется — только имена полей (см. §5.5 для единственного нового теста).
 
@@ -121,7 +121,7 @@
 | Mappers | `lib/mappers/to-location-vm.ts:7` (`name: raw.name`), `lib/mappers/buildSchedule.ts` (`buildTagSet(serviceTags: { tag: string }[])` :30-40, вызов с `service.tags` :93, `locationName: location.name` :85) |
 | API-заглушки | `lib/api/locations.ts` — `MOCK_LOCATIONS` (4× `name`), переименовывается **под канон** (это web-заглушка, runtime-связи с backend-seed нет — §4) |
 | Страница/оверлеи | `app/page.tsx` (:28, :35, :50, :66, :102), `ActivityDetail.tsx`, `BookingPrivateOverlay.tsx`, `BookingActivityOverlay.tsx`, `Hero.tsx` |
-| Тесты | `__tests__/LocationFilter.test.tsx`, `__tests__/page.test.tsx`, `hooks/__tests__/useSchedule.test.tsx` (фикстура `tag: 'взрослым'`), `lib/mappers/__tests__/*` |
+| Тесты | `lib/api/__tests__/locations.test.ts` (`:20`, потребляет `LocationDTO`), `__tests__/page.test.tsx`, `hooks/__tests__/useSchedule.test.tsx` (фикстура `tag: 'взрослым'`), `lib/mappers/__tests__/*` (гейта `__tests__/LocationFilter.test.tsx` не существует — поправлено ревью плана) |
 
 Правило: слои, зеркалящие API-поле (dto → view → mappers → ui), переименовываются до конца (`title`); web-локальные типы, не являющиеся полями сущностей (см. §4), не трогаются.
 
@@ -168,3 +168,4 @@
 - **rev1** — исходная (G1a-решения юзера; слои §3; приёмка).
 - **rev2** (17.09) — панель G1b 6/6: вплетены 3 BLOCKER (рецепт миграции #266 с naming-конвенцией и post-check; record.py как источник `location_name`; SQLAdmin setup.py), 4 MAJOR (тесты/фикстуры/generic_contract — grep-обход в плане; web-инвентарь до конца dto→view→mappers; S7 переформулирован — web e2e существует, не подключён; e2e-фабрика factories.ts) и MINOR'ы (whitelist :9-13, якоря, критерий базлайнов, атрибутный grep-предикат, no-downgrade как отклонение, domain-rules whitelists). Решения юзера: состав принят целиком; дельта-ре-проверка completeness + feasibility назначена.
 - **rev3** (17.09) — дельта-ре-проверка: feasibility PASSED_WITH_CONCERNS (7/7 ревизионных PASS; план-уровень: форма PRAGMA-вызова и порядок drop→rename→create) и completeness PASSED_WITH_CONCERNS (8/8 PASS; 4 текстовых MINOR). Все 6 уточнений вплетены (post-check форма, порядок блоков, S7 assert-форма, MOCK_LOCATIONS «под канон», api-client:422 в исключениях §5.2, search-модуль без ссылок на сущности). Новый ре-диспетч не требуется — правки суть собственные формулировки ревьюеров.
+- **rev3-поправка** (17.09, ревью плана G2, APPROVED без BLOCKER/MAJOR): S7-гейт переписан на фактически существующие web-тесты (`__tests__/LocationFilter.test.tsx` в дереве нет); в §3.8 добавлен `lib/api/__tests__/locations.test.ts`; из §3.5 убрана несуществующая «соседняя tag-фикстура». Поправка едет в коммит плана (G2).

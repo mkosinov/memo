@@ -5,7 +5,7 @@ import {
   getFirstActivity,
   phoneMaskDisplay,
 } from './fixtures/helpers';
-import { createTestClient, cleanup, cleanupRecord } from './fixtures/factories';
+import { createTestClient, createTestVisitor, cleanup, cleanupRecord } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 import {
   openRecordTab,
@@ -144,6 +144,118 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     } finally {
       if (recordId) await cleanupRecord(request, recordId);
       if (clientRow?.id) await cleanup(request, `/api/v1/clients/${String(clientRow.id)}`);
+    }
+  });
+
+  // ── US2: EXISTING client — pick the saved client via the phone typeahead, ─
+  // enter their saved visitor's name in a row + «Мест» = 1 tail → anonymous.
+  test('US2: existing client — saved visitor entered in a row + 1-seat tail saved as anonymous', async ({
+    page,
+    request,
+  }) => {
+    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // Unique phone — the typeahead searches by national-digit suffix.
+    const testPhone = `+7999${String(Date.now()).slice(-7)}`;
+    const client = (await createTestClient(request, {
+      name: `US2 Клиент ${uid}`,
+      phone: testPhone,
+    })) as IdRef;
+    const savedVisitor = (await createTestVisitor(request, client.id, {
+      name: `US2 Постоянный ${uid}`,
+    })) as { id: string; name: string };
+    let recordId = '';
+
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openAddTab(page);
+
+      // Pick the SAVED client (bind-by-id, GH #221): type the phone, the
+      // typeahead suggests «Имя · телефон», click it → name freezes read-only.
+      await page.locator('[data-testid="input-phone"]').fill(testPhone);
+      const suggestion = page
+        .getByRole('option')
+        .filter({ hasText: `US2 Клиент ${uid}` });
+      await expect(suggestion).toBeVisible({ timeout: 10_000 });
+      await suggestion.click();
+      await expect(page.locator('[data-testid="input-client-name"]')).toHaveValue(
+        `US2 Клиент ${uid}`,
+      );
+
+      // One named row with the saved visitor's name + «Мест» = 1 → the tail
+      // (1 unfilled seat) must be saved as an anonymous visit.
+      await page
+        .locator('[data-testid="new-booking-tab"]')
+        .locator('button:has-text("Добавить посетителя")')
+        .click();
+      const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
+      await visitorRow.locator('input').first().fill(savedVisitor.name);
+      await page.locator('[data-testid="input-seats"]').fill('1');
+
+      await page.locator('[data-testid="btn-create-record"]').click();
+      await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
+
+      // Locate the record for the (pre-existing) client via DB poll.
+      await expect.poll(async () => {
+        const row = queryDBRow(
+          `SELECT id FROM records WHERE client_id='${client.id}'`,
+        );
+        recordId = row ? String(row.id) : '';
+        return recordId !== '';
+      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
+
+      // VERIFY UI — the record card: 2 rows — the saved visitor's named row
+      // and one «Аноним» tail row.
+      const tab = page.locator(`[data-testid="tab-client-${recordId}"]`);
+      await expect(tab).toBeVisible({ timeout: 10_000 });
+      await tab.click();
+      await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible({
+        timeout: 10_000,
+      });
+
+      const savedRows = page.locator(
+        '[data-testid^="visit-row-"]:not([data-testid="visit-row-new"]):not([data-testid$="-delete"])',
+      );
+      await expect(savedRows).toHaveCount(2, { timeout: 10_000 });
+      const nameInputs = savedRows.locator('input:not([type="number"])');
+      await expect(nameInputs).toHaveCount(2);
+      const nameValues: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        nameValues.push(await nameInputs.nth(i).inputValue());
+      }
+      expect(nameValues).toContain(savedVisitor.name);
+      expect(nameValues.filter((v) => v === '')).toHaveLength(1);
+      // The anonymous tail row (empty name cell) shows the «Аноним» placeholder.
+      for (let i = 0; i < 2; i++) {
+        const input = nameInputs.nth(i);
+        if ((await input.inputValue()) === '') {
+          await expect(input).toHaveAttribute('placeholder', 'Аноним');
+        }
+      }
+
+      // Header seats: «Мест: 2» (named + anonymous tail).
+      await expect(page.locator('[data-testid="record-summary"]')).toContainText(
+        'Мест: 2',
+      );
+
+      // VERIFY API — 1 named visit (bound to a visitor with the saved
+      // visitor's name) + 1 anonymous visit (visitor_id = null).
+      const recordJson = await fetchRecord(request, recordId);
+      expect(recordJson.visits).toHaveLength(2);
+      const namedVisits = recordJson.visits.filter((v) => v.visitor_id != null);
+      const anonymousVisits = recordJson.visits.filter((v) => v.visitor_id == null);
+      expect(namedVisits).toHaveLength(1);
+      expect(anonymousVisits).toHaveLength(1);
+      const visitorResp = await request.get(
+        `${BACKEND}/api/v1/visitors/${namedVisits[0].visitor_id}`,
+      );
+      expect(visitorResp.ok()).toBeTruthy();
+      expect(((await visitorResp.json()) as { name: string }).name).toBe(
+        savedVisitor.name,
+      );
+    } finally {
+      if (recordId) await cleanupRecord(request, recordId);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
 

@@ -319,9 +319,11 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
              every requested location id must exist → 422 COPY_WEEK_INVALID_LOCATION.
           2. Windows: source ``[week_start-7 .. week_start-1]``, target
              ``[week_start .. week_start+6]`` — whole days via ``day_range()``.
-          3. Source rows in ONE internal query (left-join masters/staff so an
-             orphaned master extension is «archived», plus locations for the
-             archive flag); target keys = ``(master, service, start, duration)``.
+          3. Source rows in ONE internal query (left-join masters so an
+              orphaned master extension is «archived», plus locations for the
+              archive flag); target keys = ``(master, service, start, duration)``.
+              Board ordering for remap comes from the separate staff board
+              query, so staff is NOT joined here.
           4. Filters (spec §5.1): ``is_private`` → skipped_filtered; archived
              location → skipped_filtered; location not in the request list →
              silently out (the user unchecked it — no counter, spec §4).
@@ -382,7 +384,7 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         )
 
         # ── 3. One internal source query + target dedup-key set ───────────
-        # Left join masters/staff: a missing extension row = «archived» master
+        # Left join masters: a missing extension row = «archived» master
         # (spec §5.3) and must reach the remap step, not vanish in the join.
         source_rows = (
             await db_session.execute(

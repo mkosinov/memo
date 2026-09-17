@@ -9,7 +9,10 @@ import {
 
 // Capture every call to useUI().showToast so tests can drive the undo button
 // without depending on the real ToastContainer.
-const showToastMock = vi.fn<(message: string, kindOrUndo?: unknown, undo?: unknown) => void>();
+// #94: arity matches UIContext.showToast — (message, kindOrUndo, undoOrCountdownMs, countdownMs).
+const showToastMock = vi.fn<
+  (message: string, kindOrUndo?: unknown, undoOrCountdownMs?: unknown, countdownMs?: number) => void
+>();
 
 vi.mock('../contexts/UIContext', async () => {
   const actual = await vi.importActual<typeof import('../contexts/UIContext')>('../contexts/UIContext');
@@ -66,7 +69,7 @@ describe('PendingActionsContext', () => {
     expect(typeof api.enqueuePendingAction).toBe('function');
   });
 
-  it('shows a toast with the action message and an undo callback', () => {
+  it('shows a toast with the action message, undo callback, and the countdown window', () => {
     const { api } = renderProvider();
     const undo = vi.fn();
     const commit = vi.fn().mockResolvedValue(undefined);
@@ -82,10 +85,16 @@ describe('PendingActionsContext', () => {
       });
     });
 
+    // #94: enqueuePendingAction hands the undo window (delayMs) to the toast as
+    // `countdownMs` (4th arg). 3rd arg stays undefined — the kind slot is unused
+    // on the kindless-undo path. Both consumers (visits/payments) use 5000.
     expect(showToastMock).toHaveBeenCalledTimes(1);
-    const [message, secondArg] = showToastMock.mock.calls[0];
-    expect(message).toBe('Удалено. Отменить');
-    expect(typeof secondArg).toBe('function');
+    expect(showToastMock).toHaveBeenCalledWith(
+      'Удалено. Отменить',
+      expect.any(Function),
+      undefined,
+      5000,
+    );
   });
 
   it('calls commit after the delay has elapsed (no undo)', async () => {

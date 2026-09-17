@@ -16,12 +16,16 @@ function renderWithToasts(messages: string[], undoCallbacks?: (() => void)[]) {
   return renderWithToastSpecs(messages.map((message) => ({ message, kind: 'info' as ToastKind })), undoCallbacks);
 }
 
-function renderWithToastSpecs(specs: { message: string; kind: ToastKind }[], undoCallbacks?: (() => void)[]) {
+function renderWithToastSpecs(
+  specs: { message: string; kind: ToastKind }[],
+  undoCallbacks?: (() => void)[],
+  countdownMs?: number
+) {
   function TestHarness() {
     const { showToast } = useUI();
     React.useEffect(() => {
       specs.forEach((spec, i) => {
-        showToast(spec.message, spec.kind, undoCallbacks?.[i]);
+        showToast(spec.message, spec.kind, undoCallbacks?.[i], countdownMs);
       });
     }, []);
     return <ToastContainer />;
@@ -118,5 +122,26 @@ describe('ToastContainer', () => {
     expect(spinner).not.toBeNull();
     expect(spinner).toHaveClass('animate-spin');
     expect(spinner).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+describe('ToastContainer countdown ring (#94)', () => {
+  it('renders countdown ring and "Отменить" for toast with countdownMs', () => {
+    renderWithToastSpecs([{ message: 'Событие удалено', kind: 'info' }], [() => {}], 5000);
+    expect(screen.getByTestId('toast-countdown')).toBeInTheDocument();
+    expect(screen.getByText('Отменить')).toBeInTheDocument();
+    expect(screen.getByText('Событие удалено')).toBeInTheDocument();
+  });
+
+  it('does not render countdown ring for undo toast without countdownMs', () => {
+    renderWithToastSpecs([{ message: 'Событие удалено', kind: 'info' }], [() => {}]);
+    expect(screen.queryByTestId('toast-countdown')).not.toBeInTheDocument();
+    expect(screen.getByText('Отменить')).toBeInTheDocument();
+  });
+
+  it('renders neither countdown ring nor "Отменить" for non-undo toast', () => {
+    renderWithToastSpecs([{ message: 'Просто сообщение', kind: 'info' }]);
+    expect(screen.queryByTestId('toast-countdown')).not.toBeInTheDocument();
+    expect(screen.queryByText('Отменить')).not.toBeInTheDocument();
   });
 });

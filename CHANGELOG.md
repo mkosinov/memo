@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plan: `docs/plans/2026-09-16-booking-record-naming-alignment-plan.md`
   - Status: `docs/status/2026-09-17-booking-record-naming-103.md`
 - fix(api): числовые фильтры статистики /clients (records/paid/missed) отвергают отрицательные значения — `ge=0` → 422 (GH #149)
+- **GH #143:** lint-гейт admin честный — `eslint .` по всему проекту + `--max-warnings 38` (порог = фактический счёт на 17.09; любой новый warning роняет CI; `ignorePatterns`: `.next/`, `e2e/`, `__tests__/`), иконки Menubar/UserMenu переведены на lucide-react (локальные SVG/ICON_MAP удалены, габариты и раскладка без изменений — visual-базлайны без диффов). Follow-up: #300 (web-линт), #301 (спуск порога до 0).
 
 ## [Unreleased] — 2026-09-16
 

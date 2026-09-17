@@ -24,44 +24,60 @@ test.describe('Wave 6 — Record status derived from visits', () => {
   // ──────────────────────────────────────────────────
   test('Scenario 1: edit visit status updates record badge', async ({
     page,
+    request,
   }) => {
-    await page.goto('/schedule');
-    await waitForScheduleReady(page);
-    await openModal(page);
+    // Own factory record (GH #252): the record-status coarse handler
+    // REWRITES the record's visits (delete + recreate) — on a seed record
+    // that permanently deletes seed visits v1/v2 (the reset never restores
+    // seed rows) and poisons every later spec incl. visual baselines
+    // (CI run 35179631302 root cause).
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request);
+    const record = await createTestRecord(request, activity.id, client.id);
 
-    const clientTabs = page.locator('[data-testid^="tab-client-"]');
-    await clientTabs.first().click();
-    await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
+    try {
+      await page.goto('/schedule');
+      await waitForScheduleReady(page);
+      await openModal(page, { recordId: record.id });
 
-    // Find the status picker inside the client tab (testidPrefix="record-status" in RecordSummary)
-    const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
-    await expect(statusPicker).toBeVisible();
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await clientTab.click();
+      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible({ timeout: 10_000 });
 
-    // The status picker is either a native <select> or a StatusPicker trigger
-    // (status enums stay on static pickers — NOT part of the Combobox migration, GH #214 §9)
-    // Try to find a select element or a button trigger
-    const nativeSelect = statusPicker.locator('select');
-    const hasNativeSelect = (await nativeSelect.count()) > 0;
+      // Find the status picker inside the client tab (testidPrefix="record-status" in RecordSummary)
+      const statusPicker = page.locator('[data-testid="client-tab"] [data-testid="record-status"]');
+      await expect(statusPicker).toBeVisible();
 
-    if (hasNativeSelect) {
-      // Select by option label
-      await nativeSelect.selectOption({ label: 'Посетил' });
-    } else {
-      // Click the button trigger
-      const trigger = statusPicker.locator('button').first();
-      await trigger.click();
-      // Click the "Посетил" option in the dropdown
-      await page.locator('button, [role="option"]').filter({ hasText: 'Посетил' }).first().click();
+      // The status picker is either a native <select> or a StatusPicker trigger
+      // (status enums stay on static pickers — NOT part of the Combobox migration, GH #214 §9)
+      // Try to find a select element or a button trigger
+      const nativeSelect = statusPicker.locator('select');
+      const hasNativeSelect = (await nativeSelect.count()) > 0;
+
+      if (hasNativeSelect) {
+        // Select by option label
+        await nativeSelect.selectOption({ label: 'Посетил' });
+      } else {
+        // Click the button trigger
+        const trigger = statusPicker.locator('button').first();
+        await trigger.click();
+        // Click the "Посетил" option in the dropdown
+        await page.locator('button, [role="option"]').filter({ hasText: 'Посетил' }).first().click();
+      }
+
+      // Verify by checking that the visitor row's status badge updated
+      // The icon-pending should now show as a different status
+      await page.waitForTimeout(1000);
+
+      // Verify the record still exists — the client tab should still be visible
+      // with the visits table (testid="record-visits-table")
+      const visitsTable = page.locator('[data-testid="record-visits-table"]');
+      await expect(visitsTable).toBeVisible();
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
-
-    // Verify by checking that the visitor row's status badge updated
-    // The icon-pending should now show as a different status
-    await page.waitForTimeout(1000);
-
-    // Verify the record still exists — the client tab should still be visible
-    // with the visits table (testid="record-visits-table")
-    const visitsTable = page.locator('[data-testid="record-visits-table"]');
-    await expect(visitsTable).toBeVisible();
   });
 
   // ──────────────────────────────────────────────────

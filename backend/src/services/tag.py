@@ -16,7 +16,7 @@ class TagService(GenericService[TagCreate, TagCreate, TagResponse]):
 
     # GH #212 search matrix (spec §5.2): substring on ``tag``, exact id
     # equality when q parses as a full UUID (deep-link prerequisite #216).
-    search_fields = [SearchField(Tag.tag), SearchField(Tag.id, kind="uuid")]
+    search_fields = [SearchField(Tag.title), SearchField(Tag.id, kind="uuid")]
 
 
 @lru_cache

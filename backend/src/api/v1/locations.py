@@ -48,7 +48,7 @@ _READ_GUARD = [Depends(require_permission("locations:read"))]
 # Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
 # ``archived`` → is_active (asc = is_active ASC = archived-first).
 _LOCATION_SORT_MAP: dict[str, list] = {
-    "name": [Location.name],
+    "name": [Location.title],
     "short_title": [Location.short_title],
     "capacity": [Location.capacity],
     "address": [Location.address],

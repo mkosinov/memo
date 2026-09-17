@@ -38,7 +38,7 @@ _READ_GUARD = [Depends(require_permission("tags:read"))]
 # Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
 # Tags have a single sortable column: ``tag``.
 _TAG_SORT_MAP: dict[str, list] = {
-    "tag": [Tag.tag],
+    "tag": [Tag.title],
 }
 
 

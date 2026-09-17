@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class Location(AbstractModelSoftDelete):
     __tablename__ = "locations"
 
-    name: Mapped[str] = mapped_column(String(100))
+    title: Mapped[str] = mapped_column(String(100))
     short_title: Mapped[str | None] = mapped_column(String(50), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

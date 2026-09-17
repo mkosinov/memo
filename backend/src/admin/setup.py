@@ -174,8 +174,8 @@ class UserAdmin(ModelView, model=User):
 
 
 class LocationAdmin(ModelView, model=Location):
-    column_list: ClassVar[list[Column]] = [Location.id, Location.name, Location.capacity, Location.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Location.name]
+    column_list: ClassVar[list[Column]] = [Location.id, Location.title, Location.capacity, Location.is_active]
+    column_searchable_list: ClassVar[list[Column]] = [Location.title]
     name = "Location"
     name_plural = "Locations"
     icon = "fa-solid fa-location-dot"
@@ -197,8 +197,8 @@ class TariffAdmin(ModelView, model=Tariff):
 
 
 class TagAdmin(ModelView, model=Tag):
-    column_list: ClassVar[list[Column]] = [Tag.id, Tag.tag]
-    column_searchable_list: ClassVar[list[Column]] = [Tag.tag]
+    column_list: ClassVar[list[Column]] = [Tag.id, Tag.title]
+    column_searchable_list: ClassVar[list[Column]] = [Tag.title]
     name = "Tag"
     name_plural = "Tags"
     icon = "fa-solid fa-hashtag"

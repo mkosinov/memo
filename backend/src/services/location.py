@@ -20,7 +20,7 @@ class LocationService(ArchiveService[LocationCreate, LocationUpdate, LocationRes
     # image URL finds the location, partial URLs never match (spec §5.2
     # note: no ilike on URL columns).
     search_fields = [
-        SearchField(Location.name),
+        SearchField(Location.title),
         SearchField(Location.short_title),
         SearchField(Location.address),
         SearchField(Location.description),

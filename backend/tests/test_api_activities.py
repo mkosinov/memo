@@ -361,6 +361,204 @@ class TestCopyWeekContracts:
         )
 
 
+# --- Copy-week route (GH #242 Task 3, spec §4) --------------------------------
+
+#: TARGET week Monday — fixed so source/target windows are deterministic.
+TARGET_MONDAY = date(2026, 9, 21)
+
+
+def _copy_week_payload(
+    week_start: date = TARGET_MONDAY, locations: list[str] | None = None
+) -> dict:
+    """Valid copy-week request body (locations=[...] required by schema)."""
+    if locations is None:
+        locations = ["placeholder"]
+    return {"week_start": week_start.isoformat(), "locations": locations}
+
+
+def _create_activity_at(api_client, prereqs: dict, start: datetime, **overrides) -> dict:
+    """POST /api/v1/activities pinned to ``start`` (naive local datetime)."""
+    payload = _activity_payload(prereqs, start=start)
+    payload.update(overrides)
+    resp = api_client.post("/api/v1/activities", json=payload)
+    assert resp.status_code == 201, f"Seed activity failed: {resp.text}"
+    return resp.json()
+
+
+def _insert_activity_row(
+    activity_id: str, prereqs: dict, start: datetime
+) -> None:
+    """Direct-INSERT an activities row (fast path for the 100-row cap test)."""
+    from tests.conftest import query_db_params
+
+    query_db_params(
+        "INSERT INTO activities (id, master_id, service_id, location_id, start, "
+        "duration, capacity, is_private, created_at, updated_at) "
+        "VALUES (:id, :master_id, :service_id, :location_id, :start, "
+        "90, 10, 0, datetime('now'), datetime('now'))",
+        {
+            "id": activity_id,
+            "master_id": prereqs["master_id"],
+            "service_id": prereqs["service_id"],
+            "location_id": prereqs["location_id"],
+            "start": start.strftime("%Y-%m-%d %H:%M:%S.%f"),
+        },
+    )
+
+
+class TestCopyWeekRoute:
+    """POST /api/v1/activities/copy-week — guards, validation, merge (GH #242)."""
+
+    def test_copy_week_requires_auth(self, app) -> None:
+        """Anonymous → 401 AUTH_UNAUTHORIZED (activities:write guard)."""
+        from fastapi.testclient import TestClient
+
+        anon = TestClient(app)
+        resp = anon.post("/api/v1/activities/copy-week", json=_copy_week_payload())
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+    def test_copy_week_forbidden_for_master(self, login_as) -> None:
+        """Master role lacks activities:write → 403 (guard matrix #247)."""
+        from src.auth.passwords import hash_password
+        from tests.conftest import insert_user  # noqa: I001 — ruff grouping
+
+        phone = f"+7999{uuid.uuid4().hex[:7]}"
+        insert_user(phone, hash_password("master-pass"), role="master")
+        master_client = login_as(phone, "master-pass")
+
+        resp = master_client.post(
+            "/api/v1/activities/copy-week", json=_copy_week_payload()
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
+
+    def test_copy_week_rejects_cross_site(self, api_client) -> None:
+        """sec-fetch-site: cross-site → 403 AUTH_FORBIDDEN (CSRF line 2)."""
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(),
+            headers={"sec-fetch-site": "cross-site"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
+
+    def test_copy_week_non_monday_422(self, api_client) -> None:
+        """week_start must be a Monday → 422 COPY_WEEK_START_NOT_MONDAY."""
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(week_start=date(2026, 9, 22)),  # Tuesday
+        )
+        assert resp.status_code == 422, resp.text
+        assert (
+            resp.json()["detail"]["code"] == ErrorCode.COPY_WEEK_START_NOT_MONDAY.value
+        )
+
+    def test_copy_week_empty_locations_422(self, api_client) -> None:
+        """locations=[] → 422 VALIDATION_ERROR (schema min_length=1)."""
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(locations=[]),
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.VALIDATION_ERROR.value
+
+    def test_copy_week_unknown_location_422(self, api_client) -> None:
+        """Unknown location id → 422 COPY_WEEK_INVALID_LOCATION (fail-fast)."""
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(locations=["nonexistent-location-id"]),
+        )
+        assert resp.status_code == 422, resp.text
+        assert (
+            resp.json()["detail"]["code"] == ErrorCode.COPY_WEEK_INVALID_LOCATION.value
+        )
+
+    def test_copy_week_cap_422(self, api_client, create_location) -> None:
+        """More than 100 rows to insert → 422 COPY_WEEK_SOURCE_TOO_LARGE (D3)."""
+        prereqs = _create_prerequisites(api_client)
+        for i in range(101):  # distinct starts → no dedup → 101 candidates
+            _insert_activity_row(
+                str(uuid.uuid4()),
+                prereqs,
+                datetime(2026, 9, 14, 8, 0) + timedelta(minutes=i),
+            )
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(locations=[prereqs["location_id"]]),
+        )
+        assert resp.status_code == 422, resp.text
+        assert (
+            resp.json()["detail"]["code"] == ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE.value
+        )
+
+    def test_copy_week_merge_end_to_end(self, api_client) -> None:
+        """Partially occupied target: copied + skipped counters match (spec §4).
+
+        Source week: A (plain) + B (duplicate in target) + C (private).
+        """
+        prereqs = _create_prerequisites(api_client)
+
+        # Source week (Mon 14 .. Sun 20 Sep 2026)
+        activity_a = _create_activity_at(
+            api_client, prereqs, datetime(2026, 9, 14, 10, 0)
+        )
+        _create_activity_at(api_client, prereqs, datetime(2026, 9, 15, 11, 0))  # B
+        _create_activity_at(
+            api_client, prereqs, datetime(2026, 9, 16, 12, 0), is_private=True
+        )
+
+        # Target already holds a copy of B (same master/service/start+7d/duration)
+        _create_activity_at(api_client, prereqs, datetime(2026, 9, 22, 11, 0))
+
+        resp = api_client.post(
+            "/api/v1/activities/copy-week",
+            json=_copy_week_payload(locations=[prereqs["location_id"]]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "copied": 1,
+            "skipped_duplicates": 1,
+            "skipped_filtered": 1,
+            "skipped_no_master": 0,
+        }
+
+        # The copied row exists in the target week with shifted start
+        listed = api_client.get(
+            "/api/v1/activities",
+            params={
+                "date_from": "2026-09-21",
+                "date_to": "2026-09-27",
+            },
+        )
+        assert listed.status_code == 200, listed.text
+        items = listed.json()["items"]
+        assert len(items) == 2  # copied A + pre-existing B-clone
+        copied = next(i for i in items if i["start"].startswith("2026-09-21T10:00"))
+        assert copied["master_id"] == activity_a["master_id"]
+        assert copied["service_id"] == activity_a["service_id"]
+        assert copied["duration"] == activity_a["duration"]
+
+    def test_copy_week_repeat_call_copies_zero(self, api_client) -> None:
+        """Re-click with no edits → copied=0, everything is a duplicate (merge)."""
+        prereqs = _create_prerequisites(api_client)
+        _create_activity_at(api_client, prereqs, datetime(2026, 9, 14, 10, 0))
+        payload = _copy_week_payload(locations=[prereqs["location_id"]])
+
+        first = api_client.post("/api/v1/activities/copy-week", json=payload)
+        assert first.status_code == 200, first.text
+        assert first.json()["copied"] == 1
+
+        second = api_client.post("/api/v1/activities/copy-week", json=payload)
+        assert second.status_code == 200, second.text
+        assert second.json() == {
+            "copied": 0,
+            "skipped_duplicates": 1,
+            "skipped_filtered": 0,
+            "skipped_no_master": 0,
+        }
+
+
 import asyncio  # noqa: E402
 
 

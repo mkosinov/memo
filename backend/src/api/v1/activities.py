@@ -12,10 +12,12 @@ from src.auth.scope import ScopeContext, get_optional_scope
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
 from src.schemas.activity import (
+    ActivityCopyWeekRequest,
     ActivityCreate,
     ActivityPatch,
     ActivityResponse,
     ActivityUpdate,
+    CopyWeekResult,
 )
 from src.schemas.common import PaginatedResponse
 from src.schemas.pagination import PaginationParams
@@ -133,6 +135,28 @@ async def create_activity(
     """Create a new activity."""
     activity = await service.create(db_session=session, data=data)
     return await _to_response(service, db_session=session, activity=activity)
+
+
+# GH #242 (spec §4): no conflict with the /{activity_id} routes — there are no
+# other POST-parameterized paths in this file.
+@router.post("/copy-week", response_model=CopyWeekResult, dependencies=_WRITE_GUARD)
+async def copy_week(
+    data: ActivityCopyWeekRequest,
+    service: _ServiceDep,
+    session: SessionDep,
+) -> CopyWeekResult:
+    """Copy the previous week's activities into the target week (GH #242).
+
+    ``week_start`` is the Monday of the TARGET week; ``locations`` is the
+    explicit list of location ids checked in the popup. Validation errors
+    (non-Monday / unknown location / volume cap) raise 422 with the
+    COPY_WEEK_* codes; an empty source copies nothing (200 with zeros).
+    """
+    return await service.copy_week(
+        db_session=session,
+        week_start=data.week_start,
+        locations=data.locations,
+    )
 
 
 @router.put("/{activity_id}", response_model=ActivityResponse, dependencies=_WRITE_GUARD)

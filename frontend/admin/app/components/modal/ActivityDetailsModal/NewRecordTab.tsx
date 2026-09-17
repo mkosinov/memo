@@ -15,18 +15,18 @@ interface NewVisitor {
   tariffId: string;
 }
 
-/** Booking submit payload — disjoint pick/unpicked union, defined once by
+/** Record submit payload — disjoint pick/unpicked union, defined once by
  *  the mutations hook (single source of truth for the save contract). */
-export type NewBookingSubmitData = CreateRecordInput;
+export type NewRecordSubmitData = CreateRecordInput;
 
-interface NewBookingTabProps {
+interface NewRecordTabProps {
   activity: ScheduleAdminDTO;
   serviceTariffs: Tariff[];
-  onSubmit: (data: NewBookingSubmitData) => void;
+  onSubmit: (data: NewRecordSubmitData) => void;
   showToast: (message: string) => void;
 }
 
-export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }: NewBookingTabProps) {
+export function NewRecordTab({ activity, serviceTariffs, onSubmit, showToast }: NewRecordTabProps) {
   const [pickedClient, setPickedClient] = useState<PickedClient | null>(null);
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
@@ -131,7 +131,7 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
   const inputStyle = { borderColor: 'var(--line)' };
 
   return (
-    <div className="space-y-4 p-4" data-testid="new-booking-tab">
+    <div className="space-y-4 p-4" data-testid="new-record-tab">
       {/* Phone — adaptive-mask typeahead (GH #221) */}
       <PhoneInput
         onSearch={searchClients}
@@ -144,11 +144,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
       {/* Name — editable only for an unpicked (new) client; when a client is
           picked it displays the stored name read-only */}
       <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-name">
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-name">
           Имя
         </label>
         <input
-          id="booking-name"
+          id="record-name"
           type="text"
           className={inputClass}
           style={inputStyle}
@@ -161,11 +161,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
 
       {/* Seats */}
       <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-seats">
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-seats">
           Мест
         </label>
         <input
-          id="booking-seats"
+          id="record-seats"
           type="number"
           min={1}
           max={10}
@@ -229,11 +229,11 @@ export function NewBookingTab({ activity, serviceTariffs, onSubmit, showToast }:
 
       {/* Channel — always visible */}
       <div>
-        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="booking-channel">
+        <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="record-channel">
           Канал связи
         </label>
         <select
-          id="booking-channel"
+          id="record-channel"
           className={inputClass}
           style={inputStyle}
           value={channel}

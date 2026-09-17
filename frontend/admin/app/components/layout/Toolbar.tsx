@@ -2,7 +2,9 @@
 
 import React, { useState } from 'react';
 import { useUI } from '@/contexts/UIContext';
+import { useNavigation } from '@/contexts/NavigationContext';
 import { StampPanel } from '@/app/components/stamp/StampPanel';
+import { CopyLastWeekPopover } from '@/app/components/schedule/CopyLastWeekPopover';
 
 // ─── Accordion Section ────────────────────────────────────────────────────
 
@@ -47,15 +49,14 @@ function AccordionSection({ title, children, contentTestId }: AccordionSectionPr
 // ─── Toolbar ────────────────────────────────────────────────────────────
 
 export function Toolbar() {
-  const { rightPanelCollapsed, toggleRightPanel, showToast } = useUI();
+  const { rightPanelCollapsed, toggleRightPanel } = useUI();
+  const { dateFrom } = useNavigation();
+  const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
 
-  const handleCopyLastWeek = () => {
-    // #242: copyLastWeek is now a real mutation (weekStart, locations) — it is
-    // wired to the copy popup (spec §6) that supplies the explicit selection.
-    // Until the popup lands, keep the toast only: firing the mutation here
-    // with an implicit full selection would copy the week without user consent.
-    showToast('Прошлая неделя скопирована');
-  };
+  // week_start = Monday of the VIEWED week (NavigationContext dateFrom); the
+  // popover fetches the source week itself and owns the success/info/error
+  // toasts from the mutation result (spec §6) — the Toolbar shows no toasts.
+  const handleCopyLastWeek = () => setCopyPopoverOpen(prev => !prev);
 
   // If collapsed, don't render panel (toggled via StampFab)
   if (rightPanelCollapsed) {
@@ -63,16 +64,17 @@ export function Toolbar() {
   }
 
   return (
-    <aside
-      data-testid="right-panel"
-      className="fixed right-0 top-0 z-[var(--z-grid-panel)] h-full border-l bg-white transition-all duration-200"
-      style={{
-        width: 'var(--right-w)',
-        borderColor: 'var(--line)',
-        paddingTop: 0,
-        overflow: 'hidden',
-      }}
-    >
+    <>
+      <aside
+        data-testid="right-panel"
+        className="fixed right-0 top-0 z-[var(--z-grid-panel)] h-full border-l bg-white transition-all duration-200"
+        style={{
+          width: 'var(--right-w)',
+          borderColor: 'var(--line)',
+          paddingTop: 0,
+          overflow: 'hidden',
+        }}
+      >
       <div className="h-full overflow-y-auto">
         {/* Header with toggle */}
         <div
@@ -105,9 +107,11 @@ export function Toolbar() {
             </p>
             <button
               onClick={handleCopyLastWeek}
+              data-popover-toggle
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors hover:bg-surface"
               style={{ color: 'var(--ink-mid)' }}
               aria-label="Копировать прошлую неделю"
+              aria-expanded={copyPopoverOpen}
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
@@ -118,5 +122,18 @@ export function Toolbar() {
         </AccordionSection>
       </div>
     </aside>
+
+      {/* #242 spec §6: copy popup lives NEXT TO the Toolbar (not inside the
+          aside) — the aside's z-[--z-grid-panel] stacking context would trap
+          the popover under the z-[--z-topbar] topbar. As a root-context child
+          it keeps its --z-popover-stack layering (same as OverlapPopover).
+          The popover owns the real toasts; the Toolbar shows none. */}
+      {copyPopoverOpen && (
+        <CopyLastWeekPopover
+          weekStart={dateFrom}
+          onClose={() => setCopyPopoverOpen(false)}
+        />
+      )}
+    </>
   );
 }

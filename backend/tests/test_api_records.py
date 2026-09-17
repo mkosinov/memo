@@ -943,19 +943,24 @@ class TestRecordsListSorting:
         asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
         assert asc.index(anon_heavy["id"]) < asc.index(four["id"])  # 2 < 4; raw-seats sort would invert
 
-    def test_sort_guests_counts_active_named_visits(self, api_client, create_record):
-        # #257 review-fix: guests sort counts named AND ACTIVE visits —
-        # cancelled (and missed) named visits don't count, mirroring the
-        # seat-occupancy notion (cancelled/missed free their seats).
+    def test_sort_guests_counts_named_visits_including_cancelled(self, api_client, create_record):
+        # Parity pin with the pre-#257 ``seats - anonym_visits`` semantic:
+        # ALL named visits count as guests regardless of status — a record
+        # whose named visits are ALL cancelled still sorts by its named
+        # count (2), NOT 0. (An active-status filter on the guests
+        # subquery is a possible future change — deliberately NOT
+        # implemented, #257.)
         cancelled_only = create_record(visits=[
             {"name": "А1", "price": 1000, "status": "cancelled"},
             {"name": "А2", "price": 1000, "status": "cancelled"},
-        ])  # 2 named, both cancelled → active named count = 0
-        one_active = create_record(visits=[
+        ])  # 2 named, both cancelled → guests = 2 (named count kept)
+        one_named = create_record(visits=[
             {"name": "Б1", "price": 1000, "status": "waiting"},
-        ])  # 1 active named visit
+        ])  # guests = 1
         asc = self._ids(api_client.get("/api/v1/records", params={"sort_by": "guests", "sort_order": "asc"}))
-        assert asc.index(cancelled_only["id"]) < asc.index(one_active["id"])  # 0 < 1
+        # asc: fewer named visits first — 1 before 2; an active-only filter
+        # would invert this (cancelled-only would drop to 0 and sort first)
+        assert asc.index(one_named["id"]) < asc.index(cancelled_only["id"])  # 1 < 2
 
     def test_sort_guests_desc(self, api_client, create_record):
         one = create_record(visits=[{"name": "А", "price": 1000, "status": "waiting"}])

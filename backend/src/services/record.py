@@ -22,7 +22,7 @@ from src.domain.record_visits import (
     recompute_record_seats,
     recompute_record_status,
 )
-from src.domain.visit_status import ACTIVE_RECORD_STATUSES, VisitStatus
+from src.domain.visit_status import VisitStatus
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -342,19 +342,15 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             (paid_sum > 0, 1),
             else_=2,
         )
-        # Named (non-anonymous) ACTIVE visit count as a correlated subquery —
-        # the list is paginated, so guests-sorting must live in SQL. Under
-        # the unified model (#257) only named visits (visitor_id NOT NULL)
-        # in an active status (waiting/visited — the same occupancy notion
-        # as the capacity guard: cancelled/missed free their seats) count
-        # as "guests".
+        # Named (non-anonymous) visit count as a correlated subquery — the
+        # list is paginated, so guests-sorting must live in SQL. Under the
+        # unified model (#257) this is the exact continuation of the old
+        # ``seats - anonym_visits`` (== live visits count): ALL named visits
+        # count as "guests" regardless of status; anonymous visits
+        # (visitor_id IS NULL) don't.
         named_visits_count = (
             select(func.count()).select_from(Visit)
-            .where(
-                Visit.record_id == Record.id,
-                Visit.visitor_id.is_not(None),
-                Visit.status.in_(ACTIVE_RECORD_STATUSES),
-            )
+            .where(Visit.record_id == Record.id, Visit.visitor_id.is_not(None))
             .correlate(Record).scalar_subquery()
         )
         sort_map: dict[str, list] = {

@@ -114,10 +114,10 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.COLOR_REQUIRED: "Укажите цвет мастера",
     ErrorCode.FILE_TOO_LARGE: "Файл больше 5 МБ",
     ErrorCode.FILE_INVALID_TYPE: "Поддерживаются только JPEG, PNG и WebP",
-    ErrorCode.COPY_WEEK_START_NOT_MONDAY: "Неделя должна начинаться с понедельника",
-    ErrorCode.COPY_WEEK_INVALID_LOCATION: "В списке локаций есть неизвестные локации",
+    ErrorCode.COPY_WEEK_START_NOT_MONDAY: "Неделя должна начинаться с понедельника",  # noqa: RUF001
+    ErrorCode.COPY_WEEK_INVALID_LOCATION: "В списке локаций есть неизвестные локации",  # noqa: RUF001
     ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE: (
-        "В выбранной области более 100 занятий — скопируйте в несколько заходов, "
+        "В выбранной области более 100 занятий — скопируйте в несколько заходов, "  # noqa: RUF001
         "сузив выбор локаций"
     ),
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",

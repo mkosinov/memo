@@ -421,7 +421,7 @@ class TestCopyWeekRoute:
     def test_copy_week_forbidden_for_master(self, login_as) -> None:
         """Master role lacks activities:write → 403 (guard matrix #247)."""
         from src.auth.passwords import hash_password
-        from tests.conftest import insert_user  # noqa: I001 — ruff grouping
+        from tests.conftest import insert_user
 
         phone = f"+7999{uuid.uuid4().hex[:7]}"
         insert_user(phone, hash_password("master-pass"), role="master")

@@ -227,8 +227,10 @@ class TestRecordsCrud:
         assert response.status_code == 404
 
     def test_delete_nonexistent_record_returns_404(self, api_client) -> None:
-        """DELETE /api/records/{fake_id} returns 404."""
-        response = api_client.delete("/api/v1/records/nonexistent-id")
+        """DELETE /api/records/{fake_id} returns 404 (#285: via dry-run probe)."""
+        response = api_client.request(
+            "DELETE", "/api/v1/records/nonexistent-id", params={"dry_run": "true"}
+        )
         assert response.status_code == 404
 
 
@@ -1103,24 +1105,62 @@ def _link_record_tag(api_client, record_id: str, tag_name: str | None = None) ->
     return tag_id
 
 
-class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/records/{id} — unified dry-run (no body) + execute (with body).
+@pytest.fixture
+def sse_subscriber():
+    """Subscribe to the event hub for ONE test; drain/unsubscribe on exit.
 
-    Mirrors the masters/clients deletion suites. Record deps (Addendum 13):
+    Same mechanism as the ``subscriber`` fixture in test_events_emit.py
+    (module-local there); the test drains setup noise before the mutation
+    under check and asserts the post-mutation queue is empty.
+    """
+    from src.events.hub import hub
+
+    q = hub.subscribe()
+    try:
+        yield q
+    finally:
+        hub.unsubscribe(q)
+
+
+def _drain_events(q) -> list:
+    """Collect everything currently sitting in the hub queue."""
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    return events
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/records/{id} — unified delete contract (dry-run preview /
+    body with expected; no-body forbidden).
+
+    #285 rev7: the legacy no-body "execute-if-clean" mode is REMOVED. Modes:
+      * ?dry_run=true — pure preview: collect_dependencies → empty → 204
+        WITHOUT deleting; non-empty → 409 + dependency tree; missing → 404.
+        Never modifies rows, emits no SSE; combined with a resolutions
+        body → 422.
+      * No body, no flag → 422 {"detail": "expected_state_required"} —
+        every real deletion must declare its state.
+      * Body {"expected": {}} (interim #285) — execute-if-clean: clean
+        record → 204 hard delete; deps → 409 + tree.
+      * Body {"resolutions": {...}} — validate + execute cascade → 204.
+
+    Record deps (Addendum 13):
       * visits   → cascade, auto=False (user choice)
       * payments → cascade, auto=False (user choice)
       * record_tags → cascade, auto=True (join rows)
 
     No blocking deps (allowed_actions never empty for Record); no undo flow.
-    Record with zero deps → instant 204 (Materials-like path).
     Execution stays in RecordService.delete (the @transactional cascade
     visits → payments → record_tags → record) — NOT through CASCADE_HANDLERS.
     """
 
-    def test_delete_bare_record_no_deps_returns_204_and_row_gone(
+    # ── rev7: no-body DELETE without flag → 422 expected_state_required ────
+
+    def test_delete_no_body_without_flag_returns_422(
         self, api_client, create_activity, create_client
     ) -> None:
-        """No body + zero deps (record with no visits/payments/tags) → 204."""
+        """Rev7: bare DELETE (no body, no flag) → 422, row untouched."""
         activity = create_activity()
         client = create_client()
         record = api_client.post("/api/v1/records", json={
@@ -1131,29 +1171,21 @@ class TestDeleteUnifiedRoute:
 
         resp = api_client.delete(f"/api/v1/records/{record['id']}")
 
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched (the legacy execute-if-clean path is gone).
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
 
-    def test_delete_nonexistent_record_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404."""
+    def test_delete_no_body_nonexistent_returns_422(self, api_client) -> None:
+        """Rev7 rejects the request shape before any DB probe (not a 404)."""
         resp = api_client.delete("/api/v1/records/nonexistent-record-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
 
-    def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (resolve_delete returns False)."""
-        resp = api_client.request(
-            "DELETE",
-            "/api/v1/records/nonexistent-record-id",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
-        )
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
-
-    def test_delete_record_with_deps_no_body_returns_409(
+    def test_delete_no_body_with_deps_returns_422(
         self, api_client, create_record
     ) -> None:
-        """No body + deps (visits + payments + record_tags) → 409 + tree."""
+        """Rev7: bare DELETE on a record with deps → 422, not a 409 preview."""
         record = create_record(
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
@@ -1167,6 +1199,82 @@ class TestDeleteUnifiedRoute:
 
         resp = api_client.delete(f"/api/v1/records/{record_id}")
 
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (resolve_delete returns False)."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/records/nonexistent-record-id",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_delete_clean_record_with_expected_empty_body_returns_204(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """Execution moved to the body branch: {"expected": {}} + clean → 204.
+
+        The commit of the deferred delete always carries the declared state;
+        for a clean record that is an empty ``expected`` id-set (spec §3 D1).
+        """
+        activity = create_activity()
+        client = create_client()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [],
+        }).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record['id']}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_with_deps_returns_409_tree_and_row_alive(
+        self, api_client, create_record
+    ) -> None:
+        """(а) dry-run on a record with deps → 409 + tree; row alive."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        # Add a payment (dep).
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        # Add a record_tag (auto dep).
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        def _dep_counts() -> tuple[int, int, int]:
+            return (
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM visits WHERE record_id='{record_id}'"
+                )[0]["c"],
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM payments WHERE record_id='{record_id}'"
+                )[0]["c"],
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM record_tags WHERE record_id='{record_id}'"
+                )[0]["c"],
+            )
+
+        before = _dep_counts()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
@@ -1178,8 +1286,56 @@ class TestDeleteUnifiedRoute:
         assert deps["payments"]["allowed_actions"] == ["cascade"]
         assert deps["record_tags"]["count"] == 1
         assert deps["record_tags"]["allowed_actions"] == ["cascade"]
-        # Row untouched (dry-run modifies nothing).
+        # Record alive, dependency counters unchanged.
         assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert _dep_counts() == before
+
+    def test_dry_run_clean_record_returns_204_and_row_alive(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """(б) dry-run on a clean record → 204 WITHOUT deleting; row alive."""
+        activity = create_activity()
+        client = create_client()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [],
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+    def test_dry_run_nonexistent_record_returns_404(self, api_client) -> None:
+        """(в) dry-run probes existence: missing record → 404, same format."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/records/nonexistent-record-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """(г) dry_run + resolutions body → 422; combo checked before probe."""
+        record = create_record(visits=[])  # clean record
+
+        for record_id in (record["id"], "nonexistent-record-id"):
+            resp = api_client.request(
+                "DELETE",
+                f"/api/v1/records/{record_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{record_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
 
     def test_delete_record_with_cascade_resolutions_executes_204(
         self, api_client, create_record
@@ -1208,8 +1364,10 @@ class TestDeleteUnifiedRoute:
         # Add a record_tag (auto dep).
         _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
 
-        # No-body dry-run → 409 (deps present).
-        resp = api_client.delete(f"/api/v1/records/{record_id}")
+        # dry-run preview → 409 (deps present).
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
         assert resp.status_code == 409
 
         # With-body execute → 204.
@@ -1273,3 +1431,35 @@ class TestDeleteUnifiedRoute:
 
         assert resp.status_code == 422
         assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    # ── (е) dry-run emits no SSE (pattern: test_events_emit.py:128-146) ────
+
+    def test_dry_run_204_emits_no_sse_events(
+        self, api_client, create_record, sse_subscriber
+    ) -> None:
+        """Clean record: dry-run → 204 without executing — zero SSE marks."""
+        record = create_record(visits=[])  # clean record
+        _drain_events(sse_subscriber)  # discard setup noise
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 204
+        assert _drain_events(sse_subscriber) == []
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+    def test_dry_run_409_emits_no_sse_events(
+        self, api_client, create_record, sse_subscriber
+    ) -> None:
+        """Deps record: dry-run 409 preview emits no SSE marks."""
+        record = create_record()  # 1 visit → deps
+        _drain_events(sse_subscriber)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        assert _drain_events(sse_subscriber) == []
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200

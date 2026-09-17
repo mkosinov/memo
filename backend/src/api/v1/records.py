@@ -1,7 +1,7 @@
 """FastAPI router for record CRUD endpoints with nested visits."""
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -231,34 +231,94 @@ async def patch_record(
     return map_record(record)
 
 
+def _has_dependencies_response(deps: list) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``."""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "has_dependencies",
+            "dependencies": [d.model_dump() for d in deps],
+        },
+    )
+
+
 @router.delete("/{record_id}", status_code=204, dependencies=_WRITE_GUARD)
 async def delete_record(
     record_id: str,
     service: _ServiceDep,
     session: SessionDep,
     resolutions: dict[str, str] | None = Body(default=None, embed=True),
+    # #285: commit of the deferred delete declares its state — id-sets of
+    # the dependencies the caller saw at dry-run time. Free-form dict for
+    # now; the next task formalizes the body model + expected verification.
+    expected: dict[str, Any] | None = Body(default=None, embed=True),
+    dry_run: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Non-destructive preview: returns 204 without deleting "
+                "(no deps) or 409 with the dependency tree; never "
+                "modifies rows"
+            )
+        ),
+    ] = None,
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> None:
-    """Unified DELETE — dry-run (no body) or execute (with body).
+    """Unified delete contract — dry-run preview flag / body with expected.
 
-    Mirrors the masters/clients routes (GH #139, Addendum 13). Record deps
-    (visits, payments, record_tags) are never blocking; record with none →
-    instant 204 (Materials-like path). Execution stays in
-    ``RecordService.delete`` (the ``@transactional`` cascade visits →
-    payments → record_tags → record); validation runs via the deletion
-    layer free functions in ``RecordService.resolve_delete``.
+    Mirrors the masters/clients routes (GH #139, Addendum 13); #285 rev7
+    removes the legacy no-body "execute-if-clean" mode. Record deps
+    (visits, payments, record_tags) are never blocking; record with none
+    → clean delete. Execution stays in ``RecordService.delete`` (the
+    ``@transactional`` cascade visits → payments → record_tags → record);
+    validation runs via the deletion layer free functions in
+    ``RecordService.resolve_delete``.
 
-    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
-      non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``{"resolutions": {...}}`` per spec §6
-      (``embed=True`` rejects a bare dict as a dry-run shape).
-      ``service.resolve_delete`` validates then executes → 204;
-      ``ResolutionError`` → 422; missing → 404.
+    * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
+      ``collect_dependencies`` → empty → 204 WITHOUT deleting; non-empty
+      → 409 + dependency tree. Combined with a ``resolutions`` body →
+      422 ``dry_run_with_resolutions_forbidden`` (checked before the
+      existence probe).
+    * No body, no flag → 422 ``{"detail": "expected_state_required"}``
+      (rev7): every real deletion must declare its state; rejected
+      before anything else.
+    * Body ``{"expected": ...}`` — execute-if-clean (clean record → 204
+      hard delete; deps → 409 + dependency tree). Interim #285 shape;
+      expected verification lands with the body-model task.
+    * Body ``{"resolutions": {...}}`` → ``service.resolve_delete``
+      validates then executes → 204; ``ResolutionError`` → 422;
+      missing → 404.
 
     GH #263 T2: the scope gate runs FIRST (one query) — чужая запись →
-    404 before any dependency collection or cascade.
+    404 before any dependency collection or cascade; for the dry-run
+    branch the same repository-get doubles as the existence probe
+    (``collect_dependencies`` returns [] for a missing id).
     """
+    # Rev7 (#285): bare DELETE without the flag is a contract violation —
+    # reject the request shape before any DB access. Literal string detail
+    # (same flat shape as the 409 preview) → JSONResponse, not raised:
+    # the global HTTPException handler wraps string details into
+    # {code, message} — not the pinned contract.
+    if not dry_run and resolutions is None and expected is None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "expected_state_required"},
+        )
+    # Pure preview never carries resolutions — forbidden combination.
+    if dry_run and resolutions is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "dry_run_with_resolutions_forbidden"},
+        )
+
     await _scoped_or_404(service, session, record_id, scope)
+
+    if dry_run:
+        deps = await collect_dependencies(session, Record, record_id)
+        if deps:
+            return _has_dependencies_response(deps)
+        return  # 204 — preview only: no service.delete, no SSE marks.
+
     if resolutions is not None:
         try:
             ok = await service.resolve_delete(
@@ -276,15 +336,12 @@ async def delete_record(
             )
         return
 
+    # Body carries ``expected`` without resolutions — execute-if-clean
+    # (interim #285: the legacy no-body mode now requires the declared
+    # state in the body).
     deps = await collect_dependencies(session, Record, record_id)
     if deps:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "has_dependencies",
-                "dependencies": [d.model_dump() for d in deps],
-            },
-        )
+        return _has_dependencies_response(deps)
     deleted = await service.delete(db_session=session, id=record_id)
     if not deleted:
         raise HTTPException(

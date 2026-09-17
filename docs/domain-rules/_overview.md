@@ -106,7 +106,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 
 ## Hard-delete FK dependency matrix (DELETE /{id} — spec GH #207 §4)
 
-`DELETE /{id}` is a **real hard delete** (row physically removed) for all 5 entities. When FK dependencies exist, the dependency-resolution mechanism kicks in: dry-run preview (409) or execute-with-resolutions (204). Spec §5-§6 is the source of truth for the contract.
+`DELETE /{id}` is a **real hard delete** (row physically removed) for all 5 entities. When FK dependencies exist, the dependency-resolution mechanism kicks in: no-body preview (409) or execute-with-resolutions (204). Spec §5-§6 is the source of truth for the contract. (#285 rev7: for **records** the no-body preview is replaced by the explicit `?dry_run=true` flag — bare DELETE on records → 422.)
 
 | Entity → Relation | Nullable? | Action | User choice? |
 |---|---|---|---|
@@ -154,7 +154,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
   ```
 - **204 (with body, resolutions valid):** `DELETE /{id}` with body `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` — server validates each action against the FK matrix, requires resolutions for **all non-auto deps**, resolves auto deps automatically, then executes **nullify → cascade → hard delete** in ONE transaction. Returns 204 on success. Auto deps are omitted from the user's `resolutions`; if all deps are auto, the body is `{}`.
 - **422 (with body, invalid/missing resolution):** A resolution NOT in `allowed_actions` for that entity → 422 (e.g. `{"activities": "cascade"}` → 422 because activities is blocked; `{"records": "cascade"}` → 422 because records only allows nullify). Missing a non-auto dep → 422 ("resolution required for entity X"). Auto deps in the body are silently ignored (no error). Blocked deps (activities, `allowed_actions: []`) → 422 always ("entity has blocking dependencies — archive instead").
-- **404** (entity not found). An empty body (or no body) is the dry-run per §5 — produces 204 or 409, never executes.
+- **404** (entity not found). An empty body (or no body) is the no-body preview per §5: it carries no `resolutions` — clean (zero deps) → 204-execute, deps → 409-preview. **Exception (#285 rev7):** records dropped the no-body mode — bare DELETE on records → 422 `{"detail": "expected_state_required"}`; preview only via `?dry_run=true` (pure preview, never modifies rows).
 - **Execution order:** nullify → cascade → hard delete (entity row last), all in ONE `@transactional` method (rollback on any failure).
 - **FK backstop:** `PRAGMA foreign_keys=ON` added to the SQLite connect listener in `database.py` (no migration). The service-level transaction remains the **primary** mechanism; DB-level FK is a backstop that catches any non-service write path (raw SQL, migrations, backfills).
 

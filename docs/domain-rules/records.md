@@ -125,7 +125,7 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
 - **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
 - **Update (PUT):** Full replacement — record's own visit rows hard-deleted, new Visits created, seats recomputed; capacity re-checked (409 when over)
 - **Patch:** Partial update. If `visits` in payload → old visit rows hard-deleted, new created, seats recomputed and capacity re-checked (409). A comment/custom_price-only patch skips the capacity query.
-- **Delete:** Two-phase hard delete (Addendum 13 / GH #139): bare DELETE is a dry-run — 204 when no deps, 409 + dependency tree when deps exist; second DELETE with `{resolutions}` body executes the cascade hard-delete (Visits + Payments + record_tags join rows hard-deleted; Record row physically removed). Deps: visits/payments cascade (auto=False, user must resolve), record_tags cascade (auto=True, resolved server-side).
+- **Delete:** Unified contract (#285 rev7, GH #139): `?dry_run=true` — **pure preview** (non-destructive): zero deps → 204 WITHOUT deleting; deps → 409 + dependency tree; missing record → 404; never modifies rows, emits no SSE; `?dry_run=true` + resolutions body → 422 `dry_run_with_resolutions_forbidden`. Bare DELETE (no body, no flag) → 422 `expected_state_required` — every real deletion declares its state: clean → body `{"expected": {}}` → 204 hard delete; cascade → body `{resolutions}` executes the cascade hard-delete (Visits + Payments + record_tags join rows hard-deleted; Record row physically removed). Deps: visits/payments cascade (auto=False, user must resolve), record_tags cascade (auto=True, resolved server-side).
 - **Delayed delete:** REMOVED (Addendum 13) — the old 5-second setTimeout + undo toast was replaced by the DeleteDialog dry-run flow (explicit confirmation, no undo).
 
 ### Frontend
@@ -146,7 +146,7 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
 | POST | /api/v1/records | Create (capacity check) |
 | PUT | /api/v1/records/{id} | Full update (visits replaced) |
 | PATCH | /api/v1/records/{id} | Partial update |
-| DELETE | /api/v1/records/{id} | Cascade hard-delete (visits + payments + record_tags cleaned) |
+| DELETE | /api/v1/records/{id} | Cascade hard-delete (visits + payments + record_tags cleaned); `?dry_run=true` = non-destructive preview (204 no-deps / 409 tree / 404); bare DELETE (no body, no flag) → 422 `expected_state_required` (#285) |
 
 ### Records list endpoint (GET /api/v1/records)
 

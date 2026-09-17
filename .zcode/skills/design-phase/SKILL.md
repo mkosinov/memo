@@ -38,9 +38,22 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
 | G1b | the spec — after the panel's consolidated report and fixes | commit + **push** the spec; board → `Spec OK (G1b)` |
 | G2 | the plan — UI features by **Behavioral Delta** (behavior, not code); the engineering part is the reviewer's guarantee | amendments and constraints **baked into the plan text**; commit + **push**; board → `Ready to IMPL (G2)` |
 
+**Fast-track exception (docs/harness issues):** an issue touching only
+documentation (`docs/`) or the harness (`.zcode/`/`.opencode/` — no app
+code) may skip the container IMPL session entirely: G1a/G1b unchanged,
+G2 collapsed by default — the spec carries a `## Verification` section
+(mechanical checks) instead of a plan artifact; keep the plan only for
+≥3-task decompositions or verification that needs design (user decides at
+G1b). The host session implements right after the gates; spec/plan (if
+any) land in the change PR; the card goes `In IMPL` while the PR is open →
+`In-main` on merge and never sits in `Ready to IMPL (G2)`; `Closes #N`
+belongs in the PR description only; no handoff message. Full details:
+superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
+
 ## 3. Artifacts
 
 - Spec: `docs/specs/YYYY-MM-DD-<feature>-design.md`. Must include a `## User Scenarios` section — 3–7 user tasks the feature enables, each mapping to an E2E test (anchors the plan's E2E-in-DoD rule; the completeness panelist checks it). **Self-contained BEFORE the panel**: the panel does not read GH issues — the scope check against the issue is done by the main session itself, with findings baked into the spec text.
+- Fast-track specs additionally carry a `## Verification` section (mechanical checks instead of E2E — see §2 fast-track exception).
 - Plan: `docs/plans/YYYY-MM-DD-<feature>-plan.md` per the writing-plans conventions (canon: `~/dev/superagents/.opencode/skills/writing-plans/SKILL.md`):
   - header: Goal / Architecture / Tech Stack; immediately after it a `## Behavioral Delta` section;
   - every task anchor: `## Task N: <name>` + `### Classification: trivial|small|standard|large`; after commit, never renumber anchors;

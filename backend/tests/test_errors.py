@@ -13,11 +13,11 @@ pytestmark = pytest.mark.pure_unit
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 31 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files)."""
+    """Verify ErrorCode has all 34 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week)."""
 
-    def test_has_all_29_codes(self):
-        """All 31 error codes are present (base + auth + staff #266 + files #262)."""
-        assert len(ErrorCode) == 31
+    def test_total_code_count(self):
+        """All 34 error codes are present (base + auth + staff #266 + files #262 + copy-week #242)."""
+        assert len(ErrorCode) == 34
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus auth/staff additions) exists."""
@@ -62,6 +62,10 @@ class TestErrorCodeEnum:
             # GH #262 Task 2 — avatar uploads (spec §3.4/§4)
             "FILE_TOO_LARGE",        # 413 — over the 5 MB limit
             "FILE_INVALID_TYPE",     # 415 — not JPEG/PNG/WebP
+            # GH #242 — schedule copy-week (spec §4)
+            "COPY_WEEK_START_NOT_MONDAY",  # week_start is not a Monday
+            "COPY_WEEK_INVALID_LOCATION",  # unknown location id in the request
+            "COPY_WEEK_SOURCE_TOO_LARGE",  # > 100 rows to insert — copy in passes
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -124,8 +128,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 31 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 31
+        """ERROR_MESSAGES has exactly 34 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 34
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

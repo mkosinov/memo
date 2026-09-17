@@ -26,6 +26,7 @@ vi.mock('@memo/api-client', () => ({
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
   deleteActivity: vi.fn(),
+  copyWeek: vi.fn(),
   getUserSettings: vi.fn(),
   createUserSettings: vi.fn(),
   patchUserSettings: vi.fn(),
@@ -48,6 +49,7 @@ import {
   createActivity,
   patchActivity,
   deleteActivity,
+  copyWeek,
   getUserSettings,
   createUserSettings,
   patchUserSettings,
@@ -151,6 +153,7 @@ function DataConsumer() {
     gridStartMinutes,
     gridEndMinutes,
   } = useScheduleData();
+  const [copyResult, setCopyResult] = React.useState('');
 
   return (
     <div>
@@ -207,9 +210,18 @@ function DataConsumer() {
       >
         Delete
       </button>
-      <button data-testid="copy-last-week" onClick={copyLastWeek}>
+      <button
+        data-testid="copy-last-week"
+        onClick={() => {
+          // New contract (#242): copyLastWeek(weekStart, locations) → Promise<CopyWeekResult>.
+          copyLastWeek('2026-09-14', ['alpika']).then((r) =>
+            setCopyResult(`copied:${r.copied};dups:${r.skipped_duplicates}`),
+          );
+        }}
+      >
         Copy
       </button>
+      <span data-testid="copy-result">{copyResult}</span>
     </div>
   );
 }
@@ -573,13 +585,35 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
     });
   });
 
-  it('copyLastWeek does not throw', () => {
+  it('copyLastWeek calls copyWeek api and invalidates the activities family (#242)', async () => {
+    seedDictionaries();
+    vi.mocked(getActivities).mockResolvedValue(wrap([activityA1(0, 600)]));
+    vi.mocked(copyWeek).mockResolvedValue({
+      copied: 8, skipped_duplicates: 2, skipped_filtered: 1, skipped_no_master: 0,
+    });
+
     renderDataProvider();
-    expect(() => {
-      act(() => {
-        screen.getByTestId('copy-last-week').click();
-      });
-    }).not.toThrow();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+    expect(getActivities).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      screen.getByTestId('copy-last-week').click();
+    });
+
+    // api-client hit with the explicit popup selection
+    await waitFor(() => {
+      expect(copyWeek).toHaveBeenCalledWith({ week_start: '2026-09-14', locations: ['alpika'] });
+    });
+    // family invalidation ['activities'] → the week-range query refetches
+    await waitFor(() => {
+      expect(getActivities).toHaveBeenCalledTimes(2);
+    });
+    // new Promise<CopyWeekResult> contract — result flows back to the caller
+    await waitFor(() => {
+      expect(screen.getByTestId('copy-result').textContent).toBe('copied:8;dups:2');
+    });
   });
 
   // ─── grid bounds (GH #142 — single derivation site) ────────────────────────

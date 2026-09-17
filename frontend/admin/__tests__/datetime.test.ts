@@ -21,6 +21,7 @@ import {
   formatTime,
   hhmmToMinutes,
   getMonday,
+  shiftDateKey,
   generateTimeSlots,
   calculateGridTimeRange,
 } from '@/lib/datetime';
@@ -139,6 +140,24 @@ describe('dayIndexToDate', () => {
     const monthEdgeMonday = new Date(2026, 7, 31); // Monday Aug 31, 2026
     expect(dayIndexToDate(monthEdgeMonday, 0)).toBe('2026-08-31');
     expect(dayIndexToDate(monthEdgeMonday, 6)).toBe('2026-09-06');
+  });
+});
+
+// ─── shiftDateKey ─────────────────────────────────────────────────────────────
+
+describe('shiftDateKey', () => {
+  it('shifts a date key by calendar days', () => {
+    expect(shiftDateKey('2026-09-14', 0)).toBe('2026-09-14');
+    expect(shiftDateKey('2026-09-14', 6)).toBe('2026-09-20');
+    expect(shiftDateKey('2026-09-14', -7)).toBe('2026-09-07');
+    expect(shiftDateKey('2026-09-14', -1)).toBe('2026-09-13');
+  });
+
+  it('crosses month and year boundaries (setDate overflow semantics)', () => {
+    expect(shiftDateKey('2026-08-31', 1)).toBe('2026-09-01');
+    expect(shiftDateKey('2026-09-01', -1)).toBe('2026-08-31');
+    expect(shiftDateKey('2026-12-31', 1)).toBe('2027-01-01');
+    expect(shiftDateKey('2027-01-01', -1)).toBe('2026-12-31');
   });
 });
 

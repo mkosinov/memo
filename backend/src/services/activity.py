@@ -2,32 +2,61 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002 — runtime SQLAlchemy dep
 
 from src.domain.dates import day_range
 from src.domain.record_visits import active_record_filter
 from src.domain.visit_status import ACTIVE_RECORD_STATUSES
-from src.errors import ErrorCode, ErrorDetail
+from src.errors import ERROR_MESSAGES, ErrorCode, ErrorDetail
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
+from src.models.location import Location
 from src.models.master import Master
 from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
+from src.models.staff import Staff
 from src.models.tag import activity_tags, record_tags
 from src.models.visit import Visit
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.repositories.search import SearchField, search_predicate
-from src.schemas.activity import ActivityCreate, ActivityResponse, ActivityUpdate
+from src.schemas.activity import (
+    ActivityCreate,
+    ActivityResponse,
+    ActivityUpdate,
+    CopyWeekResult,
+)
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 from src.services.generic import GenericService
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+# Copy-week volume cap (GH #242 spec §4, user decision D3): at most 100 rows
+# may be INSERTED per call; more → 422 COPY_WEEK_SOURCE_TOO_LARGE ("copy in
+# several passes by location"). The cap is checked AFTER filters+dedup, so a
+# successful copy is always exact and complete — no silent truncation.
+COPY_WEEK_MAX_INSERTS = 100
+
+
+def _split_specialty(specialty: str | None) -> set[str]:
+    """CSV specialty («живопись, керамика») → lowercase set of names.
+
+    Comparison helper for the archived-master remap (spec §5.3): «analogous
+    specialty» = non-empty intersection of the two CSV lists (split by ",",
+    strip, case-insensitive).
+    """
+    if not specialty:
+        return set()
+    return {part.strip().lower() for part in specialty.split(",") if part.strip()}
 
 
 async def check_master_active(
@@ -272,6 +301,229 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         mark_changed("photos")
         mark_changed("tags")
         return True
+
+    @transactional
+    async def copy_week(
+        self, db_session: AsyncSession, *,
+        week_start: date, locations: Sequence[str],
+    ) -> CopyWeekResult:
+        """Copy the previous week's activities into the target week (GH #242).
+
+        The WHOLE pipeline runs in this single method under ONE ``@transactional``
+        (spec §5.5): read source/target → filter → remap → dedup → cap → insert.
+        Any failure mid-way propagates out of the decorator, which skips the
+        commit → full rollback → ZERO copies (atomicity invariant).
+
+        Steps (spec §4/§5):
+          1. ``week_start`` must be a Monday → 422 COPY_WEEK_START_NOT_MONDAY;
+             every requested location id must exist → 422 COPY_WEEK_INVALID_LOCATION.
+          2. Windows: source ``[week_start-7 .. week_start-1]``, target
+             ``[week_start .. week_start+6]`` — whole days via ``day_range()``.
+          3. Source rows in ONE internal query (left-join masters so an
+              orphaned master extension is «archived», plus locations for the
+              archive flag); target keys = ``(master, service, start, duration)``.
+              Board ordering for remap comes from the separate staff board
+              query, so staff is NOT joined here.
+          4. Filters (spec §5.1): ``is_private`` → skipped_filtered; archived
+             location → skipped_filtered; location not in the request list →
+             silently out (the user unchecked it — no counter, spec §4).
+             Activities of ARCHIVED services ARE copied (deliberate, §5.1).
+          5. Remap (spec §5.3): archived master (extension row archived OR
+             missing) → first ACTIVE master with a non-empty CSV-specialty
+             intersection in canonical board order (sort_order, first_name, id);
+             no replacement → skipped_no_master. ``check_master_active`` is NOT
+             called on copies — master ids come from the server-side remap,
+             never from user input (separate validation path, not a guard bypass).
+          6. Dedup key ``(master_id, service_id, start + 7d, duration)`` (spec
+             §5.2 — location/capacity deliberately outside) against target rows
+             AND rows inserted in this same run (in-run set) → skipped_duplicates.
+          7. Cap: more than 100 rows to insert (checked AFTER dedup) → 422
+             COPY_WEEK_SOURCE_TOO_LARGE — no silent truncation (D3).
+          8. Insertion (spec §5.4/§5.5): direct ``Activity(...)`` instances +
+             ``flush`` — NOT ``ActivityService.create`` (each call is itself
+             ``@transactional`` and would commit per row, killing atomicity).
+             Copies carry every source field except id/timestamps; ``is_private``
+             is always ``false`` (private rows were filtered on input).
+          9. Tag links are copied via EXPLICIT ``activity_tags`` join rows
+             (the generic create never writes tags) + a ``tags`` mark_changed.
+             The ``activities`` family label itself comes from the decorator's
+             auto-mark — no per-row mark_changed calls.
+        """
+        # ── 1. Validation guards ─────────────────────────────────────────
+        if week_start.weekday() != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=ErrorDetail(
+                    code=ErrorCode.COPY_WEEK_START_NOT_MONDAY,
+                    message=ERROR_MESSAGES[ErrorCode.COPY_WEEK_START_NOT_MONDAY],
+                ).model_dump(),
+            )
+        requested: set[str] = set(locations)
+        found = {
+            row[0] for row in (
+                await db_session.execute(
+                    select(Location.id).where(Location.id.in_(requested))
+                )
+            ).all()
+        }
+        if requested - found:
+            raise HTTPException(
+                status_code=422,
+                detail=ErrorDetail(
+                    code=ErrorCode.COPY_WEEK_INVALID_LOCATION,
+                    message=ERROR_MESSAGES[ErrorCode.COPY_WEEK_INVALID_LOCATION],
+                ).model_dump(),
+            )
+
+        # ── 2. Windows: source [-7 .. -1], target [0 .. +6] ───────────────
+        src_from, src_to = day_range(
+            week_start - timedelta(days=7), week_start - timedelta(days=1)
+        )
+        tgt_from, tgt_to = day_range(
+            week_start, week_start + timedelta(days=6)
+        )
+
+        # ── 3. One internal source query + target dedup-key set ───────────
+        # Left join masters: a missing extension row = «archived» master
+        # (spec §5.3) and must reach the remap step, not vanish in the join.
+        source_rows = (
+            await db_session.execute(
+                select(Activity, Master, Location)
+                .join(Master, Activity.master_id == Master.staff_id, isouter=True)
+                .join(Location, Activity.location_id == Location.id)
+                .where(Activity.start >= src_from, Activity.start <= src_to)
+            )
+        ).all()
+        target_keys = {
+            row for row in (
+                await db_session.execute(
+                    select(
+                        Activity.master_id, Activity.service_id,
+                        Activity.start, Activity.duration,
+                    )
+                    .where(Activity.start >= tgt_from, Activity.start <= tgt_to)
+                )
+            ).all()
+        }
+
+        # Remap candidates: all active masters in canonical board order
+        # (Staff.sort_order ASC, Staff.first_name ASC, Staff.id ASC — spec §5.3
+        # D4; loaded once — the roster is small and this keeps the remap O(n)).
+        board = (
+            await db_session.execute(
+                select(Master, Staff)
+                .join(Staff, Master.staff_id == Staff.id)
+                .where(Master.is_active.is_(True))
+                .order_by(Staff.sort_order, Staff.first_name, Staff.id)
+            )
+        ).all()
+
+        skipped_filtered = 0
+        skipped_no_master = 0
+        skipped_duplicates = 0
+        candidates: list[tuple[Activity, str]] = []  # (source row, final master_id)
+        run_keys: set[tuple[str, str, object, int]] = set()
+
+        for activity, master, location in source_rows:
+            # ── 4. Filters — spec §5.1 order: private → archived → list ──
+            if activity.is_private:
+                skipped_filtered += 1
+                continue
+            if not location.is_active:
+                skipped_filtered += 1
+                continue
+            if location.id not in requested:
+                continue  # unchecked in the popup — silently out (no counter)
+
+            # ── 5. Remap of an archived master ────────────────────────────
+            final_master_id = activity.master_id
+            if master is None or not master.is_active:
+                source_specialty = (
+                    _split_specialty(master.specialty) if master is not None else set()
+                )
+                replacement = None
+                for board_master, _ in board:
+                    if source_specialty & _split_specialty(board_master.specialty):
+                        replacement = board_master.staff_id
+                        break
+                if replacement is None:
+                    skipped_no_master += 1
+                    continue
+                final_master_id = replacement
+
+            # ── 6. Dedup vs target rows AND this run (key after +7d) ──────
+            new_start = activity.start + timedelta(days=7)
+            key = (final_master_id, activity.service_id, new_start, activity.duration)
+            if key in target_keys or key in run_keys:
+                skipped_duplicates += 1
+                continue
+            run_keys.add(key)
+            candidates.append((activity, final_master_id))
+
+        # ── 7. Volume cap — after dedup, no silent truncation (D3) ────────
+        if len(candidates) > COPY_WEEK_MAX_INSERTS:
+            raise HTTPException(
+                status_code=422,
+                detail=ErrorDetail(
+                    code=ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE,
+                    message=ERROR_MESSAGES[ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE],
+                ).model_dump(),
+            )
+        if not candidates:
+            return CopyWeekResult(
+                copied=0,
+                skipped_duplicates=skipped_duplicates,
+                skipped_filtered=skipped_filtered,
+                skipped_no_master=skipped_no_master,
+            )
+
+        # ── 8. Direct ORM inserts in ONE transaction (NOT create-per-row) ──
+        instances = [
+            Activity(
+                master_id=final_master_id,
+                service_id=activity.service_id,
+                location_id=activity.location_id,
+                start=activity.start + timedelta(days=7),
+                duration=activity.duration,
+                capacity=activity.capacity,
+                is_private=False,  # private rows were filtered on input (§5.4)
+                comment=activity.comment,
+                record_info=activity.record_info,
+            )
+            for activity, final_master_id in candidates
+        ]
+        for instance in instances:
+            db_session.add(instance)
+        await db_session.flush()
+
+        # ── 9. Tag links: explicit activity_tags join rows (§5.4) ─────────
+        source_ids = [activity.id for activity, _ in candidates]
+        tag_rows = (
+            await db_session.execute(
+                select(activity_tags.c.activity_id, activity_tags.c.tag_id)
+                .where(activity_tags.c.activity_id.in_(source_ids))
+            )
+        ).all()
+        if tag_rows:
+            copy_id = {
+                source_id: instance.id
+                for source_id, instance in zip(source_ids, instances, strict=True)
+            }
+            await db_session.execute(
+                activity_tags.insert().values([
+                    {"activity_id": copy_id[source_id], "tag_id": tag_id}
+                    for source_id, tag_id in tag_rows
+                ])
+            )
+            mark_changed("tags")  # join rows created directly (§5.5)
+
+        # ── 10. Counters; the activities SSE label is the decorator's auto-mark
+        return CopyWeekResult(
+            copied=len(instances),
+            skipped_duplicates=skipped_duplicates,
+            skipped_filtered=skipped_filtered,
+            skipped_no_master=skipped_no_master,
+        )
 
 
 @lru_cache

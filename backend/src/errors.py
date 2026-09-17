@@ -58,6 +58,11 @@ class ErrorCode(str, Enum):
     FILE_TOO_LARGE = "FILE_TOO_LARGE"            # 413 — over the 5 MB limit
     FILE_INVALID_TYPE = "FILE_INVALID_TYPE"      # 415 — not JPEG/PNG/WebP
 
+    # 422 — schedule copy-week (GH #242, spec §4)
+    COPY_WEEK_START_NOT_MONDAY = "COPY_WEEK_START_NOT_MONDAY"  # week_start is not a Monday
+    COPY_WEEK_INVALID_LOCATION = "COPY_WEEK_INVALID_LOCATION"  # unknown location id in the request
+    COPY_WEEK_SOURCE_TOO_LARGE = "COPY_WEEK_SOURCE_TOO_LARGE"  # > 100 rows to insert — copy in passes
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -109,6 +114,12 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.COLOR_REQUIRED: "Укажите цвет мастера",
     ErrorCode.FILE_TOO_LARGE: "Файл больше 5 МБ",
     ErrorCode.FILE_INVALID_TYPE: "Поддерживаются только JPEG, PNG и WebP",
+    ErrorCode.COPY_WEEK_START_NOT_MONDAY: "Неделя должна начинаться с понедельника",  # noqa: RUF001
+    ErrorCode.COPY_WEEK_INVALID_LOCATION: "В списке локаций есть неизвестные локации",  # noqa: RUF001
+    ErrorCode.COPY_WEEK_SOURCE_TOO_LARGE: (
+        "В выбранной области более 100 занятий — скопируйте в несколько заходов, "  # noqa: RUF001
+        "сузив выбор локаций"
+    ),
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",

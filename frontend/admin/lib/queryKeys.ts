@@ -32,6 +32,14 @@ export const qk = {
   activitiesForRecords: (ids: string[]) => ['activities', 'for-records', ids] as const,
   activity: (id: string) => ['activity', id] as const,
   activityRange: (weekStart: string, weekEnd: string) => ['activities', weekStart, weekEnd] as const,
+  // #242: CopyLastWeekPopover's source-week fetch. OWN key — the grid's
+  // activityRange cache holds plain rows (its queryFn maps the page to
+  // items only), so a grid-populated entry would shadow the popup's fetch
+  // and lose the capped `total` (spec §6 note). Nested under the
+  // ['activities'] family prefix, so invalidation (own mutations + SSE map)
+  // still reaches it.
+  activityRangeCopySource: (weekStart: string, weekEnd: string) =>
+    ['activities', weekStart, weekEnd, 'copy-source'] as const,
   visitors: (clientId: string) => ['visitors', clientId] as const,
   recordPayments: (recordId: string) => ['payments', recordId] as const,
   record: (id: string) => ['record', id] as const,

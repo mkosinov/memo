@@ -14,8 +14,9 @@ import {
   createActivity as apiCreateActivity,
   patchActivity as apiPatchActivity,
   deleteActivity as apiDeleteActivity,
+  copyWeek as apiCopyWeek,
 } from '@memo/api-client';
-import type { ActivityResponse, ActivityPatch } from '@memo/api-client';
+import type { ActivityResponse, ActivityPatch, CopyWeekResult } from '@memo/api-client';
 import { transformMaster, transformService, transformLocation } from '@/lib/transformers';
 import { qk } from '@/lib/queryKeys';
 import { invalidateEntities } from '@/lib/invalidate';
@@ -74,7 +75,7 @@ export interface ScheduleDataContextType {
     occupied?: number;
   }) => void;
   deleteActivity: (id: string) => void;
-  copyLastWeek: () => void; // stub stays — #242
+  copyLastWeek: (weekStart: string, locations: string[]) => Promise<CopyWeekResult>;
   gridStartMinutes: number;
   gridEndMinutes: number;
 }
@@ -215,6 +216,16 @@ export function ScheduleDataProvider({
     onSuccess: () => invalidateEntities(queryClient, ['activities']),
   });
 
+  // Week copy (#242, spec §7) — plain mutation, no optimistics: the copy is an
+  // atomic server-side call. onSuccess invalidates the ['activities'] family
+  // prefix (same rule as createMutation); the per-week activityRange key is a
+  // narrower member of that family, so the grid refetches via the prefix.
+  const copyWeekMutation = useMutation({
+    mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
+    mutationFn: (params: Parameters<typeof apiCopyWeek>[0]) => apiCopyWeek(params),
+    onSuccess: () => invalidateEntities(queryClient, ['activities']),
+  });
+
   // Actions
   const addActivity = useCallback((activity: {
     dayIndex: number;
@@ -278,9 +289,14 @@ export function ScheduleDataProvider({
     deleteMutation.mutate(id);
   }, [deleteMutation.mutate]);
 
-  const copyLastWeek = useCallback(() => {
-    // Stub: will be implemented when API-based copy-last-week is needed
-  }, []);
+  // week_start = Monday of the TARGET week; locations = explicit checked list
+  // from the copy popup. mutateAsync surfaces CopyWeekResult to the caller
+  // (popup toasts read the counters).
+  const copyLastWeek = useCallback(
+    (weekStart: string, locations: string[]): Promise<CopyWeekResult> =>
+      copyWeekMutation.mutateAsync({ week_start: weekStart, locations }),
+    [copyWeekMutation.mutateAsync],
+  );
 
   // Build enriched schedule using buildAdminSchedule — GH #267: fed with the
   // FULL status=all dictionaries so activities on archived rows still resolve

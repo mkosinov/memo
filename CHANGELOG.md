@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-17
 
+### Added
+- **GH #242 — Копирование прошлой недели расписания** — branch `feat/242-copy-last-week`
+  (12 commits: `aef08be..621cebc`, base `80aa34f`; спека `docs/specs/2026-09-17-copy-last-week-design.md`):
+  - **Backend:** атомарный `POST /api/v1/activities/copy-week` (один `@transactional`, прямые ORM-вставки):
+    source = прошлая неделя, target = целевая (`week_start` — понедельник, иначе 422 `COPY_WEEK_START_NOT_MONDAY`);
+    merge-дедуп по ключу (мастер, услуга, старт+7д, длительность — локация/capacity вне ключа) против
+    целевой недели и внутри прогона; не копируются приватные (`is_private=true`) и занятия архивных
+    локаций; архивный мастер ремапится под первого активного с пересекающейся speciality в каноническом
+    порядке борда (`sort_order, first_name, id`), замены нет → skip; кап 100 к вставке
+    (422 `COPY_WEEK_SOURCE_TOO_LARGE`); копируются duration/capacity/comment/`record_info` и теги
+    (явные `activity_tags` join-строки); ответ `{copied, skipped_duplicates, skipped_filtered, skipped_no_master}`.
+  - **Frontend:** кнопка Toolbar «Копировать прошлую неделю» (фейковый тост удалён) → `CopyLastWeekPopover`:
+    пикер локаций прошлой недели с чекбоксами и нетто-счётчиками «к копированию» (минус дубли целевой
+    недели, минус приватные), подсказка «K индивидуальных занятий не копируются», заметка «первые 100 из N»
+    при капе, пустое состояние с неактивной кнопкой; запрос всегда с явным списком отмеченных локаций;
+    тосты spec §6 — «Скопировано N занятий» (+пропуски) / «Всё уже есть» / «Нечего копировать» / error;
+    попап закрывается по успеху; мутация `copyWeek` (api-client + `ScheduleDataContext`) инвалидирует `['activities']`.
+  - **Tests:** pytest — 17 сервис-тестов + 9 API-тестов (гварды 401/403/CSRF, 422-формы, merge e2e,
+    повтор → copied=0); admin vitest — 133 файла / 2085 passed (попап: счётчики/подсказки/disable,
+    контекст-мутация + инвалидация, `copyWeek`); e2e `copy-last-week.spec.ts` — сценарии S1–S8 spec §9,
+    8/8 (чистая копия на те же слоты; повтор → «Всё уже есть»; merge в частично занятую неделю;
+    приватные не копируются; архивная локация; ремап архивного мастера по каноническому порядку борда;
+    снятая галка локации с явным списком; пустая прошлая неделя).
+  - Plan: `docs/plans/2026-09-17-copy-last-week-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-17-copy-last-week-242.md`
+
 ### Changed
 - **GH #257 — Единая модель посетителей: аноним = визит с `visitor_id = NULL`** — branch `feat/257-anonymous-visits-unified` (18 commits: `88059f4..fe73c26`, base `0ec854d`; план T1–T11):
   - **Модель:** анонимный посетитель — больше не отдельный счётчик, а полноценный визит

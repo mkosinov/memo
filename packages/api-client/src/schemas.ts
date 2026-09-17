@@ -336,6 +336,18 @@ export const ActivityResponseSchema = z.object({
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
 
+// ─── CopyWeekResult (#242: POST /api/v1/activities/copy-week response) ──────
+// Merge breakdown — each counter asserted independently by backend tests.
+
+export const CopyWeekResultSchema = z.object({
+  copied: z.number(),
+  skipped_duplicates: z.number(),
+  skipped_filtered: z.number(),
+  skipped_no_master: z.number(),
+});
+
+export type CopyWeekResult = z.infer<typeof CopyWeekResultSchema>;
+
 // ─── VisitorResponse ─────────────────────────────────────────────────────
 
 export const VisitorResponseSchema = z.object({

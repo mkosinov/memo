@@ -1,8 +1,8 @@
 """Pydantic schemas for the activities domain."""
 
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ActivityBase(BaseModel):
@@ -58,3 +58,26 @@ class ActivityResponse(ActivityBase):
     # Single-item endpoints (get/create/update/patch) leave it None — the schema
     # is shared by all 5 activity endpoints, hence optional with a default.
     service_title: str | None = None
+
+
+class ActivityCopyWeekRequest(BaseModel):
+    """Request schema for copy-week (GH #242, spec §4).
+
+    ``week_start`` is the Monday of the TARGET week; the Monday check itself
+    is a server-side guard (422 COPY_WEEK_START_NOT_MONDAY), not a schema rule.
+    ``locations`` is the explicit list of location ids checked in the popup —
+    strictly required (no "None = all" encoding); an empty list is rejected
+    via min_length=1 (FastAPI maps the ValidationError to 422 VALIDATION_ERROR).
+    """
+
+    week_start: date
+    locations: list[str] = Field(..., min_length=1)
+
+
+class CopyWeekResult(BaseModel):
+    """Response schema for copy-week — four independent counters (spec §4)."""
+
+    copied: int
+    skipped_duplicates: int
+    skipped_filtered: int
+    skipped_no_master: int

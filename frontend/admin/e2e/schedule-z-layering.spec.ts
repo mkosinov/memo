@@ -82,14 +82,28 @@ test.describe('Schedule z-layering (#260)', () => {
 
     // Scenario 3 needs a live toast: ToastContainer renders null when empty, so
     // [data-testid="toast-container"] only exists while a toast is showing.
-    // Trigger the side-effect-free Toolbar «copy last week» toast (copyLastWeek
-    // is a stub) and capture its z BEFORE opening the modal — the modal covers
-    // the screen (fixed inset-0 z-200) and would block the panel clicks. The
-    // number is captured, so the toast auto-dismissing (4.5s) later is harmless.
+    // GH #242: the side-effect-free Toolbar fake copy toast is GONE — the
+    // button now opens CopyLastWeekPopover, which owns the real toasts. Keep the scene honest: abort the popover's
+    // source-week fetch (viewed Monday −7) so the popover reports its own
+    // error toast — a real flow, not a stub. Capture its z BEFORE opening the
+    // modal — the modal covers the screen (fixed inset-0 z-200) and would
+    // block the panel clicks. The number is captured, so the toast
+    // auto-dismissing (4.5s) later is harmless.
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7)); // viewed Monday
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    monday.setDate(monday.getDate() - 7); // source week start
+    const srcFrom = iso(monday);
+    await page.route('**/api/v1/activities**', (route) => {
+      if (route.request().url().includes(`date_from=${srcFrom}`)) return route.abort();
+      return route.continue();
+    });
     await page.getByRole('button', { name: 'Открыть панель инструментов' }).click();
     await page.getByRole('button', { name: 'Копировать прошлую неделю' }).click();
     const toast = page.locator('[data-testid="toast-container"]');
-    await expect(toast).toBeVisible();
+    // QueryClient retry: 2 (backoff ~3s) — give the error room to land.
+    await expect(toast).toBeVisible({ timeout: 10_000 });
     const toastZ = await zOf(toast);
 
     // openModal navigates to a week with a seeded record and opens the details

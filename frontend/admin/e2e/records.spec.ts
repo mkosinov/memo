@@ -1269,18 +1269,11 @@ test.describe('Records Page — Deferred record delete (#285)', () => {
 
   // ── S6: mid-window race — commit 409 stale_dependencies + «Обновить» ─────
 
-  // GH #285: the rev8 stale-aware onError («Обновить» action) is NOT wired in
-  // the app yet — plan Task 5 requires `onError: staleAwareOnError(queryClient)`
-  // on both useDeleteRecord enqueue paths, but buildDeferredDeleteAction
-  // (hooks/useDeleteRecord.ts) never sets it, so a commit 409
-  // stale_dependencies falls into the context DEFAULT handler: the row is
-  // restored and a generic toast «Не удалось удалить. Изменение отменено»
-  // (no action button) is shown instead of the spec'd «Не удалось удалить:
-  // данные изменились» + «Обновить». E2E RED evidence (this commit's run):
-  // commit-DELETE → 409 received, row returned, then this test timed out on
-  // the toast locator. Un-fixme AFTER the staleAwareOnError wiring lands —
-  // the body below is the ready GREEN flip for that change.
-  test.fixme('S6: mid-window race — payment added, commit 409, row returns with «Обновить» action', async ({
+  // D4 rev8 wiring (plan Task 5 (ж)): a commit 409 `stale_dependencies`
+  // routes into the hook's staleAwareOnError — the row is restored and the
+  // red toast carries «Не удалось удалить: данные изменились» with the
+  // «Обновить» action (invalidates the ['records']-family on click).
+  test('S6: mid-window race — payment added, commit 409, row returns with «Обновить» action', async ({
     page,
     request,
   }) => {

@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures/test';
-import type { Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
 import { waitForRecordsReady } from './fixtures/helpers';
+import { queryDBRow } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import {
   createTestClient,
@@ -912,13 +913,19 @@ test.describe('Records Page — Table and Filters', () => {
 
   // ── 22. Action dropdown smoke — ⋯ menu, Удалить → DeleteDialog, cancel ──
 
-  test('22. Dropdown smoke — ⋯ opens menu, Удалить opens DeleteDialog, cancel closes', async ({
+  test('22. Dropdown smoke — ⋯ opens menu, Удалить opens DeleteDialog, cancel closes; bare DELETE → 422 (rev7)', async ({
     page,
     request,
   }) => {
-    // T8 smoke (spec §5 scenario 3 + §8): the NEW per-row dropdown replaces
-    // the ⋯-less pre-#139 table. Factory records ALWAYS create one visit →
-    // the no-body dry-run DELETE returns 409 + dependency tree → dialog.
+    // T8 smoke, rewritten under the GH #285 rev7 contract: the dropdown
+    // «Удалить» click is a PURE preview (?dry_run=true) — the factory record
+    // always carries one visit, so the non-empty dependency tree opens the
+    // DeleteDialog. The 409-preview branch itself is covered by the Task 1
+    // backend dry-run tests — the old request-shape pins
+    // (postData() === null / 409) are deliberately not asserted here.
+    // What rev7 CHANGED contractually is the bare DELETE: no flag, no body
+    // neither previews nor executes — it is rejected with 422
+    // `expected_state_required` (asserted directly against the API below).
     const clientName = `Dropdown Smoke ${Date.now()}`;
     const client = await createTestClient(request, { name: clientName });
     const activity = await createTestActivity(request);
@@ -939,18 +946,8 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(menu).toBeVisible();
       await expect(menu).toHaveAttribute('role', 'menu');
 
-      // «Удалить» fires the dry-run DELETE (no body) → 409 conflict (the
-      // record has a visit) → DeleteDialog opens (Addendum 13 / spec §6.9).
-      const dryRun = page.waitForResponse(
-        (r) =>
-          r.url().includes(`/api/v1/records/${record.id}`) &&
-          r.request().method() === 'DELETE' &&
-          r.request().postData() === null,
-        { timeout: 10_000 },
-      );
+      // «Удалить» previews (dry-run tree is non-empty) → DeleteDialog opens.
       await menu.getByRole('menuitem', { name: 'Удалить' }).click();
-      const dryRunResponse = await dryRun;
-      expect(dryRunResponse.status()).toBe(409);
       await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
 
       // Cancel closes the dialog without executing the delete.
@@ -959,6 +956,24 @@ test.describe('Records Page — Table and Filters', () => {
 
       // The row survives the cancelled delete.
       await expect(row).toBeVisible();
+
+      // rev7 contract, asserted at the API boundary: a bare DELETE (no
+      // ?dry_run flag, no body) → 422 expected_state_required…
+      const bare = await request.delete(`${BACKEND}/api/v1/records/${record.id}`);
+      expect(bare.status()).toBe(422);
+      expect(((await bare.json()) as { detail?: string }).detail).toBe(
+        'expected_state_required',
+      );
+      // …and so does a resolutions-only body without `expected`.
+      const resOnly = await request.delete(`${BACKEND}/api/v1/records/${record.id}`, {
+        data: { resolutions: {} },
+      });
+      expect(resOnly.status()).toBe(422);
+
+      // Both rejected requests touched nothing — the record is alive in the DB.
+      const dbRow = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRow).not.toBeNull();
+      expect(dbRow!.id).toBe(record.id);
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
@@ -1036,6 +1051,297 @@ test.describe('Records Page — Table and Filters', () => {
       await cleanup(request, `/api/v1/clients/${clientA.id}`);
       await cleanup(request, `/api/v1/clients/${clientB.id}`);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Deferred record delete (#285): spec §6 scenarios S1/S2/S5/S6
+// ---------------------------------------------------------------------------
+//
+// Both entry points run the deferred pipeline (D2/D3): dry-run preview →
+// optimistic row removal → 5s undo window → commit DELETE carrying the
+// `expected` state snapshot. S1 commits cleanly; S2 undoes inside the window
+// (no server write at all); S5 kills the network so the commit fails and the
+// default onError restores the row; S6 races a mid-window payment creation so
+// the expected-set check rejects the commit with 409 stale_dependencies.
+
+test.describe('Records Page — Deferred record delete (#285)', () => {
+  /** Clean record fixture (no visits → the dry-run is 204, no DeleteDialog).
+   *  Factory pattern: `visits: []` override on the standard record factory. */
+  async function createCleanRecord(api: APIRequestContext, name: string) {
+    const client = await createTestClient(api, { name });
+    const activity = await createTestActivity(api);
+    const record = await createTestRecord(api, activity.id, client.id, {
+      visits: [],
+    });
+    return { client, activity, record };
+  }
+
+  /** Open the row action dropdown and click «Удалить». */
+  async function clickRowDelete(page: Page, row: Locator, recordId: string) {
+    await row.getByRole('button', { name: 'Действия' }).click();
+    const menu = page.locator(`[data-testid="dropdown-${recordId}"]`);
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Удалить' }).click();
+  }
+
+  /** The undo toast that carries the deferred-delete message. */
+  function undoToast(page: Page) {
+    return page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено' });
+  }
+
+  /** Commit-DELETE listener: the deferred commit carries a JSON body
+   *  (`expected`); the click's dry-run DELETE (?dry_run=true) has none —
+   *  postData() === null, so the predicate cannot match the preview. */
+  function commitDeleteWait(page: Page, recordId: string) {
+    return page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/v1/records/${recordId}`) &&
+        r.request().method() === 'DELETE' &&
+        r.request().postData() !== null,
+      { timeout: 15_000 },
+    );
+  }
+
+  // ── S1: clean deferred delete — commit at window end, record gone ────────
+
+  test('S1: clean record — row disappears, undo toast, commit DELETE, gone after reload', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `Deferred S1 ${Date.now()}`;
+    const { client, record } = await createCleanRecord(request, clientName);
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // Register BEFORE the click so the listener cannot miss the 5s-window
+      // commit response.
+      const commitWait = commitDeleteWait(page, record.id);
+
+      await clickRowDelete(page, row, record.id);
+
+      // Optimistic removal + undo toast with the 5s countdown.
+      await expect(row).toBeHidden();
+      const toast = undoToast(page);
+      await expect(toast).toBeVisible();
+      await expect(toast.getByRole('button', { name: 'Отменить' })).toBeVisible();
+
+      // Window expires → commit fires with the expected-state body → 204.
+      const commit = await commitWait;
+      expect(commit.status()).toBe(204);
+
+      // Fresh load: the row is gone from the table…
+      const viewWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records/view') && r.status() === 200,
+        { timeout: 30_000 },
+      );
+      await page.reload();
+      await viewWait;
+      await expect(page.locator('tbody tr').filter({ hasText: clientName })).toHaveCount(0);
+      // …and the record is gone from the DB (hard delete, no soft flag).
+      expect(queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`)).toBeNull();
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── S2: undo inside the window — no server write, record survives ────────
+
+  test('S2: undo — row returns, no committing DELETE with body, record survives', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `Deferred S2 ${Date.now()}`;
+    const { client, record } = await createCleanRecord(request, clientName);
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // Request counter for COMMITTING deletes: DELETE to /api/v1/records/
+      // with a NON-EMPTY body. The click itself sends the ?dry_run=true
+      // preview with postData() === null — a bare DELETE counter would count
+      // the preview too (panel wave 2).
+      const bodyDeletes: string[] = [];
+      const onRequest = (req: Request) => {
+        if (
+          req.method() === 'DELETE' &&
+          req.url().includes('/api/v1/records/') &&
+          req.postData() !== null
+        ) {
+          bodyDeletes.push(req.url());
+        }
+      };
+      page.on('request', onRequest);
+
+      await clickRowDelete(page, row, record.id);
+
+      // Optimistic removal + undo toast…
+      await expect(row).toBeHidden();
+      const toast = undoToast(page);
+      await expect(toast).toBeVisible();
+
+      // …undone inside the window: row returns, toast hides.
+      await toast.getByRole('button', { name: 'Отменить' }).click();
+      await expect(row).toBeVisible();
+      await expect(toast).toBeHidden();
+
+      // Let the full window elapse: no committing DELETE may have been sent.
+      await page.waitForTimeout(5_500);
+      expect(bodyDeletes).toHaveLength(0);
+      page.off('request', onRequest);
+
+      // Fresh load: the record is still in the table…
+      const viewWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records/view') && r.status() === 200,
+        { timeout: 30_000 },
+      );
+      await page.reload();
+      await viewWait;
+      await expect(page.locator('tbody tr').filter({ hasText: clientName })).toBeVisible();
+      // …and alive in the DB.
+      const dbRow = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRow).not.toBeNull();
+      expect(dbRow!.id).toBe(record.id);
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── S5: commit failure (offline in window) — row restored + error toast ──
+
+  test('S5: network lost in window — commit fails, row returns with error toast, record survives', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `Deferred S5 ${Date.now()}`;
+    const { client, record } = await createCleanRecord(request, clientName);
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      await clickRowDelete(page, row, record.id);
+
+      await expect(row).toBeHidden();
+      await expect(undoToast(page)).toBeVisible();
+
+      // Kill the network INSIDE the 5s window (setOffline pattern #239):
+      // the scheduled commit fetch fails → default onError: undo + red toast.
+      await page.context().setOffline(true);
+
+      // The commit failure surfaces as the row returning…
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      // …and the error toast «Не удалось удалить. Изменение отменено».
+      const errorToast = page
+        .locator('[data-testid="toast-error"]')
+        .filter({ hasText: 'Не удалось удалить. Изменение отменено' });
+      await expect(errorToast).toBeVisible();
+
+      await page.context().setOffline(false);
+
+      // Fresh load: the record is still in the table…
+      const viewWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records/view') && r.status() === 200,
+        { timeout: 30_000 },
+      );
+      await page.reload();
+      await viewWait;
+      await expect(page.locator('tbody tr').filter({ hasText: clientName })).toBeVisible();
+      // …and alive in the DB.
+      const dbRow = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRow).not.toBeNull();
+      expect(dbRow!.id).toBe(record.id);
+    } finally {
+      await page.context().setOffline(false);
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── S6: mid-window race — commit 409 stale_dependencies + «Обновить» ─────
+
+  // GH #285: the rev8 stale-aware onError («Обновить» action) is NOT wired in
+  // the app yet — plan Task 5 requires `onError: staleAwareOnError(queryClient)`
+  // on both useDeleteRecord enqueue paths, but buildDeferredDeleteAction
+  // (hooks/useDeleteRecord.ts) never sets it, so a commit 409
+  // stale_dependencies falls into the context DEFAULT handler: the row is
+  // restored and a generic toast «Не удалось удалить. Изменение отменено»
+  // (no action button) is shown instead of the spec'd «Не удалось удалить:
+  // данные изменились» + «Обновить». E2E RED evidence (this commit's run):
+  // commit-DELETE → 409 received, row returned, then this test timed out on
+  // the toast locator. Un-fixme AFTER the staleAwareOnError wiring lands —
+  // the body below is the ready GREEN flip for that change.
+  test.fixme('S6: mid-window race — payment added, commit 409, row returns with «Обновить» action', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `Deferred S6 ${Date.now()}`;
+    const { client, record } = await createCleanRecord(request, clientName);
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      const commitWait = commitDeleteWait(page, record.id);
+
+      await clickRowDelete(page, row, record.id);
+
+      await expect(row).toBeHidden();
+      await expect(undoToast(page)).toBeVisible();
+
+      // The race (test_api_payments.py body shape): a colleague adds a
+      // payment to the SAME record while the undo window is open.
+      const paymentResp = await page.request.post(`${BACKEND}/api/v1/payments`, {
+        data: { record_id: record.id, amount: 500, method: 'card' },
+      });
+      expect(paymentResp.status()).toBe(201);
+      const payment = (await paymentResp.json()) as { id: string };
+
+      // Window expires → the commit DELETE carries expected:{} but the
+      // record now has a payment the snapshot never confirmed → 409.
+      const commit = await commitWait;
+      expect(commit.status()).toBe(409);
+
+      // rev8 honest error: the row returns + the red toast carries the text
+      // «Не удалось удалить: данные изменились» AND the «Обновить» action
+      // button (toast lives 4500ms — assert and click promptly).
+      await expect(row).toBeVisible();
+      const errorToast = page
+        .locator('[data-testid="toast-error"]')
+        .filter({ hasText: 'Не удалось удалить: данные изменились' });
+      await expect(errorToast).toBeVisible();
+      const refreshBtn = errorToast.getByRole('button', { name: 'Обновить' });
+      await expect(refreshBtn).toBeVisible();
+      await refreshBtn.click();
+
+      // Fresh load: the record AND the new payment are alive…
+      const viewWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records/view') && r.status() === 200,
+        { timeout: 30_000 },
+      );
+      await page.reload();
+      await viewWait;
+      await expect(page.locator('tbody tr').filter({ hasText: clientName })).toBeVisible();
+      // …in the DB on both tables.
+      const dbRecord = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRecord).not.toBeNull();
+      expect(dbRecord!.id).toBe(record.id);
+      const dbPayment = queryDBRow(`SELECT id, amount FROM payments WHERE id='${payment.id}'`);
+      expect(dbPayment).not.toBeNull();
+      expect(dbPayment!.id).toBe(payment.id);
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
     }
   });
 });

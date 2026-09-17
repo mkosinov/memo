@@ -16,12 +16,17 @@ import type { DependencyNode } from '@memo/api-client';
 //    offered, primary action is "Архивировать" (POST /{id}/archive).
 //
 // Design decision (Task 18): the dialog is fully presentational. Parents
-// (tables, Tasks 19/20) own the no-body DELETE dry-run fetch flow and inject
-// the mutations as callbacks mirroring the api-client shapes:
+// (tables, Tasks 19/20) own the dry-run fetch flow and inject the mutations
+// as callbacks mirroring the api-client shapes:
 //   onResolve(id, resolutions) ↔ resolveDeleteX(id, resolutions)
 //   onArchive(id)              ↔ archiveX(id)
 // This keeps the dialog table-agnostic and avoids a hook-per-entityType map.
 // Parents also own open/close state (the hooks' `dependencies` has no reset).
+//
+// GH #285 (records only): the parent's confirm callback ENQUEUES a deferred
+// delete (removeRecordResolved) — the enqueue is synchronous, so the dialog
+// closes immediately via onDone; the real DELETE runs in the 5s commit. The
+// rendering is unchanged for every other entity (instant resolveDelete).
 
 export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
 
@@ -145,6 +150,54 @@ function actionSuffix(dep: DependencyNode): string {
 
 function depLabel(dep: DependencyNode): string {
   return AUTO_ENTITY_LABEL[dep.entity] ?? RELATION_PLURAL[dep.relation] ?? dep.relation;
+}
+
+// ─── GH #285 D9в — per-item one-liners for record dependency nodes ────────────
+// Nodes carrying `items` (id + human-readable label — the record dry-run tree)
+// render a group: header «{plural} — будут удалены:» + one line per item,
+// capped at 10 lines + «и ещё N». The counter line («Посещения: 2 (удалены)»)
+// is replaced — the rows themselves are the information. Nodes without items
+// (every other entity, auto join-rows) keep the counter line.
+
+/** Max item lines shown before the «и ещё N» tail (spec D9в). */
+const ITEM_LINES_CAP = 10;
+
+function DepItemGroup({ dep }: { dep: DependencyNode }) {
+  const items = dep.items ?? [];
+  return (
+    <>
+      <div className="font-medium" style={{ color: 'var(--ink)' }}>
+        {`${depLabel(dep)} — будут удалены:`}
+      </div>
+      <ul className="mt-1 flex flex-col gap-0.5 pl-4 list-disc">
+        {items.slice(0, ITEM_LINES_CAP).map((item) => (
+          <li key={item.id}>{item.label}</li>
+        ))}
+        {items.length > ITEM_LINES_CAP && (
+          <li key="more">{`и ещё ${items.length - ITEM_LINES_CAP}`}</li>
+        )}
+      </ul>
+    </>
+  );
+}
+
+/** A dep row: with items → the group; without → the legacy counter line
+ *  («→ Посещения: 2 (удалены)», with the cascade_preview tail when present). */
+function DepRow({ dep }: { dep: DependencyNode }) {
+  const hasItems = Array.isArray(dep.items) && dep.items.length > 0;
+  if (hasItems) {
+    return (
+      <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
+        <DepItemGroup dep={dep} />
+      </li>
+    );
+  }
+  const preview = dep.cascade_preview ? `; визиты: ${dep.cascade_preview.visits ?? '?'}` : '';
+  return (
+    <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
+      {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`}
+    </li>
+  );
 }
 
 export function DeleteDialog({
@@ -303,18 +356,11 @@ export function DeleteDialog({
       </p>
       <ul className="flex flex-col gap-1.5 my-2">
         {autoDeps.map((dep) => (
-          <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
-            {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)})`}
-          </li>
+          <DepRow key={dep.entity} dep={dep} />
         ))}
-        {choiceDeps.map((dep) => {
-          const preview = dep.cascade_preview ? `; визиты: ${dep.cascade_preview.visits ?? '?'}` : '';
-          return (
-            <li key={dep.entity} className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
-              {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`}
-            </li>
-          );
-        })}
+        {choiceDeps.map((dep) => (
+          <DepRow key={dep.entity} dep={dep} />
+        ))}
       </ul>
       {needsConfirm && (
         <label

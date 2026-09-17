@@ -21,7 +21,7 @@ import { invalidateEntities } from '@/lib/invalidate';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { formatRecordLabel } from '@/lib/utils';
 import { patchVisitor, patchActivity, ApiError } from '@memo/api-client';
-import type { ClientWithStats, DependencyNode } from '@memo/api-client';
+import type { ClientWithStats, DependencyNode, RecordView } from '@memo/api-client';
 
 interface ClientRecordTabProps {
   recordId: string;
@@ -55,8 +55,8 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     convertAnonymousVisit,
   } = useRecordMutations(record?.activity_id ?? '', recordId);
 
-  // Delete — Addendum 13 / GH #139 T8-FE2a: unbound dry-run hook + dialog.
-  const deleteMutation = useDeleteRecord();
+  // Delete — GH #285 deferred flow: the shared useDeleteRecord hook
+  // (dry-run → enqueue / 409 dialog), see handleDelete below.
 
   // ── Surface-specific editable state ─────────────────────────────────────
   const [date, setDate] = useState('');
@@ -171,25 +171,28 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     setHasChanges(false);
   }, [activity, record]);
 
-  // ── Delete — Addendum 13 dry-run flow (mirrors ClientsTable) ───────
-  // Parent owns the state: no-body DELETE → 204 (instant, hook toasts) or
-  // 409 → park deps + open DeleteDialog; dialog confirms via resolveDelete.
+  // ── Delete — GH #285 deferred flow (mirrors RecordsTable) ──────────
+  // Parent owns the state: removeRecord dry-runs (pure preview) — a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window); a 409 WITH the dependency tree parks the tree + opens
+  // DeleteDialog. The tab STAYS open after confirm — the user remains in
+  // context (ClientsIntegration behavior).
+  const { removeRecord, removeRecordResolved } = useDeleteRecord();
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; deps: DependencyNode[] } | null>(null);
 
   const handleDelete = useCallback(async () => {
     try {
-      await deleteMutation.mutateAsync(recordId);
+      // The hook reads only `.id` — the modal record is a RecordResponse
+      // (no denormalized RecordView fields), so a row-shaped stub is enough.
+      await removeRecord({ id: recordId } as RecordView);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
-        if (deps.length > 0) {
-          setDeleteTarget({ id: recordId, deps });
-          return;
-        }
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ id: recordId, deps: err.dependencies });
+        return;
       }
       showToast(parseApiError(err).message, 'error');
     }
-  }, [deleteMutation, recordId, showToast]);
+  }, [removeRecord, recordId, showToast]);
 
   /**
    * Visitor name/age change — direct visitor update (no optimistic override
@@ -368,17 +371,19 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         </div>
       </div>
 
-      {/* Delete dialog — Addendum 13: opened on dry-run 409, closed on done/cancel.
-          The tab (and the parent modal) STAYS open after confirm — the user
-          remains in context (ClientsIntegration behavior). */}
+      {/* Delete dialog — GH #285 (D3): opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete and the dialog closes
+          immediately via onDone. The tab (and the parent modal) STAYS open —
+          the user remains in context (ClientsIntegration behavior). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={formatRecordLabel(activity?.start)}
           entityType="record"
           entityId={deleteTarget.id}
           dependencies={deleteTarget.deps}
-          onResolve={async (id, resolutions) => {
-            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          onResolve={async (_id, resolutions) => {
+            // D3: enqueue is synchronous — no await, the dialog closes at once.
+            void removeRecordResolved({ id: deleteTarget.id } as RecordView, resolutions, deleteTarget.deps);
           }}
           onArchive={async () => { /* records have no archive flow — never Mode B */ }}
           onDone={() => setDeleteTarget(null)}

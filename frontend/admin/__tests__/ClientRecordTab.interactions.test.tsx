@@ -26,7 +26,7 @@ vi.mock('@memo/api-client', () => ({
   getRecord: vi.fn(),
   updateRecord: vi.fn(),
   patchRecord: vi.fn(),
-  deleteRecord: vi.fn(),
+  dryRunDeleteRecord: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
   deletePayment: vi.fn(),
@@ -72,7 +72,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   patchRecord,
   patchActivity,
-  deleteRecord,
+  dryRunDeleteRecord,
   createPayment,
   deletePayment,
   createVisit,
@@ -108,7 +108,7 @@ describe('ClientRecordTab — interactions', () => {
     buildDefaultQueryImpl(mockUseQuery);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchActivity).mockResolvedValue(mockActivityResponse);
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
+    vi.mocked(dryRunDeleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1', record_id: 'r1', amount: 1000, method: 'card',
       created_at: '', updated_at: '',

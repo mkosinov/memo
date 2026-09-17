@@ -6,7 +6,7 @@ import { StatusPicker } from '@/app/components/shared/StatusPicker';
 export interface RecordSummaryProps {
   totalCost: number;
   totalPaid: number;
-  /** Total seats (named visits + anonym). */
+  /** Total seats (all visits). */
   seats: number;
   /** Current record status (derived from visits). */
   status: VisitStatus;

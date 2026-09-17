@@ -170,13 +170,17 @@ export function ClientTab({
 
   // Status change on the record (RecordSummary StatusPicker) — coarse
   // record-level patch: all visits set to the new status in one PATCH.
-  // Spec allows record-level ops to stay via `updateRecord` from the hook.
+  // #257 D4 cascade: the visits array includes anonymous rows (visitor_id
+  // = null) and each visit keeps its money fields (tariff_id, custom_price)
+  // — a rewrite that dropped them would silently reprice the record.
   const handleStatusChange = useCallback(
     async (newStatus: VisitStatus) => {
       const visits = record?.visits ?? [];
       const updatedVisits = visits.map((v) => ({
         visitor_id: v.visitor_id,
+        tariff_id: v.tariff_id,
         price: v.price,
+        custom_price: v.custom_price,
         status: newStatus,
       }));
       try {
@@ -250,11 +254,12 @@ export function ClientTab({
           )}
         </div>
 
-        {/* Summary: cost + status */}
+        {/* Summary: cost + status. seats = len(visits) — anonymous seats
+            are visits with visitor_id = null (#257). */}
         <RecordSummary
           totalCost={totalCost}
           totalPaid={totalPaid}
-          seats={visits.length + (record?.anonym_visits ?? 0)}
+          seats={visits.length}
           status={derivedStatus}
           onStatusChange={handleStatusChange}
         />

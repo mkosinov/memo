@@ -10,6 +10,7 @@ import {
   mockRecord,
   mockVisitor,
   mockTariffs,
+  mockVisit,
 } from './helpers/mockData';
 
 import {
@@ -17,7 +18,8 @@ import {
   createMockUIContext,
 } from './helpers/mockContexts';
 
-import { patchVisit as apiPatchVisit } from '@memo/api-client';
+import { patchVisit as apiPatchVisit, patchRecord } from '@memo/api-client';
+import type { RecordResponse } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -217,6 +219,75 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
     });
   });
 
+  // ─── #257 D4 cascade: record-level status change rewrites ALL visits ─
+
+  it('record-level status change sends all visits (incl. anonymous) with tariff_id and custom_price preserved', async () => {
+    // Canonical record: a named visit (tariff, no custom price) + an
+    // anonymous visit (visitor_id = null, custom-price override). Derived
+    // from the shared fixtures — no inline mock objects.
+    const recordWithTwoVisits: RecordResponse = {
+      ...mockRecord,
+      status: 'waiting',
+      visits: [
+        { ...mockVisit, tariff_id: 'tariff-1', custom_price: null },
+        {
+          ...mockVisit,
+          id: 'v2',
+          visitor_id: null,
+          tariff_id: 'tariff-2',
+          custom_price: 500,
+        },
+      ],
+    };
+    mockUseRecordData.mockReturnValue({
+      recordData: null,
+      record: recordWithTwoVisits,
+      visitors: [mockVisitor],
+      activity: undefined,
+      services: [],
+      masters: [],
+      locations: [],
+      payments: [],
+      visitorsMap: new Map([['vis1', { name: 'Анна Иванова', age: 30 }]]),
+      tariffs: mockTariffs,
+      isLoading: false,
+      status: 'waiting' as const,
+    });
+
+    render(<ClientTab {...newProps} />);
+    // Open the record-level StatusPicker and pick «visited».
+    const trigger = screen.getByTestId('record-status-trigger');
+    fireEvent.click(trigger);
+    const option = screen.getByTestId('record-status-option-visited');
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      // D4 cascade: ONE visits-array PUT/PATCH where every visit — named
+      // and anonymous — carries the new status AND keeps its money fields.
+      expect(patchRecord).toHaveBeenCalledWith(
+        'r1',
+        expect.objectContaining({
+          visits: [
+            expect.objectContaining({
+              visitor_id: 'vis1',
+              tariff_id: 'tariff-1',
+              price: 3500,
+              custom_price: null,
+              status: 'visited',
+            }),
+            expect.objectContaining({
+              visitor_id: null,
+              tariff_id: 'tariff-2',
+              price: 3500,
+              custom_price: 500,
+              status: 'visited',
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
   // ─── Add visit goes through addVisit (fine-grained) ─────────────────
 
   it('add-visit wires through addVisit (creates Visitor + Visit via hook)', async () => {
@@ -308,18 +379,50 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
     expect(src).not.toMatch(/useOptimisticVisitMutation/);
   });
 
-  // ─── Seats reads anonym_visits from canonical hook (not props) ──────
+  // ─── #257 unified visitors model: seats derive from record.visits ───
 
-  it('seats display reads anonym_visits from canonical record (hook, not prop)', () => {
-    // The anonym_visits change path goes through handleAnonymChange in
-    // ClientTab → useRecordMutations.updateRecord. There's no visible
-    // anonym-visits input in ClientTab's current UI (it lives in
-    // RecordHeader, which is rendered by ClientRecordTab, not ClientTab).
-    // We verify the wiring by checking the seats summary reads from the hook.
+  it('seats display equals visits.length from canonical record (hook, not prop)', () => {
+    // #257: seats = len(visits) — anonymous seats are visits with
+    // visitor_id = null, so the visit list IS the seat list. Two saved
+    // visits (one anonymous) → «Мест: 2».
+    const recordWithTwoVisits: RecordResponse = {
+      ...mockRecord,
+      status: 'waiting',
+      visits: [mockVisit, { ...mockVisit, id: 'v2', visitor_id: null }],
+    };
+    mockUseRecordData.mockReturnValue({
+      recordData: null,
+      record: recordWithTwoVisits,
+      visitors: [mockVisitor],
+      activity: undefined,
+      services: [],
+      masters: [],
+      locations: [],
+      payments: [],
+      visitorsMap: new Map([['vis1', { name: 'Анна Иванова', age: 30 }]]),
+      tariffs: mockTariffs,
+      isLoading: false,
+      status: 'waiting' as const,
+    });
+
     render(<ClientTab {...newProps} />);
-    // The seats display in RecordSummary reads anonym_visits from the
-    // canonical record — proves it is read from the hook, not props.
-    expect(screen.getByText('Мест:')).toBeInTheDocument();
+    const summary = screen.getByTestId('record-summary');
+    expect(within(summary).getByText('Мест:')).toBeInTheDocument();
+    expect(within(summary).getByText('2')).toBeInTheDocument();
+  });
+
+  it('no production component reads record.anonym_visits anymore (#257 invariant)', () => {
+    // #257 unified visitors model: seats are derived purely from
+    // record.visits — the legacy counter field is gone from the API.
+    // Guards the two surfaces that used to read it: the record tab
+    // (seats display) and the modal tab label (x{totalSeats}).
+    for (const rel of [
+      '../app/components/modal/ActivityDetailsModal/ClientTab.tsx',
+      '../app/components/modal/ActivityDetailsModal/ActivityDetailsModal.tsx',
+    ]) {
+      const src = fs.readFileSync(path.resolve(__dirname, rel), 'utf-8');
+      expect(src).not.toMatch(/anonym_visits/);
+    }
   });
 
   // ─── Status change on visit row uses patchVisit (fine-grained) ──────

@@ -157,7 +157,9 @@ function ExistingActivityContent({
   const tabs: Tab[] = useMemo(() => {
     const settingsTab: Tab = { id: 'settings', label: 'Настройка' };
     const clientTabs: Tab[] = activityRecords.map((record) => {
-      const totalSeats = record.visits.length + (record.anonym_visits ?? 0);
+      // #257: seats = len(visits) — anonymous seats are visits with
+      // visitor_id = null; no separate counter field.
+      const totalSeats = record.visits.length;
       return {
         id: `client-${record.id}`,
         label: (

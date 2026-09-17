@@ -28,6 +28,8 @@ import {
   type ActivityCreate,
   type ActivityPatch,
   ActivityResponseSchema,
+  CopyWeekResultSchema,
+  type CopyWeekResult,
   type ActivityResponse,
   PhotoResponseSchema,
   type PhotoResponse,
@@ -375,6 +377,18 @@ export async function patchActivity(
 
 export async function deleteActivity(id: string): Promise<void> {
   await api(`/api/v1/activities/${id}`, z.any(), { method: 'DELETE' });
+}
+
+// Atomic last-week copy (#242): merge dedup server-side; week_start is the
+// TARGET week's Monday, locations is the explicit checked list from the popup.
+export async function copyWeek(params: {
+  week_start: string;
+  locations: string[];
+}): Promise<CopyWeekResult> {
+  return api('/api/v1/activities/copy-week', CopyWeekResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 }
 
 // ─── Records ────────────────────────────────────────────────────────────────

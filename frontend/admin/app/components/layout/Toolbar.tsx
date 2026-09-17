@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useUI } from '@/contexts/UIContext';
-import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { StampPanel } from '@/app/components/stamp/StampPanel';
 
 // ─── Accordion Section ────────────────────────────────────────────────────
@@ -49,10 +48,12 @@ function AccordionSection({ title, children, contentTestId }: AccordionSectionPr
 
 export function Toolbar() {
   const { rightPanelCollapsed, toggleRightPanel, showToast } = useUI();
-  const { copyLastWeek } = useScheduleData();
 
   const handleCopyLastWeek = () => {
-    copyLastWeek();
+    // #242: copyLastWeek is now a real mutation (weekStart, locations) — it is
+    // wired to the copy popup (spec §6) that supplies the explicit selection.
+    // Until the popup lands, keep the toast only: firing the mutation here
+    // with an implicit full selection would copy the week without user consent.
     showToast('Прошлая неделя скопирована');
   };
 

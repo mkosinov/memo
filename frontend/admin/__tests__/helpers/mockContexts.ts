@@ -51,7 +51,11 @@ export function createMockScheduleData(
     addActivity: vi.fn(),
     updateActivity: vi.fn(),
     deleteActivity: vi.fn(),
-    copyLastWeek: vi.fn(),
+    // #242: resolves a zero CopyWeekResult so awaiting callers work by default;
+    // override per-test via createMockScheduleData({ copyLastWeek: vi.fn(...) }).
+    copyLastWeek: vi.fn(() =>
+      Promise.resolve({ copied: 0, skipped_duplicates: 0, skipped_filtered: 0, skipped_no_master: 0 }),
+    ),
     gridStartMinutes: 540,
     gridEndMinutes: 1260,
     ...overrides,

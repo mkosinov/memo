@@ -1,26 +1,25 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { ActivityResponse, CopyWeekResult } from '@memo/api-client';
 import { getActivities } from '@memo/api-client';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useUI } from '@/contexts/UIContext';
 import { qk } from '@/lib/queryKeys';
-import { toISODate } from '@/lib/datetime';
+import { shiftDateKey } from '@/lib/datetime';
 
 // ─── Constants (spec §6) ────────────────────────────────────────────────────
 
-/** Popup fetch lives a week behind the grid — explicit TanStack-recommended staleTime for fetchQuery. */
+/** Popup fetch lives a week behind the grid — 5-min cache reuse for repeat opens. */
 const POPUP_STALE_TIME = 5 * 60_000;
 const SOURCE_PAGE_SIZE = 100;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Honest note when the source page was capped (spec §6: `total > items.length`).
  */
 function cappedNote(total: number): string {
-  return `Показаны первые 100 из ${total} занятий; за один заход копируется до 100 — сузьте выбор локаций или скопируйте в несколько заходов`;
+  return `Показаны первые ${SOURCE_PAGE_SIZE} из ${total} занятий; за один заход копируется до ${SOURCE_PAGE_SIZE} — сузьте выбор локаций или скопируйте в несколько заходов`;
 }
 
 // ─── Dedup key (spec §5.2) ──────────────────────────────────────────────────
@@ -34,10 +33,10 @@ function dedupKey(masterId: string, serviceId: string, start: string, duration: 
   return `${masterId}|${serviceId}|${start}|${duration}`;
 }
 
-/** Dedup key of a SOURCE row — start shifted +7 days into the target week (floating-local arithmetic, #142). */
+/** Dedup key of a SOURCE row — start shifted +7 days into the target week (calendar-day arithmetic, #142). */
 function shiftedDedupKey(a: ActivityResponse): string {
   const [date, time] = a.start.split('T');
-  const shifted = toISODate(new Date(new Date(`${date}T00:00:00`).getTime() + 7 * DAY_MS));
+  const shifted = shiftDateKey(date, 7);
   return dedupKey(a.master_id, a.service_id, `${shifted}T${time}`, a.duration);
 }
 
@@ -49,7 +48,8 @@ interface CopyLastWeekPopoverProps {
   onClose: () => void;
 }
 
-interface SourceState {
+/** Source-week page — `{ items, total }` rides in ONE cache value, so a fresh cache hit still reports the capped total (spec §6). */
+interface CopySource {
   items: ActivityResponse[];
   total: number;
 }
@@ -62,76 +62,62 @@ interface LocationEntry {
 }
 
 export function CopyLastWeekPopover({ weekStart, onClose }: CopyLastWeekPopoverProps) {
-  const queryClient = useQueryClient();
   const { locations, copyLastWeek } = useScheduleData();
   const { showToast } = useUI();
 
-  const [source, setSource] = useState<SourceState | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const checkedInitRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Target week = Monday..Sunday of the viewed week; source = the 7 days before.
-  const srcStart = useMemo(
-    () => toISODate(new Date(new Date(`${weekStart}T00:00:00`).getTime() - 7 * DAY_MS)),
-    [weekStart],
-  );
-  const srcEnd = useMemo(
-    () => toISODate(new Date(new Date(`${weekStart}T00:00:00`).getTime() - 1 * DAY_MS)),
-    [weekStart],
-  );
-  const weekEnd = useMemo(
-    () => toISODate(new Date(new Date(`${weekStart}T00:00:00`).getTime() + 6 * DAY_MS)),
-    [weekStart],
-  );
+  const srcStart = useMemo(() => shiftDateKey(weekStart, -7), [weekStart]);
+  const srcEnd = useMemo(() => shiftDateKey(weekStart, -1), [weekStart]);
+  const weekEnd = useMemo(() => shiftDateKey(weekStart, 6), [weekStart]);
 
-  // Open → fetch the source week (fetchQuery per spec §6: same activityRange
-  // key/queryFn family as the grid + explicit staleTime). `total` rides in a
-  // sibling meta key under the same ['activities'] prefix, so a fresh cache hit
-  // (staleTime window) still reports the capped total.
+  // Open → fetch the source week. Popover-OWNED key (qk.activityRangeCopySource):
+  // the grid's activityRange cache holds plain rows and could shadow this
+  // fetch, losing `total` — so the { items, total } pair lives in this key's
+  // own cache entry. `meta.silent` skips the QueryCache error toast (the
+  // popover reports the failure itself, inline + toast below).
+  const {
+    data: source,
+    error: sourceError,
+  } = useQuery<CopySource>({
+    queryKey: qk.activityRangeCopySource(srcStart, srcEnd),
+    queryFn: async () => {
+      const res = await getActivities({
+        date_from: srcStart,
+        date_to: srcEnd,
+        per_page: SOURCE_PAGE_SIZE,
+      });
+      return { items: res.items, total: res.total };
+    },
+    staleTime: POPUP_STALE_TIME,
+    meta: { silent: true },
+  });
+
+  // Toast the source-fetch failure once (inline error renders below).
   useEffect(() => {
-    let cancelled = false;
-    const metaKey = [...qk.activityRange(srcStart, srcEnd), 'copy-meta'] as const;
-    (async () => {
-      try {
-        const items = await queryClient.fetchQuery({
-          queryKey: qk.activityRange(srcStart, srcEnd),
-          queryFn: async () => {
-            const res = await getActivities({
-              date_from: srcStart,
-              date_to: srcEnd,
-              per_page: SOURCE_PAGE_SIZE,
-            });
-            queryClient.setQueryData(metaKey, res.total);
-            return res.items;
-          },
-          staleTime: POPUP_STALE_TIME,
-        });
-        if (cancelled) return;
-        const total = queryClient.getQueryData<number>(metaKey) ?? items.length;
-        setSource({ items, total });
-        setFetchError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setFetchError(err instanceof Error ? err.message : 'Не удалось загрузить прошлую неделю');
-        showToast(err instanceof Error ? err.message : 'Не удалось загрузить прошлую неделю', 'error');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // showToast is stable (useCallback in UIProvider); meta key derives from src dates.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient, srcStart, srcEnd, showToast]);
+    if (sourceError) {
+      showToast(sourceError.message, 'error');
+    }
+  }, [sourceError, showToast]);
+
+  // Target week rows — reactive subscription on the grid's activityRange key
+  // (spec §6: already loaded by the grid). `enabled: false`: the grid owns the
+  // fetching; this observer only READS — but it re-renders whenever the cache
+  // entry changes (grid query resolving after open, SSE invalidation refetch),
+  // so net counters / enable state never stay pinned to an empty cache.
+  const { data: targetRows = [] } = useQuery<ActivityResponse[]>({
+    queryKey: qk.activityRange(weekStart, weekEnd),
+    enabled: false,
+  });
 
   // Per-location source rows (archived locations are absent from the active
   // page dictionary → never listed; the server filters them as a second line).
   const locationEntries = useMemo<LocationEntry[]>(() => {
     if (!source) return [];
-    // Target week cache — already loaded by the grid (spec §6).
-    const targetRows = queryClient.getQueryData<ActivityResponse[]>(qk.activityRange(weekStart, weekEnd)) ?? [];
     const targetKeys = new Set(targetRows.map((t) => dedupKey(t.master_id, t.service_id, t.start, t.duration)));
 
     return locations.flatMap((loc) => {
@@ -142,7 +128,7 @@ export function CopyLastWeekPopover({ weekStart, onClose }: CopyLastWeekPopoverP
       ).length;
       return [{ id: loc.id, name: loc.name, toCopy }];
     });
-  }, [source, locations, queryClient, weekStart, weekEnd]);
+  }, [source, locations, targetRows]);
 
   // All locations checked by default — initialize once, after the source lands.
   useEffect(() => {
@@ -214,9 +200,9 @@ export function CopyLastWeekPopover({ weekStart, onClose }: CopyLastWeekPopoverP
     }
   }, [source, totalToCopy, submitting, copyLastWeek, weekStart, checkedIds, showToast, onClose]);
 
-  const isLoading = source === null && fetchError === null;
-  const isEmpty = source !== null && source.items.length === 0;
-  const copyDisabled = isLoading || fetchError !== null || isEmpty || totalToCopy === 0 || submitting;
+  const isLoading = !source && !sourceError;
+  const isEmpty = !!source && source.items.length === 0;
+  const copyDisabled = isLoading || !!sourceError || isEmpty || totalToCopy === 0 || submitting;
 
   return (
     <div
@@ -250,9 +236,9 @@ export function CopyLastWeekPopover({ weekStart, onClose }: CopyLastWeekPopoverP
           </p>
         )}
 
-        {fetchError && (
+        {sourceError && (
           <p data-testid="copy-fetch-error" className="mt-3 text-xs text-red-600">
-            {fetchError}
+            {sourceError.message}
           </p>
         )}
 

@@ -4,7 +4,14 @@
  * Covers: net per-location counters (minus private, minus target-week dedup
  * keys), private hint, "first 100 of N" note, empty source, disable logic,
  * copy flow → toasts (success/info/error) → close on success.
+ *
+ * TZ=America/New_York (pool: 'forks' — env var applies before Date usage,
+ * datetime.test.ts pattern) to exercise DST-fragile date math.
  */
+
+// Set timezone to a DST zone BEFORE any Date usage
+process.env.TZ = 'America/New_York';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import React from 'react';
@@ -39,6 +46,7 @@ import { qk } from '../../lib/queryKeys';
 
 // Monday of the TARGET (viewed) week; source = the 7 days before it.
 const WEEK_START = '2026-09-14'; // Monday
+const WEEK_END = '2026-09-20'; // Sunday
 const SRC_START = '2026-09-07';
 const SRC_END = '2026-09-13';
 
@@ -101,12 +109,30 @@ interface HarnessOptions {
   showToast?: ReturnType<typeof vi.fn>;
   locations?: { id: string; name: string }[];
   targetRows?: ActivityResponse[];
+  /** Target cache left EMPTY (grid query still in flight — resolves later via setQueryData). */
+  targetInFlight?: boolean;
+  /** Target-week Monday override (DST tests). Defaults to WEEK_START. */
+  weekStart?: string;
+  /** Target-week Sunday override (DST tests). Defaults to WEEK_END. */
+  weekEnd?: string;
+  /** Prefill the SOURCE-week cache with plain rows as the grid would (no total). */
+  sourceGridRows?: ActivityResponse[];
 }
 
 function renderPopover(opts: HarnessOptions = {}) {
   const queryClient = createTestQueryClient();
-  // The target week is already loaded by the grid (spec §6) — prefill the cache.
-  queryClient.setQueryData(qk.activityRange(WEEK_START, '2026-09-20'), opts.targetRows ?? TARGET_ROWS);
+  const weekStart = opts.weekStart ?? WEEK_START;
+  const weekEnd = opts.weekEnd ?? WEEK_END;
+  // The target week is already loaded by the grid (spec §6) — prefill the cache,
+  // unless the test simulates the grid query still in flight.
+  if (!opts.targetInFlight) {
+    queryClient.setQueryData(qk.activityRange(weekStart, weekEnd), opts.targetRows ?? TARGET_ROWS);
+  }
+  if (opts.sourceGridRows) {
+    // The grid browsed the source week earlier: plain rows under the shared
+    // activityRange key — the grid's queryFn maps the page to items only.
+    queryClient.setQueryData(qk.activityRange(SRC_START, SRC_END), opts.sourceGridRows);
+  }
 
   const copyLastWeek =
     opts.copyLastWeek ??
@@ -129,7 +155,7 @@ function renderPopover(opts: HarnessOptions = {}) {
   const onClose = vi.fn();
   render(
     <QueryClientProvider client={queryClient}>
-      <CopyLastWeekPopover weekStart={WEEK_START} onClose={onClose} />
+      <CopyLastWeekPopover weekStart={weekStart} onClose={onClose} />
     </QueryClientProvider>,
   );
   return { onClose, copyLastWeek, showToast, queryClient };
@@ -221,6 +247,88 @@ describe('CopyLastWeekPopover — source list', () => {
     renderPopover();
     await waitFor(() => expect(screen.getByTestId('copy-empty')).toBeInTheDocument());
     expect(screen.getByTestId('copy-confirm')).toBeDisabled();
+  });
+});
+
+// ─── Cache reactivity & DST date math (code-review fixes) ───────────────────
+
+describe('CopyLastWeekPopover — cache reactivity & DST date math', () => {
+  it('shows the cap note when the grid already populated the source-week cache', async () => {
+    // The user browsed the source week in the grid first: plain rows (no
+    // total) sit under the shared activityRange key. The popup's own fetch
+    // (popover-owned key) must run and report the capped total (spec §6) —
+    // a fresh cache hit of grid data must not silently fall back to
+    // items.length and swallow the note.
+    const gridRows = Array.from({ length: 100 }, (_, i) =>
+      makeRow({ id: `g${i}`, start: `2026-09-07T${String(8 + (i % 12)).padStart(2, '0')}:00:00` }),
+    );
+    const pageRows = Array.from({ length: 100 }, (_, i) =>
+      makeRow({ id: `p${i}`, start: `2026-09-08T${String(8 + (i % 12)).padStart(2, '0')}:00:00` }),
+    );
+    mockSource(pageRows, 103);
+    renderPopover({ sourceGridRows: gridRows });
+    await waitFor(() =>
+      expect(screen.getByText(/Показаны первые 100 из 103/)).toBeInTheDocument(),
+    );
+    // The popup must have fetched its own page, not ridden the grid's cache.
+    expect(vi.mocked(getActivities)).toHaveBeenCalledWith({
+      date_from: SRC_START,
+      date_to: SRC_END,
+      per_page: 100,
+    });
+  });
+
+  it('recomputes net counters when the target-week query resolves after the popover opened', async () => {
+    // Grid still fetching the target week when the popover opens: the target
+    // cache is empty → the duplicate is not yet visible → alpika counts 2.
+    const { queryClient } = renderPopover({ targetInFlight: true });
+    await waitFor(() => expect(screen.getByTestId('copy-count-alpika')).toHaveTextContent('2'));
+    // The grid query resolves (or SSE invalidation refills the cache) — the
+    // popover must react to the same key, not a one-shot getQueryData read.
+    act(() => {
+      queryClient.setQueryData(qk.activityRange(WEEK_START, WEEK_END), TARGET_ROWS);
+    });
+    await waitFor(() => expect(screen.getByTestId('copy-count-alpika')).toHaveTextContent('1'));
+    expect(screen.getByTestId('copy-count-grand')).toHaveTextContent('1');
+  });
+
+  it('dedups across a DST fall-back week (calendar-day shift, not epoch × 24h)', async () => {
+    // Target week Mon 2026-11-02 .. Sun 2026-11-08 (the fall-back happened
+    // Sun Nov 1, just before it). The source week is Oct 26..Nov 1. Epoch
+    // arithmetic (7×24h from Oct 26 EDT midnight = Nov 1 23:00 EST) shifts
+    // the dedup key a calendar day early — the shared datetime helper must
+    // keep the shift exact so a1 dedups against t1.
+    const dstSource = [
+      makeRow({ id: 'a1', master_id: 'm1', service_id: 's1', start: '2026-10-26T10:00:00', duration: 60 }),
+      makeRow({ id: 'a2', master_id: 'm1', service_id: 's2', start: '2026-10-27T12:00:00', duration: 90 }),
+    ];
+    const dstTarget = [
+      makeRow({ id: 't1', master_id: 'm1', service_id: 's1', start: '2026-11-02T10:00:00', duration: 60 }),
+    ];
+    mockSource(dstSource);
+    renderPopover({
+      weekStart: '2026-11-02',
+      weekEnd: '2026-11-08',
+      targetRows: dstTarget,
+    });
+    // a1's shifted dedup key (2026-11-02T10:00) matches t1 → 1; a2 → 1.
+    await waitFor(() => expect(screen.getByTestId('copy-count-alpika')).toHaveTextContent('1'));
+  });
+
+  it('derives the source week across a DST spring-forward transition correctly', async () => {
+    // Target week Mon 2026-03-09: epoch math (7×24h from the EDT midnight)
+    // drifts srcStart/srcEnd a day early (Mar 1 / Mar 7 instead of
+    // Mar 2 / Mar 8) — the fetch window must stay the exact 7-day source week.
+    mockSource([
+      makeRow({ id: 'a1', start: '2026-03-02T10:00:00' }),
+    ]);
+    renderPopover({ weekStart: '2026-03-09', weekEnd: '2026-03-15' });
+    await waitFor(() => expect(screen.getByTestId('copy-count-alpika')).toBeInTheDocument());
+    expect(vi.mocked(getActivities)).toHaveBeenCalledWith({
+      date_from: '2026-03-02',
+      date_to: '2026-03-08',
+      per_page: 100,
+    });
   });
 });
 

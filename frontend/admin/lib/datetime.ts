@@ -58,6 +58,19 @@ export function toISODate(date: Date): string {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
+/**
+ * Shift a 'YYYY-MM-DD' date key by `days` CALENDAR days. Calendar `setDate`
+ * arithmetic on the parsed local midnight — DST-safe, unlike epoch math
+ * (N × 24h drifts a day across fall-back/spring-forward transitions; see
+ * __tests__/datetime-dst.test.ts). Week-span math for the schedule
+ * (copy-last-week #242, prev/next week derivations).
+ */
+export function shiftDateKey(dateKey: string, days: number): string {
+  const d = new Date(`${dateKey}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
+}
+
 /** Date key of the week day `dayIndex` (Mon=0..Sun=6) relative to the given week's Monday. */
 export function dayIndexToDate(monday: Date, dayIndex: number): string {
   const d = new Date(monday);

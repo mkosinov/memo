@@ -54,7 +54,7 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
 - Backend already supports nullable name on Client
 
 **Impact:**
-- Frontend: Remove required validation on name in NewBookingTab
+- Frontend: Remove required validation on name in NewRecordTab
 - Backend: No changes needed (Client.name already nullable)
 
 ## ⚠️ FUTURE REQUIREMENT: Create Booking Without Phone

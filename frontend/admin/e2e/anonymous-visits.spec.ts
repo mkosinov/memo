@@ -65,7 +65,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
 
       // 1 named visitor + «Мест» = 2 → 1 named visit + 2-seat anonymous tail.
       await page
-        .locator('[data-testid="new-booking-tab"]')
+        .locator('[data-testid="new-record-tab"]')
         .locator('button:has-text("Добавить посетителя")')
         .click();
       const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
@@ -194,7 +194,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       // One named row with the saved visitor's name + «Мест» = 1 → the tail
       // (1 unfilled seat) must be saved as an anonymous visit.
       await page
-        .locator('[data-testid="new-booking-tab"]')
+        .locator('[data-testid="new-record-tab"]')
         .locator('button:has-text("Добавить посетителя")')
         .click();
       const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();

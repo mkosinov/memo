@@ -1034,3 +1034,40 @@ class TestClientListPhoneFilter:
         assert body["total"] == 3
         assert body["page"] == 1
         assert body["per_page"] == 2
+
+
+# ─── Client list numeric stat filters: ge=0 bounds (GH #149, spec §2/§3) ──────
+
+_STAT_FILTER_FIELDS = [
+    "min_records",
+    "max_records",
+    "min_paid",
+    "max_paid",
+    "missed_from",
+    "missed_to",
+]
+
+
+class TestClientListStatFilterBounds:
+    """GH #149: numeric stat filters reject negatives (ge=0), accept zero."""
+
+    @pytest.mark.parametrize("value", [-1, -42])
+    @pytest.mark.parametrize("field", _STAT_FILTER_FIELDS)
+    def test_negative_stat_filter_returns_422(self, api_client, field: str, value: int) -> None:
+        """GET /clients with a negative stat filter → 422 (ge=0, spec §3.1)."""
+        resp = api_client.get("/api/v1/clients", params={field: value})
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize("field", _STAT_FILTER_FIELDS)
+    def test_zero_stat_filter_is_accepted(self, api_client, field: str) -> None:
+        """GET /clients with a stat filter = 0 is a valid request (spec §3.2)."""
+        resp = api_client.get("/api/v1/clients", params={field: 0})
+        assert resp.status_code == 200
+
+    def test_422_body_is_custom_handler_shape(self, api_client) -> None:
+        """422 body comes from the custom RequestValidationError handler (spec §2)."""
+        resp = api_client.get("/api/v1/clients", params={"min_records": -1})
+        assert resp.status_code == 422
+        body = resp.json()
+        assert "code" in body["detail"]
+        assert "message" in body["detail"]

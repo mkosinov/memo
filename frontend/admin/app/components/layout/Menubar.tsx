@@ -3,6 +3,16 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import {
+  Calendar,
+  Clipboard,
+  Users,
+  Palette,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Image as ImageIcon,
+} from 'lucide-react';
 import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import { useMasters } from '@/hooks/useMasters';
@@ -14,116 +24,19 @@ import { MonthYearPicker } from '../shared/MonthYearPicker';
 import { UserMenu } from './UserMenu';
 import type { Master } from '@memo/domain';
 
-// ─── SVG Icon Components ──────────────────────────────────────────────────
+// ─── Icons ─────────────────────────────────────────────────────────────────
+// GH #143: hand-written SVGs replaced by lucide-react (D3–D6). Sizing contract
+// for sidebar icons: size={18} strokeWidth={2}; inline chevrons carry their own
+// size (12 for the mini-calendar arrows, 16 for the sidebar collapse toggle).
 
-function CalendarIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  );
-}
-
-function ClipboardIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
-      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-    </svg>
-  );
-}
-
-function UsersIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 00-3-3.87" />
-      <path d="M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  );
-}
-
-function PaletteIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="13.5" cy="6.5" r="0.5" fill="currentColor" />
-      <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor" />
-      <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor" />
-      <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor" />
-      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
-    </svg>
-  );
-}
-
-function ChatIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-    </svg>
-  );
-}
-
+/** Thin wrapper over lucide ChevronRight — rotates 90° when the section is expanded. */
 function ChevronIcon({ className, expanded }: { className?: string; expanded: boolean }) {
   return (
-    <svg
-      className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-90' : ''} ${className ?? ''}`}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-function BookIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
-    </svg>
-  );
-}
-
-function PackageIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16.5 9.4l-9-5.19M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
-      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-      <line x1="12" y1="22.08" x2="12" y2="12" />
-    </svg>
-  );
-}
-
-function MapPinIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
-      <circle cx="12" cy="10" r="3" />
-    </svg>
-  );
-}
-
-function TagIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-      <line x1="7" y1="7" x2="7.01" y2="7" />
-    </svg>
-  );
-}
-
-function ImageIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
-    </svg>
+    <ChevronRight
+      size={12}
+      strokeWidth={2}
+      className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''} ${className ?? ''}`}
+    />
   );
 }
 
@@ -133,9 +46,9 @@ function ImageIcon({ className }: { className?: string }) {
 // ─── Navigation Items ─────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { label: 'Расписание', icon: 'calendar', href: '/schedule' },
-  { label: 'Записи', icon: 'clipboard', href: '/records' },
-  { label: 'Клиенты', icon: 'users', href: '/clients' },
+  { label: 'Расписание', Icon: Calendar, href: '/schedule' },
+  { label: 'Записи', Icon: Clipboard, href: '/records' },
+  { label: 'Клиенты', Icon: Users, href: '/clients' },
 ] as const;
 
 /**
@@ -172,19 +85,7 @@ const isAdminOnly = (href: string): boolean =>
     (section) => href === section || href.startsWith(`${section}/`),
   );
 
-const PHOTO_ITEM = { label: 'Фото', icon: 'image', href: '/photos' } as const;
-
-const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
-  calendar: CalendarIcon,
-  clipboard: ClipboardIcon,
-  users: UsersIcon,
-  palette: PaletteIcon,
-  chat: ChatIcon,
-  package: PackageIcon,
-  mapPin: MapPinIcon,
-  tag: TagIcon,
-  image: ImageIcon,
-};
+const PHOTO_ITEM = { label: 'Фото', Icon: ImageIcon, href: '/photos' } as const;
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
 
@@ -308,9 +209,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
           className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
           aria-label="Предыдущий месяц"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 19l-7-7 7-7" />
-          </svg>
+          <ChevronLeft size={12} strokeWidth={2} />
         </button>
 
         <div className="relative">
@@ -353,9 +252,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
           className="flex items-center justify-center w-6 h-6 rounded-md text-white/60 hover:bg-white/10 hover:text-white transition-colors"
           aria-label="Следующий месяц"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 5l7 7-7 7" />
-          </svg>
+          <ChevronRight size={12} strokeWidth={2} />
         </button>
       </div>
 
@@ -566,7 +463,6 @@ export function Menubar() {
         <nav className={`py-2 ${sidebarCollapsed ? 'px-1' : 'px-2'}`}>
           {/* Regular nav items */}
           {navItems.map(item => {
-            const IconComponent = ICON_MAP[item.icon];
             const active = isActive(item.href);
             return (
               <Link
@@ -581,7 +477,7 @@ export function Menubar() {
                 aria-label={item.label}
                 title={sidebarCollapsed ? item.label : undefined}
               >
-                <IconComponent className={active ? 'text-white' : 'text-white/60'} />
+                <item.Icon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-white/60'} />
                 {!sidebarCollapsed && <span>{item.label}</span>}
               </Link>
             );
@@ -598,7 +494,7 @@ export function Menubar() {
               aria-expanded={openMenu === 'masters'}
               title={sidebarCollapsed ? 'Мастера' : undefined}
             >
-              <PaletteIcon className="text-white/60" />
+              <Palette size={18} strokeWidth={2} className="text-white/60" />
               {!sidebarCollapsed && (
                 <>
                   <span className="flex-1 text-left">Мастера</span>
@@ -636,7 +532,7 @@ export function Menubar() {
             aria-expanded={openMenu === 'directories'}
             title={sidebarCollapsed ? 'Справочники' : undefined}
           >
-            <BookIcon className="text-white/60" />
+            <BookOpen size={18} strokeWidth={2} className="text-white/60" />
             {!sidebarCollapsed && (
               <>
                 <span className="flex-1 text-left">Справочники</span>
@@ -680,7 +576,7 @@ export function Menubar() {
                 aria-label={PHOTO_ITEM.label}
                 title={sidebarCollapsed ? PHOTO_ITEM.label : undefined}
               >
-                <ImageIcon className={active ? 'text-white' : 'text-white/60'} />
+                <ImageIcon size={18} strokeWidth={2} className={active ? 'text-white' : 'text-white/60'} />
                 {!sidebarCollapsed && <span>{PHOTO_ITEM.label}</span>}
               </Link>
             );
@@ -706,14 +602,11 @@ export function Menubar() {
             aria-label={sidebarCollapsed ? 'Развернуть sidebar' : 'Свернуть sidebar'}
             title={sidebarCollapsed ? 'Развернуть' : 'Свернуть'}
           >
-            <svg
-              className={`w-4 h-4 transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            <ChevronLeft
+              size={16}
+              strokeWidth={2}
+              className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}
+            />
           </button>
         </div>
 

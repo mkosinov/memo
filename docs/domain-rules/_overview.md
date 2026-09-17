@@ -65,6 +65,8 @@ The legacy code enum with values `pending / confirmed / cancelled / no_show` (ba
 
 **Rule:** When introducing new code, always use the code name from this table. If you see a forbidden name in existing code, rename it.
 
+**Label-field canon (GH #172):** dictionary entities ("things") carry their primary label field as `title`; persons carry `name`. `title` → Material, Service, Position, Tariff, Location, Tag; `name` → Client, Visitor (persons); Staff uses `first_name`/`last_name`. A new dictionary entity's label field is `title`.
+
 ## Deletion Policy
 
 | Delete semantics | Entities |

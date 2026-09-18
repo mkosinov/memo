@@ -12,7 +12,7 @@ import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { useDnD } from '@/hooks/useDnD';
 import { useColumnReorder } from '@/hooks/useColumnReorder';
 import { resolveById } from '@memo/domain';
-import type { ScheduleAdminDTO } from '@memo/domain';
+import type { ScheduleAdminDTO, Location, Master } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
@@ -300,7 +300,15 @@ export function DayView() {
     orderedColumns,
     onColumnDrop,
   } = useColumnReorder({
-    columns,
+    // #172: the domain Location label is now `title`; the reorder/column-header
+    // shape is the shared loose `{id, name}` (masters keep `name`), so the
+    // location side is normalized to it here. Downstream (SortableColumnHeader,
+    // column drag data, ghost header) reads `.name` for BOTH modes.
+    columns: columns.map((c) => ({
+      id: c.id,
+      name: columnMode === 'locations' ? (c as Location).title : (c as Master).name,
+      sortOrder: c.sortOrder,
+    })),
     columnMode,
     initialOrder: columnMode === 'masters' ? settings.columnOrderMasters : settings.columnOrderLocations,
     onOrderChange: (order) => saveColumnOrder(columnMode, order),

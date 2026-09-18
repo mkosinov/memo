@@ -107,7 +107,7 @@ function createTestQueryClient(): QueryClient {
 interface HarnessOptions {
   copyLastWeek?: ReturnType<typeof vi.fn>;
   showToast?: ReturnType<typeof vi.fn>;
-  locations?: { id: string; name: string }[];
+  locations?: { id: string; title: string }[];
   targetRows?: ActivityResponse[];
   /** Target cache left EMPTY (grid query still in flight — resolves later via setQueryData). */
   targetInFlight?: boolean;
@@ -140,8 +140,8 @@ function renderPopover(opts: HarnessOptions = {}) {
   mockUseScheduleData.mockReturnValue(
     createMockScheduleData({
       locations: opts.locations ?? [
-        { id: 'alpika', name: 'Альпика', address: '' },
-        { id: 'grand', name: 'Гранд Отель Поляна', address: '' },
+        { id: 'alpika', title: 'Альпика', address: '' },
+        { id: 'grand', title: 'Гранд Отель Поляна', address: '' },
       ],
       copyLastWeek: copyLastWeek as never,
     }),

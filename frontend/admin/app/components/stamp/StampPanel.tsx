@@ -135,7 +135,7 @@ export function StampPanel() {
                 onChange={() => handleLocationToggle(s.id)}
                 className="rounded"
               />
-              {s.emoji} {s.name}
+              {s.emoji} {s.title}
             </label>
           ))}
         </div>
@@ -150,7 +150,7 @@ export function StampPanel() {
         >
           {selectedMaster?.shortName} — {selectedService?.name}
           {selectedLocations.length > 0 && (
-            <> — {selectedLocations.map((l) => l.name).join(', ')}</>
+            <> — {selectedLocations.map((l) => l.title).join(', ')}</>
           )}
         </div>
       )}

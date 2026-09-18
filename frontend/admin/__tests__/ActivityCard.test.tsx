@@ -14,7 +14,7 @@ const mockMaster: Master = {
 
 const mockLocation: Location = {
   id: 'loc_1',
-  name: 'Гранд Отель Поляна',
+  title: 'Гранд Отель Поляна',
   shortTitle: 'Гранд',
 };
 

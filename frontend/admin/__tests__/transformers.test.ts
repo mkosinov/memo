@@ -81,9 +81,9 @@ describe('transformMaster', () => {
 // ─── transformLocation ──────────────────────────────────────────────────────
 
 describe('transformLocation', () => {
-  it('maps name and address', () => {
+  it('maps title and address', () => {
     const result = transformLocation(locationFixture);
-    expect(result.name).toBe('Студия на Невском');
+    expect(result.title).toBe('Студия на Невском');
     expect(result.address).toBe('Невский пр. 28');
   });
 

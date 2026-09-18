@@ -23,7 +23,9 @@ vi.mock('@memo/api-client', () => ({
 // (transformService now emits durationMinutes + tariffs per #142 spec §6/§9.8).
 vi.mock('@/lib/transformers', () => ({
   transformMaster: vi.fn((raw: any) => ({ ...raw, name: raw.first_name + ' ' + raw.last_name })),
-  transformLocation: vi.fn((raw: any) => ({ ...raw, name: raw.title })),
+  // #172: domain Location carries `title` — the raw response already has it,
+  // so the spread alone mirrors the real transformer's output shape.
+  transformLocation: vi.fn((raw: any) => ({ ...raw })),
   transformService: vi.fn((raw: any) => ({
     ...raw,
     name: raw.title,

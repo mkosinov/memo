@@ -31,7 +31,7 @@ export function transformService(raw: ServiceResponse): Service {
 export function transformLocation(raw: LocationResponse): Location {
   return {
     id: raw.id,
-    name: raw.title,
+    title: raw.title,
     shortTitle: raw.short_title ?? undefined,
     address: raw.address ?? undefined,
     defaultCapacity: raw.capacity,

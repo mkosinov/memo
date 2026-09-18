@@ -27,7 +27,7 @@ const mockUseUI = vi.mocked(useUI);
 // Форма потребляет только id у мастера (spec §2.1.4) — минимальный объект.
 const masters = [{ id: 'm1', name: 'Ольга Середа', shortName: 'Ольга', color: '#5B8C7A' }];
 const services = [{ id: 's1', name: 'Маникюр', durationMinutes: 60, minAge: '', tariffs: [] }];
-const locations = [{ id: 'l1', name: 'Студия', defaultCapacity: 6 }];
+const locations = [{ id: 'l1', title: 'Студия', defaultCapacity: 6 }];
 
 const defaults: CreateDefaults = { dayIndex: 2, startMinutes: 540 };const onSavingChange = vi.fn();
 const onSaved = vi.fn();

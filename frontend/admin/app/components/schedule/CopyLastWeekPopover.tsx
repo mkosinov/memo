@@ -126,7 +126,7 @@ export function CopyLastWeekPopover({ weekStart, onClose }: CopyLastWeekPopoverP
       const toCopy = rows.filter(
         (a) => !a.is_private && !targetKeys.has(shiftedDedupKey(a)),
       ).length;
-      return [{ id: loc.id, name: loc.name, toCopy }];
+      return [{ id: loc.id, name: loc.title, toCopy }];
     });
   }, [source, locations, targetRows]);
 

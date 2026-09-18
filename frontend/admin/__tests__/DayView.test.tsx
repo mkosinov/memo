@@ -349,10 +349,10 @@ describe('DayView', () => {
 
     it('shows location column that was removed from filter and re-added', () => {
       const allLocations = [
-        { id: 'alpika', name: 'Альпика', color: '#5B8C7A' },
-        { id: 'grand', name: 'Гранд Отель Поляна', color: '#6B7E9C' },
-        { id: 'park', name: 'Парк Отдыха', color: '#8B6E4E' },
-        { id: 'center', name: 'Центр', color: '#4E8B6E' },
+        { id: 'alpika', title: 'Альпика', color: '#5B8C7A' },
+        { id: 'grand', title: 'Гранд Отель Поляна', color: '#6B7E9C' },
+        { id: 'park', title: 'Парк Отдыха', color: '#8B6E4E' },
+        { id: 'center', title: 'Центр', color: '#4E8B6E' },
       ];
       const activities = [
         createMockActivity({ id: 'ev_1', locationId: 'alpika', date: '2026-06-15' }),
@@ -620,7 +620,7 @@ describe('DayView', () => {
 
     it('(д) shows archived location column in locations mode when gate is on', () => {
       const locations = [
-        { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
+        { id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж' },
       ];
       const activities = [
         createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),

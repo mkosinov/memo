@@ -134,7 +134,7 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
                             </div>
                             <div className="text-xs mt-1.5" style={{ color: 'var(--ink-light)' }}>
                               {activity
-                                ? `${formatTime(parseLocalISO(activity.start).startMinutes)} · ${location?.name ?? '—'}`
+                                ? `${formatTime(parseLocalISO(activity.start).startMinutes)} · ${location?.title ?? '—'}`
                                 : '—'}
                             </div>
                             {record.comment && (

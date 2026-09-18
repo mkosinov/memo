@@ -271,7 +271,7 @@ export function FilterDropdown({
                       </svg>
                     )}
                   </div>
-                  <span style={{ color: 'var(--ink, #1a1a1a)' }}>{location.name}</span>
+                  <span style={{ color: 'var(--ink, #1a1a1a)' }}>{location.title}</span>
                 </button>
               );
             })}

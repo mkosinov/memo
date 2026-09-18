@@ -58,8 +58,8 @@ export const mockServices: Service[] = [
 ];
 
 export const mockLocations: Location[] = [
-  { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
-  { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
+  { id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж' },
+  { id: 'grand', title: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
 ];
 
 /**

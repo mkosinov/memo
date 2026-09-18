@@ -46,8 +46,8 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const serviceOptions: ComboboxOption[] = services.map((s) => ({ value: s.id, label: s.name }));
   const locationOptions: ComboboxOption[] = locations.map((l) => ({
     value: l.id,
-    label: l.name,
-    searchText: l.shortTitle ? `${l.name} ${l.shortTitle}` : l.name,
+    label: l.title,
+    searchText: l.shortTitle ? `${l.title} ${l.shortTitle}` : l.title,
   }));
 
   // Selected service for display (domain Service carries tariffs, GH #142)

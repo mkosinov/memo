@@ -121,7 +121,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
 // part of the confirmed subtree (`expected`). Every other entity keeps the
 // informational auto lines (#207 §7.1 — «Без изменений: диалоги других
 // сущностей»).
-const AUTO_LINES_HIDDEN: ReadonlySet<DeleteDialogEntityType> = new Set(['activity']);
+const AUTO_LINES_HIDDEN: ReadonlySet<DeleteDialogEntityType> = new Set<DeleteDialogEntityType>(['activity']);
 
 // Per-relation nullify tail (spec §7.1: "○ Фото: 12 (отвязаны от услуги)").
 // Nullify deps exist only for Service→photos and Client→records (§4 matrix);

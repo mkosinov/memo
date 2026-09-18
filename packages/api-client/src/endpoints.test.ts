@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -510,15 +510,72 @@ describe('updateActivity', () => {
   });
 });
 
-describe('deleteActivity', () => {
-  it('calls DELETE /api/v1/activities/:id', async () => {
+// GH #286 (D2, mirror of #285 rev7): dry-run preview of activity deletion —
+// DELETE ?dry_run=true, no body. 204 resolves, 409 (recursive tree: records →
+// visits/payments, nodes carry items for one-line previews) is thrown by the
+// client as ApiError with .dependencies.
+describe('dryRunDeleteActivity', () => {
+  it('calls DELETE /api/v1/activities/:id?dry_run=true with no body', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
-    await deleteActivity('a-1');
+    await dryRunDeleteActivity('a-1');
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/activities/a-1',
+      '/api/v1/activities/a-1?dry_run=true',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      { method: 'DELETE' },
     );
+  });
+
+  it('propagates 409 ApiError with dependency tree (incl. node with items)', async () => {
+    const tree = [
+      {
+        entity: 'records', relation: 'Запись', count: 1, allowed_actions: ['cascade'],
+        items: [{ id: 'uuid-record-1', label: 'Мастер-класс, 12.09, Иван' }],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteActivity('a-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+    expect((caught as ApiError).dependencies?.[0]?.items?.[0]?.id).toBe('uuid-record-1');
+  });
+});
+
+// Execute path (GH #286 D2): `expected` is MANDATORY (bare DELETE without body
+// → 422 expected_state_required server-side); id-sets snapshotted from the
+// dry-run tree; backend answers 409 stale_dependencies on mismatch.
+describe('deleteActivityWithExpected', () => {
+  it('calls DELETE /api/v1/activities/:id with {expected} id-sets body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteActivityWithExpected('a-1', {
+      expected: { records: ['r-1'], visits: ['v-1'], payments: ['p-1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/activities/a-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { records: ['r-1'], visits: ['v-1'], payments: ['p-1'] } }),
+    });
+  });
+
+  it('clean path: body is {"expected": {}}', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteActivityWithExpected('a-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/activities/a-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes through 422 ApiError (expected_state_required / stale_dependencies)', async () => {
+    const err = new ApiError(422, 'expected state required', 'expected_state_required');
+    vi.mocked(api).mockRejectedValue(err);
+    await expect(
+      deleteActivityWithExpected('a-1', { expected: { records: ['gone'] } }),
+    ).rejects.toBe(err);
   });
 });
 

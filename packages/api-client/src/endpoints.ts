@@ -375,8 +375,31 @@ export async function patchActivity(
   });
 }
 
-export async function deleteActivity(id: string): Promise<void> {
-  await api(`/api/v1/activities/${id}`, z.any(), { method: 'DELETE' });
+// Dry-run preview (GH #286 D2, mirror of the records dry-run #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree (the RECURSIVE activity subtree — records → their
+// visits/payments — carries items: [{id, label}] for one-line previews).
+export async function dryRunDeleteActivity(id: string): Promise<void> {
+  await api(`/api/v1/activities/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard activity delete (GH #286 D2, mirror of resolveDeleteRecord) —
+// body contract: {expected}. `expected` is MANDATORY (bare DELETE → 422
+// expected_state_required): uuid id-sets of the user-confirmed dry-run subtree
+// {records, visits, payments}; backend answers 409 stale_dependencies on
+// mismatch (auto deps photos/activity_tags are exempt from the check).
+export interface DeleteActivityWithExpectedPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deleteActivityWithExpected(
+  id: string,
+  payload: DeleteActivityWithExpectedPayload,
+): Promise<void> {
+  await api(`/api/v1/activities/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
 }
 
 // Atomic last-week copy (#242): merge dedup server-side; week_start is the

@@ -63,7 +63,7 @@ async def test_list_all_limit_raises(db_session):
     rows = [
         {
             "id": uuid.uuid4().hex,
-            "tag": f"bulk-{i:05d}",
+            "title": f"bulk-{i:05d}",
             "created_at": now,
             "updated_at": now,
         }
@@ -81,7 +81,7 @@ async def test_list_all_boundary_ok(db_session):
     rows = [
         {
             "id": uuid.uuid4().hex,
-            "tag": f"bulk-{i:05d}",
+            "title": f"bulk-{i:05d}",
             "created_at": now,
             "updated_at": now,
         }

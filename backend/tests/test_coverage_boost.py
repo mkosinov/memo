@@ -491,7 +491,7 @@ class TestRepositoryListFilters:
     def test_list_locations(self, api_client):
         """GET /api/v1/locations returns active locations."""
         api_client.post("/api/v1/locations", json={
-            "name": "Test Studio", "address": "123 Main St", "capacity": 20,
+            "title": "Test Studio", "address": "123 Main St", "capacity": 20,
         })
         resp = api_client.get("/api/v1/locations")
         assert resp.status_code == 200
@@ -643,7 +643,7 @@ def _create_prereqs(api_client) -> dict:
         "specialty": "test", "min_age": 6, "max_age": 99, "duration": 60, "record_info": "",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Test Loc", "address": "123 Main", "capacity": 20,
+        "title": "Test Loc", "address": "123 Main", "capacity": 20,
     }).json()
     return {
         "master_id": master["id"],

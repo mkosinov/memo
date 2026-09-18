@@ -53,7 +53,7 @@ _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
     ("positions-write", "POST", "/api/v1/positions", {"title": "Гвард Должность"}),
     ("masters-all-read", "GET", "/api/v1/masters/all", None),
     ("locations-write", "POST", "/api/v1/locations", {
-        "name": "Гвард Студия", "address": "Гвард Адрес", "capacity": 20,
+        "title": "Гвард Студия", "address": "Гвард Адрес", "capacity": 20,
     }),
     ("services-write", "POST", "/api/v1/services", {
         "title": "Гвард Сервис", "description": "test",
@@ -157,7 +157,7 @@ def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | Non
         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "t",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Гв Студия", "address": "Гв Адрес", "capacity": 20,
+        "title": "Гв Студия", "address": "Гв Адрес", "capacity": 20,
     }).json()
     from datetime import UTC, datetime, timedelta
     return {

@@ -620,7 +620,7 @@ async def sample_record(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Rec Studio", "address": "Rec Address", "capacity": 20,
+        "title": "Rec Studio", "address": "Rec Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -683,7 +683,7 @@ async def sample_record_with_visits(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "St Studio", "address": "St Address", "capacity": 20,
+        "title": "St Studio", "address": "St Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -727,7 +727,7 @@ async def sample_activity_with_capacity(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Cap Studio", "address": "Cap Address", "capacity": 20,
+        "title": "Cap Studio", "address": "Cap Address", "capacity": 20,
     }).json()
     act_resp = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -761,7 +761,7 @@ async def sample_activity_at_capacity(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Full Studio", "address": "Full Address", "capacity": 20,
+        "title": "Full Studio", "address": "Full Address", "capacity": 20,
     }).json()
     act_resp = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -808,7 +808,7 @@ async def sample_visit(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "V Studio", "address": "V Address", "capacity": 20,
+        "title": "V Studio", "address": "V Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -852,7 +852,7 @@ async def sample_visits(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Vs Studio", "address": "Vs Address", "capacity": 20,
+        "title": "Vs Studio", "address": "Vs Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],

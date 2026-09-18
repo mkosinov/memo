@@ -56,7 +56,7 @@ def _link_master_tag(staff_id: str) -> str:
     """Link a tag to the master extension row (master_tags join)."""
     tag_id = f"tag-{_uuid.uuid4().hex[:8]}"
     query_db(
-        f"INSERT INTO tags (id, tag, created_at, updated_at) "
+        f"INSERT INTO tags (id, title, created_at, updated_at) "
         f"VALUES ('{tag_id}', 't-{staff_id[:6]}', datetime('now'), datetime('now'))"
     )
     query_db(
@@ -513,7 +513,7 @@ class TestStaffDelete:
         ).json()
         location = api_client.post(
             "/api/v1/locations",
-            json={"name": "L", "address": "a", "capacity": 5},
+            json={"title": "L", "address": "a", "capacity": 5},
         ).json()
 
         api_client.post(
@@ -555,7 +555,7 @@ class TestStaffDelete:
         ).json()
         location = api_client.post(
             "/api/v1/locations",
-            json={"name": "L", "address": "a", "capacity": 5},
+            json={"title": "L", "address": "a", "capacity": 5},
         ).json()
         api_client.post(
             "/api/v1/activities",

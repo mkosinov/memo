@@ -279,11 +279,11 @@ async def _seed_masters(session) -> None:
 
 async def _seed_locations(session) -> None:
     locations = [
-        {"id": "alpika", "name": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
+        {"id": "alpika", "title": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
          "location_hint": "1 этаж, светлая студия с панорамными окнами", "sort_order": 0},
-        {"id": "grand", "name": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12,
+        {"id": "grand", "title": "Гранд Отель Поляна", "address": "Гранд Отель, лобби", "capacity": 12,
          "location_hint": "Лобби отеля, зона у ресепшн", "sort_order": 1},
-        {"id": "p1389", "name": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8,
+        {"id": "p1389", "title": "Поляна 1389", "address": "Поляна 1389, 2 этаж", "capacity": 8,
          "location_hint": "2 этаж, рядом с детской зоной", "sort_order": 2},
     ]
     for loc in locations:
@@ -355,10 +355,10 @@ async def _seed_tariffs(session) -> None:
 
 
 async def _seed_tags(session) -> None:
-    tag_names = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
-    for i, name in enumerate(tag_names, start=1):
+    tag_titles = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
+    for i, title in enumerate(tag_titles, start=1):
         tag_id = f"tag{i}"
-        session.add(Tag(id=tag_id, tag=name))
+        session.add(Tag(id=tag_id, title=title))
 
 
 async def _seed_activities(session) -> None:

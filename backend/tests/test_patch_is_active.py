@@ -48,7 +48,7 @@ class TestPatchRejectsIsActive:
 
     def test_patch_location_is_active_rejected_and_atomic(self, api_client) -> None:
         loc_id = api_client.post("/api/v1/locations", json={
-            "name": "Active Studio", "capacity": 10,
+            "title": "Active Studio", "capacity": 10,
         }).json()["id"]
 
         resp = api_client.patch(

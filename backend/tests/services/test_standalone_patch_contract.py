@@ -414,15 +414,15 @@ class TestStandalonePatchContract:
         self, cfg: PatchContractConfig, db_session, sample_visit
     ) -> None:
         """Semantic 4a (Visits) — explicit ``null`` on ``price`` / ``status``
-        must be ignored, one probe per field: today the null reaches the
-        flush and trips ``IntegrityError`` (RED until VisitService.patch
-        strips NOT NULL nulls). Expected failure mode is the exception,
-        NOT a wrong value — the pytest.fail covers both, and a passing run
-        here plus a passing value assertion pins the ignore semantics.
+        must be ignored, one probe per field. Visits-only capability: other
+        configs' scalar NOT NULL fields live in 4a above.
         """
-        for field in sorted(cfg.not_null_fields - cfg.list_fields):
-            if field not in ("price", "status"):
-                continue  # scalar pairs for other entities live in 4a above
+        visit_not_null_scalars = {"price", "status"}
+        if not (visit_not_null_scalars & cfg.not_null_fields):
+            pytest.skip(f"{cfg.name}: no {sorted(visit_not_null_scalars)} "
+                        f"NOT NULL fields")
+        for field in sorted(visit_not_null_scalars & cfg.not_null_fields
+                            - cfg.list_fields):
             _service, _row, key = await cfg.make_owner(
                 cfg, db_session, sample_visit
             )

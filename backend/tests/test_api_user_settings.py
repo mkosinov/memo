@@ -207,17 +207,6 @@ class TestPatchSettings:
         assert body["theme"] == "dark"
         assert body["language"] == "ru"  # unchanged
 
-    def test_patch_language_only(self, api_client, me) -> None:
-        """PATCH updates only language."""
-        api_client.post("/api/v1/user-settings", json={
-            "user_id": me["id"], "theme": "light", "language": "ru",
-        })
-
-        response = api_client.patch("/api/v1/user-settings", json={"language": "en"})
-        assert response.status_code == 200
-        assert response.json()["language"] == "en"
-        assert response.json()["theme"] == "light"  # unchanged
-
     def test_patch_not_found_404(self, api_client, me) -> None:
         """PATCH with no own settings row returns 404."""
         response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})

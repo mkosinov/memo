@@ -45,16 +45,22 @@ from src.services.visit import VisitService, get_visit_service
 # Builds the owner row for the config and returns (service, row, key):
 # ``key`` is what the patch method addresses (visit_id for Visits, user_id
 # for UserSettings) and ``row`` is the freshly created owner (ORM Visit /
-# UserSettingsResponse). Receives the pytest ``request`` so Visits can pull
-# the conftest ``sample_visit`` async fixture by name (the standalone
-# analogue of the generic contract's fk_map resolution).
+# UserSettingsResponse). Receives (cfg, db_session, sample_visit):
+# ``sample_visit`` is declared as a DIRECT test parameter (the pattern
+# proven in tests/services/test_visit_service.py — lazy
+# ``request.getfixturevalue`` of an async fixture cannot run inside the
+# test's event loop); the UserSettings factory accepts it for signature
+# uniformity and ignores it, building its own User row async.
 OwnerFactory = Callable[..., Awaitable[tuple[Any, Any, str]]]
 
 # Applies a partial update through the service's patch method and returns
 # the patched row (ORM Visit / UserSettingsResponse) — or None on not-found.
+# Signature: (cfg, db_session, key, data); the service resolves via
+# ``cfg.service_factory()``.
 PatchCall = Callable[..., Awaitable[Any]]
 
 # Reads the owner's current state as a flat dict (pre/post patch snapshot).
+# Signature: (cfg, db_session, key).
 StateReader = Callable[..., Awaitable[dict[str, Any] | None]]
 
 
@@ -114,6 +120,7 @@ class PatchContractConfig(NamedTuple):
 # ─── Visits config ───────────────────────────────────────────────────────────────
 
 async def _make_visit_owner(
+    cfg: PatchContractConfig,
     db_session,
     sample_visit,
 ) -> tuple[VisitService, Any, str]:
@@ -123,20 +130,22 @@ async def _make_visit_owner(
     fixture from inside a running loop raises ``RuntimeError:
     Runner.run() cannot be called from a running event loop``).
     Seeds price=3000, status='waiting'."""
-    service = get_visit_service()
+    service = cfg.service_factory()
     assert isinstance(service, VisitService)
     return service, sample_visit, sample_visit.id
 
 
 def _visit_patch_call(
-    db_session, key: str, data: Any
+    cfg: PatchContractConfig, db_session, key: str, data: Any
 ) -> Awaitable[Any]:
-    return VisitService.patch(get_visit_service(), db_session, key, data)
+    return VisitService.patch(cfg.service_factory(), db_session, key, data)
 
 
-async def _visit_read_state(db_session, key: str) -> dict[str, Any] | None:
+async def _visit_read_state(
+    cfg: PatchContractConfig, db_session, key: str
+) -> dict[str, Any] | None:
     """Pre/post-patch snapshot from the ORM Visit (attribute access)."""
-    orm = await get_visit_service().get(db_session, key)
+    orm = await cfg.service_factory().get(db_session, key)
     if orm is None:
         return None
     return {c.name: getattr(orm, c.name) for c in type(orm).__table__.columns}
@@ -145,10 +154,9 @@ async def _visit_read_state(db_session, key: str) -> dict[str, Any] | None:
 # ─── UserSettings config ─────────────────────────────────────────────────────────
 
 async def _make_user_settings_owner(
+    cfg: PatchContractConfig,
     db_session,
-    sample_visit,
-    # signature (tests declare it as a direct param); IGNORED here — the
-    # settings owner is built entirely through db_session below.
+    sample_visit,  # accepted for signature uniformity; unused by this factory.
 ) -> tuple[UserSettingsService, Any, str]:
     """UserSettings owner factory — OWN async setup (GH #179 Task 1).
 
@@ -170,26 +178,26 @@ async def _make_user_settings_owner(
     db_session.add(user)
     await db_session.flush()
 
-    service = get_user_settings_service()
+    service = cfg.service_factory()
     assert isinstance(service, UserSettingsService)
     row = await service.create(db_session, UserSettingsCreate(user_id=user.id))
     return service, row, row.user_id
 
 
 def _user_settings_patch_call(
-    db_session, key: str, data: Any
+    cfg: PatchContractConfig, db_session, key: str, data: Any
 ) -> Awaitable[Any]:
     return UserSettingsService.update_by_user_id(
-        get_user_settings_service(), db_session, key, data
+        cfg.service_factory(), db_session, key, data
     )
 
 
 async def _user_settings_read_state(
-    db_session, key: str
+    cfg: PatchContractConfig, db_session, key: str
 ) -> dict[str, Any] | None:
     """Pre/post-patch snapshot from UserSettingsResponse (parsed: JSON
     columns decoded back to lists)."""
-    resp = await get_user_settings_service().get_by_user_id(db_session, key)
+    resp = await cfg.service_factory().get_by_user_id(db_session, key)
     if resp is None:
         return None
     return resp.model_dump()
@@ -267,12 +275,12 @@ class TestStandalonePatchContract:
     ) -> None:
         """Semantic 1 — partial update: sentinel lands on ``patch_field``;
         EVERY other patch-schema field keeps its pre-state value."""
-        _service, _row, key = await cfg.make_owner(db_session, sample_visit)
-        pre = await cfg.read_state(db_session, key)
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
         assert pre is not None
 
         patched = await cfg.patch_call(
-            db_session, key, cfg.patch_schema(**{cfg.patch_field: cfg.sentinel})
+            cfg, db_session, key, cfg.patch_schema(**{cfg.patch_field: cfg.sentinel})
         )
         assert patched is not None, f"{cfg.name}: patch on existing row returned None"
 
@@ -293,6 +301,7 @@ class TestStandalonePatchContract:
         returns None (Visit.patch → None; update_by_user_id → None)."""
         missing_key = f"missing-{uuid.uuid4()}"
         result = await cfg.patch_call(
+            cfg,
             db_session,
             missing_key,
             cfg.patch_schema(**{cfg.patch_field: cfg.sentinel}),
@@ -311,14 +320,14 @@ class TestStandalonePatchContract:
         ``sentinel``, so this is a REAL patch — the ORM ``onupdate`` /
         explicit ``updated_at`` write must fire.
         """
-        _service, _row, key = await cfg.make_owner(db_session, sample_visit)
-        pre = await cfg.read_state(db_session, key)
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
         assert pre is not None
         pre_updated_at = pre["updated_at"]
         assert pre_updated_at is not None
 
         patched = await cfg.patch_call(
-            db_session, key, cfg.patch_schema(**{cfg.patch_field: cfg.sentinel})
+            cfg, db_session, key, cfg.patch_schema(**{cfg.patch_field: cfg.sentinel})
         )
         assert patched is not None
         post_updated_at = _get_field(patched, "updated_at")

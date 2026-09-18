@@ -251,7 +251,7 @@ describe('ClientRecordTab — API interactions', () => {
   it('409 dry-run opens DeleteDialog listing deps; confirm enqueues the cascade (expected ids from items)', async () => {
     const deps = [
       {
-        entity: 'visits',
+        entity: 'visits', auto: false,
         relation: 'Посещение',
         count: 2,
         allowed_actions: ['cascade'],
@@ -262,14 +262,14 @@ describe('ClientRecordTab — API interactions', () => {
         ],
       },
       {
-        entity: 'payments',
+        entity: 'payments', auto: false,
         relation: 'Платёж',
         count: 1,
         allowed_actions: ['cascade'],
         message: null,
         items: [{ id: 'payment-1', label: '3500, card' }],
       },
-      { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+      { entity: 'record_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
     ];
     const { ApiError } = await import('@memo/api-client');
     vi.mocked(dryRunDeleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
@@ -319,7 +319,7 @@ describe('ClientRecordTab — API interactions', () => {
   it('dialog cancel closes without enqueuing or resolving', async () => {
     const deps = [
       {
-        entity: 'visits',
+        entity: 'visits', auto: false,
         relation: 'Посещение',
         count: 1,
         allowed_actions: ['cascade'],

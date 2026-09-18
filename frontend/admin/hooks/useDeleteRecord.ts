@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import {
-  ApiError,
   dryRunDeleteRecord,
   resolveDeleteRecord,
 } from '@memo/api-client';
@@ -24,6 +23,7 @@ import {
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
 import { invalidateEntities } from '@/lib/invalidate';
+import { staleAwareOnError } from '@/lib/staleAwareOnError';
 import { qk } from '@/lib/queryKeys';
 
 /**
@@ -122,47 +122,6 @@ async function commitDeferredDelete(
 /** Toast shower type derived from the UI context (the hook consumes useUI). */
 type ShowToast = ReturnType<typeof useUI>['showToast'];
 
-/**
- * #285 D4 rev8 (plan Task 5 (ж)) — the RECORDS consumer's commit-failure
- * handler, kept out of the domain-independent PendingActionsContext.
- *
- * - `err.status === 409 && err.dependencies` (commit-time expected mismatch
- *   — the only 409-with-deps the commit path can receive): undo the
- *   optimistic removal (the row is back; the server state is untouched) and
- *   surface the honest error: «Не удалось удалить: данные изменились» with
- *   the «Обновить» action that re-reads the record lists (['records']-family
- *   via the shared #239 map → ['records'] + ['visitors']).
- * - Any other non-404 error reproduces the context-default surface (undo +
- *   generic error toast). A wired onError suppresses the context's own
- *   default branch, so the default behavior is mirrored here — the 404
- *   quiet-success case never reaches onError (the pipeline returns early).
- */
-function buildStaleAwareOnError(
-  qc: QueryClient,
-  undo: () => void,
-  showToast: ShowToast,
-): (err: unknown) => void {
-  return (err: unknown) => {
-    if (err instanceof ApiError && err.status === 409 && err.dependencies) {
-      undo();
-      showToast(
-        'Не удалось удалить: данные изменились',
-        'error',
-        undefined,
-        undefined,
-        {
-          label: 'Обновить',
-          onAction: () => invalidateEntities(qc, ['records']),
-        },
-      );
-      return;
-    }
-    // Non-409 — the context-default surface (undo + default error toast).
-    undo();
-    showToast('Не удалось удалить. Изменение отменено', 'error');
-  };
-}
-
 /** Shared enqueue shape (dedupe/cancel key + 5s window + by-key undo). */
 function buildDeferredDeleteAction(
   qc: QueryClient,
@@ -181,8 +140,12 @@ function buildDeferredDeleteAction(
     // guarantees nothing was deleted during the window), no invalidations.
     undo,
     commit: () => commitDeferredDelete(qc, record, payload, snapshots),
-    // D4 rev8: the stale-aware honest-error handler (see above).
-    onError: buildStaleAwareOnError(qc, undo, showToast),
+    // D4 rev8 / #286 D7: the shared stale-aware handler parameterized on
+    // 'records' (lib/staleAwareOnError.ts) — 409+dependencies → undo +
+    // «Не удалось удалить: данные изменились» with the «Обновить» action
+    // (['records']-family); 404 — quiet success; any other error —
+    // context-default (undo + red toast).
+    onError: staleAwareOnError(qc, 'records', undo, showToast),
   };
 }
 

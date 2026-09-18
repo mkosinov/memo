@@ -10,22 +10,22 @@ import { ApiError } from '@memo/api-client';
 // Client with choice deps (records nullify, visitors cascade) + auto tags →
 // Mode A; resolutions = { records:'nullify', visitors:'cascade' }.
 const DEPS_CHOICE: DependencyNode[] = [
-  { entity: 'records', relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
+  { entity: 'records', auto: false, relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
   {
-    entity: 'visitors',
+    entity: 'visitors', auto: false,
     relation: 'Посетитель',
     count: 12,
     allowed_actions: ['cascade'],
     message: null,
     cascade_preview: { visits: 45 },
   },
-  { entity: 'client_tags', relation: 'Тег', count: 5, allowed_actions: ['cascade'], message: null },
+  { entity: 'client_tags', auto: true, relation: 'Тег', count: 5, allowed_actions: ['cascade'], message: null },
 ];
 
 // Client with activities → delete blocked → Mode B (archive only).
 const DEPS_BLOCKED: DependencyNode[] = [
   {
-    entity: 'activities',
+    entity: 'activities', auto: false,
     relation: 'Активность',
     count: 2,
     allowed_actions: [],

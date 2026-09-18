@@ -23,7 +23,6 @@ vi.mock('@memo/api-client', () => {
   getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
-  deleteActivity: vi.fn(),
   });
 });
 

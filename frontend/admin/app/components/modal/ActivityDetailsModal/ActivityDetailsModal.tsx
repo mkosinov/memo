@@ -125,7 +125,7 @@ function ExistingActivityContent({
   isOpen: boolean;
   onClose: () => void;
 }) {
-  const { services, updateActivity, deleteActivity } = useScheduleData();
+  const { services, updateActivity, deleteActivityDeferred, setPendingActivityConfirm } = useScheduleData();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-record' : 'settings');
@@ -202,12 +202,28 @@ function ExistingActivityContent({
     return [settingsTab, ...clientTabs];
   }, [activityRecords, onClose]);
 
-  // Delete activity handler
+  // Delete activity handler (#286 D5/Task 5): routes into the SAME deferred
+  // flow as the card (ensure-fresh → dry-run → enqueue / needs-confirm); the
+  // modal closes immediately — the pending action survives unmount (app-level
+  // provider). needs-confirm is handed to the context's pending-confirm state
+  // (dialog renders at WeekView/DayView level). The flow's own undo/error
+  // toasts surface the outcome; there is no «Активность удалена» toast.
   const handleDeleteActivity = useCallback(() => {
-    deleteActivity(activity.id);
-    showToast('Активность удалена');
+    deleteActivityDeferred(activity.id)
+      .then((outcome) => {
+        if (outcome.kind === 'needs-confirm') {
+          setPendingActivityConfirm({
+            activityId: activity.id,
+            dependencies: outcome.dependencies,
+            refetched: outcome.refetched,
+          });
+        }
+      })
+      .catch((err) => {
+        showToast(parseApiError(err).message, 'error');
+      });
     onClose();
-  }, [activity.id, deleteActivity, showToast, onClose]);
+  }, [activity.id, deleteActivityDeferred, setPendingActivityConfirm, showToast, onClose]);
 
   // Activity update callback for settings — payload is the context's
   // minutes-based update shape (GH #142).

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider } from '../contexts/UIContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
@@ -34,7 +35,6 @@ vi.mock('@memo/api-client', () => ({
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   patchActivity: vi.fn(),
-  deleteActivity: vi.fn(),
   // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
   getUserSettings: vi.fn().mockResolvedValue({
     user_id: 'u1', theme: 'light', language: 'ru',
@@ -196,9 +196,11 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         <UIProvider>
           <NavigationProvider>
             <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
@@ -226,9 +228,11 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         <UIProvider>
           <NavigationProvider>
             <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
@@ -334,9 +338,11 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         <UIProvider>
           <NavigationProvider>
             <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>
@@ -375,9 +381,11 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         <UIProvider>
           <NavigationProvider>
             <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               <WeekView />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
           </NavigationProvider>
         </UIProvider>

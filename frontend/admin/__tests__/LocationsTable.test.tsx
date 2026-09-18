@@ -14,18 +14,18 @@ import type { DependencyNode, LocationResponse, PaginatedResponse } from '@memo/
 // Location with activities → delete blocked → Mode B (archive only).
 const DEPS_BLOCKED: DependencyNode[] = [
   {
-    entity: 'activities',
+    entity: 'activities', auto: false,
     relation: 'Активность',
     count: 3,
     allowed_actions: [],
     message: 'Удалите активности вручную или архивируйте',
   },
-  { entity: 'location_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'location_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // Location with only auto deps (tags) → Mode A, resolutions body {}.
 const DEPS_AUTO: DependencyNode[] = [
-  { entity: 'location_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'location_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── Mock @tanstack/react-query ──────────────────────────────────────────

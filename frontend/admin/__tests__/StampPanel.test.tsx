@@ -5,6 +5,7 @@ import { StampPanel } from '../app/components/stamp/StampPanel';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 
 // Mock api-client so React Query hooks don't make real network calls
@@ -36,7 +37,6 @@ vi.mock('@memo/api-client', () => {
   getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
-  deleteActivity: vi.fn(),
   // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
   getUserSettings: vi.fn().mockResolvedValue({
     user_id: 'u1', theme: 'light', language: 'ru',
@@ -71,7 +71,9 @@ function Wrapper({ children }: { children: React.ReactNode }) {
       <NavigationProvider>
         <UIProvider>
           <UserSettingsProvider>
-            <ScheduleProvider>{children}</ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>{children}</ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
         </UIProvider>
       </NavigationProvider>

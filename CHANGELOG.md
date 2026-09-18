@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-18
 
 ### Changed
+- Удаление занятия переведено на общую отложенную схему с отменой (единый контракт #285): окно отмены 5с с кольцом отсчёта, диалог зависимостей (какие записи будут удалены), защита от гонок (`expected`-сверка) и честные ошибки при изменении данных; удаление из модалки деталей — тот же поток; тост «Сохраняем…» на удалении больше не показывается (#286).
 - **GH #172 — thing-title канон: `Location.name`/`Tag.tag` → `title`** — branch `feat/thing-title-canon`
   (7 commits: e59e772..HEAD; BREAKING: API-пейлоады/ответы location/tag):
   - **Migration (`a7b8c9d0e1f2`):** переименование колонок `locations.name` → `title`, `tags.tag` → `title`

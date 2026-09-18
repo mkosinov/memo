@@ -7,6 +7,7 @@ import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
 import { formatTime } from '@/lib/datetime';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 import { ArchiveBadge, type ArchivePart } from '@/app/components/shared/ArchiveBadge';
 
 interface ActivityCardProps {
@@ -24,7 +25,7 @@ interface ActivityCardProps {
 
 export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = 540 }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
-  const { deleteActivity, addActivity } = useScheduleData();
+  const { deleteActivityDeferred, setPendingActivityConfirm } = useScheduleData();
   const { cellHeight = 60 } = useGridSettings();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
@@ -70,22 +71,32 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
 
   const handleClick = () => {
     if (deleteMode) {
+      // #286 deferred delete — the context owns the mechanics (ensure-fresh →
+      // dry-run → optimistic enqueue / needs-confirm). The 150ms fade-out stays
+      // as the click response while the dry-run is in flight; the guard resets
+      // in finally on EVERY branch (fail-closed — the card never stays dead).
+      // needs-confirm (Task 5): the outcome is handed to the context's
+      // pending-confirm state — the confirm dialog renders at WeekView/DayView
+      // level and survives this card's unmount.
       if (deletingRef.current) return;
       deletingRef.current = true;
       setDeleting(true);
       setTimeout(() => {
-        deleteActivity(activity.id);
-        showToast(`«${activity.serviceTitle}» удалено`, () => addActivity({
-          dayIndex: activity.day,
-          masterId: activity.masterId,
-          serviceId: activity.serviceId,
-          locationId: activity.locationId,
-          startMinutes: activity.startMinutes,
-          durationMinutes: activity.durationMinutes,
-          capacity: activity.capacity,
-          isPrivate: activity.isPrivate,
-          comment: activity.comment,
-        }));
+        deleteActivityDeferred(activity.id)
+          .then((outcome) => {
+            if (outcome.kind === 'needs-confirm') {
+              setPendingActivityConfirm({
+                activityId: activity.id,
+                dependencies: outcome.dependencies,
+                refetched: outcome.refetched,
+              });
+            }
+          })
+          .catch((err) => showToast(parseApiError(err).message, 'error'))
+          .finally(() => {
+            deletingRef.current = false;
+            setDeleting(false);
+          });
       }, 150);
     } else if (onEdit) {
       onEdit(activity);

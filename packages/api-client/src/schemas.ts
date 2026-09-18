@@ -790,6 +790,10 @@ export interface DependencyNode {
   relation: string;
   count: number;
   allowed_actions: string[]; // [] = blocked (delete impossible — archive instead)
+  // rev8 (GH #285): mirrors the matrix's FKDependency.auto — the backend
+  // flags server-resolved deps (no user choice) and serializes the field
+  // ALWAYS (bool survives exclude_none). The client filters on it (#286).
+  auto: boolean;
   message?: string | null;
   cascade_preview?: Record<string, number> | null;
   // Record nodes only (GH #285): id + one-line label of individual rows —

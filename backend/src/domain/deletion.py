@@ -30,6 +30,13 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
     Service/Client/Location nullify (auto) — GH #211 4-owner model; a photo
     survives losing its owner (row kept, FK set NULL).
   * ``Record.client_id`` — nullable → Client nullify (user choice).
+  * ``Activity`` (GH #286 D1) — direct FK children only: records
+    (CASCADE, user choice), photos (SET NULL, auto), activity_tags
+    (join, auto). PREVIEW-ONLY entry — consumed by
+    :func:`collect_dependencies` (dialog tree, two levels deep via
+    ``_RECURSIVE_CHILDREN``); execution of DELETE /activities/{id}
+    stays with the handwritten ``ActivityService.delete`` — NO
+    handlers are wired for Activity in the dispatch tables below.
   * ``Visitor.client_id`` — NOT NULL → Client cascade (user choice).
   * join tables ``master_tags``/``location_tags``/``service_tags``/
     ``client_tags``/``service_materials`` — NOT-NULL PK → cascade (auto).
@@ -63,6 +70,7 @@ from src.models.service_material import ServiceMaterial
 from src.models.staff import Staff
 from src.models.tag import (
     Tag,
+    activity_tags,
     client_tags,
     location_tags,
     master_tags,
@@ -223,6 +231,24 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         ),
         FKDependency(
             entity="record_tags", relation="Тег", nullable=False,
+            action="cascade", auto=True, allowed_actions=["cascade"],
+        ),
+    ],
+    Activity: [
+        # GH #286 D1: direct FK children (records CASCADE; photos SET NULL
+        # #194; activity_tags join rows). PREVIEW-ONLY — collect/labels
+        # only; the generic resolver never executes an activity delete
+        # (no handlers in NULLIFY_HANDLERS/CASCADE_HANDLERS).
+        FKDependency(
+            entity="records", relation="Запись", nullable=False,
+            action="cascade", auto=False, allowed_actions=["cascade"],
+        ),
+        FKDependency(
+            entity="photos", relation="Фото", nullable=True,
+            action="nullify", auto=True, allowed_actions=["nullify"],
+        ),
+        FKDependency(
+            entity="activity_tags", relation="Тег", nullable=False,
             action="cascade", auto=True, allowed_actions=["cascade"],
         ),
     ],
@@ -478,6 +504,28 @@ async def _count_r_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     return r.scalar_one(), None
 
 
+async def _count_a_records(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Record).where(Record.activity_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_a_photos(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(Photo).where(Photo.activity_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_a_activity_tags(s: AsyncSession, entity_id: str) -> _CountResult:
+    r = await s.execute(
+        select(func.count()).select_from(activity_tags)
+        .where(activity_tags.c.activity_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Staff, "activities"): _count_m_activities,
     (Staff, "users"): _count_m_users,
@@ -500,6 +548,9 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Record, "visits"): _count_r_visits,
     (Record, "payments"): _count_r_payments,
     (Record, "record_tags"): _count_r_record_tags,
+    (Activity, "records"): _count_a_records,
+    (Activity, "photos"): _count_a_photos,
+    (Activity, "activity_tags"): _count_a_activity_tags,
 }
 
 
@@ -515,6 +566,7 @@ type _ItemsFn = Callable[[AsyncSession, str], Awaitable[list[DependencyItem]]]
 
 _NO_TARIFF_LABEL = "Без тарифа"  # tariff_id IS NULL (или service title недоступен)
 _NO_METHOD_LABEL = "—"  # method IS NULL (D9б)
+_ANONYMOUS_LABEL = "Аноним"  # client_id IS NULL / имя клиента пусто (#286 D1)
 
 
 async def _items_r_visits(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
@@ -573,10 +625,107 @@ async def _items_r_record_tags(s: AsyncSession, entity_id: str) -> list[Dependen
     ]
 
 
+async def _items_a_records(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Record label «{service.title}, {start date}, {client | Аноним}» (#286 D1).
+
+    One query: Record → Activity → Service (the activity's service) +
+    LEFT JOIN Client (``client_id`` nullable → «Аноним»; a NULL/empty
+    client name degrades the same way). Date = ``Activity.start`` date
+    part, ISO ``YYYY-MM-DD`` (locale-free). PII boundary per #285 D9б:
+    the client name is visible to admin callers (not masked).
+    """
+    r = await s.execute(
+        select(
+            Record.id.label("record_id"),
+            Service.title.label("service_title"),
+            Activity.start.label("start"),
+            Client.name.label("client_name"),
+        )
+        .join(Activity, Record.activity_id == Activity.id)
+        .join(Service, Activity.service_id == Service.id)
+        .outerjoin(Client, Record.client_id == Client.id)
+        .where(Record.activity_id == entity_id)
+    )
+    return [
+        DependencyItem(
+            id=row.record_id,
+            label=(
+                f"{row.service_title}, {row.start.date().isoformat()}, "
+                f"{row.client_name if row.client_name else _ANONYMOUS_LABEL}"
+            ),
+        )
+        for row in r.all()
+    ]
+
+
 _ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
     (Record, "visits"): _items_r_visits,
     (Record, "payments"): _items_r_payments,
     (Record, "record_tags"): _items_r_record_tags,
+    (Activity, "records"): _items_a_records,
+}
+
+
+# ─── #286 D1: recursive two-level Activity subtree ─────────────────────────────
+# FK_MATRIX[Activity] lists only DIRECT FK children (records/photos/
+# activity_tags). The deferred-delete dialog needs the full subtree: for
+# each direct record its own non-auto deps (visits/payments; record_tags
+# is auto and excluded). The recursion reuses the Record-level counters +
+# label-builders (#285) AS IS, per record id. Visit/Payment have no
+# non-auto deps of their own, so the recursion stops at depth 2.
+
+type _ChildrenFn = Callable[[AsyncSession, str], Awaitable[list[DependencyNode]]]
+
+
+async def _activity_children_nodes(
+    session: AsyncSession, activity_id: str,
+) -> list[DependencyNode]:
+    """Second-level nodes for an activity: aggregated visits + payments.
+
+    For every NON-AUTO dep of ``FK_MATRIX[Record]`` (visits, payments),
+    sums the per-record counts and concatenates the per-record items
+    (``_COUNTERS``/``_ITEM_COLLECTORS`` — the #285 builders run
+    unchanged per record). Zero-total deps are skipped (§5). Nodes are
+    appended after the matrix nodes, so the client-side auto-filter
+    keeps the dialog order records → visits → payments.
+    """
+    r = await session.execute(
+        select(Record.id).where(Record.activity_id == activity_id)
+    )
+    record_ids = list(r.scalars().all())
+    if not record_ids:
+        return []
+
+    nodes: list[DependencyNode] = []
+    for dep in FK_MATRIX.get(Record, []):
+        if dep.auto:
+            continue  # record_tags — auto, excluded from the subtree (#286 D1).
+        counter = _COUNTERS[(Record, dep.entity)]
+        item_collector = _ITEM_COLLECTORS.get((Record, dep.entity))
+        total = 0
+        items: list[DependencyItem] = []
+        for record_id in record_ids:
+            count, _preview = await counter(session, record_id)
+            total += count
+            if item_collector is not None and count:
+                items.extend(await item_collector(session, record_id))
+        if not total:
+            continue
+        nodes.append(
+            DependencyNode(
+                entity=dep.entity,
+                relation=dep.relation,
+                count=total,
+                allowed_actions=list(dep.allowed_actions),
+                auto=dep.auto,
+                items=items or None,
+            )
+        )
+    return nodes
+
+
+_RECURSIVE_CHILDREN: dict[type[Base], _ChildrenFn] = {
+    Activity: _activity_children_nodes,
 }
 
 
@@ -597,6 +746,11 @@ async def collect_dependencies(
     Every node also carries ``auto`` = the matrix's ``FKDependency.auto``
     (rev8: server-resolved deps like record_tags are flagged so the
     client can filter them without hardcoding entity names).
+
+    #286 D1: entities whose dialog tree spans MORE than one matrix level
+    (``_RECURSIVE_CHILDREN`` — Activity → records → visits/payments)
+    append their second-level nodes after the matrix nodes; the matrix
+    itself stays the direct-FK mirror.
 
     Used by Task 9's unified DELETE route — the no-body 409 builder AND
     both #285 409 paths (``has_dependencies`` dry-run + ``stale_dependencies``
@@ -630,6 +784,12 @@ async def collect_dependencies(
                 items=items,
             )
         )
+    # #286 D1: second-level nodes (Activity → records → visits/payments)
+    # appended after the matrix nodes — the client-side auto-filter keeps
+    # the dialog order records → visits → payments.
+    recursion = _RECURSIVE_CHILDREN.get(model)
+    if recursion is not None:
+        nodes.extend(await recursion(session, entity_id))
     return nodes
 
 
@@ -668,10 +828,76 @@ async def _ids_r_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
     return list(r.scalars().all())
 
 
+# ─── #286 D2: Activity direct id-collectors ─────────────────────────────────────
+# Mirror of the Record collectors: records (direct FK child), photos (auto)
+# and activity_tags (auto join rows) — the direct level of the subtree.
+
+
+async def _ids_a_records(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Record.id).where(Record.activity_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_a_photos(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Photo.id).where(Photo.activity_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_a_activity_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(activity_tags.c.tag_id).where(
+            activity_tags.c.activity_id == entity_id
+        )
+    )
+    return list(r.scalars().all())
+
+
 _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Record, "visits"): _ids_r_visits,
     (Record, "payments"): _ids_r_payments,
     (Record, "record_tags"): _ids_r_record_tags,
+    (Activity, "records"): _ids_a_records,
+    (Activity, "photos"): _ids_a_photos,
+    (Activity, "activity_tags"): _ids_a_activity_tags,
+}
+
+
+# ─── #286 D2: second-level id-collection (Activity → records → visits/payments) ─
+# The Activity dialog tree spans TWO matrix levels; the ``expected`` commit
+# carries id-sets for BOTH levels. visits/payments are not direct FK deps of
+# Activity (absent from FK_MATRIX[Activity]), so they are collected by a
+# dedicated subtree extender instead of the direct ``_ID_COLLECTORS`` loop —
+# mirror of ``_RECURSIVE_CHILDREN`` in the preview path.
+
+
+async def _activity_dependency_ids(
+    session: AsyncSession, activity_id: str,
+) -> dict[str, list[str]]:
+    """Second-level id-sets: visits and payments of EVERY record of the
+    activity (one JOIN query each — no per-record N+1). Only non-empty
+    lists are included, mirroring :func:`collect_dependency_ids`."""
+    out: dict[str, list[str]] = {}
+    visit_r = await session.execute(
+        select(Visit.id)
+        .join(Record, Visit.record_id == Record.id)
+        .where(Record.activity_id == activity_id)
+    )
+    visits = list(visit_r.scalars().all())
+    if visits:
+        out["visits"] = visits
+    payment_r = await session.execute(
+        select(Payment.id)
+        .join(Record, Payment.record_id == Record.id)
+        .where(Record.activity_id == activity_id)
+    )
+    payments = list(payment_r.scalars().all())
+    if payments:
+        out["payments"] = payments
+    return out
+
+
+_RECURSIVE_IDS: dict[type[Base], Callable[[AsyncSession, str], Awaitable[dict[str, list[str]]]]] = {
+    Activity: _activity_dependency_ids,
 }
 
 
@@ -689,6 +915,11 @@ async def collect_dependency_ids(
     Auto-deps (e.g. ``record_tags``) ARE collected here (the task's payload
     is per-entity and complete); whether they participate in the check is
     decided by :func:`stale_expected_entities`.
+
+    #286 D2: entities with a two-level dialog tree
+    (``_RECURSIVE_IDS`` — Activity → records → visits/payments) extend
+    their per-entity map with the second-level id-sets after the direct
+    loop.
     """
     deps = FK_MATRIX.get(model, [])
     if not deps:
@@ -701,7 +932,27 @@ async def collect_dependency_ids(
         ids = await collector(session, entity_id)
         if ids:
             out[dep.entity] = ids
+    # #286 D2: second-level subtree ids appended after the direct level —
+    # the per-entity payload stays complete across both matrix levels.
+    recursion = _RECURSIVE_IDS.get(model)
+    if recursion is not None:
+        for entity, ids in (await recursion(session, entity_id)).items():
+            out.setdefault(entity, []).extend(ids)
     return out
+
+
+# ─── #286 D2: entities verified at the SECOND matrix level ─────────────────────
+# Activity's dialog tree spans two matrix levels (direct records + each
+# record's visits/payments). visits/payments are NOT direct FK deps of
+# Activity (absent from FK_MATRIX[Activity]) yet ARE part of the
+# user-confirmed subtree — verified like non-auto deps by
+# :func:`stale_expected_entities`. Derived from FK_MATRIX[Record]'s
+# non-auto deps so a future Record-level dep stays consistent.
+_RECURSIVE_VERIFY: dict[type[Base], frozenset[str]] = {
+    Activity: frozenset(
+        dep.entity for dep in FK_MATRIX[Record] if not dep.auto
+    ),
+}
 
 
 def stale_expected_entities(
@@ -719,13 +970,23 @@ def stale_expected_entities(
     Auto-deps (``FKDependency.auto``, e.g. record_tags) NEVER participate:
     they resolve themselves during execution, so the user could not have
     confirmed them and a mid-window tag link is not a race.
+
+    #286 D2: for two-level trees (``_RECURSIVE_VERIFY`` — Activity), the
+    second-level entities (visits/payments) verify the same way even though
+    they are not direct FK deps — a visit that appeared inside an
+    already-confirmed record is a mid-window race the user never confirmed.
     """
     matrix = {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
+    recursive_verify = _RECURSIVE_VERIFY.get(model, frozenset())
     stale: list[str] = []
     for entity, ids in now_ids.items():
         dep = matrix.get(entity)
-        if dep is None or dep.auto:
-            continue  # unknown/auto entities are never verified.
+        if dep is None:
+            if entity not in recursive_verify:
+                continue  # unknown entities are never verified.
+            # Second-level subtree entity — verified like a user choice.
+        elif dep.auto:
+            continue
         if not set(ids) <= set(expected.get(entity, [])):
             stale.append(entity)
     return stale

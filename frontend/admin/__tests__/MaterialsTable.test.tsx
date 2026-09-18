@@ -473,7 +473,7 @@ describe('MaterialsTable', () => {
 
   it('opens DeleteDialog when a 409 conflict occurs (defensive)', async () => {
     setupDeleteConflict([
-      { entity: 'service_materials', relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
+      { entity: 'service_materials', auto: true, relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
     ]);
     setupEnvelope();
     await renderLoaded();
@@ -486,7 +486,7 @@ describe('MaterialsTable', () => {
 
   it('cancel closes the dialog without executing a delete', async () => {
     setupDeleteConflict([
-      { entity: 'service_materials', relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
+      { entity: 'service_materials', auto: true, relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
     ]);
     setupEnvelope();
     await renderLoaded();

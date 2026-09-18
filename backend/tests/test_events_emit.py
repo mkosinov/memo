@@ -115,7 +115,20 @@ class TestActivityDeleteCascade:
         record = create_record()
         _drain(subscriber)
 
-        resp = api_client.delete(f"/api/v1/activities/{record['activity_id']}")
+        # Execute mode: the unified DELETE route requires the commit body
+        # (the expected id-sets confirmed at dry-run — #286 D2);
+        # ActivityService.delete is the executor and marks the full set.
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/activities/{record['activity_id']}",
+            json={
+                "expected": {
+                    "records": [record["id"]],
+                    "visits": [v["id"] for v in record["visits"]],
+                    "payments": [],
+                },
+            },
+        )
         assert resp.status_code == 204, resp.text
 
         events = _drain(subscriber)

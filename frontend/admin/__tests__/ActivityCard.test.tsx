@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
@@ -408,26 +408,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('ActivityCard delete mode', () => {
-  it('does not trigger delete when deleteMode is false', () => {
-    const deleteActivity = vi.fn();
-    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivity }));
+describe('ActivityCard delete mode (#286 deferred flow)', () => {
+  it('does not trigger deferred delete when deleteMode is false', () => {
+    const deleteActivityDeferred = vi.fn();
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivityDeferred }));
 
     render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');
     fireEvent.click(card);
 
-    expect(deleteActivity).not.toHaveBeenCalled();
+    expect(deleteActivityDeferred).not.toHaveBeenCalled();
   });
 
-  it('triggers delete with fade-out animation when deleteMode is true', () => {
-    const deleteActivity = vi.fn();
+  it('plays the 150ms fade-out as click response, then fires deleteActivityDeferred', async () => {
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'enqueued' as const, refetched: false }),
+    );
     const showToast = vi.fn();
-    mockUseUI.mockReturnValue(createMockUIContext({
-      deleteMode: true,
-      showToast,
-    }));
-    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivity }));
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true, showToast }));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivityDeferred }));
 
     const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
     const card = screen.getByTestId('activity-ev_1');
@@ -435,26 +434,156 @@ describe('ActivityCard delete mode', () => {
     // Before click: card is visible
     expect(card).not.toHaveClass('opacity-0');
 
-    // Click to delete
+    // Click to delete — the fade-out starts immediately (click response)
     fireEvent.click(card);
-
-    // After click: card has fade-out classes
     expect(card).toHaveClass('opacity-0');
     expect(card).toHaveClass('scale-95');
 
-    // deleteActivity not called yet (waiting for animation)
-    expect(deleteActivity).not.toHaveBeenCalled();
+    // deleteActivityDeferred not called yet (waiting for the animation)
+    expect(deleteActivityDeferred).not.toHaveBeenCalled();
 
-    // Advance timer past animation duration (150ms)
-    vi.advanceTimersByTime(160);
+    // Advance past the 150ms animation — the deferred flow starts
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
 
-    // Now deleteActivity should be called
-    expect(deleteActivity).toHaveBeenCalledWith('ev_1');
+    expect(deleteActivityDeferred).toHaveBeenCalledWith('ev_1');
+    // No own toast — the PendingActions pipeline owns the undo toast now.
+    expect(showToast).not.toHaveBeenCalled();
+  });
 
-    // Toast shown with undo
-    expect(showToast).toHaveBeenCalled();
-    const toastCall = showToast.mock.calls[0];
-    expect(toastCall[0]).toContain('удалено');
-    expect(typeof toastCall[0]).toBe('string');
+  it('resets the deleting guard after needs-confirm (fail-closed) — the card stays alive and re-click works', async () => {
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'needs-confirm' as const, dependencies: [], refetched: false }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true }));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivityDeferred }));
+
+    const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    const card = screen.getByTestId('activity-ev_1');
+
+    fireEvent.click(card);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    // The card must not stay "dead" — fade-out cleared after the outcome.
+    expect(card).not.toHaveClass('opacity-0');
+    expect(card).not.toHaveClass('scale-95');
+
+    // The guard reset in finally allows a second delete attempt.
+    fireEvent.click(card);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+    expect(deleteActivityDeferred).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets the deleting guard when the flow rejects + shows the error toast (fail-closed)', async () => {
+    const deleteActivityDeferred = vi.fn(() => Promise.reject(new Error('network down')));
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true, showToast }));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ deleteActivityDeferred }));
+
+    const { container } = render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    const card = screen.getByTestId('activity-ev_1');
+
+    fireEvent.click(card);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(card).not.toHaveClass('opacity-0');
+    // A plain Error parses to the generic fallback message (parseApiError).
+    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
+
+    // Re-click allowed after the failure.
+    fireEvent.click(card);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+    expect(deleteActivityDeferred).toHaveBeenCalledTimes(2);
+  });
+
+  // #286 Task 5 — the needs-confirm outcome must land in the context's
+  // pending-confirm state so the confirm dialog renders at WeekView/DayView
+  // level and SURVIVES the card unmount (the card itself is long gone by the
+  // time Task 6's DeleteDialog closes the flow).
+  it('needs-confirm outcome → setPendingActivityConfirm({activityId, dependencies, refetched})', async () => {
+    const dependencies = ACTIVITY_DEPS_FIXTURE;
+    const setPendingActivityConfirm = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'needs-confirm' as const, dependencies, refetched: true }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).toHaveBeenCalledTimes(1);
+    expect(setPendingActivityConfirm).toHaveBeenCalledWith({
+      activityId: 'ev_1',
+      dependencies,
+      refetched: true,
+    });
+  });
+
+  it('enqueued outcome does NOT open the confirm dialog (clean path has no dialog)', async () => {
+    const setPendingActivityConfirm = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'enqueued' as const, refetched: false }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).not.toHaveBeenCalled();
+  });
+
+  it('rejected flow does NOT set pending-confirm (error toast only)', async () => {
+    const setPendingActivityConfirm = vi.fn();
+    const showToast = vi.fn();
+    const deleteActivityDeferred = vi.fn(() => Promise.reject(new Error('network down')));
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true, showToast }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
   });
 });
+
+/** #286: 409 dry-run dependency tree shape for an activity with one record
+ *  (→ visit + payment) and an auto node without items (mirrors the fixture
+ *  in ScheduleDataContext.test.tsx). */
+const ACTIVITY_DEPS_FIXTURE: import('@memo/api-client').DependencyNode[] = [
+  {
+    entity: 'records', auto: false, relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
+  },
+  {
+    entity: 'visits', auto: false, relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'v1', label: 'Картина маслом, 1000' }],
+  },
+  { entity: 'activity_tags', auto: true, relation: 'activity_tags', count: 2, allowed_actions: [] },
+];

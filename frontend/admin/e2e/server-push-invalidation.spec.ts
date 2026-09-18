@@ -13,13 +13,13 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import { queryDBRow } from './fixtures/db-query';
 import {
   serverPushPages as twoPages,
   expectUpdateToast,
   clickFabRobust,
   createRecordViaUI,
   uid,
-  API_BASE,
   PUSH_WINDOW,
 } from './fixtures/server-push';
 
@@ -40,14 +40,28 @@ import {
 
 /**
  * Delete an activity through B's UI: enable «Режим удаления» in the right
- * panel, then click the activity card. Waits for the DELETE response.
+ * panel, then click the activity card (#286 deferred delete).
+ *
+ * The CLICK sends the dry-run preview DELETE (`?dry_run=true`,
+ * postData() === null) — waiting on THAT response would be falsely green
+ * (a dry-run deletes nothing, any status). The helper therefore waits for
+ * the COMMIT DELETE — the one carrying the `{expected}` body, which fires
+ * ~5s after the undo toast — and asserts its 204. When the activity has
+ * dependencies the dry-run 409 opens the needs-confirm DeleteDialog; pass
+ * `confirm: true` (С3's setup activity always holds a record) so the
+ * helper waits for it properly and confirms (entity-level checkbox →
+ * enqueue).
  *
  * Opening the panel goes through clickFabRobust — the StampFab (fixed
  * bottom-right, z-50) shares the screen corner with the toast container
  * (fixed bottom-right, z-[250]) and parallel-spec toasts would otherwise
  * swallow the click.
  */
-async function deleteActivityViaUI(pageB: Page, activityId: string) {
+async function deleteActivityViaUI(
+  pageB: Page,
+  activityId: string,
+  opts?: { confirm?: boolean },
+) {
   // B must be watching the schedule for the delete to be a real UI action.
   await waitForScheduleReady(pageB);
 
@@ -57,16 +71,32 @@ async function deleteActivityViaUI(pageB: Page, activityId: string) {
   }
   await pageB.getByRole('button', { name: 'Режим удаления' }).click();
 
-  const deleteResponse = pageB.waitForResponse(
-    (r) => r.url().includes(`/api/v1/activities/${activityId}`) && r.request().method() === 'DELETE',
-    { timeout: 15_000 },
+  const commitDelete = pageB.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/v1/activities/${activityId}`) &&
+      r.request().method() === 'DELETE' &&
+      r.request().postData() !== null,
+    { timeout: 20_000 },
   );
   // The WeekView carousel demotes overlapping cards to pointer-events:none
   // (z>0), so a real-mouse click can be permanently hit-test-blocked;
   // dispatchEvent reaches the same React handler (S5 pattern).
   const card = pageB.locator(`[data-testid="activity-${activityId}"]`);
   await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
-  const resp = await deleteResponse;
+
+  // needs-confirm: when the activity has dependencies the dry-run 409
+  // opens the DeleteDialog — a PROPER visibility wait (the dialog renders
+  // after the dry-run roundtrip, an instant isVisible() would miss it),
+  // then the entity-level checkbox → confirm enqueues the deferred delete.
+  if (opts?.confirm) {
+    const dialog = pageB.locator('[data-testid="delete-dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const checkbox = pageB.locator('[data-testid="delete-dialog-confirm-checkbox"]');
+    if (await checkbox.count()) await checkbox.check();
+    await pageB.locator('[data-testid="delete-dialog-confirm-btn"]').click();
+  }
+
+  const resp = await commitDelete;
   expect(resp.status()).toBe(204);
 }
 
@@ -175,8 +205,18 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       const card = pageA.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
-      // B deletes the activity through the UI.
-      await deleteActivityViaUI(pageB, activity.id);
+      // B deletes the activity through the UI (dry-run + needs-confirm
+      // dialog for the record it holds + commit at the window end).
+      await deleteActivityViaUI(pageB, activity.id, { confirm: true });
+
+      // DB ASSERTION (#286) — the commit DELETE executed for real: the
+      // activity row is GONE from the shard DB after the window.
+      await expect
+        .poll(
+          () => queryDBRow(`SELECT id FROM activities WHERE id='${activity.id}'`),
+          { timeout: PUSH_WINDOW },
+        )
+        .toBeNull();
 
       // PUSH ASSERTION 1 — A's grid loses the card within the push window.
       await expect(card).not.toBeVisible({ timeout: PUSH_WINDOW });
@@ -195,11 +235,10 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       await expect(recordRow).not.toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
       // UI delete is the test subject, not a prerequisite — if it failed,
-      // remove the setup activity via API so parallel runs don't inherit it.
-      // Ignore 4xx: already-deleted (by a succeeded UI delete) is fine.
-      await request
-        .delete(`${API_BASE}/api/v1/activities/${activity.id}`)
-        .catch(() => undefined); // network-level errors: nothing more to do
+      // remove the setup activity via the #286 cleanup contract so parallel
+      // runs don't inherit it. A re-cleanup of a succeeded delete is
+      // idempotent (the dry-run 404 is swallowed).
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }

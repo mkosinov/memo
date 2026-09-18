@@ -9,27 +9,46 @@ import {
 import { ScheduleProvider } from '../../contexts/schedule/ScheduleProvider';
 import { useGridSettings } from '../../contexts/schedule/GridSettingsContext';
 import { useScheduleView } from '../../contexts/schedule/ScheduleViewContext';
-import { NavigationProvider } from '../../contexts/NavigationContext';
+import { NavigationProvider, useNavigation } from '../../contexts/NavigationContext';
 import { toISODate } from '@/lib/datetime';
 import { transformService } from '../../lib/transformers';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
-vi.mock('@memo/api-client', () => ({
-  getMasters: vi.fn(),
-  getLocations: vi.fn(),
-  getServices: vi.fn(),
-  getActivities: vi.fn(),
-  getAllMasters: vi.fn(),
-  getAllLocations: vi.fn(),
-  getAllServices: vi.fn(),
-  createActivity: vi.fn(),
-  updateActivity: vi.fn(),
-  patchActivity: vi.fn(),
-  deleteActivity: vi.fn(),
-  copyWeek: vi.fn(),
-  getUserSettings: vi.fn(),
-  createUserSettings: vi.fn(),
-  patchUserSettings: vi.fn(),
+// Partial mock (importOriginal) — the real ApiError class stays because the
+// 409-with-dependencies rejection surface is part of the deferred-delete
+// contract (#286).
+vi.mock('@memo/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memo/api-client')>();
+  return {
+    ...actual,
+    getMasters: vi.fn(),
+    getLocations: vi.fn(),
+    getServices: vi.fn(),
+    getActivities: vi.fn(),
+    getAllMasters: vi.fn(),
+    getAllLocations: vi.fn(),
+    getAllServices: vi.fn(),
+    createActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    patchActivity: vi.fn(),
+    dryRunDeleteActivity: vi.fn(),
+    deleteActivityWithExpected: vi.fn(),
+    copyWeek: vi.fn(),
+    getUserSettings: vi.fn(),
+    createUserSettings: vi.fn(),
+    patchUserSettings: vi.fn(),
+  };
+});
+
+// #286: the data provider owns the deferred-delete mechanics — enqueue and
+// toast are controlled by tests (same approach as useDeleteRecord.test.ts).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('../../contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+const mockShowToast = vi.fn();
+vi.mock('../../contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
 }));
 
 // GH #267: UserSettingsProvider gates loading on useAuth().status — mock the
@@ -48,12 +67,17 @@ import {
   getAllServices,
   createActivity,
   patchActivity,
-  deleteActivity,
+  dryRunDeleteActivity,
+  deleteActivityWithExpected,
   copyWeek,
   getUserSettings,
   createUserSettings,
   patchUserSettings,
+  ApiError,
 } from '@memo/api-client';
+import type { DependencyNode } from '@memo/api-client';
+import type { PendingAction } from '../../contexts/PendingActionsContext';
+import { qk } from '@/lib/queryKeys';
 import { UserSettingsProvider, useUserSettings } from '../../contexts/UserSettingsContext';
 
 // ─── Date helpers (floating-local, GH #142) ─────────────────────────────────
@@ -112,6 +136,25 @@ function pad(mins: number): string {
   return `${h}:${m}:00`;
 }
 
+/** #286: 409 dry-run dependency tree for an activity with one record
+ *  (→ its visit + payment) plus an auto node without items. */
+const ACTIVITY_DEPS: DependencyNode[] = [
+  {
+    entity: 'records', auto: false, relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
+  },
+  {
+    entity: 'visits', auto: false, relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'v1', label: 'Картина маслом, 1000' }],
+  },
+  {
+    entity: 'payments', auto: false, relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'p1', label: '1000, карта' }],
+  },
+  // auto (photos/activity_tags) — no items, excluded from `expected`
+  { entity: 'activity_tags', auto: true, relation: 'activity_tags', count: 2, allowed_actions: [] },
+];
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function wrap<T>(items: T[]) {
@@ -135,6 +178,23 @@ function seedDictionaries(masters = [masterM1], services = [serviceS1], location
 }
 
 // Test component consuming ONLY the data context.
+/** Week navigation driver: moves dateFrom/dateTo one week forward (#286). */
+function NextWeekNav() {
+  const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  return (
+    <button
+      data-testid="next-week"
+      onClick={() => {
+        const from = new Date(dateFrom + 'T00:00:00');
+        const to = new Date(dateTo + 'T00:00:00');
+        from.setDate(from.getDate() + 7);
+        to.setDate(to.getDate() + 7);
+        selectDateRange(toISODate(from), toISODate(to));
+      }}
+    />
+  );
+}
+
 function DataConsumer() {
   const {
     activities,
@@ -146,7 +206,11 @@ function DataConsumer() {
     scheduleLocations: fullScheduleLocations,
     addActivity,
     updateActivity,
-    deleteActivity,
+    deleteActivityDeferred,
+    deleteActivityConfirmed,
+    // #286 Task 5: pending-confirm dialog state.
+    pendingActivityConfirm,
+    setPendingActivityConfirm,
     copyLastWeek,
     loading,
     error,
@@ -154,6 +218,7 @@ function DataConsumer() {
     gridEndMinutes,
   } = useScheduleData();
   const [copyResult, setCopyResult] = React.useState('');
+  const [deleteOutcome, setDeleteOutcome] = React.useState('');
 
   return (
     <div>
@@ -206,10 +271,46 @@ function DataConsumer() {
       />
       <button
         data-testid="delete-activity"
-        onClick={() => deleteActivity(activities[0]?.id ?? '')}
+        onClick={() => {
+          deleteActivityDeferred(activities[0]?.id ?? '')
+            .then((o) => setDeleteOutcome(JSON.stringify(o)))
+            .catch((err: Error) => setDeleteOutcome(`error:${err.message}`));
+        }}
       >
         Delete
       </button>
+      <button
+        data-testid="confirm-delete-activity"
+        onClick={() => {
+          void deleteActivityConfirmed('a1', ACTIVITY_DEPS);
+        }}
+      >
+        ConfirmDelete
+      </button>
+      <span data-testid="delete-outcome">{deleteOutcome}</span>
+      {/* #286 Task 5: pending-confirm dialog state (hold + clear contract). */}
+      <span data-testid="pending-confirm">
+        {pendingActivityConfirm
+          ? JSON.stringify({
+              activityId: pendingActivityConfirm.activityId,
+              refetched: pendingActivityConfirm.refetched,
+              deps: pendingActivityConfirm.dependencies.length,
+            })
+          : 'null'}
+      </span>
+      <button
+        data-testid="set-pending-confirm"
+        onClick={() =>
+          setPendingActivityConfirm({ activityId: 'a1', dependencies: ACTIVITY_DEPS, refetched: true })
+        }
+      >
+        SetPending
+      </button>
+      <button data-testid="clear-pending-confirm" onClick={() => setPendingActivityConfirm(null)}>
+        ClearPending
+      </button>
+      {/* #286: week navigation driver — selectDateRange moves dateFrom/dateTo. */}
+      <NextWeekNav />
       <button
         data-testid="copy-last-week"
         onClick={() => {
@@ -351,7 +452,8 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
     vi.mocked(getActivities).mockResolvedValue(wrap([]));
     vi.mocked(createActivity).mockResolvedValue({} as never);
     vi.mocked(patchActivity).mockResolvedValue({} as never);
-    vi.mocked(deleteActivity).mockResolvedValue(undefined);
+    vi.mocked(dryRunDeleteActivity).mockResolvedValue(undefined);
+    vi.mocked(deleteActivityWithExpected).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -567,23 +669,8 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
     expect(result).not.toHaveProperty('maxCapacity');
   });
 
-  it('calls deleteActivity mutation when deleteActivity is called', async () => {
-    seedDictionaries();
-    vi.mocked(getActivities).mockResolvedValue(wrap([activityA1(0, 600)]));
-
-    renderDataProvider();
-    await waitFor(() => {
-      expect(screen.getByTestId('activity-count').textContent).toBe('1');
-    });
-
-    act(() => {
-      screen.getByTestId('delete-activity').click();
-    });
-
-    await waitFor(() => {
-      expect(deleteActivity).toHaveBeenCalledWith('a1');
-    });
-  });
+  // ─── Deferred activity delete (#286) ──────────────────────────────────────
+  // Covered below in the dedicated top-level describes.
 
   it('copyLastWeek calls copyWeek api and invalidates the activities family (#242)', async () => {
     seedDictionaries();
@@ -973,6 +1060,392 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
       expect(screen.getByTestId('probe').textContent).toBe('1');
     });
     expect(probeRenders).toBeGreaterThan(before);
+  });
+});
+
+// ─── Deferred activity delete (#286) ──────────────────────────────────────────
+
+describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getAllMasters).mockResolvedValue([] as never);
+    vi.mocked(getAllLocations).mockResolvedValue([] as never);
+    vi.mocked(getAllServices).mockResolvedValue([] as never);
+    vi.mocked(getActivities).mockResolvedValue(wrap([activityA1(0, 600)]) as never);
+    vi.mocked(createActivity).mockResolvedValue({} as never);
+    vi.mocked(patchActivity).mockResolvedValue({} as never);
+    vi.mocked(dryRunDeleteActivity).mockResolvedValue(undefined);
+    vi.mocked(deleteActivityWithExpected).mockResolvedValue(undefined);
+    seedDictionaries();
+  });
+
+  function weekKey(): readonly unknown[] {
+    return qk.activityRange(weekStartKey(), weekEndKey());
+  }
+
+  /** Render + settle the initial load with a FRESH week cache (the app's
+   *  providers default staleTime is 30s; the test client has none). */
+  async function renderReady() {
+    const utils = renderDataProvider();
+    utils.queryClient.setQueryDefaults(weekKey(), { staleTime: 60_000 });
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    return utils;
+  }
+
+  function lastEnqueuedAction(): PendingAction {
+    expect(mockEnqueuePendingAction).toHaveBeenCalled();
+    return mockEnqueuePendingAction.mock.calls.at(-1)![0] as PendingAction;
+  }
+
+  function cacheRowIds(queryClient: QueryClient, key: readonly unknown[]): string[] {
+    const cache = queryClient.getQueryData<{ id: string }[]>(key);
+    return (cache ?? []).map((a) => a.id);
+  }
+
+  it('(а) dry-run 409 → needs-confirm returned, NO enqueue, cache untouched', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, ACTIVITY_DEPS),
+    );
+    const { queryClient } = await renderReady();
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('needs-confirm');
+    });
+    const outcome = JSON.parse(screen.getByTestId('delete-outcome').textContent!) as {
+      kind: string;
+      refetched: boolean;
+      dependencies: unknown[];
+    };
+    expect(outcome.kind).toBe('needs-confirm');
+    expect(outcome.refetched).toBe(false);
+    expect(outcome.dependencies).toHaveLength(4);
+    // No pending action, no commit call, the row stays in the cache.
+    expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+    expect(deleteActivityWithExpected).not.toHaveBeenCalled();
+    expect(cacheRowIds(queryClient, weekKey())).toContain('a1');
+  });
+
+  it('(б) dry-run 204 → enqueued (5s undo window): optimistic map-remove from EVERY [activities] family cache, no commit yet', async () => {
+    const { queryClient } = await renderReady();
+    // Second family member — activitiesForRecords — holds the row too.
+    const forRecordsKey = qk.activitiesForRecords(['r1']);
+    queryClient.setQueryData(forRecordsKey, [
+      activityA1(0, 600),
+      { ...activityA1(1, 840), id: 'a2' },
+    ]);
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('enqueued');
+    });
+    expect(dryRunDeleteActivity).toHaveBeenCalledWith('a1');
+    const action = lastEnqueuedAction();
+    expect(action.id).toBe('delete-activity-a1');
+    expect(action.kind).toBe('delete');
+    expect(action.message).toBe('Удалено. Отменить');
+    expect(action.delayMs).toBe(5000);
+    expect(deleteActivityWithExpected).not.toHaveBeenCalled();
+    // Optimistic removal hits both family caches; the neighbour survives.
+    expect(cacheRowIds(queryClient, weekKey())).not.toContain('a1');
+    const forRecords = cacheRowIds(queryClient, forRecordsKey);
+    expect(forRecords).not.toContain('a1');
+    expect(forRecords).toContain('a2');
+  });
+
+  it('(в-чистый) commit carries expected {} and invalidates the activities family', async () => {
+    const { queryClient } = await renderReady();
+    const callsBefore = vi.mocked(getActivities).mock.calls.length;
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalled();
+    });
+    const action = lastEnqueuedAction();
+
+    await act(async () => {
+      await action.commit();
+    });
+
+    expect(deleteActivityWithExpected).toHaveBeenCalledTimes(1);
+    expect(deleteActivityWithExpected).toHaveBeenCalledWith('a1', { expected: {} });
+    // Family invalidation (['activities'] prefix) → the week query refetches.
+    await waitFor(() => {
+      expect(vi.mocked(getActivities).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+  });
+
+  it('(в-каскад) confirmed delete carries the FULL id lists from all three items nodes (auto excluded)', async () => {
+    const { queryClient } = await renderReady();
+
+    act(() => {
+      screen.getByTestId('confirm-delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalled();
+    });
+    // The confirm path also removes the row optimistically.
+    expect(cacheRowIds(queryClient, weekKey())).not.toContain('a1');
+
+    const action = lastEnqueuedAction();
+    await act(async () => {
+      await action.commit();
+    });
+
+    expect(deleteActivityWithExpected).toHaveBeenCalledWith('a1', {
+      expected: { records: ['r1'], visits: ['v1'], payments: ['p1'] },
+    });
+  });
+
+  it('(г) undo = replace-by-id: the captured row returns, mid-window SSE updates to neighbours are NOT rolled back', async () => {
+    vi.mocked(getActivities).mockResolvedValue(
+      wrap([activityA1(0, 600), { ...activityA1(1, 840), id: 'a2' }]) as never,
+    );
+    const { queryClient } = await renderReady();
+    const rowA1 = queryClient
+      .getQueryData<{ id: string }[]>(weekKey())!
+      .find((a) => a.id === 'a1');
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalled();
+    });
+    expect(cacheRowIds(queryClient, weekKey())).not.toContain('a1');
+
+    // Mid-window SSE: the neighbour a2 is bumped in the cache.
+    queryClient.setQueryData<{ id: string; occupied: number }[]>(
+      weekKey(),
+      (old) => (old ?? []).map((a) => (a.id === 'a2' ? { ...a, occupied: 7 } : a)),
+    );
+
+    act(() => {
+      lastEnqueuedAction().undo();
+    });
+
+    const cache = queryClient.getQueryData<{ id: string; occupied: number }[]>(weekKey());
+    const restored = cache?.find((a) => a.id === 'a1');
+    expect(restored).toBe(rowA1); // the ORIGINAL captured object, by id
+    expect(cache?.find((a) => a.id === 'a2')?.occupied).toBe(7); // SSE update survives
+  });
+
+  it('stale week cache (isInvalidated) → ensure-fresh fetchQuery runs first, refetched=true rides on the outcome', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, ACTIVITY_DEPS),
+    );
+    const { queryClient } = await renderReady();
+    const callsBefore = vi.mocked(getActivities).mock.calls.length;
+    // Mark invalidated WITHOUT refetch (v5 refetchType:'none').
+    queryClient.invalidateQueries({ queryKey: weekKey(), refetchType: 'none' });
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('needs-confirm');
+    });
+    expect(vi.mocked(getActivities).mock.calls.length).toBeGreaterThan(callsBefore);
+    const outcome = JSON.parse(screen.getByTestId('delete-outcome').textContent!) as { refetched: boolean };
+    expect(outcome.refetched).toBe(true);
+  });
+
+  it('fresh week cache → no ensure-fresh refetch (refetched=false, zero extra queries)', async () => {
+    const { queryClient } = await renderReady();
+    const callsBefore = vi.mocked(getActivities).mock.calls.length;
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('enqueued');
+    });
+    const outcome = JSON.parse(screen.getByTestId('delete-outcome').textContent!) as { refetched: boolean };
+    expect(outcome.refetched).toBe(false);
+    expect(vi.mocked(getActivities).mock.calls.length).toBe(callsBefore);
+  });
+
+  it('dry-run network error rejects upward — no enqueue, cache untouched', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(new Error('network down'));
+    const { queryClient } = await renderReady();
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toBe('error:network down');
+    });
+    expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+    expect(cacheRowIds(queryClient, weekKey())).toContain('a1');
+  });
+
+  // #286 Task 5 — the provider only HOLDS the pending-confirm state; the call
+  // sites (card/modal) set it on the needs-confirm outcome.
+  it('pending-confirm state: null by default, round-trips via the setter', async () => {
+    await renderReady();
+
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+
+    act(() => {
+      screen.getByTestId('set-pending-confirm').click();
+    });
+    const exposed = JSON.parse(screen.getByTestId('pending-confirm').textContent!) as {
+      activityId: string;
+      refetched: boolean;
+      deps: number;
+    };
+    expect(exposed).toEqual({ activityId: 'a1', refetched: true, deps: 4 });
+
+    act(() => {
+      screen.getByTestId('clear-pending-confirm').click();
+    });
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+  });
+
+  it('the provider does NOT self-set pending-confirm on the 409 needs-confirm outcome (call sites own it)', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, ACTIVITY_DEPS),
+    );
+    await renderReady();
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('needs-confirm');
+    });
+
+    // No auto-set: the dialog opens only when a call site (card/modal) hands
+    // the outcome over via setPendingActivityConfirm.
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+  });
+
+  // #286 fix round: a pending confirm captured for week N is stale once the
+  // user navigates — week N+1's dry-run tree was never fetched. The provider
+  // resets the state on weekStart change (covers week AND day navigation,
+  // which both move dateFrom/dateTo).
+  it('navigating to another week resets the pending-confirm state', async () => {
+    await renderReady();
+
+    act(() => {
+      screen.getByTestId('set-pending-confirm').click();
+    });
+    expect(screen.getByTestId('pending-confirm').textContent).not.toBe('null');
+
+    act(() => {
+      screen.getByTestId('next-week').click();
+    });
+
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+  });
+});
+
+// ─── staleAwareOnError — activities branches (#286 D7) ────────────────────────
+
+describe('ScheduleDataProvider — staleAwareOnError(activities) commit branches (#286 D7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getAllMasters).mockResolvedValue([] as never);
+    vi.mocked(getAllLocations).mockResolvedValue([] as never);
+    vi.mocked(getAllServices).mockResolvedValue([] as never);
+    vi.mocked(getActivities).mockResolvedValue(wrap([activityA1(0, 600)]) as never);
+    vi.mocked(createActivity).mockResolvedValue({} as never);
+    vi.mocked(patchActivity).mockResolvedValue({} as never);
+    vi.mocked(dryRunDeleteActivity).mockResolvedValue(undefined);
+    vi.mocked(deleteActivityWithExpected).mockResolvedValue(undefined);
+    seedDictionaries();
+  });
+
+  function weekKey(): readonly unknown[] {
+    return qk.activityRange(weekStartKey(), weekEndKey());
+  }
+
+  async function renderReadyAndEnqueue() {
+    const utils = renderDataProvider();
+    utils.queryClient.setQueryDefaults(weekKey(), { staleTime: 60_000 });
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    const rowA1 = utils.queryClient
+      .getQueryData<{ id: string }[]>(weekKey())!
+      .find((a) => a.id === 'a1');
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalled();
+    });
+    const action = mockEnqueuePendingAction.mock.calls.at(-1)![0] as PendingAction;
+    expect(cacheRowIds(utils.queryClient, weekKey())).not.toContain('a1');
+    return { ...utils, action, rowA1 };
+  }
+
+  function cacheRowIds(queryClient: QueryClient, key: readonly unknown[]): string[] {
+    const cache = queryClient.getQueryData<{ id: string }[]>(key);
+    return (cache ?? []).map((a) => a.id);
+  }
+
+  it('(а) 409+dependencies → undo restores the row + stale toast with «Обновить» → action invalidates [activities]', async () => {
+    const { queryClient, action, rowA1 } = await renderReadyAndEnqueue();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    act(() => {
+      action.onError!(new ApiError(409, 'stale_dependencies', undefined, ACTIVITY_DEPS));
+    });
+
+    // undo ran — the captured row is back in the week cache.
+    expect(queryClient.getQueryData<{ id: string }[]>(weekKey())?.[0]).toBe(rowA1);
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Не удалось удалить: данные изменились',
+      'error',
+      undefined,
+      undefined,
+      { label: 'Обновить', onAction: expect.any(Function) },
+    );
+    // The «Обновить» action invalidates the ['activities'] family.
+    const actionSlot = mockShowToast.mock.calls.at(-1)![4] as { onAction: () => void };
+    act(() => {
+      actionSlot.onAction();
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activities'] });
+  });
+
+  it('(б) 404 → quiet success: no undo, no toast', async () => {
+    const { queryClient, action } = await renderReadyAndEnqueue();
+
+    act(() => {
+      action.onError!(new ApiError(404, 'Not found', 'NOT_FOUND'));
+    });
+
+    expect(mockShowToast).not.toHaveBeenCalled();
+    // The row stays removed — a competitor's DELETE already achieved the goal.
+    expect(cacheRowIds(queryClient, weekKey())).not.toContain('a1');
+  });
+
+  it('(в) other errors → context-default: undo + red toast, no action slot', async () => {
+    const { queryClient, action, rowA1 } = await renderReadyAndEnqueue();
+
+    act(() => {
+      action.onError!(new ApiError(500, 'Internal error', 'INTERNAL'));
+    });
+
+    expect(queryClient.getQueryData<{ id: string }[]>(weekKey())?.[0]).toBe(rowA1);
+    expect(mockShowToast).toHaveBeenCalledTimes(1);
+    expect(mockShowToast).toHaveBeenCalledWith('Не удалось удалить. Изменение отменено', 'error');
   });
 });
 

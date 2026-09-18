@@ -1319,3 +1319,73 @@ describe('create mode', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─── Delete activity (#286 Task 5 — deferred flow call site) ─────────────────
+
+describe('ActivityDetailsModal — delete activity (#286 deferred flow)', () => {
+  const DEPS: import('@memo/api-client').DependencyNode[] = [
+    {
+      entity: 'records', auto: false, relation: 'records', count: 1, allowed_actions: [],
+      items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
+    },
+    { entity: 'visits', auto: false, relation: 'records', count: 1, allowed_actions: [] },
+  ];
+
+  it('closes immediately and hands needs-confirm to the context pending-confirm state', async () => {
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
+    const setPendingActivityConfirm = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'needs-confirm' as const, dependencies: DEPS, refetched: false }),
+    );
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    fireEvent.click(screen.getByTestId('btn-delete-activity'));
+
+    // The modal closes IMMEDIATELY (before the dry-run settles) — the dialog
+    // will render at the view level, driven by the context state.
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {});
+
+    expect(setPendingActivityConfirm).toHaveBeenCalledTimes(1);
+    expect(setPendingActivityConfirm).toHaveBeenCalledWith({
+      activityId: mockActivity.id,
+      dependencies: DEPS,
+      refetched: false,
+    });
+  });
+
+  it('clean path: closes immediately, no confirm state, no own toast', async () => {
+    stubClientsById({ c1: { data: mockClient } });
+    stubActivityRecords([mockRecord]);
+    const setPendingActivityConfirm = vi.fn();
+    const showToast = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'enqueued' as const, refetched: false }),
+    );
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    fireEvent.click(screen.getByTestId('btn-delete-activity'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {});
+
+    expect(setPendingActivityConfirm).not.toHaveBeenCalled();
+    // No own toast — the PendingActions pipeline owns the undo toast.
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});

@@ -497,6 +497,70 @@ export function seedStaffUser(overview: {
 }
 
 /**
+ * Hard-delete an activity in cleanup under the GH #286 deferred-delete
+ * contract (mirror of {@link cleanupRecord} for the unified DELETE contract).
+ *
+ * The unified route has NO bare-DELETE execution anymore (bare → 422
+ * `expected_state_required`). Flow (plan Task 7 (а)):
+ *   1. `?dry_run=true` preview — pure, never deletes:
+ *        404 → already gone, done;
+ *        204 → clean activity → commit with `{expected: {}}`;
+ *        409 → tree: build `expected` from the `items` ids of ALL nodes
+ *              (records + aggregated visits/payments — the recursive
+ *              two-level subtree) → commit.
+ * The execute DELETE carries `{expected}` (NO resolutions — activities
+ * have no resolution flow; the handwritten ActivityService.delete
+ * cascades records/visits/payments + photo SET NULL + join rows).
+ * Swallowed outcomes: 404 (already deleted — a re-cleanup of a succeeded
+ * test, idempotent) and 409 `stale_dependencies` (deps changed between the
+ * preview and the commit — e.g. the test's own UI deleted them mid-flight;
+ * the tree re-previewed milliseconds earlier cannot otherwise 409). Every
+ * OTHER error (422 contract break, 5xx, network) THROWS — a silently
+ * broken contract must not look like a green cleanup.
+ */
+export async function cleanupActivity(api: APIRequestContext, activityId: string) {
+  const preview = await api.delete(
+    `${BACKEND}/api/v1/activities/${activityId}?dry_run=true`,
+  );
+  if (preview.status() === 404) return; // already deleted — nothing to clean
+  let payload: Record<string, unknown> = { expected: {} };
+  if (preview.status() === 409) {
+    const body = (await preview.json().catch(() => null)) as {
+      dependencies?: Array<{
+        entity: string;
+        items?: Array<{ id: string }> | null;
+      }>;
+    } | null;
+    // expected = ids from the items of EVERY node (records + the recursive
+    // visits/payments levels); auto deps (photos/activity_tags) carry no
+    // items → excluded, matching the backend subset-check.
+    const expected: Record<string, string[]> = {};
+    for (const dep of body?.dependencies ?? []) {
+      if (dep.items && dep.items.length > 0) {
+        expected[dep.entity] = dep.items.map((item) => item.id);
+      }
+    }
+    payload = { expected };
+  } else if (preview.status() !== 204) {
+    throw new Error(
+      `cleanupActivity: dry-run preview failed with HTTP ${preview.status()}`,
+    );
+  }
+  const commit = await api.delete(
+    `${BACKEND}/api/v1/activities/${activityId}`,
+    { data: payload },
+  );
+  // Re-cleanup semantics: 404 (already gone) + 409 (mid-cleanup drift) are
+  // swallowed; everything else must surface.
+  if (commit.status() === 404 || commit.status() === 409) return;
+  if (!commit.ok()) {
+    throw new Error(
+      `cleanupActivity: commit DELETE failed with HTTP ${commit.status()}`,
+    );
+  }
+}
+
+/**
  * Delete entity via API (ignore errors — used in cleanup).
  * Always call this in test cleanup to prevent data leaking between tests.
  *
@@ -504,13 +568,23 @@ export function seedStaffUser(overview: {
  * (entity has dependencies) the body lists them, and a second DELETE with
  * `{"resolutions": {"<entity>": "cascade"}}` executes for real. Without the
  * retry, cleanup silently 409s and test data leaks between tests (the exact
- * leak `cleanupRecord` was added for — generalized here so client/activity/
- * master/service cleanups cascade their blocking deps too; e.g. a client
- * keeps its `visitors` after its records were deleted). Only deps whose
+ * leak `cleanupRecord` was added for — generalized here so client/master/
+ * service cleanups cascade their blocking deps too; e.g. a client keeps its
+ * `visitors` after its records were deleted). Only deps whose
  * allowed_actions include "cascade" are resolved (Mode-B archive-only deps
  * stay blocked, same as today's silent behavior).
+ *
+ * GH #286: the `/api/v1/activities/{id}` branch routes to
+ * {@link cleanupActivity} — the unified deferred-delete contract replaced
+ * the bare-DELETE execution (which would 422 now).
  */
 export async function cleanup(api: APIRequestContext, path: string) {
+  const activityMatch = path.match(/^\/api\/v1\/activities\/([^/?]+)$/);
+  if (activityMatch) {
+    // #286 unified DELETE contract — the generic resolutions flow does not
+    // apply (bare DELETE → 422 expected_state_required).
+    return cleanupActivity(api, activityMatch[1]);
+  }
   try {
     const resp = await api.delete(`${BACKEND}${path}`);
     if (resp.status() === 409) {

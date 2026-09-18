@@ -81,3 +81,20 @@ class CopyWeekResult(BaseModel):
     skipped_duplicates: int
     skipped_filtered: int
     skipped_no_master: int
+
+
+class ActivityDeleteBody(BaseModel):
+    """DELETE /api/v1/activities/{id} body — the deferred-delete commit
+    state (#286 D2, mirror of the records ``RecordDeleteBody`` #285 rev7).
+
+    ``expected`` — id-sets per dependency entity of the RECURSIVE
+    two-level subtree (records / visits / payments — the user-confirmed
+    dry-run tree; auto deps photos/activity_tags are exempt from the
+    check); the clean path sends ``{}``.
+
+    Optional at the schema level: ``?dry_run=true`` needs no body, and the
+    execute-path requirement (``expected`` mandatory) is enforced in the
+    route branch so the preview stays body-free.
+    """
+
+    expected: dict[str, list[str]] | None = None

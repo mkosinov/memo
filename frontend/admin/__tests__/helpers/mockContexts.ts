@@ -50,7 +50,16 @@ export function createMockScheduleData(
     error: null,
     addActivity: vi.fn(),
     updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
+    // #286: deferred delete — resolves the enqueued outcome by default;
+    // override per-test (e.g. `{ kind: 'needs-confirm', dependencies: [], refetched: false }`).
+    deleteActivityDeferred: vi.fn(() =>
+      Promise.resolve({ kind: 'enqueued' as const, refetched: false }),
+    ),
+    deleteActivityConfirmed: vi.fn(() => Promise.resolve()),
+    // #286 Task 5: pending-confirm dialog state — null by default; override
+    // per-test (e.g. `{ activityId: 'ev_1', dependencies: [], refetched: false }`).
+    pendingActivityConfirm: null,
+    setPendingActivityConfirm: vi.fn(),
     // #242: resolves a zero CopyWeekResult so awaiting callers work by default;
     // override per-test via createMockScheduleData({ copyLastWeek: vi.fn(...) }).
     copyLastWeek: vi.fn(() =>

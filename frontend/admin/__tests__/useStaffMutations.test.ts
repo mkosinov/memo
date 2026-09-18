@@ -200,10 +200,10 @@ describe('useStaffMutations', () => {
     it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
       const { wrapper } = createQueryClientWrapper();
       const deps: DependencyNode[] = [
-        { entity: 'users', relation: 'Пользователь', count: 1, allowed_actions: ['cascade'] },
-        { entity: 'masters', relation: 'Мастер', count: 1, allowed_actions: ['cascade'] },
-        { entity: 'master_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
-        { entity: 'staff_positions', relation: 'Должность', count: 2, allowed_actions: ['cascade'] },
+        { entity: 'users', auto: true, relation: 'Пользователь', count: 1, allowed_actions: ['cascade'] },
+        { entity: 'masters', auto: true, relation: 'Мастер', count: 1, allowed_actions: ['cascade'] },
+        { entity: 'master_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
+        { entity: 'staff_positions', auto: true, relation: 'Должность', count: 2, allowed_actions: ['cascade'] },
       ];
       mockDeleteStaff.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 

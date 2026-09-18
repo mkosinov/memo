@@ -50,7 +50,7 @@ export function PhotosTable() {
       payload.is_public = Boolean(data.is_public);
     }
     if (data.tag_ids !== null && data.tag_ids !== undefined) {
-      const tags = (data.tag_ids as Array<{ id: string; tag: string }>) || [];
+      const tags = (data.tag_ids as Array<{ id: string; title: string }>) || [];
       payload.tag_ids = tags.map(t => t.id);
     }
     try {
@@ -66,7 +66,7 @@ export function PhotosTable() {
   };
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
-    const tags = (data.tag_ids as Array<{ id: string; tag: string }>) || [];
+    const tags = (data.tag_ids as Array<{ id: string; title: string }>) || [];
     try {
       await createMutation.mutateAsync({
         filename: String(data.filename ?? ''),

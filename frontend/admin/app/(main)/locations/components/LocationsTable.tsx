@@ -52,7 +52,7 @@ export function LocationsTable() {
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /locations/{id}/archive|restore, so PUT never flips it.
     const payload: LocationUpdate = {
-      name: data.name as string,
+      title: data.title as string,
       short_title: (data.short_title as string | null | undefined) ?? '',
       address: (data.address as string | null | undefined) ?? '',
       description: (data.description as string | null | undefined) ?? '',
@@ -206,7 +206,7 @@ export function LocationsTable() {
           onSubmit={handleEdit}
           onClose={() => setEditLocation(null)}
           title="Редактирование локации"
-          subtitle={editLocation.name}
+          subtitle={editLocation.title}
         />
       )}
 
@@ -224,7 +224,7 @@ export function LocationsTable() {
       {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
       {deleteTarget && (
         <DeleteDialog
-          entityName={deleteTarget.location.name}
+          entityName={deleteTarget.location.title}
           entityType="location"
           entityId={deleteTarget.location.id}
           dependencies={deleteTarget.dependencies}

@@ -30,7 +30,7 @@ interface TextareaFieldConfig {
 export type LocationFieldConfig = TextFieldConfig | NumberFieldConfig | TextareaFieldConfig;
 
 export const LOCATION_FIELDS: LocationFieldConfig[] = [
-  { type: 'text', key: 'name', label: 'Название', required: true, placeholder: 'Студия на Тверской' },
+  { type: 'text', key: 'title', label: 'Название', required: true, placeholder: 'Студия на Тверской' },
   { type: 'text', key: 'short_title', label: 'Короткое название', placeholder: 'Например: Гранд' },
   { type: 'text', key: 'address', label: 'Адрес', placeholder: 'ул. Тверская, д. 1' },
   { type: 'textarea', key: 'description', label: 'Описание', rows: 3, placeholder: 'Описание локации...' },

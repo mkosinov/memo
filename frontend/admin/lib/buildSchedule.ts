@@ -60,7 +60,7 @@ export function buildAdminSchedule(
       startMinutes,
       occupied: act.occupied,
       capacity: act.capacity,
-      locationName: location.name,
+      locationName: location.title,
       locationAddress: location.address ?? undefined,
       locationHint: location.location_hint ?? undefined,
       // materialDetails source removed by GH #223 Task 13 — the retired
@@ -70,7 +70,7 @@ export function buildAdminSchedule(
       priceMax,
       priceHint: computePriceHint(tariffs),
       image_url: service.image_url || '',
-      tags: service.tags?.map(t => t.tag) ?? [],
+      tags: service.tags?.map(t => t.title) ?? [],
       masterAvatar: master.avatar_url ?? undefined,
       // Admin-specific fields:
       isPrivate: act.is_private,

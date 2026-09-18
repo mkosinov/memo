@@ -119,7 +119,7 @@ export const serviceColumns = (): ColumnDef<ServiceResponse>[] => [
     sortable: false, // no server sort key — backend whitelist has no tags mapping (#205 Task 3)
     render: (s) => (
       <span style={{ color: 'var(--ink-mid)' }}>
-        {s.tags.length > 0 ? s.tags.map((t) => t.tag).join(', ') : '—'}
+        {s.tags.length > 0 ? s.tags.map((t) => t.title).join(', ') : '—'}
       </span>
     ),
   },

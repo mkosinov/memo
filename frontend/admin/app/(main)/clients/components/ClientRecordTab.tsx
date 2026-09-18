@@ -240,8 +240,8 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
 
   const locationOptions: ComboboxOption[] = (Array.isArray(locations) ? locations : []).map((l) => ({
     value: l.id,
-    label: l.name,
-    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+    label: l.title,
+    searchText: `${l.title} ${l.short_title ?? ''}`.trim(),
   }));
 
   const serviceOptions: ComboboxOption[] = (Array.isArray(services) ? services : []).map((s) => ({

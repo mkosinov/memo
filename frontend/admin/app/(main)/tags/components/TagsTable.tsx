@@ -32,9 +32,9 @@ export function TagsTable() {
 
   const handleEdit = async (data: Record<string, unknown>) => {
     if (!editTag) return;
-    const payload: { tag?: string } = {};
-    if (data.tag !== null && data.tag !== undefined) {
-      payload.tag = String(data.tag);
+    const payload: { title?: string } = {};
+    if (data.title !== null && data.title !== undefined) {
+      payload.title = String(data.title);
     }
     try {
       await updateTag.mutateAsync({
@@ -50,7 +50,7 @@ export function TagsTable() {
 
   const handleCreateSubmit = async (data: Record<string, unknown>) => {
     try {
-      await createTag.mutateAsync({ tag: String(data.tag ?? '') });
+      await createTag.mutateAsync({ title: String(data.title ?? '') });
       showToast('Тег создан');
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
@@ -117,7 +117,7 @@ export function TagsTable() {
           onSubmit={handleEdit}
           onClose={() => setEditTag(null)}
           title="Редактирование тега"
-          subtitle={editTag.tag}
+          subtitle={editTag.title}
         />
       )}
 

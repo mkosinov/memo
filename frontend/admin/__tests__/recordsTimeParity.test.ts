@@ -46,14 +46,14 @@ const mockService: ServiceResponse = {
   duration: 120,
   record_info: '',
   tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 }],
-  tags: [{ id: 'tag1', tag: 'глина' }],
+  tags: [{ id: 'tag1', title: 'глина' }],
   materials: [],
   archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
 
-const mockLocation = createMockLocationResponse({ id: 'l1', name: 'Основной зал' });
+const mockLocation = createMockLocationResponse({ id: 'l1', title: 'Основной зал' });
 
 const mockActivity: ActivityResponse = {
   id: 'a1',
@@ -98,7 +98,7 @@ function makeRecordView(overrides: Partial<RecordView> = {}): RecordView {
     activity_start: NAIVE_START,
     service_title: mockService.title,
     master_name: 'Середа Ольга',
-    location_name: mockLocation.name,
+    location_name: mockLocation.title,
     master_color: '#5B8C7A',
     is_private: false,
     paid: 0,

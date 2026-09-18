@@ -52,14 +52,14 @@ const mockService: ServiceResponse = {
   duration: 120,
   record_info: '',
   tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 }],
-  tags: [{ id: 'tag1', tag: 'глина' }],
+  tags: [{ id: 'tag1', title: 'глина' }],
   materials: [],
   archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
 
-const mockLocation = createMockLocationResponse({ id: 'l1', name: 'Основной зал' });
+const mockLocation = createMockLocationResponse({ id: 'l1', title: 'Основной зал' });
 
 const makeActivity = (overrides: Partial<ActivityResponse> = {}): ActivityResponse => ({
   id: 'a1',

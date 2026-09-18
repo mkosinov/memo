@@ -96,8 +96,8 @@ const ACTIVITY_FIXTURE: ActivityResponse = {
 };
 
 const TAG_FIXTURES: TagResponse[] = [
-  { id: 't-1', tag: 'Гуашь' },
-  { id: 't-2', tag: 'Керамика' },
+  { id: 't-1', title: 'Гуашь' },
+  { id: 't-2', title: 'Керамика' },
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

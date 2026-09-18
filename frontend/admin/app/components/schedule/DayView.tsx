@@ -201,10 +201,10 @@ export function DayView() {
       if (!settings.showArchivedLocations) return cols;
       const archived = scheduleLocations
         .filter((l) => l.archived)
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.title.localeCompare(b.title));
       for (const l of archived) {
         if (dayActivities.some((a) => a.locationId === l.id)) {
-          cols.push({ id: l.id, name: l.name });
+          cols.push({ id: l.id, name: l.title });
         }
       }
     }

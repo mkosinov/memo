@@ -84,7 +84,7 @@ function makeService(id: string, overrides: Partial<ServiceResponse> = {}): Serv
 function makeLocation(id: string, overrides: Partial<LocationResponse> = {}): LocationResponse {
   return {
     id,
-    name: `Location ${id}`,
+    title: `Location ${id}`,
     address: null,
     description: null,
     capacity: 10,
@@ -340,7 +340,7 @@ describe('PhotosContext — server-driven list (GH #211 Task 6)', () => {
 
     await waitFor(() => {
       expect(result.current.servicesMap.get('s-1')?.title).toBe('Service s-1');
-      expect(result.current.locationsMap.get('l-1')?.name).toBe('Location l-1');
+      expect(result.current.locationsMap.get('l-1')?.title).toBe('Location l-1');
     });
     expect(mockGetAllServices).toHaveBeenCalledTimes(1);
     expect(mockGetAllLocations).toHaveBeenCalledTimes(1);

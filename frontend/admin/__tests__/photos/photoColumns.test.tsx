@@ -52,10 +52,10 @@ function makeService(id: string, title: string): ServiceResponse {
   };
 }
 
-function makeLocation(id: string, name: string): LocationResponse {
+function makeLocation(id: string, title: string): LocationResponse {
   return {
     id,
-    name,
+    title,
     address: '',
     description: null,
     capacity: 10,

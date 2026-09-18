@@ -40,7 +40,7 @@ const mockService1: ServiceResponse = {
     { id: 't-1', service_id: 'svc-1', title: 'Взрослый', description: null, price: 3500 },
     { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500 },
   ],
-  tags: [{ id: 'tag-1', tag: 'масло' }],
+  tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
   archived: false,
   created_at: '2024-01-01T00:00:00Z',
@@ -60,7 +60,7 @@ const mockService2: ServiceResponse = {
   tariffs: [
     { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800 },
   ],
-  tags: [{ id: 'tag-2', tag: 'акрил' }],
+  tags: [{ id: 'tag-2', title: 'акрил' }],
   materials: [],
   archived: false,
   created_at: '2024-02-01T00:00:00Z',

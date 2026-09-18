@@ -11,5 +11,5 @@ interface TextFieldConfig {
 export type TagFieldConfig = TextFieldConfig;
 
 export const TAG_FIELDS: TagFieldConfig[] = [
-  { type: 'text', key: 'tag', label: 'Тег', required: true, placeholder: 'VIP, Постоянный клиент...' },
+  { type: 'text', key: 'title', label: 'Тег', required: true, placeholder: 'VIP, Постоянный клиент...' },
 ];

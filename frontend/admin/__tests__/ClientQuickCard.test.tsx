@@ -66,7 +66,7 @@ const service2: ServiceResponse = {
   title: 'Картина акрилом',
 };
 
-const location1: LocationResponse = { ...mockLocationResponse, id: 'loc-1', name: 'Альпика' };
+const location1: LocationResponse = { ...mockLocationResponse, id: 'loc-1', title: 'Альпика' };
 
 const activity1: ActivityResponse = {
   id: 'a1',

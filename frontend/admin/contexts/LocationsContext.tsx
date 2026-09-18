@@ -20,7 +20,7 @@ const { Provider, usePagedList } = createPagedListContext<LocationResponse>({
   // GH #212 T11 — dict search is server-side: the factory clamps q to ≥2
   // chars, puts it in the query key, and the fetcher sends it on. The #139
   // predicate mechanism (temporary degradation, §6.7) is retired here; the
-  // name+address field matching now lives in the backend list ?q=.
+  // title+address field matching now lives in the backend list ?q=.
   serverSearch: true,
 });
 

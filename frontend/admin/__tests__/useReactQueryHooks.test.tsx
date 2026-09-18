@@ -23,7 +23,7 @@ vi.mock('@memo/api-client', () => ({
 // (transformService now emits durationMinutes + tariffs per #142 spec §6/§9.8).
 vi.mock('@/lib/transformers', () => ({
   transformMaster: vi.fn((raw: any) => ({ ...raw, name: raw.first_name + ' ' + raw.last_name })),
-  transformLocation: vi.fn((raw: any) => ({ ...raw, name: raw.name })),
+  transformLocation: vi.fn((raw: any) => ({ ...raw, name: raw.title })),
   transformService: vi.fn((raw: any) => ({
     ...raw,
     name: raw.title,
@@ -109,7 +109,7 @@ const mastersFixture: MasterViewResponse[] = [
 const locationsFixture: LocationResponse[] = [
   {
     id: 'l1',
-    name: 'Студия на Невском',
+    title: 'Студия на Невском',
     address: 'Невский пр. 28',
     description: null,
     capacity: 10,
@@ -188,8 +188,8 @@ const recordsFixture: RecordResponse[] = [
 ];
 
 const tagsFixture: TagResponse[] = [
-  { id: 't1', tag: 'живопись' },
-  { id: 't2', tag: 'керамика' },
+  { id: 't1', title: 'живопись' },
+  { id: 't2', title: 'керамика' },
 ];
 
 // ─── useMasters ─────────────────────────────────────────────────────────────

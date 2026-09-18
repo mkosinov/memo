@@ -111,29 +111,34 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 **Deferred-delete `expected` contract (rev8, #285):** the commit of a **deferred** deletion carries `expected` — per-entity id-sets of the server dependency tree the user confirmed (dialog/undo window); subset match by id (a dep absent from `expected` on the server → 409 `stale_dependencies` + current tree → honest error + «Обновить» refresh, not a silent skip or auto-dialog). **Onboarding criterion — the presence of server-side dependencies (FK_MATRIX), not the undo window and not "non-archival":**
 - **Records (#285)** — the core of the contract (visits/payments/record_tags deps).
 - **Visits (#297) / payments (#298)** — leaf entities (no FK_MATRIX entry): they carry no `expected` and need no server changes — they inherit only the deferred-commit error handling (honest errors + undo instead of silent failures).
-- **Activities (#286)** — server dependencies EXIST (handwritten service-level cascade destroys the activity's records with their visits/payments/record_tags — outside the deletion domain / FK matrix for now); their contract line (Activity in the matrix, `expected = {records}`) is written by #286 post-merge — deliberately not stated here.
+- **Activities (#286, CONNECTED)** — server dependencies exist (the handwritten service-level cascade destroys the activity's records with their visits/payments/record_tags — `activity.py:229-274`, `Record.activity_id` FK `ondelete=CASCADE`); Activity is now in the FK matrix (preview-only) and its deferred commit carries `expected` = the confirmed **recursive subtree** (`records` + nested `visits`/`payments`; auto nodes excluded) → see the `Expected?` column below. Execution stays the handwritten service; the matrix entry feeds only the dry-run/409 tree.
 - **Tag / Photo / Visitor / UserSettings** — instant hard-deletes (no FK-matrix deps — nothing to match).
 - **Archive-aware entities (staff/location/service/material/client)** — deferred is deliberately out of reach (user decision 17.09): no undo window exists for them; deletion goes through an explicit resolutions dialog or is a clean instant 204, and they already have a real undo (archive → restore).
 
-| Entity → Relation | Nullable? | Action | User choice? |
-|---|---|---|---|
-| **Material** | (no FK deps) | — | — | Zero DB deps; `DELETE /materials/{id}` always 204 |
-| Staff → **activities** (через master-строку) | NOT NULL | **block** | N/A — `allowed_actions: []` |
-| Staff → **masters** (1:0..1) | — | **cascade** (auto, ON DELETE CASCADE) | auto — при отсутствии занятий |
-| Staff → **users** (staff_id) | nullable | **cascade** (auto) | auto — no choice (§4.1, Change 2) |
-| Staff → **master_tags** (join via masters) | NOT NULL PK | **cascade** (auto) | auto |
-| Staff → **staff_positions** (join) | NOT NULL PK | **cascade** (auto) | auto |
-| Location → **activities** (location_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
-| Location → **location_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
-| Location → **photos** (location_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211) |
-| Service → **activities** (service_id) | NOT NULL | **block** | N/A — `allowed_actions: []` |
-| Service → **tariffs** (service_id) | NOT NULL | **cascade** (auto) | auto |
-| Service → **photos** (service_id) | nullable | **nullify** (auto) | auto |
-| Service → **service_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
-| Client → **records** (client_id) | nullable | **nullify** | choice: `["nullify"]` — record survives, becomes anonymous |
-| Client → **visitors** (client_id) | NOT NULL | **cascade** | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
-| Client → **client_tags** (join) | NOT NULL PK | **cascade** (auto) | auto |
-| Client → **photos** (client_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211) |
+The `Expected?` column marks the relations whose ids a **deferred** commit carries in `expected` (per-entity id-sets of the confirmed tree); archive-aware entities are never deferred, so their rows are `—`. The #286 Activity rows are the only deferred entity in this matrix (its entry is preview-only — execution stays handwritten).
+
+| Entity → Relation | Nullable? | Action | Expected? | User choice? |
+|---|---|---|---|---|
+| **Material** | (no FK deps) | — | — | N/A — zero DB deps; `DELETE /materials/{id}` always 204 |
+| Staff → **activities** (через master-строку) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Staff → **masters** (1:0..1) | — | **cascade** (auto, ON DELETE CASCADE) | — | auto — при отсутствии занятий |
+| Staff → **users** (staff_id) | nullable | **cascade** (auto) | — | auto — no choice (§4.1, Change 2) |
+| Staff → **master_tags** (join via masters) | NOT NULL PK | **cascade** (auto) | — | auto |
+| Staff → **staff_positions** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
+| Location → **activities** (location_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Location → **location_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
+| Location → **photos** (location_id) | nullable | **nullify** (auto) | — | auto — photo survives, becomes owner-less (GH #211) |
+| Service → **activities** (service_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Service → **tariffs** (service_id) | NOT NULL | **cascade** (auto) | — | auto |
+| Service → **photos** (service_id) | nullable | **nullify** (auto) | — | auto |
+| Service → **service_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
+| Client → **records** (client_id) | nullable | **nullify** | — | choice: `["nullify"]` — record survives, becomes anonymous |
+| Client → **visitors** (client_id) | NOT NULL | **cascade** | — | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
+| Client → **client_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
+| Client → **photos** (client_id) | nullable | **nullify** (auto) | — | auto — photo survives, becomes owner-less (GH #211) |
+| Activity → **records** (activity_id, #286) | NOT NULL | **cascade** (NOT auto) | `records` (+ nested `visits`/`payments`) | confirmed as a whole by the deferred dialog/undo window — no per-row choice |
+| Activity → **photos** (activity_id, #286) | nullable | **nullify** (auto) | — | auto — photo survives, becomes owner-less |
+| Activity → **activity_tags** (join, #286) | NOT NULL PK | **cascade** (auto) | — | auto |
 
 **Key rules:**
 

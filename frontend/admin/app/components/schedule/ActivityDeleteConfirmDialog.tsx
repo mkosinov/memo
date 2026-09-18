@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useUI } from '@/contexts/UIContext';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 
 // ─── ActivityDeleteConfirmDialog (#286 Task 5 — minimal inline confirm) ───────
 //
@@ -28,6 +30,7 @@ export function ActivityDeleteConfirmDialog() {
     deleteActivityConfirmed,
     setPendingActivityConfirm,
   } = useScheduleData();
+  const { showToast } = useUI();
 
   useEffect(() => {
     if (!pendingActivityConfirm) return;
@@ -43,11 +46,15 @@ export function ActivityDeleteConfirmDialog() {
   const { activityId, dependencies } = pendingActivityConfirm;
 
   const handleConfirm = (): void => {
-    // Snapshot first, clear, then enqueue — the optimistic remove runs in the
-    // PendingActions pipeline; its own error path (staleAwareOnError) owns
-    // failure recovery, so the dialog never stays open on a failed enqueue.
+    // Snapshot first, clear, then enqueue — the dialog closes instantly (the
+    // enqueue is fire-and-forget into the PendingActions pipeline; its own
+    // error path staleAwareOnError owns commit-failure recovery). An EARLY
+    // rejection (before the enqueue lands) surfaces via the same call-site
+    // error path as the card/modal — default error toast, dialog stays closed.
     setPendingActivityConfirm(null);
-    void deleteActivityConfirmed(activityId, dependencies);
+    deleteActivityConfirmed(activityId, dependencies).catch((err) => {
+      showToast(parseApiError(err).message, 'error');
+    });
   };
 
   const handleDismiss = (): void => setPendingActivityConfirm(null);

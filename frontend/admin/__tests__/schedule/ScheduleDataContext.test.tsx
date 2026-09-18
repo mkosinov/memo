@@ -9,7 +9,7 @@ import {
 import { ScheduleProvider } from '../../contexts/schedule/ScheduleProvider';
 import { useGridSettings } from '../../contexts/schedule/GridSettingsContext';
 import { useScheduleView } from '../../contexts/schedule/ScheduleViewContext';
-import { NavigationProvider } from '../../contexts/NavigationContext';
+import { NavigationProvider, useNavigation } from '../../contexts/NavigationContext';
 import { toISODate } from '@/lib/datetime';
 import { transformService } from '../../lib/transformers';
 
@@ -178,6 +178,23 @@ function seedDictionaries(masters = [masterM1], services = [serviceS1], location
 }
 
 // Test component consuming ONLY the data context.
+/** Week navigation driver: moves dateFrom/dateTo one week forward (#286). */
+function NextWeekNav() {
+  const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  return (
+    <button
+      data-testid="next-week"
+      onClick={() => {
+        const from = new Date(dateFrom + 'T00:00:00');
+        const to = new Date(dateTo + 'T00:00:00');
+        from.setDate(from.getDate() + 7);
+        to.setDate(to.getDate() + 7);
+        selectDateRange(toISODate(from), toISODate(to));
+      }}
+    />
+  );
+}
+
 function DataConsumer() {
   const {
     activities,
@@ -292,6 +309,8 @@ function DataConsumer() {
       <button data-testid="clear-pending-confirm" onClick={() => setPendingActivityConfirm(null)}>
         ClearPending
       </button>
+      {/* #286: week navigation driver — selectDateRange moves dateFrom/dateTo. */}
+      <NextWeekNav />
       <button
         data-testid="copy-last-week"
         onClick={() => {
@@ -1311,6 +1330,25 @@ describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
 
     // No auto-set: the dialog opens only when a call site (card/modal) hands
     // the outcome over via setPendingActivityConfirm.
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+  });
+
+  // #286 fix round: a pending confirm captured for week N is stale once the
+  // user navigates — week N+1's dry-run tree was never fetched. The provider
+  // resets the state on weekStart change (covers week AND day navigation,
+  // which both move dateFrom/dateTo).
+  it('navigating to another week resets the pending-confirm state', async () => {
+    await renderReady();
+
+    act(() => {
+      screen.getByTestId('set-pending-confirm').click();
+    });
+    expect(screen.getByTestId('pending-confirm').textContent).not.toBe('null');
+
+    act(() => {
+      screen.getByTestId('next-week').click();
+    });
+
     expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
   });
 });

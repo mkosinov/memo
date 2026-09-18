@@ -11,16 +11,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ActivityDeleteConfirmDialog } from '../app/components/schedule/ActivityDeleteConfirmDialog';
-import { createMockScheduleData } from './helpers/mockContexts';
+import { createMockScheduleData, createMockUIContext } from './helpers/mockContexts';
 import type { DependencyNode } from '@memo/api-client';
 
 vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
   useScheduleData: vi.fn(),
 }));
 
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: vi.fn(),
+}));
+
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import { useUI } from '@/contexts/UIContext';
 
 const mockUseScheduleData = vi.mocked(useScheduleData);
+const mockUseUI = vi.mocked(useUI);
 
 const DEPS: DependencyNode[] = [
   {
@@ -42,6 +48,7 @@ const PENDING = {
 
 beforeEach(() => {
   mockUseScheduleData.mockReturnValue(createMockScheduleData());
+  mockUseUI.mockReturnValue(createMockUIContext());
 });
 
 afterEach(() => {
@@ -85,7 +92,34 @@ describe('ActivityDeleteConfirmDialog (#286 pending-confirm mechanism)', () => {
       expect(deleteActivityConfirmed).toHaveBeenCalledTimes(1);
     });
     expect(deleteActivityConfirmed).toHaveBeenCalledWith('a1', DEPS);
-    // Cleared exactly once, after the enqueue handed off to the pipeline.
+    // Cleared BEFORE the enqueue (the dialog closes instantly; the enqueue is
+    // fire-and-forget into the PendingActions pipeline).
+    expect(setPendingActivityConfirm).toHaveBeenCalledWith(null);
+  });
+
+  it('enqueue rejection → error toast, dialog STAYS closed (state already cleared)', async () => {
+    const deleteActivityConfirmed = vi.fn(() => Promise.reject(new Error('boom')));
+    const setPendingActivityConfirm = vi.fn();
+    const showToast = vi.fn();
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({
+        pendingActivityConfirm: PENDING,
+        deleteActivityConfirmed,
+        setPendingActivityConfirm,
+      }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    render(<ActivityDeleteConfirmDialog />);
+
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalledTimes(1);
+    });
+    // Same call-site error path as the card/modal (parseApiError → error toast).
+    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
+    // No re-open: the dismiss already happened before the enqueue.
+    expect(setPendingActivityConfirm).toHaveBeenCalledTimes(1);
     expect(setPendingActivityConfirm).toHaveBeenCalledWith(null);
   });
 

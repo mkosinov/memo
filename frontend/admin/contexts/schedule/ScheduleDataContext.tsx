@@ -156,6 +156,14 @@ export function ScheduleDataProvider({
   // lives in the provider so the dialog survives the card/modal unmount.
   const [pendingActivityConfirm, setPendingActivityConfirm] =
     useState<PendingActivityConfirm | null>(null);
+
+  // #286 fix round: navigating resets the pending confirm — the dry-run tree
+  // was fetched for the OLD week's data. Week AND day navigation both move
+  // dateFrom (single-day range in day view), so `weekStart` covers both; a
+  // week↔day switch within the same range keeps the dialog (still valid).
+  useEffect(() => {
+    setPendingActivityConfirm(null);
+  }, [weekStart, setPendingActivityConfirm]);
   // Local week-Monday derivation for buildAdminSchedule + dayIndex→date math
   // (spec §3: the data provider calls useNavigation() internally; currentWeek /
   // setCurrentWeek STATE lives in the view context, not here).

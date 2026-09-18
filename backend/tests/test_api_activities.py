@@ -626,7 +626,7 @@ def _link_activity_tag(api_client, activity_id: str, tag_name: str | None = None
     The tests do not exercise the tag-linking UI path, so the auto-cascade dep
     is seeded via ``query_db`` (FK-ON-safe: both ids exist)."""
     tag_name = tag_name or f"at-{activity_id[:8]}"
-    tag_id = api_client.post("/api/v1/tags", json={"tag": tag_name}).json()["id"]
+    tag_id = api_client.post("/api/v1/tags", json={"title": tag_name}).json()["id"]
     query_db(
         f"INSERT INTO activity_tags (activity_id, tag_id) "
         f"VALUES ('{activity_id}', '{tag_id}')"

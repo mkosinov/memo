@@ -774,7 +774,7 @@ class TestCollectDependenciesActivity:
         master = Staff(first_name="a1", last_name="m")
         service = Service(title="МК Гончарное дело", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90, record_info="r")
-        location = Location(name="aL", capacity=10)
+        location = Location(title="aL", capacity=10)
         client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
                         email=None, channel="telegram")
         db_session.add_all([master, service, location, client])
@@ -867,7 +867,7 @@ class TestCollectDependenciesActivity:
         master = Staff(first_name="a2", last_name="m")
         service = Service(title="a2S", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90, record_info="r")
-        location = Location(name="a2L", capacity=10)
+        location = Location(title="a2L", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         await _ensure_extension(db_session, master.id)
@@ -887,7 +887,7 @@ class TestCollectDependenciesActivity:
         master = Staff(first_name="a3", last_name="m")
         service = Service(title="a3S", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90, record_info="r")
-        location = Location(name="a3L", capacity=10)
+        location = Location(title="a3L", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         await _ensure_extension(db_session, master.id)
@@ -917,7 +917,7 @@ async def _seed_activity_with_record(
     master = Staff(first_name="lbl", last_name="m")
     service = Service(title=service_title, description="d", image_url="i",
                       specialty="живопись", min_age=6, duration=90, record_info="r")
-    location = Location(name="lblL", capacity=10)
+    location = Location(title="lblL", capacity=10)
     db_session.add_all([master, service, location])
     if client is not None:
         db_session.add(client)
@@ -1040,7 +1040,7 @@ class TestCollectDependencyIdsActivity:
         service = Service(title="idcS", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90,
                           record_info="r")
-        location = Location(name="idcL", capacity=10)
+        location = Location(title="idcL", capacity=10)
         client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
                         email=None, channel="telegram")
         db_session.add_all([master, service, location, client])
@@ -1106,7 +1106,7 @@ class TestCollectDependencyIdsActivity:
         service = Service(title="idcES", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90,
                           record_info="r")
-        location = Location(name="idcEL", capacity=10)
+        location = Location(title="idcEL", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         await _ensure_extension(db_session, master.id)
@@ -1125,7 +1125,7 @@ class TestCollectDependencyIdsActivity:
         service = Service(title="idcPS", description="d", image_url="i",
                           specialty="живопись", min_age=6, duration=90,
                           record_info="r")
-        location = Location(name="idcPL", capacity=10)
+        location = Location(title="idcPL", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         await _ensure_extension(db_session, master.id)

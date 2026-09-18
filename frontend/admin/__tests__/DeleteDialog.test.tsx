@@ -57,35 +57,35 @@ const confirmBtn = (): HTMLButtonElement => {
 // Master with only auto deps (users + tags) — the only Master tree that can
 // reach Mode A (activities always block). Per §4.1 users is AUTO cascade.
 const MASTER_ALL_AUTO: DependencyNode[] = [
-  { entity: 'users', relation: 'Пользователь', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'users', auto: true, relation: 'Пользователь', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'master_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // Client with every dependency kind (§4): records nullify choice, visitors
 // cascade choice (+ cascade_preview), client_tags AUTO cascade.
 const CLIENT_MIXED: DependencyNode[] = [
-  { entity: 'records', relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
+  { entity: 'records', auto: false, relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
   {
-    entity: 'visitors',
+    entity: 'visitors', auto: false,
     relation: 'Посетитель',
     count: 12,
     allowed_actions: ['cascade'],
     message: null,
     cascade_preview: { visits: 45 },
   },
-  { entity: 'client_tags', relation: 'Тег', count: 5, allowed_actions: ['cascade'], message: null },
+  { entity: 'client_tags', auto: true, relation: 'Тег', count: 5, allowed_actions: ['cascade'], message: null },
 ];
 
 // Blocked — activities present → Mode B (archive only).
 const MASTER_BLOCKED: DependencyNode[] = [
   {
-    entity: 'activities',
+    entity: 'activities', auto: false,
     relation: 'Активность',
     count: 3,
     allowed_actions: [],
     message: 'Удалите активности вручную или архивируйте',
   },
-  { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'master_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── Tests ────
@@ -209,7 +209,7 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
       entityType: 'service',
       entityId: 's1',
       dependencies: [
-        { entity: 'photos', relation: 'Фото', count: 12, allowed_actions: ['nullify'], message: null },
+        { entity: 'photos', auto: true, relation: 'Фото', count: 12, allowed_actions: ['nullify'], message: null },
       ],
       onDone: vi.fn(),
       onCancel: vi.fn(),
@@ -288,9 +288,9 @@ describe('DeleteDialog — Mode A (client with user-choice deps)', () => {
 // ─── Record (Addendum 13 / GH #139): visits+payments cascade choice deps, ──
 // record_tags auto cascade (mirrors backend src/domain/deletion.py Record row).
 const RECORD_MIXED: DependencyNode[] = [
-  { entity: 'visits', relation: 'Посещение', count: 2, allowed_actions: ['cascade'], message: null },
-  { entity: 'payments', relation: 'Платёж', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+  { entity: 'visits', auto: false, relation: 'Посещение', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'payments', auto: false, relation: 'Платёж', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'record_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
 ];
 
 describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () => {
@@ -347,7 +347,7 @@ describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () =
 // them off record_tags to keep the no-items fallback branch regression-covered.
 const RECORD_WITH_ITEMS: DependencyNode[] = [
   {
-    entity: 'visits',
+    entity: 'visits', auto: false,
     relation: 'Посещение',
     count: 2,
     allowed_actions: ['cascade'],
@@ -358,14 +358,14 @@ const RECORD_WITH_ITEMS: DependencyNode[] = [
     ],
   },
   {
-    entity: 'payments',
+    entity: 'payments', auto: false,
     relation: 'Платёж',
     count: 1,
     allowed_actions: ['cascade'],
     message: null,
     items: [{ id: 'payment-1', label: '3500, card' }],
   },
-  { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+  { entity: 'record_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
 ];
 
 describe('DeleteDialog — record one-liners (GH #285 D9в)', () => {
@@ -455,7 +455,7 @@ describe('DeleteDialog — record one-liners (GH #285 D9в)', () => {
       entityId: 'r1',
       dependencies: [
         {
-          entity: 'visits',
+          entity: 'visits', auto: false,
           relation: 'Посещение',
           count: 12,
           allowed_actions: ['cascade'],
@@ -580,7 +580,7 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
   // Live 409 tree for a linked material (backend deletion.py: relation
   // «Услуга», allowed_actions ["cascade"], auto=True).
   const MATERIAL_LINKED: DependencyNode[] = [
-    { entity: 'service_materials', relation: 'Услуга', count: 1, allowed_actions: ['cascade'], message: null },
+    { entity: 'service_materials', auto: true, relation: 'Услуга', count: 1, allowed_actions: ['cascade'], message: null },
   ];
 
   it('renders service_materials as an auto "→ Услуги: 1 (удалён)" line, no choice UI', () => {
@@ -625,7 +625,7 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
     // relation «Материал» (vs «Услуга» from the Material side) — the label
     // must follow the relation, not the entity name.
     const SERVICE_LINKED: DependencyNode[] = [
-      { entity: 'service_materials', relation: 'Материал', count: 2, allowed_actions: ['cascade'], message: null },
+      { entity: 'service_materials', auto: true, relation: 'Материал', count: 2, allowed_actions: ['cascade'], message: null },
     ];
     renderDialog({
       entityName: 'Гончарное дело',

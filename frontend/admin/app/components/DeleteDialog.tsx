@@ -23,12 +23,13 @@ import type { DependencyNode } from '@memo/api-client';
 // This keeps the dialog table-agnostic and avoids a hook-per-entityType map.
 // Parents also own open/close state (the hooks' `dependencies` has no reset).
 //
-// GH #285 (records only): the parent's confirm callback ENQUEUES a deferred
-// delete (removeRecordResolved) — the enqueue is synchronous, so the dialog
-// closes immediately via onDone; the real DELETE runs in the 5s commit. The
-// rendering is unchanged for every other entity (instant resolveDelete).
+// GH #285 (records) / GH #286 (activities): the parent's confirm callback
+// ENQUEUES a deferred delete (removeRecordResolved / deleteActivityConfirmed)
+// — the enqueue is synchronous, so the dialog closes immediately via onDone;
+// the real DELETE runs in the 5s commit. The rendering is unchanged for every
+// other entity (instant resolveDelete).
 
-export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
+export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -43,6 +44,13 @@ export interface DeleteDialogProps {
    * derive visibility from the hooks' `dependencies` state (no exposed reset).
    */
   dependencies: DependencyNode[];
+  /**
+   * #286: optional refresh banner text — rendered as the dialog's FIRST line
+   * when the parent's ensure-fresh refetched the cache before the dry-run
+   * («Карточка обновлена по данным сервера»). Undefined → no banner (the
+   * clean path never primes the dialog).
+   */
+  refetchNote?: string;
   /** Execute the hard delete (DELETE /{id} WITH `{ resolutions }` body, §6). */
   onResolve: (id: string, resolutions: Record<string, string>) => Promise<void>;
   /** Archive the entity (POST /{id}/archive) — Mode B primary action. */
@@ -55,20 +63,9 @@ export interface DeleteDialogProps {
 
 // ─── §4 FK matrix facts (mirrors backend src/domain/deletion.py) ──────────────
 
-/** FK-relation names whose deps are auto-resolved server-side — never user choice. */
-const AUTO_ENTITIES = new Set([
-  'users', // Staff/Master→users auto-cascade (§4.1)
-  'masters', // GH #266: the staff card's masters extension row auto-cascades
-  'master_tags',
-  'staff_positions', // GH #266: position links auto-cascade with the card
-  'location_tags',
-  'service_tags',
-  'client_tags',
-  'record_tags', // Record→record_tags auto-cascade (Addendum 13 / GH #139)
-  'service_materials', // Service/Material→service_materials join (GH #223 §7)
-  'tariffs',
-  'photos',
-]);
+// Auto deps are flagged by the backend itself: rev8 (#285) copies the matrix's
+// ``FKDependency.auto`` into every DependencyNode — the client-classification
+// below is FIELD-based (isAuto), with no entity-name hardcode (#286 Task 6).
 
 // Auto deps use friendly plural labels; choice deps derive the plural from the
 // backend `relation` label via RELATION_PLURAL. `relation` is the backend's
@@ -100,6 +97,10 @@ const RELATION_PLURAL: Record<string, string> = {
   // Service delete → relation «Материал» → «Материалы» (deletion.py:166/:204).
   Услуга: 'Услуги',
   Материал: 'Материалы',
+  // Join/tag relation shared by record_tags and activity_tags (#286) — the
+  // entity-keyed map above covers record_tags; the relation fallback covers
+  // the activity tree's tag node.
+  Тег: 'Теги',
 };
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */
@@ -111,7 +112,16 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   material: 'материала',
   client: 'клиента',
   record: 'записи',
+  activity: 'занятия', // #286: deferred activity delete (schedule card/modal)
 };
+
+// #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are
+// implicit cascades (SET NULL / join rows) — their drift destroys no data and
+// requires no confirmation, so they are NOT rendered in the dialog and not
+// part of the confirmed subtree (`expected`). Every other entity keeps the
+// informational auto lines (#207 §7.1 — «Без изменений: диалоги других
+// сущностей»).
+const AUTO_LINES_HIDDEN: ReadonlySet<DeleteDialogEntityType> = new Set(['activity']);
 
 // Per-relation nullify tail (spec §7.1: "○ Фото: 12 (отвязаны от услуги)").
 // Nullify deps exist only for Service→photos and Client→records (§4 matrix);
@@ -131,8 +141,9 @@ function pluralSuffix(n: number, one: string, few: string, many: string): string
   return many;
 }
 
+/** rev8 (#285): the backend flags server-resolved deps — field, not hardcode. */
 function isAuto(dep: DependencyNode): boolean {
-  return AUTO_ENTITIES.has(dep.entity);
+  return dep.auto === true;
 }
 
 /** → = will be deleted (cascade); ○ = will be unlinked (nullify). */
@@ -205,6 +216,7 @@ export function DeleteDialog({
   entityType,
   entityId,
   dependencies,
+  refetchNote,
   onResolve,
   onArchive,
   onDone,
@@ -226,6 +238,9 @@ export function DeleteDialog({
     () => dependencies.filter((d) => d.allowed_actions.length > 0 && isAuto(d)),
     [dependencies],
   );
+  // #286 (spec §4): activities hide the informational auto lines entirely —
+  // photos/activity_tags cascade implicitly and are not user-confirmed.
+  const showAutoLines = !AUTO_LINES_HIDDEN.has(entityType);
 
   const needsConfirm = choiceDeps.length > 0;
 
@@ -269,7 +284,23 @@ export function DeleteDialog({
     }
   }
 
-  const title = `Удаление «${TITLE_BY_TYPE[entityType]} ${entityName}»`;
+  // #286: the activity pending-confirm carries only the id — no human label —
+  // so a nameless render falls back to the plain genitive («Удаление занятия»).
+  const title = entityName
+    ? `Удаление «${TITLE_BY_TYPE[entityType]} ${entityName}»`
+    : `Удаление ${TITLE_BY_TYPE[entityType]}`;
+
+  // #286: refresh notice — the FIRST line of the dialog, only when the parent
+  // actually refetched before the dry-run (refetchNote undefined → nothing).
+  const refetchBanner = refetchNote && (
+    <p
+      className="mb-2 rounded-lg px-3 py-1.5 text-xs"
+      style={{ backgroundColor: 'var(--surface)', color: 'var(--ink-mid)' }}
+      data-testid="delete-dialog-refetch-note"
+    >
+      {refetchNote}
+    </p>
+  );
 
   const errorBlock = error && (
     <p role="alert" style={{ color: 'var(--danger)' }} data-testid="delete-dialog-error">
@@ -348,6 +379,7 @@ export function DeleteDialog({
   // ── Mode A — resolvable + auto deps (§7.1): confirm-checkbox, delete primary. ──
   return overlay(
     <>
+      {refetchBanner}
       <h2 className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }} data-testid="delete-dialog-title">
         {title}
       </h2>
@@ -355,7 +387,7 @@ export function DeleteDialog({
         Будет выполнено:
       </p>
       <ul className="flex flex-col gap-1.5 my-2">
-        {autoDeps.map((dep) => (
+        {showAutoLines && autoDeps.map((dep) => (
           <DepRow key={dep.entity} dep={dep} />
         ))}
         {choiceDeps.map((dep) => (

@@ -1325,10 +1325,10 @@ describe('create mode', () => {
 describe('ActivityDetailsModal — delete activity (#286 deferred flow)', () => {
   const DEPS: import('@memo/api-client').DependencyNode[] = [
     {
-      entity: 'records', relation: 'records', count: 1, allowed_actions: [],
+      entity: 'records', auto: false, relation: 'records', count: 1, allowed_actions: [],
       items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
     },
-    { entity: 'visits', relation: 'records', count: 1, allowed_actions: [] },
+    { entity: 'visits', auto: false, relation: 'records', count: 1, allowed_actions: [] },
   ];
 
   it('closes immediately and hands needs-confirm to the context pending-confirm state', async () => {

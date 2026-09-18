@@ -140,19 +140,19 @@ function pad(mins: number): string {
  *  (→ its visit + payment) plus an auto node without items. */
 const ACTIVITY_DEPS: DependencyNode[] = [
   {
-    entity: 'records', relation: 'records', count: 1, allowed_actions: [],
+    entity: 'records', auto: false, relation: 'records', count: 1, allowed_actions: [],
     items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
   },
   {
-    entity: 'visits', relation: 'records', count: 1, allowed_actions: [],
+    entity: 'visits', auto: false, relation: 'records', count: 1, allowed_actions: [],
     items: [{ id: 'v1', label: 'Картина маслом, 1000' }],
   },
   {
-    entity: 'payments', relation: 'records', count: 1, allowed_actions: [],
+    entity: 'payments', auto: false, relation: 'records', count: 1, allowed_actions: [],
     items: [{ id: 'p1', label: '1000, карта' }],
   },
   // auto (photos/activity_tags) — no items, excluded from `expected`
-  { entity: 'activity_tags', relation: 'activity_tags', count: 2, allowed_actions: [] },
+  { entity: 'activity_tags', auto: true, relation: 'activity_tags', count: 2, allowed_actions: [] },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

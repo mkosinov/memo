@@ -125,7 +125,7 @@ function seedCaches(queryClient: QueryClient) {
 /** A 409 dry-run tree: items carry ids for `expected`; auto nodes have none. */
 const RECORD_DEPS: DependencyNode[] = [
   {
-    entity: 'visits',
+    entity: 'visits', auto: false,
     relation: 'Посещение',
     count: 2,
     allowed_actions: ['cascade'],
@@ -135,13 +135,13 @@ const RECORD_DEPS: DependencyNode[] = [
     ],
   },
   {
-    entity: 'payments',
+    entity: 'payments', auto: false,
     relation: 'Платёж',
     count: 1,
     allowed_actions: ['cascade'],
     items: [{ id: '33333333-3333-3333-3333-333333333333', label: '3500, card' }],
   },
-  { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
+  { entity: 'record_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
 ];
 
 const RESOLUTIONS: Record<string, string> = { visits: 'cascade', payments: 'cascade' };

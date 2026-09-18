@@ -15,22 +15,22 @@ import type { DependencyNode, StaffResponse, PaginatedResponse, PositionResponse
 // Staff with activities → delete blocked → Mode B (archive only).
 const DEPS_BLOCKED: DependencyNode[] = [
   {
-    entity: 'activities',
+    entity: 'activities', auto: false,
     relation: 'Активность',
     count: 3,
     allowed_actions: [],
     message: 'Удалите активности вручную или архивируйте',
   },
-  { entity: 'masters', relation: 'Мастер', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'staff_positions', relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'masters', auto: true, relation: 'Мастер', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'staff_positions', auto: true, relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
 ];
 
 // Staff with only auto deps (users + masters + tags + positions) → Mode A, body {}.
 const DEPS_AUTO: DependencyNode[] = [
-  { entity: 'users', relation: 'Пользователь', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'masters', relation: 'Мастер', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'master_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
-  { entity: 'staff_positions', relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'users', auto: true, relation: 'Пользователь', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'masters', auto: true, relation: 'Мастер', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'master_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'staff_positions', auto: true, relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── D6 dialog checkbox-visibility matrix (GH #266) ──────────────────────────

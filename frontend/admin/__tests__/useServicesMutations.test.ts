@@ -226,9 +226,9 @@ describe('useServicesMutations', () => {
     it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
       const { wrapper } = createQueryClientWrapper();
       const deps: DependencyNode[] = [
-        { entity: 'tariffs', relation: 'Тариф', count: 3, allowed_actions: ['cascade'] },
-        { entity: 'photos', relation: 'Фото', count: 12, allowed_actions: ['nullify'] },
-        { entity: 'service_tags', relation: 'Тег', count: 5, allowed_actions: ['cascade'] },
+        { entity: 'tariffs', auto: true, relation: 'Тариф', count: 3, allowed_actions: ['cascade'] },
+        { entity: 'photos', auto: true, relation: 'Фото', count: 12, allowed_actions: ['nullify'] },
+        { entity: 'service_tags', auto: true, relation: 'Тег', count: 5, allowed_actions: ['cascade'] },
       ];
       mockDeleteService.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 

@@ -52,9 +52,9 @@ const mockRecord: RecordView = {
 // record_tags auto-handled. ─────────────────────────────────────────────────
 
 const DEPS_RECORD: DependencyNode[] = [
-  { entity: 'visits', relation: 'Посетитель', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'payments', relation: 'Оплата', count: 1, allowed_actions: ['cascade'], message: null },
-  { entity: 'record_tags', relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'visits', auto: false, relation: 'Посетитель', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'payments', auto: false, relation: 'Оплата', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'record_tags', auto: true, relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── Mutable mock context ───────────────────────────────────────────────────

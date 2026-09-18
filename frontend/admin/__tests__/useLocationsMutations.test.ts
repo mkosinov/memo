@@ -224,8 +224,8 @@ describe('useLocationsMutations', () => {
     it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
       const { wrapper } = createQueryClientWrapper();
       const deps: DependencyNode[] = [
-        { entity: 'activities', relation: 'Активность', count: 3, allowed_actions: [], message: 'Удалите активности вручную или архивируйте' },
-        { entity: 'location_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'] },
+        { entity: 'activities', auto: false, relation: 'Активность', count: 3, allowed_actions: [], message: 'Удалите активности вручную или архивируйте' },
+        { entity: 'location_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'] },
       ];
       mockDeleteLocation.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 

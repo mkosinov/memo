@@ -9,19 +9,19 @@ import type { ServiceResponse, DependencyNode, PaginatedResponse, MaterialRespon
 // Service with activities → delete blocked → Mode B (archive only).
 const DEPS_BLOCKED: DependencyNode[] = [
   {
-    entity: 'activities',
+    entity: 'activities', auto: false,
     relation: 'Активность',
     count: 3,
     allowed_actions: [],
     message: 'Удалите активности вручную или архивируйте',
   },
-  { entity: 'service_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'service_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // Service with only auto deps (tariffs + tags) → Mode A, resolutions body {}.
 const DEPS_AUTO: DependencyNode[] = [
-  { entity: 'tariffs', relation: 'Тариф', count: 3, allowed_actions: ['cascade'], message: null },
-  { entity: 'service_tags', relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+  { entity: 'tariffs', auto: true, relation: 'Тариф', count: 3, allowed_actions: ['cascade'], message: null },
+  { entity: 'service_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── Mock data ──────────────────────────────────────────────────────────────

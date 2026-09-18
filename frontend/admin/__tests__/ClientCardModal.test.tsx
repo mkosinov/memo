@@ -8,8 +8,8 @@ import { ApiError } from '@memo/api-client';
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
 const DEPS_CHOICE: DependencyNode[] = [
-  { entity: 'records', relation: 'Запись', count: 2, allowed_actions: ['nullify'], message: null },
-  { entity: 'client_tags', relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
+  { entity: 'records', auto: false, relation: 'Запись', count: 2, allowed_actions: ['nullify'], message: null },
+  { entity: 'client_tags', auto: true, relation: 'Тег', count: 1, allowed_actions: ['cascade'], message: null },
 ];
 
 // ─── Mock child components ────────────────────────────────────────────────
@@ -349,7 +349,7 @@ describe('ClientCardModal', () => {
 
   it('Mode B "Архивировать" calls the archive hook and closes the modal', async () => {
     const blocked: DependencyNode[] = [
-      { entity: 'activities', relation: 'Активность', count: 1, allowed_actions: [], message: null },
+      { entity: 'activities', auto: false, relation: 'Активность', count: 1, allowed_actions: [], message: null },
     ];
     deleteHook.mutateAsync = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', blocked),

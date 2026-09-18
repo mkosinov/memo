@@ -4,6 +4,8 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
+import { UIProvider } from '../contexts/UIContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { useScheduleData } from '../contexts/schedule/ScheduleDataContext';
 import { getMonday, toISODate } from '@/lib/datetime';
 
@@ -99,9 +101,13 @@ function renderWithContext() {
     <QueryClientProvider client={queryClient}>
       <NavigationProvider>
         <UserSettingsProvider>
-          <ScheduleProvider>
-            <TestUpdater />
-          </ScheduleProvider>
+          <UIProvider>
+            <PendingActionsProvider>
+              <ScheduleProvider>
+                <TestUpdater />
+              </ScheduleProvider>
+            </PendingActionsProvider>
+          </UIProvider>
         </UserSettingsProvider>
       </NavigationProvider>
     </QueryClientProvider>,

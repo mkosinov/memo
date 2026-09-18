@@ -7,6 +7,7 @@ import { ToastContainer } from '../app/components/toast/ToastContainer';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { getActivities } from '@memo/api-client';
 import { getMonday, toISODate, shiftDateKey } from '../lib/datetime';
@@ -51,10 +52,12 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
       <NavigationProvider>
         <UIProvider>
           <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               {children}
               <ToastContainer />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
         </UIProvider>
       </NavigationProvider>

@@ -125,7 +125,7 @@ function ExistingActivityContent({
   isOpen: boolean;
   onClose: () => void;
 }) {
-  const { services, updateActivity, deleteActivity } = useScheduleData();
+  const { services, updateActivity, deleteActivityDeferred } = useScheduleData();
   const { showToast } = useUI();
 
   const [activeTab, setActiveTab] = useState(mode === 'quickAdd' ? 'new-record' : 'settings');
@@ -202,12 +202,17 @@ function ExistingActivityContent({
     return [settingsTab, ...clientTabs];
   }, [activityRecords, onClose]);
 
-  // Delete activity handler
+  // Delete activity handler (#286 D5): routes into the SAME deferred flow as
+  // the card (ensure-fresh → dry-run → enqueue / needs-confirm); the modal
+  // closes immediately — the pending action survives unmount (app-level
+  // provider). The flow's own undo/error toasts surface the outcome; the
+  // former «Активность удалена» toast is gone.
   const handleDeleteActivity = useCallback(() => {
-    deleteActivity(activity.id);
-    showToast('Активность удалена');
+    deleteActivityDeferred(activity.id).catch((err) => {
+      showToast(parseApiError(err).message, 'error');
+    });
     onClose();
-  }, [activity.id, deleteActivity, showToast, onClose]);
+  }, [activity.id, deleteActivityDeferred, showToast, onClose]);
 
   // Activity update callback for settings — payload is the context's
   // minutes-based update shape (GH #142).

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
+import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import SchedulePage from '../app/(main)/schedule/page';
 import React from 'react';
@@ -58,9 +59,11 @@ function renderPage() {
       <UIProvider>
         <NavigationProvider>
           <UserSettingsProvider>
-            <ScheduleProvider>
+            <PendingActionsProvider>
+          <ScheduleProvider>
               <SchedulePage />
             </ScheduleProvider>
+          </PendingActionsProvider>
           </UserSettingsProvider>
         </NavigationProvider>
       </UIProvider>

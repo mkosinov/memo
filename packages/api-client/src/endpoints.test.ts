@@ -1169,7 +1169,7 @@ describe('deleteService', () => {
 describe('createLocation', () => {
   it('calls POST /api/v1/locations with body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
-    const data: z.input<typeof LocationCreateSchema> = { name: 'Новая студия', capacity: 20 };
+    const data: z.input<typeof LocationCreateSchema> = { title: 'Новая студия', capacity: 20 };
     await createLocation(data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/locations',
@@ -1186,7 +1186,7 @@ describe('updateLocation', () => {
   it('calls PUT /api/v1/locations/:id with full body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
     const payload: LocationUpdate = {
-      name: 'Обновлённая',
+      title: 'Обновлённая',
       short_title: '',
       address: '',
       description: '',
@@ -1225,13 +1225,13 @@ describe('deleteLocation', () => {
 describe('patchLocation', () => {
   it('calls PATCH /api/v1/locations/:id with partial body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'l-1' });
-    await patchLocation('l-1', { name: 'Обновлённая' });
+    await patchLocation('l-1', { title: 'Обновлённая' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/locations/l-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ name: 'Обновлённая' }),
+        body: JSON.stringify({ title: 'Обновлённая' }),
       }),
     );
   });
@@ -1435,7 +1435,7 @@ describe('changePassword', () => {
 
 describe('getTag', () => {
   it('calls /api/v1/tags/:id with tag schema', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 't-1', tag: 'VIP' });
+    vi.mocked(api).mockResolvedValue({ id: 't-1', title: 'VIP' });
     await getTag('t-1');
     expect(api).toHaveBeenCalledWith('/api/v1/tags/t-1', expect.anything());
   });
@@ -1740,7 +1740,7 @@ describe('getAllMaterials', () => {
 
 describe('getAllTags', () => {
   it('calls GET /api/v1/tags/all with no params', async () => {
-    const tag = { id: 't-1', tag: 'VIP' };
+    const tag = { id: 't-1', title: 'VIP' };
     vi.mocked(api).mockResolvedValue([tag]);
     const result = await getAllTags();
     expect(api).toHaveBeenCalledWith('/api/v1/tags/all', expect.anything());

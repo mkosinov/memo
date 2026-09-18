@@ -278,8 +278,8 @@ test.describe('Photos — Location filter', () => {
     // at alpika; ph6/ph7 are activity-owned whose activities (ev_1/ev_4) also
     // sit at alpika — the direct-only filter must NOT surface them.
     const locsResp = await request.get(`${BACKEND}/api/v1/locations/all`);
-    const alpika = ((await locsResp.json()) as Array<{ id: string; name: string }>).find(
-      (l) => l.name === 'Альпика',
+    const alpika = ((await locsResp.json()) as Array<{ id: string; title: string }>).find(
+      (l) => l.title === 'Альпика',
     );
     expect(alpika).toBeTruthy();
 
@@ -413,8 +413,8 @@ test.describe('Photos — Create Modal', () => {
       // Location field is a Combobox (GH #214 row 9) — open trigger, pick
       // «Альпика» by its option value (clear label is «Без локации»).
       const locsResp = await request.get(`${BACKEND}/api/v1/locations/all`);
-      const alpika = ((await locsResp.json()) as Array<{ id: string; name: string }>).find(
-        (l) => l.name === 'Альпика',
+      const alpika = ((await locsResp.json()) as Array<{ id: string; title: string }>).find(
+        (l) => l.title === 'Альпика',
       );
       expect(alpika).toBeTruthy();
       await searchAndSelect(page, dialog.getByLabel('Локация'), 'Альпика', alpika!.id);
@@ -474,7 +474,7 @@ test.describe('Photos — Create Modal', () => {
     const activity = await createTestActivity(request, { service_id: service.id });
     const locationsJson = await (await request.get(`${BACKEND}/api/v1/locations`)).json();
     const serviceTitle = service.title;
-    const locationName = ((locationsJson.items ?? locationsJson) as Array<{ name: string }>)[0].name;
+    const locationName = ((locationsJson.items ?? locationsJson) as Array<{ title: string }>)[0].title;
 
     const d = new Date(activity.start);
     const p = (n: number) => String(n).padStart(2, '0');

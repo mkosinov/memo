@@ -452,8 +452,8 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
     const masterB = await createTestMaster(request, { first_name: 'ПаритетБ', last_name: `МБ${ts}` });
     const serviceA = await createTestService(request, { title: `ЮС5 Услуга А ${ts}` });
     const serviceB = await createTestService(request, { title: `ЮС5 Услуга Б ${ts}` });
-    const locationA = await createTestLocation(request, { name: `ЮС5 Лок А ${ts}` });
-    const locationB = await createTestLocation(request, { name: `ЮС5 Лок Б ${ts}` });
+    const locationA = await createTestLocation(request, { title: `ЮС5 Лок А ${ts}` });
+    const locationB = await createTestLocation(request, { title: `ЮС5 Лок Б ${ts}` });
     const clientA = await createTestClient(request, { name: nameA });
     const clientB = await createTestClient(request, { name: nameB });
     const activityA = await createTestActivity(request, {
@@ -581,7 +581,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
         last_name: `МС${ts}${n}`,
       });
       const service = await createTestService(request, { title: `ЮС6 Услуга ${n} ${ts}` });
-      const location = await createTestLocation(request, { name: `ЮС6 Лок ${n} ${ts}` });
+      const location = await createTestLocation(request, { title: `ЮС6 Лок ${n} ${ts}` });
       const client = await createTestClient(request, { name: `ЮС6 Клиент${n} ${ts}` });
       const activity = await createTestActivity(request, {
         master_id: master.id,

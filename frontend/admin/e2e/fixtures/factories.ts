@@ -251,7 +251,7 @@ export async function createTestLocation(
 ) {
   const resp = await api.post(`${BACKEND}/api/v1/locations`, {
     data: {
-      name: `Локация ${uid()}`,
+      title: `Локация ${uid()}`,
       capacity: 8,
       ...overrides,
     },
@@ -304,13 +304,13 @@ export async function createTestPhoto(
   return await resp.json();
 }
 
-/** Create a test tag via backend API ({ id, tag }). */
+/** Create a test tag via backend API ({ id, title }) — #172: tag → title. */
 export async function createTestTag(
   api: APIRequestContext,
-  overrides?: { tag?: string },
+  overrides?: { title?: string },
 ) {
   const resp = await api.post(`${BACKEND}/api/v1/tags`, {
-    data: { tag: overrides?.tag || `test-tag ${uid()}` },
+    data: { title: overrides?.title || `test-tag ${uid()}` },
   });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();

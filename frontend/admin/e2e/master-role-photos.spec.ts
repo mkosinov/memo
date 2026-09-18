@@ -85,7 +85,7 @@ test.describe('GH #263 S5 — master photos scoped to own activities', () => {
       master_id: 'm1', service_id: service.id,
     });
     const locationsJson = await (await admin.get(`${BACKEND}/api/v1/locations`)).json();
-    const locationName = ((locationsJson.items ?? locationsJson) as Array<{ name: string }>)[0].name;
+    const locationName = ((locationsJson.items ?? locationsJson) as Array<{ title: string }>)[0].title;
 
     const d = new Date(ownActivity.start);
     const p = (n: number) => String(n).padStart(2, '0');

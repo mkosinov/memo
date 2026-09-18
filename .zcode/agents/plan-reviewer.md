@@ -1,6 +1,6 @@
 ---
 name: "plan-reviewer"
-description: "Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec before implementation (G2, DESIGN). Read-only."
+description: "Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec before implementation (gate C, DESIGN). Read-only."
 color: yellow
 model: omniroute/plan-reviewer
 thoughtLevel: disabled

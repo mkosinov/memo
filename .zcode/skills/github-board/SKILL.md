@@ -21,9 +21,9 @@ Status is gate-anchored: each status names the last workflow gate passed. Flip i
 | Status | Gate | Meaning | Set by |
 |---|---|---|---|
 | Backlog | — | not in the trajectory | user |
-| In Design (G1a) | G1a | concept approved in brainstorm; spec work underway | DESIGN session |
-| Spec OK (G1b) | G1b | panel review done, spec fixes folded, spec pushed to main | DESIGN session |
-| Ready to IMPL (G2) | G2 | plan reviewed and pushed — the signal for IMPL start (plan-only start) | DESIGN session |
+| In Design (G1a) | A | design in progress — scout, actuality, concept (gate A auto-OK or the user's pick at a divergence stop); spec work underway | DESIGN session |
+| Spec OK (G1b) | B | gate B passed: panel review done, spec fixes folded, user OK given, spec pushed to main | DESIGN session |
+| Ready to IMPL (G2) | C | gate C passed (auto unless the plan forced a spec change): plan reviewed and pushed — the signal for IMPL start (plan-only start) | DESIGN session |
 | In IMPL | G3 | IMPL dispatched (plan-only start); worktree + baseline green follow as the architect's first steps | container manager |
 | PR (G7) | G7 | finishing: PR open, CI/merge pending | container |
 | In-main | — | merged to main | manager, mandatory |
@@ -50,7 +50,7 @@ An issue is automatically added to the board on the first set/status call if it 
 | **Session start, no active workflow** | `gh_board.py next-up` → show the user the trajectory, ask what to take | manager, automatic |
 | **Card status check (pre-flight, triage, "can X run in parallel?")** | `gh_board.py show N` (or `show all`) | manager |
 | **User picked a task** | `status N "In Design (G1a)"` | whoever runs DESIGN — manager in-container; host DESIGN session after the split |
-| **Design gate passed (G1a/G1b/G2)** | flip status per the gate table above | whoever runs DESIGN |
+| **Design gate passed (A/B/C)** | flip status per the gate table above | whoever runs DESIGN |
 | **New issue created (gh issue create)** | add the card in the same breath: `status N "Backlog"` — the user tracks work in the project board and does not see card-less issues; discuss Next Up only when it is upcoming work | manager |
 | **User changes the trajectory** | `set-next-up` per their words | manager |
 | **Plan-only IMPL entry (split): user says «продолжаем траекторию #N», card at `Ready to IMPL (G2)`** | verify card + plan on fetched main → `status N "In IMPL"` → dispatch IMPL (plan-only start, no worktree yet — architect's first action). Flip BEFORE the dispatch: the dispatch blocks for the whole marathon (2026-09-13: #262 sat on `Ready to IMPL` through a 15-hour run) | manager, container |

@@ -34,6 +34,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     на `127.0.0.1` браузер ходит на `localhost:8000` (.env.test), а сессионная cookie (host-scoped, `127.0.0.1`)
     не отправляется → 401 → редирект на /login у каждого UI-теста.
 
+- **GH #179 — standalone PATCH mini-contract для Visits/UserSettings (закрывает открытый вопрос 3 спеки #175)** —
+  branch `feat/179-standalone-patch-contract` (8 commits: `ef94a674..3e9bbc98`, base `ef94a674`;
+  спека `docs/specs/2026-09-18-standalone-patch-contract-design.md` rev3,
+  план `docs/plans/2026-09-19-standalone-patch-contract-plan.md`; 7 файлов, +590/−80):
+  - **Backend-фикс (Behavioral Delta spec §6, только визиты):** `VisitService.patch` — явный `null` на
+    NOT NULL полях (`price`, `status`) теперь молча стрипится («не менять»; было — 422
+    `INTEGRITY_VIOLATION` и падение всего запроса вместе с остальными полями); пустой PATCH — полный
+    no-op (ранний выход: без записи `updated_at`, без каскада `recompute_record_status`, без
+    SSE-события `records`). Nullable-поля (`visitor_id`, `tariff_id`, `custom_price`) по-прежнему
+    очищаются явным `null`. `GenericService`-наследование не вводится — приём `UserSettingsService`
+    (локальный NOT NULL набор + ранний выход).
+  - **Контракт-тест:** новый `backend/tests/services/test_standalone_patch_contract.py` — два явных
+    конфига (`PatchContractConfig`, без наследования и авто-обнаружения) × 5 семантик: partial update,
+    not-found, `updated_at`, null-policy (NOT NULL → игнор; nullable → применяется; list-поля
+    `null` → игнор, `[]` → значение), empty body = full no-op; guard
+    `test_sentinel_differs_from_original`. 17 passed / 7 capability-skip.
+  - **Дедуп личных файлов (spec §3.4):** удалены `test_visit_service_patch_partial` (сервис-уровневый
+    дубль partial), `test_patch_language_only` (чистый дубль theme-only), класс
+    `TestUserSettingsPatchSemantic` (−78 строк); HTTP-якоря (200/404/каскад/`seats`/archived/own-only)
+    сохранены.
+  - **Domain-rules:** формулировка PATCH null-policy в `docs/domain-rules/visits.md` выровнена с кодом и
+    каноном `_overview.md` (commit `3e9bbc98`).
+  - **Tests:** контракт 17p/7s/0f; полный backend pytest **2230 passed / 15 skipped / 0 failed**
+    (базовая 2236/14 − 5 дедуплицированных + 1 переклассифицированный skip); ruff clean по изменённым
+    файлам (9 pre-existing I001 в `test_visit_service.py` вне скоупа).
+
 ## [Unreleased] — 2026-09-17
 
 ### Added

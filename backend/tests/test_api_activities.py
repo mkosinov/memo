@@ -577,3 +577,37 @@ async def _insert_record_direct(activity_id: str) -> None:
         )
         session.add(record)
         await session.commit()
+
+
+class TestDeleteUsesHandwrittenService:
+    """GH #286 D1 preview-only lock: DELETE /activities/{id} must keep
+    going through the handwritten ``ActivityService.delete`` cascade —
+    the generic resolver (``ArchiveService.resolve_delete``) must never
+    run for activities (FK_MATRIX[Activity] entries are preview-only:
+    consumed by collect, no handlers wired)."""
+
+    def test_delete_goes_through_handwritten_service(
+        self, api_client, create_activity, monkeypatch,
+    ) -> None:
+        from src.services.activity import ActivityService
+        from src.services.generic import ArchiveService
+
+        activity = create_activity()
+        calls: list[str] = []
+        original_delete = ActivityService.delete
+
+        async def spy_delete(self, db_session, id):
+            calls.append(f"handwritten:{id}")
+            return await original_delete(self, db_session, id)
+
+        async def forbidden_resolver(*args, **kwargs):
+            calls.append("generic_resolver")
+            return True
+
+        monkeypatch.setattr(ActivityService, "delete", spy_delete)
+        monkeypatch.setattr(ArchiveService, "resolve_delete", forbidden_resolver)
+
+        resp = api_client.delete(f"/api/v1/activities/{activity['id']}")
+
+        assert resp.status_code == 204, resp.text
+        assert calls == [f"handwritten:{activity['id']}"]

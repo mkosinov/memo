@@ -40,11 +40,11 @@
 
 ## Task 1: Бэкенд — FK_MATRIX/collect для Activity + label-билдер записей
 
-- [ ] `FK_MATRIX[Activity] = [records (cascade, НЕ auto), photos (nullify, auto=True), activity_tags (cascade, auto=True)]` в `backend/src/domain/deletion.py` (зеркало фактических FK: `models/record.py:19`, photos SET NULL `activity.py:265-267`).
-- [ ] Рекурсивный сбор дерева занятия на два уровня (решение юзера 17.09): records (прямые дети) + visits/payments каждой записи (record_tags — auto, исключён; у Visit/Payment новых не-auto узлов нет).
-- [ ] **Preview-only инвариант:** generic-резолвер для (Activity, photos/activity_tags/records) НЕ подключается к исполнению (`NULLIFY_HANDLERS`/`CASCADE_HANDLERS` не расширяются) — матрица потребляется только collect'ом; юнит-тест-лок: `DELETE /activities/{id}` идёт рукописным сервисом (трассировка/мок), не generic-резолвером.
-- [ ] Три узла с `items`: records — label «{услуга}, {дата}, {клиент|Аноним}» (услуга через `activity.service_id`, клиент nullable → fallback; join из одного запроса, PII-граница D9б #285); visits/payments — label-билдеры #285 Task 3 переиспользуются как есть («{услуга}, {цена}» / «{сумма}, {метод}»).
-- [ ] Юниты: collect_dependencies(Activity) — три узла с items (records не-auto; visits/payments второй уровень; photos/activity_tags auto, без items); пустое дерево на занятии без записей; label-билдеры (формат, fallback).
+- [x] `FK_MATRIX[Activity] = [records (cascade, НЕ auto), photos (nullify, auto=True), activity_tags (cascade, auto=True)]` в `backend/src/domain/deletion.py` (зеркало фактических FK: `models/record.py:19`, photos SET NULL `activity.py:265-267`).
+- [x] Рекурсивный сбор дерева занятия на два уровня (решение юзера 17.09): records (прямые дети) + visits/payments каждой записи (record_tags — auto, исключён; у Visit/Payment новых не-auto узлов нет).
+- [x] **Preview-only инвариант:** generic-резолвер для (Activity, photos/activity_tags/records) НЕ подключается к исполнению (`NULLIFY_HANDLERS`/`CASCADE_HANDLERS` не расширяются) — матрица потребляется только collect'ом; юнит-тест-лок: `DELETE /activities/{id}` идёт рукописным сервисом (трассировка/мок), не generic-резолвером.
+- [x] Три узла с `items`: records — label «{услуга}, {дата}, {клиент|Аноним}» (услуга через `activity.service_id`, клиент nullable → fallback; join из одного запроса, PII-граница D9б #285); visits/payments — label-билдеры #285 Task 3 переиспользуются как есть («{услуга}, {цена}» / «{сумма}, {метод}»).
+- [x] Юниты: collect_dependencies(Activity) — три узла с items (records не-auto; visits/payments второй уровень; photos/activity_tags auto, без items); пустое дерево на занятии без записей; label-билдеры (формат, fallback).
 
 ## Task 2: Бэкенд — контракт DELETE /activities/{id}
 

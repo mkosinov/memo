@@ -28,8 +28,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import insert
 
 from src.domain.deletion import (
+    CASCADE_HANDLERS,
     FK_MATRIX,
+    NULLIFY_HANDLERS,
     BlockingDepsError,
+    DependencyItem,
     DependencyNode,
     FKDependency,
     InvalidResolutionError,
@@ -44,19 +47,23 @@ from src.models.location import Location
 from src.models.master import Master  # extension row factory (#266)
 from src.models.material import Material
 from src.models.payment import Payment
+from src.models.photo import Photo
 from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
 from src.models.staff import Staff
 from src.models.tag import (
     Tag,
+    activity_tags,
     client_tags,
     location_tags,
     master_tags,
     record_tags,
     service_tags,
 )
+from src.models.tariff import Tariff
 from src.models.user import User
+from src.models.visit import Visit
 from src.models.visitor import Visitor
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -142,6 +149,20 @@ async def _add_client_tag_links(db_session, client: Client, n: int) -> None:
 
 async def _add_record_tag_links(db_session, record: Record, n: int) -> None:
     await _link_tags(db_session, record_tags, "record_id", record.id, n, prefix="rtag")
+
+
+async def _add_activity_tag_links(db_session, activity: Activity, n: int) -> None:
+    await _link_tags(db_session, activity_tags, "activity_id", activity.id, n, prefix="atag")
+
+
+async def _add_activity_photo(db_session, activity: Activity) -> Photo:
+    """Add an activity-scoped photo (activity_id SET NULL on #286 cascade)."""
+    photo = Photo(
+        activity_id=activity.id, filename=f"p-{_uuid.uuid4().hex[:6]}", is_public=False,
+    )
+    db_session.add(photo)
+    await db_session.flush()
+    return photo
 
 
 async def _add_payment(db_session, record: Record, amount: int = 500) -> None:
@@ -379,6 +400,58 @@ class TestFKMatrixRecord:
         assert dep.auto is True
         assert dep.allowed_actions == ["cascade"]
         assert dep.nullable is False
+
+
+class TestFKMatrixActivity:
+    """GH #286 D1: direct FK children of an activity — records (CASCADE,
+    ``models/record.py``), photos (SET NULL), activity_tags (link rows).
+
+    PREVIEW-ONLY entries: consumed by ``collect_dependencies`` (dialog
+    tree / expected ids) — execution of DELETE /activities/{id} stays
+    with the handwritten ``ActivityService.delete`` (no handlers below).
+    """
+
+    def test_has_exactly_three_deps(self) -> None:
+        assert {dep.entity for dep in FK_MATRIX[Activity]} == {
+            "records", "photos", "activity_tags",
+        }
+
+    def test_records_cascade_user_choice(self) -> None:
+        dep = _deps_map(Activity)["records"]
+        assert dep.action == "cascade"
+        assert dep.auto is False
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+        assert dep.relation == "Запись"
+
+    def test_photos_nullify_auto(self) -> None:
+        dep = _deps_map(Activity)["photos"]
+        assert dep.action == "nullify"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["nullify"]
+        assert dep.nullable is True
+        assert dep.relation == "Фото"
+
+    def test_activity_tags_cascade_auto(self) -> None:
+        dep = _deps_map(Activity)["activity_tags"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
+        assert dep.nullable is False
+        assert dep.relation == "Тег"
+
+
+class TestActivityPreviewOnly:
+    """#286 D1 invariant lock: the Activity matrix entries are consumed by
+    collect ONLY — no (Activity, *) handler may appear in the generic
+    executor dispatch tables (NULLIFY/CASCADE_HANDLERS), so the generic
+    resolver can never execute an activity delete."""
+
+    def test_no_activity_nullify_handlers(self) -> None:
+        assert not any(model is Activity for model, _ in NULLIFY_HANDLERS)
+
+    def test_no_activity_cascade_handlers(self) -> None:
+        assert not any(model is Activity for model, _ in CASCADE_HANDLERS)
 
 
 # ─── 2. Exception hierarchy (pure) ─────────────────────────────────────────────
@@ -685,6 +758,224 @@ class TestCollectDependenciesRecord:
         await db_session.commit()
 
         assert await collect_dependencies(db_session, Record, record.id) == []
+
+
+# ─── 4b. collect_dependencies(Activity) — two-level subtree (#286 D1) ──────────
+
+
+class TestCollectDependenciesActivity:
+    async def test_full_tree_two_levels_with_items(self, db_session) -> None:
+        """records node (direct FK child, non-auto, per-row items) +
+        aggregated visits/payments of each record (second level — #285
+        label-builders reused as is) + photos/activity_tags auto nodes
+        without items."""
+        master = Staff(first_name="a1", last_name="m")
+        service = Service(title="МК Гончарное дело", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90, record_info="r")
+        location = Location(name="aL", capacity=10)
+        client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
+                        email=None, channel="telegram")
+        db_session.add_all([master, service, location, client])
+        await db_session.flush()
+
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.flush()
+
+        rec_client = Record(activity_id=activity.id, client_id=client.id,
+                            status="pending", seats=1)
+        rec_anon = Record(activity_id=activity.id, client_id=None,
+                          status="pending", seats=1)
+        db_session.add_all([rec_client, rec_anon])
+        await db_session.flush()
+
+        tariff = Tariff(service_id=service.id, title="Adult", price=3500)
+        db_session.add(tariff)
+        await db_session.flush()
+        visit_tariff = Visit(record_id=rec_client.id, visitor_id=None,
+                             tariff_id=tariff.id, price=3500, status="waiting")
+        visit_no_tariff = Visit(record_id=rec_anon.id, visitor_id=None,
+                                price=2500, status="waiting")
+        db_session.add_all([visit_tariff, visit_no_tariff])
+        payment_cash = Payment(record_id=rec_client.id, amount=1000, method="cash")
+        payment_free = Payment(record_id=rec_anon.id, amount=500, method=None)
+        db_session.add_all([payment_cash, payment_free])
+        await db_session.flush()
+
+        await _add_activity_photo(db_session, activity)
+        await _add_activity_tag_links(db_session, activity, 2)
+        await db_session.commit()
+
+        nodes = await collect_dependencies(db_session, Activity, activity.id)
+        by_entity = {n.entity: n for n in nodes}
+        assert set(by_entity) == {
+            "records", "visits", "payments", "photos", "activity_tags",
+        }
+
+        records_node = by_entity["records"]
+        assert records_node.count == 2
+        assert records_node.auto is False
+        assert records_node.allowed_actions == ["cascade"]
+        assert records_node.relation == "Запись"
+        assert records_node.cascade_preview is None
+        assert {i.id: i.label for i in records_node.items} == {
+            rec_client.id: "МК Гончарное дело, 2026-09-18, Алиса",
+            rec_anon.id: "МК Гончарное дело, 2026-09-18, Аноним",
+        }
+
+        visits_node = by_entity["visits"]
+        assert visits_node.count == 2
+        assert visits_node.auto is False
+        assert visits_node.allowed_actions == ["cascade"]
+        assert visits_node.relation == "Посещение"
+        assert visits_node.cascade_preview is None
+        assert {i.id: i.label for i in visits_node.items} == {
+            visit_tariff.id: "МК Гончарное дело, 3500",
+            visit_no_tariff.id: "Без тарифа, 2500",
+        }
+
+        payments_node = by_entity["payments"]
+        assert payments_node.count == 2
+        assert payments_node.auto is False
+        assert payments_node.allowed_actions == ["cascade"]
+        assert payments_node.relation == "Платёж"
+        assert {i.id: i.label for i in payments_node.items} == {
+            payment_cash.id: "1000, cash",
+            payment_free.id: "500, —",
+        }
+
+        assert by_entity["photos"].count == 1
+        assert by_entity["photos"].auto is True
+        assert by_entity["photos"].allowed_actions == ["nullify"]
+        assert by_entity["photos"].items is None
+
+        assert by_entity["activity_tags"].count == 2
+        assert by_entity["activity_tags"].auto is True
+        assert by_entity["activity_tags"].allowed_actions == ["cascade"]
+        assert by_entity["activity_tags"].items is None
+
+    async def test_bare_activity_empty_tree(self, db_session) -> None:
+        """Activity with no records/photos/tags → empty tree (§5 zero-count
+        skip) → the clean 204 path downstream."""
+        master = Staff(first_name="a2", last_name="m")
+        service = Service(title="a2S", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90, record_info="r")
+        location = Location(name="a2L", capacity=10)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.commit()
+
+        assert await collect_dependencies(db_session, Activity, activity.id) == []
+
+    async def test_photos_only_activity_no_record_nodes(self, db_session) -> None:
+        """Activity with photos but no records → only the auto photos node;
+        no records/visits/payments nodes (the recursion needs records)."""
+        master = Staff(first_name="a3", last_name="m")
+        service = Service(title="a3S", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90, record_info="r")
+        location = Location(name="a3L", capacity=10)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.flush()
+        await _add_activity_photo(db_session, activity)
+        await db_session.commit()
+
+        nodes = await collect_dependencies(db_session, Activity, activity.id)
+        assert len(nodes) == 1
+        photos_node = nodes[0]
+        assert photos_node.entity == "photos"
+        assert photos_node.count == 1
+        assert photos_node.auto is True
+        assert photos_node.items is None
+
+
+async def _seed_activity_with_record(
+    db_session, *, client: Client | None, service_title: str = "МК Лепка",
+) -> tuple[Activity, Record]:
+    """One activity (start fixed 2026-09-18 10:00) with a single record."""
+    master = Staff(first_name="lbl", last_name="m")
+    service = Service(title=service_title, description="d", image_url="i",
+                      specialty="живопись", min_age=6, duration=90, record_info="r")
+    location = Location(name="lblL", capacity=10)
+    db_session.add_all([master, service, location])
+    if client is not None:
+        db_session.add(client)
+    await db_session.flush()
+    await _ensure_extension(db_session, master.id)
+    activity = Activity(
+        master_id=master.id, service_id=service.id, location_id=location.id,
+        start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+        is_private=False,
+    )
+    db_session.add(activity)
+    await db_session.flush()
+    record = Record(activity_id=activity.id,
+                    client_id=client.id if client is not None else None,
+                    status="pending", seats=1)
+    db_session.add(record)
+    await db_session.commit()
+    return activity, record
+
+
+class TestActivityRecordLabelBuilder:
+    """Record label «{услуга}, {дата}, {клиент|Аноним}» (#286 D1): service
+    via activity.service_id, ISO date of Record.start, client name —
+    «Аноним» fallback when client_id is NULL or the client name is NULL.
+    PII boundary per #285 D9б: the name is not masked for admin callers."""
+
+    async def test_label_with_client_name(self, db_session) -> None:
+        client = Client(name="Борис", phone=f"+7999{_uuid.uuid4().hex[:7]}",
+                        email=None, channel="phone")
+        activity, record = await _seed_activity_with_record(
+            db_session, client=client,
+        )
+
+        nodes = await collect_dependencies(db_session, Activity, activity.id)
+        assert nodes[0].entity == "records"
+        assert nodes[0].items == [
+            DependencyItem(id=record.id, label="МК Лепка, 2026-09-18, Борис"),
+        ]
+
+    async def test_label_fallback_when_client_id_null(self, db_session) -> None:
+        activity, record = await _seed_activity_with_record(
+            db_session, client=None,
+        )
+
+        nodes = await collect_dependencies(db_session, Activity, activity.id)
+        assert nodes[0].items == [
+            DependencyItem(id=record.id, label="МК Лепка, 2026-09-18, Аноним"),
+        ]
+
+    async def test_label_fallback_when_client_name_null(self, db_session) -> None:
+        client = Client(name=None, phone=f"+7999{_uuid.uuid4().hex[:7]}",
+                        email=None, channel="phone")
+        activity, record = await _seed_activity_with_record(
+            db_session, client=client,
+        )
+
+        nodes = await collect_dependencies(db_session, Activity, activity.id)
+        assert nodes[0].items == [
+            DependencyItem(id=record.id, label="МК Лепка, 2026-09-18, Аноним"),
+        ]
 
 
 # ─── 5. validate_resolutions (pure — construct nodes directly) ──────────────────

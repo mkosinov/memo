@@ -1147,17 +1147,23 @@ class TestClientListPaginationEdgeCases:
 class TestClientStatsAggregationExtended:
     """More thorough stats tests for edge cases."""
 
-    def test_total_paid_across_multiple_records(
+    def test_total_paid_includes_all_record_statuses(
         self, api_client, create_activity, create_client
     ) -> None:
-        """Payments across multiple records sum correctly."""
+        """total_paid sums payments across records of ALL statuses.
+
+        waiting/visited/missed/cancelled alike — money of a cancelled
+        record is real money (issue #192). If a record-status filter
+        ever appears in the total_paid subquery, this test fails.
+        """
+        # waiting record (helper default)
         client, r1 = _create_client_with_record(
             api_client, create_activity, create_client,
-            client={"name": "MultiRec", "phone": "+79999000001"},
+            client={"name": "AllStatusPay", "phone": "+79999001041"},
         )
-        _add_payment(api_client, r1["id"], amount=2000)
+        _add_payment(api_client, r1["id"], amount=1000)
 
-        # Second record for same client
+        # visited record — two payments on one record
         activity2 = create_activity()
         r2_resp = api_client.post("/api/v1/records", json={
             "activity_id": activity2["id"],
@@ -1166,11 +1172,34 @@ class TestClientStatsAggregationExtended:
             "visits": [{"name": "G2", "price": 3500, "status": "visited"}],
         })
         assert r2_resp.status_code == 201
-        _add_payment(api_client, r2_resp.json()["id"], amount=3000)
+        _add_payment(api_client, r2_resp.json()["id"], amount=2000)
+        _add_payment(api_client, r2_resp.json()["id"], amount=500)
+
+        # missed record
+        activity3 = create_activity()
+        r3_resp = api_client.post("/api/v1/records", json={
+            "activity_id": activity3["id"],
+            "client_id": client["id"],
+            "comment": "Record 3",
+            "visits": [{"name": "G3", "price": 3500, "status": "missed"}],
+        })
+        assert r3_resp.status_code == 201
+        _add_payment(api_client, r3_resp.json()["id"], amount=3000)
+
+        # cancelled record — its payment still counts
+        activity4 = create_activity()
+        r4_resp = api_client.post("/api/v1/records", json={
+            "activity_id": activity4["id"],
+            "client_id": client["id"],
+            "comment": "Record 4",
+            "visits": [{"name": "G4", "price": 3500, "status": "cancelled"}],
+        })
+        assert r4_resp.status_code == 201
+        _add_payment(api_client, r4_resp.json()["id"], amount=4000)
 
         resp = api_client.get("/api/v1/clients")
         item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["total_paid"] == 5000
+        assert item["total_paid"] == 10500
 
     def test_total_paid_not_multiplied_by_visit_count(
         self, api_client, create_activity, create_client
@@ -1253,20 +1282,6 @@ class TestClientStatsAggregationExtended:
         assert item["records_count"] == 1  # counts 1 record, not 3 visits
         # Record.status = 'visited' (priority: visited > missed > cancelled)
         assert item["missed_records"] == 0  # record is 'visited', not 'missed'
-
-    def test_payments_only_count_active_records(
-        self, api_client, create_activity, create_client
-    ) -> None:
-        """total_paid only aggregates from active records."""
-        client, record = _create_client_with_record(
-            api_client, create_activity, create_client,
-            client={"name": "ActiveRecPay", "phone": "+79999000030"},
-        )
-        _add_payment(api_client, record["id"], amount=5000)
-
-        resp = api_client.get("/api/v1/clients")
-        item = next(c for c in resp.json()["items"] if c["id"] == client["id"])
-        assert item["total_paid"] == 5000
 
     def test_client_with_multiple_payment_methods(
         self, api_client, create_activity, create_client

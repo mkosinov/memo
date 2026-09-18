@@ -270,21 +270,23 @@ class TestGenericApiDeleteContract:
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         fk_ids = _resolve_fk_ids(request, cfg)
         created = _create_entity(api_client, cfg, fk_ids)
-        resp = api_client.delete(f"{cfg.router_prefix}/{created['id']}")
+        resp = _delete(api_client, f"{cfg.router_prefix}/{created['id']}", cfg.delete_body)
         assert resp.status_code == 204, f"DELETE must return 204, got {resp.status_code}"
         assert resp.content == b"", "204 must carry no body"
 
     @pytest.mark.parametrize("service_cls,cfg", _contract_params())
     def test_delete_nonexistent_returns_404_with_entity_code(self, service_cls, cfg, api_client):
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
-        _assert_not_found(api_client.delete(f"{cfg.router_prefix}/nonexistent-id"), cfg)
+        _assert_not_found(
+            _delete(api_client, f"{cfg.router_prefix}/nonexistent-id", cfg.delete_body), cfg,
+        )
 
     @pytest.mark.parametrize("service_cls,cfg", _hard_params())
     def test_delete_hard_visibility(self, service_cls, cfg, api_client, request):
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         fk_ids = _resolve_fk_ids(request, cfg)
         created = _create_entity(api_client, cfg, fk_ids)
-        assert api_client.delete(f"{cfg.router_prefix}/{created['id']}").status_code == 204
+        assert _delete(api_client, f"{cfg.router_prefix}/{created['id']}", cfg.delete_body).status_code == 204
         get_resp = api_client.get(f"{cfg.router_prefix}/{created['id']}")
         assert get_resp.status_code == 404, "hard-deleted row is gone"
         assert get_resp.json()["detail"]["code"] == cfg.not_found_code
@@ -308,8 +310,8 @@ class TestGenericApiDeleteContract:
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         fk_ids = _resolve_fk_ids(request, cfg)
         created = _create_entity(api_client, cfg, fk_ids)
-        assert api_client.delete(f"{cfg.router_prefix}/{created['id']}").status_code == 204
-        resp = api_client.delete(f"{cfg.router_prefix}/{created['id']}")
+        assert _delete(api_client, f"{cfg.router_prefix}/{created['id']}", cfg.delete_body).status_code == 204
+        resp = _delete(api_client, f"{cfg.router_prefix}/{created['id']}", cfg.delete_body)
         assert resp.status_code == 404, "second DELETE on a hard-deleted row → 404"
         assert resp.json()["detail"]["code"] == cfg.not_found_code
 
@@ -321,6 +323,18 @@ class TestGenericApiPatchWiring:
     def test_patch_nonexistent_returns_404_with_entity_code(self, service_cls, cfg, api_client):
         assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
         _assert_not_found(api_client.patch(f"{cfg.router_prefix}/nonexistent-id", json={}), cfg)
+
+
+def _delete(api_client, url: str, body: dict | None):
+    """DELETE helper honoring the deferred-delete contract config (#286 D2).
+
+    ``body is None`` → bare DELETE (the no-body preview contract of the
+    archive entities); otherwise the commit body is carried as JSON —
+    a bare DELETE on a deferred-delete entity is 422 EXPECTED_STATE_REQUIRED.
+    """
+    if body is None:
+        return api_client.delete(url)
+    return api_client.request("DELETE", url, json=body)
 
 
 # ─── /all contract (GH #205 Task 4) ─────────────────────────────────────────

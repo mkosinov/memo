@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 
 from src.domain.deletion import (
     CASCADE_HANDLERS,
@@ -38,7 +38,9 @@ from src.domain.deletion import (
     InvalidResolutionError,
     ResolutionError,
     collect_dependencies,
+    collect_dependency_ids,
     has_blocking_deps,
+    stale_expected_entities,
     validate_resolutions,
 )
 from src.models.activity import Activity
@@ -1019,6 +1021,204 @@ def _record_nodes() -> list[DependencyNode]:
         DependencyNode(entity="record_tags", relation="Тег", count=2,
                        allowed_actions=["cascade"]),
     ]
+
+
+class TestCollectDependencyIdsActivity:
+    """``collect_dependency_ids(Activity)`` — the recursive two-level
+    subtree id-sets (#286 D2): records (direct FK children) + visits and
+    payments of EVERY record (second level) + auto deps
+    (photos/activity_tags) collected per the per-entity-complete payload
+    rule; whether they block is decided by :func:`stale_expected_entities`
+    (auto → exempt)."""
+
+    async def _seed_tree(
+        self, db_session, *, with_auto: bool = True,
+    ) -> tuple[Activity, Record, Record, list[str], Payment, Photo, list[str]]:
+        """Activity with a client record + an anonymous record, one visit
+        and one payment per record; optionally a photo + 2 tag links."""
+        master = Staff(first_name="idc", last_name="m")
+        service = Service(title="idcS", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90,
+                          record_info="r")
+        location = Location(name="idcL", capacity=10)
+        client = Client(name="Алиса", phone=f"+7999{_uuid.uuid4().hex[:7]}",
+                        email=None, channel="telegram")
+        db_session.add_all([master, service, location, client])
+        await db_session.flush()
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.flush()
+        rec_client = Record(activity_id=activity.id, client_id=client.id,
+                            status="pending", seats=1)
+        rec_anon = Record(activity_id=activity.id, client_id=None,
+                          status="pending", seats=1)
+        db_session.add_all([rec_client, rec_anon])
+        await db_session.flush()
+        visit_client = Visit(record_id=rec_client.id, visitor_id=None,
+                             price=3500, status="waiting")
+        visit_anon = Visit(record_id=rec_anon.id, visitor_id=None,
+                           price=2500, status="waiting")
+        db_session.add_all([visit_client, visit_anon])
+        payment_cash = Payment(record_id=rec_client.id, amount=1000,
+                               method="cash")
+        db_session.add(payment_cash)
+        await db_session.flush()
+        photo: Photo | None = None
+        tag_ids: list[str] = []
+        if with_auto:
+            photo = await _add_activity_photo(db_session, activity)
+            await _add_activity_tag_links(db_session, activity, 2)
+            r = await db_session.execute(
+                select(activity_tags.c.tag_id)
+                .where(activity_tags.c.activity_id == activity.id)
+            )
+            tag_ids = list(r.scalars().all())
+        await db_session.commit()
+        return (
+            activity, rec_client, rec_anon,
+            [visit_client.id, visit_anon.id],
+            payment_cash, photo, tag_ids,
+        )
+
+    async def test_full_subtree_ids_two_levels(self, db_session) -> None:
+        activity, rec_client, rec_anon, visit_ids, payment, photo, tag_ids = (
+            await self._seed_tree(db_session)
+        )
+
+        now_ids = await collect_dependency_ids(db_session, Activity, activity.id)
+
+        assert set(now_ids) == {
+            "records", "visits", "payments", "photos", "activity_tags",
+        }
+        assert set(now_ids["records"]) == {rec_client.id, rec_anon.id}
+        assert set(now_ids["visits"]) == set(visit_ids)
+        assert set(now_ids["payments"]) == {payment.id}
+        assert set(now_ids["photos"]) == {photo.id}
+        assert set(now_ids["activity_tags"]) == set(tag_ids)
+
+    async def test_empty_activity_yields_empty_map(self, db_session) -> None:
+        master = Staff(first_name="idcE", last_name="m")
+        service = Service(title="idcES", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90,
+                          record_info="r")
+        location = Location(name="idcEL", capacity=10)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.commit()
+
+        assert await collect_dependency_ids(db_session, Activity, activity.id) == {}
+
+    async def test_photos_only_yields_only_photos_key(self, db_session) -> None:
+        master = Staff(first_name="idcP", last_name="m")
+        service = Service(title="idcPS", description="d", image_url="i",
+                          specialty="живопись", min_age=6, duration=90,
+                          record_info="r")
+        location = Location(name="idcPL", capacity=10)
+        db_session.add_all([master, service, location])
+        await db_session.flush()
+        await _ensure_extension(db_session, master.id)
+        activity = Activity(
+            master_id=master.id, service_id=service.id, location_id=location.id,
+            start=datetime(2026, 9, 18, 10, 0), duration=90, capacity=10,
+            is_private=False,
+        )
+        db_session.add(activity)
+        await db_session.flush()
+        photo = await _add_activity_photo(db_session, activity)
+        await db_session.commit()
+
+        now_ids = await collect_dependency_ids(db_session, Activity, activity.id)
+        assert set(now_ids) == {"photos"}
+        assert now_ids["photos"] == [photo.id]
+
+
+class TestStaleExpectedEntitiesActivity:
+    """``stale_expected_entities(Activity, ...)`` — the per-entity subset
+    check over the RECURSIVE subtree (#286 D2): an id of ANY node
+    (record / visit / payment) present on the server but missing from
+    ``expected`` blocks; a dep that disappeared in the undo window does
+    not (subset, #285 D9a); auto deps (photos/activity_tags) are never
+    verified."""
+
+    def test_new_record_appeared_is_stale(self) -> None:
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1", "r2-new"], "visits": ["v1"], "payments": [],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"], "payments": []}
+        assert stale_expected_entities(Activity, now_ids, expected) == ["records"]
+
+    def test_new_visit_in_confirmed_record_is_stale(self) -> None:
+        """The nested-level race: a visit added to an ALREADY-confirmed
+        record mid-window — visits is not a direct FK dep of Activity but
+        is part of the confirmed subtree → must block."""
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"], "visits": ["v1", "v2-new"], "payments": [],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"], "payments": []}
+        assert stale_expected_entities(Activity, now_ids, expected) == ["visits"]
+
+    def test_new_payment_is_stale(self) -> None:
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"], "visits": ["v1"], "payments": ["p1-new"],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"], "payments": []}
+        assert stale_expected_entities(Activity, now_ids, expected) == ["payments"]
+
+    def test_swapped_visit_id_blocks_at_equal_counter(self) -> None:
+        """Same counters, different ids — the rev6 reason ids, not counts,
+        are the currency of ``expected``."""
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"], "visits": ["v-swapped"], "payments": [],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"], "payments": []}
+        assert stale_expected_entities(Activity, now_ids, expected) == ["visits"]
+
+    def test_disappeared_deps_do_not_block_subset(self) -> None:
+        """Expected carries ids that no longer exist — deleting LESS than
+        was confirmed is fine (subset semantics, #285 D9a)."""
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"], "visits": ["v1"], "payments": [],
+        }
+        expected = {
+            "records": ["r1", "r-gone"],
+            "visits": ["v1", "v-gone"],
+            "payments": [],
+        }
+        assert stale_expected_entities(Activity, now_ids, expected) == []
+
+    def test_auto_deps_never_verified(self) -> None:
+        """photos/activity_tags drift alone (SET NULL rows, join rows) must
+        NOT block — exempt by ``auto=True`` (#285 rev8, #286 D2)."""
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"],
+            "visits": ["v1"],
+            "payments": [],
+            "photos": ["ph-drift"],
+            "activity_tags": ["t-drift"],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"], "payments": []}
+        assert stale_expected_entities(Activity, now_ids, expected) == []
+
+    def test_missing_expected_key_means_nothing_confirmed(self) -> None:
+        """No ``payments`` key in expected, but a payment appeared → the
+        current row is stale (a missing key = «nothing was confirmed»)."""
+        now_ids: dict[str, list[str]] = {
+            "records": ["r1"], "visits": ["v1"], "payments": ["p1"],
+        }
+        expected = {"records": ["r1"], "visits": ["v1"]}
+        assert stale_expected_entities(Activity, now_ids, expected) == ["payments"]
 
 
 class TestValidateResolutions:

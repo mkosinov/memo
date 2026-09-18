@@ -828,10 +828,76 @@ async def _ids_r_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
     return list(r.scalars().all())
 
 
+# ─── #286 D2: Activity direct id-collectors ─────────────────────────────────────
+# Mirror of the Record collectors: records (direct FK child), photos (auto)
+# and activity_tags (auto join rows) — the direct level of the subtree.
+
+
+async def _ids_a_records(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Record.id).where(Record.activity_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_a_photos(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Photo.id).where(Photo.activity_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_a_activity_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(activity_tags.c.tag_id).where(
+            activity_tags.c.activity_id == entity_id
+        )
+    )
+    return list(r.scalars().all())
+
+
 _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Record, "visits"): _ids_r_visits,
     (Record, "payments"): _ids_r_payments,
     (Record, "record_tags"): _ids_r_record_tags,
+    (Activity, "records"): _ids_a_records,
+    (Activity, "photos"): _ids_a_photos,
+    (Activity, "activity_tags"): _ids_a_activity_tags,
+}
+
+
+# ─── #286 D2: second-level id-collection (Activity → records → visits/payments) ─
+# The Activity dialog tree spans TWO matrix levels; the ``expected`` commit
+# carries id-sets for BOTH levels. visits/payments are not direct FK deps of
+# Activity (absent from FK_MATRIX[Activity]), so they are collected by a
+# dedicated subtree extender instead of the direct ``_ID_COLLECTORS`` loop —
+# mirror of ``_RECURSIVE_CHILDREN`` in the preview path.
+
+
+async def _activity_dependency_ids(
+    session: AsyncSession, activity_id: str,
+) -> dict[str, list[str]]:
+    """Second-level id-sets: visits and payments of EVERY record of the
+    activity (one JOIN query each — no per-record N+1). Only non-empty
+    lists are included, mirroring :func:`collect_dependency_ids`."""
+    out: dict[str, list[str]] = {}
+    visit_r = await session.execute(
+        select(Visit.id)
+        .join(Record, Visit.record_id == Record.id)
+        .where(Record.activity_id == activity_id)
+    )
+    visits = list(visit_r.scalars().all())
+    if visits:
+        out["visits"] = visits
+    payment_r = await session.execute(
+        select(Payment.id)
+        .join(Record, Payment.record_id == Record.id)
+        .where(Record.activity_id == activity_id)
+    )
+    payments = list(payment_r.scalars().all())
+    if payments:
+        out["payments"] = payments
+    return out
+
+
+_RECURSIVE_IDS: dict[type[Base], Callable[[AsyncSession, str], Awaitable[dict[str, list[str]]]]] = {
+    Activity: _activity_dependency_ids,
 }
 
 
@@ -849,6 +915,11 @@ async def collect_dependency_ids(
     Auto-deps (e.g. ``record_tags``) ARE collected here (the task's payload
     is per-entity and complete); whether they participate in the check is
     decided by :func:`stale_expected_entities`.
+
+    #286 D2: entities with a two-level dialog tree
+    (``_RECURSIVE_IDS`` — Activity → records → visits/payments) extend
+    their per-entity map with the second-level id-sets after the direct
+    loop.
     """
     deps = FK_MATRIX.get(model, [])
     if not deps:
@@ -861,7 +932,27 @@ async def collect_dependency_ids(
         ids = await collector(session, entity_id)
         if ids:
             out[dep.entity] = ids
+    # #286 D2: second-level subtree ids appended after the direct level —
+    # the per-entity payload stays complete across both matrix levels.
+    recursion = _RECURSIVE_IDS.get(model)
+    if recursion is not None:
+        for entity, ids in (await recursion(session, entity_id)).items():
+            out.setdefault(entity, []).extend(ids)
     return out
+
+
+# ─── #286 D2: entities verified at the SECOND matrix level ─────────────────────
+# Activity's dialog tree spans two matrix levels (direct records + each
+# record's visits/payments). visits/payments are NOT direct FK deps of
+# Activity (absent from FK_MATRIX[Activity]) yet ARE part of the
+# user-confirmed subtree — verified like non-auto deps by
+# :func:`stale_expected_entities`. Derived from FK_MATRIX[Record]'s
+# non-auto deps so a future Record-level dep stays consistent.
+_RECURSIVE_VERIFY: dict[type[Base], frozenset[str]] = {
+    Activity: frozenset(
+        dep.entity for dep in FK_MATRIX[Record] if not dep.auto
+    ),
+}
 
 
 def stale_expected_entities(
@@ -879,13 +970,23 @@ def stale_expected_entities(
     Auto-deps (``FKDependency.auto``, e.g. record_tags) NEVER participate:
     they resolve themselves during execution, so the user could not have
     confirmed them and a mid-window tag link is not a race.
+
+    #286 D2: for two-level trees (``_RECURSIVE_VERIFY`` — Activity), the
+    second-level entities (visits/payments) verify the same way even though
+    they are not direct FK deps — a visit that appeared inside an
+    already-confirmed record is a mid-window race the user never confirmed.
     """
     matrix = {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
+    recursive_verify = _RECURSIVE_VERIFY.get(model, frozenset())
     stale: list[str] = []
     for entity, ids in now_ids.items():
         dep = matrix.get(entity)
-        if dep is None or dep.auto:
-            continue  # unknown/auto entities are never verified.
+        if dep is None:
+            if entity not in recursive_verify:
+                continue  # unknown entities are never verified.
+            # Second-level subtree entity — verified like a user choice.
+        elif dep.auto:
+            continue
         if not set(ids) <= set(expected.get(entity, [])):
             stale.append(entity)
     return stale

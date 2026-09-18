@@ -67,6 +67,10 @@ class ErrorCode(str, Enum):
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
 
+    # 422 — unified deferred-delete contract (#285 rev7 / #286 D2)
+    EXPECTED_STATE_REQUIRED = "EXPECTED_STATE_REQUIRED"  # bare DELETE without the flag
+    INVALID_DELETE_REQUEST = "INVALID_DELETE_REQUEST"    # dry_run + body combo
+
     # 500 — internal
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
@@ -122,5 +126,11 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ),
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
+    ErrorCode.EXPECTED_STATE_REQUIRED: (
+        "Не указано ожидаемое состояние зависимостей"
+    ),
+    ErrorCode.INVALID_DELETE_REQUEST: (
+        "Предпросмотр удаления не может нести тело запроса"
+    ),
     ErrorCode.INTERNAL_ERROR: "Ошибка сервера",
 }

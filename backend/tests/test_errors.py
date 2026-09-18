@@ -13,11 +13,11 @@ pytestmark = pytest.mark.pure_unit
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 34 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week)."""
+    """Verify ErrorCode has all 36 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week + 2 GH #286 deferred-delete)."""
 
     def test_total_code_count(self):
-        """All 34 error codes are present (base + auth + staff #266 + files #262 + copy-week #242)."""
-        assert len(ErrorCode) == 34
+        """All 36 error codes are present (base + auth + staff #266 + files #262 + copy-week #242 + deferred-delete #286)."""
+        assert len(ErrorCode) == 36
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus auth/staff additions) exists."""
@@ -66,6 +66,9 @@ class TestErrorCodeEnum:
             "COPY_WEEK_START_NOT_MONDAY",  # week_start is not a Monday
             "COPY_WEEK_INVALID_LOCATION",  # unknown location id in the request
             "COPY_WEEK_SOURCE_TOO_LARGE",  # > 100 rows to insert — copy in passes
+            # GH #285 rev7 / GH #286 D2 — unified deferred-delete contract
+            "EXPECTED_STATE_REQUIRED",     # 422 — bare DELETE without the flag
+            "INVALID_DELETE_REQUEST",      # 422 — dry_run + body combo
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -128,8 +131,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 34 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 34
+        """ERROR_MESSAGES has exactly 36 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 36
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

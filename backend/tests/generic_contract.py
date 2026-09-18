@@ -176,6 +176,12 @@ class EntityConfig(NamedTuple):
     # TestGenericApiSearchContract until Tasks 5-8 wire its config.
     search_override: dict | None = None  # create_data overrides carrying the Cyrillic probe value (stored UPPERCASE)
     search_query: str | None = None  # lowercase Cyrillic substring matching search_override (M5 pin)
+    # Deferred-delete commit body (GH #285 rev7 / GH #286 D2): entities on the
+    # unified deferred-delete contract reject a bare DELETE with 422
+    # EXPECTED_STATE_REQUIRED — their generic DELETE tests must carry the
+    # declared state (``{"expected": {}}``). None → bare DELETE stays valid
+    # (the no-body preview contract of the 5 archive entities).
+    delete_body: dict | None = None
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -210,6 +216,7 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/activities",
         not_found_code="ACTIVITY_NOT_FOUND",
         response_schema=ActivityResponse,
+        delete_body={"expected": {}},  # GH #286 D2 — deferred-delete commit state
     ),
     ClientService: EntityConfig(
         service_factory=get_client_service,

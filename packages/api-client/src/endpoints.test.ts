@@ -528,7 +528,7 @@ describe('dryRunDeleteActivity', () => {
   it('propagates 409 ApiError with dependency tree (incl. node with items)', async () => {
     const tree = [
       {
-        entity: 'records', relation: 'Запись', count: 1, allowed_actions: ['cascade'],
+        entity: 'records', auto: false, relation: 'Запись', count: 1, allowed_actions: ['cascade'],
         items: [{ id: 'uuid-record-1', label: 'Мастер-класс, 12.09, Иван' }],
       },
     ];
@@ -945,7 +945,7 @@ describe('dryRunDeleteRecord', () => {
   it('propagates 409 ApiError with dependency tree (incl. node with items)', async () => {
     const tree = [
       {
-        entity: 'visits', relation: 'Визит', count: 2, allowed_actions: ['cascade'],
+        entity: 'visits', auto: false, relation: 'Визит', count: 2, allowed_actions: ['cascade'],
         items: [{ id: 'uuid-visit-1', label: 'Иван — 12.09 10:00' }],
       },
     ];

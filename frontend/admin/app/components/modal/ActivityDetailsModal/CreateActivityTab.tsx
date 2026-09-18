@@ -142,7 +142,7 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
         >
           <option value="">—</option>
           {locations.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
+            <option key={l.id} value={l.id}>{l.title}</option>
           ))}
         </select>
       </div>

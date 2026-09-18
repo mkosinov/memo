@@ -43,13 +43,13 @@ const mockArchiveLocation = vi.mocked(archiveLocation);
 const mockRestoreLocation = vi.mocked(restoreLocation);
 
 const locationCreatePayload: LocationCreate = {
-  name: 'Studio', short_title: 'Studio', capacity: 10, address: '', description: '',
+  title: 'Studio', short_title: 'Studio', capacity: 10, address: '', description: '',
   yandex_map_url: '', review_url: '', record_info: '', image_url: '',
   location_hint: '', tag_ids: [],
 };
 
 const locationResponse = {
-  id: 'loc-1', name: 'Studio', address: 'Main St', description: null,
+  id: 'loc-1', title: 'Studio', address: 'Main St', description: null,
   capacity: 10, yandex_map_url: null, review_url: null, record_info: null,
   image_url: null, archived: false, created_at: '', updated_at: '',
 };
@@ -103,7 +103,7 @@ describe('useLocationsMutations', () => {
   describe('useUpdateLocation', () => {
     it('calls updateLocation with id and data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockUpdateLocation.mockResolvedValue({ ...locationResponse, name: 'Updated' });
+      mockUpdateLocation.mockResolvedValue({ ...locationResponse, title: 'Updated' });
 
       const { result } = renderHook(() => useUpdateLocation(), { wrapper });
 
@@ -112,7 +112,7 @@ describe('useLocationsMutations', () => {
       const payload: { id: string; data: LocationUpdate } = {
         id: 'loc-1',
         data: {
-          name: 'Updated',
+          title: 'Updated',
           short_title: '',
           address: '',
           description: '',
@@ -136,12 +136,12 @@ describe('useLocationsMutations', () => {
     it('invalidates the locations query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockUpdateLocation.mockResolvedValue({ ...locationResponse, name: 'Updated' });
+      mockUpdateLocation.mockResolvedValue({ ...locationResponse, title: 'Updated' });
 
       const { result } = renderHook(() => useUpdateLocation(), { wrapper });
 
       const payload: LocationUpdate = {
-        name: 'Updated',
+        title: 'Updated',
         short_title: '',
         address: '',
         description: '',
@@ -165,27 +165,27 @@ describe('useLocationsMutations', () => {
   describe('usePatchLocation', () => {
     it('calls patchLocation with id and partial data', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, name: 'Patched' });
+      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
 
       const { result } = renderHook(() => usePatchLocation(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { name: 'Patched' } });
+        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
       });
 
-      expect(mockPatchLocation).toHaveBeenCalledWith('loc-1', { name: 'Patched' });
+      expect(mockPatchLocation).toHaveBeenCalledWith('loc-1', { title: 'Patched' });
       expect(mockUpdateLocation).not.toHaveBeenCalled();
     });
 
     it('invalidates the locations query cache on success', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, name: 'Patched' });
+      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
 
       const { result } = renderHook(() => usePatchLocation(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { name: 'Patched' } });
+        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });

@@ -85,7 +85,7 @@ export const photoColumns = ({ servicesMap, locationsMap }: PhotoColumnLookup): 
     width: 'w-[150px]',
     render: (p) => (
       <span style={{ color: 'var(--ink-mid)' }}>
-        {locationsMap.get(p.location_id ?? '')?.name ?? '—'}
+        {locationsMap.get(p.location_id ?? '')?.title ?? '—'}
       </span>
     ),
   },

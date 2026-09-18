@@ -5,10 +5,10 @@ import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 
 /**
  * Columns config for the Tags table (#139 T1). Single sortable key — matches
- * the backend tags sort whitelist (just `tag`).
+ * the backend tags sort whitelist (just `title`).
  */
 export const tagColumns = (): ColumnDef<TagResponse>[] => [
-  { key: 'tag', label: 'Тег', defaultVisible: true, width: 'flex-1', accessor: (t) => t.tag },
+  { key: 'title', label: 'Тег', defaultVisible: true, width: 'flex-1', accessor: (t) => t.title },
 ];
 
 /**

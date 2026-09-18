@@ -69,7 +69,7 @@ record_tags = Table(
 class Tag(AbstractModel):
     __tablename__ = "tags"
 
-    tag: Mapped[str] = mapped_column(String(100), unique=True)
+    title: Mapped[str] = mapped_column(String(100), unique=True)
 
     services: Mapped[list["Service"]] = relationship(
         "Service", secondary=service_tags, back_populates="tags"

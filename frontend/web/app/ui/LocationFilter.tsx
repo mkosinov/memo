@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Overlay } from "./Overlay";
 
 export interface LocationFilterProps {
-  locations: { id: string; name: string }[];
+  locations: { id: string; title: string }[];
   selectedLocation: string | null;
   onSelectLocation: (locationId: string | null) => void;
 }
@@ -17,7 +17,7 @@ export function LocationFilter({
   const [isOpen, setIsOpen] = useState(false);
 
   const currentLabel = selectedLocation
-    ? locations.find((l) => l.id === selectedLocation)?.name ?? "Локация"
+    ? locations.find((l) => l.id === selectedLocation)?.title ?? "Локация"
     : "Все локации";
 
   return (
@@ -169,7 +169,7 @@ export function LocationFilter({
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span>{loc.name}</span>
+              <span>{loc.title}</span>
               {selectedLocation === loc.id && (
                 <svg
                   className="w-5 h-5 ml-auto text-[#004D56]"

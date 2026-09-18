@@ -100,7 +100,7 @@ export function ActivityDetail({
             <div className="text-[#888888] text-xs">Локация</div>
             <div className="relative inline-block mt-0.5">
               <HintText details={activity.location.address ?? activity.locationDetails}>
-                {activity.location.name}
+                {activity.location.title}
               </HintText>
             </div>
           </div>

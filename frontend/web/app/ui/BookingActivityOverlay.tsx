@@ -87,7 +87,7 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
 
           <div className="space-y-1 text-[#555555] mb-8">
             <p className="text-base">{activity.title}</p>
-            <p className="text-sm">{time} · {activity.location.name}</p>
+            <p className="text-sm">{time} · {activity.location.title}</p>
             <p className="text-sm">
               {tariffs
                 .filter((_, i) => counts[i] > 0)
@@ -132,7 +132,7 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
         <div>
           <h3 className="text-base font-medium text-[#1a1a1a]">{activity.title}</h3>
           <p className="text-sm text-[#555555]">{activity.dateFormatted}, {activity.time}</p>
-          <p className="text-sm text-[#555555]">{activity.location.name}</p>
+          <p className="text-sm text-[#555555]">{activity.location.title}</p>
         </div>
       </div>
 

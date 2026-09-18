@@ -24,7 +24,7 @@ STAFF_CREATE = {
 }
 
 LOCATION_CREATE = {
-    "name": "Test Studio",
+    "title": "Test Studio",
     "address": "Test Address",
     "capacity": 20,
 }

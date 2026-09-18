@@ -105,7 +105,7 @@ const mockMasters = [
 ];
 
 const mockLocations = [
-  { id: 'loc1', name: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 20, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
+  { id: 'loc1', title: 'Альпика', address: 'Альпика, 1 этаж', description: null, capacity: 20, yandex_map_url: null, review_url: null, record_info: null, image_url: null, archived: false, created_at: '', updated_at: '' },
 ];
 
 const mockPayments = [
@@ -308,7 +308,7 @@ describe('useRecordData', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.locations).toHaveLength(1);
-    expect(result.current.locations[0].name).toBe('Альпика');
+    expect(result.current.locations[0].title).toBe('Альпика');
   });
 
   it('returns payments array', async () => {

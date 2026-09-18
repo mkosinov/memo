@@ -30,7 +30,7 @@ SERVICE_PAYLOAD = {
 }
 
 LOCATION_PAYLOAD = {
-    "name": "Studio 1",
+    "title": "Studio 1",
     "address": "123 Main St",
     "capacity": 20,
 }

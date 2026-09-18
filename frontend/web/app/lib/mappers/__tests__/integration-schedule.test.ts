@@ -11,7 +11,8 @@ const mockMaster = {
   position: 'мастер',
   specialty: 'живопись',
   avatar_url: null,
-  is_active: true,
+  sort_order: 0,
+  archived: false,
   created_at: '',
   updated_at: '',
 };
@@ -26,7 +27,7 @@ const mockService = {
   max_age: 99,
   duration: 150,
   record_info: '',
-  is_active: true,
+  archived: false,
   created_at: '',
   updated_at: '',
   materials: [
@@ -36,20 +37,20 @@ const mockService = {
   tariffs: [
     { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
   ],
-  tags: [{ id: 'tag2', tag: 'хит' }],
+  tags: [{ id: 'tag2', title: 'хит' }],
 };
 
 const mockLocation = {
   id: 'alpika',
-  name: 'Альпика',
+  title: 'Альпика',
   address: 'ул. Альпика, 1',
   description: null,
+  archived: false,
   capacity: 10,
   yandex_map_url: null,
   review_url: null,
   record_info: null,
   image_url: null,
-  is_active: true,
   created_at: '',
   updated_at: '',
   location_hint: '1 этаж, светлая студия',
@@ -66,7 +67,6 @@ const mockActivity = {
   is_private: false,
   comment: null,
   record_info: null,
-  is_active: true,
   occupied: 2,
   created_at: '',
   updated_at: '',
@@ -122,7 +122,7 @@ describe('Full pipeline: API responses → ScheduleView', () => {
     const masters = new Map([['m1', mockMaster]]);
     const locations = new Map([
       ['alpika', mockLocation],
-      ['grand', { ...mockLocation, id: 'grand', name: 'Гранд Отель', location_hint: 'Лобби' }],
+      ['grand', { ...mockLocation, id: 'grand', title: 'Гранд Отель', location_hint: 'Лобби' }],
     ]);
 
     const index = buildWebSchedule(activities, services, masters, locations);

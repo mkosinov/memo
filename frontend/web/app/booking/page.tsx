@@ -22,7 +22,7 @@ const mockActivity: ActivityView = {
   dateFormatted: "20 мая",
   priceFormatted: "2 500 – 3 500 ₽",
   categoryColor: "#5B8C7A",
-  location: { id: "loc-1", name: "Студия на Таганке", address: "ул. Таганская, д. 10" },
+  location: { id: "loc-1", title: "Студия на Таганке", address: "ул. Таганская, д. 10" },
   guestPhotos: [],
 };
 

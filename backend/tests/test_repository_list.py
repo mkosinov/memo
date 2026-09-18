@@ -161,7 +161,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
     # and 0 for the others — desc ordering puts "B" first.
     svc = _service(title="for-activity")
     db_session.add(svc)
-    db_session.add(Location(name="L", capacity=10))
+    db_session.add(Location(title="L", capacity=10))
     await db_session.flush()
     b_master = next(r for r in rows if r.first_name == "B")  # rows from Case A
     # Re-fetch the "B" master from this session to wire the activity FK.

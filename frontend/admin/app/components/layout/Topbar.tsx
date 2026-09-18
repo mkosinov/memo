@@ -257,7 +257,7 @@ export function Topbar() {
           onSelectionChange={setFilterLocationIds}
           label="Локации"
           getId={(l) => l.id}
-          getLabel={(l) => l.name}
+          getLabel={(l) => l.title}
           footer={
             <ArchivedToggle
               testId="show-archived-locations-toggle"

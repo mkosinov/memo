@@ -45,7 +45,7 @@
   },
   "location": {
     "active": {
-      "name": "Студия на Невском",
+      "title": "Студия на Невском",
       "short_title": null,
       "address": "Невский пр. 28",
       "description": "Уютная студия",
@@ -62,7 +62,7 @@
       "archived": false
     },
     "archived": {
-      "name": "Студия на Невском",
+      "title": "Студия на Невском",
       "short_title": null,
       "address": "Невский пр. 28",
       "description": "Уютная студия",
@@ -104,7 +104,7 @@
       "tags": [
         {
           "id": "tag-1",
-          "tag": "керамика"
+          "title": "керамика"
         }
       ],
       "materials": [
@@ -141,7 +141,7 @@
       "tags": [
         {
           "id": "tag-1",
-          "tag": "керамика"
+          "title": "керамика"
         }
       ],
       "materials": [

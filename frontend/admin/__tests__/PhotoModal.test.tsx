@@ -74,7 +74,7 @@ const ACTIVITY_FIXTURE = {
 
 const LOCATION_FIXTURE = {
   id: 'loc-1',
-  name: 'Студия на Невском',
+  title: 'Студия на Невском',
   short_title: 'Невский',
   address: 'Невский пр. 28',
   description: null,
@@ -91,7 +91,7 @@ const LOCATION_FIXTURE = {
 /** Second location — search-filtering needs ≥2 options to prove hiding. */
 const LOCATION_FIXTURE_2 = {
   id: 'loc-2',
-  name: 'Мастерская на Литейном',
+  title: 'Мастерская на Литейном',
   short_title: 'Литейный',
   address: 'Литейный пр. 17',
   description: null,
@@ -105,7 +105,7 @@ const LOCATION_FIXTURE_2 = {
   updated_at: '2026-01-01T00:00:00',
 };
 
-const TAG_FIXTURE = { id: 'tag1', tag: 'Гуашь' };
+const TAG_FIXTURE = { id: 'tag1', title: 'Гуашь' };
 
 /** «dd.mm.yyyy HH:mm — Локация — Услуга» (date-first, spec §7.7). */
 const CANONICAL_LABEL = '07.06.2026 14:05 — Студия на Невском — Картина маслом';
@@ -371,7 +371,7 @@ describe('PhotoModal — tag submission (GH #211 Task 9)', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const payload = onSubmit.mock.calls[0][0];
-    expect(payload.tag_ids).toEqual([{ id: 'tag1', tag: 'Гуашь' }]);
+    expect(payload.tag_ids).toEqual([{ id: 'tag1', title: 'Гуашь' }]);
   });
 });
 

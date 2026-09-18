@@ -26,14 +26,14 @@ class TestLocationSchemaShortTitle:
         """LocationBase schema accepts short_title as optional str."""
         from src.schemas.location import LocationBase
 
-        loc = LocationBase(name="Test", capacity=10, short_title="T")
+        loc = LocationBase(title="Test", capacity=10, short_title="T")
         assert loc.short_title == "T"
 
     def test_location_base_short_title_defaults_to_none(self) -> None:
         """LocationBase schema defaults short_title to None when omitted."""
         from src.schemas.location import LocationBase
 
-        loc = LocationBase(name="Test", capacity=10)
+        loc = LocationBase(title="Test", capacity=10)
         assert loc.short_title is None
 
     def test_location_response_includes_short_title(self) -> None:
@@ -44,7 +44,7 @@ class TestLocationSchemaShortTitle:
 
         resp = LocationResponse(
             id="test-id",
-            name="Test Studio",
+            title="Test Studio",
             capacity=20,
             short_title="TS",
             created_at=datetime.now(),
@@ -61,7 +61,7 @@ class TestLocationSchemaShortTitle:
 
         resp = LocationResponse(
             id="test-id",
-            name="Test Studio",
+            title="Test Studio",
             capacity=20,
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -81,7 +81,7 @@ class TestLocationApiShortTitle:
         resp = api_client.post(
             "/api/v1/locations",
             json={
-                "name": "Гранд Отель Поляна 1389",
+                "title": "Гранд Отель Поляна 1389",
                 "capacity": 30,
                 "short_title": "Гранд",
             },
@@ -96,7 +96,7 @@ class TestLocationApiShortTitle:
         """POST /api/v1/locations omitting short_title → null."""
         resp = api_client.post(
             "/api/v1/locations",
-            json={"name": "Альпика", "capacity": 15},
+            json={"title": "Альпика", "capacity": 15},
         )
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         assert resp.json()["short_title"] is None
@@ -106,7 +106,7 @@ class TestLocationApiShortTitle:
         create_resp = api_client.post(
             "/api/v1/locations",
             json={
-                "name": "Polyana 1389",
+                "title": "Polyana 1389",
                 "capacity": 25,
                 "short_title": "Polyana",
             },
@@ -121,7 +121,7 @@ class TestLocationApiShortTitle:
         """PUT /api/v1/locations/{id} with short_title updates it."""
         create_resp = api_client.post(
             "/api/v1/locations",
-            json={"name": "Studio", "capacity": 10},
+            json={"title": "Studio", "capacity": 10},
         )
         loc_id = create_resp.json()["id"]
         assert create_resp.json()["short_title"] is None
@@ -131,7 +131,7 @@ class TestLocationApiShortTitle:
             json={
                 # #207 §3.2: is_active removed from LocationUpdate (PUT) —
                 # archive/restore only via POST endpoints.
-                "name": "Studio",
+                "title": "Studio",
                 "capacity": 10,
                 "short_title": "ST",
             },
@@ -144,7 +144,7 @@ class TestLocationApiShortTitle:
         create_resp = api_client.post(
             "/api/v1/locations",
             json={
-                "name": "Studio",
+                "title": "Studio",
                 "capacity": 10,
                 "short_title": "S",
             },
@@ -155,7 +155,7 @@ class TestLocationApiShortTitle:
             f"/api/v1/locations/{loc_id}",
             json={
                 # #207 §3.2: is_active removed from LocationUpdate (PUT).
-                "name": "Studio",
+                "title": "Studio",
                 "capacity": 10,
                 "short_title": None,
             },
@@ -168,7 +168,7 @@ class TestLocationApiShortTitle:
         api_client.post(
             "/api/v1/locations",
             json={
-                "name": "Test",
+                "title": "Test",
                 "capacity": 5,
                 "short_title": "T",
             },

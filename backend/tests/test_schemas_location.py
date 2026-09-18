@@ -15,7 +15,7 @@ from src.schemas.location import LocationResponse
 def _location_orm(**overrides) -> SimpleNamespace:
     base = dict(
         id="loc-1",
-        name="Studio A",
+        title="Studio A",
         short_title=None,
         address=None,
         description=None,
@@ -37,7 +37,7 @@ def _location_orm(**overrides) -> SimpleNamespace:
 def _location_kwargs(**overrides) -> dict:
     base = dict(
         id="loc-1",
-        name="Studio A",
+        title="Studio A",
         capacity=10,
         created_at=datetime(2025, 1, 1, tzinfo=UTC),
         updated_at=datetime(2025, 1, 1, tzinfo=UTC),

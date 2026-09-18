@@ -12,7 +12,7 @@ export interface ScheduleView {
   photos: { url: string; isPublic: boolean; tags: string[] }[];
   time: string;
   duration: string;
-  location: { id: string; name: string; address?: string };
+  location: { id: string; title: string; address?: string };
   guestsCount: number;
   material: string;
   size: string;

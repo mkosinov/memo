@@ -12,11 +12,11 @@ from src.services.generic import GenericService
 class TagService(GenericService[TagCreate, TagCreate, TagResponse]):
     """Tag service with NOT NULL field protection on PATCH."""
 
-    NOT_NULL_FIELDS = {"tag"}
+    NOT_NULL_FIELDS = {"title"}
 
-    # GH #212 search matrix (spec §5.2): substring on ``tag``, exact id
+    # GH #212 search matrix (spec §5.2): substring on ``title``, exact id
     # equality when q parses as a full UUID (deep-link prerequisite #216).
-    search_fields = [SearchField(Tag.tag), SearchField(Tag.id, kind="uuid")]
+    search_fields = [SearchField(Tag.title), SearchField(Tag.id, kind="uuid")]
 
 
 @lru_cache

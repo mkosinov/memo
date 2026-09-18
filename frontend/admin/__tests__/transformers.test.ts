@@ -25,7 +25,7 @@ const masterFixture: MasterViewResponse = {
 
 const locationFixture: LocationResponse = {
   id: 'loc-1',
-  name: 'Студия на Невском',
+  title: 'Студия на Невском',
   address: 'Невский пр. 28',
   description: 'Уютная студия',
   capacity: 10,
@@ -51,7 +51,7 @@ const serviceFixture: ServiceResponse = {
   duration: 180,
   record_info: 'Запись за 24 часа',
   tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500 }],
-  tags: [{ id: 'tag-1', tag: 'масло' }],
+  tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
@@ -81,9 +81,9 @@ describe('transformMaster', () => {
 // ─── transformLocation ──────────────────────────────────────────────────────
 
 describe('transformLocation', () => {
-  it('maps name and address', () => {
+  it('maps title and address', () => {
     const result = transformLocation(locationFixture);
-    expect(result.name).toBe('Студия на Невском');
+    expect(result.title).toBe('Студия на Невском');
     expect(result.address).toBe('Невский пр. 28');
   });
 

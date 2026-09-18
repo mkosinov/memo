@@ -92,7 +92,7 @@ const serviceS1 = {
   archived: false, created_at: '', updated_at: '',
 };
 const locationAlpika = {
-  id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж', description: null,
+  id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж', description: null,
   capacity: 10, yandex_map_url: null, review_url: null, record_info: null,
   image_url: null, location_hint: null, archived: false, created_at: '', updated_at: '',
 };
@@ -659,7 +659,7 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
 
   it('exposes FULL schedule lists (incl. archived) while domain slices stay active-only (GH #267)', async () => {
     const archivedMaster = { ...masterM1, id: 'm-arch', first_name: 'Архивный', archived: true };
-    const archivedLocation = { ...locationAlpika, id: 'loc-arch', name: 'Архивная студия', archived: true };
+    const archivedLocation = { ...locationAlpika, id: 'loc-arch', title: 'Архивная студия', archived: true };
     seedDictionaries(
       [masterM1, archivedMaster],
       [serviceS1],
@@ -733,7 +733,7 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
   // ─── GH #267: archived-visibility gate on enrichedData.items ────────────────
 
   const archivedMasterM2 = { ...masterM2, id: 'm-arch', first_name: 'Архивный', archived: true };
-  const archivedLocationLoc = { ...locationAlpika, id: 'loc-arch', name: 'Архивная студия', archived: true };
+  const archivedLocationLoc = { ...locationAlpika, id: 'loc-arch', title: 'Архивная студия', archived: true };
   const archivedServiceS = { ...serviceS1, id: 's-arch', title: 'Архивная услуга', archived: true };
 
   it('shows a card on an ARCHIVED master by default (showArchivedMasters=true) (GH #267)', async () => {

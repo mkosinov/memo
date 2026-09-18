@@ -29,7 +29,7 @@ const mockActivity: ActivityView = {
     { id: "act-3", date: "18 мая", time: "17:00" },
     { id: "act-4", date: "20 мая", time: "14:00" },
   ],
-  location: { id: "loc-1", name: "Студия на Таганке", address: "ул. Таганская, д. 10" },
+  location: { id: "loc-1", title: "Студия на Таганке", address: "ул. Таганская, д. 10" },
   locationDetails: "Метро Таганская, 5 минут пешком",
   teacherDetails: "Художник-живописец, педагог с 10-летним стажем",
 };

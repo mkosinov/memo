@@ -46,7 +46,7 @@ function putPayload(entity: string, seed: Record<string, any>): Record<string, u
       };
     case 'locations':
       return {
-        name: seed.name,
+        title: seed.title,
         short_title: seed.short_title ?? null,
         address: seed.address ?? null,
         description: seed.description ?? null,

@@ -43,7 +43,7 @@ const mockServices = [
       { id: 'mat-2', title: 'Масло', description: 'Масляные краски — классика', note: 'Густые, сохнут долго' },
     ],
     tariffs: [{ id: 't-1', service_id: 'svc-1', title: 'Стандарт', description: null, price: 3500 }],
-    tags: [{ id: 'tag-1', tag: 'взрослым' }],
+    tags: [{ id: 'tag-1', title: 'взрослым' }],
     is_active: true,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
@@ -85,7 +85,7 @@ const mockMasters = [
 const mockLocations = [
   {
     id: 'loc-1',
-    name: 'Альпика',
+    title: 'Альпика',
     address: 'ул. Альпика, 1',
     description: null,
     capacity: 20,
@@ -100,7 +100,7 @@ const mockLocations = [
   },
   {
     id: 'loc-2',
-    name: 'Гранд Отель Поляна',
+    title: 'Гранд Отель Поляна',
     address: 'ул. Просвещения, 60',
     description: null,
     capacity: 15,

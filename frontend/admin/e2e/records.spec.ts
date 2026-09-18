@@ -604,7 +604,7 @@ test.describe('Records Page — Table and Filters', () => {
 
       const locResp = await request.get(`${BACKEND}/api/v1/locations`);
       const locations = (await locResp.json()).items ?? [];
-      const locationName = locations.find((l: any) => l.id === activity.location_id)?.name;
+      const locationName = locations.find((l: any) => l.id === activity.location_id)?.title;
       expect(locationName).toBeTruthy();
 
       await waitForRecordsReady(page);
@@ -1003,7 +1003,7 @@ test.describe('Records Page — Table and Filters', () => {
       // Learn the location name for the Combobox search
       const locResp = await request.get(`${BACKEND}/api/v1/locations`);
       const locations = (await locResp.json()).items ?? [];
-      const locationName = locations.find((l: any) => l.id === activity.location_id)?.name;
+      const locationName = locations.find((l: any) => l.id === activity.location_id)?.title;
       expect(locationName).toBeTruthy();
 
       await waitForRecordsReady(page);

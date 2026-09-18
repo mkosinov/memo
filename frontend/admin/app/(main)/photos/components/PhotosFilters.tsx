@@ -35,15 +35,15 @@ export function PhotosFilters() {
 
   const tagTitleById = useMemo(() => {
     const map = new Map<string, string>();
-    tags.forEach((t) => map.set(t.id, t.tag));
+    tags.forEach((t) => map.set(t.id, t.title));
     return map;
   }, [tags]);
 
-  // formatActivityLabel's contract is Map<string, { title }> — adapt the
-  // context's LocationResponse map (locations carry `name`, not `title`).
+  // formatActivityLabel's contract is Map<string, { title }> — the context's
+  // LocationResponse map already carries `title` (#172), pass it through.
   const locationTitleMap = useMemo(() => {
     const map = new Map<string, { title: string }>();
-    locationsMap.forEach((l, id) => map.set(id, { title: l.name }));
+    locationsMap.forEach((l, id) => map.set(id, { title: l.title }));
     return map;
   }, [locationsMap]);
 
@@ -57,8 +57,8 @@ export function PhotosFilters() {
   }));
   const locationOptions: ComboboxOption[] = Array.from(locationsMap.values()).map((l) => ({
     value: l.id,
-    label: l.name,
-    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+    label: l.title,
+    searchText: `${l.title} ${l.short_title ?? ''}`.trim(),
   }));
 
   const handleReset = () => {
@@ -174,10 +174,10 @@ export function PhotosFilters() {
           onSelectItem={(item) => addTag(item.id)}
           onSearch={async (q) => {
             const lower = q.toLowerCase();
-            return tags.filter((t) => t.tag.toLowerCase().includes(lower));
+            return tags.filter((t) => t.title.toLowerCase().includes(lower));
           }}
           label=""
-          displayField="tag"
+          displayField="title"
           placeholder="Добавить тег..."
           minChars={2}
         />

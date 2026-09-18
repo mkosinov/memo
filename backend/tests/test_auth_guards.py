@@ -53,14 +53,14 @@ _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
     ("positions-write", "POST", "/api/v1/positions", {"title": "Гвард Должность"}),
     ("masters-all-read", "GET", "/api/v1/masters/all", None),
     ("locations-write", "POST", "/api/v1/locations", {
-        "name": "Гвард Студия", "address": "Гвард Адрес", "capacity": 20,
+        "title": "Гвард Студия", "address": "Гвард Адрес", "capacity": 20,
     }),
     ("services-write", "POST", "/api/v1/services", {
         "title": "Гвард Сервис", "description": "test",
         "image_url": "https://example.com/g.jpg", "specialty": "живопись",
         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }),
-    ("tags-write", "POST", "/api/v1/tags", {"tag": f"guard-{uuid.uuid4().hex[:8]}"}),
+    ("tags-write", "POST", "/api/v1/tags", {"title": f"guard-{uuid.uuid4().hex[:8]}"}),
     ("activities-write", "POST", "/api/v1/activities", None),  # FK ids filled in-test
     ("photos-write", "POST", "/api/v1/photos", {"filename": f"g-{uuid.uuid4().hex[:8]}.jpg"}),
     ("records-read", "GET", "/api/v1/records", None),
@@ -157,7 +157,7 @@ def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | Non
         "min_age": 6, "max_age": 99, "duration": 90, "record_info": "t",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Гв Студия", "address": "Гв Адрес", "capacity": 20,
+        "title": "Гв Студия", "address": "Гв Адрес", "capacity": 20,
     }).json()
     from datetime import UTC, datetime, timedelta
     return {
@@ -375,7 +375,7 @@ class TestSecFetchSite:
     def test_cross_site_authenticated_mutation_403(self, api_client) -> None:
         resp = api_client.post(
             "/api/v1/tags",
-            json={"tag": f"csrf-{uuid.uuid4().hex[:8]}"},
+            json={"title": f"csrf-{uuid.uuid4().hex[:8]}"},
             headers={"Sec-Fetch-Site": "cross-site"},
         )
         assert resp.status_code == 403
@@ -384,14 +384,14 @@ class TestSecFetchSite:
     def test_same_site_authenticated_mutation_passes(self, api_client) -> None:
         resp = api_client.post(
             "/api/v1/tags",
-            json={"tag": f"csrf-{uuid.uuid4().hex[:8]}"},
+            json={"title": f"csrf-{uuid.uuid4().hex[:8]}"},
             headers={"Sec-Fetch-Site": "same-origin"},
         )
         assert resp.status_code == 201, resp.text
 
     def test_missing_header_authenticated_mutation_passes(self, api_client) -> None:
         """Legacy clients/tools (no Sec-Fetch-Site) pass — spec §2.14."""
-        resp = api_client.post("/api/v1/tags", json={"tag": f"csrf-{uuid.uuid4().hex[:8]}"})
+        resp = api_client.post("/api/v1/tags", json={"title": f"csrf-{uuid.uuid4().hex[:8]}"})
         assert resp.status_code == 201, resp.text
 
     def test_cross_site_anonymous_public_route_exempt(self, anon_client, create_activity) -> None:

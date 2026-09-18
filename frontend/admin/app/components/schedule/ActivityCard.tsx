@@ -98,7 +98,7 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
   };
 
   const foundLocation = locations.find(l => l.id === activity.locationId);
-  const locationShortName = foundLocation?.shortTitle || foundLocation?.name || '';
+  const locationShortName = foundLocation?.shortTitle || foundLocation?.title || '';
 
   // GH #267: archived reference entities — card stays but is muted and badged.
   // opacity-70 (not 60): worst-case palette (#9A5870) keeps black text ≥4.5:1

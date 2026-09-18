@@ -1,6 +1,6 @@
 export interface LocationDTO {
   id: string;
-  name: string;
+  title: string;
   address: string;
   hours?: string;
   photo_url?: string;

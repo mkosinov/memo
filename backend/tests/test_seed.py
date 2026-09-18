@@ -274,14 +274,14 @@ async def test_seed_populates_materials(db_manager: DBManager) -> None:
 
 
 async def test_seed_has_guest_tag(db_manager: DBManager) -> None:
-    """Tag with id 'tag7' exists and has tag 'гость'."""
+    """Tag with id 'tag7' exists and has title 'гость'."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text("SELECT tag FROM tags WHERE id = 'tag7'")
+            text("SELECT title FROM tags WHERE id = 'tag7'")
         )
         row = result.one_or_none()
         assert row is not None, "tag7 does not exist"

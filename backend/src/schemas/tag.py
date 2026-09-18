@@ -4,12 +4,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-# Sort whitelist for GET /api/v1/tags (#205 Task 3, spec §4.5).
-TagSortBy = Literal["tag"]
+# Sort whitelist for GET /api/v1/tags (#205 Task 3, spec §4.5; #172: ``tag``
+# → ``title`` — thing-title canon).
+TagSortBy = Literal["title"]
 
 
 class TagCreate(BaseModel):
-    tag: str
+    title: str
 
 
 class TagPatch(BaseModel):
@@ -18,10 +19,10 @@ class TagPatch(BaseModel):
     All fields optional. None means 'don't change'.
     """
 
-    tag: str | None = None
+    title: str | None = None
 
 
 class TagResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    tag: str
+    title: str

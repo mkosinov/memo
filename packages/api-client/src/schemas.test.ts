@@ -540,7 +540,7 @@ describe('PositionPatchSchema', () => {
 
 const validLocation = {
   id: 'loc-1',
-  name: 'Студия на Невском',
+  title: 'Студия на Невском',
   address: 'Невский пр. 28',
   description: 'Уютная студия',
   capacity: 10,
@@ -557,7 +557,7 @@ describe('LocationResponseSchema', () => {
   it('parses a valid location response', () => {
     const result = LocationResponseSchema.parse(validLocation);
     expect(result.id).toBe('loc-1');
-    expect(result.name).toBe('Студия на Невском');
+    expect(result.title).toBe('Студия на Невском');
     expect(result.capacity).toBe(10);
   });
 
@@ -568,8 +568,8 @@ describe('LocationResponseSchema', () => {
     expect(result.description).toBeNull();
   });
 
-  it('rejects missing name', () => {
-    const { name, ...without } = validLocation;
+  it('rejects missing title', () => {
+    const { title, ...without } = validLocation;
     expect(() => LocationResponseSchema.parse(without)).toThrow();
   });
 
@@ -626,7 +626,7 @@ const validTariff = {
 
 const validTag = {
   id: 'tag-1',
-  tag: 'масло',
+  title: 'масло',
 };
 
 // GH #223: nested material payload on ServiceResponse (read shape, spec §4/§5).
@@ -667,7 +667,7 @@ describe('ServiceResponseSchema', () => {
     expect(result.tariffs[0].title).toBe('Взрослый');
     expect(result.tariffs[0].price).toBe(2500);
     expect(result.tags).toHaveLength(1);
-    expect(result.tags[0].tag).toBe('масло');
+    expect(result.tags[0].title).toBe('масло');
   });
 
   it('parses service with empty tariffs and tags', () => {
@@ -868,7 +868,7 @@ const validPhoto = {
   activity_id: 'activity-1',
   location_id: 'location-1',
   is_public: true,
-  tags: [{ id: 'tag-1', tag: 'керамика' }],
+  tags: [{ id: 'tag-1', title: 'керамика' }],
   client_name: 'Иван Петров',
   created_at: '2024-06-01T12:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -884,7 +884,7 @@ describe('PhotoResponseSchema', () => {
     expect(result.activity_id).toBe('activity-1');
     expect(result.location_id).toBe('location-1');
     expect(result.is_public).toBe(true);
-    expect(result.tags).toEqual([{ id: 'tag-1', tag: 'керамика' }]);
+    expect(result.tags).toEqual([{ id: 'tag-1', title: 'керамика' }]);
     expect(result.client_name).toBe('Иван Петров');
   });
 
@@ -1264,7 +1264,7 @@ describe('Type exports', () => {
 
   it('LocationResponse is a valid type', () => {
     const l: LocationResponse = validLocation;
-    expect(l.name).toBe('Студия на Невском');
+    expect(l.title).toBe('Студия на Невском');
   });
 
   it('ServiceResponse is a valid type', () => {
@@ -1337,17 +1337,17 @@ describe('Type exports', () => {
 
   it('LocationCreate input accepts minimal fields (defaults apply)', () => {
     const l: z.input<typeof LocationCreateSchema> = {
-      name: 'Новая студия',
+      title: 'Новая студия',
       capacity: 20,
     };
     const parsed = LocationCreateSchema.parse(l);
-    expect(parsed.name).toBe('Новая студия');
+    expect(parsed.title).toBe('Новая студия');
     expect(parsed.address).toBe('');
   });
 
   it('LocationUpdate is a valid type', () => {
     const l: LocationUpdate = {
-      name: 'Обновлённая студия',
+      title: 'Обновлённая студия',
       short_title: '',
       address: '',
       description: '',
@@ -1359,7 +1359,7 @@ describe('Type exports', () => {
       location_hint: '',
       tag_ids: [],
     };
-    expect(l.name).toBe('Обновлённая студия');
+    expect(l.title).toBe('Обновлённая студия');
   });
 
   it('TariffCreate input accepts minimal fields', () => {
@@ -1527,14 +1527,14 @@ describe('ServiceUpdateSchema', () => {
 // ─── LocationCreateSchema ────────────────────────────────────────────────
 
 const validLocationCreate = {
-  name: 'Новая студия',
+  title: 'Новая студия',
   capacity: 15,
 };
 
 describe('LocationCreateSchema', () => {
   it('parses a valid location create request with defaults', () => {
     const result = LocationCreateSchema.parse(validLocationCreate);
-    expect(result.name).toBe('Новая студия');
+    expect(result.title).toBe('Новая студия');
     expect(result.capacity).toBe(15);
     expect(result.address).toBe('');
     expect(result.description).toBe('');
@@ -1548,7 +1548,7 @@ describe('LocationCreateSchema', () => {
 
   it('parses with all fields', () => {
     const data = {
-      name: 'Большой зал',
+      title: 'Большой зал',
       address: 'ул. Ленина 10',
       description: 'Зал на 50 человек',
       capacity: 50,
@@ -1560,13 +1560,13 @@ describe('LocationCreateSchema', () => {
       tag_ids: ['tag-1'],
     };
     const result = LocationCreateSchema.parse(data);
-    expect(result.name).toBe('Большой зал');
+    expect(result.title).toBe('Большой зал');
     expect(result.capacity).toBe(50);
     expect(result.tag_ids).toHaveLength(1);
   });
 
-  it('rejects empty name', () => {
-    const data = { name: '', capacity: 15 };
+  it('rejects empty title', () => {
+    const data = { title: '', capacity: 15 };
     expect(() => LocationCreateSchema.parse(data)).toThrow();
   });
 
@@ -1576,7 +1576,7 @@ describe('LocationCreateSchema', () => {
   });
 
   it('rejects capacity < 1', () => {
-    const data = { name: 'Пустая', capacity: 0 };
+    const data = { title: 'Пустая', capacity: 0 };
     expect(() => LocationCreateSchema.parse(data)).toThrow();
   });
 });
@@ -1586,15 +1586,15 @@ describe('LocationCreateSchema', () => {
 describe('LocationUpdateSchema', () => {
   it('accepts a full canonical update payload', () => {
     const result = LocationUpdateSchema.parse({
-      name: 'Обновлённое',
+      title: 'Обновлённое',
       capacity: 20,
     });
-    expect(result.name).toBe('Обновлённое');
+    expect(result.title).toBe('Обновлённое');
   });
 
   it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
-      LocationUpdateSchema.parse({ name: 'Обновлённое', capacity: 20, is_active: true }),
+      LocationUpdateSchema.parse({ title: 'Обновлённое', capacity: 20, is_active: true }),
     ).toThrow();
   });
 

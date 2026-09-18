@@ -4,9 +4,9 @@ import { LocationFilter } from "../LocationFilter";
 
 describe("LocationFilter", () => {
   const locations = [
-    { id: "1", name: "Альпика" },
-    { id: "2", name: "Гранд Отель Поляна" },
-    { id: "3", name: "Поляна 1389" },
+    { id: "1", title: "Альпика" },
+    { id: "2", title: "Гранд Отель Поляна" },
+    { id: "3", title: "Поляна 1389" },
   ];
 
   it("renders a button trigger with location icon and 'Все локации' text", () => {

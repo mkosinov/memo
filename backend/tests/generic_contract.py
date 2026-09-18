@@ -163,7 +163,7 @@ class EntityConfig(NamedTuple):
     not_found_code: str  # e.g. "MASTER_NOT_FOUND" — explicit, NOT derived (activities → ACTIVITY, spec D15)
     response_schema: type  # <Entity>Response — model_validate + exact-keys on HTTP bodies
     # Column with a DB unique constraint that multi-row tests must vary per row
-    # (only Tag.tag is unique=True among the 8 models). Trailing fields below
+    # (only Tag.title is unique=True among the 8 models). Trailing fields below
     # all have defaults so unspecified entries keep working.
     unique_row_field: str | None = None
     # Field overrides that produce a row sorting BEFORE ``create_data`` per
@@ -234,28 +234,28 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         model=Location,
         create_schema=LocationCreate,
         patch_schema=LocationPatch,
-        create_data={"name": "Loc", "capacity": 5, "address": "addr"},
+        create_data={"title": "Loc", "capacity": 5, "address": "addr"},
         fk_map={},
-        not_null_field="name",
+        not_null_field="title",
         not_null_sentinel="Loc2",
         nullable_field="address",
         nullable_sentinel="addr",
         delete_semantics="hard",
         update_schema=LocationUpdate,
-        update_data={"name": "Loc2", "capacity": 10},
+        update_data={"title": "Loc2", "capacity": 10},
         router_prefix="/api/v1/locations",
         not_found_code="LOCATION_NOT_FOUND",
         response_schema=LocationResponse,
-        # §4.4 default order: sort_order ASC, name ASC, id ASC. Both rows share
-        # sort_order=0 (column default), so ``name`` decides. "!" (0x21) < "L"
-        # (0x4C) → sentinel sorts BEFORE the default ``name="Loc"``.
-        earlier_create_data={"name": "!AAA-contract"},
+        # §4.4 default order: sort_order ASC, title ASC, id ASC. Both rows share
+        # sort_order=0 (column default), so ``title`` decides. "!" (0x21) < "L"
+        # (0x4C) → sentinel sorts BEFORE the default ``title="Loc"``.
+        earlier_create_data={"title": "!AAA-contract"},
         # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
         # stored value found by a lowercase substring query. All 4 substring
         # fields carry the probe; URL fields are exact-kind and covered by a
         # dedicated full-URL test (partial URLs never match).
         search_override={
-            "name": "Флигель",
+            "title": "Флигель",
             "short_title": "Флигель",
             "address": "Флигель, дом 1",
             "description": "Флигель с мансардой",
@@ -395,27 +395,27 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         model=Tag,
         create_schema=TagCreate,
         patch_schema=TagPatch,
-        create_data={"tag": "t1"},
+        create_data={"title": "t1"},
         fk_map={},
-        not_null_field="tag",
+        not_null_field="title",
         not_null_sentinel="t2",
         nullable_field=None,
         nullable_sentinel=None,
         delete_semantics="hard",
         update_schema=TagCreate,  # Tag has no TagUpdate — TagService is GenericService[TagCreate, TagCreate, TagResponse]
-        update_data={"tag": "t2-upd"},
+        update_data={"title": "t2-upd"},
         router_prefix="/api/v1/tags",
         not_found_code="TAG_NOT_FOUND",
         response_schema=TagResponse,
-        unique_row_field="tag",
-        # §4.4 default order: tag ASC, id ASC. "!" (0x21) < "t" (0x74) →
-        # sentinel sorts BEFORE the default ``tag="t1"``.
-        earlier_create_data={"tag": "!aaa-contract"},
+        unique_row_field="title",
+        # §4.4 default order: title ASC, id ASC. "!" (0x21) < "t" (0x74) →
+        # sentinel sorts BEFORE the default ``title="t1"``.
+        earlier_create_data={"title": "!aaa-contract"},
         # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
         # stored value found by a lowercase substring query. Differs from
         # create_data ("t1") so multi-row tests never hit the tag UNIQUE
         # constraint.
-        search_override={"tag": "Живопись"},
+        search_override={"title": "Живопись"},
         search_query="жив",
     ),
     VisitorService: EntityConfig(
@@ -604,7 +604,7 @@ def _search_field_params() -> list:
     ``test_substring_match_case_insensitive`` seeds ONE row carrying the
     probe on ALL fields at once (matching via ANY field passes); these rows
     pin each field SEPARATELY: masters first_name AND last_name, materials/
-    services title AND description, locations name/short_title/address/
+    services title AND description, locations title/short_title/address/
     description, visitors name (single-field — parity row).
     """
     params = []

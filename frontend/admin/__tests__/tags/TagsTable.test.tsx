@@ -54,10 +54,10 @@ const mockGetTags = vi.mocked(getTags);
 
 // ─── Test data ───────────────────────────────────────────────────────────
 
-// Minimal mock tags — TagResponse only has { id, tag }
+// Minimal mock tags — TagResponse only has { id, title }
 const TEST_TAGS: TagResponse[] = [
-  { id: 't-1', tag: 'Живопись' },
-  { id: 't-2', tag: 'Керамика' },
+  { id: 't-1', title: 'Живопись' },
+  { id: 't-2', title: 'Керамика' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ describe('TagsTable status column removal (GH #194)', () => {
   });
 
   it('does not render an "Активен" status badge for a row', async () => {
-    setupEnvelope({ items: [{ id: 't-1', tag: 'Живопись' }], total: 1 });
+    setupEnvelope({ items: [{ id: 't-1', title: 'Живопись' }], total: 1 });
     renderTable();
     // The row itself should render the tag name…
     expect(await screen.findByText('Живопись')).toBeInTheDocument();
@@ -287,7 +287,7 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
       expect(mockGetTags).toHaveBeenCalledWith({
         page: 1,
         per_page: 10,
-        sort_by: 'tag',
+        sort_by: 'title',
         sort_order: 'asc',
       });
     });
@@ -298,7 +298,7 @@ describe('TagsTable server pagination/sort (#205 §5.2/§5.3)', () => {
       expect(mockGetTags).toHaveBeenCalledWith({
         page: 1,
         per_page: 10,
-        sort_by: 'tag',
+        sort_by: 'title',
         sort_order: 'desc',
       });
     });

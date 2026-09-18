@@ -1,7 +1,7 @@
 /**
  * Payload-mapping tests for PhotosTable handlers (GH #211 Task 9):
  * the modal's form data (owner slots as strings/null, tag_ids as
- * {id, tag} objects) must reach the mutations as the API contract —
+ * {id, title} objects) must reach the mutations as the API contract —
  * owners as string|null, tag_ids as string[]. Covers BOTH create and
  * edit, plus the 422 surfacing path (rejected mutation → error toast).
  */
@@ -13,7 +13,7 @@ import type { PhotoResponse } from '@memo/api-client';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-// Modal-shaped payload — owners as strings/null, tag_ids as {id, tag}
+// Modal-shaped payload — owners as strings/null, tag_ids as {id, title}
 // objects (exactly what the real PhotoModal submits).
 const { shared, MODAL_PAYLOAD } = vi.hoisted(() => ({
   shared: {
@@ -29,7 +29,7 @@ const { shared, MODAL_PAYLOAD } = vi.hoisted(() => ({
     activity_id: null,
     location_id: null,
     is_public: true,
-    tag_ids: [{ id: 'tag-1', tag: 'Гуашь' }],
+    tag_ids: [{ id: 'tag-1', title: 'Гуашь' }],
   },
 }));
 
@@ -99,7 +99,7 @@ const mockPhoto: PhotoResponse = {
   activity_id: null,
   location_id: null,
   is_public: true,
-  tags: [{ id: 'tag-1', tag: 'Гуашь' }],
+  tags: [{ id: 'tag-1', title: 'Гуашь' }],
   client_name: 'Анна Иванова',
   created_at: '2026-06-07T14:05:00',
   updated_at: '2026-06-07T14:05:00',

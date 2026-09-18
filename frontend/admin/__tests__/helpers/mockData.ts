@@ -58,8 +58,8 @@ export const mockServices: Service[] = [
 ];
 
 export const mockLocations: Location[] = [
-  { id: 'alpika', name: 'Альпика', address: 'Альпика, 1 этаж' },
-  { id: 'grand', name: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
+  { id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж' },
+  { id: 'grand', title: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
 ];
 
 /**
@@ -179,7 +179,7 @@ export const mockTariffs = [
 
 export const mockLocationResponse: LocationResponse = {
   id: 'loc-1',
-  name: 'Студия на Невском',
+  title: 'Студия на Невском',
   address: 'Невский пр. 28',
   description: 'Уютная студия',
   capacity: 10,
@@ -196,7 +196,7 @@ export const mockLocationResponse: LocationResponse = {
 
 export const mockLocationResponseArchived: LocationResponse = {
   id: 'loc-2',
-  name: 'Гранд Отель Поляна',
+  title: 'Гранд Отель Поляна',
   address: 'Гранд Отель, лобби',
   description: null,
   capacity: 20,

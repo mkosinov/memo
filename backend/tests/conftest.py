@@ -330,7 +330,7 @@ def create_location(api_client):
     Usage::
 
         location = create_location()
-        location = create_location(name="Альпика", capacity=30)
+        location = create_location(title="Альпика", capacity=30)
     """
     _counter = 0
 
@@ -338,7 +338,7 @@ def create_location(api_client):
         nonlocal _counter
         _counter += 1
         payload = {
-            "name": f"Test Studio {_counter}",
+            "title": f"Test Studio {_counter}",
             "address": f"Test Address {_counter}",
             "capacity": 20,
             **overrides,
@@ -356,14 +356,14 @@ def create_tag(api_client):
     Usage::
 
         tag = create_tag()
-        tag = create_tag(tag="beginner")
+        tag = create_tag(title="beginner")
     """
     import uuid as _uuid
 
     def factory(**overrides):
         unique = _uuid.uuid4().hex[:8]
         payload = {
-            "tag": f"tag-{unique}",
+            "title": f"tag-{unique}",
             **overrides,
         }
         resp = api_client.post("/api/v1/tags", json=payload)
@@ -620,7 +620,7 @@ async def sample_record(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Rec Studio", "address": "Rec Address", "capacity": 20,
+        "title": "Rec Studio", "address": "Rec Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -683,7 +683,7 @@ async def sample_record_with_visits(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "St Studio", "address": "St Address", "capacity": 20,
+        "title": "St Studio", "address": "St Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -727,7 +727,7 @@ async def sample_activity_with_capacity(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Cap Studio", "address": "Cap Address", "capacity": 20,
+        "title": "Cap Studio", "address": "Cap Address", "capacity": 20,
     }).json()
     act_resp = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -761,7 +761,7 @@ async def sample_activity_at_capacity(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Full Studio", "address": "Full Address", "capacity": 20,
+        "title": "Full Studio", "address": "Full Address", "capacity": 20,
     }).json()
     act_resp = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -808,7 +808,7 @@ async def sample_visit(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "V Studio", "address": "V Address", "capacity": 20,
+        "title": "V Studio", "address": "V Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],
@@ -852,7 +852,7 @@ async def sample_visits(api_client, db_session):
         "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
     }).json()
     location = api_client.post("/api/v1/locations", json={
-        "name": "Vs Studio", "address": "Vs Address", "capacity": 20,
+        "title": "Vs Studio", "address": "Vs Address", "capacity": 20,
     }).json()
     activity = api_client.post("/api/v1/activities", json={
         "master_id": master["id"], "service_id": service["id"],

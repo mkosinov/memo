@@ -33,7 +33,7 @@ STAFF_PUT = {
 }
 
 LOCATION_PUT = {
-    "name": "Test Studio",
+    "title": "Test Studio",
     "address": "Test Address",
     "capacity": 20,
 }

@@ -562,14 +562,14 @@ async def _items_r_payments(s: AsyncSession, entity_id: str) -> list[DependencyI
 
 
 async def _items_r_record_tags(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
-    """record_tags label «{tag name}» per link row — id = ``tag_id``."""
+    """record_tags label «{tag title}» per link row — id = ``tag_id``."""
     r = await s.execute(
-        select(record_tags.c.tag_id, Tag.tag)
+        select(record_tags.c.tag_id, Tag.title)
         .join(Tag, record_tags.c.tag_id == Tag.id)
         .where(record_tags.c.record_id == entity_id)
     )
     return [
-        DependencyItem(id=row.tag_id, label=row.tag) for row in r.all()
+        DependencyItem(id=row.tag_id, label=row.title) for row in r.all()
     ]
 
 

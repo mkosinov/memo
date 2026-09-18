@@ -35,7 +35,7 @@ class TestBookingFlow:
             "min_age": 6, "max_age": 99, "duration": 90, "record_info": "Фартук",
         }).json()
         location = api_client.post("/api/v1/locations", json={
-            "name": "Студия", "address": "ул. Тестовая, 1", "capacity": 20,
+            "title": "Студия", "address": "ул. Тестовая, 1", "capacity": 20,
         }).json()
 
         from datetime import UTC, datetime, timedelta
@@ -314,7 +314,7 @@ class TestCapacityFlow:
             "min_age": 4, "max_age": 99, "duration": 60, "record_info": "",
         }).json()
         location = api_client.post("/api/v1/locations", json={
-            "name": "Малый зал", "address": "ул. Тестовая", "capacity": 5,
+            "title": "Малый зал", "address": "ул. Тестовая", "capacity": 5,
         }).json()
         activity = api_client.post("/api/v1/activities", json={
             "master_id": master["id"],

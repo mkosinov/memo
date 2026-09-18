@@ -115,7 +115,7 @@ def make_entity(request, db_session):
 
     Параметры ``_make``:
       * ``**overrides`` — поля, перетирающие ``cfg.create_data`` (например
-        ``tag="t-X"`` для многострочного посева Tag с уникальными значениями);
+        ``title="t-X"`` для многострочного посева Tag с уникальными значениями);
       * ``with_input=True`` — вернуть дополнительно сконструированный
         ``create_schema`` (parsed типы + разрешённые FK id). Существующие
         места вызова без этих параметров остаются совместимыми.
@@ -141,7 +141,7 @@ def make_entity(request, db_session):
 @pytest.fixture
 def seed_rows(request, db_session):
     """Create n rows via the entity's service. FK parents resolved ONCE and shared;
-    unique_row_field (Tag.tag) suffixed per row to respect the DB unique constraint."""
+    unique_row_field (Tag.title) suffixed per row to respect the DB unique constraint."""
 
     async def _seed(cfg: EntityConfig, n: int):
         base_data = dict(cfg.create_data)

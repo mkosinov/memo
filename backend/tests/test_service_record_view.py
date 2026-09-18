@@ -104,7 +104,7 @@ async def _seed_world(
     )
     location = Location(
         **{
-            "name": "Студия",
+            "title": "Студия",
             "address": "Адрес",
             "capacity": 20,
             **(location_kwargs or {}),
@@ -195,7 +195,7 @@ async def test_archived_entities_resolve_display_names(db_session) -> None:
         db_session,
         master_kwargs={"is_active": False, "last_name": "Архивова", "first_name": "Мария"},
         service_kwargs={"is_active": False, "title": "Архивная услуга"},
-        location_kwargs={"is_active": False, "name": "Архивная студия"},
+        location_kwargs={"is_active": False, "title": "Архивная студия"},
         client_kwargs={"is_active": False, "name": "Архивный Клиент"},
     )
 

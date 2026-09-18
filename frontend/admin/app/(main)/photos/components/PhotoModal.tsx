@@ -73,7 +73,7 @@ function FieldRenderer({
 
   if (field.type === 'tags') {
     // Tags field - multi-select with search
-    const selectedTags = (value as Array<{ id: string; tag: string }>) || [];
+    const selectedTags = (value as Array<{ id: string; title: string }>) || [];
     const selectedTagIds = selectedTags.map(t => t.id);
     
     return (
@@ -87,7 +87,7 @@ function FieldRenderer({
               key={tag.id}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
             >
-              {tag.tag}
+              {tag.title}
               <button
                 type="button"
                 onClick={() => {
@@ -106,12 +106,12 @@ function FieldRenderer({
           onChange={() => {}}
           onSelectItem={(item) => {
             if (!selectedTagIds.includes(item.id as string)) {
-              onChange(field.key, [...selectedTags, { id: item.id, tag: item.tag }]);
+              onChange(field.key, [...selectedTags, { id: item.id, title: item.title }]);
             }
           }}
           onSearch={async (q) => (await getTags({ q, per_page: 10 })).items}
           label=""
-          displayField="tag"
+          displayField="title"
           placeholder={field.placeholder || 'Добавить тег...'}
           minChars={2}
         />
@@ -256,17 +256,17 @@ export function PhotoModal({
     () =>
       locations.map((l) => ({
         value: l.id,
-        label: l.name,
-        searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+        label: l.title,
+        searchText: `${l.title} ${l.short_title ?? ''}`.trim(),
       })),
     [locations],
   );
 
-  // formatActivityLabel's contract is Map<string, { title }> — adapt the
-  // LocationResponse list (locations carry `name`, not `title`).
+  // formatActivityLabel's contract is Map<string, { title }> — the raw
+  // LocationResponse list carries `title` (#172), pass it through.
   const locationTitleMap = useMemo(() => {
     const map = new Map<string, { title: string }>();
-    locations.forEach((l) => map.set(l.id, { title: l.name }));
+    locations.forEach((l) => map.set(l.id, { title: l.title }));
     return map;
   }, [locations]);
 

@@ -26,7 +26,7 @@ export function toScheduleView(raw: WebScheduleDTO): ScheduleView {
     duration: formatDuration(raw.durationMinutes),
     location: {
       id: raw.locationId,
-      name: raw.locationName,
+      title: raw.locationName,
       address: raw.locationAddress,
     },
     guestsCount: raw.occupied,

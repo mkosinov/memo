@@ -147,7 +147,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     vi.mocked(getAllLocations).mockResolvedValue([
       {
         id: 'loc1',
-        name: 'Альпика',
+        title: 'Альпика',
         address: 'Альпика, 1 этаж',
         description: null,
         capacity: 10,
@@ -289,7 +289,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
     vi.mocked(getAllLocations).mockResolvedValue([
       {
         id: 'loc1',
-        name: 'Альпика',
+        title: 'Альпика',
         address: 'Альпика, 1 этаж',
         description: null,
         capacity: 10,

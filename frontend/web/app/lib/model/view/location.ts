@@ -1,6 +1,6 @@
 export interface LocationView {
   id: string;
-  name: string;
+  title: string;
   address: string;
   hours?: string;
   photoUrl?: string;

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-18
+
+### Changed
+- **GH #172 — thing-title канон: `Location.name`/`Tag.tag` → `title`** — branch `feat/thing-title-canon`
+  (7 commits: e59e772..HEAD; BREAKING: API-пейлоады/ответы location/tag):
+  - **Migration (`a7b8c9d0e1f2`):** переименование колонок `locations.name` → `title`, `tags.tag` → `title`
+    (SQLite batch-recipe, констрейнты/индексы переименованы вместе с колонкой).
+  - **Backend:** модели + схемы (`LocationCreate/Update/Response`, `TagCreate/Update/Response`), сервисы и API;
+    sort-whitelist'ы `LocationSortBy`/`TagSortBy` → `title`; seed и backend-тест-фабрики на `title`.
+  - **api-client:** zod-схемы Location/Tag → `title` (dfb7847).
+  - **Admin:** все потребители (таблицы локаций/тегов, фото, клиентская карточка, `packages/domain`
+    Location view-model и schedule-потребители) читают `title`; UI-лейблы («Название», «Тег») не менялись.
+  - **E2E:** фабрики `factories.ts` (`createTestLocation` пейлоад, `createTestTag` `{tag}` → `{title}`),
+    payload/аксессоры спеков (`photos-crud`, `master-role-photos`, `records-view` US-5/US-6,
+    `update-rejects-is-active`); перегенерированы **21** рендер-зависимых visual-базлайна
+    (`{locations,services,materials,records,photos,clients,staff}-table-{filled,sort-active,dropdown-open,picker-open}`;
+    `tags-table-*` и состояния empty/error/skeleton брейка не дали). Прогон (standalone, :3012):
+    locations-crud 5/5, tags-crud 11/11, combobox-dictionaries 6/6, schedule-filters 8/8, photos-crud 19/19,
+    archive-restore-parity 5/5, master-role-photos 2/2, update-rejects-is-active 5/5, records-view 8/8,
+    visual-regression 61/61.
+  - **Test-infra fix (standalone e2e rot):** `allowedDevOrigins` в `next.config.mjs` дополнен `127.0.0.1` —
+    next dev 403-ил `/_next/*` запросы с `Origin: http://127.0.0.1:<port>` (страницы не гидрировались, все UI-тесты
+    падали по таймауту). Плюс задокументировано требование standalone-прогона (как в `e2e-shard-start.sh`):
+    `BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` — без `NEXT_PUBLIC_API_URL`
+    на `127.0.0.1` браузер ходит на `localhost:8000` (.env.test), а сессионная cookie (host-scoped, `127.0.0.1`)
+    не отправляется → 401 → редирект на /login у каждого UI-теста.
+
 ## [Unreleased] — 2026-09-17
 
 ### Added

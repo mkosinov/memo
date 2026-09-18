@@ -257,7 +257,7 @@ class TestModelCrud:
     def test_location_crud(self, session: Session):
         from src.models import Location
         loc = Location(
-            name="Studio 1",
+            title="Studio 1",
             address="Moscow, street 1",
             description="Main hall",
             capacity=20,
@@ -269,7 +269,7 @@ class TestModelCrud:
         session.add(loc)
         session.flush()
         fetched = session.get(Location, loc.id)
-        assert fetched.name == "Studio 1"
+        assert fetched.title == "Studio 1"
         assert fetched.capacity == 20
 
     def test_service_crud(self, session: Session):
@@ -313,11 +313,28 @@ class TestModelCrud:
 
     def test_tag_crud(self, session: Session):
         from src.models import Tag
-        t = Tag(tag="beginner")
+        t = Tag(title="beginner")
         session.add(t)
         session.flush()
         fetched = session.get(Tag, t.id)
-        assert fetched.tag == "beginner"
+        assert fetched.title == "beginner"
+
+    def test_tag_unique_title(self, session: Session):
+        """GH #172: Tag.title carries the UNIQUE constraint — a second Tag
+        with the same title must fail at flush with IntegrityError."""
+        from sqlalchemy.exc import IntegrityError
+
+        from src.models import Tag
+        session.add(Tag(title="dup"))
+        session.flush()
+        session.add(Tag(title="dup"))
+        try:
+            session.flush()
+            assert False, "Expected IntegrityError for duplicate tag title"
+        except IntegrityError:
+            pass
+        finally:
+            session.rollback()
 
     def test_material_crud(self, session: Session):
         from src.models import Material
@@ -340,7 +357,7 @@ class TestModelCrud:
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L", capacity=10)
+        loc = Location(title="L", capacity=10)
         session.add_all([svc, loc])
         session.flush()
         a = Activity(
@@ -447,7 +464,7 @@ class TestModelCrud:
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L", capacity=10)
+        loc = Location(title="L", capacity=10)
         client = Client(name="Client", phone="+79001234567", channel="phone")
         session.add_all([svc, loc, client])
         session.flush()
@@ -483,7 +500,7 @@ class TestModelCrud:
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L", capacity=10)
+        loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
         session.add_all([svc, loc, client])
         session.flush()
@@ -523,7 +540,7 @@ class TestModelCrud:
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L", capacity=10)
+        loc = Location(title="L", capacity=10)
         client = Client(name="C", phone="+79001234567", channel="phone")
         session.add_all([svc, loc, client])
         session.flush()
@@ -571,7 +588,7 @@ class TestModelCrud:
         """Location can be created with an optional location_hint field."""
         from src.models import Location
         loc = Location(
-            name="Main Studio",
+            title="Main Studio",
             address="Moscow, Arbat 1",
             capacity=20,
             location_hint="1 этаж, светлая студия с панорамными окнами",
@@ -585,7 +602,7 @@ class TestModelCrud:
         """Location can be created without location_hint (nullable)."""
         from src.models import Location
         loc = Location(
-            name="No Hint Location",
+            title="No Hint Location",
             capacity=10,
         )
         session.add(loc)
@@ -597,8 +614,8 @@ class TestModelCrud:
         from src.models import Service, Tag, service_tags
         svc = Service(title="S2", description="d", image_url="http://x.com/i", specialty="керамика",
                        min_age=5, max_age=50, duration=90, record_info="r")
-        tag1 = Tag(tag="for-kids")
-        tag2 = Tag(tag="weekend")
+        tag1 = Tag(title="for-kids")
+        tag2 = Tag(title="weekend")
         session.add_all([svc, tag1, tag2])
         session.flush()
         session.execute(service_tags.insert().values(service_id=svc.id, tag_id=tag1.id))
@@ -622,8 +639,8 @@ class TestModelCrud:
         m_id = _mk_master(session)
         svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
                        min_age=1, max_age=99, duration=60, record_info="r")
-        loc = Location(name="L3", capacity=10)
-        tag = Tag(tag="private-class")
+        loc = Location(title="L3", capacity=10)
+        tag = Tag(title="private-class")
         session.add_all([svc, loc, tag])
         session.flush()
         act = Activity(master_id=m_id, service_id=svc.id, location_id=loc.id,
@@ -643,7 +660,7 @@ class TestModelCrud:
 
         from src.models import Photo, Tag, photo_tags
         p = Photo(filename="pic.jpg")
-        tag = Tag(tag="portrait")
+        tag = Tag(title="portrait")
         session.add_all([p, tag])
         session.flush()
         session.execute(photo_tags.insert().values(photo_id=p.id, tag_id=tag.id))
@@ -660,7 +677,7 @@ class TestModelCrud:
         from src.models import Master, Tag, master_tags
         m_id = _mk_master(session, first_name="Elena", last_name="Sidorova",
                           color="#33FF57")
-        tag = Tag(tag="pottery-master")
+        tag = Tag(title="pottery-master")
         session.add(tag)
         session.flush()
         session.execute(master_tags.insert().values(master_id=m_id, tag_id=tag.id))

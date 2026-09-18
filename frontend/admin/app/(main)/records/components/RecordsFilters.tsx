@@ -70,8 +70,8 @@ export function RecordsFilters({
   // swaps. Master label unifies to «Фамилия Имя» (§6.1) + swatch from color.
   const locationOptions: ComboboxOption[] = locationList.map((l) => ({
     value: l.id,
-    label: l.name,
-    searchText: `${l.name} ${l.short_title ?? ''}`.trim(),
+    label: l.title,
+    searchText: `${l.title} ${l.short_title ?? ''}`.trim(),
   }));
   const serviceOptions: ComboboxOption[] = serviceList.map((s) => ({
     value: s.id,

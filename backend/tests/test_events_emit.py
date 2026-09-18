@@ -80,7 +80,7 @@ class TestRollbackSilence:
 class TestOwnEntityEmit:
     def test_create_tag_publishes_tags(self, api_client, subscriber) -> None:
         """POST /tags → subscriber receives exactly ``({"tags"}, None)``."""
-        resp = api_client.post("/api/v1/tags", json={"tag": f"t-{uuid.uuid4().hex[:8]}"})
+        resp = api_client.post("/api/v1/tags", json={"title": f"t-{uuid.uuid4().hex[:8]}"})
         assert resp.status_code == 201
 
         events = _drain(subscriber)
@@ -241,7 +241,7 @@ class TestOriginPropagation:
         """Mutating request with X-Memo-Tab-Id → origin envelope {"tab", id}."""
         resp = api_client.post(
             "/api/v1/tags",
-            json={"tag": f"t-{uuid.uuid4().hex[:8]}"},
+            json={"title": f"t-{uuid.uuid4().hex[:8]}"},
             headers={"X-Memo-Tab-Id": "tab-123"},
         )
         assert resp.status_code == 201
@@ -251,7 +251,7 @@ class TestOriginPropagation:
 
     def test_no_header_means_null_origin(self, api_client, subscriber) -> None:
         """Same POST without the header → origin is None (external writer)."""
-        resp = api_client.post("/api/v1/tags", json={"tag": f"t-{uuid.uuid4().hex[:8]}"})
+        resp = api_client.post("/api/v1/tags", json={"title": f"t-{uuid.uuid4().hex[:8]}"})
         assert resp.status_code == 201
 
         events = _drain(subscriber)

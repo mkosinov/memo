@@ -159,7 +159,7 @@ export type PositionPatch = z.input<typeof PositionPatchSchema>;
 
 export const LocationResponseSchema = z.object({
   id: z.string(),
-  name: z.string(),
+  title: z.string(),
   short_title: z.string().nullable().optional(),
   address: z.string().nullable(),
   description: z.string().nullable(),
@@ -187,7 +187,7 @@ export const PhotoResponseSchema = z.object({
   activity_id: z.string().nullable(),
   location_id: z.string().nullable(),
   is_public: z.boolean(),
-  tags: z.array(z.object({ id: z.string(), tag: z.string() })).default([]),
+  tags: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
   client_name: z.string().nullable(), // denormalized for list display
   created_at: z.string(),
   updated_at: z.string(),
@@ -228,7 +228,7 @@ export type TariffResponse = z.infer<typeof TariffResponseSchema>;
 
 export const TagResponseSchema = z.object({
   id: z.string(),
-  tag: z.string(),
+  title: z.string(),
 });
 
 export type TagResponse = z.infer<typeof TagResponseSchema>;
@@ -236,7 +236,7 @@ export type TagResponse = z.infer<typeof TagResponseSchema>;
 // ─── TagCreate (request body) ───────────────────────────────────────────
 
 export const TagCreateSchema = z.object({
-  tag: z.string().min(1).max(100),
+  title: z.string().min(1).max(100),
 });
 export type TagCreate = z.infer<typeof TagCreateSchema>;
 
@@ -597,7 +597,7 @@ export type ServiceUpdate = z.infer<typeof ServiceUpdateSchema>;
 // ─── LocationCreate (request body) ───────────────────────────────────────
 
 export const LocationCreateSchema = z.object({
-  name: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
   short_title: z.string().optional().default(''),
   address: z.string().optional().default(''),
   description: z.string().optional().default(''),

@@ -81,7 +81,7 @@ class TestLocationSortOrder:
     def test_location_response_includes_sort_order(self, api_client) -> None:
         """Location response includes sort_order field."""
         resp = api_client.post("/api/v1/locations", json={
-            "name": "Тест Локация",
+            "title": "Тест Локация",
             "capacity": 10,
         })
         assert resp.status_code == 201
@@ -92,7 +92,7 @@ class TestLocationSortOrder:
     def test_location_create_with_sort_order(self, api_client) -> None:
         """Location can be created with explicit sort_order."""
         resp = api_client.post("/api/v1/locations", json={
-            "name": "Локация С",
+            "title": "Локация С",
             "capacity": 15,
             "sort_order": 7,
         })
@@ -100,19 +100,19 @@ class TestLocationSortOrder:
         assert resp.json()["sort_order"] == 7
 
     def test_locations_list_sorted_by_sort_order(self, api_client) -> None:
-        """Locations list is sorted by sort_order ASC, then name ASC."""
+        """Locations list is sorted by sort_order ASC, then title ASC."""
         api_client.post("/api/v1/locations", json={
-            "name": "Гранд",
+            "title": "Гранд",
             "capacity": 12,
             "sort_order": 2,
         })
         api_client.post("/api/v1/locations", json={
-            "name": "Альпика",
+            "title": "Альпика",
             "capacity": 10,
             "sort_order": 1,
         })
         api_client.post("/api/v1/locations", json={
-            "name": "Поляна",
+            "title": "Поляна",
             "capacity": 8,
             "sort_order": 3,
         })
@@ -120,9 +120,9 @@ class TestLocationSortOrder:
         resp = api_client.get("/api/v1/locations")
         assert resp.status_code == 200
         locations = resp.json()["items"]
-        assert locations[0]["name"] == "Альпика"
-        assert locations[1]["name"] == "Гранд"
-        assert locations[2]["name"] == "Поляна"
+        assert locations[0]["title"] == "Альпика"
+        assert locations[1]["title"] == "Гранд"
+        assert locations[2]["title"] == "Поляна"
 
 
 # ── Reorder endpoint ──────────────────────────────────────────────────────────
@@ -138,10 +138,10 @@ class TestLocationsReorder:
     def test_reorder_updates_sort_order(self, api_client) -> None:
         """Reorder endpoint updates sort_order for each location."""
         l1 = api_client.post("/api/v1/locations", json={
-            "name": "Локация1", "capacity": 10,
+            "title": "Локация1", "capacity": 10,
         }).json()
         l2 = api_client.post("/api/v1/locations", json={
-            "name": "Локация2", "capacity": 15,
+            "title": "Локация2", "capacity": 15,
         }).json()
 
         resp = api_client.put("/api/v1/locations/reorder", json={

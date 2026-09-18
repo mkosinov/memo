@@ -83,7 +83,7 @@ async def _make_service(db_session, *, is_active: bool = True) -> Service:
 
 
 async def _make_location(db_session, *, is_active: bool = True) -> Location:
-    location = Location(name="Локация", capacity=20, is_active=is_active)
+    location = Location(title="Локация", capacity=20, is_active=is_active)
     db_session.add(location)
     await db_session.flush()
     return location
@@ -116,7 +116,7 @@ async def _tag_activity(db_session, activity: Activity, count: int = 1) -> list[
     """Create ``count`` tags linked to the activity via activity_tags."""
     tags = []
     for i in range(count):
-        tag = Tag(tag=f"tag-{activity.id[:8]}-{i}")
+        tag = Tag(title=f"tag-{activity.id[:8]}-{i}")
         db_session.add(tag)
         await db_session.flush()
         await db_session.execute(

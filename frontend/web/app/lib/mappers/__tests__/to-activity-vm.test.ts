@@ -54,7 +54,7 @@ describe('toActivityView', () => {
 
   it('nests location object', () => {
     const vm = toActivityView(makeRawActivity());
-    expect(vm.location).toEqual({ id: 'alpika', name: 'Альпика' });
+    expect(vm.location).toEqual({ id: 'alpika', title: 'Альпика' });
   });
 
   it('assigns correct category color for взрослым', () => {

@@ -122,7 +122,7 @@ const TEST_LOCATIONS = [
   mockLocationResponseArchived,
   createMockLocationResponse({
     id: 'loc-3',
-    name: 'Альпика',
+    title: 'Альпика',
     address: 'Альпика, 1 этаж',
     capacity: 15,
     location_hint: null,
@@ -251,7 +251,7 @@ describe('LocationsTable', () => {
     expect(mockGetLocations).toHaveBeenCalledTimes(1);
     expect(mockGetLocations).toHaveBeenCalledWith({ page: 1, per_page: 10, status: 'active' });
     // sortBy starts null → sort params omitted → backend default
-    // sort_order/name/id order (preserves manual reorder).
+    // sort_order/title/id order (preserves manual reorder).
     expect(mockGetLocations.mock.calls[0][0]).not.toHaveProperty('sort_by');
     expect(mockGetLocations.mock.calls[0][0]).not.toHaveProperty('sort_order');
   });
@@ -399,7 +399,7 @@ describe('LocationsTable', () => {
         page: 1,
         per_page: 10,
         status: 'active',
-        sort_by: 'name',
+        sort_by: 'title',
         sort_order: 'asc',
       });
     });
@@ -411,7 +411,7 @@ describe('LocationsTable', () => {
         page: 1,
         per_page: 10,
         status: 'active',
-        sort_by: 'name',
+        sort_by: 'title',
         sort_order: 'desc',
       });
     });
@@ -684,7 +684,7 @@ describe('LocationsTable', () => {
   });
 
   it('shows hidden column in table when loaded from localStorage', async () => {
-    localStorage.setItem('locations-columns', JSON.stringify(['name', 'description']));
+    localStorage.setItem('locations-columns', JSON.stringify(['title', 'description']));
     setupEnvelope();
     renderTable();
     await screen.findByText('Студия на Невском');

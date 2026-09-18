@@ -16,6 +16,7 @@ import type { ScheduleAdminDTO, Location, Master } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ActivityDeleteConfirmDialog } from './ActivityDeleteConfirmDialog';
 import { ScheduleColumnHeader, SortableColumnHeader } from './ScheduleColumnHeader';
 import { ArchiveBadge } from '@/app/components/shared/ArchiveBadge';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
@@ -670,6 +671,10 @@ export function DayView() {
           createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
         />
       )}
+
+      {/* #286 Task 5: pending-confirm delete dialog — context-driven, so it
+          survives the deleted card's unmount (Task 6 swaps in DeleteDialog). */}
+      <ActivityDeleteConfirmDialog />
     </DndContext>
     </>
   );

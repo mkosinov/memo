@@ -191,6 +191,9 @@ function DataConsumer() {
     updateActivity,
     deleteActivityDeferred,
     deleteActivityConfirmed,
+    // #286 Task 5: pending-confirm dialog state.
+    pendingActivityConfirm,
+    setPendingActivityConfirm,
     copyLastWeek,
     loading,
     error,
@@ -268,6 +271,27 @@ function DataConsumer() {
         ConfirmDelete
       </button>
       <span data-testid="delete-outcome">{deleteOutcome}</span>
+      {/* #286 Task 5: pending-confirm dialog state (hold + clear contract). */}
+      <span data-testid="pending-confirm">
+        {pendingActivityConfirm
+          ? JSON.stringify({
+              activityId: pendingActivityConfirm.activityId,
+              refetched: pendingActivityConfirm.refetched,
+              deps: pendingActivityConfirm.dependencies.length,
+            })
+          : 'null'}
+      </span>
+      <button
+        data-testid="set-pending-confirm"
+        onClick={() =>
+          setPendingActivityConfirm({ activityId: 'a1', dependencies: ACTIVITY_DEPS, refetched: true })
+        }
+      >
+        SetPending
+      </button>
+      <button data-testid="clear-pending-confirm" onClick={() => setPendingActivityConfirm(null)}>
+        ClearPending
+      </button>
       <button
         data-testid="copy-last-week"
         onClick={() => {
@@ -1247,6 +1271,47 @@ describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
     });
     expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
     expect(cacheRowIds(queryClient, weekKey())).toContain('a1');
+  });
+
+  // #286 Task 5 — the provider only HOLDS the pending-confirm state; the call
+  // sites (card/modal) set it on the needs-confirm outcome.
+  it('pending-confirm state: null by default, round-trips via the setter', async () => {
+    await renderReady();
+
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+
+    act(() => {
+      screen.getByTestId('set-pending-confirm').click();
+    });
+    const exposed = JSON.parse(screen.getByTestId('pending-confirm').textContent!) as {
+      activityId: string;
+      refetched: boolean;
+      deps: number;
+    };
+    expect(exposed).toEqual({ activityId: 'a1', refetched: true, deps: 4 });
+
+    act(() => {
+      screen.getByTestId('clear-pending-confirm').click();
+    });
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
+  });
+
+  it('the provider does NOT self-set pending-confirm on the 409 needs-confirm outcome (call sites own it)', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, ACTIVITY_DEPS),
+    );
+    await renderReady();
+
+    act(() => {
+      screen.getByTestId('delete-activity').click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('needs-confirm');
+    });
+
+    // No auto-set: the dialog opens only when a call site (card/modal) hands
+    // the outcome over via setPendingActivityConfirm.
+    expect(screen.getByTestId('pending-confirm').textContent).toBe('null');
   });
 });
 

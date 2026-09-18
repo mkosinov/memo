@@ -504,4 +504,86 @@ describe('ActivityCard delete mode (#286 deferred flow)', () => {
     });
     expect(deleteActivityDeferred).toHaveBeenCalledTimes(2);
   });
+
+  // #286 Task 5 — the needs-confirm outcome must land in the context's
+  // pending-confirm state so the confirm dialog renders at WeekView/DayView
+  // level and SURVIVES the card unmount (the card itself is long gone by the
+  // time Task 6's DeleteDialog closes the flow).
+  it('needs-confirm outcome → setPendingActivityConfirm({activityId, dependencies, refetched})', async () => {
+    const dependencies = ACTIVITY_DEPS_FIXTURE;
+    const setPendingActivityConfirm = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'needs-confirm' as const, dependencies, refetched: true }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).toHaveBeenCalledTimes(1);
+    expect(setPendingActivityConfirm).toHaveBeenCalledWith({
+      activityId: 'ev_1',
+      dependencies,
+      refetched: true,
+    });
+  });
+
+  it('enqueued outcome does NOT open the confirm dialog (clean path has no dialog)', async () => {
+    const setPendingActivityConfirm = vi.fn();
+    const deleteActivityDeferred = vi.fn(() =>
+      Promise.resolve({ kind: 'enqueued' as const, refetched: false }),
+    );
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).not.toHaveBeenCalled();
+  });
+
+  it('rejected flow does NOT set pending-confirm (error toast only)', async () => {
+    const setPendingActivityConfirm = vi.fn();
+    const showToast = vi.fn();
+    const deleteActivityDeferred = vi.fn(() => Promise.reject(new Error('network down')));
+    mockUseUI.mockReturnValue(createMockUIContext({ deleteMode: true, showToast }));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ deleteActivityDeferred, setPendingActivityConfirm }),
+    );
+
+    render(<ActivityCard activity={mockActivity} master={mockMaster} />);
+    fireEvent.click(screen.getByTestId('activity-ev_1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160);
+    });
+
+    expect(setPendingActivityConfirm).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
+  });
 });
+
+/** #286: 409 dry-run dependency tree shape for an activity with one record
+ *  (→ visit + payment) and an auto node without items (mirrors the fixture
+ *  in ScheduleDataContext.test.tsx). */
+const ACTIVITY_DEPS_FIXTURE: import('@memo/api-client').DependencyNode[] = [
+  {
+    entity: 'records', relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'r1', label: 'Картина маслом, 2026-09-14, Аноним' }],
+  },
+  {
+    entity: 'visits', relation: 'records', count: 1, allowed_actions: [],
+    items: [{ id: 'v1', label: 'Картина маслом, 1000' }],
+  },
+  { entity: 'activity_tags', relation: 'activity_tags', count: 2, allowed_actions: [] },
+];

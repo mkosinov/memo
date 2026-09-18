@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useCallback, useMemo, useEffect, useRef, useState } from 'react';
 import type { Master, Service, Location, ScheduleAdminDTO, ScheduleIndex as DomainScheduleIndex } from '@memo/domain';
 import { buildSchedule } from '@memo/domain';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
@@ -53,6 +53,17 @@ export const SCHEDULE_ACTIVITY_MUTATION_KEY = ['schedule-activity'] as const;
 export type DeleteActivityOutcome =
   | { kind: 'enqueued'; refetched: boolean }
   | { kind: 'needs-confirm'; dependencies: DependencyNode[]; refetched: boolean };
+
+/** #286 Task 5 — pending-confirm dialog payload. The call sites (ActivityCard
+ *  / ActivityDetailsModal) hand the needs-confirm outcome over via
+ *  `setPendingActivityConfirm`; the confirm dialog renders at WeekView/DayView
+ *  level and survives the card's optimistic unmount / the modal's immediate
+ *  close. Cleared on dialog resolve/dismiss. */
+export interface PendingActivityConfirm {
+  activityId: string;
+  dependencies: DependencyNode[];
+  refetched: boolean;
+}
 
 /** Resolved staleTime for the week cache (D3 step 1): setQueryDefaults wins,
  *  then the app-level default (providers.tsx sets 30_000), else 0. */
@@ -114,6 +125,11 @@ export interface ScheduleDataContextType {
    *  the FULL id lists from the confirmed dry-run tree's items (all three
    *  nodes — records/visits/payments; auto nodes carry no items → skipped). */
   deleteActivityConfirmed: (id: string, dependencies: DependencyNode[]) => Promise<void>;
+  /** #286 Task 5 — the pending-confirm dialog state. Call sites set it on the
+   *  needs-confirm outcome; the view-level dialog (ActivityDeleteConfirmDialog)
+   *  reads it, resolves via deleteActivityConfirmed or dismisses; both clear. */
+  pendingActivityConfirm: PendingActivityConfirm | null;
+  setPendingActivityConfirm: (pending: PendingActivityConfirm | null) => void;
   copyLastWeek: (weekStart: string, locations: string[]) => Promise<CopyWeekResult>;
   gridStartMinutes: number;
   gridEndMinutes: number;
@@ -136,6 +152,10 @@ export function ScheduleDataProvider({
   const { dateFrom, dateTo } = useNavigation();
   const weekStart = dateFrom;
   const weekEnd = dateTo;
+  // #286 Task 5: pending-confirm dialog state — plain useState; the state
+  // lives in the provider so the dialog survives the card/modal unmount.
+  const [pendingActivityConfirm, setPendingActivityConfirm] =
+    useState<PendingActivityConfirm | null>(null);
   // Local week-Monday derivation for buildAdminSchedule + dayIndex→date math
   // (spec §3: the data provider calls useNavigation() internally; currentWeek /
   // setCurrentWeek STATE lives in the view context, not here).
@@ -523,6 +543,8 @@ export function ScheduleDataProvider({
     updateActivity: updateActivityFn,
     deleteActivityDeferred,
     deleteActivityConfirmed,
+    pendingActivityConfirm,
+    setPendingActivityConfirm,
     copyLastWeek,
     gridStartMinutes,
     gridEndMinutes,
@@ -530,7 +552,8 @@ export function ScheduleDataProvider({
     filteredItems, scheduleIndex, masters, services, locations,
     scheduleMasters, scheduleServices, scheduleLocations,
     activitiesLoading, activitiesError,
-    addActivity, updateActivityFn, deleteActivityDeferred, deleteActivityConfirmed, copyLastWeek,
+    addActivity, updateActivityFn, deleteActivityDeferred, deleteActivityConfirmed,
+    pendingActivityConfirm, copyLastWeek,
     gridStartMinutes, gridEndMinutes,
   ]);
 

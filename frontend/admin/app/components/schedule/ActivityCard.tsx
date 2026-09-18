@@ -25,7 +25,7 @@ interface ActivityCardProps {
 
 export function ActivityCard({ activity, master, locations = [], style, onEdit, onQuickAdd, isDragging, isDragCopy, gridStart = 540 }: ActivityCardProps) {
   const { deleteMode, showToast } = useUI();
-  const { deleteActivityDeferred } = useScheduleData();
+  const { deleteActivityDeferred, setPendingActivityConfirm } = useScheduleData();
   const { cellHeight = 60 } = useGridSettings();
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
@@ -75,11 +75,23 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
       // dry-run → optimistic enqueue / needs-confirm). The 150ms fade-out stays
       // as the click response while the dry-run is in flight; the guard resets
       // in finally on EVERY branch (fail-closed — the card never stays dead).
+      // needs-confirm (Task 5): the outcome is handed to the context's
+      // pending-confirm state — the confirm dialog renders at WeekView/DayView
+      // level and survives this card's unmount.
       if (deletingRef.current) return;
       deletingRef.current = true;
       setDeleting(true);
       setTimeout(() => {
         deleteActivityDeferred(activity.id)
+          .then((outcome) => {
+            if (outcome.kind === 'needs-confirm') {
+              setPendingActivityConfirm({
+                activityId: activity.id,
+                dependencies: outcome.dependencies,
+                refetched: outcome.refetched,
+              });
+            }
+          })
           .catch((err) => showToast(parseApiError(err).message, 'error'))
           .finally(() => {
             deletingRef.current = false;

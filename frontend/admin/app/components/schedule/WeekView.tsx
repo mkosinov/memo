@@ -12,6 +12,7 @@ import type { ScheduleAdminDTO } from '@memo/domain';
 import { TimeColumn } from './TimeColumn';
 import { DayColumn } from './DayColumn';
 import { ActivityCard } from './ActivityCard';
+import { ActivityDeleteConfirmDialog } from './ActivityDeleteConfirmDialog';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
@@ -343,6 +344,10 @@ export function WeekView() {
             createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
           />
         )}
+
+        {/* #286 Task 5: pending-confirm delete dialog — context-driven, so it
+            survives the deleted card's unmount (Task 6 swaps in DeleteDialog). */}
+        <ActivityDeleteConfirmDialog />
       </DndContext>
     </>
   );

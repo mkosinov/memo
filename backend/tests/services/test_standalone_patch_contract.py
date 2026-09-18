@@ -74,11 +74,12 @@ class PatchContractConfig(NamedTuple):
     * ``service_factory`` — the service singleton factory (get_*_service).
     * ``patch_schema`` — the Pydantic partial-update schema
       (VisitPatch / UserSettingsPatch).
-    * ``patch_call`` — ``(db_session, key, data) -> row | None`` wrapper
-      over the service's patch method (VisitService.patch vs
+    * ``patch_call`` — ``(cfg, db_session, key, data) -> row | None``
+      wrapper over the service's patch method (VisitService.patch vs
       UserSettingsService.update_by_user_id — different method names, so
-      the service-specific binding lives in the config, not the tests).
-    * ``read_state`` — ``(db_session, key) -> dict | None`` pre/post-patch
+      the service-specific binding lives in the config, not the tests;
+      the service resolves via ``service_factory()``).
+    * ``read_state`` — ``(cfg, db_session, key) -> dict | None`` pre/post-patch
       snapshot (ORM attributes vs parsed UserSettingsResponse).
     * ``not_null_fields`` — patch-schema fields the service treats as
       NOT NULL (null → stripped; Task 2 pins that policy). Visits:
@@ -93,15 +94,15 @@ class PatchContractConfig(NamedTuple):
       ``test_sentinel_differs_from_original`` (the standalone analogue of
       ``_ensure_different`` from the generic contract).
     * ``make_owner`` — async factory:
-      ``(db_session, sample_visit) -> (service, row, key)``. Visits reuse
-      the conftest ``sample_visit`` async fixture — declared as a DIRECT
-      test parameter and forwarded here (lazy ``request.getfixturevalue``
-      of async fixtures cannot run inside the test's event loop);
-      UserSettings accept it for signature symmetry but ignore it — they
-      build their own async setup (a ``User`` row inserted through
-      ``db_session`` + the settings row created via the service call; the
-      sync ``_user`` conftest fixture commits on a separate connection
-      and is deliberately NOT reused).
+      ``(cfg, db_session, sample_visit) -> (service, row, key)``. Visits
+      reuse the conftest ``sample_visit`` async fixture — declared as a
+      DIRECT test parameter and forwarded here (lazy
+      ``request.getfixturevalue`` of async fixtures cannot run inside the
+      test's event loop); UserSettings accept it for signature symmetry
+      but ignore it — they build their own async setup (a ``User`` row
+      inserted through ``db_session`` + the settings row created via the
+      service call; the sync ``_user`` conftest fixture commits on a
+      separate connection and is deliberately NOT reused).
     """
 
     name: str

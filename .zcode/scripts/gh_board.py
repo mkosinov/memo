@@ -148,7 +148,7 @@ CLAIM_TTL_HOURS = 1  # auto-impl: свежесть последних запис
 MAX_TOTAL_INFLIGHT = 3  # auto-impl: глобальный бюджет карточек In IMPL (iMac 2 + ноутбук 1); ручные сессии тоже считаются — они двигают карточки так же
 AUTO_IMPL_LOG_PREFIX = "auto-impl log:"
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
-_NUM_RE = re.compile(r"#?(\d+)")
+_NUM_RE = re.compile(r"#(\d+)")
 
 
 def _recent_markers(number: int, prefixes: tuple[str, ...]) -> list[dict]:
@@ -193,8 +193,13 @@ def _open_deps(number: int) -> list[int]:
         nums += [int(n) for n in _NUM_RE.findall(m.group(1))]
     open_deps = []
     for n in dict.fromkeys(nums):
-        d = gql(f'query {{ repository(owner: "{OWNER}", name: "{REPO}") {{ issue(number: {n}) {{ state }} }} }}')
-        issue = d["repository"]["issue"]
+        try:
+            d = gql(f'query {{ repository(owner: "{OWNER}", name: "{REPO}") {{ issue(number: {n}) {{ state }} }} }}')
+            issue = d["repository"]["issue"]
+        except SystemExit:
+            # Deleted/nonexistent issue number (e.g. stray digits in the line):
+            # not a dependency — skip it instead of blinding the whole picker.
+            continue
         if issue and issue["state"] == "OPEN":
             open_deps.append(n)
     return open_deps

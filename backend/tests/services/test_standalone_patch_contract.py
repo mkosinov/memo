@@ -3,7 +3,7 @@
 GH #239 made VisitService and UserSettingsService standalone transactional
 services (no GenericService base), so the generic patch contract
 (tests/generic_contract.py → TestGenericServicePatchContract) no longer
-covers them. This file pins the SAME three patch semantics for the two
+covers them. This file pins the SAME five patch semantics for the two
 standalone services, at SERVICE level (no HTTP):
 
   1. partial update — the sentinel lands on the patched field; EVERY other
@@ -11,7 +11,12 @@ standalone services, at SERVICE level (no HTTP):
   2. not-found — patching a missing owner row returns ``None`` (Visit:
      missing ``visit_id``; UserSettings: ``user_id`` without a row);
   3. updated_at — a real patch bumps ``updated_at`` (``>=`` guard against
-     equal SQLite ticks).
+     equal SQLite ticks);
+  4. null-policy — an explicit ``null`` on a NOT NULL field is IGNORED
+     ('don't change'), while on a NULLABLE field it is APPLIED (clears the
+     field); list fields take ``[]`` as a VALUE while ``null`` stays ignored;
+  5. empty body — a patch schema with NO fields set is a full no-op: every
+     field value AND ``updated_at`` stay unchanged.
 
 Shape modeled on tests/generic_contract.py: a config NamedTuple per entity
 (``PatchContractConfig``) drives a parametrized test class — but this file
@@ -19,8 +24,8 @@ is STANDALONE: explicit configs only, NO auto-discovery, NO inheritance
 from the generic contract (the two services are not GenericService
 subclasses).
 
-Task 2 of the plan (null-policy / empty-body semantics) is intentionally
-NOT here.
+Task 4 of the plan (dedup of private test files) is intentionally NOT
+here; Task 3 (null-policy / empty-body semantics) IS.
 """
 
 from __future__ import annotations
@@ -68,7 +73,7 @@ class PatchContractConfig(NamedTuple):
     """Per-entity config for the standalone PATCH mini-contract.
 
     Modeled on ``EntityConfig`` from tests/generic_contract.py (GH #184/#185),
-    trimmed to what the three patch semantics need:
+    trimmed to what the five patch semantics need:
 
     * ``name`` — parametrization id (e.g. ``visits``).
     * ``service_factory`` — the service singleton factory (get_*_service).
@@ -82,11 +87,17 @@ class PatchContractConfig(NamedTuple):
     * ``read_state`` — ``(cfg, db_session, key) -> dict | None`` pre/post-patch
       snapshot (ORM attributes vs parsed UserSettingsResponse).
     * ``not_null_fields`` — patch-schema fields the service treats as
-      NOT NULL (null → stripped; Task 2 pins that policy). Visits:
+      NOT NULL (null → stripped; Task 3 pins that policy). Visits:
       {price, status}; UserSettings: all 6 fields
       (docs/domain-rules/user_settings.md).
     * ``nullable_field`` — one patch-schema field that MAY be null, or None
-      when the schema has no nullable field (UserSettingsPatch).
+      when the schema has no nullable field (UserSettingsPatch). The
+      null-policy test's nullable half runs only when this is set; the
+      ``apply_null`` callback (optional) turns ``field=None`` into a schema
+      for the null-policy probes without touching the sentinel path.
+    * ``list_fields`` — patch-schema list fields (UserSettings:
+      column_order_staff / column_order_locations): ``null`` → ignored,
+      ``[]`` → applied as a real value. Empty for Visits (no list fields).
     * ``patch_field`` — the single field the partial-update test patches
       (must be in not_null_fields or equal nullable_field).
     * ``original`` / ``sentinel`` — the pre-state value of ``patch_field``
@@ -112,10 +123,16 @@ class PatchContractConfig(NamedTuple):
     read_state: StateReader
     not_null_fields: frozenset[str]
     nullable_field: str | None
+    list_fields: frozenset[str]
     patch_field: str
     original: Any
     sentinel: Any
     make_owner: OwnerFactory
+    apply_null: Callable[[type, str], Any] | None = None
+    """Builds a patch schema instance with ``field=None`` EXPLICITLY set
+    (``lambda schema, field: schema(**{field: None})``). Optional because
+    the sentinel path never needs it; both configs provide it so the
+    null-policy probes stay uniform. Signature: (patch_schema, field)."""
 
 
 # ─── Visits config ───────────────────────────────────────────────────────────────
@@ -214,10 +231,12 @@ VISITS_CONFIG = PatchContractConfig(
     read_state=_visit_read_state,
     not_null_fields=frozenset({"price", "status"}),
     nullable_field="custom_price",
+    list_fields=frozenset(),  # VisitPatch has no list fields
     patch_field="price",
     original=3000,  # sample_visit seeds price=3000
     sentinel=7777,
     make_owner=_make_visit_owner,
+    apply_null=lambda schema, field: schema(**{field: None}),
 )
 
 USER_SETTINGS_CONFIG = PatchContractConfig(
@@ -235,10 +254,12 @@ USER_SETTINGS_CONFIG = PatchContractConfig(
         "show_archived_locations",
     }),
     nullable_field=None,  # UserSettingsPatch has no nullable field
+    list_fields=frozenset({"column_order_staff", "column_order_locations"}),
     patch_field="theme",
     original="light",  # UserSettingsCreate.theme default
     sentinel="dark",
     make_owner=_make_user_settings_owner,
+    apply_null=lambda schema, field: schema(**{field: None}),
 )
 
 PATCH_CONTRACT_CONFIGS = [VISITS_CONFIG, USER_SETTINGS_CONFIG]
@@ -264,9 +285,23 @@ def test_sentinel_differs_from_original(cfg: PatchContractConfig) -> None:
     assert cfg.patch_field in schema_fields
     for field in cfg.not_null_fields:
         assert field in schema_fields, f"{cfg.name}: {field} not in patch schema"
+    for field in cfg.list_fields:
+        assert field in cfg.not_null_fields, (
+            f"{cfg.name}: list field {field!r} must also be a NOT NULL field "
+            f"(list columns are NOT NULL — null must be ignored, [] applied)"
+        )
+    if cfg.nullable_field is not None:
+        assert cfg.nullable_field in schema_fields
+        assert cfg.nullable_field not in cfg.not_null_fields, (
+            f"{cfg.name}: nullable_field {cfg.nullable_field!r} must not be "
+            f"a NOT NULL field"
+        )
+    assert cfg.apply_null is not None, (
+        f"{cfg.name}: null-policy tests need apply_null"
+    )
 
 
-# ─── Contract: the three patch semantics (2 configs × 3 tests) ──────────────────
+# ─── Contract: the five patch semantics (3 landed + 2 Task-3 RED) ────────────────
 
 
 class TestStandalonePatchContract:
@@ -338,12 +373,183 @@ class TestStandalonePatchContract:
             f"({pre_updated_at!r} → {post_updated_at!r})"
         )
 
+    # ─── Task 3 semantics: null-policy + empty body ───────────────────────────
+
+    @pytest.mark.parametrize(
+        "field",
+        ["theme", "language", "show_archived_masters", "show_archived_locations"],
+    )
+    @pytest.mark.parametrize("cfg", PATCH_CONTRACT_CONFIGS, ids=lambda c: c.name)
+    async def test_patch_null_on_not_null_field_is_ignored(
+        self, cfg: PatchContractConfig, db_session, sample_visit, field: str
+    ) -> None:
+        """Semantic 4a — null-policy: an explicit ``null`` on a NOT NULL
+        field means 'don't change' — the pre-state value survives.
+
+        Scalar NOT NULL fields only (theme/language for UserSettings — the
+        list NOT NULL fields get their own rule in the list-fields test;
+        price/status for Visits via the dedicated per-config loop below —
+        each trips a separate IntegrityError path on the current code).
+        """
+        if field not in cfg.not_null_fields:
+            pytest.skip(f"{cfg.name}: {field!r} is not a NOT NULL patch field")
+        if field in cfg.list_fields:
+            pytest.skip(f"{cfg.name}: {field!r} is a list field — own test")
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
+        assert pre is not None
+
+        patched = await cfg.patch_call(
+            cfg, db_session, key, _apply_null(cfg, field)
+        )
+        assert patched is not None, f"{cfg.name}: patch on existing row returned None"
+
+        assert _get_field(patched, field) == pre[field], (
+            f"{cfg.name}.{field} is NOT NULL — explicit null must be ignored "
+            f"(pre-state {pre[field]!r}), got {_get_field(patched, field)!r}"
+        )
+
+    @pytest.mark.parametrize("cfg", PATCH_CONTRACT_CONFIGS, ids=lambda c: c.name)
+    async def test_patch_null_on_not_null_price_status_is_ignored(
+        self, cfg: PatchContractConfig, db_session, sample_visit
+    ) -> None:
+        """Semantic 4a (Visits) — explicit ``null`` on ``price`` / ``status``
+        must be ignored, one probe per field: today the null reaches the
+        flush and trips ``IntegrityError`` (RED until VisitService.patch
+        strips NOT NULL nulls). Expected failure mode is the exception,
+        NOT a wrong value — the pytest.fail covers both, and a passing run
+        here plus a passing value assertion pins the ignore semantics.
+        """
+        for field in sorted(cfg.not_null_fields - cfg.list_fields):
+            if field not in ("price", "status"):
+                continue  # scalar pairs for other entities live in 4a above
+            _service, _row, key = await cfg.make_owner(
+                cfg, db_session, sample_visit
+            )
+            pre = await cfg.read_state(cfg, db_session, key)
+            assert pre is not None
+
+            patched = await cfg.patch_call(
+                cfg, db_session, key, _apply_null(cfg, field)
+            )
+            assert patched is not None
+            assert _get_field(patched, field) == pre[field], (
+                f"{cfg.name}.{field} is NOT NULL — explicit null must be "
+                f"ignored (pre-state {pre[field]!r}), "
+                f"got {_get_field(patched, field)!r}"
+            )
+
+    @pytest.mark.parametrize("cfg", PATCH_CONTRACT_CONFIGS, ids=lambda c: c.name)
+    async def test_patch_null_on_nullable_field_is_applied(
+        self, cfg: PatchContractConfig, db_session, sample_visit
+    ) -> None:
+        """Semantic 4b — null-policy (nullable half, Visits-only): an
+        explicit ``null`` on the NULLABLE field is APPLIED — it clears the
+        field. UserSettingsPatch has no nullable field → capability skip.
+        """
+        if cfg.nullable_field is None:
+            pytest.skip(f"{cfg.name}: no nullable field in patch schema")
+        assert cfg.nullable_field is not None  # narrowed for the type checker
+        field: str = cfg.nullable_field
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
+        assert pre is not None
+
+        patched = await cfg.patch_call(
+            cfg, db_session, key, _apply_null(cfg, field)
+        )
+        assert patched is not None
+
+        assert _get_field(patched, field) is None, (
+            f"{cfg.name}.{field} is nullable — explicit null must be APPLIED "
+            f"(cleared); pre-state {pre[field]!r}, "
+            f"got {_get_field(patched, field)!r}"
+        )
+
+    @pytest.mark.parametrize("cfg", PATCH_CONTRACT_CONFIGS, ids=lambda c: c.name)
+    async def test_patch_list_fields_null_ignored_empty_applied(
+        self, cfg: PatchContractConfig, db_session, sample_visit
+    ) -> None:
+        """Semantic 4c — list-fields rule: ``null`` → ignored (pre-state
+        list survives), ``[]`` → applied as a REAL value (empties the list).
+        Only configs with list fields (UserSettings) run the body.
+        """
+        if not cfg.list_fields:
+            pytest.skip(f"{cfg.name}: no list fields in patch schema")
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
+        assert pre is not None
+
+        # null → ignored on every list field
+        for field in sorted(cfg.list_fields):
+            patched = await cfg.patch_call(
+                cfg, db_session, key, _apply_null(cfg, field)
+            )
+            assert patched is not None
+            assert _get_field(patched, field) == pre[field], (
+                f"{cfg.name}.{field} is a NOT NULL list column — explicit "
+                f"null must be ignored (pre-state {pre[field]!r}), "
+                f"got {_get_field(patched, field)!r}"
+            )
+
+        # [] → applied as a value (distinct from the null probe)
+        empty_probe = cfg.patch_schema(
+            **{field: [] for field in sorted(cfg.list_fields)}
+        )
+        patched = await cfg.patch_call(cfg, db_session, key, empty_probe)
+        assert patched is not None
+        for field in sorted(cfg.list_fields):
+            assert _get_field(patched, field) == [], (
+                f"{cfg.name}.{field} — explicit [] must be APPLIED as a "
+                f"real value (empty list), got {_get_field(patched, field)!r}"
+            )
+
+    @pytest.mark.parametrize("cfg", PATCH_CONTRACT_CONFIGS, ids=lambda c: c.name)
+    async def test_patch_empty_body_is_full_noop(
+        self, cfg: PatchContractConfig, db_session, sample_visit
+    ) -> None:
+        """Semantic 5 — empty body: a patch schema with NO fields set is a
+        full no-op — every field value AND ``updated_at`` stay unchanged.
+
+        ``updated_at`` must not move: no early-exit on the current
+        VisitService.patch means the unconditional ``updated_at = now()``
+        fires even with nothing to apply (RED half of the premise).
+        """
+        _service, _row, key = await cfg.make_owner(cfg, db_session, sample_visit)
+        pre = await cfg.read_state(cfg, db_session, key)
+        assert pre is not None
+
+        patched = await cfg.patch_call(cfg, db_session, key, cfg.patch_schema())
+        assert patched is not None, f"{cfg.name}: patch on existing row returned None"
+
+        for field in cfg.patch_schema.model_fields:
+            assert _get_field(patched, field) == pre[field], (
+                f"{cfg.name}.{field} changed on EMPTY patch body "
+                f"(pre-state {pre[field]!r}, got {_get_field(patched, field)!r})"
+            )
+        post_updated_at = _get_field(patched, "updated_at")
+        assert post_updated_at is not None
+        assert _as_datetime(post_updated_at) == _as_datetime(pre["updated_at"]), (
+            f"{cfg.name}: EMPTY patch body must not touch updated_at "
+            f"({pre['updated_at']!r} → {post_updated_at!r})"
+        )
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────────
 
 def _get_field(row: Any, field: str) -> Any:
     """Uniform field access over ORM Visit and UserSettingsResponse."""
     return getattr(row, field)
+
+
+def _apply_null(cfg: PatchContractConfig, field: str) -> Any:
+    """Null probe: patch schema with ``field=None`` EXPLICITLY set.
+
+    The explicit set is the whole point — a bare ``cfg.patch_schema()``
+    leaves the field unset (partial-update hole) and would test nothing.
+    """
+    assert cfg.apply_null is not None, f"{cfg.name}: null-policy needs apply_null"
+    return cfg.apply_null(cfg.patch_schema, field)
 
 
 def _as_datetime(value: Any) -> datetime:

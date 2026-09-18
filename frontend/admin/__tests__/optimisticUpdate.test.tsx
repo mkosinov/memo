@@ -21,7 +21,6 @@ vi.mock('@memo/api-client', () => {
     createActivity: vi.fn(),
     updateActivity: update,
     patchActivity: update,
-    deleteActivity: vi.fn(),
     // GH #267: UserSettingsProvider (mounted above ScheduleProvider) reads these.
     getUserSettings: vi.fn().mockResolvedValue({
       user_id: 'u1', theme: 'light', language: 'ru',

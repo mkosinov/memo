@@ -17,7 +17,6 @@ vi.mock('@memo/api-client', () => {
   getActivities: vi.fn().mockResolvedValue(wrap([])),
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
-  deleteActivity: vi.fn(),
   // GH #213 §6.6: schedule-page spies — the RecordsProvider removal means the
   // records-context queries must never fire on /schedule (api-client is NOT
   // mocked for RecordsContext, so a stray provider would hit the network).

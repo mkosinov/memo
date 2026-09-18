@@ -122,22 +122,6 @@ async function commitDeferredDelete(
 /** Toast shower type derived from the UI context (the hook consumes useUI). */
 type ShowToast = ReturnType<typeof useUI>['showToast'];
 
-/**
- * #285 D4 rev8 (plan Task 5 (ж)) — the RECORDS consumer's commit-failure
- * handler. #286 D7 parameterized the helper (lib/staleAwareOnError.ts) on the
- * invalidation target — the records consumer is now `staleAwareOnError(qc,
- * 'records', undo, showToast)`: 409+dependencies → undo + «Не удалось
- * удалить: данные изменились» with the «Обновить» action (['records']-family);
- * 404 — quiet success; any other error — context-default (undo + red toast).
- */
-function buildStaleAwareOnError(
-  qc: QueryClient,
-  undo: () => void,
-  showToast: ShowToast,
-): (err: unknown) => void {
-  return staleAwareOnError(qc, 'records', undo, showToast);
-}
-
 /** Shared enqueue shape (dedupe/cancel key + 5s window + by-key undo). */
 function buildDeferredDeleteAction(
   qc: QueryClient,
@@ -156,8 +140,12 @@ function buildDeferredDeleteAction(
     // guarantees nothing was deleted during the window), no invalidations.
     undo,
     commit: () => commitDeferredDelete(qc, record, payload, snapshots),
-    // D4 rev8: the stale-aware honest-error handler (see above).
-    onError: buildStaleAwareOnError(qc, undo, showToast),
+    // D4 rev8 / #286 D7: the shared stale-aware handler parameterized on
+    // 'records' (lib/staleAwareOnError.ts) — 409+dependencies → undo +
+    // «Не удалось удалить: данные изменились» with the «Обновить» action
+    // (['records']-family); 404 — quiet success; any other error —
+    // context-default (undo + red toast).
+    onError: staleAwareOnError(qc, 'records', undo, showToast),
   };
 }
 

@@ -19,6 +19,7 @@
  */
 import type { QueryClient } from '@tanstack/react-query';
 import { qk } from '@/lib/queryKeys';
+import { createRowSnapshotSync, mapRowListCache, type RowSnapshot } from './rowSnapshotSync';
 import type {
   PaginatedResponse,
   PaymentResponse,
@@ -32,16 +33,15 @@ export type RecordsListCache<T = RecordResponse> = T[] | PaginatedResponse<T>;
  * Apply `fn` to the items of any ['records', ...] list cache, shape-agnostic:
  * the paged main list caches the envelope {items,total,page,per_page} (#191);
  * per-client/per-activity caches hold plain arrays. `total` is NOT adjusted —
- * every mutation path follows with invalidateQueries(['records']).
+ * every mutation path follows with invalidateQueries(['records']). Typed
+ * wrapper over the shared rowSnapshotSync transform (same mechanics serve
+ * the ['activities'] family — lib/cache/activityCacheSync.ts).
  */
 export function mapRecordsListCache<T>(
   old: RecordsListCache<T> | undefined,
   fn: (items: T[]) => T[],
 ): RecordsListCache<T> | undefined {
-  if (old == null) return old;
-  if (Array.isArray(old)) return fn(old);
-  if (Array.isArray(old.items)) return { ...old, items: fn(old.items) };
-  return old;
+  return mapRowListCache(old, fn) as RecordsListCache<T> | undefined;
 }
 
 // ── #285 deferred record delete: item-level snapshots per cache key (§3 D5) ──
@@ -50,31 +50,15 @@ export function mapRecordsListCache<T>(
 // broadcast). The canonical ['record', id] key is deliberately not involved:
 // the prefix-scoped removal never reaches it and the commit invalidation
 // converges it (D5 — snapshotting the canon would be dead code).
-
-/** Minimal structural contract shared by RecordView and RecordResponse rows. */
-interface RecordRowLike {
-  id: string;
-}
+//
+// The snapshot/remove/restore mechanics are SHARED with the ['activities']
+// family (#286) via createRowSnapshotSync (./rowSnapshotSync) — thin
+// record-flavored delegates below keep the #285 public API and types.
 
 /** One captured pair: the cache key + the row object in its original form. */
-export interface RecordSnapshot {
-  queryKey: readonly unknown[];
-  row: unknown;
-}
+export type RecordSnapshot = RowSnapshot;
 
-/** Shape-agnostic row lookup, mirroring mapRecordsListCache's two shapes. */
-function findRecordRow(
-  cache: unknown,
-  id: string,
-): RecordRowLike | undefined {
-  if (cache == null) return undefined;
-  if (Array.isArray(cache)) {
-    return (cache as RecordRowLike[]).find((r) => r.id === id);
-  }
-  const items = (cache as { items?: unknown }).items;
-  if (Array.isArray(items)) return (items as RecordRowLike[]).find((r) => r.id === id);
-  return undefined;
-}
+const recordRowSync = createRowSnapshotSync(qk.records);
 
 /**
  * Snapshot every ['records', ...] cache holding the row (spec §3 D5): read-only
@@ -86,27 +70,7 @@ export function captureRecordSnapshots(
   qc: QueryClient,
   id: string,
 ): RecordSnapshot[] {
-  const snapshots: RecordSnapshot[] = [];
-  for (const [queryKey, data] of qc.getQueriesData<unknown>({
-    queryKey: qk.records,
-  })) {
-    const row = findRecordRow(data, id);
-    if (row !== undefined) snapshots.push({ queryKey, row });
-  }
-  return snapshots;
-}
-
-/** insertRowById via mapRecordsListCache: same id → replace; absent → append. */
-function insertRowById(
-  old: RecordsListCache | undefined,
-  row: RecordResponse,
-): RecordsListCache | undefined {
-  return mapRecordsListCache(old, (items) => {
-    const exists = items.some((r) => r.id === row.id);
-    return exists
-      ? items.map((r) => (r.id === row.id ? row : r))
-      : [...items, row];
-  });
+  return recordRowSync.capture(qc, id);
 }
 
 /**
@@ -121,12 +85,7 @@ export function restoreRecordSnapshots(
   qc: QueryClient,
   snapshots: RecordSnapshot[],
 ): void {
-  for (const { queryKey, row } of snapshots) {
-    qc.setQueryData<RecordsListCache | undefined>(
-      queryKey,
-      (old) => insertRowById(old, row as RecordResponse),
-    );
-  }
+  recordRowSync.restore(qc, snapshots);
 }
 
 /**
@@ -139,13 +98,7 @@ export function removeRecordRow(
   qc: QueryClient,
   snapshots: RecordSnapshot[],
 ): void {
-  for (const { queryKey, row } of snapshots) {
-    const id = (row as RecordRowLike).id;
-    qc.setQueryData<RecordsListCache | undefined>(
-      queryKey,
-      (old) => mapRecordsListCache(old, (items) => items.filter((r) => r.id !== id)),
-    );
-  }
+  recordRowSync.remove(qc, snapshots);
 }
 
 /** Patch a single record everywhere it lives: canonical + every list cache. */

@@ -533,21 +533,57 @@ export async function cleanup(api: APIRequestContext, path: string) {
 }
 
 /**
- * Hard-delete a record in cleanup with explicit cascade resolutions
- * (Addendum 13 / GH #139 T8-FE2a): the no-body DELETE is a dry-run and
- * returns 409 when the record has visits/payments, which made bare
- * `cleanup()` calls silently leak rows. record_tags is auto=True
- * server-side and is omitted from the body (validate_resolutions
- * silently IGNORES user-sent actions for auto deps — deletion.py §16).
- * Safe for dep-free records too (204) and for
- * already-deleted rows (404 — swallowed), so it is a drop-in replacement
- * for `cleanup(api, \`/api/v1/records/{id}\`)`.
+ * Hard-delete a record in cleanup under the GH #285 rev7 DELETE contract.
+ *
+ * The OLD shape (resolutions-only body) is REJECTED now: every record DELETE
+ * must carry `expected` — the uuid id-sets snapshotted from the dependency
+ * tree (bare no-body DELETE → 422 `expected_state_required`, resolutions-only
+ * body → 422 too). Flow:
+ *   1. `?dry_run=true` preview — pure, never deletes:
+ *        404 → already gone, done;
+ *        204 → clean record → execute with `{expected: {}}`;
+ *        409 → tree: build `expected` from the nodes' `items` ids (auto
+ *              nodes carry none → excluded from the check per rev8) and
+ *              `resolutions` = cascade for every dep whose allowed_actions
+ *              include it (same policy as `cleanup`) → execute.
+ * 409 `stale_dependencies` at execute-time is impossible here: `expected` is
+ * built from the tree fetched milliseconds earlier. record_tags is auto=True
+ * server-side; user-sent resolutions for auto deps are silently ignored
+ * (deletion.py §16). Safe for dep-free records (204) and already-deleted rows
+ * (404 — swallowed), so it is a drop-in replacement for
+ * `cleanup(api, \`/api/v1/records/{id}\`)`.
  */
 export async function cleanupRecord(api: APIRequestContext, recordId: string) {
   try {
-    await api.delete(`${BACKEND}/api/v1/records/${recordId}`, {
-      data: { resolutions: { visits: 'cascade', payments: 'cascade' } },
-    });
+    const preview = await api.delete(
+      `${BACKEND}/api/v1/records/${recordId}?dry_run=true`,
+    );
+    if (preview.status() === 404) return; // already deleted — nothing to clean
+    let payload: Record<string, unknown> = { expected: {} };
+    if (preview.status() === 409) {
+      const body = (await preview.json().catch(() => null)) as {
+        dependencies?: Array<{
+          entity: string;
+          allowed_actions?: string[];
+          items?: Array<{ id: string }> | null;
+        }>;
+      } | null;
+      const expected: Record<string, string[]> = {};
+      const resolutions: Record<string, string> = {};
+      for (const dep of body?.dependencies ?? []) {
+        if (dep.items && dep.items.length > 0) {
+          expected[dep.entity] = dep.items.map((item) => item.id);
+        }
+        if ((dep.allowed_actions ?? []).includes('cascade')) {
+          resolutions[dep.entity] = 'cascade';
+        }
+      }
+      payload =
+        Object.keys(resolutions).length > 0
+          ? { resolutions, expected }
+          : { expected };
+    }
+    await api.delete(`${BACKEND}/api/v1/records/${recordId}`, { data: payload });
   } catch {
     // Ignore cleanup errors
   }

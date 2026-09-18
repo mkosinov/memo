@@ -37,6 +37,22 @@ function renderWithToastSpecs(
   );
 }
 
+// #285 D4 (rev8): non-undo toasts can carry a custom action button slot.
+function renderWithActionToast(action: { label: string; onAction: () => void }) {
+  function TestHarness() {
+    const { showToast } = useUI();
+    React.useEffect(() => {
+      showToast('Не удалось удалить: данные изменились', 'error', undefined, undefined, action);
+    }, []);
+    return <ToastContainer />;
+  }
+  return render(
+    <UIProvider>
+      <TestHarness />
+    </UIProvider>
+  );
+}
+
 describe('ToastContainer', () => {
   it('renders nothing when there are no toasts', () => {
     const { container } = renderWithProvider();
@@ -143,5 +159,28 @@ describe('ToastContainer countdown ring (#94)', () => {
     renderWithToastSpecs([{ message: 'Просто сообщение', kind: 'info' }]);
     expect(screen.queryByTestId('toast-countdown')).not.toBeInTheDocument();
     expect(screen.queryByText('Отменить')).not.toBeInTheDocument();
+  });
+});
+
+// ── #285 D4 (rev8): generalized action slot on non-undo toasts ──────────────
+describe('ToastContainer action slot (#285 D4 rev8)', () => {
+  it('renders the action button with its custom label', () => {
+    renderWithActionToast({ label: 'Обновить', onAction: () => {} });
+    expect(screen.getByText('Обновить')).toBeInTheDocument();
+    // No «Отменить» — the undo slot is not touched by the action slot.
+    expect(screen.queryByText('Отменить')).not.toBeInTheDocument();
+  });
+
+  it('clicking the action button calls onAction and removes the toast', () => {
+    const onAction = vi.fn();
+    renderWithActionToast({ label: 'Обновить', onAction: onAction });
+    fireEvent.click(screen.getByText('Обновить'));
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Не удалось удалить: данные изменились')).not.toBeInTheDocument();
+  });
+
+  it('undo toast rendering is untouched (action slot is additive)', () => {
+    renderWithToasts(['Удалено'], [() => {}]);
+    expect(screen.getByText('Отменить')).toBeInTheDocument();
   });
 });

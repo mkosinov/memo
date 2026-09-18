@@ -90,16 +90,18 @@ vi.mock('@/hooks/useRecordData', () => ({
   }),
 }));
 
-// ─── Mock the shared record-delete hook (Addendum 13) + UI toasts ───────────
+// ─── Mock the shared record-delete hook (GH #285 deferred flow) + UI toasts ──
 
-const mockDeleteMutation = {
-  mutateAsync: vi.fn(),
-  dependencies: null as DependencyNode[] | null,
-  resolveDelete: { mutateAsync: vi.fn() },
+// useDeleteRecord (#285): removeRecord = clean deferred path (dry-run 204 →
+// optimistic removal + enqueue; 409-with-deps REJECTS upward); 
+// removeRecordResolved = the DeleteDialog confirm path (enqueue, sync).
+const mockDeleteHook = {
+  removeRecord: vi.fn(),
+  removeRecordResolved: vi.fn(),
 };
 
 vi.mock('@/hooks/useDeleteRecord', () => ({
-  useDeleteRecord: () => mockDeleteMutation,
+  useDeleteRecord: () => mockDeleteHook,
 }));
 
 const mockShowToast = vi.fn();
@@ -117,19 +119,17 @@ function renderTable(overrides: Partial<RecordsContextType> = {}) {
 
 /** Delete hook whose dry-run rejects with a 409 carrying the records tree. */
 function setupDeleteConflict() {
-  mockDeleteMutation.mutateAsync = vi
+  mockDeleteHook.removeRecord = vi
     .fn()
     .mockRejectedValue(new ApiError(409, 'has_dependencies', 'has_dependencies', DEPS_RECORD));
-  mockDeleteMutation.dependencies = DEPS_RECORD;
 }
 
 describe('RecordsTable', () => {
   beforeEach(() => {
     localStorage.clear();
     mockRecordPayments = [mockPayment];
-    mockDeleteMutation.mutateAsync = vi.fn().mockResolvedValue(undefined);
-    mockDeleteMutation.dependencies = null;
-    mockDeleteMutation.resolveDelete.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    mockDeleteHook.removeRecord = vi.fn().mockResolvedValue(undefined);
+    mockDeleteHook.removeRecordResolved = vi.fn().mockResolvedValue(undefined);
     mockShowToast.mockClear();
   });
 
@@ -347,13 +347,16 @@ describe('RecordsTable', () => {
     expect(screen.getByText('Детали записи')).toBeInTheDocument();
   });
 
-  // ─── Delete → DeleteDialog flow (Addendum 13 dry-run, FE2b wiring) ──────
+  // ─── Delete → DeleteDialog flow (GH #285 deferred: dry-run 409 parks the ──
+  // tree, dialog confirm enqueues via removeRecordResolved) ─────────────────
 
-  it('«Удалить» fires the dry-run delete for the row id', () => {
+  it('«Удалить» runs the deferred clean path with the row object', () => {
     renderTable();
     fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
-    expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1');
+    // D2: removeRecord(record) — the hook dry-runs, then removes the row and
+    // enqueues (row removal + undo toast are the hook/pipeline's business).
+    expect(mockDeleteHook.removeRecord).toHaveBeenCalledWith(mockRecord);
   });
 
   it('409 dry-run conflict opens DeleteDialog labelled from row.activity_start', async () => {
@@ -374,7 +377,7 @@ describe('RecordsTable', () => {
     expect(screen.getByTestId('dep-record_tags')).toBeInTheDocument();
   });
 
-  it('cancel closes the dialog without calling resolveDelete', async () => {
+  it('cancel closes the dialog without enqueuing the cascade delete', async () => {
     setupDeleteConflict();
     renderTable();
     fireEvent.click(screen.getByLabelText(/Действия/));
@@ -386,10 +389,10 @@ describe('RecordsTable', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument(),
     );
-    expect(mockDeleteMutation.resolveDelete.mutateAsync).not.toHaveBeenCalled();
+    expect(mockDeleteHook.removeRecordResolved).not.toHaveBeenCalled();
   });
 
-  it('confirm resolves via resolveDelete with the picked cascade resolutions', async () => {
+  it('confirm enqueues the cascade deferred delete (removeRecordResolved with the tree)', async () => {
     setupDeleteConflict();
     renderTable();
     fireEvent.click(screen.getByLabelText(/Действия/));
@@ -403,25 +406,29 @@ describe('RecordsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
+    // D3: the dialog confirm enqueues the cascade deferred delete — enqueue
+    // is synchronous, so the dialog closes immediately via onDone.
     await waitFor(() =>
-      expect(mockDeleteMutation.resolveDelete.mutateAsync).toHaveBeenCalledWith({
-        id: 'rec-1',
-        resolutions: { visits: 'cascade', payments: 'cascade' },
-      }),
+      expect(mockDeleteHook.removeRecordResolved).toHaveBeenCalledWith(
+        mockRecord,
+        { visits: 'cascade', payments: 'cascade' },
+        DEPS_RECORD,
+      ),
     );
     await waitFor(() =>
       expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument(),
     );
   });
 
-  it('204 dry-run success deletes instantly — no dialog opens', async () => {
-    // mutateAsync resolves (mock default) → the hook already toasted/invalidated
-    // (covered by useDeleteRecord.test.ts); assert table behavior only.
+  it('204 dry-run success enqueues the deferred delete — no dialog opens', async () => {
+    // removeRecord resolves (mock default) → the hook removed the row +
+    // enqueued the deferred action (covered by useDeleteRecord.test.ts);
+    // assert table behavior only.
     renderTable();
     fireEvent.click(screen.getByLabelText(/Действия/));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
-    await waitFor(() => expect(mockDeleteMutation.mutateAsync).toHaveBeenCalledWith('rec-1'));
+    await waitFor(() => expect(mockDeleteHook.removeRecord).toHaveBeenCalledWith(mockRecord));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 });

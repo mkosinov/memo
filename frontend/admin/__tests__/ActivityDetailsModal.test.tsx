@@ -37,7 +37,7 @@ vi.mock('@memo/api-client', () => ({
   createClient: vi.fn(),
   createVisitor: vi.fn(),
   createRecord: vi.fn(),
-  deleteRecord: vi.fn(),
+  dryRunDeleteRecord: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
   deletePayment: vi.fn(),
@@ -52,7 +52,7 @@ import {
   createClient,
   createVisitor,
   createRecord,
-  deleteRecord,
+  dryRunDeleteRecord,
   createPayment,
 } from '@memo/api-client';
 
@@ -130,6 +130,9 @@ vi.mock('@tanstack/react-query', () => ({
     invalidateQueries: vi.fn(),
     setQueryData: vi.fn(),
     fetchQuery: vi.fn(),
+    // The GH #285 delete hook snapshots ['records', ...] caches via
+    // getQueriesData at click time — none seeded in these tests.
+    getQueriesData: vi.fn(() => [] as Array<[readonly unknown[], unknown]>),
   })),
   useQuery: vi.fn(() => ({
     data: undefined,
@@ -511,7 +514,7 @@ describe('ActivityDetailsModal — API integration', () => {
     vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, custom_price: null, created_at: '', updated_at: '', visits: [] });
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', archived: false });
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '' });
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
+    vi.mocked(dryRunDeleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({ id: 'p1', record_id: 'r1', amount: 1000, method: 'card', created_at: '', updated_at: '' });
     vi.mocked(getClientByPhone).mockRejectedValue(new Error('Not found'));
     // #191/#140: booking tabs come from useActivityRecords; client c1 resolves

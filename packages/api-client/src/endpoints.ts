@@ -586,14 +586,26 @@ export async function updateRecord(id: string, data: RecordUpdate): Promise<Reco
   });
 }
 
-export async function deleteRecord(id: string): Promise<void> {
-  await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE' });
+// Dry-run preview (GH #285 rev7): DELETE ?dry_run=true without body.
+// 204 No Content → resolves; 409 → ApiError with .dependencies tree
+// (record nodes carry items: [{id, label}] for one-line previews).
+export async function dryRunDeleteRecord(id: string): Promise<void> {
+  await api(`/api/v1/records/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
 }
 
-// Execute a hard delete with dependency resolutions (Addendum 13 / GH #139
-// T8-FE2a) — mirrors resolveDeleteClient/resolveDeleteStaff: DELETE with body.
-export async function resolveDeleteRecord(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Execute a hard delete (GH #285 rev7) — body contract: {expected, resolutions?}.
+// `expected` is MANDATORY (contract "every delete carries state"): uuid id-sets
+// snapshotted from the dry-run tree; backend answers 409 stale_dependencies on
+// mismatch. resolutions (nullify/cascade) optional — pure path sends only expected.
+export interface ResolveDeleteRecordPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeleteRecord(id: string, payload: ResolveDeleteRecordPayload): Promise<void> {
+  const body: ResolveDeleteRecordPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/records/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
 }
 
 export async function patchRecord(id: string, data: Partial<Pick<RecordResponse, 'status' | 'comment' | 'custom_price'> & { visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; price: number; custom_price?: number | null; status?: string }> }>): Promise<RecordResponse> {

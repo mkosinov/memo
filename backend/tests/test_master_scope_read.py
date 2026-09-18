@@ -278,7 +278,11 @@ class TestRecordScope:
     def test_foreign_delete_404(self, two_records) -> None:
         mc = two_records["master"]["client"]
         foreign = two_records["foreign"]
-        resp = mc.delete(f"/api/v1/records/{foreign['id']}")
+        # #285: bare DELETE is 422 now; the scope gate is probed via dry-run.
+        resp = mc.request(
+            "DELETE", f"/api/v1/records/{foreign['id']}",
+            params={"dry_run": "true"},
+        )
         assert resp.status_code == 404
         rows = query_db(
             f"SELECT id FROM records WHERE id='{foreign['id']}'"
@@ -321,11 +325,15 @@ class TestRecordScope:
         mc = two_records["master"]["client"]
         own = two_records["own"]
         # Own record carries a visit → dry-run DELETE would 409; the
-        # execute path (visit cascade — visits never block) → 204.
+        # execute path (visit cascade — visits never block) → 204. #285
+        # rev7: the commit carries the state confirmed at dry-run.
         resp = mc.request(
             "DELETE",
             f"/api/v1/records/{own['id']}",
-            json={"resolutions": {"visits": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade"},
+                "expected": {"visits": [own["visits"][0]["id"]]},
+            },
         )
         assert resp.status_code == 204
 

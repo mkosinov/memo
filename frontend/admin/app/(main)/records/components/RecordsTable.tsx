@@ -25,11 +25,12 @@ export function RecordsTable() {
   const [selectedRecord, setSelectedRecord] = useState<RecordView | null>(null);
   const [clientModalId, setClientModalId] = useState<string | null>(null);
 
-  // Delete — Addendum 13 / GH #139 T8: shared dry-run hook + dialog. Mirrors
-  // the FE2a call sites (ClientRecordTab/ClientTab) EXACTLY: no-body DELETE →
-  // 204 (instant, hook toasts) or 409 → park deps + open DeleteDialog; the
-  // dialog confirms via resolveDelete.
-  const deleteMutation = useDeleteRecord();
+  // Delete — GH #285 (spec §3 D2/D3): deferred flow. removeRecord dry-runs
+  // (pure preview): a clean 204 removes the row optimistically + enqueues the
+  // deferred delete (5s undo window, commit = resolveDeleteRecord); a 409
+  // WITH the dependency tree rejects here → park the tree + open DeleteDialog
+  // (the row stays visible). Any other error keeps the error toast.
+  const { removeRecord, removeRecordResolved } = useDeleteRecord();
   const [deleteTarget, setDeleteTarget] = useState<{
     record: RecordView;
     deps: DependencyNode[];
@@ -37,29 +38,25 @@ export function RecordsTable() {
 
   const handleDelete = useCallback(async (record: RecordView) => {
     try {
-      await deleteMutation.mutateAsync(record.id);
+      await removeRecord(record);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
-        if (deps.length > 0) {
-          setDeleteTarget({ record, deps });
-          return;
-        }
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ record, deps: err.dependencies });
+        return;
       }
       showToast(
         err instanceof Error ? err.message : 'Не удалось удалить. Попробуйте ещё раз.',
         'error',
       );
     }
-  }, [deleteMutation, showToast]);
+  }, [removeRecord, showToast]);
 
   // GH #213 Task 7 (§6.2) — the columns factory is lookup-free; cells read the
   // denormalized RecordView row fields. Only the ClientQuickCard opener stays
-  // wired here (row.client_id → setClientModalId). The actions memo is NOT
-  // referentially stable: useDeleteRecord returns a fresh mutation object
-  // identity every render, so handleDelete — and with it this useMemo —
-  // recomputes on every render. Harmless: DataTable does not depend on the
-  // referential stability of `actions`.
+  // wired here (row.client_id → setClientModalId). The actions memo is
+  // referentially stable: useDeleteRecord's removeRecord is a stable
+  // useCallback, so handleDelete — and with it this useMemo — recompute only
+  // when they actually change.
   const columns = useMemo(
     () =>
       recordColumns({
@@ -227,17 +224,19 @@ export function RecordsTable() {
         </div>
       )}
 
-      {/* Delete dialog — Addendum 13: opened on dry-run 409, closed on
-          done/cancel. Mirrors ClientRecordTab exactly (FE2a). GH #213 Task 7:
-          label reads row.activity_start (formatRecordLabel — no maps). */}
+      {/* Delete dialog — GH #285 (D3): opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and the
+          dialog closes immediately via onDone. GH #213 Task 7: label reads
+          row.activity_start (formatRecordLabel — no maps). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={formatRecordLabel(deleteTarget.record.activity_start)}
           entityType="record"
           entityId={deleteTarget.record.id}
           dependencies={deleteTarget.deps}
-          onResolve={async (id, resolutions) => {
-            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          onResolve={async (_id, resolutions) => {
+            // D3: enqueue is synchronous — no await, the dialog closes at once.
+            void removeRecordResolved(deleteTarget.record, resolutions, deleteTarget.deps);
           }}
           onArchive={async () => { /* records have no archive flow — never Mode B */ }}
           onDone={() => setDeleteTarget(null)}

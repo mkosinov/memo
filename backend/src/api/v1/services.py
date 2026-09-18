@@ -255,7 +255,7 @@ async def delete_service(
             status_code=409,
             content={
                 "detail": "has_dependencies",
-                "dependencies": [d.model_dump() for d in deps],
+                "dependencies": [d.model_dump(exclude_none=True) for d in deps],
             },
         )
     deleted = await service.delete(db_session=session, id=service_id)

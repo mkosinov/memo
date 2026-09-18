@@ -52,6 +52,17 @@ function UIConsumer() {
         Show Toast w/ Undo
       </button>
       <button
+        data-testid="show-toast-action"
+        onClick={() =>
+          showToast('Данные изменились', 'error', undefined, undefined, {
+            label: 'Обновить',
+            onAction: actionSpy,
+          })
+        }
+      >
+        Show Toast w/ Action
+      </button>
+      <button
         data-testid="show-toast-info-countdown"
         onClick={() => showToast('Info', 'info', undefined, 3000)}
       >
@@ -98,7 +109,13 @@ function renderWithContext() {
   );
 }
 
+const actionSpy = vi.fn();
+
 describe('UIProvider', () => {
+  beforeEach(() => {
+    actionSpy.mockReset();
+  });
+
   it('throws when useUI is used outside provider', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     function BrokenConsumer() {
@@ -246,6 +263,24 @@ describe('UIProvider', () => {
     renderWithContext();
     act(() => {
       screen.getByTestId('show-toast-info-countdown').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(4499);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  it('auto-removes an action toast (no undo) after the 4500ms default (#285 rev8)', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-action').click();
     });
     expect(screen.getByTestId('toast-count').textContent).toBe('1');
     act(() => {

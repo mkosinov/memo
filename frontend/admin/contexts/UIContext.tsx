@@ -4,12 +4,17 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 
 export type ToastKind = 'info' | 'success' | 'error' | 'loading';
 
+/** #285 D4 (rev8): custom action button on non-undo toasts (e.g. «Обновить»). */
+export type ToastAction = { label: string; onAction: () => void };
+
 interface Toast {
   id: string;
   kind: ToastKind;
   message: string;
   undo?: () => void;
   countdownMs?: number;
+  /** Additive action slot — rendered by ToastContainer with its own label. */
+  action?: ToastAction;
 }
 
 interface UIContextType {
@@ -19,11 +24,14 @@ interface UIContextType {
   // #94: `countdownMs` rides in the 3rd slot when the 2nd arg is an undo
   // function (kindless form — used by enqueuePendingAction), or as the 4th
   // parameter for the kind form; it is ignored for non-undo toasts.
+  // #285 D4 (rev8): the 5th parameter carries the optional action slot
+  // (rendered as a button with `action.label`); undo toasts are unaffected.
   showToast: (
     message: string,
     kindOrUndo?: ToastKind | (() => void),
     undoOrCountdownMs?: (() => void) | number,
     countdownMs?: number,
+    action?: ToastAction,
   ) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
@@ -84,6 +92,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     kindOrUndo?: ToastKind | (() => void),
     undoOrCountdownMs?: (() => void) | number,
     countdownMs?: number,
+    action?: ToastAction,
   ): string => {
     let kind: ToastKind = 'info';
     let undoFn: (() => void) | undefined;
@@ -99,8 +108,10 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       undoFn = typeof undoOrCountdownMs === 'function' ? undoOrCountdownMs : undefined;
     }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setToasts(prev => [...prev, { id, kind, message, undo: undoFn, countdownMs: cd }]);
+    setToasts(prev => [...prev, { id, kind, message, undo: undoFn, countdownMs: cd, action }]);
     if (kind !== 'loading') {
+      // #285 D4 (rev8): the lifetime rule is untouched — only `undo` selects
+      // the countdown-window lifetime; action toasts (no undo) keep 4500ms.
       const duration = undoFn ? (cd ?? 5000) : 4500;
       const timerId = setTimeout(() => {
         toastTimers.current.delete(id);

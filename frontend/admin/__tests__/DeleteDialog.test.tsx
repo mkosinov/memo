@@ -337,6 +337,146 @@ describe('DeleteDialog — Mode A (record with cascade deps, Addendum 13)', () =
   });
 });
 
+// ─── GH #285 D9в — record one-liners: nodes with `items` render a group ────
+// Header «{relationPlural} — будут удалены:» + one line per item (cap 10 +
+// «и ещё N»). Nodes WITHOUT items keep the legacy counter line.
+
+// Live dry-run tree shape for a record: cascade nodes carry items (id +
+// human-readable label). Backend deletion.py registers a collector for
+// record_tags too, so real trees MAY carry tag items — this fixture leaves
+// them off record_tags to keep the no-items fallback branch regression-covered.
+const RECORD_WITH_ITEMS: DependencyNode[] = [
+  {
+    entity: 'visits',
+    relation: 'Посещение',
+    count: 2,
+    allowed_actions: ['cascade'],
+    message: null,
+    items: [
+      { id: 'visit-1', label: 'Гончарное дело, 10:00' },
+      { id: 'visit-2', label: 'Лепка, 11:00' },
+    ],
+  },
+  {
+    entity: 'payments',
+    relation: 'Платёж',
+    count: 1,
+    allowed_actions: ['cascade'],
+    message: null,
+    items: [{ id: 'payment-1', label: '3500, card' }],
+  },
+  { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+];
+
+describe('DeleteDialog — record one-liners (GH #285 D9в)', () => {
+  it('node with items renders the group header + one line per item (no counter string)', () => {
+    renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_WITH_ITEMS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // Group header — plural relation label + "will be deleted" wording.
+    expect(screen.getByText('Посещения — будут удалены:')).toBeInTheDocument();
+    // One line per item — the human-readable label, not ids.
+    expect(screen.getByText('Гончарное дело, 10:00')).toBeInTheDocument();
+    expect(screen.getByText('Лепка, 11:00')).toBeInTheDocument();
+    // The legacy counter line is replaced by the group.
+    expect(screen.queryByText(/Посещения: 2 \(удалены\)/)).not.toBeInTheDocument();
+    // cascade_preview tail is not shown for nodes with items (the data is
+    // already in the list).
+    expect(screen.queryByText(/визиты:/)).not.toBeInTheDocument();
+  });
+
+  it('keeps dep-<entity> testids on the item groups', () => {
+    renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_WITH_ITEMS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-visits')).toHaveTextContent('Посещения — будут удалены:');
+    expect(screen.getByTestId('dep-visits')).toHaveTextContent('Гончарное дело, 10:00');
+    expect(screen.getByTestId('dep-payments')).toHaveTextContent('Платежи — будут удалены:');
+    expect(screen.getByTestId('dep-payments')).toHaveTextContent('3500, card');
+  });
+
+  it('nodes WITHOUT items keep today\'s render (record_tags auto line unchanged)', () => {
+    renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_WITH_ITEMS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const tagsRow = screen.getByTestId('dep-record_tags');
+    expect(tagsRow).toHaveTextContent('→ Теги: 3 (удалены)');
+    expect(tagsRow.textContent).not.toContain('будут удалены');
+  });
+
+  it('confirm is still gated per-entity; resolutions omit the auto dep', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_WITH_ITEMS,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn()).toBeDisabled(); // checkbox unchecked
+    toggleConfirm();
+    expect(confirmBtn()).toBeEnabled();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('r1', { visits: 'cascade', payments: 'cascade' }),
+    );
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+  });
+
+  it('caps at 10 lines + «и ещё N» for larger trees', () => {
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      id: `visit-${i + 1}`,
+      label: `Гончарное дело, ${10 + i}:00`,
+    }));
+    renderDialog({
+      entityName: '15 мая · 14:00',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: [
+        {
+          entity: 'visits',
+          relation: 'Посещение',
+          count: 12,
+          allowed_actions: ['cascade'],
+          message: null,
+          items,
+        },
+      ],
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // First 10 labels visible…
+    for (let i = 0; i < 10; i++) {
+      expect(screen.getByText(`Гончарное дело, ${10 + i}:00`)).toBeInTheDocument();
+    }
+    // …items beyond the cap are NOT rendered individually, replaced by the tail.
+    expect(screen.queryByText('Гончарное дело, 20:00')).not.toBeInTheDocument();
+    expect(screen.getByText('и ещё 2')).toBeInTheDocument();
+  });
+});
+
 describe('DeleteDialog — Mode B (blocked by activities → archive, §7.2)', () => {
   it('shows the block message with count + backend hint; "Архивировать" present, "Удалить" absent', () => {
     renderDialog({

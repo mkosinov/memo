@@ -26,9 +26,7 @@ import type {
   VisitResponse,
 } from '@memo/api-client';
 
-export type RecordsListCache =
-  | RecordResponse[]
-  | PaginatedResponse<RecordResponse>;
+export type RecordsListCache<T = RecordResponse> = T[] | PaginatedResponse<T>;
 
 /**
  * Apply `fn` to the items of any ['records', ...] list cache, shape-agnostic:
@@ -36,14 +34,118 @@ export type RecordsListCache =
  * per-client/per-activity caches hold plain arrays. `total` is NOT adjusted —
  * every mutation path follows with invalidateQueries(['records']).
  */
-export function mapRecordsListCache(
-  old: RecordsListCache | undefined,
-  fn: (items: RecordResponse[]) => RecordResponse[],
-): RecordsListCache | undefined {
+export function mapRecordsListCache<T>(
+  old: RecordsListCache<T> | undefined,
+  fn: (items: T[]) => T[],
+): RecordsListCache<T> | undefined {
   if (old == null) return old;
   if (Array.isArray(old)) return fn(old);
   if (Array.isArray(old.items)) return { ...old, items: fn(old.items) };
   return old;
+}
+
+// ── #285 deferred record delete: item-level snapshots per cache key (§3 D5) ──
+// Capture the ROW OBJECT itself from every ['records', ...] cache where it
+// lives; undo inserts it back into ITS OWN cache keys only (replace-by-id, no
+// broadcast). The canonical ['record', id] key is deliberately not involved:
+// the prefix-scoped removal never reaches it and the commit invalidation
+// converges it (D5 — snapshotting the canon would be dead code).
+
+/** Minimal structural contract shared by RecordView and RecordResponse rows. */
+interface RecordRowLike {
+  id: string;
+}
+
+/** One captured pair: the cache key + the row object in its original form. */
+export interface RecordSnapshot {
+  queryKey: readonly unknown[];
+  row: unknown;
+}
+
+/** Shape-agnostic row lookup, mirroring mapRecordsListCache's two shapes. */
+function findRecordRow(
+  cache: unknown,
+  id: string,
+): RecordRowLike | undefined {
+  if (cache == null) return undefined;
+  if (Array.isArray(cache)) {
+    return (cache as RecordRowLike[]).find((r) => r.id === id);
+  }
+  const items = (cache as { items?: unknown }).items;
+  if (Array.isArray(items)) return (items as RecordRowLike[]).find((r) => r.id === id);
+  return undefined;
+}
+
+/**
+ * Snapshot every ['records', ...] cache holding the row (spec §3 D5): read-only
+ * walk via getQueriesData({queryKey: qk.records}); each pair captures the row
+ * object itself (RecordView from the paged envelope, RecordResponse from
+ * per-client/per-activity lists). Caches without the row are not captured.
+ */
+export function captureRecordSnapshots(
+  qc: QueryClient,
+  id: string,
+): RecordSnapshot[] {
+  const snapshots: RecordSnapshot[] = [];
+  for (const [queryKey, data] of qc.getQueriesData<unknown>({
+    queryKey: qk.records,
+  })) {
+    const row = findRecordRow(data, id);
+    if (row !== undefined) snapshots.push({ queryKey, row });
+  }
+  return snapshots;
+}
+
+/** insertRowById via mapRecordsListCache: same id → replace; absent → append. */
+function insertRowById(
+  old: RecordsListCache | undefined,
+  row: RecordResponse,
+): RecordsListCache | undefined {
+  return mapRecordsListCache(old, (items) => {
+    const exists = items.some((r) => r.id === row.id);
+    return exists
+      ? items.map((r) => (r.id === row.id ? row : r))
+      : [...items, row];
+  });
+}
+
+/**
+ * Undo path (§3 D5): for each captured pair, take the CURRENT value of its own
+ * cache key and insert the captured row replace-by-id — a refetch-returned row
+ * is replaced (no duplicates), a shifted list gets the row appended. Never
+ * writes into an evicted/deleted cache (updater returns undefined → skip) and
+ * performs no server calls — the dry-run (D1) guarantees nothing was deleted
+ * during the window.
+ */
+export function restoreRecordSnapshots(
+  qc: QueryClient,
+  snapshots: RecordSnapshot[],
+): void {
+  for (const { queryKey, row } of snapshots) {
+    qc.setQueryData<RecordsListCache | undefined>(
+      queryKey,
+      (old) => insertRowById(old, row as RecordResponse),
+    );
+  }
+}
+
+/**
+ * Optimistic row removal (§3 D5): scoped to the CAPTURED pairs only — other
+ * ['records', ...] caches (e.g. a foreign client/activity list the row never
+ * lived in) are not broadcast-touched. Shape-preserving via mapRecordsListCache;
+ * `total` stays untouched (helper invariant).
+ */
+export function removeRecordRow(
+  qc: QueryClient,
+  snapshots: RecordSnapshot[],
+): void {
+  for (const { queryKey, row } of snapshots) {
+    const id = (row as RecordRowLike).id;
+    qc.setQueryData<RecordsListCache | undefined>(
+      queryKey,
+      (old) => mapRecordsListCache(old, (items) => items.filter((r) => r.id !== id)),
+    );
+  }
 }
 
 /** Patch a single record everywhere it lives: canonical + every list cache. */

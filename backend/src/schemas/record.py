@@ -97,6 +97,28 @@ class RecordPatch(BaseModel):
     visits: list[VisitItem] | None = None
 
 
+class RecordDeleteBody(BaseModel):
+    """DELETE /api/v1/records/{id} body — the deferred-delete commit state (#285 rev7).
+
+    Every real deletion must declare the dependency state the caller saw at
+    dry-run time (spec §3 D1/D9a):
+
+    * ``expected`` — id-sets per FK entity (rev6: ids, not counters — the
+      check also catches a swapped dependency at an unchanged counter);
+      clean path sends ``{}``.
+    * ``resolutions`` — the user's cascade choices (§6); cascade commits
+      send ``{"visits": "cascade", "payments": "cascade"}`` alongside
+      ``expected``.
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body, and
+    the execute-path requirement (``expected`` mandatory) is enforced in
+    the route branch so the preview stays body-free.
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
+
+
 class RecordResponse(RecordBase):
     """Response schema with all record fields including nested visits."""
 

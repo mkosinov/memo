@@ -535,11 +535,15 @@ class TestDataIntegrity:
         ids = [r["id"] for r in response.json()["items"]]
         assert record_id in ids
 
-        # Hard-delete (with-body execute — record has visits as deps, GH #139)
+        # Hard-delete (with-body execute — record has visits as deps, GH #139;
+        # #285 rev7: the commit declares the state confirmed at dry-run)
         api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [record["visits"][0]["id"]]},
+            },
         )
 
         # Not in list
@@ -572,12 +576,20 @@ class TestDataIntegrity:
         response = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [record["visits"][0]["id"]]},
+            },
         )
         assert response.status_code == 204
 
         # Second delete should return 404 (record already deleted)
-        response = api_client.delete(f"/api/v1/records/{record_id}")
+        # (#285: bare DELETE is 422 now; execution carries {"expected": {}}).
+        response = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"expected": {}},
+        )
         assert response.status_code == 404
 
     def test_client_visitors_excludes_deleted(self, api_client, create_client):

@@ -106,7 +106,14 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 
 ## Hard-delete FK dependency matrix (DELETE /{id} — spec GH #207 §4)
 
-`DELETE /{id}` is a **real hard delete** (row physically removed) for all 5 entities. When FK dependencies exist, the dependency-resolution mechanism kicks in: dry-run preview (409) or execute-with-resolutions (204). Spec §5-§6 is the source of truth for the contract.
+`DELETE /{id}` is a **real hard delete** (row physically removed) for all 5 entities. When FK dependencies exist, the dependency-resolution mechanism kicks in: no-body preview (409) or execute-with-resolutions (204). Spec §5-§6 is the source of truth for the contract. (#285 rev7: for **records** the no-body preview is replaced by the explicit `?dry_run=true` flag — bare DELETE on records → 422.)
+
+**Deferred-delete `expected` contract (rev8, #285):** the commit of a **deferred** deletion carries `expected` — per-entity id-sets of the server dependency tree the user confirmed (dialog/undo window); subset match by id (a dep absent from `expected` on the server → 409 `stale_dependencies` + current tree → honest error + «Обновить» refresh, not a silent skip or auto-dialog). **Onboarding criterion — the presence of server-side dependencies (FK_MATRIX), not the undo window and not "non-archival":**
+- **Records (#285)** — the core of the contract (visits/payments/record_tags deps).
+- **Visits (#297) / payments (#298)** — leaf entities (no FK_MATRIX entry): they carry no `expected` and need no server changes — they inherit only the deferred-commit error handling (honest errors + undo instead of silent failures).
+- **Activities (#286)** — server dependencies EXIST (handwritten service-level cascade destroys the activity's records with their visits/payments/record_tags — outside the deletion domain / FK matrix for now); their contract line (Activity in the matrix, `expected = {records}`) is written by #286 post-merge — deliberately not stated here.
+- **Tag / Photo / Visitor / UserSettings** — instant hard-deletes (no FK-matrix deps — nothing to match).
+- **Archive-aware entities (staff/location/service/material/client)** — deferred is deliberately out of reach (user decision 17.09): no undo window exists for them; deletion goes through an explicit resolutions dialog or is a clean instant 204, and they already have a real undo (archive → restore).
 
 | Entity → Relation | Nullable? | Action | User choice? |
 |---|---|---|---|
@@ -154,7 +161,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
   ```
 - **204 (with body, resolutions valid):** `DELETE /{id}` with body `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` — server validates each action against the FK matrix, requires resolutions for **all non-auto deps**, resolves auto deps automatically, then executes **nullify → cascade → hard delete** in ONE transaction. Returns 204 on success. Auto deps are omitted from the user's `resolutions`; if all deps are auto, the body is `{}`.
 - **422 (with body, invalid/missing resolution):** A resolution NOT in `allowed_actions` for that entity → 422 (e.g. `{"activities": "cascade"}` → 422 because activities is blocked; `{"records": "cascade"}` → 422 because records only allows nullify). Missing a non-auto dep → 422 ("resolution required for entity X"). Auto deps in the body are silently ignored (no error). Blocked deps (activities, `allowed_actions: []`) → 422 always ("entity has blocking dependencies — archive instead").
-- **404** (entity not found). An empty body (or no body) is the dry-run per §5 — produces 204 or 409, never executes.
+- **404** (entity not found). An empty/no-body DELETE never carries `resolutions`: execute-if-clean (204) or preview (409). **Exception (#285 rev7):** records dropped the no-body mode — bare DELETE on records → 422 `{"detail": "expected_state_required"}`; preview only via `?dry_run=true` (pure preview, never modifies rows).
 - **Execution order:** nullify → cascade → hard delete (entity row last), all in ONE `@transactional` method (rollback on any failure).
 - **FK backstop:** `PRAGMA foreign_keys=ON` added to the SQLite connect listener in `database.py` (no migration). The service-level transaction remains the **primary** mechanism; DB-level FK is a backstop that catches any non-service write path (raw SQL, migrations, backfills).
 

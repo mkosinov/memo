@@ -1,8 +1,13 @@
 ---
-name: plan-reviewer
-description: Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec before implementation (G2, DESIGN). Read-only.
-tools: [Read, Bash]
+name: "plan-reviewer"
+description: "Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec before implementation (G2, DESIGN). Read-only."
+color: yellow
 model: omniroute/plan-reviewer
+thoughtLevel: disabled
+tools:
+  - Read
+  - Bash
+injectAgentsMd: true
 ---
 
 <!-- Host port of superagents/.opencode/agents/plan-reviewer.md (2026-09-06; formerly spec-reviewer.md, split: plan-reviewer for G2 + code-compliance-reviewer for in-container G5). The superagents repo is canonical — re-port on change. Model: routes via the omniroute combo `plan-reviewer` (indirection — the underlying model is swapped in the omniroute dashboard, not in agent files; currently opencode-go/minimax-m3). -->

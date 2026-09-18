@@ -58,6 +58,17 @@ export function ToastContainer() {
               Отменить
             </button>
           )}
+          {toast.action && (
+            <button
+              onClick={() => {
+                toast.action?.onAction();
+                hideToast(toast.id);
+              }}
+              className="text-brand-light font-medium hover:underline whitespace-nowrap"
+            >
+              {toast.action.label}
+            </button>
+          )}
           {toast.kind !== 'loading' && (
             <button
               onClick={() => hideToast(toast.id)}

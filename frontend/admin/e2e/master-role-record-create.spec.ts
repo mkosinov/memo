@@ -143,7 +143,9 @@ test.describe('GH #263 S2 — master creates records', () => {
     } finally {
       const created = ownRecordRow(studioClient.id);
       if (created) await cleanupRecord(page.request, created.id as string);
-      await cleanup(admin, `/api/v1/records/${foreignRecord.id}`);
+      // rev7 (#285): record DELETE carries the expected-state contract —
+      // the generic cleanup's bare DELETE would 422 and leak.
+      await cleanupRecord(admin, foreignRecord.id);
       await cleanup(admin, `/api/v1/activities/${foreignActivity.id}`);
       await cleanup(admin, `/api/v1/clients/${studioClient.id}`);
       await cleanup(admin, `/api/v1/staff/${foreignMaster.id}`);

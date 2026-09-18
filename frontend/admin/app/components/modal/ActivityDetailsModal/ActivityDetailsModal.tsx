@@ -241,10 +241,11 @@ function ExistingActivityContent({
     [createRecord, serviceTariffs, showToast],
   );
 
-  // Delete record handler — ClientTab owns the Addendum 13 dry-run flow
-  // (shared useDeleteRecord hook + DeleteDialog) and calls back here AFTER a
-  // successful delete (hook already toasted «Запись удалена»). Keep today's
-  // post-delete navigation only — no second delete.
+  // Delete record handler — ClientTab owns the #285 deferred flow (shared
+  // useDeleteRecord hook + DeleteDialog; DELETE commit + undo toast live in
+  // the PendingActions pipeline) and calls back here at click time — right
+  // after the dry-run/dialog step (spec D6). Keep today's post-delete
+  // navigation only — no second delete.
   const handleDeleteRecord = useCallback((_recordId: string) => {
     setActiveTab('settings');
   }, []);

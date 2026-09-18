@@ -133,12 +133,16 @@ class TestRecordDeleteCascade:
         record = create_record()
         _drain(subscriber)
 
-        # Execute mode: the unified DELETE route requires the resolutions
-        # body when dependencies exist (visits here); RecordService.delete
-        # is the executor and marks {visits, payments} (§3.3).
+        # Execute mode: the unified DELETE route requires the commit body
+        # (resolutions + the expected id-sets confirmed at dry-run — #285
+        # rev7); RecordService.delete is the executor and marks
+        # {visits, payments} (§3.3).
         resp = api_client.request(
             "DELETE", f"/api/v1/records/{record['id']}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [record["visits"][0]["id"]]},
+            },
         )
         assert resp.status_code == 204, resp.text
 

@@ -1,5 +1,6 @@
 """Tests for the Records + Visits CRUD API endpoints."""
 
+import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -188,12 +189,18 @@ class TestRecordsCrud:
         }
         create_resp = api_client.post("/api/v1/records", json=payload)
         record_id = create_resp.json()["id"]
+        # #285 rev7: the commit must declare the state it confirmed — the
+        # visit ids from the create response (no payments exist).
+        visit_ids = [v["id"] for v in create_resp.json()["visits"]]
 
         # Delete (with-body execute — record has visits as deps, GH #139)
         response = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": []},
+            },
         )
         assert response.status_code == 204
 
@@ -227,8 +234,10 @@ class TestRecordsCrud:
         assert response.status_code == 404
 
     def test_delete_nonexistent_record_returns_404(self, api_client) -> None:
-        """DELETE /api/records/{fake_id} returns 404."""
-        response = api_client.delete("/api/v1/records/nonexistent-id")
+        """DELETE /api/records/{fake_id} returns 404 (#285: via dry-run probe)."""
+        response = api_client.request(
+            "DELETE", "/api/v1/records/nonexistent-id", params={"dry_run": "true"}
+        )
         assert response.status_code == 404
 
 
@@ -1103,24 +1112,69 @@ def _link_record_tag(api_client, record_id: str, tag_name: str | None = None) ->
     return tag_id
 
 
-class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/records/{id} — unified dry-run (no body) + execute (with body).
+@pytest.fixture
+def sse_subscriber():
+    """Subscribe to the event hub for ONE test; drain/unsubscribe on exit.
 
-    Mirrors the masters/clients deletion suites. Record deps (Addendum 13):
+    Same mechanism as the ``subscriber`` fixture in test_events_emit.py
+    (module-local there); the test drains setup noise before the mutation
+    under check and asserts the post-mutation queue is empty.
+    """
+    from src.events.hub import hub
+
+    q = hub.subscribe()
+    try:
+        yield q
+    finally:
+        hub.unsubscribe(q)
+
+
+def _drain_events(q) -> list:
+    """Collect everything currently sitting in the hub queue."""
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    return events
+
+
+class TestDeleteUnifiedRoute:
+    """DELETE /api/v1/records/{id} — unified delete contract (dry-run preview /
+    body with expected id-sets; no-body forbidden).
+
+    #285 rev7: the legacy no-body "execute-if-clean" mode is REMOVED. Modes:
+      * ?dry_run=true — pure preview: collect_dependencies → empty → 204
+        WITHOUT deleting; non-empty → 409 + dependency tree; missing → 404.
+        Never modifies rows, emits no SSE; combined with a resolutions
+        body → 422.
+      * No body, no flag → 422 {"detail": "expected_state_required"} —
+        every real deletion must declare its state.
+      * Body {"expected": {...}} — the deferred-delete commit: ``expected``
+        id-sets (rev6) are verified against the CURRENT dependency tree
+        BEFORE the resolutions validation; mismatch → 409
+        ``stale_dependencies`` + tree. Subset semantics (rev6): a dep that
+        disappeared in the undo window does not block (deleting less than
+        confirmed); a dep that APPEARED does. Auto-deps (record_tags) are
+        exempt. Clean record + {"expected": {}} → 204 hard delete.
+      * Body {"resolutions": {...}, "expected": {...}} — expected check →
+        resolutions validation (§6) → atomic cascade → 204. A cascade
+        commit WITHOUT ``expected`` → 422 expected_state_required.
+
+    Record deps (Addendum 13):
       * visits   → cascade, auto=False (user choice)
       * payments → cascade, auto=False (user choice)
       * record_tags → cascade, auto=True (join rows)
 
     No blocking deps (allowed_actions never empty for Record); no undo flow.
-    Record with zero deps → instant 204 (Materials-like path).
     Execution stays in RecordService.delete (the @transactional cascade
     visits → payments → record_tags → record) — NOT through CASCADE_HANDLERS.
     """
 
-    def test_delete_bare_record_no_deps_returns_204_and_row_gone(
+    # ── rev7: no-body DELETE without flag → 422 expected_state_required ────
+
+    def test_delete_no_body_without_flag_returns_422(
         self, api_client, create_activity, create_client
     ) -> None:
-        """No body + zero deps (record with no visits/payments/tags) → 204."""
+        """Rev7: bare DELETE (no body, no flag) → 422, row untouched."""
         activity = create_activity()
         client = create_client()
         record = api_client.post("/api/v1/records", json={
@@ -1131,29 +1185,21 @@ class TestDeleteUnifiedRoute:
 
         resp = api_client.delete(f"/api/v1/records/{record['id']}")
 
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched (the legacy execute-if-clean path is gone).
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
 
-    def test_delete_nonexistent_record_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404."""
+    def test_delete_no_body_nonexistent_returns_422(self, api_client) -> None:
+        """Rev7 rejects the request shape before any DB probe (not a 404)."""
         resp = api_client.delete("/api/v1/records/nonexistent-record-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
 
-    def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (resolve_delete returns False)."""
-        resp = api_client.request(
-            "DELETE",
-            "/api/v1/records/nonexistent-record-id",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
-        )
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
-
-    def test_delete_record_with_deps_no_body_returns_409(
+    def test_delete_no_body_with_deps_returns_422(
         self, api_client, create_record
     ) -> None:
-        """No body + deps (visits + payments + record_tags) → 409 + tree."""
+        """Rev7: bare DELETE on a record with deps → 422, not a 409 preview."""
         record = create_record(
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
@@ -1167,19 +1213,371 @@ class TestDeleteUnifiedRoute:
 
         resp = api_client.delete(f"/api/v1/records/{record_id}")
 
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_delete_nonexistent_record_with_body_returns_404(self, api_client) -> None:
+        """With body + nonexistent id → 404 (scope probe fires first)."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/records/nonexistent-record-id",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {},
+            },
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_delete_clean_record_with_expected_empty_body_returns_204(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """Execution moved to the body branch: {"expected": {}} + clean → 204.
+
+        The commit of the deferred delete always carries the declared state;
+        for a clean record that is an empty ``expected`` id-set (spec §3 D1).
+        """
+        activity = create_activity()
+        client = create_client()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [],
+        }).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record['id']}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 404
+
+    # ── expected id-set verification (rev5/rev6) — BEFORE resolutions ─────
+
+    def test_expected_payment_appeared_in_window_returns_409_stale(
+        self, api_client, create_record
+    ) -> None:
+        """(б) Payment landed in the undo window → 409 stale_dependencies.
+
+        The record was clean at dry-run time (expected: {}); a payment
+        appeared before the deferred commit → the id-set check must refuse
+        the delete and leave the record AND the payment alive.
+        """
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        # Current tree in DependencyNode shape (parsed by ApiError.dependencies).
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["count"] == 1
+        assert deps["payments"]["allowed_actions"] == ["cascade"]
+        # Nothing deleted.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert query_db(
+            f"SELECT * FROM payments WHERE record_id='{record_id}'"
+        ), "payment must survive the stale commit"
+
+    def test_expected_cascade_matching_ids_executes_204(
+        self, api_client, create_record
+    ) -> None:
+        """(в) 2 visits + resolutions + expected {visits: [id1, id2]} → 204."""
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": []},
+            },
+        )
+
+        assert resp.status_code == 204
+        # Cascade executed: record + visits gone.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 404
+        for vid in visit_ids:
+            assert query_db(f"SELECT * FROM visits WHERE id='{vid}'") == []
+
+    def test_expected_extra_visit_appeared_returns_409_not_422(
+        self, api_client, create_record
+    ) -> None:
+        """(г) Valid resolutions but stale expected (visit appeared) → 409.
+
+        Pins the ORDER: the expected id-set check runs BEFORE the
+        resolutions validation — the commit fails with 409
+        stale_dependencies, not 422, and nothing is deleted.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+        # The race: a third visit appears between dry-run and commit.
+        visitor = api_client.post("/api/v1/visitors", json={
+            "client_id": record["client_id"], "name": "Carol", "age": 40,
+        }).json()
+        extra_visit = api_client.post(
+            "/api/v1/visits",
+            json={
+                "record_id": record_id,
+                "visitor_id": visitor["id"],
+                "price": 1500,
+            },
+        )
+        assert extra_visit.status_code == 201, extra_visit.text
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [visit_ids[0]]},
+            },
+        )
+
+        assert resp.status_code == 409, f"got {resp.status_code}: {resp.text}"
+        assert resp.json()["detail"] == "stale_dependencies"
+        # Nothing deleted — record and BOTH confirmed visits survive.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        for vid in visit_ids:
+            assert query_db(f"SELECT * FROM visits WHERE id='{vid}'") != []
+
+    def test_expected_exchange_same_counter_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """(д) Swap at equal counter: expected [a], DB holds visit b → 409.
+
+        rev6: id-sets, not counters — the counters would both read 1, but
+        the confirmed id is not among the current rows → stale.
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        db_visit_id = record["visits"][0]["id"]
+        ghost_id = str(_uuid.uuid4())
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [ghost_id]},
+            },
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert query_db(f"SELECT * FROM visits WHERE id='{db_visit_id}'") != []
+
+    def test_expected_dep_disappeared_subset_passes_204(
+        self, api_client, create_record
+    ) -> None:
+        """(е) Dependency vanished in the window → subset → 204 (delete less).
+
+        expected claims visit «a»; by commit time the record has no visits.
+        Subset (not equality) semantics: deleting less than confirmed is OK.
+        """
+        record = create_record(visits=[])  # clean by commit time
+        record_id = record["id"]
+        ghost_id = str(_uuid.uuid4())
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"expected": {"visits": [ghost_id]}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 404
+
+    def test_expected_missing_entity_key_that_appeared_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """(ж) expected covers visits but omits the payments key → 409.
+
+        The payment exists in the DB but ``expected`` has no "payments" key
+        at all — the missing key means «nothing was confirmed» for that
+        entity → any current row is a stale dependency.
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting"},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_ids = [v["id"] for v in record["visits"]]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids},  # no "payments" key
+            },
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["count"] == 1
+        # Nothing deleted.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    def test_resolutions_without_expected_returns_422_expected_state_required(
+        self, api_client, create_record
+    ) -> None:
+        """(з) rev7: cascade body without ``expected`` → 422, row untouched.
+
+        Every real deletion must carry the declared state — a resolutions
+        body alone is the rejected legacy shape.
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record_id}",
+            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert record["visits"], "visits untouched too"
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_with_deps_returns_409_tree_and_row_alive(
+        self, api_client, create_record
+    ) -> None:
+        """(а) dry-run on a record with deps → 409 + tree; row alive."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        # Add a payment (dep).
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        # Add a record_tag (auto dep).
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        def _dep_counts() -> tuple[int, int, int]:
+            return (
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM visits WHERE record_id='{record_id}'"
+                )[0]["c"],
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM payments WHERE record_id='{record_id}'"
+                )[0]["c"],
+                query_db(
+                    f"SELECT COUNT(*) AS c FROM record_tags WHERE record_id='{record_id}'"
+                )[0]["c"],
+            )
+
+        before = _dep_counts()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
         assert deps["visits"]["count"] == 1
         assert deps["visits"]["allowed_actions"] == ["cascade"]
-        assert deps["visits"]["cascade_preview"] is None
+        # rev8: optional-null fields are OMITTED (exclude_none), not null.
+        assert "cascade_preview" not in deps["visits"]
         assert deps["payments"]["count"] == 1
         assert deps["payments"]["allowed_actions"] == ["cascade"]
         assert deps["record_tags"]["count"] == 1
         assert deps["record_tags"]["allowed_actions"] == ["cascade"]
-        # Row untouched (dry-run modifies nothing).
+        # Record alive, dependency counters unchanged.
         assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+        assert _dep_counts() == before
+
+    def test_dry_run_clean_record_returns_204_and_row_alive(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """(б) dry-run on a clean record → 204 WITHOUT deleting; row alive."""
+        activity = create_activity()
+        client = create_client()
+        record = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [],
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+    def test_dry_run_nonexistent_record_returns_404(self, api_client) -> None:
+        """(в) dry-run probes existence: missing record → 404, same format."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/records/nonexistent-record-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "RECORD_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """(г) dry_run + resolutions body → 422; combo checked before probe."""
+        record = create_record(visits=[])  # clean record
+
+        for record_id in (record["id"], "nonexistent-record-id"):
+            resp = api_client.request(
+                "DELETE",
+                f"/api/v1/records/{record_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{record_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        # Row untouched.
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
 
     def test_delete_record_with_cascade_resolutions_executes_204(
         self, api_client, create_record
@@ -1208,15 +1606,21 @@ class TestDeleteUnifiedRoute:
         # Add a record_tag (auto dep).
         _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
 
-        # No-body dry-run → 409 (deps present).
-        resp = api_client.delete(f"/api/v1/records/{record_id}")
+        # dry-run preview → 409 (deps present).
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
         assert resp.status_code == 409
 
-        # With-body execute → 204.
+        # With-body execute → 204. The commit carries both the user's
+        # resolutions and the state confirmed at dry-run (rev7).
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": visit_ids, "payments": [payment_id]},
+            },
         )
         assert resp.status_code == 204
 
@@ -1237,15 +1641,21 @@ class TestDeleteUnifiedRoute:
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
         record_id = record["id"]
+        visit_id = record["visits"][0]["id"]
         # Add a payment so both non-auto deps are present.
-        api_client.post("/api/v1/payments", json={
+        payment = api_client.post("/api/v1/payments", json={
             "record_id": record_id, "amount": 500, "method": "cash",
-        })
+        }).json()
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "nullify", "payments": "cascade"}},
+            json={
+                "resolutions": {"visits": "nullify", "payments": "cascade"},
+                # expected matches the DB — the 422 must come from the
+                # resolutions validation, not from the expected check.
+                "expected": {"visits": [visit_id], "payments": [payment["id"]]},
+            },
         )
 
         assert resp.status_code == 422
@@ -1260,16 +1670,318 @@ class TestDeleteUnifiedRoute:
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
         record_id = record["id"]
+        visit_id = record["visits"][0]["id"]
         # Add a payment so payments is a required non-auto dep.
-        api_client.post("/api/v1/payments", json={
+        payment = api_client.post("/api/v1/payments", json={
             "record_id": record_id, "amount": 500, "method": "cash",
-        })
+        }).json()
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/records/{record_id}",
-            json={"resolutions": {"visits": "cascade"}},  # no payments resolution
+            json={
+                "resolutions": {"visits": "cascade"},  # no payments resolution
+                # expected matches the DB — the 422 must come from the
+                # resolutions validation, not from the expected check.
+                "expected": {"visits": [visit_id], "payments": [payment["id"]]},
+            },
         )
 
         assert resp.status_code == 422
         assert api_client.get(f"/api/v1/records/{record_id}").status_code == 200
+
+    # ── (е) dry-run emits no SSE (pattern: test_events_emit.py:128-146) ────
+
+    def test_dry_run_204_emits_no_sse_events(
+        self, api_client, create_record, sse_subscriber
+    ) -> None:
+        """Clean record: dry-run → 204 without executing — zero SSE marks."""
+        record = create_record(visits=[])  # clean record
+        _drain_events(sse_subscriber)  # discard setup noise
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 204
+        assert _drain_events(sse_subscriber) == []
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+    def test_dry_run_409_emits_no_sse_events(
+        self, api_client, create_record, sse_subscriber
+    ) -> None:
+        """Deps record: dry-run 409 preview emits no SSE marks."""
+        record = create_record()  # 1 visit → deps
+        _drain_events(sse_subscriber)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        assert _drain_events(sse_subscriber) == []
+        assert api_client.get(f"/api/v1/records/{record['id']}").status_code == 200
+
+
+class TestDependencyItemsIn409Tree:
+    """D9б/в (#285): the 409 dependency tree for RECORDS carries ``items`` —
+    a one-line human label per dependent row (``{id, label}``), for the
+    visits / payments / record_tags nodes, so the DeleteDialog renders
+    "what exactly will be deleted" entries instead of bare counts.
+
+    Pinned label formats (plan D9б/в):
+      * Visit   → «{service.title}, {price}» (service via ``tariff_id``);
+        ``tariff_id IS NULL`` → «Без тарифа, {price}»; tariff whose
+        service row is missing → fallback «Без тарифа, {price}».
+      * Payment → «{amount}, {method}»; ``method IS NULL`` → «{amount}, —».
+      * record_tags → «{tag name}» per link row (id = tag_id).
+
+    Other entities (e.g. Client) keep the bare tree — ``items`` stays
+    None (§5: their dialogs are unchanged). Both 409 paths
+    (``has_dependencies`` dry-run and ``stale_dependencies`` commit) go
+    through ``collect_dependencies`` → items appear in BOTH.
+    """
+
+    def test_dry_run_409_visits_payments_items(
+        self, api_client, create_record, create_service
+    ) -> None:
+        """(а) dry-run 409: visits/payments nodes carry id + pinned labels."""
+        service = create_service(title="МК Гончарное дело")
+        tariff_id = f"tariff-{_uuid.uuid4().hex[:8]}"
+        query_db(
+            "INSERT INTO tariffs (id, service_id, title, price, is_active, "
+            "created_at, updated_at) VALUES "
+            f"('{tariff_id}', '{service['id']}', 'Adult', 3500, 1, "
+            "datetime('now'), datetime('now'))"
+        )
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": tariff_id},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        visit_t = next(v for v in record["visits"] if v["tariff_id"] == tariff_id)
+        visit_no_t = next(v for v in record["visits"] if v["tariff_id"] is None)
+        payment_cash = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        }).json()
+        payment_free = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 500,
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409, resp.text
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        visits_items = {i["id"]: i["label"] for i in deps["visits"]["items"]}
+        assert visits_items == {
+            visit_t["id"]: f"{service['title']}, 3500",
+            visit_no_t["id"]: "Без тарифа, 2500",
+        }
+        payments_items = {i["id"]: i["label"] for i in deps["payments"]["items"]}
+        assert payments_items == {
+            payment_cash["id"]: "1000, cash",
+            payment_free["id"]: "500, —",
+        }
+
+    def test_dry_run_409_visits_items_tariff_without_service_fallback(
+        self, api_client, create_record, sample_tariff
+    ) -> None:
+        """Fallback (D9б): tariff row exists but its service row doesn't.
+
+        Not reachable via the FK matrix (tariffs.service_id NOT NULL with a
+        real service) but pinned: the title degrades to «Без тарифа», the
+        price stays — «Без тарифа, {price}».
+        """
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": sample_tariff},
+            ]
+        )
+        visit_id = record["visits"][0]["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record['id']}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["visits"]["items"] == [
+            {"id": visit_id, "label": "Без тарифа, 3500"},
+        ]
+
+    def test_dry_run_409_items_counts_and_preview_unchanged(
+        self, api_client, create_record, create_service
+    ) -> None:
+        """(д) items are additive: count/cascade_preview stay as before."""
+        service = create_service()
+        tariff_id = f"tariff-{_uuid.uuid4().hex[:8]}"
+        query_db(
+            "INSERT INTO tariffs (id, service_id, title, price, is_active, "
+            "created_at, updated_at) VALUES "
+            f"('{tariff_id}', '{service['id']}', 'Adult', 3500, 1, "
+            "datetime('now'), datetime('now'))"
+        )
+        record = create_record(
+            visits=[
+                {"name": "Alice", "price": 3500, "status": "waiting", "tariff_id": tariff_id},
+                {"name": "Bob", "price": 2500, "status": "waiting"},
+            ]
+        )
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        }).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["visits"]["count"] == 2 == len(deps["visits"]["items"])
+        assert deps["visits"]["allowed_actions"] == ["cascade"]
+        # rev8: optional-null fields are OMITTED (exclude_none), not null.
+        assert "cascade_preview" not in deps["visits"]
+        assert deps["payments"]["count"] == 1 == len(deps["payments"]["items"])
+        assert "cascade_preview" not in deps["payments"]
+
+    def test_dry_run_409_record_tags_items(
+        self, api_client, create_record
+    ) -> None:
+        """(в) record_tags node (when present) items = tag name labels."""
+        record = create_record(visits=[])  # no visits/payments deps
+        tag_id = _link_record_tag(api_client, record["id"], tag_name="VIP")
+        record_id = record["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["record_tags"]["count"] == 1
+        assert deps["record_tags"]["items"] == [{"id": tag_id, "label": "VIP"}]
+
+    def test_stale_dependencies_409_carries_items_too(
+        self, api_client, create_record
+    ) -> None:
+        """Both 409 paths serialize items: stale_dependencies tree too."""
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        payment = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "card",
+        }).json()
+        # The race: the payment landed in the undo window.
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", json={"expected": {}}
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["payments"]["items"] == [
+            {"id": payment["id"], "label": "1000, card"},
+        ]
+
+    def test_client_409_tree_has_no_items_and_explicit_auto_false(
+        self, api_client, create_record
+    ) -> None:
+        """(г) Other entities: the Client 409 tree stays without items.
+
+        rev8: ``items`` is OMITTED (never serialized as ``null``) — the
+        client-side absence filter keys on the missing field, not on a
+        null value. Non-record nodes still carry ``"auto": false``
+        explicitly (bool False survives ``exclude_none``).
+        """
+        record = create_record()
+        client_id = record["client_id"]
+
+        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+
+        assert resp.status_code == 409
+        deps = resp.json()["dependencies"]
+        assert deps, "client with a record must have deps"
+        for dep in deps:
+            assert "items" not in dep, dep["entity"]
+            assert dep["auto"] is False, dep["entity"]
+
+
+class TestDependencyTreeAutoFlags:
+    """Spec rev8 addendum (#285): ``DependencyNode.auto`` in the 409 tree.
+
+    ``auto`` marks server-resolved deps (record_tags — the join rows the
+    record delete sweeps unconditionally) so the CLIENT filters them by
+    field instead of hardcoding entity names (DeleteDialog.tsx used to
+    hardcode). The flag mirrors ``FKDependency.auto`` from FK_MATRIX —
+    no entity name is hardcoded in the node-building code.
+
+    Serialization invariants (``model_dump(exclude_none=True)``):
+      * ``auto`` is ALWAYS present in JSON — ``bool`` is never None, so
+        ``False`` survives ``exclude_none`` (record nodes: visits/
+        payments/record_tags → false/false/true; other entities: false).
+      * optional-None fields (``message`` / ``cascade_preview`` /
+        ``items``) are OMITTED, not null — other entities' 409 no longer
+        carry ``"items": null``.
+      * non-optional fields (entity/relation/count/allowed_actions) are
+        unaffected by ``exclude_none``.
+    """
+
+    def test_dry_run_409_record_nodes_carry_auto_flags(
+        self, api_client, create_record
+    ) -> None:
+        """(а) dry-run 409: record_tags auto=true; visits/payments auto=false."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        _link_record_tag(api_client, record_id, tag_name=f"rt-{record_id[:8]}")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", params={"dry_run": "true"}
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        # record_tags is the auto-resolved join sweep → true.
+        assert deps["record_tags"]["auto"] is True
+        # User-choice deps → false, but EXPLICITLY present (bool not None).
+        assert deps["visits"]["auto"] is False
+        assert deps["payments"]["auto"] is False
+        # items still serialize fully on record nodes (non-None → kept).
+        assert deps["visits"]["items"] and deps["record_tags"]["items"]
+        # Optional-None fields are omitted, not null (record nodes carry
+        # neither cascade_preview nor message).
+        assert "cascade_preview" not in deps["visits"]
+        assert "message" not in deps["visits"]
+
+    def test_stale_dependencies_409_nodes_carry_auto_flags(
+        self, api_client, create_record
+    ) -> None:
+        """(г) stale_dependencies 409: same invariants as the dry-run tree."""
+        record = create_record(visits=[])  # clean at dry-run time
+        record_id = record["id"]
+        api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "card",
+        })
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/records/{record_id}", json={"expected": {}}
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
+        assert deps["payments"]["auto"] is False
+        assert deps["payments"]["items"], "payments items serialize in stale tree too"
+        assert "cascade_preview" not in deps["payments"]
+        assert "message" not in deps["payments"]

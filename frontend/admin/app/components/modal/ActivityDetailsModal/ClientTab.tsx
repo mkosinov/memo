@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo } from 'react';
-import type { DependencyNode } from '@memo/api-client';
+import type { DependencyNode, RecordView } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useQueryClient } from '@tanstack/react-query';
 import { patchVisitor, ApiError } from '@memo/api-client';
@@ -64,9 +64,12 @@ export function ClientTab({
     convertAnonymousVisit,
   } = useRecordMutations(activityId, recordId);
 
-  // Delete — Addendum 13 / GH #139 T8-FE2a: replaces the legacy 5-second
-  // setTimeout + undo toast with an explicit-confirmation dry-run flow.
-  const deleteMutation = useDeleteRecord();
+  // Delete — GH #285 (spec §3 D2/D3/D6): deferred flow. removeRecord
+  // dry-runs (pure preview): a clean 204 removes the row optimistically +
+  // enqueues the deferred delete (5s undo window); a 409 WITH the dependency
+  // tree rejects here → park the tree + open DeleteDialog (the row stays
+  // visible). Navigation stays at click time (D6).
+  const { removeRecord, removeRecordResolved } = useDeleteRecord();
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; deps: DependencyNode[] } | null>(null);
 
   // GH #140 US-2: ClientTab owns its client resolution (no `client` prop from
@@ -121,20 +124,20 @@ export function ClientTab({
 
   const handleDelete = useCallback(async () => {
     try {
-      await deleteMutation.mutateAsync(recordId);
-      // No deps — already deleted (hook toasted): keep today's navigation.
+      // The hook reads only `.id` — the modal record is a RecordResponse
+      // (no denormalized RecordView fields), so a row-shaped stub is enough.
+      await removeRecord({ id: recordId } as RecordView);
+      // Clean path: the deferred delete is enqueued (undo toast is up) —
+      // keep today's navigation (D6).
       onDeleteRecord(recordId);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        const deps = err.dependencies ?? deleteMutation.dependencies ?? [];
-        if (deps.length > 0) {
-          setDeleteTarget({ id: recordId, deps });
-          return;
-        }
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ id: recordId, deps: err.dependencies });
+        return;
       }
       showToast(parseApiError(err).message, 'error');
     }
-  }, [deleteMutation, recordId, onDeleteRecord, showToast]);
+  }, [removeRecord, recordId, onDeleteRecord, showToast]);
 
   // ── Local state ──────────────────────────────────────────────────────
   const [comment, setComment] = useState(record?.comment || '');
@@ -313,17 +316,19 @@ export function ClientTab({
         </button>
       </div>
 
-      {/* Delete dialog — Addendum 13: opened on dry-run 409; confirm calls
-          resolveDelete (explicit cascade confirmation — no undo timer), then
-          keeps today's post-delete navigation via onDeleteRecord. */}
+      {/* Delete dialog — GH #285 (D3/D6): opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (sync) and keeps today's
+          post-delete navigation via onDeleteRecord (pending action survives
+          the modal unmount — provider is app-level). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={formatRecordLabel(activity?.start)}
           entityType="record"
           entityId={deleteTarget.id}
           dependencies={deleteTarget.deps}
-          onResolve={async (id, resolutions) => {
-            await deleteMutation.resolveDelete.mutateAsync({ id, resolutions });
+          onResolve={async (_id, resolutions) => {
+            // D3: enqueue is synchronous — no await, the dialog closes at once.
+            void removeRecordResolved({ id: deleteTarget.id } as RecordView, resolutions, deleteTarget.deps);
           }}
           onArchive={async () => { /* records have no archive flow — never Mode B */ }}
           onDone={() => {

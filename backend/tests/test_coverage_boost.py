@@ -614,8 +614,10 @@ class TestRecordNotFound:
         assert resp.status_code == 404
 
     def test_delete_nonexistent_record(self, api_client):
-        """DELETE /api/v1/records/{fake} → 404."""
-        resp = api_client.delete("/api/v1/records/nonexistent")
+        """DELETE /api/v1/records/{fake} → 404 (#285: via dry-run probe)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/records/nonexistent", params={"dry_run": "true"}
+        )
         assert resp.status_code == 404
 
 

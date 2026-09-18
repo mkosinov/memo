@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, deleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, deleteActivity, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, createUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -11,6 +11,7 @@ vi.mock('./client', () => ({
       public status: number,
       message: string,
       public code?: string,
+      public dependencies?: unknown[],
     ) {
       super(message);
       this.name = 'ApiError';
@@ -871,15 +872,37 @@ describe('updateRecord', () => {
   });
 });
 
-describe('deleteRecord', () => {
-  it('calls DELETE /api/v1/records/:id', async () => {
+// dry-run preview (GH #285 rev7): DELETE ?dry_run=true, no body. 204 resolves,
+// 409 (dependency tree) is thrown by the client as ApiError with .dependencies.
+describe('dryRunDeleteRecord', () => {
+  it('calls DELETE /api/v1/records/:id?dry_run=true with no body', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
-    await deleteRecord('r-1');
+    await dryRunDeleteRecord('r-1');
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/records/r-1',
+      '/api/v1/records/r-1?dry_run=true',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      { method: 'DELETE' },
     );
+  });
+
+  it('propagates 409 ApiError with dependency tree (incl. node with items)', async () => {
+    const tree = [
+      {
+        entity: 'visits', relation: 'Визит', count: 2, allowed_actions: ['cascade'],
+        items: [{ id: 'uuid-visit-1', label: 'Иван — 12.09 10:00' }],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteRecord('r-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+    expect((caught as ApiError).dependencies?.[0]?.items?.[0]?.id).toBe('uuid-visit-1');
   });
 });
 
@@ -1632,13 +1655,30 @@ describe('resolveDeleteClient', () => {
   });
 });
 
+// GH #285 rev7: `expected` (id-множества, uuid strings) обязателен — контракт
+// «каждое удаление несёт состояние». resolutions остаётся опциональным.
 describe('resolveDeleteRecord', () => {
-  it('calls DELETE /api/v1/records/:id with resolutions body (execute path, NOT POST)', async () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
-    await resolveDeleteRecord('r-1', { visits: 'cascade', payments: 'cascade' });
+    await resolveDeleteRecord('r-1', { expected: {} });
     expect(api).toHaveBeenCalledWith('/api/v1/records/r-1', expect.anything(), {
       method: 'DELETE',
-      body: JSON.stringify({ resolutions: { visits: 'cascade', payments: 'cascade' } }),
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('sends both expected and resolutions when provided', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteRecord('r-1', {
+      resolutions: { visits: 'cascade' },
+      expected: { visits: ['uuid-1', 'uuid-2'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/records/r-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { visits: ['uuid-1', 'uuid-2'] },
+        resolutions: { visits: 'cascade' },
+      }),
     });
   });
 });

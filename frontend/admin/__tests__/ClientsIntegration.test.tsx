@@ -30,7 +30,7 @@ vi.mock('@memo/api-client', () => {
     getRecords: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 }),
     patchRecord: vi.fn(),
     updateRecord: vi.fn(),
-    deleteRecord: vi.fn(),
+    dryRunDeleteRecord: vi.fn(),
     resolveDeleteRecord: vi.fn(),
     createPayment: vi.fn(),
     patchPayment: vi.fn(),
@@ -47,7 +47,7 @@ import {
   getRecord,
   patchRecord,
   updateRecord,
-  deleteRecord,
+  dryRunDeleteRecord,
   createPayment,
   getClientVisitors,
   patchVisit,
@@ -205,6 +205,9 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
       setQueryData: vi.fn(),
       setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
+      // The GH #285 delete hook snapshots ['records', ...] caches via
+      // getQueriesData at click time — none seeded in these tests.
+      getQueriesData: vi.fn(() => [] as Array<[readonly unknown[], unknown]>),
     } as any);
 
     // Mock useQuery to return different data based on query key
@@ -360,7 +363,6 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1',
       record_id: 'rec1',
@@ -378,6 +380,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
       setQueryData: vi.fn(),
       setQueriesData: vi.fn(),
       fetchQuery: vi.fn(),
+      // The GH #285 delete hook snapshots ['records', ...] caches via
+      // getQueriesData at click time — none seeded in these tests.
+      getQueriesData: vi.fn(() => [] as Array<[readonly unknown[], unknown]>),
     } as any);
 
     // Mock useQuery to return different data based on query key
@@ -505,28 +510,12 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
   it('record tab delete runs the dry-run DELETE but does NOT close modal', async () => {
     const onClose = vi.fn();
-    // Addendum 13: window.confirm is gone — clicking runs the no-body
-    // DELETE dry-run via the shared useDeleteRecord hook; a 204 means the
-    // record is already deleted → the mutation toasted + invalidated. The
+    // GH #285: clicking runs the dry-run DELETE (?dry_run=true, pure preview)
+    // via the shared useDeleteRecord hook; a clean 204 removes the row
+    // optimistically and enqueues the deferred delete (5s undo window). The
     // modal stays open (user remains in context).
 
     const { ClientCardModal } = await import('@/app/(main)/clients/components/ClientCardModal');
-    const { useMutation: useMutationMock } = await import('@tanstack/react-query');
-    // Executing mock: run mutationFn + onSuccess so the dry-run completes.
-    vi.mocked(useMutationMock).mockImplementation(
-      ((opts: {
-        mutationFn?: (vars: unknown) => Promise<unknown>;
-        onSuccess?: (data: unknown, variables: unknown) => void;
-      }) => ({
-        mutate: vi.fn(),
-        mutateAsync: vi.fn(async (input: unknown) => {
-          const result = opts.mutationFn ? await opts.mutationFn(input) : undefined;
-          opts.onSuccess?.(result, input);
-          return result;
-        }),
-        isPending: false,
-      }) as unknown) as () => never,
-    );
 
     render(
       <UIProvider><QueryClientProvider client={createQueryClient()}>
@@ -545,13 +534,12 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
     fireEvent.click(screen.getByTestId('btn-delete-record'));
 
     await waitFor(() => {
-      expect(deleteRecord).toHaveBeenCalledWith('rec1');
+      expect(dryRunDeleteRecord).toHaveBeenCalledWith('rec1');
     });
     // No dependency dialog for the zero-deps case
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
     // Delete deliberately does NOT close the modal — user stays in context
     expect(onClose).not.toHaveBeenCalled();
-    vi.mocked(useMutationMock).mockRestore();
   });
 
   it('switching back to client tab from record tab shows client info', async () => {
@@ -593,7 +581,6 @@ describe('Cross-page integration: create client → view → edit → save', () 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1',
       record_id: 'rec1',
@@ -704,7 +691,6 @@ describe('Error scenarios: create client fails', () => {
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(updateRecord).mockResolvedValue(mockRecord);
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1',
       record_id: 'rec1',

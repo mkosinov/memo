@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { createMockGridSettings } from './helpers/mockContexts';
 import fs from 'fs';
@@ -28,7 +28,7 @@ vi.mock('@memo/api-client', () => ({
   getRecord: vi.fn(),
   updateRecord: vi.fn(),
   patchRecord: vi.fn(),
-  deleteRecord: vi.fn(),
+  dryRunDeleteRecord: vi.fn(),
   resolveDeleteRecord: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
@@ -50,8 +50,25 @@ vi.mock('@memo/api-client', () => ({
   ApiError: class ApiError extends Error {
     status: number;
     code?: string;
-    dependencies?: Array<{ entity: string; relation: string; count: number; allowed_actions: string[] }>;
-    constructor(status: number, message: string, code?: string, dependencies?: Array<{ entity: string; relation: string; count: number; allowed_actions: string[] }>) {
+    dependencies?: Array<{
+      entity: string;
+      relation: string;
+      count: number;
+      allowed_actions: string[];
+      items?: { id: string; label: string }[];
+    }>;
+    constructor(
+      status: number,
+      message: string,
+      code?: string,
+      dependencies?: Array<{
+        entity: string;
+        relation: string;
+        count: number;
+        allowed_actions: string[];
+        items?: { id: string; label: string }[];
+      }>,
+    ) {
       super(message);
       this.status = status;
       this.code = code;
@@ -82,19 +99,24 @@ const mockSetQueryData = vi.fn();
 const mockSetQueriesData = vi.fn();
 const mockFetchQuery = vi.fn();
 const mockGetQueryData = vi.fn(() => undefined);
+const mockGetQueriesData = vi.fn(() => [] as Array<[readonly unknown[], unknown]>);
 const mockQueryClient = {
   invalidateQueries: mockInvalidateQueries,
   setQueryData: mockSetQueryData,
   setQueriesData: mockSetQueriesData,
   fetchQuery: mockFetchQuery,
   getQueryData: mockGetQueryData,
+  getQueriesData: mockGetQueriesData,
 };
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
   useQueryClient: vi.fn(() => mockQueryClient),
-  // Executing mock (Addendum 13): runs mutationFn + onSuccess so the
-  // useDeleteRecord dry-run flow (204 toast / 409 dialog parking) works.
+  // Executing mock: the tab's remaining mutations (useRecordMutations —
+  // visits/payments/record-level saves) run mutationFn + onSuccess when
+  // invoked; the record delete flow does NOT use useMutation anymore
+  // (#285 — useDeleteRecord calls dryRunDeleteRecord/resolveDeleteRecord
+  // directly via PendingActions).
   useMutation: vi.fn(
     (opts: {
       mutationFn?: (vars: unknown) => Promise<unknown>;
@@ -118,7 +140,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   patchRecord,
   patchActivity,
-  deleteRecord,
+  dryRunDeleteRecord,
   resolveDeleteRecord,
   createPayment,
   deletePayment,
@@ -159,7 +181,8 @@ describe('ClientRecordTab — API interactions', () => {
     mockEnqueuePendingAction.mockReset();
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchActivity).mockResolvedValue(mockActivityResponse);
-    vi.mocked(deleteRecord).mockResolvedValue(undefined);
+    vi.mocked(dryRunDeleteRecord).mockResolvedValue(undefined);
+    vi.mocked(resolveDeleteRecord).mockResolvedValue(undefined);
     vi.mocked(createPayment).mockResolvedValue({
       id: 'p1', record_id: 'r1', amount: 1000, method: 'card',
       created_at: '', updated_at: '',
@@ -182,36 +205,74 @@ describe('ClientRecordTab — API interactions', () => {
     vi.restoreAllMocks();
   });
 
-  // ─── Delete record — Addendum 13 dry-run + DeleteDialog flow ────────
+  // ─── Delete record — GH #285 deferred flow (dry-run via the shared hook) ─
 
-  it('click fires the no-body DELETE dry-run (no window.confirm any more)', async () => {
+  it('click fires the dry-run DELETE via the hook (no window.confirm any more)', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
     await waitFor(() => {
-      expect(deleteRecord).toHaveBeenCalledWith('r1');
+      expect(dryRunDeleteRecord).toHaveBeenCalledWith('r1');
     });
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
-  it('invalidates records query after delete', async () => {
+  it('clean delete enqueues the deferred action; invalidations live in the commit', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
 
+    // D2: a clean 204 → the hook enqueued the deferred delete (5s undo window);
+    // nothing is invalidated before the commit runs.
     await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
+    const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+      id: string;
+      kind: string;
+      message: string;
+      commit: () => Promise<void>;
+    };
+    expect(action.id).toBe('delete-record-r1');
+    expect(action.kind).toBe('delete');
+    expect(action.message).toBe('Удалено. Отменить');
+    expect(mockInvalidateQueries).not.toHaveBeenCalled();
+
+    // The commit carries the real DELETE with the expected-state body and the
+    // non-fatal invalidation union — the provider owns the timer.
+    await act(async () => {
+      await action.commit();
+    });
+    expect(resolveDeleteRecord).toHaveBeenCalledWith('r1', { expected: {} });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['records'] });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['record', 'r1'] });
   });
 
-  it('409 dry-run opens DeleteDialog listing deps; confirm resolves the cascade', async () => {
+  it('409 dry-run opens DeleteDialog listing deps; confirm enqueues the cascade (expected ids from items)', async () => {
     const deps = [
-      { entity: 'visits', relation: 'Посещение', count: 2, allowed_actions: ['cascade'], message: null },
-      { entity: 'payments', relation: 'Платёж', count: 1, allowed_actions: ['cascade'], message: null },
+      {
+        entity: 'visits',
+        relation: 'Посещение',
+        count: 2,
+        allowed_actions: ['cascade'],
+        message: null,
+        items: [
+          { id: 'visit-1', label: 'Гончарное дело, 10:00' },
+          { id: 'visit-2', label: 'Лепка, 11:00' },
+        ],
+      },
+      {
+        entity: 'payments',
+        relation: 'Платёж',
+        count: 1,
+        allowed_actions: ['cascade'],
+        message: null,
+        items: [{ id: 'payment-1', label: '3500, card' }],
+      },
       { entity: 'record_tags', relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
     ];
     const { ApiError } = await import('@memo/api-client');
-    vi.mocked(deleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+    vi.mocked(dryRunDeleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
@@ -227,25 +288,47 @@ describe('ClientRecordTab — API interactions', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
+    // D3: enqueue is synchronous — dialog closes, tab stays open (modal stays open)
     await waitFor(() => {
-      expect(resolveDeleteRecord).toHaveBeenCalledWith('r1', {
-        visits: 'cascade',
-        payments: 'cascade',
-      });
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'delete-record-r1', kind: 'delete' }),
+      );
     });
-    // Dialog closes after resolve and the tab stays open (modal stays open)
     await waitFor(() => {
       expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
     });
     expect(screen.getByTestId('client-record-tab')).toBeInTheDocument();
+
+    // The commit carries the resolutions + the expected id-sets snapshotted
+    // from the tree's items (auto record_tags — no items — is skipped).
+    const action = mockEnqueuePendingAction.mock.calls.at(-1)![0] as {
+      commit: () => Promise<void>;
+    };
+    await act(async () => {
+      await action.commit();
+    });
+    expect(resolveDeleteRecord).toHaveBeenCalledWith('r1', {
+      resolutions: { visits: 'cascade', payments: 'cascade' },
+      expected: {
+        visits: ['visit-1', 'visit-2'],
+        payments: ['payment-1'],
+      },
+    });
   });
 
-  it('dialog cancel closes without resolving', async () => {
+  it('dialog cancel closes without enqueuing or resolving', async () => {
     const deps = [
-      { entity: 'visits', relation: 'Посещение', count: 1, allowed_actions: ['cascade'], message: null },
+      {
+        entity: 'visits',
+        relation: 'Посещение',
+        count: 1,
+        allowed_actions: ['cascade'],
+        message: null,
+        items: [{ id: 'visit-1', label: 'Гончарное дело, 10:00' }],
+      },
     ];
     const { ApiError } = await import('@memo/api-client');
-    vi.mocked(deleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+    vi.mocked(dryRunDeleteRecord).mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByText('Удалить запись'));
@@ -256,6 +339,7 @@ describe('ClientRecordTab — API interactions', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
 
     expect(resolveDeleteRecord).not.toHaveBeenCalled();
+    expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 

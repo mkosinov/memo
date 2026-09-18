@@ -5,10 +5,14 @@ mechanism. The unified DELETE route (Task 9) reads :func:`collect_dependencies`
 and the :class:`BlockingDepsError`/:class:`InvalidResolutionError` exceptions;
 the ``resolve_delete`` executor (Task 10) consumes :data:`FK_MATRIX`,
 :func:`has_blocking_deps`, :func:`validate_resolutions` and the exceptions.
+The #285 deferred-delete commit additionally reads
+:func:`collect_dependency_ids` + :func:`stale_expected_entities` — the
+``expected`` id-set verification of the record DELETE body (spec rev5/rev6).
 
 Spec: ``docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md``
   * §4  — FK matrix (the full per-entity table).
-  * §5  — 409 Conflict response shape (counters + ``cascade_preview`` only).
+  * §5  — 409 Conflict response shape (counters + ``cascade_preview``;
+    #285 D9б/в additionally carries per-row ``items`` on record-dep nodes).
   * §6  — resolutions body rules.
   * §11 — context facts (Activity has no ``is_active``; Material has zero FK deps).
   * §16 — auto-deps ignored when sent in the resolutions body.
@@ -35,7 +39,8 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
 
 from __future__ import annotations
 
-# ruff: noqa: RUF001  -- Cyrillic text is intentional (Russian UI labels per spec §5)
+# ruff: noqa: RUF001, RUF002, RUF003  -- Cyrillic is intentional here (Russian UI
+# labels per spec §5 + D9б/в one-line labels in docstrings/comments)
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -57,6 +62,7 @@ from src.models.service import Service
 from src.models.service_material import ServiceMaterial
 from src.models.staff import Staff
 from src.models.tag import (
+    Tag,
     client_tags,
     location_tags,
     master_tags,
@@ -232,13 +238,41 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
 # ─── 409 response shape (§5) ────────────────────────────────────────────────────
 
 
+class DependencyItem(BaseModel):
+    """One one-line "what exactly will be deleted" entry (#285 D9б/в).
+
+    ``id`` identifies the dependent row (UUID str; join-table rows are
+    identified by the same id the id-collectors use — record_tags →
+    ``tag_id`` within the parent record's scope, mirroring
+    :func:`collect_dependency_ids`). ``label`` is the backend-built
+    human-readable line the DeleteDialog renders.
+    """
+
+    id: str
+    label: str
+
+
 class DependencyNode(BaseModel):
     """One entry in the 409 ``dependencies`` array.
 
-    Matches spec §5: ``{"entity", "count", "allowed_actions", "message",
-    "cascade_preview"}`` plus the human ``relation`` label. Built manually by
-    :func:`collect_dependencies` (no ORM ``from_attributes`` mapping needed) so
-    the 409 carries counters + sums only — never individual row data.
+    Original spec §5 shape: ``{"entity", "count", "allowed_actions",
+    "message", "cascade_preview"}`` plus the human ``relation`` label —
+    built manually by :func:`collect_dependencies` (no ORM
+    ``from_attributes`` mapping needed). Historically counters + sums
+    only, never individual row data.
+
+    #285 D9б/в: for RECORD deps (``visits`` / ``payments`` /
+    ``record_tags``) the node additionally carries ``items`` — one
+    ``{id, label}`` entry per dependent row, so the tree does expose
+    individual rows there. Other entities keep
+    ``items=None`` (§5 boundary — their dialogs are unchanged) and stay
+    counters + sums only.
+
+    rev8: ``auto`` mirrors :attr:`FKDependency.auto` (copied from the
+    matrix in :func:`collect_dependencies` — no entity-name hardcode) so
+    the client filters server-resolved deps (record_tags) by field
+    instead of hardcoding entity names. Serialized ALWAYS — ``bool``
+    is never None, ``False`` survives ``model_dump(exclude_none=True)``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -247,8 +281,10 @@ class DependencyNode(BaseModel):
     relation: str
     count: int
     allowed_actions: list[str]
+    auto: bool = False
     message: str | None = None
     cascade_preview: dict[str, int] | None = None
+    items: list[DependencyItem] | None = None
 
 
 # ─── resolutions/422 path (§6, §16) ─────────────────────────────────────────────
@@ -467,6 +503,83 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
 }
 
 
+# ─── #285 D9б/в: per-row label builders → 409 ``items`` ────────────────────────
+# Mirror of ``_COUNTERS``/``_ID_COLLECTORS`` dispatch: each collector selects the
+# dependent rows WITH their human label. Wired ONLY for Record deps
+# (``visits``/``payments``/``record_tags``) — other entities keep the bare tree
+# (items=None; §5 boundary). Item ids match ``_ID_COLLECTORS`` exactly (the
+# ``expected`` commit is built from these same ids: visit.id / payment.id /
+# record_tags.tag_id).
+
+type _ItemsFn = Callable[[AsyncSession, str], Awaitable[list[DependencyItem]]]
+
+_NO_TARIFF_LABEL = "Без тарифа"  # tariff_id IS NULL (или service title недоступен)
+_NO_METHOD_LABEL = "—"  # method IS NULL (D9б)
+
+
+async def _items_r_visits(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Visit label «{service.title}, {price}» — service via ``tariff_id``.
+
+    ``tariff_id IS NULL`` → «Без тарифа, {price}»; a tariff whose service
+    row is missing (не возникает по FK-матрице — tariffs.service_id NOT
+    NULL, но fallback безопасен) → title becomes «Без тарифа» as well.
+    """
+    r = await s.execute(
+        select(
+            Visit.id.label("visit_id"),
+            Visit.price.label("price"),
+            Tariff.id.label("tariff_id"),
+            Service.title.label("service_title"),
+        )
+        .outerjoin(Tariff, Visit.tariff_id == Tariff.id)
+        .outerjoin(Service, Tariff.service_id == Service.id)
+        .where(Visit.record_id == entity_id)
+    )
+    items: list[DependencyItem] = []
+    for row in r.all():
+        title = (
+            row.service_title
+            if row.tariff_id is not None and row.service_title is not None
+            else _NO_TARIFF_LABEL
+        )
+        items.append(DependencyItem(id=row.visit_id, label=f"{title}, {row.price}"))
+    return items
+
+
+async def _items_r_payments(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Payment label «{amount}, {method}»; ``method IS NULL`` → «{amount}, —»."""
+    r = await s.execute(
+        select(Payment.id, Payment.amount, Payment.method)
+        .where(Payment.record_id == entity_id)
+    )
+    return [
+        DependencyItem(
+            id=row.id,
+            label=f"{row.amount}, {row.method if row.method is not None else _NO_METHOD_LABEL}",
+        )
+        for row in r.all()
+    ]
+
+
+async def _items_r_record_tags(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """record_tags label «{tag name}» per link row — id = ``tag_id``."""
+    r = await s.execute(
+        select(record_tags.c.tag_id, Tag.tag)
+        .join(Tag, record_tags.c.tag_id == Tag.id)
+        .where(record_tags.c.record_id == entity_id)
+    )
+    return [
+        DependencyItem(id=row.tag_id, label=row.tag) for row in r.all()
+    ]
+
+
+_ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
+    (Record, "visits"): _items_r_visits,
+    (Record, "payments"): _items_r_payments,
+    (Record, "record_tags"): _items_r_record_tags,
+}
+
+
 # ─── 409 builder ────────────────────────────────────────────────────────────────
 
 
@@ -478,9 +591,16 @@ async def collect_dependencies(
     Returns the 409 ``dependencies`` array. Zero-count deps are skipped (§5).
     Each node carries: ``entity``, ``relation``, ``count``, ``allowed_actions``,
     ``message``; Client → visitors additionally carries
-    ``cascade_preview`` = ``{"visits": N}`` (NO payments per §5).
+    ``cascade_preview`` = ``{"visits": N}`` (NO payments per §5); Record
+    deps (#285 D9б/в) additionally carry ``items`` = one ``{id, label}``
+    per dependent row (other entities → ``items=None``, §5 boundary).
+    Every node also carries ``auto`` = the matrix's ``FKDependency.auto``
+    (rev8: server-resolved deps like record_tags are flagged so the
+    client can filter them without hardcoding entity names).
 
-    Used by Task 9's unified DELETE route (no-body mode → 409 builder).
+    Used by Task 9's unified DELETE route — the no-body 409 builder AND
+    both #285 409 paths (``has_dependencies`` dry-run + ``stale_dependencies``
+    commit), so items appear in every serialized tree.
     """
     deps = FK_MATRIX.get(model, [])
     if not deps:
@@ -494,14 +614,20 @@ async def collect_dependencies(
         count, preview = await counter(session, entity_id)
         if not count:
             continue  # §5: skip zero-count deps.
+        # #285 D9б/в: Record deps carry per-row one-line labels; other
+        # entities have no collector → items stays None (§5 boundary).
+        item_collector = _ITEM_COLLECTORS.get((model, dep.entity))
+        items = await item_collector(session, entity_id) if item_collector else None
         nodes.append(
             DependencyNode(
                 entity=dep.entity,
                 relation=dep.relation,
                 count=count,
                 allowed_actions=list(dep.allowed_actions),
+                auto=dep.auto,
                 message=dep.message,
                 cascade_preview=preview,
+                items=items,
             )
         )
     return nodes
@@ -513,6 +639,96 @@ def has_blocking_deps(nodes: list[DependencyNode]) -> bool:
     Such an entity cannot be deleted by either DELETE mode — only archived.
     """
     return any(not n.allowed_actions for n in nodes)
+
+
+# ─── #285: id-collectors for the expected-state check (rev5/rev6) ──────────────
+# Mirror of ``_COUNTERS``: same (model, entity) dispatch, but each collector
+# returns the dependent rows' IDs instead of a count — the input for the
+# deferred-delete commit's ``expected`` id-set verification.
+# Join tables have no single-column PK: a record_tags link row is identified
+# by its ``tag_id`` within the parent record's scope.
+
+type _IdsFn = Callable[[AsyncSession, str], Awaitable[list[str]]]
+
+
+async def _ids_r_visits(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Visit.id).where(Visit.record_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_r_payments(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Payment.id).where(Payment.record_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_r_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(record_tags.c.tag_id).where(record_tags.c.record_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
+_ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
+    (Record, "visits"): _ids_r_visits,
+    (Record, "payments"): _ids_r_payments,
+    (Record, "record_tags"): _ids_r_record_tags,
+}
+
+
+async def collect_dependency_ids(
+    session: AsyncSession, model: type, entity_id: str,
+) -> dict[str, list[str]]:
+    """Collect the id-lists of dependent rows per FK entity (#285 rev6).
+
+    Returns ``{entity: [dependent row ids]}`` for every relation wired in
+    :data:`_ID_COLLECTORS` (only non-empty lists are included). This is the
+    CURRENT state side of the deferred-delete ``expected`` verification:
+    the route compares these sets against the id-sets the caller confirmed
+    at dry-run time (subset semantics — spec §3 D9a).
+
+    Auto-deps (e.g. ``record_tags``) ARE collected here (the task's payload
+    is per-entity and complete); whether they participate in the check is
+    decided by :func:`stale_expected_entities`.
+    """
+    deps = FK_MATRIX.get(model, [])
+    if not deps:
+        return {}
+    out: dict[str, list[str]] = {}
+    for dep in deps:
+        collector = _ID_COLLECTORS.get((model, dep.entity))
+        if collector is None:  # defensive — mirrors _COUNTERS wiring.
+            continue
+        ids = await collector(session, entity_id)
+        if ids:
+            out[dep.entity] = ids
+    return out
+
+
+def stale_expected_entities(
+    model: type,
+    now_ids: dict[str, list[str]],
+    expected: dict[str, list[str]],
+) -> list[str]:
+    """Entity keys whose CURRENT id-set is NOT a subset of ``expected`` (#285).
+
+    Subset, not equality (spec §3 D9a): a dependency that disappeared during
+    the undo window does NOT block (deleting less than was confirmed); a
+    dependency that APPEARED does block. A missing ``expected`` key means
+    «nothing was confirmed» for that entity — any current row is stale.
+
+    Auto-deps (``FKDependency.auto``, e.g. record_tags) NEVER participate:
+    they resolve themselves during execution, so the user could not have
+    confirmed them and a mid-window tag link is not a race.
+    """
+    matrix = {dep.entity: dep for dep in FK_MATRIX.get(model, [])}
+    stale: list[str] = []
+    for entity, ids in now_ids.items():
+        dep = matrix.get(entity)
+        if dep is None or dep.auto:
+            continue  # unknown/auto entities are never verified.
+        if not set(ids) <= set(expected.get(entity, [])):
+            stale.append(entity)
+    return stale
 
 
 def validate_resolutions(

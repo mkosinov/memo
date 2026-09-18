@@ -28,7 +28,10 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
 ## 1.5 Session rules (talking to the user)
 
 - A message ending in `?` is a question: answer in text, **no actions** (tools, commits, file edits). Exception: the answer needs data not in context — read-only gathering (read a file, `git log`), then an immediate text answer.
-- **Report before answer**: a new message does not cancel an unread work result. First the result (status DONE | DONE_WITH_CONCERNS | BLOCKED | awaiting user OK; changed files as paths; evidence; blockers/questions), then the answer to the new message. If no dispatches happened since the user's last message and nothing awaits their decision — say "no outstanding tasks" and answer immediately. Edits in the current turn — the final message must summarize them.
+- **Report before answer**: a new message does not cancel an unread work result. First the result as a status block — a **markdown list**, one item per line (bold items on adjacent lines without blank lines collapse into a single rendered line; "Files changed" / "Evidence" items dropped 2026-09-18 by user decision, as in `~/.zcode/AGENTS.md`):
+  - **Status:** `DONE | DONE_WITH_CONCERNS | BLOCKED | awaiting user OK`
+  - **Open questions** or an explicit "OK to mark this done?"
+  Then the answer to the new message. If no dispatches happened since the user's last message and nothing awaits their decision — say "no outstanding tasks" and answer immediately. Edits in the current turn — the final message must summarize them.
 
 ## 2. Gates (all three human; board flips strictly at the gate moment)
 

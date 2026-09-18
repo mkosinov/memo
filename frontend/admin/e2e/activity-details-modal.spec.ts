@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures/test';
+import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
 import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, phoneMaskDisplay } from './fixtures/helpers';
@@ -105,21 +106,56 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     }
   });
 
-  // ── Scenario 2: Delete record via DeleteDialog — verify DB hard-delete ──
-  // Addendum 13 (T8-FE2a): the legacy 5s undo toast is gone. Click
-  // «Удалить запись» → dry-run 409 (record has visits + payments) →
-  // DeleteDialog lists the deps → type-to-confirm + resolve → record and
-  // its cascade are hard-deleted.
+  // ── Scenario 2 (spec §6 S3): Delete record via DeleteDialog — deferred ──
+  // GH #285 (D3/D9): the record keeps its visits + payments → dry-run 409 →
+  // DeleteDialog lists the dependencies as ONE-LINERS (D9в): group header
+  // «{plural} — будут удалены:» + one line per item — visits carry
+  // «{service.title}, {price}» (backend deletion.py _items_r_visits),
+  // payments «{amount}, {method}». Confirm enqueues a DEFERRED delete: the
+  // dialog closes instantly, the undo toast «Удалено. Отменить» opens the 5s
+  // window, and the commit DELETE (resolutions + expected) runs at window
+  // end — record and its cascade are hard-deleted from the DB.
+
+  /** Cascade seed for the S3/S4 dialog tests (shared by scenarios 2 and 2b):
+   *  a client, the first on-screen activity's service with its first seed
+   *  tariff, a record carrying one visit on that tariff (label source
+   *  «{service.title}, {price}», D9б) and a factory payment (3500, card). */
+  async function createCascadeSeedRecord(
+    api: APIRequestContext,
+    activity: unknown,
+  ) {
+    const client = await createTestClient(api);
+    // Card DTO is camelCase (lib/buildSchedule.ts) — the visit label is
+    // «{service.title}, {tariff.price}» (backend deletion.py _items_r_visits).
+    const serviceResp = await api.get(
+      `${BACKEND}/api/v1/services/${(activity as any).serviceId}`,
+    );
+    expect(serviceResp.ok()).toBeTruthy();
+    const service = (await serviceResp.json()) as {
+      title: string;
+      tariffs: Array<{ id: string; price: number }>;
+    };
+    const tariff = service.tariffs[0];
+    const record = await createTestRecord(api, (activity as any).id, client.id, {
+      visits: [
+        { name: `Test Visitor ${Date.now()}`, tariff_id: tariff.id, price: tariff.price },
+      ],
+    });
+    await createTestPayment(api, record.id);
+    return { client, service, tariff, record };
+  }
 
   test('2. Delete record — dialog confirm removes it (row gone from DB)', async ({
     page,
     request,
   }) => {
-    // 1. SETUP — create record with a visit AND a payment (both dialog deps)
-    const client = await createTestClient(request);
+    // 1. SETUP — record with a visit on a seed tariff (the D9б label source)
+    //    AND a payment (both dialog deps)
     const activity = await getFirstActivity(page);
-    const record = await createTestRecord(request, activity.id, client.id);
-    await createTestPayment(request, record.id);
+    const { client, service, tariff, record } = await createCascadeSeedRecord(
+      request,
+      activity,
+    );
 
     try {
       // Verify it exists before delete
@@ -140,21 +176,32 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await clientTab.click();
       await page.locator('[data-testid="btn-delete-record"]').click();
 
-      // 3. VERIFY UI — DeleteDialog opens listing visits + payments
+      // 3. VERIFY UI — DeleteDialog opens listing visits + payments as
+      // one-liners (D9в): the header + the seeded tariff/service + price for
+      // the visit, «{amount}, {method}» for the factory payment.
       await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения: 1 (удалён)');
-      await expect(page.locator('[data-testid="dep-payments"]')).toContainText('Платежи: 1 (удалён)');
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения — будут удалены:');
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText(
+        `${service.title}, ${tariff.price}`,
+      );
+      await expect(page.locator('[data-testid="dep-payments"]')).toContainText('Платежи — будут удалены:');
+      await expect(page.locator('[data-testid="dep-payments"]')).toContainText('3500, card');
 
       // Confirm is gated on the single "Подтверждаю удаление зависимостей" checkbox.
       await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeDisabled();
       await confirmDeleteDialog(page);
 
-      // Success toast + dialog closes (text= locator — scenario 1 style:
-      // the generic [role="status"] also matches dnd-kit's empty live region).
-      await expect(page.locator('text=Запись удалена')).toBeVisible({ timeout: 10_000 });
+      // Deferred flow (D3): the enqueue is synchronous — the dialog closes
+      // instantly and the undo toast opens the 5s window (NOT the legacy
+      // instant «Запись удалена»). toast-info testid — the generic
+      // [role="status"] also matches dnd-kit's empty live region.
       await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено' });
+      await expect(toast).toBeVisible();
+      await expect(toast.getByRole('button', { name: 'Отменить' })).toBeVisible();
 
-      // 4. VERIFY DB — row gone; cascade rows (visits/payments) gone too
+      // 4. VERIFY DB — the poll waits out the 5s undo window; after the
+      // commit the row is gone and the cascade (visits/payments) with it.
       await expect.poll(async () => {
         const afterRow = queryDBRow(
           `SELECT id FROM records WHERE id='${record.id}'`,
@@ -163,6 +210,69 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
       expect(queryDBRows(`SELECT * FROM visits WHERE record_id='${record.id}'`)).toHaveLength(0);
       expect(queryDBRows(`SELECT * FROM payments WHERE record_id='${record.id}'`)).toHaveLength(0);
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── Scenario 2b (spec §6 S4): undo the cascade delete inside the window ──
+  // Same flow as scenario 2 up to the confirm; then «Отменить» in the undo
+  // toast: the row/details return, the toast hides, and the DB poll proves
+  // the record, its visit and its payment are all alive (no server write
+  // happened — the deferred commit never fired).
+
+  test('2b. Delete record — undo in the window restores record, visits, payments', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — the same cascade seed as scenario 2 (seed-tariff visit +
+    //    payment): the dry-run returns 409 → DeleteDialog.
+    const activity = await getFirstActivity(page);
+    const { client, record } = await createCascadeSeedRecord(request, activity);
+
+    try {
+      await page.goto('/schedule');
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      // 2. ACTION — open modal → client tab → «Удалить запись» → dialog →
+      // confirm (enqueue is sync: dialog closes at once).
+      await openModal(page, { recordId: record.id });
+
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await expect(clientTab).toBeVisible({ timeout: 15_000 });
+      await clientTab.click();
+      await page.locator('[data-testid="btn-delete-record"]').click();
+      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
+      await confirmDeleteDialog(page);
+
+      // Deferred flow: the dialog closes, the client tab disappears
+      // optimistically (row removed from the ['records',…] caches), and the
+      // undo toast opens the 5s window.
+      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+      await expect(clientTab).toBeHidden();
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено' });
+      await expect(toast).toBeVisible();
+
+      // 3. ACTION — undo inside the window: the row returns…
+      await toast.getByRole('button', { name: 'Отменить' }).click();
+      // …and the toast hides.
+      await expect(toast).toBeHidden();
+      await expect(clientTab).toBeVisible({ timeout: 10_000 });
+
+      // The details came back too — reopen the record's client tab.
+      await clientTab.click();
+      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+
+      // 4. VERIFY DB — record, visit and payment all still alive (the
+      // deferred commit never fired: no server write happened in the window).
+      await expect.poll(async () => {
+        const row = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+        const visits = queryDBRows(`SELECT id FROM visits WHERE record_id='${record.id}'`);
+        const payments = queryDBRows(`SELECT id FROM payments WHERE record_id='${record.id}'`);
+        return row !== null && visits.length === 1 && payments.length === 1;
+      }, { timeout: 15_000, intervals: [500, 1000, 2000] }).toBe(true);
     } finally {
       // CLEANUP — always runs, even if test fails
       await cleanupRecord(request, record.id);
@@ -392,9 +502,12 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
 
       await page.locator('[data-testid="btn-delete-record"]').click();
 
-      // 3. VERIFY UI — DeleteDialog opens with the visit dependency listed
+      // 3. VERIFY UI — DeleteDialog opens with the visit dependency as a
+      // one-liner group (GH #285 D9в): header + the factory-visit line (no
+      // tariff → «Без тарифа, {price}» D9б fallback).
       await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения: 1 (удалён)');
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Посещения — будут удалены:');
+      await expect(page.locator('[data-testid="dep-visits"]')).toContainText('Без тарифа, 3500');
 
       // Cancel — dialog closes, nothing deleted.
       await page.locator('[data-testid="delete-dialog-cancel-btn"]').click();

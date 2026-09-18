@@ -28,7 +28,8 @@ vi.mock('@memo/api-client', () => ({
   createClient: vi.fn(),
   createVisitor: vi.fn(),
   createRecord: vi.fn(),
-  deleteRecord: vi.fn(),
+  dryRunDeleteRecord: vi.fn(),
+  resolveDeleteRecord: vi.fn(),
   createPayment: vi.fn(),
   patchPayment: vi.fn(),
   deletePayment: vi.fn(),
@@ -93,6 +94,7 @@ const mockSetQueryData = vi.fn();
 const mockSetQueriesData = vi.fn();
 const mockFetchQuery = vi.fn();
 const mockGetQueryData = vi.fn(() => null);
+const mockGetQueriesData = vi.fn(() => [] as Array<[readonly unknown[], unknown]>);
 vi.mock('@tanstack/react-query', () => ({
   useMutation: vi.fn(() => ({
     mutate: vi.fn(),
@@ -105,6 +107,9 @@ vi.mock('@tanstack/react-query', () => ({
     setQueriesData: mockSetQueriesData,
     fetchQuery: mockFetchQuery,
     getQueryData: mockGetQueryData,
+    // The GH #285 delete hook snapshots ['records', ...] caches via
+    // getQueriesData at click time — none seeded in these tests.
+    getQueriesData: mockGetQueriesData,
   })),
   useQuery: vi.fn(() => ({
     data: undefined,
@@ -352,16 +357,22 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
     expect(options[2]).toHaveTextContent('Детский');
   });
 
-  // ─── Delete record — Addendum 13 dry-run flow (useUI toast, no legacy
+  // ─── Delete record — GH #285 deferred flow (useUI toast, no legacy
   // 5s timer + undo toast) ──────────────────────────────────────────────
 
-  it('delete click runs the dry-run via useDeleteRecord and navigates immediately', async () => {
+  it('delete click runs the dry-run via useDeleteRecord, enqueues and navigates immediately', async () => {
     render(<ClientTab {...newProps} />);
     fireEvent.click(screen.getByTestId('btn-delete-record'));
     // The new ClientTab reads showToast from useUI (not props).
     expect(mockUseUI).toHaveBeenCalled();
-    // Addendum 13: a successful dry-run reports back to the parent right
-    // away — no 5-second setTimeout, no undo toast.
+    // GH #285 D2/D6: a clean 204 dry-run enqueues the deferred delete
+    // (5s undo window — the PendingActions provider owns the timer) and the
+    // tab navigates right away — the pending action survives unmount.
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'delete-record-r1', kind: 'delete' }),
+      );
+    });
     await waitFor(() => {
       expect(newProps.onDeleteRecord).toHaveBeenCalledWith('r1');
     });

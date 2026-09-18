@@ -792,6 +792,9 @@ export interface DependencyNode {
   allowed_actions: string[]; // [] = blocked (delete impossible — archive instead)
   message?: string | null;
   cascade_preview?: Record<string, number> | null;
+  // Record nodes only (GH #285): id + one-line label of individual rows —
+  // `expected` id-sets are snapshotted from these for the execute call.
+  items?: { id: string; label: string }[];
 }
 
 // ─── Paginated list envelopes ────────────────────────────────────────────────

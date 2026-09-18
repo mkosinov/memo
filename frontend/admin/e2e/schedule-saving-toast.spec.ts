@@ -3,6 +3,8 @@ import {
   waitForScheduleReady,
   delayActivityMutations,
 } from './fixtures/helpers';
+import { createTestActivity, cleanup } from './fixtures/factories';
+import { clickFabRobust } from './fixtures/server-push';
 import { openCombobox } from './helpers/combobox';
 
 /**
@@ -15,7 +17,11 @@ import { openCombobox } from './helpers/combobox';
  *   S2  update   → loading visible in flight, hidden after
  *   S3  overlap  → exactly ONE loading toast across two concurrent creates
  *   S4  500      → loading disappears, error toast appears, nothing hangs
- *   S5  delete   → loading in flight, then undo toast («удалено»)
+ *   S5  delete   → «Сохраняем…» is NOT shown on the deferred delete (#286
+ *                  пересмотр S5 #261): the dry-run click stays quiet, the
+ *                  undo toast («удалено», with the #94 countdown ring)
+ *                  arrives immediately, and the real DELETE waits for the
+ *                  commit ~5s after the undo toast.
  *
  * The delay helper (`delayActivityMutations`) holds non-GET activity API
  * requests for ~1.5 s, making the in-flight window deterministic.
@@ -237,46 +243,73 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
       .toBe(0);
   });
 
-  // ── S5. Удаление с отменой ──────────────────────────────────────────────
+  // ── S5. Удаление с отменой (пересмотрено #286 — отложенное удаление) ────
 
-  test('S5: delete shows «Сохраняем…», then undo toast «удалено»', async ({
+  test('S5: delete — no «Сохраняем…», immediate undo toast with countdown, DELETE at commit', async ({
     page,
+    request,
   }) => {
-    // Card-based deletion: enable «Режим удаления» in the right panel
-    // (open through the FAB if collapsed), then click the card.
-    const panel = page.locator('[data-testid="right-panel"]');
-    if (!(await panel.isVisible().catch(() => false))) {
-      const fab = page.getByRole('button', { name: 'Открыть панель инструментов' });
-      await expect(fab).toBeVisible();
-      await fab.click();
+    // Own factory activity (clean path — no records): the deferred delete
+    // never goes through the mutation-key «Сохраняем…» machinery.
+    const activity = await createTestActivity(request);
+
+    try {
+      // Card appears via the initial week fetch (created before load).
+      const card = page.locator(`[data-testid="activity-${activity.id}"]`);
+      await expect(card).toBeVisible({ timeout: 15_000 });
+
+      // Card-based deletion: enable «Режим удаления» in the right panel
+      // (open through the FAB if collapsed). The FAB click goes through
+      // clickFabRobust — the createToast from the bare-API creation shares
+      // the screen corner with the FAB and would otherwise swallow the
+      // click (server-push helper, #239).
+      const panel = page.locator('[data-testid="right-panel"]');
+      if (!(await panel.isVisible().catch(() => false))) {
+        await clickFabRobust(page);
+      }
+      await page.getByRole('button', { name: 'Режим удаления' }).click();
+
+      // Register the COMMIT-DELETE wait BEFORE the click. The click itself
+      // sends the dry-run preview DELETE (?dry_run=true, postData() ===
+      // null); the real DELETE carries the {expected} body and must wait
+      // for the commit ~5s after the undo toast — waiting on the click's
+      // response would be falsely green on the dry-run (#286).
+      const commitDelete = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/activities/${activity.id}`) &&
+          r.request().method() === 'DELETE' &&
+          r.request().postData() !== null,
+        { timeout: 20_000 },
+      );
+
+      await card.click({ timeout: 5_000 }).catch(() =>
+        card.dispatchEvent('click'),
+      );
+
+      // The dry-run is in flight for ~1.5s (delayActivityMutations) — the
+      // exact window where the OLD flow showed «Сохраняем…». On the
+      // deferred delete the loading toast must never appear at all.
+      await expect(page.getByTestId('toast-loading')).toHaveCount(0);
+
+      // Optimistic removal + the immediate undo toast («удалено»).
+      await expect(card).not.toBeVisible();
+      const undoToast = page
+        .getByTestId('toast-info')
+        .filter({ hasText: 'удалено' });
+      await expect(undoToast).toBeVisible();
+      // #94: the undo window rides as the countdown ring (countdown
+      // attribute on the toast).
+      await expect(undoToast.getByTestId('toast-countdown')).toBeVisible();
+
+      // Window expires → the commit DELETE fires with the expected body.
+      const commit = await commitDelete;
+      expect(commit.status()).toBe(204);
+
+      // The loading toast never showed up during the whole flow.
+      await expect(page.getByTestId('toast-loading')).toHaveCount(0);
+    } finally {
+      // Already deleted on success; a re-cleanup swallows the 404 (idempotent).
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
-    await page.getByRole('button', { name: 'Режим удаления' }).click();
-
-    const firstCard = page.locator('[data-testid^="activity-"]').first();
-    const activityId = (await firstCard.getAttribute('data-drag-id')) ?? '';
-    expect(activityId).not.toBe('');
-
-    const deleteResponse = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/v1/activities/${activityId}`) &&
-        r.request().method() === 'DELETE',
-      { timeout: 15_000 },
-    );
-    await firstCard.click({ timeout: 5_000 }).catch(() =>
-      firstCard.dispatchEvent('click'),
-    );
-
-    // In flight: loading toast visible during the DELETE.
-    await expect(page.getByTestId('toast-loading')).toBeVisible();
-    await deleteResponse;
-
-    // After: loading hidden, then the sequential undo toast («удалено»).
-    // Scoped to toast-info (the undo toast's kind) — the generic
-    // `[data-testid^="toast-"]` prefix also matches `toast-container`
-    // (GH #260 added the container testid).
-    await expect(page.getByTestId('toast-loading')).toBeHidden();
-    await expect(
-      page.getByTestId('toast-info').filter({ hasText: 'удалено' }),
-    ).toBeVisible();
   });
 });

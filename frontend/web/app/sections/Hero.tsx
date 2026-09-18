@@ -6,7 +6,7 @@ import { Overlay } from "../ui/Overlay";
 
 export interface HeroProps {
   onMenuToggle?: () => void;
-  locations?: { id: string; name: string }[];
+  locations?: { id: string; title: string }[];
   selectedLocation?: string | null;
   onSelectLocation?: (locationId: string | null) => void;
 }
@@ -37,7 +37,7 @@ export function Hero({ onMenuToggle, locations, selectedLocation, onSelectLocati
   const [activePill, setActivePill] = useState<string | null>(null);
 
   const currentLocationName = selectedLocation && locations
-    ? locations.find((l) => l.id === selectedLocation)?.name
+    ? locations.find((l) => l.id === selectedLocation)?.title
     : null;
 
   return (
@@ -274,7 +274,7 @@ export function Hero({ onMenuToggle, locations, selectedLocation, onSelectLocati
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span>{loc.name}</span>
+              <span>{loc.title}</span>
               {selectedLocation === loc.id && (
                 <svg className="w-5 h-5 ml-auto text-[#004D56]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />

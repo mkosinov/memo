@@ -27,13 +27,13 @@ function computePriceHint(tariffs: { title: string; price: number }[]): string {
   return tariffs.map(t => `${t.title}: ${t.price}₽`).join(', ');
 }
 
-function buildTagSet(serviceTags: { tag: string }[]): string[] {
+function buildTagSet(serviceTags: { title: string }[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const t of serviceTags) {
-    if (!seen.has(t.tag)) {
-      seen.add(t.tag);
-      result.push(t.tag);
+    if (!seen.has(t.title)) {
+      seen.add(t.title);
+      result.push(t.title);
     }
   }
   return result;
@@ -82,7 +82,7 @@ export function buildWebSchedule(
       durationMinutes: act.duration,
       occupied: act.occupied,
       capacity: act.capacity,
-      locationName: location.name,
+      locationName: location.title,
       locationAddress: location.address ?? undefined,
       locationHint: location.location_hint ?? undefined,
       materialDetails,

@@ -12,7 +12,7 @@ describe('useLocations', () => {
     });
 
     expect(result.current.locations.length).toBeGreaterThanOrEqual(3);
-    expect(result.current.locations[0].name).toBeDefined();
+    expect(result.current.locations[0].title).toBeDefined();
     expect(result.current.locations[0].address).toBeDefined();
   });
 });

@@ -20,7 +20,7 @@ const mockActivity: ActivityView = {
   dateFormatted: "20 мая",
   priceFormatted: "1 000 – 1 500 ₽",
   categoryColor: "#5B8C7A",
-  location: { id: "loc-1", name: "Парк Горького", address: "ул. Тестовая, 1" },
+  location: { id: "loc-1", title: "Парк Горького", address: "ул. Тестовая, 1" },
   guestPhotos: [],
 };
 

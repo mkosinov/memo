@@ -16,7 +16,6 @@ function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
     record_info: null,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
-    is_active: true,
     occupied: 3,
     ...overrides,
   };
@@ -38,7 +37,7 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
       { id: 'mat-2', title: 'Масло', description: 'Масляные краски', note: 'Густые масляные краски' },
     ],
     tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500 }],
-    tags: [{ id: 'tag-1', tag: 'масло' }, { id: 'tag-2', tag: 'пейзаж' }],
+    tags: [{ id: 'tag-1', title: 'масло' }, { id: 'tag-2', title: 'пейзаж' }],
     is_active: true,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
@@ -65,7 +64,7 @@ function makeMaster(overrides?: Partial<MasterViewResponse>): MasterViewResponse
 function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
   return {
     id: 'loc-1',
-    name: 'Альпика',
+    title: 'Альпика',
     address: 'ул. Тестовая, 1',
     description: 'Уютная студия',
     capacity: 20,
@@ -249,7 +248,7 @@ describe('buildWebSchedule', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([
       ['loc-1', makeLocation()],
-      ['loc-2', makeLocation({ id: 'loc-2', name: 'Гранд Отель' })],
+      ['loc-2', makeLocation({ id: 'loc-2', title: 'Гранд Отель' })],
     ]);
 
     const result = buildWebSchedule(activities, services, masters, locations);
@@ -270,7 +269,7 @@ describe('buildWebSchedule', () => {
     const masters = new Map([['master-1', makeMaster()]]);
     const locations = new Map([
       ['loc-1', makeLocation()],
-      ['loc-2', makeLocation({ id: 'loc-2', name: 'Гранд Отель' })],
+      ['loc-2', makeLocation({ id: 'loc-2', title: 'Гранд Отель' })],
     ]);
 
     const result = buildWebSchedule(activities, services, masters, locations);

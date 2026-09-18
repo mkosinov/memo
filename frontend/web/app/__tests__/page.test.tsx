@@ -18,7 +18,7 @@ const mockSchedules = [
     photos: [{ url: "/guest1.jpg", isPublic: true, tags: [] }],
     time: "14:00",
     duration: "2 часа",
-    location: { id: "loc-1", name: "Студия на Арбате", address: "ул. Арбат, 1" },
+    location: { id: "loc-1", title: "Студия на Арбате", address: "ул. Арбат, 1" },
     guestsCount: 5,
     material: "Акварель",
     size: "30x40",
@@ -43,7 +43,7 @@ const mockSchedules = [
     photos: [],
     time: "16:00",
     duration: "1.5 часа",
-    location: { id: "loc-2", name: "Парк Горького", address: "ул. Крымский Вал, 9" },
+    location: { id: "loc-2", title: "Парк Горького", address: "ул. Крымский Вал, 9" },
     guestsCount: 3,
     material: "Акрил",
     size: "20x30",
@@ -67,7 +67,7 @@ const mockSchedules = [
     photos: [],
     time: "12:00",
     duration: "2 часа",
-    location: { id: "loc-1", name: "Студия на Арбате" },
+    location: { id: "loc-1", title: "Студия на Арбате" },
     guestsCount: 2,
     material: "Глина",
     size: "Горшок",
@@ -86,8 +86,8 @@ const mockSchedules = [
 ];
 
 const mockLocations = [
-  { id: "loc-1", name: "Студия на Арбате", address: "ул. Арбат, 1" },
-  { id: "loc-2", name: "Парк Горького", address: "ул. Крымский Вал, 9" },
+  { id: "loc-1", title: "Студия на Арбате", address: "ул. Арбат, 1" },
+  { id: "loc-2", title: "Парк Горького", address: "ул. Крымский Вал, 9" },
 ];
 
 const mockGalleryPhotos = [

@@ -72,8 +72,8 @@ function toActivityView(s: ScheduleView): ActivityView {
 }
 
 /** Map LocationView → LocationFilter location */
-function toLocationOption(vm: LocationView): { id: string; name: string } {
-  return { id: vm.id, name: vm.name };
+function toLocationOption(vm: LocationView): { id: string; title: string } {
+  return { id: vm.id, title: vm.title };
 }
 
 /** Map GalleryPhotoView → GuestGallery photo */

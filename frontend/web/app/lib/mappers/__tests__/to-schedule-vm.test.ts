@@ -72,7 +72,7 @@ describe('toScheduleView', () => {
     const vm = toScheduleView(makeRawSchedule());
     expect(vm.location).toEqual({
       id: 'alpika',
-      name: 'Альпика',
+      title: 'Альпика',
       address: 'Альпика, 1 этаж',
     });
   });
@@ -174,7 +174,7 @@ describe('toCardProps', () => {
       photos: [],
       time: '14:00',
       duration: '2 ч 30 мин',
-      location: { id: 'alpika', name: 'Альпика' },
+      location: { id: 'alpika', title: 'Альпика' },
       guestsCount: 3,
       material: 'Масло',
       size: '30x40 см',

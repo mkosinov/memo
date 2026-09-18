@@ -17,7 +17,7 @@ export function toActivityView(raw: ActivityDTO): ActivityView {
     guestPhotos: raw.guest_photos,
     time: raw.time,
     duration: formatDuration(raw.duration_minutes),
-    location: { id: raw.location_id, name: raw.location_name, address: raw.location_address },
+    location: { id: raw.location_id, title: raw.location_name, address: raw.location_address },
     guestsCount: raw.guests_count,
     material: raw.material,
     size: raw.size,

@@ -141,7 +141,9 @@ test.describe('GH #263 S6 — master API герметичность', () => {
       expect(items.some((c) => c.id === foreignClient.id)).toBe(false);
     } finally {
       await cleanup(admin, `/api/v1/payments/${foreignPayment.id}`);
-      await cleanup(admin, `/api/v1/records/${foreignRecord.id}`);
+      // rev7 (#285): record DELETE carries the expected-state contract —
+      // the generic cleanup's bare DELETE would 422 and leak.
+      await cleanupRecord(admin, foreignRecord.id);
       await cleanup(admin, `/api/v1/photos/${foreignPhoto.id}`);
       await cleanup(admin, `/api/v1/activities/${foreignActivity.id}`);
       await cleanup(admin, `/api/v1/clients/${foreignClient.id}`);

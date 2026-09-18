@@ -190,12 +190,30 @@ class VisitService:
     ) -> Visit | None:
         """Partial update — only fields explicitly set in `data` are applied.
 
+        Null-policy (GH #179): an explicit ``null`` on the NOT NULL columns
+        ``price``/``status`` is IGNORED ('don't change'); on nullable fields
+        (``visitor_id``/``tariff_id``/``custom_price``) it is APPLIED
+        (clears the field). Empty body is a full no-op: no ``updated_at``
+        bump, no status cascade, no ``mark_changed``.
+
         Cascade only status (seats unchanged — is_active not in VisitPatch).
         """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return None
         update_data = data.model_dump(exclude_unset=True)
+
+        # Strip null values for NOT NULL columns — client intent is "don't
+        # change", not "set to null" (same approach as UserSettingsService)
+        _not_null_fields = {"price", "status"}
+        for field in _not_null_fields:
+            if field in update_data and update_data[field] is None:
+                del update_data[field]
+
+        # Empty body → full no-op (early exit)
+        if not update_data:
+            return visit
+
         for field, value in update_data.items():
             setattr(visit, field, value)
         visit.updated_at = datetime.now(UTC)

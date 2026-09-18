@@ -45,10 +45,11 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("locations:read"))]
 
-# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
+# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5;
+# #172: ``name`` → ``title``).
 # ``archived`` → is_active (asc = is_active ASC = archived-first).
 _LOCATION_SORT_MAP: dict[str, list] = {
-    "name": [Location.title],
+    "title": [Location.title],
     "short_title": [Location.short_title],
     "capacity": [Location.capacity],
     "address": [Location.address],
@@ -63,12 +64,12 @@ _LOCATION_SORT_MAP: dict[str, list] = {
 def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) -> list:
     """Build the ``order_by`` list for GET /api/v1/locations.
 
-    * ``sort_by=None`` → spec §4.4 default: ``sort_order ASC, name ASC, id ASC``.
+    * ``sort_by=None`` → spec §4.4 default: ``sort_order ASC, title ASC, id ASC``.
     * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
       then ``id ASC`` tiebreak for cross-page stability (records idiom).
     """
     if sort_by is None:
-        return [asc(Location.sort_order), asc(Location.name), asc(Location.id)]
+        return [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
     cols = _LOCATION_SORT_MAP[sort_by]
     ordered = [
         c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
@@ -88,7 +89,7 @@ async def list_locations(
     q: str | None = Query(None, min_length=2, max_length=100),
 ) -> PaginatedResponse[LocationResponse]:
     """Return locations filtered by archive status (default: active),
-    sorted by sort_order, then name.
+    sorted by sort_order, then title.
 
     ``status`` accepts ``active`` (default), ``archived``, or ``all`` — see
     ``ArchiveStatus``. Invalid values are rejected with 422 by FastAPI's
@@ -99,7 +100,7 @@ async def list_locations(
     validation. ``sort_by=None`` → spec §4.4 default order with ``id ASC``
     tiebreak.
 
-    ``q`` (GH #212): case-insensitive substring on ``name``/``short_title``/
+    ``q`` (GH #212): case-insensitive substring on ``title``/``short_title``/
     ``address``/``description`` OR exact equality on ``id`` (full UUID) or
     the URL fields (``yandex_map_url``/``review_url``/``image_url`` — full
     string only, partial URLs never match); ``total`` reflects the filtered
@@ -124,14 +125,14 @@ async def list_all_locations(
     """Return all locations as a bare JSON array (GH #205).
 
     Unpaginated, capped by ``BARE_LIST_MAX_ROWS`` (1000). Sorted by
-    ``sort_order ASC, name ASC, id ASC`` (spec §4.4). ``status``
+    ``sort_order ASC, title ASC, id ASC`` (spec §4.4). ``status``
     mirrors the paginated list endpoint (active default / archived / all).
     """
     try:
         return await service.list_all(
             db_session=session,
             status=status,
-            order_by=[asc(Location.sort_order), asc(Location.name), asc(Location.id)],
+            order_by=[asc(Location.sort_order), asc(Location.title), asc(Location.id)],
         )
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

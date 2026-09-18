@@ -25,8 +25,9 @@ class TestTagAllEndpoint:
 class TestTagListSorting:
     """Server-side sorting on GET /api/v1/tags (#205 Task 3).
 
-    sort_by whitelist: tag (only key). sort_order: asc/desc. Unknown → 422.
-    Default (sort_by=None): tag ASC, id ASC (spec §4.4 — NEW, was unspecified).
+    sort_by whitelist: title (only key — #172 renamed ``tag`` → ``title``).
+    sort_order: asc/desc. Unknown → 422.
+    Default (sort_by=None): title ASC, id ASC (spec §4.4).
     """
 
     @staticmethod
@@ -34,31 +35,32 @@ class TestTagListSorting:
         assert resp.status_code == 200, f"list failed: {resp.text}"
         return [t["id"] for t in resp.json()["items"]]
 
-    def test_sort_tag_asc_desc(self, api_client, create_tag) -> None:
-        """sort_by=tag → [tag]; asc/desc both differ from insertion order."""
-        t_z = create_tag(tag="zebra")   # inserted first
-        t_a = create_tag(tag="apple")
-        t_m = create_tag(tag="moon")
+    def test_sort_title_asc_desc(self, api_client, create_tag) -> None:
+        """sort_by=title → [title]; asc/desc both differ from insertion order."""
+        t_z = create_tag(title="zebra")   # inserted first
+        t_a = create_tag(title="apple")
+        t_m = create_tag(title="moon")
 
-        asc = self._ids(api_client.get("/api/v1/tags?sort_by=tag&sort_order=asc"))
+        asc = self._ids(api_client.get("/api/v1/tags?sort_by=title&sort_order=asc"))
         assert asc.index(t_a["id"]) < asc.index(t_m["id"]) < asc.index(t_z["id"])
 
-        desc = self._ids(api_client.get("/api/v1/tags?sort_by=tag&sort_order=desc"))
+        desc = self._ids(api_client.get("/api/v1/tags?sort_by=title&sort_order=desc"))
         assert desc.index(t_z["id"]) < desc.index(t_m["id"]) < desc.index(t_a["id"])
 
-    def test_sort_invalid_key_422(self, api_client) -> None:
-        """sort_by=bogus → 422 from Literal validation."""
-        resp = api_client.get("/api/v1/tags?sort_by=bogus")
+    @pytest.mark.parametrize("key", ["bogus", "tag"])
+    def test_sort_invalid_key_422(self, api_client, key) -> None:
+        """sort_by=bogus / legacy sort_by=tag (#172 rename) → 422 Literal validation."""
+        resp = api_client.get(f"/api/v1/tags?sort_by={key}")
         assert resp.status_code == 422
 
     def test_default_order_locked(self, api_client, create_tag) -> None:
-        """Default (no sort params): tag ASC, id ASC (NEW per spec §4.4).
-        Insertion order differs from tag-ASC so the old unspecified DB
+        """Default (no sort params): title ASC, id ASC (NEW per spec §4.4).
+        Insertion order differs from title-ASC so the old unspecified DB
         order (insertion/rowid) would return a different sequence."""
-        create_tag(tag="banana")  # inserted first
-        create_tag(tag="apple")
+        create_tag(title="banana")  # inserted first
+        create_tag(title="apple")
 
         resp = api_client.get("/api/v1/tags")
         assert resp.status_code == 200
-        tags = [t["tag"] for t in resp.json()["items"]]
-        assert tags == ["apple", "banana"]  # tag ASC, not insertion order
+        tags = [t["title"] for t in resp.json()["items"]]
+        assert tags == ["apple", "banana"]  # title ASC, not insertion order

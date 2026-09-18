@@ -16,7 +16,7 @@ ServiceSortBy = Literal[
 class TagResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    tag: str
+    title: str
 
 
 class ServiceMaterialItem(BaseModel):

@@ -381,7 +381,7 @@ async def test_update_master_null_blocked_by_activities(db_session) -> None:
         title="S", description="d", image_url="i", specialty="живопись",
         min_age=6, duration=90, record_info="r",
     )
-    location = Location(name="L", capacity=10)
+    location = Location(title="L", capacity=10)
     db_session.add_all([service_, location])
     await db_session.flush()
     db_session.add(Activity(
@@ -581,7 +581,7 @@ async def test_resolve_delete_blocked_by_activities(db_session) -> None:
         title="S", description="d", image_url="i", specialty="живопись",
         min_age=6, duration=90, record_info="r",
     )
-    location = Location(name="L", capacity=10)
+    location = Location(title="L", capacity=10)
     db_session.add_all([service_, location])
     await db_session.flush()
     db_session.add(Activity(
@@ -855,7 +855,7 @@ async def _activity_deps(db_session) -> tuple[str, str]:
         title="S", description="d", image_url="i", specialty="живопись",
         min_age=6, duration=90, record_info="r",
     )
-    location = Location(name="L", capacity=10)
+    location = Location(title="L", capacity=10)
     db_session.add_all([service_, location])
     await db_session.flush()
     return service_.id, location.id

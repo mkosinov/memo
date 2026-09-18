@@ -220,8 +220,8 @@ class TestServiceWithTariffsAndTags:
     def test_create_service_with_tags_and_tariffs(self, api_client):
         """Create service with both tags and tariffs."""
         # Create tags
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "popular"}).json()
-        tag2 = api_client.post("/api/v1/tags", json={"tag": "new"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "popular"}).json()
+        tag2 = api_client.post("/api/v1/tags", json={"title": "new"}).json()
 
         payload = {
             "title": "Watercolor Art",
@@ -242,14 +242,14 @@ class TestServiceWithTariffsAndTags:
         body = resp.json()
         assert len(body["tariffs"]) == 1
         assert len(body["tags"]) == 2
-        tag_names = {t["tag"] for t in body["tags"]}
+        tag_names = {t["title"] for t in body["tags"]}
         assert "popular" in tag_names
         assert "new" in tag_names
 
     def test_update_service_replaces_tariffs_and_tags(self, api_client):
         """PUT replaces all tariffs and tags."""
         # Create service with initial tags
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "initial"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "initial"}).json()
         payload = {
             "title": "Ceramics",
             "description": "Clay sculpting",
@@ -266,7 +266,7 @@ class TestServiceWithTariffsAndTags:
         service_id = create_resp.json()["id"]
 
         # Create new tag
-        tag2 = api_client.post("/api/v1/tags", json={"tag": "updated"}).json()
+        tag2 = api_client.post("/api/v1/tags", json={"title": "updated"}).json()
 
         # Update with completely new tariffs and tags
         # #207 §3.2: is_active removed from ServiceUpdate (PUT) — archive/restore
@@ -293,7 +293,7 @@ class TestServiceWithTariffsAndTags:
         assert len(body["tariffs"]) == 2
         assert body["tariffs"][0]["title"] == "Premium"
         assert len(body["tags"]) == 1
-        assert body["tags"][0]["tag"] == "updated"
+        assert body["tags"][0]["title"] == "updated"
 
     def test_update_service_clears_all_tariffs(self, api_client):
         """PUT with empty tariffs clears all existing tariffs."""
@@ -509,7 +509,7 @@ class TestRepositoryListFilters:
 
     def test_list_tags(self, api_client):
         """GET /api/v1/tags returns active tags."""
-        api_client.post("/api/v1/tags", json={"tag": "test-tag"})
+        api_client.post("/api/v1/tags", json={"title": "test-tag"})
         resp = api_client.get("/api/v1/tags")
         assert resp.status_code == 200
         assert len(resp.json()["items"]) >= 1

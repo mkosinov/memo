@@ -58,7 +58,7 @@ async def _insert_activity(db_session) -> Activity:
     staff = Staff(first_name="M", last_name="L")
     service = Service(title="S", description="d", image_url="http://x",
                      specialty="s", min_age=5, duration=60, record_info="r")
-    location = Location(name="L", capacity=20)
+    location = Location(title="L", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
     db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
@@ -113,7 +113,7 @@ async def _insert_visitor(db_session, client: Client, name: str = "V") -> Visito
 
 async def _insert_location(db_session) -> Location:
     """Insert a bare Location (committed) — no master/service/activity."""
-    location = Location(name="PhotoLoc", capacity=5)
+    location = Location(title="PhotoLoc", capacity=5)
     db_session.add(location)
     await db_session.commit()
     return location
@@ -354,7 +354,7 @@ async def test_activity_delete_is_atomic_on_partial_failure(db_session, monkeypa
 
 async def _insert_tag(db_session, label: str = "T") -> Tag:
     """Insert a Tag (committed)."""
-    tag = Tag(tag=label)
+    tag = Tag(title=label)
     db_session.add(tag)
     await db_session.commit()
     return tag

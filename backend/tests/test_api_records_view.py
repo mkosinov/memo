@@ -127,10 +127,10 @@ def _seed_view_world(
         create_service(title="Глина"),
     ]
     locations = [
-        create_location(name="Арбат"),
-        create_location(name="Берег"),
-        create_location(name="Волна"),
-        create_location(name="Гать"),
+        create_location(title="Арбат"),
+        create_location(title="Берег"),
+        create_location(title="Волна"),
+        create_location(title="Гать"),
     ]
     clients = [
         create_client(name="Анна"),
@@ -441,7 +441,7 @@ class TestViewDisplayFields:
     ) -> None:
         master = create_master(first_name="Иван", last_name="Арбузов", color="#AB12CD")
         service = create_service(title="Гончарная мастерская")
-        location = create_location(name="Студия на Арбате")
+        location = create_location(title="Студия на Арбате")
         client = create_client(name="Анна")
         activity = _activity_on(
             api_client,

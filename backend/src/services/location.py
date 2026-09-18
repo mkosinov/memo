@@ -12,7 +12,7 @@ from src.services.generic import ArchiveService
 class LocationService(ArchiveService[LocationCreate, LocationUpdate, LocationResponse]):
     """Location service with NOT NULL field protection on PATCH."""
 
-    NOT_NULL_FIELDS = {"name", "capacity", "sort_order"}
+    NOT_NULL_FIELDS = {"title", "capacity", "sort_order"}
 
     # GH #212 search matrix (spec §5.2): substring on the 4 text fields;
     # id is exact-uuid (deep-link prerequisite #216); the 3 URL fields are

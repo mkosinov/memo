@@ -439,7 +439,7 @@ def _bulk_seed_tags(db_engine, n: int) -> None:
         rows = [
             {
                 "id": str(_uuid.uuid4()),
-                "tag": f"bulk-{i:05d}",
+                "title": f"bulk-{i:05d}",
                 "created_at": now,
                 "updated_at": now,
             }

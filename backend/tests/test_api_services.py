@@ -19,7 +19,7 @@ SERVICE_PAYLOAD = {
     "record_info": "Bring your own apron",
 }
 
-TAG_PAYLOAD = {"tag": "beginner"}
+TAG_PAYLOAD = {"title": "beginner"}
 
 TARIFF_PAYLOAD = {
     "title": "Standard",
@@ -130,7 +130,7 @@ class TestServicesCrud:
         assert body["tariffs"][0]["title"] == "Standard"
         assert body["tariffs"][0]["price"] == 1500
         assert len(body["tags"]) == 1
-        assert body["tags"][0]["tag"] == "beginner"
+        assert body["tags"][0]["title"] == "beginner"
 
     def test_list_services_includes_created(self, api_client) -> None:
         """GET /api/services returns a list containing the created service."""
@@ -176,7 +176,7 @@ class TestServicesCrud:
         service_id = create_resp.json()["id"]
 
         # Create a second tag
-        tag2_resp = api_client.post("/api/v1/tags", json={"tag": "advanced"})
+        tag2_resp = api_client.post("/api/v1/tags", json={"title": "advanced"})
         tag2_id = tag2_resp.json()["id"]
 
         update_data = {
@@ -205,7 +205,7 @@ class TestServicesCrud:
         assert body["tariffs"][0]["title"] == "Premium"
         assert body["tariffs"][0]["price"] == 2500
         assert len(body["tags"]) == 1
-        assert body["tags"][0]["tag"] == "advanced"
+        assert body["tags"][0]["title"] == "advanced"
 
     def test_get_nonexistent_service_returns_404(self, api_client) -> None:
         """GET /api/services/{fake_id} returns 404."""
@@ -313,9 +313,9 @@ class TestServicePatch:
 
     def test_patch_service_tag_ids_replaces(self, api_client) -> None:
         """PATCH with tag_ids replaces all tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "tag1"}).json()
-        tag2 = api_client.post("/api/v1/tags", json={"tag": "tag2"}).json()
-        tag3 = api_client.post("/api/v1/tags", json={"tag": "tag3"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "tag1"}).json()
+        tag2 = api_client.post("/api/v1/tags", json={"title": "tag2"}).json()
+        tag3 = api_client.post("/api/v1/tags", json={"title": "tag3"}).json()
 
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",
@@ -333,11 +333,11 @@ class TestServicePatch:
         assert response.status_code == 200
         tags = response.json()["tags"]
         assert len(tags) == 1
-        assert tags[0]["tag"] == "tag3"
+        assert tags[0]["title"] == "tag3"
 
     def test_patch_service_without_tag_ids_preserves(self, api_client) -> None:
         """PATCH without tag_ids preserves existing tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "preserve"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "preserve"}).json()
 
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",
@@ -352,11 +352,11 @@ class TestServicePatch:
         assert response.status_code == 200
         tags = response.json()["tags"]
         assert len(tags) == 1
-        assert tags[0]["tag"] == "preserve"
+        assert tags[0]["title"] == "preserve"
 
     def test_patch_service_tag_ids_empty_clears(self, api_client) -> None:
         """PATCH with empty tag_ids clears all tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "remove"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "remove"}).json()
 
         create = api_client.post("/api/v1/services", json={
             "title": "Service", "description": "desc",

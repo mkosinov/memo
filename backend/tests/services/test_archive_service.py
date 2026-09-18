@@ -124,7 +124,7 @@ async def _link_position(db_session, staff_id: str) -> None:
 
 
 async def _link_master_tag(db_session, staff_id: str) -> None:
-    tag = Tag(tag=f"t-{_uuid.uuid4().hex[:8]}")
+    tag = Tag(title=f"t-{_uuid.uuid4().hex[:8]}")
     db_session.add(tag)
     await db_session.flush()
     await db_session.execute(
@@ -188,7 +188,7 @@ async def test_staff_resolve_delete_with_activities_blocks(db_session) -> None:
     db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
     service = Service(title="S", description="d", image_url="i", specialty="живопись",
                       min_age=6, duration=90, record_info="r")
-    location = Location(name="L", capacity=10)
+    location = Location(title="L", capacity=10)
     db_session.add_all([service, location])
     await db_session.flush()
     db_session.add(Activity(

@@ -330,7 +330,7 @@ def create_location(api_client):
     Usage::
 
         location = create_location()
-        location = create_location(name="Альпика", capacity=30)
+        location = create_location(title="Альпика", capacity=30)
     """
     _counter = 0
 
@@ -338,7 +338,7 @@ def create_location(api_client):
         nonlocal _counter
         _counter += 1
         payload = {
-            "name": f"Test Studio {_counter}",
+            "title": f"Test Studio {_counter}",
             "address": f"Test Address {_counter}",
             "capacity": 20,
             **overrides,
@@ -356,14 +356,14 @@ def create_tag(api_client):
     Usage::
 
         tag = create_tag()
-        tag = create_tag(tag="beginner")
+        tag = create_tag(title="beginner")
     """
     import uuid as _uuid
 
     def factory(**overrides):
         unique = _uuid.uuid4().hex[:8]
         payload = {
-            "tag": f"tag-{unique}",
+            "title": f"tag-{unique}",
             **overrides,
         }
         resp = api_client.post("/api/v1/tags", json=payload)

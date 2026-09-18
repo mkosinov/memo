@@ -5,9 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-# Sort whitelist for GET /api/v1/locations (#205 Task 3, spec §4.5).
+# Sort whitelist for GET /api/v1/locations (#205 Task 3, spec §4.5; #172:
+# ``name`` → ``title`` — thing-title canon).
 LocationSortBy = Literal[
-    "name", "short_title", "capacity", "address", "location_hint",
+    "title", "short_title", "capacity", "address", "location_hint",
     "description", "archived", "yandex_map_url", "created_at",
 ]
 
@@ -15,7 +16,7 @@ LocationSortBy = Literal[
 class LocationBase(BaseModel):
     """Shared fields for location creation and updates."""
 
-    name: str
+    title: str
     short_title: str | None = None
     address: str | None = None
     description: str | None = None
@@ -56,7 +57,7 @@ class LocationPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = None
+    title: str | None = None
     short_title: str | None = None
     address: str | None = None
     description: str | None = None

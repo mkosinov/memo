@@ -170,13 +170,13 @@ def photos_fixture(
     tags [T1,T2] / [T1].
     """
     c1 = create_client(name="Anna Karenina")
-    l1 = create_location(name="Act Studio")
-    l2 = create_location(name="Hall Venue")
+    l1 = create_location(title="Act Studio")
+    l2 = create_location(title="Hall Venue")
     s1 = create_service(title="Wheel pottery")
     s2 = create_service(title="Oil painting")
     a1 = create_activity(service_id=s1["id"], location_id=l1["id"])
-    t1 = create_tag(tag="workshop")
-    t2 = create_tag(tag="kids")
+    t1 = create_tag(title="workshop")
+    t2 = create_tag(title="kids")
 
     def post_photo(filename: str, **extra: object) -> dict:
         resp = api_client.post(
@@ -552,9 +552,9 @@ class TestPhotoPatch:
 
     def test_patch_photo_tag_ids_replaces(self, api_client) -> None:
         """PATCH with tag_ids replaces all tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-1"}).json()
-        tag2 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-2"}).json()
-        tag3 = api_client.post("/api/v1/tags", json={"tag": "photo-tag-3"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "photo-tag-1"}).json()
+        tag2 = api_client.post("/api/v1/tags", json={"title": "photo-tag-2"}).json()
+        tag3 = api_client.post("/api/v1/tags", json={"title": "photo-tag-3"}).json()
 
         create = api_client.post(PHOTOS_URL, json={
             "filename": "test.jpg", "is_public": True,
@@ -569,11 +569,11 @@ class TestPhotoPatch:
         assert response.status_code == 200
         tags = response.json()["tags"]
         assert len(tags) == 1
-        assert tags[0]["tag"] == "photo-tag-3"
+        assert tags[0]["title"] == "photo-tag-3"
 
     def test_patch_photo_without_tag_ids_preserves(self, api_client) -> None:
         """PATCH without tag_ids preserves existing tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "preserve-photo"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "preserve-photo"}).json()
 
         create = api_client.post(PHOTOS_URL, json={
             "filename": "test.jpg", "is_public": True,
@@ -585,11 +585,11 @@ class TestPhotoPatch:
         assert response.status_code == 200
         tags = response.json()["tags"]
         assert len(tags) == 1
-        assert tags[0]["tag"] == "preserve-photo"
+        assert tags[0]["title"] == "preserve-photo"
 
     def test_patch_photo_tag_ids_empty_clears(self, api_client) -> None:
         """PATCH with empty tag_ids clears all tag links."""
-        tag1 = api_client.post("/api/v1/tags", json={"tag": "remove-photo"}).json()
+        tag1 = api_client.post("/api/v1/tags", json={"title": "remove-photo"}).json()
 
         create = api_client.post(PHOTOS_URL, json={
             "filename": "test.jpg", "is_public": True,

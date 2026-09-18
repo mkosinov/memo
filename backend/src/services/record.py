@@ -250,7 +250,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             .scalar_subquery()
         )
         location_name = (
-            select(Location.name)
+            select(Location.title)
             .where(Activity.location_id == Location.id)
             .correlate(Activity)
             .scalar_subquery()
@@ -338,7 +338,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             .scalar_subquery()
         )
         location_name = (
-            select(Location.name).where(Location.id == Activity.location_id).scalar_subquery()
+            select(Location.title).where(Location.id == Activity.location_id).scalar_subquery()
         )
         total_price = (
             select(func.coalesce(func.sum(Visit.price), 0))

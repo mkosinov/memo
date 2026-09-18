@@ -194,7 +194,7 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 | client | `Client.name` (correlated subquery on `Record.client_id`) |
 | service | `Service.title` (correlated subquery on `Activity.service_id`) |
 | master | `Master.last_name, Master.first_name` |
-| location | `Location.name` (correlated subquery on activity) |
+| location | `Location.title` (correlated subquery on activity; #172 renamed the column, sort key stays `location`) |
 | guests | `COUNT(Visit)` with `visitor_id IS NOT NULL` (correlated subquery — named visits count; ALL named visits count regardless of status, anonymous visits don't, #257) |
 | status | `Record.status` |
 | total | `SUM(Visit.price)` (coalesced to 0) |
@@ -219,7 +219,7 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 | `is_private` | `bool` | `Activity.is_private` direct column (no subquery) | never (INNER join) |
 | `service_title` | `str \| None` | `Service.title` via `Activity.service_id` (correlated scalar subquery) | service deleted/missing |
 | `master_name` | `str \| None` | `Master.last_name \|\| ' ' \|\| Master.first_name` — «Фамилия Имя», byte-identical to `displayMasterName` | activity has no master |
-| `location_name` | `str \| None` | `Location.name` via `Activity.location_id` (correlated scalar subquery) | activity has no location |
+| `location_name` | `str \| None` | `Location.title` via `Activity.location_id` (correlated scalar subquery; #172 renamed the column — the display field itself stays `location_name`) | activity has no location |
 | `master_color` | `str \| None` | `Master.color` (correlated scalar subquery) | no master |
 | `paid` | `int` (NOT nullable, default 0) | `COALESCE(SUM(Payment.amount), 0)` over the record's stored Payment rows — hard-deleted payments are physically gone and contribute 0 (`get_payment_totals` semantics) | never — 0 when no payments |
 

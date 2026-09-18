@@ -74,9 +74,9 @@ async def _add_user(db_session, staff_id: str) -> str:
     return user.id
 
 
-async def _flush_tag(db_session, name: str) -> str:
+async def _flush_tag(db_session, title: str) -> str:
     """Add a fresh Tag row and return its id (direct ORM insert, no relationships)."""
-    tag = Tag(tag=name)
+    tag = Tag(title=title)
     db_session.add(tag)
     await db_session.flush()
     return tag.id
@@ -436,7 +436,7 @@ class TestCollectDependenciesMaster:
         master = Staff(first_name="A", last_name="B")
         service = Service(title="S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="L", capacity=10)
+        location = Location(title="L", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
 
@@ -472,7 +472,7 @@ class TestCollectDependenciesMaster:
         master = Staff(first_name="A2", last_name="B2")
         service = Service(title="S2", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="L2", capacity=10)
+        location = Location(title="L2", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         await _add_activity(db_session, master=master, service=service, location=location)
@@ -503,7 +503,7 @@ class TestCollectDependenciesLocation:
         master = Staff(first_name="L1", last_name="m")
         service = Service(title="LS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="LL", capacity=10)
+        location = Location(title="LL", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         for i in range(2):
@@ -523,7 +523,7 @@ class TestCollectDependenciesService:
         master = Staff(first_name="sv", last_name="m")
         service = Service(title="SvS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="SvL", capacity=10)
+        location = Location(title="SvL", capacity=10)
         db_session.add_all([master, service, location])
         await db_session.flush()
         for i in range(2):
@@ -554,7 +554,7 @@ class TestCollectDependenciesClient:
         master = Staff(first_name="c1", last_name="m")
         service = Service(title="cS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="cL", capacity=50)
+        location = Location(title="cL", capacity=50)
         client = Client(name="cc", phone=f"+7999{_uuid.uuid4().hex[:7]}",
                         email=None, channel="telegram")
         db_session.add_all([master, service, location, client])
@@ -597,7 +597,7 @@ class TestCollectDependenciesClient:
         master = Staff(first_name="c2", last_name="m")
         service = Service(title="c2S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="c2L", capacity=50)
+        location = Location(title="c2L", capacity=50)
         client = Client(name="cc2", phone=f"+7999{_uuid.uuid4().hex[:8]}",
                         email=None, channel="telegram")
         db_session.add_all([master, service, location, client])
@@ -615,7 +615,7 @@ class TestCollectDependenciesRecord:
         master = Staff(first_name="r1", last_name="m")
         service = Service(title="rS", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="rL", capacity=50)
+        location = Location(title="rL", capacity=50)
         db_session.add_all([master, service, location])
         await db_session.flush()
         activity = await _add_activity(
@@ -649,7 +649,7 @@ class TestCollectDependenciesRecord:
         master = Staff(first_name="r2", last_name="m")
         service = Service(title="r2S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="r2L", capacity=50)
+        location = Location(title="r2L", capacity=50)
         db_session.add_all([master, service, location])
         await db_session.flush()
         activity = await _add_activity(
@@ -673,7 +673,7 @@ class TestCollectDependenciesRecord:
         master = Staff(first_name="r3", last_name="m")
         service = Service(title="r3S", description="d", image_url="i", specialty="живопись",
                           min_age=6, duration=90, record_info="r")
-        location = Location(name="r3L", capacity=50)
+        location = Location(title="r3L", capacity=50)
         db_session.add_all([master, service, location])
         await db_session.flush()
         activity = await _add_activity(

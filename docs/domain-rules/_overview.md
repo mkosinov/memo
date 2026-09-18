@@ -183,8 +183,8 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
       | Staff | `first_name`, `last_name` | `id` (uuid) | Each field ilike'd separately — no cross-field concat (бывш. Masters, #266). |
       | Materials | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
       | Services | `title`, `description` | `id` (uuid) | Each field ilike'd separately. |
-      | Tags | `tag` | `id` (uuid) | Single substring field. |
-      | Locations | `name`, `short_title`, `address`, `description` | `id` (uuid); `yandex_map_url`, `review_url`, `image_url` (exact) | URL fields exact-only (no ilike). |
+      | Tags | `title` | `id` (uuid) | Single substring field. |
+      | Locations | `title`, `short_title`, `address`, `description` | `id` (uuid); `yandex_map_url`, `review_url`, `image_url` (exact) | URL fields exact-only (no ilike). |
       | Visitors | `name` | `id` (uuid) | Single substring field. |
       | Activities | `service.title` (INNER join, added only when q present) | `id` (uuid) | Service join is INNER only when `q` is present; without `q` the default query plan is unchanged. `?service_id=` filter param intersects with `q`. |
 

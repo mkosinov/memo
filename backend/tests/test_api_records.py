@@ -1043,8 +1043,8 @@ class TestRecordsListSorting:
 
     def test_sort_location_name_asc_desc(self, api_client, create_master, create_service, create_location, create_record):
         master, service = create_master(), create_service()
-        l_a = create_location(name="Арбат")
-        l_b = create_location(name="Яуза")
+        l_a = create_location(title="Арбат")
+        l_b = create_location(title="Яуза")
         a = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_a["id"], start=datetime(2026, 8, 5, 10, 0))
         b = self._activity_on(api_client, master_id=master["id"], service_id=service["id"], location_id=l_b["id"], start=datetime(2026, 8, 5, 12, 0))
         r_a = create_record(activity_id=a["id"])
@@ -1095,7 +1095,7 @@ def _link_record_tag(api_client, record_id: str, tag_name: str | None = None) ->
     ``query_db`` to seed the auto-cascade dep (FK-ON-safe: both ids exist).
     """
     tag_name = tag_name or f"rt-{record_id[:8]}"
-    tag_id = api_client.post("/api/v1/tags", json={"tag": tag_name}).json()["id"]
+    tag_id = api_client.post("/api/v1/tags", json={"title": tag_name}).json()["id"]
     query_db(
         f"INSERT INTO record_tags (record_id, tag_id) "
         f"VALUES ('{record_id}', '{tag_id}')"

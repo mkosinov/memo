@@ -264,7 +264,7 @@ class TestInvalidateFrames:
                 app,
                 "POST",
                 "/api/v1/tags",
-                json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
+                json_body={"title": f"sse-{uuid.uuid4().hex[:8]}"},
                 headers=[(b"x-memo-tab-id", b"tab-1")],
                 cookie=_sse_cookie,
             )
@@ -281,7 +281,7 @@ class TestInvalidateFrames:
                 app,
                 "POST",
                 "/api/v1/tags",
-                json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
+                json_body={"title": f"sse-{uuid.uuid4().hex[:8]}"},
                 cookie=_sse_cookie,
             )
             assert status == 201
@@ -297,7 +297,7 @@ class TestInvalidateFrames:
                 app,
                 "POST",
                 "/api/v1/tags",
-                json_body={"tag": f"sse-{uuid.uuid4().hex[:8]}"},
+                json_body={"title": f"sse-{uuid.uuid4().hex[:8]}"},
                 cookie=_sse_cookie,
             )
             assert status == 201

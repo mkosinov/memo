@@ -141,7 +141,7 @@ def make_entity(request, db_session):
 @pytest.fixture
 def seed_rows(request, db_session):
     """Create n rows via the entity's service. FK parents resolved ONCE and shared;
-    unique_row_field (Tag.tag) suffixed per row to respect the DB unique constraint."""
+    unique_row_field (Tag.title) suffixed per row to respect the DB unique constraint."""
 
     async def _seed(cfg: EntityConfig, n: int):
         base_data = dict(cfg.create_data)

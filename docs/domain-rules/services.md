@@ -11,7 +11,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | image_url | string | ✅ | — | — | — | URL картинки |
 | specialty | string | ✅ | — | — | — | Специализация |
 | min_age | integer | ✅ | 0 | 18 | — | Минимальный возраст |
-| max_age | integer | ✅ | 0 | 18 | — | Максимальный возраст |
+| max_age | integer | ❌ | 0 | 18 | — | Максимальный возраст; nullable — `null` = без верхней границы (миграция `275ba490cab8`). Диапазон 0–18 — клиентская валидация формы |
 | duration | integer | ✅ | 15 | 480 | — | Длительность в минутах |
 | record_info | string | ✅ | — | — | — | Информация для записи |
 | tariffs | array | ❌ | — | — | [] | Тарифы (nested) |
@@ -22,6 +22,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | Field | Type | Required | Min | Description |
 |-------|------|----------|-----|-------------|
 | title | string | ✅ | 1 | Название тарифа |
+| audience | string | ✅ | — | Возрастная группа: `kid` / `adult` / `all` (enum `TariffAudience`, DB NOT NULL, default `all`); UI-подписи строчными: «детский»/«взрослый»/«единый» — GH #284 |
 | description | string | ❌ | — | Описание |
 | price | integer | ✅ | 0 | Цена в рублях |
 
@@ -36,6 +37,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 
 ### Backend
 - **Tariffs:** Managed atomically with Service. On PUT: DELETE all existing → CREATE new.
+- **Tariff audience (GH #284):** classifies who the price is for. NO uniqueness or service-shape validation — several `kid` (or `adult`) tariffs on one service are legal (e.g. same age group split by a second axis: canvas size). One-time migration backfill by exact case-insensitive title match: «детский» → `kid`, «взрослый» → `adult`, everything else (incl. «единый») → `all`.
 - **Tags:** Same pattern — DELETE all links → INSERT new.
 - **Materials (GH #223, landed):** same hard-replace pattern, but each link carries `note: Text NULL`; ids are pre-validated (unknown material_id → 422) — deliberate deviation from tags (which rely on the DB FK violation). `ServiceResponse.materials` = `[{id, title, description, note}]` ordered `title ASC, id ASC`.
 - **No age validation** that min_age <= max_age at code level.
@@ -44,6 +46,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 - **Auto-fill:** When Service selected in Activity → fills duration, capacity, minAge
 - **Domain `Service` (frontend, `@memo/domain`):** carries `tariffs: Tariff[]` (`id`/`title`/`price`/`description`) populated by `transformService` in `frontend/admin/lib/transformers.ts`; `durationMinutes` is the canonical duration field — no decimal-hours twin (GH #142).
 - **Tariff display:** Read-only list below service select (title + price ₽)
+- **Tariff autofill by visitor age (GH #284, owner decisions 2026-09-19):** one shared resolver is the single owner of the default-tariff rule — first `audience="kid"` tariff when the visitor age is in the «Дети» select range (3–11), otherwise first `audience="adult"` (covers 12–17, «Взрослый», empty age); no match → first tariff in the list (legacy behavior; may cross audiences). `all` never participates. **Age change ALWAYS re-resolves** — it overwrites a manual tariff pick, no undo (owner decision: explicit substitution, admin controls the final price). The 3–11 boundary is intentionally hardcoded: one shared constant feeds both the AgeSelect options and the classifier — NO studio-level setting. Client always sends an explicit tariff; the server persists it as-is (no server-side default computation). Consumers: draft row factory, row age-change handler, NewRecordTab, ClientRecordTab anonymous add, AddVisitorForm initial pick, `useRecordMutations.defaultTariff` callers.
 - **EntityModal validation:** title required, duration required min(15) max(480), min_age/max_age min(0) max(18), cross-field min_age <= max_age
 
 ## API Endpoints
@@ -86,7 +89,7 @@ The Response schema exposes `archived: bool` instead of `is_active` (inversion: 
 | title: str (no constraints) | title: min(1).max(200) | ❌ Backend missing |
 | duration: int (no constraints) | duration: min(15).max(480) | ❌ Backend missing |
 | min_age: int (no constraints) | min_age: min(0).max(18) | ❌ Backend missing |
-| max_age: int (no constraints) | max_age: min(0).max(18) | ❌ Backend missing |
+| max_age: int (no constraints) | maxAge: z.string().optional() | ✅ |
 | tariff.price: int (no constraints) | price: min(0) | ❌ Backend missing |
 | description: required | description: optional | ⚠️ |
 | image_url: required | image_url: optional | ⚠️ |

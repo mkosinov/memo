@@ -10,30 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-19
 
 ### Changed
-- **GH #138 — URL как источник правды: view-state расписания и период записей в URL** — branch
-  `feat/138-schedule-url-state` (13 commits: `8b9774ab..37c4197b`; спека
-  `docs/specs/2026-07-17-schedule-view-url-state-138-design.md` rev5, план
-  `docs/plans/2026-09-19-schedule-view-url-state-138-plan.md`, задачи T1–T10):
-  - **Расписание:** вид, дата и колонки живут в URL — `?view=week|day`, `?date=YYYY-MM-DD`,
-    `?col=<id>`; новый хук `useScheduleView` (replace-навигация + фикс последовательной записи против
-    гонок параллельных апдейтов), `ScheduleViewContext` — прокси над хуком; Topbar/Toolbar пишут через
-    сеттеры хука; страница расписания обёрнута в Suspense (`useSearchParams`).
-  - **Записи:** период записей живёт в URL `?from`/`?to` (`useRecordsPeriod`, RecordsFilters);
-    `/clients` переведён на `GridSettingsProvider`.
-  - **Удалено:** императивная навигация — CustomEvent-шина `__memo-*` (тестовые бэкдоры) и
-    `NavigationContext` удалены; Menubar MiniCalendar стал навигатором + индикатором периода
-    (подсветка недели/дня на /schedule, красный диапазон на /records, клиппинг по границам месяца).
-  - **DayView:** перестановка колонок доступна с клавиатуры — KeyboardSensor + фикс activator node
-    (клавиши больше не перехватываются вне drag).
-  - **E2E:** 11 спеков переведены с `__memo-*`-хуков на реальные взаимодействия; новый
-    `schedule-url-state.spec.ts` — URL-сценарии US-1..US-7.
-  - **Tests:** admin vitest **2218 passed** (137 файлов); lint **0 errors / 35 warnings** (бюджет 38);
-    `tsc` clean; e2e US-1..US-7 зелёные в таргетированных прогонах (полные локальные шарды деградировали
-    от насыщения хоста — финальное решенье за CI).
-
-## [Unreleased] — 2026-09-19
-
-### Changed
 - **GH #138 — URL как источник правды: view-state расписания и период записей живут в URL** —
   branch `feat/138-schedule-url-state` (13 commits: `8b9774ab..37c4197b`, base `8b9774ab`;
   спека `docs/specs/2026-07-17-schedule-view-url-state-138-design.md` rev5,
@@ -62,6 +38,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     0 errors / 35 warnings (бюджет 38); e2e US-1..US-7 и переведённые спеки зелёные
     в точечных прогонах; полный локальный шард не диагностируем (хост был насыщен
     посторонней задачей + очистка кэша браузера) — авторитетный гейт CI.
+
+### Fixed
+- **GH #203 — ServiceModal: NULL max_age → 0 блокировал edit-save открытых услуг** — branch
+  `service-modal-null-max-age-203` (3 commits: `1d8f97d0..4aa19858`, base `514a2b96`;
+  спека `docs/specs/2026-09-18-service-modal-null-max-age-design.md` rev4,
+  план `docs/plans/2026-09-19-service-modal-null-max-age-plan.md`; 7 файлов, +676/−21):
+  - **Клиентский фикс (3 прод-файла; сервер, миграции, api-client не тронуты — схемы уже `int | None`):**
+    услуга без верхней возрастной границы (`max_age = null`) редактируется и сохраняется —
+    инициализация `null` → `''` (фиксированный список полей, не по флагу `required`: у `min_age`
+    сохраняется 0-инициализация), пустое поле показывает placeholder «без ограничения»
+    (`serviceFields.tsx` + добавленный в `FieldRenderer` проброс `placeholder` в числовой инпут),
+    перекрёстное правило «Возраст от ≤ Возраст до» срабатывает только когда ОБА значения заполнены
+    (`value !== '' && value != null`, без truthy-проверок — `0` валиден), сабмит нормализует
+    `'' → null` только для `max_age` (по образцу `MyDataModal`, не генерически);
+    `ServicesTable.tsx` — edit-маппер (PUT-ветка `handleEditSubmit`) больше не подменяет
+    `max_age` на 18 через `?? 18` (create-ветка не тронута).
+  - **Клиентская валидация тарифов (решение пользователя «вариант B», гейт C 2026-09-19):**
+    required-поля элементов тарифов (цена и др.) валидируются на клиенте по их конфигам
+    (`itemFields`: required, min/max — те же механизмы, что у полей верхнего уровня), ошибка
+    выводится под соответствующим полем элемента; составные ключи ошибок (`tariffs.0.price`)
+    очищаются при следующем сабмите — принятое ограничение.
+  - **Domain-rules:** `docs/domain-rules/services.md` — строка `max_age` помечена
+    опциональной/nullable (`null` = без верхней границы, паритет с миграцией `275ba490cab8`),
+    ссылка на несуществующий zod `max_age: min(0).max(18)` заменена на живой
+    `maxAge: z.string().optional()`; диапазон 0–18 описан как клиентская валидация формы
+    (commit `4aa19858`).
+  - **Tests:** новые `frontend/admin/__tests__/ServiceModal.test.tsx` (13 тестов, сценарии
+    спеки §4.3–4.5, RED→GREEN) + юнит edit-маппера в `__tests__/ServicesTable.test.tsx`;
+    полный admin vitest **2160 passed / 0 failed** (базлайн 2146 + 14 новых); новый e2e
+    `services-null-max-age.spec.ts` — дымовая пара (решение пользователя: только smoke на e2e)
+    `edit-save-null-max-age` + `clear-max-age-saves-null` — **2/2** зелёные в двух прогонах
+    подряд; визуальная поверхность (пустое поле + placeholder) проверена именованными asserts
+    e2e (отдельного visual-скрипта для этой поверхности нет).
+  - **Известный pre-existing follow-up (вне скоупа, обнаружен в Task 2, здесь НЕ исправлен):**
+    любой edit-save модалки ServiceModal PUT-ит `tag_ids: []` — форма никогда не собирает теги
+    (`ServicesTable.tsx:80` шлёт `?? []`), т.е. редактирование услуги молча теряет её связи
+    с тегами; заводится отдельным GH-issue (архитектор), в #203 не включён.
+  - Plan: `docs/plans/2026-09-19-service-modal-null-max-age-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-19-service-modal-null-max-age-203.md`
 
 ## [Unreleased] — 2026-09-18
 

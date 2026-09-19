@@ -1,5 +1,9 @@
 # Memo — Domain Rules Overview
 
+## Layers
+
+Канон слоёв бэкенда (api → usecases → services + domain) — см. [service-layer.md](service-layer.md) (утверждён 2026-09-18, #171).
+
 ## Entities
 
 | Entity | Description | Key Relationships | Complexity |

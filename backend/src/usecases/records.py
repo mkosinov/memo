@@ -273,10 +273,6 @@ async def patch_record(
     additionally ONLY on a non-empty replacement list (a comment/
     custom_price-only patch keeps the pre-refactor {"records"} grid).
 
-    Event grid (GH #239, Task 4 fix): "records" always; "visits"
-    additionally ONLY on a non-empty replacement list (a comment/
-    custom_price-only patch keeps the pre-refactor {"records"} grid).
-
     NOTE: call as ``patch_record(None, db_session=..., id=..., data=...)``
     — see the module docstring for why.
     """

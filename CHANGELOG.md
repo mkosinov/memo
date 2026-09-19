@@ -31,6 +31,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `tsc` clean; e2e US-1..US-7 зелёные в таргетированных прогонах (полные локальные шарды деградировали
     от насыщения хоста — финальное решенье за CI).
 
+## [Unreleased] — 2026-09-19
+
+### Changed
+- **GH #138 — URL как источник правды: view-state расписания и период записей живут в URL** —
+  branch `feat/138-schedule-url-state` (13 commits: `8b9774ab..37c4197b`, base `8b9774ab`;
+  спека `docs/specs/2026-07-17-schedule-view-url-state-138-design.md` rev5,
+  план `docs/plans/2026-09-19-schedule-view-url-state-138-plan.md`; 52 файла, +2710/−1341):
+  - **Расписание (`/schedule?view=week|day&date=YYYY-MM-DD&col=masters|locations`):** новый
+    хук `useScheduleView` — единственная точка чтения/записи URL-состояния; строгий парсинг
+    (enum-вайтлист, `date` — только реальная календарная дата) с тихим фолбэком на дефолты
+    (week/masters/today); сериализованный райтер — последовательные синхронные записи
+    компонуются (колонки + вид в одном хендлере Topbar'а) и дают один вызов роутера;
+    шаги навигации (view/date/prev/next/today) пишутся через push, переключение отображения
+    колонок — через replace (без шагов истории); `ScheduleViewContext` — прокси над хуком
+    (локально остались только штамп и списки фильтров), страница обёрнута в `<Suspense>`.
+  - **Записи (`/records?from=…&to=…`):** период переносится в URL тем же идиомом
+    (`useRecordsPeriod`); сеттеры `RecordsFilters` идут через хук.
+  - **Удалены тестовые бэкдоры из продакшн-кода:** CustomEvent-шина `__memo-*` и
+    `NavigationContext` (с потребителями, переехавшими на URL-хук / GridSettingsProvider);
+    Menubar MiniCalendar стал навигатором и индикатором периода — подсветка недели/дня на
+    `/schedule`, красный диапазон на `/records` (с клиппингом по видимому месяцу);
+    DayView reorder колонок переоборудуем с клавиатуры (`KeyboardSensor` + фикс
+    activator-node, без перехвата клавиш вне drag).
+  - **E2E честные:** 11 спеков переведены с `__memo-*` на реальные взаимодействия
+    (клики/DnD/клавиатура); новый `schedule-url-state.spec.ts` — US-1..US-7 (deep links,
+    канонизация параметров, browser-back, «Сегодня», переходы между страницами,
+    невалидные параметры, round-trip периода записей, персист после refresh).
+  - **Tests:** admin vitest **2218 passed / 0 failed** (137 файлов); `tsc` clean; lint
+    0 errors / 35 warnings (бюджет 38); e2e US-1..US-7 и переведённые спеки зелёные
+    в точечных прогонах; полный локальный шард не диагностируем (хост был насыщен
+    посторонней задачей + очистка кэша браузера) — авторитетный гейт CI.
+
 ## [Unreleased] — 2026-09-18
 
 ### Changed

@@ -1,11 +1,28 @@
 import { test, expect } from './fixtures/test';
+import { gotoScheduleDay } from './fixtures/helpers';
 
 /**
- * E2E tests for DayView column reorder.
+ * E2E: DayView column reorder (GH #138 US-6).
  *
- * We use a custom __memo-column-reorder event because Playwright's dragTo() cannot
- * properly propagate DataTransfer data through React's synthetic event system.
- * The same pattern is used for __memo-open-modal (activity details modal).
+ * Drives the per-column «Переместить влево/вправо» buttons — the production
+ * keyboard-accessible reorder controls (SortableColumnHeader.tsx:93-120).
+ * Both buttons and the dnd-kit sortable surface commit through the same
+ * onColumnDrop → column-order state → patchUserSettings chain, so the
+ * user-visible outcome (order change, persistence) is identical.
+ *
+ * NOTE — dnd-kit KeyboardSensor gap (found during #138 T9, needs a
+ * production follow-up): SortableColumnHeader spreads the sortable
+ * listeners+attributes on the whole header but never attaches
+ * setActivatorNodeRef. Consequences in the browser:
+ *   - Space/Enter/arrows on the header start a drag, but arrow moves never
+ *     commit (no droppable-rect update → sortableKeyboardCoordinates
+ *     returns undefined);
+ *   - Enter on the NESTED move-left/move-right <button>s is hijacked by the
+ *     sensor (keydown bubbles to the header, preventDefault cancels the
+ *     button's default click) — so the buttons are mouse-only today.
+ * Pointer clicks (below) are the working interaction and prove the reorder
+ * chain; the sensor path needs setActivatorNodeRef + a measuring fix and is
+ * out of scope for the e2e migration task.
  */
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
@@ -43,16 +60,11 @@ async function cleanupActivity(
 }
 
 /**
- * Navigate to day view and select the test date with activities.
+ * Deep-link to the day view of the test date (#138: the URL is the source
+ * of truth — /schedule?view=day&date=…).
  */
 async function navigateToTestDay(page: import('@playwright/test').Page) {
-  await page.goto('/schedule');
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
-
-  // Navigate to test date via custom event
-  await page.evaluate((date: string) => {
-    document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date } }));
-  }, `${TEST_DATE}T12:00:00`);
+  await gotoScheduleDay(page, TEST_DATE);
 
   // Wait for DayView column headers to appear
   await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
@@ -65,30 +77,7 @@ async function getColumnHeaders(page: import('@playwright/test').Page): Promise<
   return page.locator('[data-testid^="column-header-m"]').allTextContents();
 }
 
-/**
- * Simulate column reorder via custom event.
- *
- * Playwright's dragTo() and manual DragEvent dispatch don't work with React's
- * synthetic event system — DataTransfer.setData/getData don't propagate. So we
- * dispatch a custom __memo-column-reorder event that DayView listens to and
- * calls onColumnDrop directly.
- */
-async function simulateColumnReorder(
-  page: import('@playwright/test').Page,
-  draggedId: string,
-  targetId: string,
-) {
-  await page.evaluate(({ src, tgt }) => {
-    document.dispatchEvent(new CustomEvent('__memo-column-reorder', {
-      detail: { draggedId: src, targetId: tgt },
-    }));
-  }, { src: draggedId, tgt: targetId });
-
-  // Wait for React state update and re-render
-  await page.waitForTimeout(500);
-}
-
-test.describe('DayView Column Reorder DnD', () => {
+test.describe('DayView Column Reorder (US-6)', () => {
   let activityIds: string[] = [];
 
   test.beforeEach(async ({ request }) => {
@@ -109,7 +98,7 @@ test.describe('DayView Column Reorder DnD', () => {
     activityIds = [];
   });
 
-  test('column reorder swaps column order', async ({ page }) => {
+  test('column reorder moves column left via the move button', async ({ page }) => {
     await navigateToTestDay(page);
 
     // Verify at least 2 column headers visible
@@ -120,22 +109,36 @@ test.describe('DayView Column Reorder DnD', () => {
     const headersBefore = await getColumnHeaders(page);
     expect(headersBefore.length).toBeGreaterThanOrEqual(2);
 
-    // Identify first two column testids
-    const firstTestId = await allHeaders.first().getAttribute('data-testid');
+    // Move the second column one slot left via its «Переместить влево» button.
     const secondTestId = await allHeaders.nth(1).getAttribute('data-testid');
-    expect(firstTestId).toBeTruthy();
     expect(secondTestId).toBeTruthy();
+    const moveLeft = page.locator(`[data-testid="move-left-${secondTestId!.replace('column-header-', '')}"]`);
+    await moveLeft.click();
 
-    const draggedId = firstTestId!.replace('column-header-', '');
-    const targetId = secondTestId!.replace('column-header-', '');
-
-    // Reorder: drag SECOND column to FIRST position to see a visible change
-    await simulateColumnReorder(page, targetId, draggedId);
-
-    // Get new column order
+    // The former second column must now lead; the displaced one follows.
+    await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 5_000 })
+      .toBe(headersBefore[1]);
     const headersAfter = await getColumnHeaders(page);
+    expect(headersAfter[1]).toBe(headersBefore[0]);
+  });
 
-    // Assert order changed
-    expect(headersAfter).not.toEqual(headersBefore);
+  test('column order change persists across reload (user settings)', async ({ page }) => {
+    await navigateToTestDay(page);
+
+    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const headersBefore = await getColumnHeaders(page);
+
+    // Move the second column to the front.
+    const secondTestId = await allHeaders.nth(1).getAttribute('data-testid');
+    const moveLeft = page.locator(`[data-testid="move-left-${secondTestId!.replace('column-header-', '')}"]`);
+    await moveLeft.click();
+    await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 5_000 })
+      .toBe(headersBefore[1]);
+
+    // Reload (same deep-linked day URL): the per-user column order survives.
+    await page.reload();
+    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 10_000 });
+    const headersAfterReload = await getColumnHeaders(page);
+    expect(headersAfterReload[0]).toBe(headersBefore[1]);
   });
 });

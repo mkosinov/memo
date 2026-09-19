@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { gotoScheduleDay, waitForScheduleReady } from './fixtures/helpers';
 
 /**
  * E2E tests for DayView column visibility controlled by filters.
@@ -46,12 +46,12 @@ async function resetUserSettings(request: import('@playwright/test').APIRequestC
 
 /**
  * Switch to DayView by clicking the day button and optionally navigating
- * to a specific date via the __memo-switch-to-day-view custom event.
+ * to a specific date via the schedule URL (#138: /schedule?view=day&date=…).
  *
  * @param page   Playwright page instance
  * @param date   Optional ISO date string (e.g. '2026-06-05'). When provided,
- *               dispatches a custom event to navigate to that day so tests land
- *               on a date with known seed data.
+ *               deep-links to that day so tests land on a date with known
+ *               seed data.
  */
 async function switchToDayView(page: import('@playwright/test').Page, date?: string) {
   await page.locator('[data-testid="day-button"]').click();
@@ -59,12 +59,8 @@ async function switchToDayView(page: import('@playwright/test').Page, date?: str
   await expect(page.locator('[data-testid="day-button"]')).toContainText(/День/);
 
   if (date) {
-    // Navigate to the specific date via custom event
-    await page.evaluate((d: string) => {
-      document.dispatchEvent(
-        new CustomEvent('__memo-switch-to-day-view', { detail: { date: d } }),
-      );
-    }, `${date}T12:00:00`);
+    // Deep-link to the specific date via the schedule URL
+    await gotoScheduleDay(page, date);
 
     // Wait for DayView column headers to appear (master columns start with 'column-header-m')
     await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
@@ -448,14 +444,9 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
     await waitForScheduleReady(page);
-    await switchToDayView(page, '2026-06-05');
-
-    // switchToDayView clicks day-button which opens the column-mode dropdown.
-    // Wait for it to be visible, then select locations.
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
-
-    // Switch to locations column mode (pure UI state change, no network call)
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
+    // #138: the column mode is URL state (col=locations) — deep-link
+    // directly instead of the day-button dropdown dance.
+    await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });
 
     // Verify we're in day view with location columns. Poll (GH #239: a
     // background ['locations'] refetch can transiently render zero columns).
@@ -507,14 +498,9 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
     await waitForScheduleReady(page);
-    await switchToDayView(page, '2026-06-05');
-
-    // switchToDayView clicks day-button which opens the column-mode dropdown.
-    // Wait for it to be visible, then select locations.
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
-
-    // Switch to locations column mode (pure UI state change, no network call)
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
+    // #138: the column mode is URL state (col=locations) — deep-link
+    // directly instead of the day-button dropdown dance.
+    await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });
 
     await expect(page.locator('[data-testid^="column-header-"]').first()).toBeVisible();
 

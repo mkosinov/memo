@@ -2,6 +2,7 @@ import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
   delayActivityMutations,
+  clickActivityCard,
 } from './fixtures/helpers';
 import { createTestActivity, cleanup } from './fixtures/factories';
 import { clickFabRobust } from './fixtures/server-push';
@@ -129,9 +130,9 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
   test('S2: edit shows «Сохраняем…» in flight, hidden after the update', async ({
     page,
   }) => {
-    // Open the first existing activity in edit mode: pull the card's activity
-    // payload from its react props and dispatch __memo-open-modal — the same
-    // event a real card click drives (openEditModal, WeekView.tsx:94).
+    // Open the first existing activity in edit mode: click the card — a real
+    // user interaction that drives openEditModal (#138; the card carries the
+    // activity payload through its React props).
     const firstCard = page.locator('[data-testid^="activity-"]').first();
     const activityId = (await firstCard.getAttribute('data-drag-id')) ?? '';
     expect(activityId).not.toBe('');
@@ -143,22 +144,7 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
       { timeout: 15_000 },
     );
 
-    const activity = await firstCard.evaluate((el: any) => {
-      const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
-      if (!k) return null;
-      let c = el[k];
-      while (c) {
-        if (c.memoizedProps?.activity) return c.memoizedProps.activity;
-        c = c.return;
-      }
-      return null;
-    });
-    expect(activity).not.toBeNull();
-    await page.evaluate((act: unknown) => {
-      document.dispatchEvent(
-        new CustomEvent('__memo-open-modal', { detail: { activity: act } }),
-      );
-    }, activity);
+    await clickActivityCard(page, firstCard);
 
     const dialog = page.locator('[data-testid="activity-details-modal"]');
     await expect(dialog).toBeVisible();

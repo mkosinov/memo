@@ -8,11 +8,11 @@
  *
  * Pre-existing #124 trap:
  *   `openModal()` picks the wrong activity on multi-record weeks. We avoid it
- *   by using `openModalByActivity()` — a direct helper that finds the card
- *   by the activity id we know from the factory and dispatches the open event.
- *   This is robust against any number of activities in the same week
- *   (previous tests in the file leave their activities behind, since cleanup
- *   soft-deletes via the API).
+ *   by using `openClientTabFor()` — a local helper that deep-links to the
+ *   record's week via the schedule URL and clicks the exact card
+ *   by data-testid="activity-{id}". This is robust against any number of
+ *   activities in the same week (previous tests in the file leave their
+ *   activities behind, since cleanup soft-deletes via the API).
  *
  * Toast locator:
  *   `[role="status"]` picks up the dnd-kit live region first (empty). We use
@@ -24,7 +24,7 @@
  */
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { gotoScheduleWeek, clickActivityCard } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
   createTestClient,
@@ -58,56 +58,22 @@ function recordActivityDate(recordId: string): string | null {
 /**
  * Open the activity modal by the specific activity id, then switch to the
  * client tab. Robust against multiple activities in the same week — finds
- * the EXACT card by data-testid="activity-{id}".
+ * the EXACT card by data-testid="activity-{id}" and clicks it (#138 US-7:
+ * real card click; deep-link to the record's week via the schedule URL).
  */
 async function openClientTabFor(page: Page, recordId: string, activityId: string) {
-  // 1. Navigate to /schedule and wait for it to be ready.
-  await page.goto('/schedule');
-  await waitForScheduleReady(page);
-
-  // 2. Switch to the week of the record's activity (DB lookup).
+  // 1. Deep-link to the week of the record's activity (DB lookup).
   const targetDate = recordActivityDate(recordId);
   if (!targetDate) throw new Error(`No activity date for record ${recordId}`);
 
-  await page.evaluate((d: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-week-view', {
-        detail: { date: `${d}T12:00:00` },
-      }),
-    );
-  }, targetDate);
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
-  await page.waitForTimeout(300); // buffer for cards to render
+  await gotoScheduleWeek(page, targetDate);
 
-  // 3. Find the specific activity card by its data-testid.
+  // 2. Click the specific activity card by its data-testid.
   const card = page.locator(`[data-testid="activity-${activityId}"]`);
   await expect(card).toBeVisible({ timeout: 5_000 });
+  await clickActivityCard(page, card);
 
-  // 4. Read the activity object from the React fiber (same pattern as openModal).
-  const activity = await card.evaluate((el: any) => {
-    const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
-    if (!k) return null;
-    let c = (el as any)[k];
-    while (c) {
-      if (c.memoizedProps?.activity) return c.memoizedProps.activity;
-      c = c.return;
-    }
-    return null;
-  });
-  if (!activity) throw new Error(`No React fiber activity for card ${activityId}`);
-
-  // 5. Dispatch the open-modal event.
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', {
-      detail: { activity: act },
-    }));
-  }, activity);
-
-  await expect(
-    page.locator('[data-testid="activity-details-modal"]'),
-  ).toBeVisible({ timeout: 10_000 });
-
-  // 6. Switch to the client tab.
+  // 3. Switch to the client tab.
   await switchToRecordsTab(page);
   await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible({ timeout: 5_000 });

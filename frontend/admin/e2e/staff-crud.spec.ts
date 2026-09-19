@@ -24,9 +24,10 @@ test.describe('Staff — Table and Navigation', () => {
   test('table has expected column headers', async ({ page }) => {
     await waitForStaffReady(page);
 
-    // GH #266: имя, должности, специальность, цвет, архив (status is visible
-    // by default; аватар hidden).
-    const expectedHeaders = ['Имя', 'Должности', 'Специальность', 'Цвет', 'Архив'];
+    // GH #266: имя, должности, специальность, цвет. GH #220 Task 2: «Архив»
+    // (status) is hidden by default — reachable via the column picker; аватар
+    // stays hidden too.
+    const expectedHeaders = ['Имя', 'Должности', 'Специальность', 'Цвет'];
 
     for (const headerText of expectedHeaders) {
       await expect(
@@ -34,10 +35,33 @@ test.describe('Staff — Table and Navigation', () => {
       ).toBeVisible();
     }
 
+    await expect(
+      page.locator('table thead th').filter({ hasText: 'Архив' }),
+    ).toHaveCount(0);
+
     // The positions column is NOT sortable (M2M — excluded from the server
     // sort whitelist): no sort glyph on its header.
     const positionsHeader = page.locator('table thead th').filter({ hasText: 'Должности' });
     await expect(positionsHeader).not.toContainText('↕');
+  });
+
+  test('«Архив» status column shows the badge after enabling it via the column picker (GH #220 Task 2)', async ({ page }) => {
+    await waitForStaffReady(page);
+
+    await page.click('[aria-label="Настроить колонки"]');
+    await page.getByLabel('Архив').check();
+    await page.keyboard.press('Escape');
+
+    const archiveHeader = page.locator('table thead th').filter({ hasText: 'Архив' });
+    await expect(archiveHeader).toBeVisible();
+
+    // Seed contains both an active person («Активен») and an archived one
+    // («Архив») — the badge reflects the inverted `archived` field (#207).
+    // Scoped to the table: the status filter's hidden <option> also reads
+    // «Архив» and would win the DOM-first getByText match otherwise.
+    const table = page.locator('table');
+    await expect(table.getByText('Активен').first()).toBeVisible();
+    await expect(table.getByText('Архив', { exact: true }).first()).toBeVisible();
   });
 
   test('staff are loaded from API and rows keep the master-row-* testid', async ({ page }) => {

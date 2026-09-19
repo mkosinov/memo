@@ -85,7 +85,10 @@ export const staffColumns = (
     key: 'status',
     label: 'Архив',
     width: 'w-[100px]',
-    defaultVisible: true,
+    // GH #220 Task 2 — hidden by default (clients precedent): the archive
+    // state stays reachable via the D6 row menu and the server status
+    // filter. Key unchanged — persisted picker selections key off it.
+    defaultVisible: false,
     // Badge driven by the inverted `archived` field (#207).
     render: (s) => (
       <span

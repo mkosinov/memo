@@ -13,7 +13,6 @@
  */
 
 import crypto from 'node:crypto';
-import path from 'node:path';
 import { type APIRequestContext, expect } from '@playwright/test';
 import { sqliteExecWithRetry } from './sqlite-exec';
 import { resolveTestDbPath } from '../lib/db-path';

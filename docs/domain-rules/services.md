@@ -11,7 +11,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | image_url | string | ✅ | — | — | — | URL картинки |
 | specialty | string | ✅ | — | — | — | Специализация |
 | min_age | integer | ✅ | 0 | 18 | — | Минимальный возраст |
-| max_age | integer | ✅ | 0 | 18 | — | Максимальный возраст |
+| max_age | integer | ❌ | 0 | 18 | — | Максимальный возраст; nullable — `null` = без верхней границы (миграция `275ba490cab8`). Диапазон 0–18 — клиентская валидация формы |
 | duration | integer | ✅ | 15 | 480 | — | Длительность в минутах |
 | record_info | string | ✅ | — | — | — | Информация для записи |
 | tariffs | array | ❌ | — | — | [] | Тарифы (nested) |
@@ -86,7 +86,7 @@ The Response schema exposes `archived: bool` instead of `is_active` (inversion: 
 | title: str (no constraints) | title: min(1).max(200) | ❌ Backend missing |
 | duration: int (no constraints) | duration: min(15).max(480) | ❌ Backend missing |
 | min_age: int (no constraints) | min_age: min(0).max(18) | ❌ Backend missing |
-| max_age: int (no constraints) | max_age: min(0).max(18) | ❌ Backend missing |
+| max_age: int (no constraints) | maxAge: z.string().optional() | ✅ |
 | tariff.price: int (no constraints) | price: min(0) | ❌ Backend missing |
 | description: required | description: optional | ⚠️ |
 | image_url: required | image_url: optional | ⚠️ |

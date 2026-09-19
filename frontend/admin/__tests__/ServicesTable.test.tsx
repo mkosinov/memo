@@ -918,6 +918,26 @@ describe('ServicesTable', () => {
 
   // ─── Edit does not resurrect archived services (GH #195 via #207) ────────
 
+  // ─── GH #203: null max_age survives the edit (PUT) mapper ───────────────
+
+  it('edit submit keeps max_age null in the PUT payload (no ?? 18 coercion, GH #203)', async () => {
+    const nullAgeService: ServiceResponse = {
+      ...mockService1,
+      id: 'svc-null-age',
+      max_age: null,
+    };
+    setupEnvelope({ items: [nullAgeService], total: 1 });
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('Картина маслом').closest('tr')!);
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    const payload = updatePayloadFor('svc-null-age');
+    expect(payload.max_age).toBeNull();
+  });
+
   it('edit submit on archived service sends no archive flag (GH #195/#207)', async () => {
     setupEnvelope();
     await renderLoaded();

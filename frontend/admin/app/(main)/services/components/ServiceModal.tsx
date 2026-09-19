@@ -105,6 +105,7 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
               }
               min={field.min}
               max={field.max}
+              placeholder={field.placeholder}
               className={baseInputClasses}
               style={{ ...baseStyle, width: '120px' }}
               aria-describedby={ariaDescribedBy}
@@ -148,9 +149,11 @@ interface NestedListProps {
   field: Extract<ServiceFieldConfig, { type: 'nested-list' }>;
   items: Record<string, unknown>[];
   onChange: (items: Record<string, unknown>[]) => void;
+  /** Composite-key errors (tariffs.<index>.<key>) from validate(). */
+  itemErrors?: Record<string, string>;
 }
 
-function NestedList({ field, items, onChange }: NestedListProps) {
+function NestedList({ field, items, onChange, itemErrors }: NestedListProps) {
   const addItem = () => {
     const newItem: Record<string, unknown> = {};
     field.itemFields.forEach((f) => {
@@ -206,6 +209,7 @@ function NestedList({ field, items, onChange }: NestedListProps) {
                 field={itemField}
                 value={item[itemField.key]}
                 onChange={(key, val) => updateItem(index, key, val)}
+                error={itemErrors?.[`${index}.${itemField.key}`]}
               />
             ))}
           </div>
@@ -350,6 +354,30 @@ function toMaterialLinks(state: MaterialLinkState[]): ServiceMaterialLink[] {
   );
 }
 
+/**
+ * Split composite error keys for a nested list: errors stored as
+ * `<listKey>.<index>.<itemKey>` → `{ '<index>.<itemKey>': text }` for the
+ * list's item renderers.
+ */
+function errorsFrom(
+  listValue: unknown,
+  errors: Record<string, string>,
+  listKey: string,
+): Record<string, string> {
+  const items = Array.isArray(listValue) ? listValue : [];
+  const result: Record<string, string> = {};
+  Object.entries(errors).forEach(([key, text]) => {
+    if (key.startsWith(`${listKey}.`)) {
+      const rest = key.slice(listKey.length + 1);
+      const index = Number(rest.split('.', 1)[0]);
+      if (!isNaN(index) && index >= 0 && index < items.length) {
+        result[rest] = text;
+      }
+    }
+  });
+  return result;
+}
+
 export function ServiceModal({
   mode,
   service,
@@ -359,16 +387,28 @@ export function ServiceModal({
   subtitle,
 }: ServiceModalProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    if (!service) return {};
+    // GH #203: max_age is the one optional number — null means «без
+    // ограничения», so it inits EMPTY, not 0. The empty-init list is fixed
+    // explicitly (NOT by the `required` flag: min_age has no flag but keeps
+    // its 0-init «с N лет» semantics).
+    const DEFAULT_EMPTY_NUMBER_KEYS = ['max_age'];
     const initial: Record<string, unknown> = {};
     SERVICE_FIELDS.forEach((f) => {
       if (f.type === 'materials') {
-        // Edit prefill: checked + note restored from service.materials.
-        initial[f.key] = toMaterialLinkState(service[f.key]);
+        // Edit prefill: checked + note restored from service.materials
+        // (create: no service → empty picker).
+        initial[f.key] = toMaterialLinkState(service?.[f.key]);
         return;
       }
       initial[f.key] =
-        service[f.key] ?? (f.type === 'number' ? 0 : f.type === 'nested-list' ? [] : '');
+        service?.[f.key] ??
+        (f.type === 'number'
+          ? DEFAULT_EMPTY_NUMBER_KEYS.includes(f.key)
+            ? ''
+            : 0
+          : f.type === 'nested-list'
+            ? []
+            : '');
     });
     return initial;
   });
@@ -388,32 +428,51 @@ export function ServiceModal({
 
   const validate = useCallback((): boolean => {
     const newErrors: Record<string, string> = {};
-    SERVICE_FIELDS.forEach((field) => {
+
+    /** «Заполнено»: 0 is a VALID value — no truthy checks (GH #203). */
+    const isFilled = (value: unknown) => value !== '' && value != null;
+
+    const validateField = (field: (typeof SERVICE_FIELDS)[number], value: unknown, key: string) => {
       if ('required' in field && field.required) {
-        const val = formData[field.key];
-        if (val === undefined || val === null || val === '') {
-          newErrors[field.key] = 'Обязательное поле';
+        if (!isFilled(value)) {
+          newErrors[key] = 'Обязательное поле';
         }
       }
       if (field.type === 'number') {
-        const rawVal = formData[field.key];
-        if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-          const val = Number(rawVal);
+        if (isFilled(value)) {
+          const val = Number(value);
           if (!isNaN(val)) {
             if (field.min !== undefined && val < field.min) {
-              newErrors[field.key] = `Минимум: ${field.min}`;
+              newErrors[key] = `Минимум: ${field.min}`;
             }
             if (field.max !== undefined && val > field.max) {
-              newErrors[field.key] = `Максимум: ${field.max}`;
+              newErrors[key] = `Максимум: ${field.max}`;
             }
           }
         }
       }
+    };
+
+    SERVICE_FIELDS.forEach((field) => {
+      if (field.type === 'nested-list') {
+        // GH #203 rev4 «вариант B»: tariff items are validated against their
+        // own itemFields configs (required + min/max — same mechanics as
+        // top-level fields). Errors use composite keys (tariffs.<i>.<key>).
+        const items = (formData[field.key] as Record<string, unknown>[]) ?? [];
+        items.forEach((item, index) => {
+          field.itemFields.forEach((itemField) => {
+            validateField(itemField, item[itemField.key], `${field.key}.${index}.${itemField.key}`);
+          });
+        });
+        return;
+      }
+      validateField(field, formData[field.key], field.key);
     });
-    // Cross-field: min_age <= max_age
-    const minAge = formData['min_age'] as number | undefined;
-    const maxAge = formData['max_age'] as number | undefined;
-    if (minAge !== undefined && maxAge !== undefined && minAge > maxAge) {
+    // Cross-field: min_age <= max_age — only when BOTH are filled; an empty
+    // «до» (null max_age) must not trip the rule (the reported false error).
+    const minAge = formData['min_age'];
+    const maxAge = formData['max_age'];
+    if (isFilled(minAge) && isFilled(maxAge) && Number(minAge) > Number(maxAge)) {
       newErrors['min_age'] = 'Не может быть больше возраста до';
       newErrors['max_age'] = 'Не может быть меньше возраста от';
     }
@@ -426,8 +485,12 @@ export function ServiceModal({
     setIsSubmitting(true);
     try {
       // GH #223 T5: checkbox state → wire links ({material_id, note?}).
+      // GH #203: '' → null ONLY for max_age (the one optional number; the
+      // MyDataModal pattern — NOT generic, otherwise a cleared required field
+      // could travel as null).
       const payload: Record<string, unknown> = {
         ...formData,
+        max_age: formData['max_age'] === '' ? null : formData['max_age'],
         materials: toMaterialLinks((formData['materials'] as MaterialLinkState[]) ?? []),
       };
       await onSubmit(payload);
@@ -494,6 +557,7 @@ export function ServiceModal({
                   field={field}
                   items={(formData[field.key] as Record<string, unknown>[]) ?? []}
                   onChange={(items) => handleChange(field.key, items)}
+                  itemErrors={errorsFrom(formData[field.key] as unknown, errors, field.key)}
                 />
               );
             }

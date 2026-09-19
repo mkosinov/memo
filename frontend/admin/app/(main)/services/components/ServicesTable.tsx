@@ -71,7 +71,9 @@ export function ServicesTable() {
       image_url: (data.image_url as string | null | undefined) ?? '',
       specialty: (data.specialty as string | null | undefined) ?? '',
       min_age: (data.min_age as number | null | undefined) ?? 0,
-      max_age: (data.max_age as number | null | undefined) ?? 18,
+      // GH #203: no coercion — an empty «Возраст до» is `null` = «без
+      // ограничения»; the server schema is int | None.
+      max_age: (data.max_age as number | null | undefined) ?? null,
       duration: data.duration as number,
       record_info: (data.record_info as string | null | undefined) ?? '',
       tariffs: (data.tariffs as ServiceUpdate['tariffs'] | undefined) ?? [],

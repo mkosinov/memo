@@ -17,6 +17,8 @@ interface NumberFieldConfig {
   max?: number;
   required?: boolean;
   suffix?: string;
+  /** GH #203: optional numbers read their empty state («без ограничения»). */
+  placeholder?: string;
 }
 
 interface TextareaFieldConfig {
@@ -102,6 +104,9 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
     label: 'Возраст до',
     min: 0,
     max: 18,
+    // GH #203: max_age is optional (null = «без ограничения») — the empty
+    // state must read as intentional.
+    placeholder: 'без ограничения',
     suffix: 'лет',
   },
   {

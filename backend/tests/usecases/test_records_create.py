@@ -44,6 +44,63 @@ async def test_usecases_create_record_is_transactional():
     )
 
 
+async def test_usecases_records_module_has_no_runtime_orm_imports():
+    """Canon rule 2: scenarios import services/events/domain — never ORM.
+
+    GH #171 Task 3 fix: the scenario passes VALUE payloads; building ORM
+    rows is the owner service's job (its own entity — allowed). AST walk
+    over the module source catches function-local and top-level runtime
+    imports alike; ``TYPE_CHECKING``-guarded imports (annotation-only
+    type references, never executed) are allowed.
+    """
+    import ast
+    import inspect
+    import sys
+
+    import src.usecases.records as records_module
+
+    source = inspect.getsource(sys.modules[records_module.__name__])
+    tree = ast.parse(source)
+
+    def _is_type_checking_guard(node: ast.expr) -> bool:
+        """True if the ``if`` test is exactly ``TYPE_CHECKING``."""
+        return (
+            isinstance(node, ast.Name) and node.id == "TYPE_CHECKING"
+        ) or (
+            isinstance(node, ast.Attribute) and node.attr == "TYPE_CHECKING"
+        )
+
+    def visit(node: ast.AST, guarded: bool, found: list[str]) -> None:
+        """Collect ``src.models`` imports NOT inside a TYPE_CHECKING guard."""
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if not guarded and node.module.startswith("src.models"):
+                found.append(f"line {node.lineno}: from {node.module}")
+            return
+        if isinstance(node, ast.Import):
+            if not guarded:
+                for alias in node.names:
+                    if alias.name.startswith("src.models"):
+                        found.append(f"line {node.lineno}: import {alias.name}")
+            return
+        if isinstance(node, ast.If) and _is_type_checking_guard(node.test):
+            for child in node.body:
+                visit(child, guarded=True, found=found)
+            for child in node.orelse:
+                visit(child, guarded=False, found=found)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, guarded, found)
+
+    offenders: list[str] = []
+    visit(tree, guarded=False, found=offenders)
+    assert offenders == [], (
+        "usecases/records.py has runtime ORM-model imports — canon rule 2 "
+        "(docs/domain-rules/service-layer.md): scenarios compose service "
+        "and domain calls only; the SERVICE builds its own ORM rows. "
+        f"Offenders: {offenders}"
+    )
+
+
 async def _orm_activity(db_session, create_activity) -> Activity:
     """The ``create_activity`` factory rides the API (returns a dict);
     tests here need the ORM row — fetch it by the factory's id."""

@@ -29,11 +29,13 @@ from src.services.decorators import transactional
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.schemas.record import VisitItem
+
 # ``list`` is shadowed by ``VisitService.list`` inside the class body, so a
-# bare ``list[Visit]`` annotation there is invalid for mypy ("function not
+# bare ``list[...]`` annotation there is invalid for mypy ("function not
 # valid as a type"). A module-level alias sidesteps the shadowing (same
 # trick as ``ModelList`` in repositories/generic.py).
-type VisitList = list[Visit]
+type VisitItemList = list[VisitItem]
 
 
 class VisitService:
@@ -298,21 +300,33 @@ class VisitService:
         mark_changed("visits")
 
     async def create_visits_bulk(
-        self, db_session: AsyncSession, visits: VisitList,
+        self, db_session: AsyncSession, record_id: str, items: VisitItemList,
     ) -> None:
-        """Insert a BATCH of visits — WITHOUT committing, no recalc.
+        """Insert a BATCH of visits from VALUE payloads — no commit, no recalc.
 
-        Non-transactional scenario building block (canon rules 3-4): one
-        bulk INSERT via the owner repository
-        (``VisitRepository.create_bulk`` — insertmanyvalues, no per-row
-        loop). The batch rows are the caller's own (constructed by the
-        scenario, referencing the entity's OWN ``record_id`` — no foreign
-        ORM imports happen here). Capacity/cascade/recalculation timing is
-        the scenario's job — nothing is recomputed here. Marks the
-        helper's OWN entity ("visits"); outside an active transaction the
-        mark is a no-op.
+        Non-transactional scenario building block (canon rules 2-4,
+        GH #171 Task 3 fix): the caller passes ``VisitItem`` payloads plus
+        the owning ``record_id`` — never ORM rows — so the usecases layer
+        stays free of ORM-model imports. The SERVICE builds the rows (its
+        own entity — allowed) and delegates insertion to the owner
+        repository (``VisitRepository.create_bulk`` — insertmanyvalues,
+        no per-row loop). Capacity/cascade/recalculation timing is the
+        scenario's job — nothing is recomputed here. Marks the helper's
+        OWN entity ("visits"); outside an active transaction the mark is
+        a no-op.
         """
-        await self._repository.create_bulk(db_session, visits)
+        rows = [
+            Visit(
+                record_id=record_id,
+                visitor_id=item.visitor_id,
+                tariff_id=item.tariff_id,
+                price=item.price,
+                custom_price=item.custom_price,
+                status=item.status.value,
+            )
+            for item in items
+        ]
+        await self._repository.create_bulk(db_session, rows)
         mark_changed("visits")
 
 

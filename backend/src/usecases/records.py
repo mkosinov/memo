@@ -4,7 +4,11 @@ GH #171 Task 3 — the ``usecases`` layer, Corridor 2 of the service canon
 (docs/domain-rules/service-layer.md rule 2): each scenario is a public
 function named after the business action, decorated ``@transactional``
 (ONE transaction + ONE event batch per action), composing service calls
-and domain functions only — no direct ORM-model imports here.
+and domain functions only — no RUNTIME ORM-model imports here (the only
+model reference is the TYPE_CHECKING-only return annotation; ORM rows
+are built by the owning services — GH #171 Task 3 fix: the visit batch
+is passed to ``VisitService.create_visits_bulk`` as ``VisitItem``
+VALUES, never as transient ORM rows).
 
 CALLING CONVENTION: the ``@transactional`` wrapper's signature is
 ``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
@@ -123,25 +127,17 @@ async def create_record(
     )
 
     # ── Create Visits — ONE bulk insert (marks "visits") ────────────
-    # Transient row construction only (Task-2 contract: the batch rows
-    # are the caller's own) — the table command itself lives in the
-    # owner repository behind VisitService.create_visits_bulk.
-    from src.models.visit import Visit
-
-    visits = [
-        Visit(
-            record_id=record.id,
-            visitor_id=visitor_ids[i],
-            # GH #257 US1: the booking tail's default tariff rides on the
-            # VisitItem — persist it (parity with the PUT path).
-            tariff_id=item.tariff_id,
-            price=item.price,
-            custom_price=item.custom_price,
-            status=item.status.value,
-        )
+    # Value payloads only (canon rule 2): visitor resolution replaces the
+    # item's visitor_id (name-flow resolved an id; id/anonymous flows keep
+    # theirs/None). The SERVICE builds its own ORM rows behind
+    # VisitService.create_visits_bulk.
+    visit_items = [
+        item.model_copy(update={"visitor_id": visitor_ids[i]})
         for i, item in enumerate(data.visits)
     ]
-    await get_visit_service().create_visits_bulk(db_session, visits)
+    await get_visit_service().create_visits_bulk(
+        db_session, record.id, visit_items,
+    )
 
     # ── Recompute seats and status from actual visits ────────────────
     # Route final persisted seats through recompute_record_seats so

@@ -194,36 +194,54 @@ async def test_delete_visits_by_record_removes_all_visits_of_record(db_session, 
 
 
 @pytest.mark.asyncio
-async def test_create_visits_bulk_inserts_batch(db_session, sample_record):
-    """Insert a batch of visits in one call; parent record untouched (no recalc)."""
+async def test_create_visits_bulk_inserts_batch(db_session, sample_visits, sample_tariff):
+    """Insert a batch of visit VALUES in one call; parent record untouched.
+
+    Value-typed contract (GH #171 Task 3 fix, canon rule 2): the caller
+    passes ``VisitItem`` payloads + the owning ``record_id``; the SERVICE
+    builds the ORM rows. All mapped fields must land on the rows.
+    """
     from sqlalchemy import select
     from src.models.visit import Visit
+    from src.schemas.record import VisitItem
 
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
     service = VisitService(get_visit_repository())
-    before_seats = sample_record.seats
+    record_id = sample_visits[0].record_id
+    real_visitor_id = sample_visits[0].visitor_id
+    from src.models.record import Record
+    before_seats = (await db_session.get(Record, record_id)).seats
     before = (await db_session.execute(
-        select(Visit).where(Visit.record_id == sample_record.id)
+        select(Visit).where(Visit.record_id == record_id)
     )).scalars().all()
     before_count = len(before)
 
     batch = [
-        Visit(record_id=sample_record.id, price=100, status="waiting"),
-        Visit(record_id=sample_record.id, price=200, status="waiting"),
-        Visit(record_id=sample_record.id, price=300, status="waiting"),
+        VisitItem(price=100),
+        VisitItem(price=200, visitor_id=real_visitor_id, tariff_id=sample_tariff,
+                  custom_price=250, status="visited"),
+        VisitItem(price=300),
     ]
-    await service.create_visits_bulk(db_session, batch)
+    await service.create_visits_bulk(db_session, record_id, batch)
 
-    for v in batch:
-        assert v.id is not None  # flushed — ids assigned
     rows = (await db_session.execute(
-        select(Visit).where(Visit.record_id == sample_record.id)
+        select(Visit).where(Visit.record_id == record_id)
     )).scalars().all()
     assert len(rows) == before_count + 3
+    inserted = rows[before_count:]
+    # Field parity: every value payload landed on the persisted row.
+    assert [(v.price, v.status) for v in inserted] == [
+        (100, "waiting"), (200, "visited"), (300, "waiting"),
+    ]
+    assert inserted[1].visitor_id == real_visitor_id
+    assert inserted[1].tariff_id == sample_tariff
+    assert inserted[1].custom_price == 250
+    assert all(v.record_id == record_id for v in inserted)
     # No recalculation inside — seats are the scenario's job.
-    await db_session.refresh(sample_record)
-    assert sample_record.seats == before_seats
+    record = await db_session.get(Record, record_id)
+    await db_session.refresh(record)
+    assert record.seats == before_seats
 
 
 @pytest.mark.asyncio
@@ -239,7 +257,7 @@ async def test_create_visits_bulk_empty_batch_is_noop(db_session, sample_record)
         select(Visit).where(Visit.record_id == sample_record.id)
     )).scalars().all()
 
-    await service.create_visits_bulk(db_session, [])
+    await service.create_visits_bulk(db_session, sample_record.id, [])
 
     rows = (await db_session.execute(
         select(Visit).where(Visit.record_id == sample_record.id)

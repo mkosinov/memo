@@ -156,6 +156,31 @@ describe('useScheduleView — period navigation', () => {
   });
 });
 
+describe('useScheduleView — sequential synchronous writes compose (#138 Task 3)', () => {
+  it('setColumnMode + setViewMode in one tick → final URL has BOTH col and view', () => {
+    // Topbar's column-mode select from week view fires two setters in one
+    // handler. The second write must build on the FIRST write's params,
+    // not the render-time snapshot (which lacks col).
+    const { result } = renderWithParams('?view=week&date=2026-01-05&col=masters');
+    act(() => {
+      result.current.setColumnMode('locations');
+      result.current.setViewMode('day');
+    });
+    // setViewMode second → its URL is the final one and must carry col=locations
+    expect(lastWrite(mockPush)).toBe('/schedule?view=day&date=2026-01-05&col=locations');
+  });
+
+  it('setViewMode + setColumnMode in one tick → final URL has BOTH view and col', () => {
+    const { result } = renderWithParams('?view=week&date=2026-01-05&col=masters');
+    act(() => {
+      result.current.setViewMode('day');
+      result.current.setColumnMode('locations');
+    });
+    // setColumnMode is a replace — final URL via replace carries view=day+anchor
+    expect(lastWrite(mockReplace)).toBe('/schedule?view=day&date=2026-01-05&col=locations');
+  });
+});
+
 describe('useScheduleView — day-anchor on week→day switch', () => {
   it('viewed week is the current week → anchors today', () => {
     const todayMonday = toISODate(getMonday(new Date()));

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getMonday, toISODate, shiftDateKey } from '@/lib/datetime';
 
@@ -67,7 +67,16 @@ export function useScheduleView(): ScheduleView {
   const currentWeek = getMonday(selectedDay);
 
   /**
-   * One serialized writer: apply param updates on top of the current params,
+   * Latest params as seen by the writer. Initialized from the render snapshot;
+   * updated on every write so SEQUENTIAL synchronous writes compose (e.g.
+   * Topbar's column-mode select fires setColumnMode + setViewMode in one
+   * handler — the second write must build on the first, not on the stale
+   * render-time params that would drop the first change).
+   */
+  const latestParamsRef = useRef<string | null>(null);
+
+  /**
+   * One serialized writer: apply param updates on top of the latest params,
    * preserve the others, write the URL once.
    */
   const updateParams = useCallback(
@@ -75,10 +84,12 @@ export function useScheduleView(): ScheduleView {
       updates: Partial<Record<'view' | 'date' | 'col', string>>,
       history: 'push' | 'replace',
     ) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const base = latestParamsRef.current ?? searchParams.toString();
+      const params = new URLSearchParams(base);
       for (const [key, value] of Object.entries(updates)) {
         params.set(key, value);
       }
+      latestParamsRef.current = params.toString();
       const url = `/schedule?${params.toString()}`;
       if (history === 'replace') {
         router.replace(url);
@@ -88,6 +99,14 @@ export function useScheduleView(): ScheduleView {
     },
     [router, searchParams],
   );
+
+  // A committed navigation re-renders the hook with fresh searchParams —
+  // adopt them as the new base (a stale ref from before the navigation
+  // must not win once the router state has caught up).
+  const searchParamsKey = searchParams.toString();
+  if (latestParamsRef.current !== null && latestParamsRef.current !== searchParamsKey) {
+    latestParamsRef.current = null;
+  }
 
   const setViewMode = useCallback(
     (mode: ScheduleViewMode) => {

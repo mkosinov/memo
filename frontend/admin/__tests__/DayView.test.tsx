@@ -667,4 +667,21 @@ describe('DayView', () => {
       expect(header.querySelector('[data-testid="archived-badge"]')).not.toBeNull();
     });
   });
+
+  describe('keyboard column reorder (US-6 prep, Task 8)', () => {
+    it('activates a column drag via keyboard (Space on focused header)', () => {
+      const activities = [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', date: '2026-06-15' }),
+      ];
+      renderDayView({ activities });
+
+      const header = screen.getByTestId('column-header-m1');
+      header.focus();
+      // dnd-kit KeyboardSensor matches on KeyboardEvent.code, not .key
+      fireEvent.keyDown(header, { key: 'Space', code: 'Space' });
+
+      // dnd-kit marks the activator as pressed while a keyboard drag is active
+      expect(header).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
 });

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { DndContext, DragOverlay, closestCorners, rectIntersection, useSensor, useSensors, PointerSensor, TouchSensor } from '@dnd-kit/core';
+import { DndContext, DragOverlay, closestCorners, rectIntersection, useSensor, useSensors, PointerSensor, TouchSensor, KeyboardSensor } from '@dnd-kit/core';
 import type { CollisionDetection } from '@dnd-kit/core';
-import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
@@ -112,38 +112,6 @@ export function DayView() {
     setModalOpen(false);
     setModalActivity(null);
   }, []);
-
-  // Expose modal openers for E2E tests
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleTestOpen = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.activity) {
-        openEditModal(detail.activity);
-      }
-    };
-
-    const handleTestQuickAdd = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.activity) {
-        openQuickAdd(detail.activity);
-      }
-    };
-
-    const handleTestClose = () => {
-      closeModal();
-    };
-
-    document.addEventListener('__memo-open-modal', handleTestOpen);
-    document.addEventListener('__memo-quick-add', handleTestQuickAdd);
-    document.addEventListener('__memo-close-modal', handleTestClose);
-    return () => {
-      document.removeEventListener('__memo-open-modal', handleTestOpen);
-      document.removeEventListener('__memo-quick-add', handleTestQuickAdd);
-      document.removeEventListener('__memo-close-modal', handleTestClose);
-    };
-  }, [openEditModal, openQuickAdd, closeModal]);
 
   const handleCreateActivity = React.useCallback(
     (dayIndex: number, startMinutes: number) => {
@@ -315,26 +283,6 @@ export function DayView() {
     onOrderChange: (order) => saveColumnOrder(columnMode, order),
   });
 
-  // Ref for onColumnDrop so the test event effect always has the latest callback
-  const onColumnDropRef = React.useRef(onColumnDrop);
-  onColumnDropRef.current = onColumnDrop;
-
-  // Expose column reorder for E2E tests via custom event
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleTestColumnReorder = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.draggedId && detail?.targetId) {
-        onColumnDropRef.current(detail.draggedId, detail.targetId);
-      }
-    };
-
-    document.addEventListener('__memo-column-reorder', handleTestColumnReorder);
-    return () => {
-      document.removeEventListener('__memo-column-reorder', handleTestColumnReorder);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- uses onColumnDropRef.current
-
   // Group activities by column
   const activitiesByColumn = useMemo(() => {
     const map = new Map<string, ScheduleAdminDTO[]>();
@@ -374,6 +322,9 @@ export function DayView() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    // Task 8 / US-6 prep: keyboard column reorder — sortableKeyboardCoordinates
+    // moves the active column between sibling column droppables on arrow keys.
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   if (loading) {

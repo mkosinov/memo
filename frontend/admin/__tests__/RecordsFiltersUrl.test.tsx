@@ -14,7 +14,6 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
-vi.mock('@/contexts/NavigationContext', () => ({ useNavigation: vi.fn() }));
 vi.mock('@memo/api-client', () => ({
   getAllLocations: vi.fn(),
   getAllServices: vi.fn(),

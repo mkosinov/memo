@@ -179,7 +179,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       error: recordsError ?? null,
       refetch,
     }),
-    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, recordsLoading, isPending, isFetching, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, setPeriod, recordsLoading, isPending, isFetching, recordsError, refetch],
   );
 
   return (

@@ -83,6 +83,7 @@ jobs:
           SHARD_ID: 2
           SHARD_PORT: 3003
           BACKEND_PORT: 8002
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
           BACKEND_URL: http://127.0.0.1:8002
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
 

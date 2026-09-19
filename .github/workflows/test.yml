@@ -217,6 +217,7 @@ jobs:
           SHARD_ID: ${{ matrix.shard-id }}
           SHARD_PORT: ${{ matrix.shard-port }}
           BACKEND_PORT: ${{ matrix.backend-port }}
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard-id }}.db
           BACKEND_URL: http://127.0.0.1:${{ matrix.backend-port }}
           NEXT_PUBLIC_API_URL: http://127.0.0.1:${{ matrix.backend-port }}
 

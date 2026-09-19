@@ -51,7 +51,14 @@ interface SortableColumnHeaderProps {
 
 /**
  * A column header wrapped with useSortable from @dnd-kit/sortable.
- * Enables drag-to-reorder columns within the unified DndContext.
+ * Enables drag-to-reorder columns (pointer + keyboard) within the unified
+ * DndContext.
+ *
+ * GH #138 (US-6 fix): the activator node ref IS attached to the same element
+ * that carries {...listeners}. Without it dnd-kit's KeyboardSensor cannot
+ * resolve/focus/measure the activator, so Space/arrow drags never move the
+ * dragged rect — and every keydown inside the header (e.g. Enter on the
+ * nested move buttons) was swallowed by the sensor's preventDefault.
  */
 export function SortableColumnHeader({
   col,
@@ -65,6 +72,7 @@ export function SortableColumnHeader({
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -79,7 +87,11 @@ export function SortableColumnHeader({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        // One element serves as both the sortable node and the drag activator.
+        setNodeRef(node);
+        setActivatorNodeRef(node);
+      }}
       style={style}
       data-testid={`column-header-${col.id}`}
       className={`flex-1 text-center py-2 text-xs font-medium transition-all duration-150 cursor-grab select-none relative group ${

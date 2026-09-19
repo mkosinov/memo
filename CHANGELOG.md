@@ -72,6 +72,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plan: `docs/plans/2026-09-19-service-modal-null-max-age-plan.md` (on main, unchanged by IMPL)
   - Status: `docs/status/2026-09-19-service-modal-null-max-age-203.md`
 
+### Test Infra
+- **GH #209 — e2e env guardrails (постмортем-остаток, только test-infra)** — branch
+  `209-e2e-env-guardrails` (7 commits: `4c1592a5..56e5cbc0`, base `5d3a22d1`; спека
+  `docs/specs/2026-09-18-e2e-env-guardrails-design.md` rev2, план
+  `docs/plans/2026-09-18-e2e-env-guardrails-plan.md`; 15 файлов, +390/−44; продуктовый код,
+  схема БД и API не затронуты):
+  - **SHARD_ID whitelist (S1):** `scripts/e2e-shard-start.sh` на входе отсекает любой `SHARD_ID`
+    вне {1, 2} — exit 1 с текстом `must be 1 or 2` до подъёма стека и создания мусорной БД
+    (`test_memo_shardrest.db` больше не появится); новый кейс dryrun-теста пинит поведение.
+  - **Громкий конфликт `SHARD_ID × TEST_DB_PATH` (S2):** новый общий хелпер
+    `frontend/admin/e2e/lib/db-path.ts` `resolveTestDbPath` — единственный источник пути тестовой
+    БД для всех 6 мест TS-слоя (globalSetup, db-query, seed-reset, factories, unify-caches,
+    visual-compliance-checks — у последнего исчез обратный приоритет «TEST_DB_PATH побеждает»);
+    конфликт путей → throw с именованием обеих переменных и подсказкой, совпадающие пути — тихо ок;
+    относительный `TEST_DB_PATH` резолвится от корня репо, не от `process.cwd()`.
+  - **CI-guard «0 spec-файлов» (S3):** в обеих шард-джобах `test.yml` и в `update-snapshots.yml`
+    guard-шаг до старта стека: `playwright test --project=<проект> --list` — ненулевой выход
+    («проект не найден») или ноль строк `.spec.ts` в stdout (регрессия фильтра / не тот worktree)
+    валит job рано и понятно, с указанием на regex в `playwright.config.ts:118,125`.
+  - **Dryrun-тест подключён к CI и локальному прогону (S4):** новая джоба `shard-script-checks`
+    в `test.yml` (параллельно e2e-матрице, без браузеров) + ранний шаг в `scripts/test-all.sh`
+    (на заглушках, миллисекунды; на macOS без `timeout` — skip с предупреждением).
+  - **Канон в скилле `dev-workflow` (S3/S4, осознанно без автоматизации):** дрилл регенерации
+    снапшотов (ручной `update-snapshots.yml` → артефакт `updated-snapshots-shard-rest` → PNG в
+    `e2e/**/*-snapshots/` → коммит; локально — только итерации, шард из {1, 2}), протокол
+    переиспользования стека (порт ≠ идентичность: проверить `SHARD_ID`/`DATABASE_URL`/
+    `NEXT_DIST_DIR` процесса-владельца, иначе убить и поднять свежий), чеклист свежего worktree
+    (`uv sync --extra dev`, `corepack enable && pnpm install`); перекрёстная ссылка на канон
+    `docs/tests_workflow.md` (второго параллельного канона нет).
+  - **Tests:** dryrun-сюита **7/7**, admin vitest **2170 passed / 0 failed** (новый
+    `__tests__/db-path.test.ts` — 8 кейсов; `seed-reset.test.ts` переведён на новый контракт),
+    `tsc --noEmit` clean, симуляции guard'а 3/3; зелёные прогоны обоих workflow — верификация
+    в CI на PR-времени (сквозной DoD плана, у оркестратора на finishing).
+  - Plan: `docs/plans/2026-09-18-e2e-env-guardrails-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-19-e2e-env-guardrails-209.md`
+
 ## [Unreleased] — 2026-09-18
 
 ### Changed

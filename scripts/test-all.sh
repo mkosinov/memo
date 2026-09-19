@@ -99,6 +99,17 @@ else
   echo "  → skipping .next wipe — a Next.js dev server is live on :3001/:3002/:3003 (shared build dir)"
 fi
 
+# ── Shard-start dryrun test (stub-level, milliseconds) ─────────────────────
+# Regression guard for scripts/e2e-shard-start.sh (S4): DB-wipe guard,
+# SHARD_ID whitelist, NEXT_DIST_DIR export. GNU `timeout` may be missing on
+# macOS without coreutils — skip with a warning instead of failing.
+if command -v timeout >/dev/null; then
+  echo "  → shard-start dryrun test..."
+  bash "$ROOT/scripts/e2e-shard-start.dryrun.test.sh"
+else
+  echo "  ⚠️  skip dryrun test (no timeout binary)"
+fi
+
 # Track all background PIDs for waiting
 ALL_PIDS=()
 

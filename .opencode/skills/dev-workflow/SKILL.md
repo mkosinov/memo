@@ -149,7 +149,26 @@ Two modes, controlled by the `SHARD_ID` env var (see `frontend/admin/playwright.
   the shard stack pre-starts the server and Playwright connects to it.
 - Run the whole suite: `pnpm test:all` (or `bash scripts/test-all.sh`).
 
-### 3. Run a SINGLE spec / a few specs locally (simplest reliable path)
+### 3. Reusing an already-running stack — port ≠ identity
+
+`reuseExistingServer: true` and "something listens on :3002/:3003" do NOT mean the
+stack matches your run. A listening port is not identity — a leftover stack from a
+different shard or an older config can silently serve wrong data (wrong DB, wrong
+build dir). Before reusing a running stack, verify the owner process env:
+
+```bash
+# Find the owner PID, then inspect its environment
+lsof -ti :3003                        # → PID
+tr '\0' '\n' < /proc/<PID>/environ | grep -E '^(SHARD_ID|DATABASE_URL|NEXT_DIST_DIR)='
+```
+
+Check that `SHARD_ID`, `DATABASE_URL`, and `NEXT_DIST_DIR` match what YOUR run
+expects (see shard table above: shard 1 → `test_memo_shard1.db`/:8001/:3002,
+shard 2 → `test_memo_shard2.db`/:8002/:3003). **When in any doubt — kill it and
+start a fresh stack.** A 30-second restart is cheaper than debugging failures
+caused by a stale stack.
+
+### 4. Run a SINGLE spec / a few specs locally (simplest reliable path)
 
 Use standalone mode. Start backend once, then let Playwright's webServer handle Next.js:
 
@@ -165,7 +184,7 @@ cd frontend/admin && pnpm exec playwright test -g "test title substring"
 
 For a specific shard project: `pnpm exec playwright test --project=shard-rest --workers=1`.
 
-### 4. ALWAYS use PTY for E2E
+### 5. ALWAYS use PTY for E2E
 
 E2E suites are long (Next.js compiles routes on first hit; full suite is minutes).
 Run them via `pty_spawn`, never `bash`-with-timeout (see PTY rule above).
@@ -177,6 +196,33 @@ pty_spawn(
     description="Run single E2E spec"
 )
 ```
+
+### 6. Visual snapshot regeneration
+
+Visual baselines are recorded in the CI environment, never locally. Local
+regeneration (`pnpm run test:e2e:update`) is for iteration ONLY — local PNGs
+will pixel-diff on CI due to font/OS rendering drift.
+
+**Canonical drill** (manual trigger, shard 2 = `shard-rest` project):
+
+1. Trigger the workflow: `gh workflow run update-snapshots.yml --ref <branch>`
+   (`workflow_dispatch`, runs with `SHARD_ID=2` on `ubuntu-latest`).
+2. Download the `updated-snapshots-shard-rest` artifact from the workflow run.
+3. Copy the PNGs into `frontend/admin/e2e/**/*-snapshots/` (the spec's
+   `-snapshots/` dirs).
+4. Commit the new PNG files.
+
+Local regeneration (step order: verify baseline dirs, run with
+`--update-snapshots`) is acceptable ONLY for iterating on a visual test while
+developing — do NOT commit locally recorded baselines as the final state.
+
+`SHARD_ID` is always from {1, 2} (shard 1 = `shard-schedule`, shard 2 =
+`shard-rest`).
+
+**Full canon:** `docs/tests_workflow.md` ("Visual regression" + "Known
+caveats" sections) is the single source of truth for snapshot provenance,
+date stability, and why CI-only recording matters. This drill is a shortcut,
+not a second canon.
 
 ## Git worktrees
 
@@ -191,6 +237,19 @@ git worktree list
 git worktree remove .worktrees/feat-name
 git branch -d feat-name
 ```
+
+### Fresh worktree checklist
+
+A fresh worktree has NO installed dependencies (node_modules, .venv are not
+tracked by git). Before running tests, set up each side:
+
+- [ ] **Backend** — install deps before pytest:
+  `cd backend && uv sync --extra dev` (then `uv run pytest`)
+- [ ] **Frontend** — enable corepack and install:
+  `cd frontend/admin && corepack enable && pnpm install`
+- [ ] **Playwright browsers** — do NOT reinstall blindly; the global cache at
+  `~/.cache/ms-playwright/` survives across worktrees. Follow the
+  "Check before installing browsers" section above.
 
 ## Quick checks
 

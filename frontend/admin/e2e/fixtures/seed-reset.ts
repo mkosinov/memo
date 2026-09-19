@@ -29,6 +29,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { sqliteExecWithRetry } from './sqlite-exec';
+import { resolveTestDbPath } from '../lib/db-path';
 
 /**
  * Seed staff ids preserved by the #266 migration (m6 never existed) and the
@@ -97,18 +98,15 @@ export const RESET_SQL = `
 /**
  * Resolve the test DB path AT CALL TIME — never at module load (env vars
  * are set by the shard script / test runner and may change between
- * import and call). Same rules as `globalSetup.ts`:
- *   SHARD_ID set       → backend/test_memo_shard{id}.db
- *   else TEST_DB_PATH  → as-is, relative resolved against process CWD
- *                        (pass-through, 1:1 with globalSetup)
- *   else               → backend/test_memo.db
+ * import and call). Delegates to the shared GH #209 resolver
+ * (e2e/lib/db-path.ts): SHARD_ID → canonical shard DB; a SHARD_ID ×
+ * TEST_DB_PATH conflict is a loud error (no silent precedence).
  */
 export function resolveSeedDbPath(): string {
-  const shardId = process.env.SHARD_ID;
-  return shardId
-    ? path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`)
-    : process.env.TEST_DB_PATH
-      || path.resolve(__dirname, '../../../../backend/test_memo.db');
+  return resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 }
 
 /**

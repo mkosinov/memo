@@ -17,12 +17,6 @@ from src.domain.deletion import (
     has_blocking_deps,
     validate_resolutions,
 )
-from src.domain.record_visits import (
-    check_activity_capacity,
-    recompute_record_seats,
-    recompute_record_status,
-)
-from src.domain.visit_status import VisitStatus
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -41,7 +35,6 @@ from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
     RecordListParams,
-    RecordPatch,
     RecordResponse,
     RecordUpdate,
     RecordViewResponse,
@@ -587,136 +580,68 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             mark_changed("visitors")
         return visitor
 
-    @transactional
-    async def update(
-        self, db_session: AsyncSession, id: str, data: RecordUpdate
+    async def update_row(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        *,
+        activity_id: str,
+        client_id: str | None,
+        comment: str | None,
+        custom_price: int | None,
     ) -> Record | None:
-        """Full-update record: replace visits, recalculate seats.
+        """Apply the scalar field writes of a full update — WITHOUT
+        committing, no visit handling, no recalculation.
 
-        Re-checks activity capacity (Variant 1 from #129): after the record's own
-        visits are deleted, the record's stored ``seats`` is recomputed BEFORE
-        the capacity check so the occupied sum reflects only *other* records.
-        If over capacity, raises 409 and the transaction rolls back, restoring
-        the record to its pre-update state.
+        GH #171 Task 4: the row-level remainder of the former
+        ``RecordService.update`` — the visit delete/recompute/capacity/
+        re-insert orchestration moved to the ``update_record`` scenario
+        (usecases, Corridor 2 — canon docs/domain-rules/service-layer.md
+        rules 2, 5). This is the owner service's own-entity row op
+        (rule 1): load (missing → None), write the PUT scalar fields +
+        ``updated_at``, flush. The transaction boundary, the visit
+        batch, and the recalculation timing belong to the scenario.
+        Value-typed parameters — no foreign ORM/schema objects.
         """
         record = await self.get(db_session, id)
         if not record:
             return None
 
-        record.activity_id = data.activity_id
-        record.client_id = data.client_id
-        record.comment = data.comment
-        record.custom_price = data.custom_price
+        record.activity_id = activity_id
+        record.client_id = client_id
+        record.comment = comment
+        record.custom_price = custom_price
         record.updated_at = datetime.now(UTC)
-
-        # Remove the record's own existing visits first (so they don't self-count)
-        for existing_visit in list(record.visits):
-            await db_session.delete(existing_visit)
         await db_session.flush()
-
-        # CRITICAL: check_activity_capacity sums the stored Record.seats COLUMN,
-        # not live visit counts. Deleting visits does NOT change Record.seats —
-        # it keeps its old value until recompute_record_seats runs. So we MUST
-        # recompute seats here (→ 0 visits) BEFORE the capacity check,
-        # otherwise the occupied sum still includes this
-        # record's stale old seats → double-count → a shrink (US-6) would
-        # falsely 409. This resets the record's own contribution.
-        await recompute_record_seats(db_session, record.id)
-
-        # Capacity re-check with the record's own seats already reset in the sum
-        effective_seats = len(data.visits)
-        await check_activity_capacity(
-            db_session, data.activity_id, seats=effective_seats
-        )
-
-        # Only now insert the new visits
-        for visit_item in data.visits:
-            visit = Visit(
-                record_id=record.id,
-                visitor_id=visit_item.visitor_id,
-                tariff_id=visit_item.tariff_id,
-                price=visit_item.price,
-                custom_price=visit_item.custom_price,
-                status=visit_item.status.value,
-            )
-            db_session.add(visit)
-
-        await db_session.flush()
-
-        # Recompute seats and status from actual visits
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-
-        await db_session.refresh(record)
         return record
 
-    @transactional
-    async def patch(
-        self, db_session: AsyncSession, id: str, data: RecordPatch
+    async def patch_row(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        fields: dict[str, str | int | None],
     ) -> Record | None:
-        """Partial-update record — only fields explicitly sent are changed.
+        """Apply the EXPLICITLY-SENT scalar fields of a partial update —
+        WITHOUT committing, no visit handling, no recalculation.
 
-        Handles visits specially: if ``visits`` is provided in the patch,
-        deactivates existing visits and creates new ones; otherwise visits
-        are left untouched. Seats and status are always recomputed via
-        domain free functions after the flush.
-
-        Capacity re-check (#129 Variant 1): only fires when the patch touches
-        ``visits`` (the ``seats_changed`` guard). A patch
-        of only ``comment``/``custom_price`` does not change seats and skips
-        the capacity query.
+        GH #171 Task 4: the row-level remainder of the former
+        ``RecordService.patch`` — the seats_changed visit orchestration
+        moved to the ``patch_record`` scenario (usecases, Corridor 2 —
+        canon rules 2, 5). ``fields`` is the caller's
+        ``model_dump(exclude_unset=True)`` restricted to the scalar keys
+        (``comment`` / ``custom_price``) — only those are written, plus
+        ``updated_at``. Missing id → None. Value-typed input only.
         """
         record = await self.get(db_session, id)
         if not record:
             return None
 
-        update_data = data.model_dump(exclude_unset=True)
-
-        if "comment" in update_data:
-            record.comment = update_data["comment"]
-        if "custom_price" in update_data:
-            record.custom_price = update_data["custom_price"]
-
-        # ── Capacity re-check (only when seats may change) ─────────────
-        seats_changed = "visits" in update_data
-        if "visits" in update_data:
-            for existing_visit in list(record.visits):
-                await db_session.delete(existing_visit)
-            await db_session.flush()
-
-        if seats_changed:
-            # CRITICAL (same as update): reset Record.seats to reflect the
-            # current DB state BEFORE the capacity check, so the occupied
-            # sum doesn't double-count this record's stale old seats.
-            # recompute_record_seats counts visits still in the DB (0 if we
-            # just deleted them for a visits-patch).
-            await recompute_record_seats(db_session, record.id)
-            effective_seats = len(update_data["visits"])
-            await check_activity_capacity(
-                db_session, record.activity_id, seats=effective_seats
-            )
-
-        # ── Insert new visits (if provided) ───────────────────────────
-        if "visits" in update_data:
-            for visit_item in update_data["visits"]:
-                visit = Visit(
-                    record_id=record.id,
-                    visitor_id=visit_item.get("visitor_id"),
-                    tariff_id=visit_item.get("tariff_id"),
-                    price=visit_item["price"],
-                    custom_price=visit_item.get("custom_price"),
-                    status=visit_item.get("status", VisitStatus.WAITING),
-                )
-                db_session.add(visit)
-
+        if "comment" in fields:
+            record.comment = fields["comment"]
+        if "custom_price" in fields:
+            record.custom_price = fields["custom_price"]
         record.updated_at = datetime.now(UTC)
         await db_session.flush()
-
-        # Recompute seats and status from actual active visits in DB
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-
-        await db_session.refresh(record)
         return record
 
 

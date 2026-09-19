@@ -30,7 +30,11 @@ from src.schemas.record import (
 )
 from src.services.activity import get_activity_service
 from src.services.record import RecordService, get_record_service, map_record
-from src.usecases.records import create_record as create_record_scenario
+from src.usecases.records import (
+    create_record as create_record_scenario,
+    patch_record as patch_record_scenario,
+    update_record as update_record_scenario,
+)
 
 router = APIRouter(tags=["records"])
 
@@ -209,7 +213,13 @@ async def update_record(
     # must be inside the master's scope (RecordPatch carries no
     # activity_id, so PATCH cannot re-target and needs no gate).
     await _activity_scoped_or_404(session, data.activity_id, scope)
-    record = await service.update(db_session=session, id=record_id, data=data)
+    # Corridor 2 (GH #171 Task 4): the full-update chain (visits replace +
+    # recalculation + capacity re-check) lives in the usecases layer —
+    # the route stays transport-only. Leading None = the @transactional
+    # wrapper's unused self slot (selfless-function convention).
+    record = await update_record_scenario(
+        None, db_session=session, id=record_id, data=data,
+    )
     if not record:
         raise HTTPException(
             status_code=404,
@@ -231,7 +241,12 @@ async def patch_record(
 ) -> RecordResponse:
     """Partial-update a record by ID (PATCH). Only sent fields are changed."""
     await _scoped_or_404(service, session, record_id, scope)
-    record = await service.patch(db_session=session, id=record_id, data=data)
+    # Corridor 2 (GH #171 Task 4): the partial-update chain lives in the
+    # usecases layer — same convention as PUT above (selfless scenario,
+    # keyword args; RecordPatch carries no activity_id → no re-target gate).
+    record = await patch_record_scenario(
+        None, db_session=session, id=record_id, data=data,
+    )
     if not record:
         raise HTTPException(
             status_code=404,

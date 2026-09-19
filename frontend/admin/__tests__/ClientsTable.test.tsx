@@ -499,4 +499,55 @@ describe('ClientsTable', () => {
     expect(stored).not.toContain('phone');
     expect(stored).toContain('name');
   });
+
+  // ─── Archived status column (GH #220 Task 1) ─────────────────────────────
+
+  it('hides the «Статус» column by default (GH #220)', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    const thead = document.querySelector('thead')!;
+    expect(thead.textContent).not.toContain('Статус');
+    expect(screen.queryByText('Активен')).not.toBeInTheDocument();
+  });
+
+  it('shows the «Статус» column with badges after enabling it via ColumnPicker (GH #220)', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Статус'));
+
+    // Both fixture clients are active → «Активен» badges (client gender)
+    expect(screen.getAllByText('Активен')).toHaveLength(2);
+    expect(screen.queryByText('Активна')).not.toBeInTheDocument();
+
+    const stored = JSON.parse(localStorage.getItem('clients-columns')!);
+    expect(stored).toContain('archived');
+  });
+
+  it('badge matches row.archived: «Архив» for archived, «Активен» for active (GH #220)', () => {
+    mockTableState = {
+      ...mockTableState,
+      items: [
+        mockClientsWithStats[0],
+        { ...mockClientsWithStats[1], archived: true },
+      ],
+    };
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Статус'));
+
+    expect(screen.getByText('Активен')).toBeInTheDocument();
+    expect(screen.getByText('Архив')).toBeInTheDocument();
+  });
+
+  it('renders a non-sortable «Статус» header — no sort button, no setSort (GH #220)', () => {
+    render(<ClientsTable onClientClick={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Статус'));
+
+    // Sortable headers render a <button> inside the <th>; non-sortable ones
+    // render the label as plain <th> text (DataTable §6.2).
+    expect(screen.queryByRole('button', { name: /Статус/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('columnheader', { name: /Статус/ }));
+    expect(mockTableState.setSort).not.toHaveBeenCalled();
+  });
 });

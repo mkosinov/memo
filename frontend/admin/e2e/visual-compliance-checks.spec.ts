@@ -23,7 +23,7 @@
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import path from 'path';
+import { resolveTestDbPath } from './lib/db-path';
 import {
   createTestClient,
   createTestActivity,
@@ -41,8 +41,12 @@ function log(line: string) {
 }
 
 function dbPath() {
-  if (process.env.TEST_DB_PATH) return process.env.TEST_DB_PATH;
-  return path.resolve(__dirname, '../../../../backend/test_memo.db');
+  // GH #209: shared resolver — the previous local "TEST_DB_PATH wins"
+  // precedence is gone; a SHARD_ID × TEST_DB_PATH conflict is a loud error.
+  return resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 }
 
 function clean() {

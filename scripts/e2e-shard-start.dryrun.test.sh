@@ -370,6 +370,35 @@ else
   FAIL=1
 fi
 
+# ── Case 6 (#209): SHARD_ID whitelist rejects non-canonical values ────────
+# A SHARD_ID typo (e.g. "rest") used to fall through to Playwright project
+# resolution and CI reported "0 spec files" far from the root cause. The
+# script must hard-fail before any machinery: only 1 and 2 are canonical.
+# Called DIRECTLY (no stubs, no staged tree): the whitelist fires before
+# uv/pnpm, so nothing beyond the guard is reachable in this case.
+CASE6_DIR="$WORK/case6"; mkdir -p "$CASE6_DIR"
+set +e
+SHARD_ID=rest SHARD_PORT=3003 BACKEND_PORT=8002 \
+  BACKEND_URL=http://127.0.0.1:8002 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8002 \
+  TEST_DB_PATH="$CASE6_DIR/test_memo_shard1.db" \
+  timeout 5 bash "$SCRIPT_UNDER_TEST" \
+  > "$CASE6_DIR/run.out" 2> "$CASE6_DIR/run.err"
+WHITELIST_EXIT=$?
+set -e
+
+echo "── Case 6 stderr ──"
+cat "$CASE6_DIR/run.err"
+echo "─────────────────"
+
+if [ "$WHITELIST_EXIT" -eq 1 ] && grep -q "must be 1 or 2" "$CASE6_DIR/run.err"; then
+  echo "PASS Case 6 (#209): SHARD_ID=rest rejected with exit 1 + whitelist diagnostic"
+else
+  echo "FAIL Case 6 (#209): expected exit code 1 + 'must be 1 or 2' on stderr for SHARD_ID=rest"
+  echo "  exit code: $WHITELIST_EXIT"
+  FAIL=1
+fi
+
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0

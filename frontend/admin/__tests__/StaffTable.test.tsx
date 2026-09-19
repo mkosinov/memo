@@ -506,7 +506,7 @@ describe('StaffTable', () => {
     expect(swatches.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('shows default visible columns (имя, должности, специальность, цвет, архив)', async () => {
+  it('shows default visible columns (имя, должности, специальность, цвет) without «Архив» (GH #220 Task 2)', async () => {
     setupEnvelope();
     const { container } = await renderLoaded();
     const thead = container.querySelector('thead')!;
@@ -516,6 +516,23 @@ describe('StaffTable', () => {
     expect(within(thead).getByText('Должности')).toBeInTheDocument();
     expect(within(thead).getByText(/Специальность/)).toBeInTheDocument();
     expect(within(thead).getByText(/Цвет/)).toBeInTheDocument();
-    expect(within(thead).getByText(/Архив/)).toBeInTheDocument();
+    // GH #220 Task 2 — «Архив» is hidden by default; the D6 menu item
+    // «Архивировать» (dropdown content) is NOT a thead header.
+    expect(within(thead).queryByText(/Архив/)).not.toBeInTheDocument();
+  });
+
+  it('shows the «Архив» column after enabling it via ColumnPicker (GH #220 Task 2)', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Архив'));
+
+    // m1 active + m2 archived → both badge texts render (scoped to tbody
+    // chips: the status filter also has an «Архив» <option>).
+    const tbody = container.querySelector('tbody')!;
+    const badges = Array.from(tbody.querySelectorAll('span')).filter(
+      (s) => s.className.includes('rounded-full'),
+    );
+    expect(badges.map((b) => b.textContent)).toEqual(['Активен', 'Архив', 'Активен']);
   });
 });

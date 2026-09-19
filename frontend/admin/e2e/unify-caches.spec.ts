@@ -33,6 +33,7 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import { resolveTestDbPath } from './lib/db-path';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -42,9 +43,10 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
  */
 function recordActivityDate(recordId: string): string | null {
   const { execSync } = require('child_process') as typeof import('child_process');
-  const path = require('path') as typeof import('path');
-  const dbPath = process.env.TEST_DB_PATH
-    || path.resolve(__dirname, '../../../../backend/test_memo.db');
+  const dbPath = resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
   const safeId = recordId.replace(/'/g, "''");
   const out = execSync(
     `sqlite3 -json "${dbPath}" "SELECT substr(a.start, 1, 10) AS d FROM records r JOIN activities a ON r.activity_id = a.id WHERE r.id = '${safeId}'"`,

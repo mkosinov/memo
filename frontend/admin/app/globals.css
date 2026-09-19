@@ -15,7 +15,7 @@
   --surface:    #f4f4f5;
   --ink:        #1a1a1a;
   --ink-mid:    #555555;
-  --ink-light:  #888888;
+  --ink-light:  #5f5f65;
   --ink-faint:  #cccccc;
   --line:       #E0E0E1;
   --line-dark:  rgba(255,255,255,.1);
@@ -35,7 +35,8 @@
   --bg: #FFFFFF;
   
   /* Status */
-  --success: #6B8E6E;
+  --success: #2f6b2f;
+  --success-bg: #dcfce7;
   --warning: #C8A050;
   --danger: #C8503C;
   
@@ -52,9 +53,11 @@
   --surface:    #303035;
   --ink:        #e8e8ea;
   --ink-mid:    #aaaaae;
-  --ink-light:  #777780;
+  --ink-light:  #9c9ca5;
   --ink-faint:  #555560;
   --line:       #3a3a3e;
+  --success:    #8fd18f;
+  --success-bg: #1f2f24;
 }
 
 /* ===== Base Styles ===== */

@@ -418,6 +418,42 @@ describe('MaterialsTable', () => {
     expect(screen.getByText('+ Добавить материал')).toBeInTheDocument();
   });
 
+  // ─── «Статус» column hidden by default (GH #220 Task 2) ───────────────
+
+  it('hides the «Статус» column by default (GH #220 Task 2)', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
+    const thead = container.querySelector('thead')!;
+    expect(thead.textContent).not.toContain('Статус');
+    // mat-3 (archived) exists in the fixture, but its badge is not rendered
+    // while the column is hidden. Scoped to tbody spans — the status FILTER
+    // also contains an «Архив» <option>, which is not a cell badge.
+    const tbody = container.querySelector('tbody')!;
+    const badges = Array.from(tbody.querySelectorAll('span')).filter(
+      (s) => s.className.includes('rounded-full'),
+    );
+    expect(badges).toHaveLength(0);
+  });
+
+  it('shows the «Статус» column with badges after enabling it via ColumnPicker (GH #220 Task 2)', async () => {
+    setupEnvelope();
+    const { container } = await renderLoaded();
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+    fireEvent.click(screen.getByLabelText('Статус'));
+
+    // mat-1/mat-2 active, mat-3 archived → both badge texts render (scoped
+    // to tbody chips: the status filter also has an «Архив» <option>).
+    const tbody = container.querySelector('tbody')!;
+    const badges = Array.from(tbody.querySelectorAll('span')).filter(
+      (s) => s.className.includes('rounded-full'),
+    );
+    expect(badges.map((b) => b.textContent)).toEqual([
+      'Активен',
+      'Активен',
+      'Архив',
+    ]);
+  });
+
   it('opens create modal when "Добавить материал" clicked', async () => {
     setupEnvelope();
     await renderLoaded();

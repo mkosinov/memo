@@ -126,6 +126,10 @@ async def test_delete_stale_expected_raises_and_keeps_rows(
     record = await _seed_record(db_session, activity, [100], payments=[500])
     record_id = record.id  # rollback expires ORM objects — keep the id
 
+    # Discard setup noise: the create_activity API factory publishes its own
+    # batches (staff/masters, services, locations, activities).
+    _drain(subscriber)
+
     # The caller confirmed NOTHING (empty expected) — the payment is stale.
     with pytest.raises(StaleDependenciesError) as exc_info:
         await delete_record(
@@ -145,9 +149,15 @@ async def test_delete_stale_expected_raises_and_keeps_rows(
     )
     assert payments_left, "the stale branch must NOT run the cascade"
 
+    # Failure branch publishes NOTHING — the @transactional decorator
+    # aborts on the raise before emitting the event batch (GH #239 grid).
+    assert _drain(subscriber) == [], (
+        "the stale branch must not invalidate caches — no event batch"
+    )
+
 
 async def test_delete_invalid_resolutions_raises_and_keeps_rows(
-    db_session, create_activity,
+    db_session, create_activity, subscriber,
 ):
     """A wrong resolution action → InvalidResolutionError (route → 422);
     nothing is deleted."""
@@ -159,6 +169,10 @@ async def test_delete_invalid_resolutions_raises_and_keeps_rows(
     record_id = record.id  # rollback expires ORM objects — keep the id
     visit_ids = await _ids(db_session, select(Visit.id).where(Visit.record_id == record_id))
 
+    # Discard setup noise: the create_activity API factory publishes its own
+    # batches (staff/masters, services, locations, activities).
+    _drain(subscriber)
+
     with pytest.raises(InvalidResolutionError):
         await delete_record(
             None, db_session=db_session, id=record_id,
@@ -169,6 +183,11 @@ async def test_delete_invalid_resolutions_raises_and_keeps_rows(
     await db_session.rollback()
     assert await db_session.get(Record, record_id) is not None
     assert await _ids(db_session, select(Visit).where(Visit.record_id == record_id)) != []
+
+    # Failure branch publishes NOTHING (the decorator aborts on the raise).
+    assert _drain(subscriber) == [], (
+        "the invalid-resolutions branch must not publish an event batch"
+    )
 
 
 async def test_delete_cascades_and_returns_true(db_session, create_activity):

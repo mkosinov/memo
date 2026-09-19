@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-19
 
+### Added
+- **GH #220 — Клиенты: колонка «Статус» (архив/активен) + единые скрытые статус-колонки** — branch
+  `220-clients-status-column` (4 commits: `0fd4bb88..9a251ab3`, base `5d3a22d1`;
+  спека `docs/specs/2026-09-19-clients-status-column-220-design.md`,
+  план `docs/plans/2026-09-19-clients-status-column-220-plan.md`; 12 файлов, +710/−12):
+  - В таблице клиентов — последняя колонка «Статус» (ключ `archived`, `defaultVisible: false`,
+    `sortable: false` — в серверном whitelist сортировки `archived` нет) с бейджем «Активен»/«Архив»
+    на CSS-переменных (паттерн serviceColumns); контракт данных не менялся — `archived` уже в
+    `ClientWithStats`; бэкенд/migrations/api-client не тронуты.
+  - **AA-контраст статус-токенов** (`globals.css`, WCAG 2.2 AA ≥ 4.5:1 на 12px): light —
+    `--ink-light` `#888888` → `#5f5f65`, `--success` `#6B8E6E` → `#2f6b2f` + новый
+    `--success-bg` `#dcfce7`; dark — `--ink-light` `#777780` → `#9c9ca5`, `--success` `#8fd18f` +
+    `--success-bg` `#1f2f24`; проверено вживую (light 5.86/5.77, dark 7.84/4.82).
+  - **Унификация:** колонки «Архив»/«Статус» сотрудников (staff) и материалов (materials) переведены
+    на `defaultVisible: false` — единое правило для всех архивируемых сущностей; e2e `staff-crud`
+    обновлён (дефолтный набор заголовков; тесту с бейджем колонка включается через пикер).
+  - **Tests:** vitest полный прогон **2181p/0f** (12 новых/обновлённых юнитов: ClientsTable,
+    clientColumns, StaffTable, staffColumns, MaterialsTable, materialsColumns); новый e2e
+    `clients-status-column.spec.ts` — 3 сценария (включение через пикер + бейджи; deep-link на
+    архивного клиента; флип бейджа при архивации/восстановлении без перезагрузки при фильтре «Все»)
+    — **3/3** зелёные standalone, staff-crud **15/15** (shard); tsc/lint чисто; полный e2e — PR CI;
+    визуальный гейт пройден (скриншоты в `/tmp`, не коммитятся).
+  - Status: `docs/status/2026-09-19-clients-status-column-220.md`
+
 ### Fixed
 - **GH #203 — ServiceModal: NULL max_age → 0 блокировал edit-save открытых услуг** — branch
   `service-modal-null-max-age-203` (3 commits: `1d8f97d0..4aa19858`, base `514a2b96`;

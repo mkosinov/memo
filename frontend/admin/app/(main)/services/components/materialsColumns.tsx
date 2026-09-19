@@ -35,7 +35,10 @@ export const materialColumns = (): ColumnDef<MaterialResponse>[] => [
   {
     key: 'archived',
     label: 'Статус',
-    defaultVisible: true,
+    // GH #220 Task 2 — hidden by default (clients precedent): the archive
+    // state stays reachable via the row menu and the server status filter.
+    // Key unchanged — persisted picker selections key off it.
+    defaultVisible: false,
     // Badge verbatim from the pre-#139 cell (inverted `archived` field, #207).
     render: (m) => (
       <span

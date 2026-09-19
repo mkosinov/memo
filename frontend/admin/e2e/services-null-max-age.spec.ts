@@ -18,7 +18,12 @@
  */
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
-import { waitForServicesReady, waitForScheduleReady, waitForToast } from './fixtures/helpers';
+import {
+  gotoScheduleWeek,
+  waitForServicesReady,
+  waitForScheduleReady,
+  waitForToast,
+} from './fixtures/helpers';
 import { queryDBRows } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -203,9 +208,8 @@ test.describe('Services — NULL max_age smoke pair (#203 §4.1–4.2)', () => {
       // upper bound), never the «6–12» range badge.
       await waitForScheduleReady(page);
 
-      // Find a seed week that contains an «Акварель» (s4) activity, then jump
-      // there via the ScheduleContext week-switch event (same helper pattern
-      // the neighbor specs use).
+      // Find a seed week that contains an «Акварель» (s4) activity, then
+      // deep-link there via the schedule URL canon (#138 gotoScheduleWeek).
       const actsResp = await request.get(`${BACKEND}/api/v1/activities?page=1&per_page=100`);
       expect(actsResp.ok()).toBeTruthy();
       const acts = (await actsResp.json()) as {
@@ -216,13 +220,7 @@ test.describe('Services — NULL max_age smoke pair (#203 §4.1–4.2)', () => {
       expect(s4Activity, 'seed schedule must contain an «Акварель» (s4) activity').toBeTruthy();
       const weekStart = s4Activity!.start.slice(0, 10);
 
-      await page.evaluate((d) => {
-        document.dispatchEvent(
-          new CustomEvent('__memo-switch-to-week-view', {
-            detail: { date: `${d}T12:00:00` },
-          }),
-        );
-      }, weekStart);
+      await gotoScheduleWeek(page, weekStart);
 
       // One «Акварель» activity per seed week — first() is deterministic here.
       const card = page

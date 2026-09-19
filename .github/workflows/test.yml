@@ -189,6 +189,37 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: frontend/admin
 
+      # CI guard (#209): fail EARLY if the Playwright project resolves 0 spec
+      # files (project-name typo in the matrix, testMatch filter regression,
+      # or a worktree path swept by the regexes) — before the stack starts.
+      # `--list` prints spec paths to stdout only; stderr (config-error traces
+      # with absolute .spec.ts paths) is NOT scanned.
+      - name: Spec-file guard (${{ matrix.shard-name }})
+        run: |
+          list_output=$(mktemp)
+          if ! pnpm exec playwright test --project=${{ matrix.shard-name }} --list > "$list_output"; then
+            echo "ERROR: playwright --list failed for project '${{ matrix.shard-name }}'."
+            echo "Likely cause: project name typo in this job's matrix vs playwright.config.ts."
+            rm -f "$list_output"
+            exit 1
+          fi
+          spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
+          rm -f "$list_output"
+          if [ "$spec_count" -eq 0 ]; then
+            echo "ERROR: project '${{ matrix.shard-name }}' resolved 0 spec files."
+            echo "Likely cause: test-filter regression or worktree path swept by the"
+            echo "testMatch regexes (frontend/admin/playwright.config.ts:118,125)."
+            exit 1
+          fi
+          echo "Spec-file guard OK: ${spec_count} spec files in project '${{ matrix.shard-name }}'."
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: ${{ matrix.shard-id }}
+          SHARD_PORT: ${{ matrix.shard-port }}
+          BACKEND_PORT: ${{ matrix.backend-port }}
+          BACKEND_URL: http://127.0.0.1:${{ matrix.backend-port }}
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:${{ matrix.backend-port }}
+
       - name: Start E2E stack (${{ matrix.shard-name }})
         run: |
           SHARD_ID=${{ matrix.shard-id }} \

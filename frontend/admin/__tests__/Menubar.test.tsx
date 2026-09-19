@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 import { DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
@@ -79,9 +78,7 @@ function renderWithProviders() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <NavigationProvider>
-          <Menubar />
-        </NavigationProvider>
+        <Menubar />
       </UIProvider>
     </QueryClientProvider>
   );

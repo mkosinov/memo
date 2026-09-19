@@ -1,8 +1,5 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-// NavigationProvider stays ONLY until Task 3 rewires Topbar (the last
-// NavigationContext consumer in this tree).
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
@@ -59,13 +56,11 @@ function renderPage() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <NavigationProvider>
-          <UserSettingsProvider>
+        <UserSettingsProvider>
             <PendingActionsProvider>
               <SchedulePage />
             </PendingActionsProvider>
           </UserSettingsProvider>
-        </NavigationProvider>
       </UIProvider>
     </QueryClientProvider>,
   );

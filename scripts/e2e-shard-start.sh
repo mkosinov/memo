@@ -39,6 +39,17 @@ for var in SHARD_ID SHARD_PORT BACKEND_PORT TEST_DB_PATH BACKEND_URL NEXT_PUBLIC
   fi
 done
 
+# GH #209 — canonical shards are 1 and 2. A typo (e.g. SHARD_ID=rest) used to
+# fall through to Playwright project resolution, where CI reported "0 spec
+# files" far from the root cause. Fail here, at the source.
+case "$SHARD_ID" in
+  1|2) ;;
+  *)
+    echo "ERROR: SHARD_ID must be 1 or 2 (canonical shards; got '$SHARD_ID')" >&2
+    exit 1
+    ;;
+esac
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 ADMIN_DIR="$ROOT_DIR/frontend/admin"

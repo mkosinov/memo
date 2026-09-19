@@ -110,15 +110,31 @@ describe('resolveSeedDbPath (call-time resolution)', () => {
     process.env = { ...ORIGINAL };
   });
 
-  it('SHARD_ID wins over TEST_DB_PATH (shard mode) and anchors at <repo>/backend', () => {
+  it('throws when SHARD_ID and TEST_DB_PATH CONFLICT (GH #209 — no silent precedence)', () => {
     process.env.SHARD_ID = '3';
-    process.env.TEST_DB_PATH = '/tmp/should-be-ignored.sqlite';
+    process.env.TEST_DB_PATH = '/tmp/should-conflict.sqlite';
+    // GH #209: the old "shard wins, TEST_DB_PATH ignored" behavior hid a
+    // silent mismatch — now a conflicting pair is a loud error (shared
+    // resolveTestDbPath contract, e2e/lib/db-path.ts).
+    expect(() => resolveSeedDbPath()).toThrowError(/SHARD_ID/);
+  });
+
+  it('SHARD_ID alone anchors at <repo>/backend', () => {
+    process.env.SHARD_ID = '3';
     const resolved = resolveSeedDbPath();
     // 4 levels up from e2e/fixtures → repo root, exactly like helpers.ts
     // resolveDBPath() in the same directory (vitest keeps real __dirname).
     // This test file lives at <repo>/frontend/admin/__tests__/ → 3 up.
     const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
     expect(resolved).toBe(path.join(repoBackend, 'test_memo_shard3.db'));
+  });
+
+  it('SHARD_ID with a MATCHING TEST_DB_PATH passes quietly (absolute form)', () => {
+    process.env.SHARD_ID = '3';
+    process.env.TEST_DB_PATH = path.resolve(
+      __dirname, '..', '..', '..', 'backend', 'test_memo_shard3.db',
+    );
+    expect(resolveSeedDbPath()).toBe(process.env.TEST_DB_PATH);
   });
 
   it('TEST_DB_PATH is used when SHARD_ID is unset', () => {

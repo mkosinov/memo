@@ -2,7 +2,7 @@
  * globalSetup.ts — Clean test data before each E2E run.
  *
  * Per-shard mode (via test-all.sh):
- *   SHARD_ID is set → uses test_memo_shard{1-5}.db
+ *   SHARD_ID is set → uses test_memo_shard{1,2}.db
  *
  * Standalone mode (manual playwright test):
  *   SHARD_ID not set → uses TEST_DB_PATH or default test_memo.db
@@ -16,6 +16,7 @@
  * so length checks distinguish them from UUID test data.
  */
 import path from 'path';
+import { resolveTestDbPath } from './lib/db-path';
 import { masterAuthStatePath, resolveAuthStatePath } from './fixtures/auth-state';
 import { RESET_SQL, wipeAvatarsDir } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
@@ -74,13 +75,14 @@ async function loginAndSaveStorageState(
 }
 
 export default async function globalSetup() {
-  // Per-shard DB: test_memo_shard{id}.db
-  // Falls back to TEST_DB_PATH or default test_memo.db for backwards compat.
+  // Per-shard DB via the shared GH #209 resolver (e2e/lib/db-path.ts):
+  // SHARD_ID → canonical shard DB; a SHARD_ID × TEST_DB_PATH conflict is
+  // a loud error; otherwise TEST_DB_PATH or the default test_memo.db.
   const shardId = process.env.SHARD_ID;
-  const dbPath = shardId
-    ? path.resolve(__dirname, `../../../backend/test_memo_shard${shardId}.db`)
-    : process.env.TEST_DB_PATH
-      || path.resolve(__dirname, '../../../backend/test_memo.db');
+  const dbPath = resolveTestDbPath({
+    shardId,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 
   console.log(`[globalSetup] Cleaning DB: ${dbPath}${shardId ? ` (shard ${shardId})` : ''}`);
 

@@ -11,9 +11,10 @@ docs/domain-rules/service-layer.md rule 2). These tests pin the new shape:
   seats → capacity check → bulk insert (US-6 shrink must not 409);
 - missing id → ``None`` (the route maps that to 404);
 - patch without ``visits`` leaves visits untouched and skips capacity;
-- with a visits payload the published event grid (GH #239) is EXACTLY
-  ``{"records", "visits"}`` — wider than the pre-refactor ``{"records"}``
-  (visit helpers mark their own entity; deliberate additive invalidation).
+- SSE event-mark parity (Task 4 fix): the published grid (GH #239) is
+  EXACTLY ``{"records"}`` when the visits collection is NOT replaced
+  (empty PUT list / PATCH without visits) and ``{"records", "visits"}``
+  when it is (non-empty replacement list) — the pre-refactor grid.
 
 CALLING CONVENTION: scenarios are selfless functions, so the
 ``@transactional`` wrapper binds the first positional arg as ``self`` —
@@ -299,14 +300,14 @@ def subscriber():
 async def test_update_patch_event_grid_is_records_and_visits(
     db_session, create_activity, subscriber, scenario: str,
 ):
-    """PUT/PATCH with a visits payload publishes EXACTLY {"records", "visits"}.
+    """PUT/PATCH with a NON-EMPTY visits payload publishes EXACTLY
+    {"records", "visits"}.
 
-    Task 4 compliance fix: pins the event grid that the module docstring
-    now documents. The selfless @transactional scenario marks its own
-    entity ("records") and the non-transactional visit helpers mark
-    THEIRS ("visits": delete_visits_by_record + create_visits_bulk) —
-    wider than the pre-refactor method-based flow's {"records"} (a
-    deliberate additive invalidation: visits genuinely change).
+    Task 4 fix: a non-empty replacement genuinely touches visits, so the
+    grid widens to both entities. The selfless @transactional scenario
+    marks its own entity ("records"); the visit helpers mark THEIRS
+    ("visits") — allowed ONLY on a real replacement (see the empty-list
+    parity test below).
     """
     from src.usecases.records import patch_record, update_record
 
@@ -333,3 +334,46 @@ async def test_update_patch_event_grid_is_records_and_visits(
     published_entities, origin = events[0]
     assert published_entities == {"records", "visits"}
     assert origin is None  # direct scenario call — no middleware envelope
+
+
+@pytest.mark.parametrize("scenario", ["update", "patch"])
+async def test_update_patch_empty_visits_grid_is_records_only(
+    db_session, create_activity, subscriber, scenario: str,
+):
+    """PUT/PATCH with an EMPTY visits list publishes EXACTLY {"records"}.
+
+    Task 4 fix (parity with the pre-refactor method-based flow): a
+    field-only update (empty replacement list) must NOT widen the SSE
+    invalidation grid — pre-refactor these endpoints published only
+    "records", never "visits". The visit helpers' unconditional marks
+    would leak an extra "visits" batch; the scenarios therefore gate the
+    helper marks on a REAL (non-empty) replacement.
+    """
+    from src.usecases.records import patch_record, update_record
+
+    activity = await _orm_activity(db_session, create_activity)
+    record = await _seed_record(db_session, activity, [100])
+    record_id = record.id  # commit in _seed_record expires rows — keep the id
+
+    # Discard setup noise (same drain-after-setup pattern as above).
+    _drain(subscriber)
+
+    data = (
+        RecordUpdate(activity_id=activity.id, visits=[])
+        if scenario == "update"
+        else RecordPatch(visits=[])
+    )
+
+    scenario_fn = update_record if scenario == "update" else patch_record
+    updated = await scenario_fn(None, db_session=db_session, id=record_id, data=data)
+    assert updated is not None
+    assert updated.seats == 0  # empty replacement → no visits remain
+
+    events = _drain(subscriber)
+    assert len(events) == 1, f"ONE @transactional = ONE event batch, got {events}"
+    published_entities, origin = events[0]
+    assert published_entities == {"records"}, (
+        f"field-only update must publish exactly {{'records'}}, got {events}"
+    )
+    assert origin is None  # direct scenario call — no middleware envelope
+

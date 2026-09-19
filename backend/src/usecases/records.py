@@ -30,21 +30,18 @@ Behavior-preserving extraction of the former ``RecordService.create`` /
 status derivation are byte-identical to the pre-refactor flow).
 
 EVENT GRID (GH #239), pinned by
-``tests/usecases/test_records_update_patch.py``:
+``tests/usecases/test_records_update_patch.py`` — the rule is:
+``"records"`` ALWAYS; ``"visits"`` ADDITIONALLY when the visit
+collection was actually (re)populated:
 
-- ``create_record`` — the accumulator is opened EMPTY (selfless wrapper)
-  and the scenario's ``mark_changed("records")`` + the visit helpers'
-  ``mark_changed("visits")`` (create_visits_bulk) publish
-  ``{"records", "visits"}`` — same as the pre-refactor flow;
-- ``update_record`` / ``patch_record`` (with a ``visits`` payload) —
-  ``{"records", "visits"}``: WIDER than the pre-refactor
-  ``{"records"}``. DELIBERATE, not parity: each visit helper marks its
-  OWN entity (``delete_visits_by_record`` + ``create_visits_bulk`` →
-  ``"visits"``), and visits genuinely change in these actions — the old
-  flow's ``{"records"}``-only grid was a latent invalidation gap, so
-  this is additive invalidation, not a behavior regression. A
-  comment/custom_price-only patch never calls the visit helpers → grid
-  stays ``{"records"}``.
+- ``create_record`` — ``{"records", "visits"}`` (visits are created);
+- ``update_record`` / ``patch_record`` with a NON-EMPTY ``visits`` list —
+  ``{"records", "visits"}``: a real replacement touches both entities;
+- ``update_record`` with an EMPTY list / ``patch_record`` without
+  ``visits`` (or with an empty list) — exactly ``{"records"}``: a
+  field-only update keeps the pre-refactor grid (the visit helpers are
+  still invoked — the mandatory interleaving — but with
+  ``mark_visits=False`` their "visits" marks are suppressed).
 """
 
 from __future__ import annotations
@@ -191,11 +188,15 @@ async def update_record(
        still carries the record's stale old seats → double-count → a
        shrink (US-6) would falsely 409;
     4. capacity check (409 over capacity → rollback restores the old visits);
-    5. insert the new batch (ONE bulk, marks "visits") — ``visitor_id`` is
-       carried VERBATIM from the items (today's update flow performs NO
+    5. insert the new batch (ONE bulk) — ``visitor_id`` is carried
+       VERBATIM from the items (today's update flow performs NO
        client/visitor find-or-create; unlike create, a name-bearing item
        links nothing — anonymous unless ``visitor_id`` is sent);
     6. recompute seats + status from the persisted visits, refresh.
+
+    Event grid (GH #239, Task 4 fix): "records" always; "visits"
+    additionally ONLY on a non-empty replacement list (a field-only
+    update — empty list — keeps the pre-refactor {"records"} grid).
 
     NOTE: call as ``update_record(None, db_session=..., id=..., data=...)``
     — see the module docstring for why.
@@ -218,7 +219,13 @@ async def update_record(
     # ── Visit replacement — STRICT order (delete → recompute → check →
     #    insert). Inserting before recomputing would double-count the
     #    record's own seats in the capacity check. ─────────────────────
-    await get_visit_service().delete_visits_by_record(db_session, record.id)
+    # Event parity: the helpers' "visits" marks are gated on a REAL
+    # (non-empty) replacement — an empty list is a field-only update and
+    # must keep the pre-refactor {"records"} grid.
+    mark_visits = bool(data.visits)
+    await get_visit_service().delete_visits_by_record(
+        db_session, record.id, mark_visits=mark_visits,
+    )
     await recompute_record_seats(db_session, record.id)
 
     effective_seats = len(data.visits)
@@ -227,7 +234,9 @@ async def update_record(
     )
 
     # ── ONE bulk insert (value payloads only) — visitor_id verbatim ──
-    await get_visit_service().create_visits_bulk(db_session, record.id, data.visits)
+    await get_visit_service().create_visits_bulk(
+        db_session, record.id, data.visits, mark_visits=mark_visits,
+    )
 
     # ── Recompute from actual visits ─────────────────────────────────
     await recompute_record_seats(db_session, record.id)
@@ -255,10 +264,18 @@ async def patch_record(
     2. when ``visits`` is provided (``seats_changed``): delete → recompute
        seats → capacity check (same interleaving as update_record) — a
        patch of only comment/custom_price skips the capacity query;
-    3. insert the new batch (ONE bulk, marks "visits") — visits not
-       provided → untouched; ``visitor_id`` carried verbatim (no
-       find-or-create, same as today's patch flow);
+    3. insert the new batch (ONE bulk) — visits not provided → untouched;
+       ``visitor_id`` carried verbatim (no find-or-create, same as
+       today's patch flow);
     4. recompute seats + status, refresh.
+
+    Event grid (GH #239, Task 4 fix): "records" always; "visits"
+    additionally ONLY on a non-empty replacement list (a comment/
+    custom_price-only patch keeps the pre-refactor {"records"} grid).
+
+    Event grid (GH #239, Task 4 fix): "records" always; "visits"
+    additionally ONLY on a non-empty replacement list (a comment/
+    custom_price-only patch keeps the pre-refactor {"records"} grid).
 
     NOTE: call as ``patch_record(None, db_session=..., id=..., data=...)``
     — see the module docstring for why.
@@ -278,8 +295,14 @@ async def patch_record(
 
     # ── Visit replacement (only when seats may change) — STRICT order:
     #    delete → recompute → check (same interleaving as update_record). ──
+    # Event parity: the helpers' "visits" marks are gated on a REAL
+    # (non-empty) replacement — a comment/custom_price-only patch (or an
+    # empty list) must keep the pre-refactor {"records"} grid.
+    mark_visits = bool(update_data.get("visits"))
     if "visits" in update_data:
-        await get_visit_service().delete_visits_by_record(db_session, record.id)
+        await get_visit_service().delete_visits_by_record(
+            db_session, record.id, mark_visits=mark_visits,
+        )
         await recompute_record_seats(db_session, record.id)
         effective_seats = len(update_data["visits"])
         await check_activity_capacity(
@@ -293,7 +316,7 @@ async def patch_record(
             for raw in update_data["visits"]
         ]
         await get_visit_service().create_visits_bulk(
-            db_session, record.id, patch_items,
+            db_session, record.id, patch_items, mark_visits=mark_visits,
         )
 
     # ── Recompute from actual active visits ──────────────────────────

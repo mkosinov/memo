@@ -283,7 +283,9 @@ class VisitService:
 
     # ── GH #171 Task 2 — scenario building blocks (no transaction) ──────
 
-    async def delete_visits_by_record(self, db_session: AsyncSession, record_id: str) -> None:
+    async def delete_visits_by_record(
+        self, db_session: AsyncSession, record_id: str, *, mark_visits: bool = True,
+    ) -> None:
         """Remove ALL visits of one record — WITHOUT committing, no recalc.
 
         Non-transactional service method for the usecases layer (canon
@@ -293,14 +295,18 @@ class VisitService:
         before the replacement batch). Value-typed input (``record_id``);
         the set-based DELETE lives in the owner repository
         (``VisitRepository.delete_by_record_id`` — one statement, no
-        per-row loop). Marks the helper's OWN entity ("visits"); outside
-        an active transaction the mark is a no-op.
+        per-row loop). Marks the helper's OWN entity ("visits") — unless
+        ``mark_visits=False`` (the caller publishes the entity itself or
+        folds the change into its own batch); outside an active
+        transaction the mark is a no-op.
         """
         await self._repository.delete_by_record_id(db_session, record_id)
-        mark_changed("visits")
+        if mark_visits:
+            mark_changed("visits")
 
     async def create_visits_bulk(
         self, db_session: AsyncSession, record_id: str, items: VisitItemList,
+        *, mark_visits: bool = True,
     ) -> None:
         """Insert a BATCH of visits from VALUE payloads — no commit, no recalc.
 
@@ -312,8 +318,9 @@ class VisitService:
         repository (``VisitRepository.create_bulk`` — insertmanyvalues,
         no per-row loop). Capacity/cascade/recalculation timing is the
         scenario's job — nothing is recomputed here. Marks the helper's
-        OWN entity ("visits"); outside an active transaction the mark is
-        a no-op.
+        OWN entity ("visits") — unless ``mark_visits=False`` (the caller
+        publishes the entity itself or folds the change into its own
+        batch); outside an active transaction the mark is a no-op.
         """
         rows = [
             Visit(
@@ -327,7 +334,8 @@ class VisitService:
             for item in items
         ]
         await self._repository.create_bulk(db_session, rows)
-        mark_changed("visits")
+        if mark_visits:
+            mark_changed("visits")
 
 
 @lru_cache

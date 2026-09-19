@@ -189,6 +189,13 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
       // authenticated layout — copy the storage state from the sharer.
       await recipientCtx.addCookies(await page.context().cookies());
 
+      // The load-time records/view fetch is armed BEFORE goto (same pattern
+      // as the sharer leg) — registered afterwards, it would deterministically
+      // miss the response on a warm stack.
+      const recipientView = recipient.waitForResponse(
+        (r) => r.url().includes('/api/v1/records/view') && r.url().includes(`date_from=${toISO(from)}`),
+        { timeout: 15_000 },
+      );
       await recipient.goto(sharedUrl);
       await recipient.waitForSelector('h1:has-text("Управление записями")', { timeout: 60_000 });
 
@@ -196,11 +203,8 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
       expect(new URL(recipient.url()).searchParams.get('from')).toBe(toISO(from));
       expect(new URL(recipient.url()).searchParams.get('to')).toBe(toISO(to));
 
-      // The same API request fires with the shared period.
-      await recipient.waitForResponse(
-        (r) => r.url().includes('/api/v1/records/view') && r.url().includes(`date_from=${toISO(from)}`),
-        { timeout: 15_000 },
-      );
+      // The same API request fired with the shared period.
+      await recipientView;
 
       // The same red range on the mini calendar.
       await expect(miniDay(recipient, from).locator('span')).toHaveClass(/bg-red-400\/45/);

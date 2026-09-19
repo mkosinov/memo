@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { RecordsProvider, useRecords } from '@/contexts/RecordsContext';
 import { RecordsFilters } from './components/RecordsFilters';
 import { RecordsTable } from './components/RecordsTable';
@@ -47,9 +47,15 @@ function RecordsPageContent() {
 }
 
 export default function RecordsPage() {
+  // #138 Task 5 (spec §2.2): the tree reads ?from=&to= via useSearchParams —
+  // the Suspense boundary is MANDATORY for the Next 14 static build (same
+  // pattern as app/(main)/schedule/page.tsx); the deep-link first paint
+  // (?from=2024-01-01) must not fetch with the default range.
   return (
-    <RecordsProvider>
-      <RecordsPageContent />
-    </RecordsProvider>
+    <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+      <RecordsProvider>
+        <RecordsPageContent />
+      </RecordsProvider>
+    </Suspense>
   );
 }

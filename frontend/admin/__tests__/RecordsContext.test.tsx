@@ -28,6 +28,12 @@ vi.mock('@memo/api-client', () => ({
   getRecordsView: vi.fn(),
 }));
 
+// #138 Task 5: the period comes from the URL (useRecordsPeriod →
+// useSearchParams), so the old NavigationContext mock is replaced by the
+// shared next-navigation mock. Default: /records with NO params → the
+// current-week monday..sunday default range.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+
 import { getRecordsView } from '@memo/api-client';
 import type {
   PaginatedResponse,
@@ -35,19 +41,7 @@ import type {
   VisitResponse,
 } from '@memo/api-client';
 
-// ─── Mock NavigationContext (provides dateFrom/dateTo) ────────────────────
-
-vi.mock('@/contexts/NavigationContext', () => ({
-  useNavigation: vi.fn(() => ({
-    dateFrom: '2026-01-01',
-    dateTo: '2026-01-31',
-    selectDateRange: vi.fn(),
-  })),
-}));
-
-import { useNavigation } from '@/contexts/NavigationContext';
-
-const mockUseNavigation = vi.mocked(useNavigation);
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 import { RecordsProvider, useRecords } from '../contexts/RecordsContext';
 
@@ -103,16 +97,25 @@ function envelope<T>(items: T[]) {
   return { items, total: items.length, page: 1, per_page: 10 };
 }
 
-const DEFAULT_RECORDS_KEY = [
-  'records',
-  1,
-  10,
-  '2026-01-01',
-  '2026-01-31',
-  { locationId: '', serviceId: '', masterId: '', status: '', search: '' },
-  'date',
-  'asc',
-];
+// #138 Task 5: with NO URL params the key range = monday..sunday of the
+// current week (the old NavigationContext default) — the invariant pinned in
+// useRecordsPeriod/RecordsPeriodContext tests. Computed, not hardcoded.
+import { getMonday, toISODate } from '@/lib/datetime';
+
+const DEFAULT_RECORDS_KEY = (() => {
+  const monday = getMonday(new Date());
+  const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+  return [
+    'records',
+    1,
+    10,
+    toISODate(monday),
+    toISODate(sunday),
+    { locationId: '', serviceId: '', masterId: '', status: '', search: '' },
+    'date',
+    'asc',
+  ];
+})();
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -134,11 +137,7 @@ describe('RecordsContext — no display lookup maps (GH #213 Task 11)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    __resetNavigation('', '/records');
 
     vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
@@ -186,11 +185,7 @@ describe('RecordsContext — canonical cache seeding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    __resetNavigation('', '/records');
 
     vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
@@ -262,11 +257,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    __resetNavigation('', '/records');
 
     vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
@@ -288,8 +279,8 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
         expect.objectContaining({
           page: 1,
           per_page: 10,
-          date_from: '2026-01-01',
-          date_to: '2026-01-31',
+          date_from: DEFAULT_RECORDS_KEY[3],
+          date_to: DEFAULT_RECORDS_KEY[4],
           location_id: 'loc-1',
           sort_by: 'date',
           sort_order: 'asc',
@@ -344,11 +335,11 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
       expect(result.current.page).toBe(3);
     });
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-02-01',
-      dateTo: '2026-02-28',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    // #138 Task 5: the range changes via a committed navigation — the mocked
+    // router adopts the new params and the hook re-renders with them.
+    act(() => {
+      __resetNavigation('?from=2026-02-01&to=2026-02-28', '/records');
+    });
 
     rerender();
 
@@ -473,11 +464,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    __resetNavigation('', '/records');
 
     vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });
@@ -611,11 +598,7 @@ describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockUseNavigation.mockReturnValue({
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      selectDateRange: vi.fn(),
-    } as unknown as ReturnType<typeof useNavigation>);
+    __resetNavigation('', '/records');
 
     vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
   });

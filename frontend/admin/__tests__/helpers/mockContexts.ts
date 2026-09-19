@@ -157,6 +157,8 @@ export function createMockRecordsContext(
     setFilters: vi.fn(),
     setSort: vi.fn(),
     resetFilters: vi.fn(),
+    // #138 Task 5: URL period writer — no-op by default, override per-test.
+    setPeriod: vi.fn(),
     isLoading: false,
     loading: false,
     isPending: false,

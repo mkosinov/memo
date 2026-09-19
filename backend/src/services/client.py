@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.scope import mask_phone
 from src.domain.visit_status import VisitStatus
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.enums import ArchiveStatus
@@ -186,6 +187,44 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         if master_key is not None:
             return _mask_client_contacts(item)
         return item
+
+    # ── GH #171 Task 2 — scenario building block (no transaction) ───────
+
+    async def get_or_create_by_phone(
+        self,
+        db_session: AsyncSession,
+        phone: str,
+        name: str | None = None,
+    ) -> Client:
+        """Find the client by exact phone, or create one — WITHOUT committing.
+
+        Non-transactional scenario building block for the usecases layer
+        (canon docs/domain-rules/service-layer.md rules 3-4) — moved
+        BEHAVIOR-FOR-BEHAVIOR from ``RecordService._resolve_client_by_phone``
+        (the future create_record scenario re-links it in Task 6):
+        exact-phone lookup; on a miss a client is created with the
+        caller-supplied display name (``None`` → "Гость" — the legacy
+        empty-visit-name default) and the default channel "whatsapp",
+        then flushed so ``id`` is populated. ``mark_changed("clients")``
+        fires ONLY on the creation branch (GH #239 §3.3); outside an
+        active transaction the mark is a no-op. Value-typed parameters
+        (``phone``, ``name``) — no foreign ORM/schema objects.
+        """
+        result = await db_session.execute(
+            select(Client).where(Client.phone == phone)
+        )
+        client = result.scalar_one_or_none()
+        if not client:
+            client = Client(
+                phone=phone,
+                name=name or "Гость",
+                channel="whatsapp",
+            )
+            db_session.add(client)
+            await db_session.flush()
+            # GH #239 §3.3: conditional mark — only when actually created
+            mark_changed("clients")
+        return client
 
 
 @lru_cache

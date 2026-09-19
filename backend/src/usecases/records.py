@@ -26,9 +26,25 @@ the scenario marks its OWN entity explicitly
 byte-identical to the former method-based ``RecordService.create``.
 
 Behavior-preserving extraction of the former ``RecordService.create`` /
-``RecordService.update`` / ``RecordService.patch`` chains (step order,
-conditional cache marks, and status derivation are byte-identical to the
-pre-refactor flow).
+``RecordService.update`` / ``RecordService.patch`` chains (step order and
+status derivation are byte-identical to the pre-refactor flow).
+
+EVENT GRID (GH #239), pinned by
+``tests/usecases/test_records_update_patch.py``:
+
+- ``create_record`` — the accumulator is opened EMPTY (selfless wrapper)
+  and the scenario's ``mark_changed("records")`` + the visit helpers'
+  ``mark_changed("visits")`` (create_visits_bulk) publish
+  ``{"records", "visits"}`` — same as the pre-refactor flow;
+- ``update_record`` / ``patch_record`` (with a ``visits`` payload) —
+  ``{"records", "visits"}``: WIDER than the pre-refactor
+  ``{"records"}``. DELIBERATE, not parity: each visit helper marks its
+  OWN entity (``delete_visits_by_record`` + ``create_visits_bulk`` →
+  ``"visits"``), and visits genuinely change in these actions — the old
+  flow's ``{"records"}``-only grid was a latent invalidation gap, so
+  this is additive invalidation, not a behavior regression. A
+  comment/custom_price-only patch never calls the visit helpers → grid
+  stays ``{"records"}``.
 """
 
 from __future__ import annotations

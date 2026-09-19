@@ -31,7 +31,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 - **price >= 0** (only Pydantic field-level constraint)
 - **Cascade to parent Record:** Visit create / update / patch / delete recompute the parent Record's seats + status (Phase 1: `domain/record_visits.py` → `recompute_record_seats` + `recompute_record_status`)
 - Filtered by record_id on list
-- **PATCH** merges only provided fields; `None` means "don't change"
+- **PATCH** merges only provided fields. Null-policy: `null` on NOT NULL fields (`price`, `status`) is ignored ("don't change"); `null` on nullable fields (`visitor_id`, `tariff_id`, `custom_price`) is applied and clears the field. Empty body (no fields set) → full no-op (`updated_at` unchanged, no Record cascade).
 
 ### Frontend
 - **Inline editing:** tariff / price / status edited via `PATCH /api/v1/visits/:id`

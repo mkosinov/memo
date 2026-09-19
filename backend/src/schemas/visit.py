@@ -31,7 +31,10 @@ class VisitUpdate(VisitBase):
 class VisitPatch(BaseModel):
     """Request schema for partial update (PATCH /api/v1/visits/{id}).
 
-    All fields optional. None means 'don't change'.
+    All fields optional. Null-policy: ``null`` on NOT NULL fields
+    (``price``, ``status``) is ignored ("don't change"); ``null`` on
+    nullable fields (``visitor_id``, ``tariff_id``, ``custom_price``) is
+    applied and clears the field.
     """
 
     visitor_id: str | None = None

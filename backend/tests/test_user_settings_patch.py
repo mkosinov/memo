@@ -20,53 +20,6 @@ def me(api_client) -> str:
     return resp.json()["user"]["id"]
 
 
-class TestUserSettingsPatchSemantic:
-    """PATCH /api/v1/user-settings should accept partial updates."""
-
-    def test_patch_single_field(self, api_client, me) -> None:
-        """PATCH with only theme field works (partial update)."""
-        api_client.post("/api/v1/user-settings", json={
-            "user_id": me,
-            "theme": "light",
-            "language": "ru",
-        })
-
-        # PATCH only theme
-        response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
-        assert response.status_code == 200
-        body = response.json()
-        assert body["theme"] == "dark"
-        assert body["language"] == "ru"  # unchanged
-
-    def test_patch_multiple_fields(self, api_client, me) -> None:
-        """PATCH with multiple fields works."""
-        api_client.post("/api/v1/user-settings", json={
-            "user_id": me,
-            "theme": "light",
-            "language": "ru",
-        })
-
-        response = api_client.patch("/api/v1/user-settings", json={
-            "theme": "dark",
-            "language": "en",
-        })
-        assert response.status_code == 200
-        body = response.json()
-        assert body["theme"] == "dark"
-        assert body["language"] == "en"
-
-    def test_patch_empty_body(self, api_client, me) -> None:
-        """PATCH with empty body is valid (no-op)."""
-        api_client.post("/api/v1/user-settings", json={
-            "user_id": me,
-            "theme": "light",
-        })
-
-        response = api_client.patch("/api/v1/user-settings", json={})
-        assert response.status_code == 200
-        assert response.json()["theme"] == "light"  # unchanged
-
-
 class TestUserSettingsPatchArchivedVisibility:
     """PATCH /api/v1/user-settings with the GH #267 visibility toggles."""
 

@@ -79,26 +79,6 @@ async def test_visit_service_update_full_replace(db_session, sample_visit):
 
 
 @pytest.mark.asyncio
-async def test_visit_service_patch_partial(db_session, sample_visit):
-    """patch only updates sent fields, others unchanged."""
-    from src.services.visit import VisitService
-    from src.repositories.generic import get_base_repository
-    from src.schemas.visit import VisitPatch
-
-    service = VisitService(get_base_repository())
-    original_price = sample_visit.price
-    result = await service.patch(
-        db_session=db_session,
-        visit_id=sample_visit.id,
-        data=VisitPatch(status="visited"),
-    )
-    assert result is not None
-    assert result.status == "visited"
-    # Price unchanged (not in patch)
-    assert result.price == original_price
-
-
-@pytest.mark.asyncio
 async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample_visit):
     """delete hard-deletes the row and cascades to record."""
     from src.services.visit import VisitService

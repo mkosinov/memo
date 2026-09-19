@@ -66,9 +66,10 @@ repositories — единственное место табличных кома
 
 Сценарный эндпоинт «удалить запись»
   → usecases.delete_record (декорирован)     [1 транзакция + один пакет событий]
-      → PaymentService.delete_by_record      (без транзакции, id на входе)
-          → репозиторий платежей: delete_by_record_id
       → VisitService.delete_visits_by_record (без транзакции)
           → репозиторий посещений
+      → PaymentService.delete_by_record      (без транзакции, id на входе)
+          → репозиторий платежей: delete_by_record_id
+      → репозиторий записей: снос связок record_tags (своё ребро)
       → RecordService: строка записи
 ```

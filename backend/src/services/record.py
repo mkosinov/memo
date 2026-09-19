@@ -29,7 +29,7 @@ from src.models.staff import Staff
 from src.models.tag import record_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
-from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.record import RecordRepository, get_record_repository
 from src.repositories.search import SearchField, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
@@ -116,7 +116,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     ]
 
     def __init__(
-        self, repository: BaseRepository, model: type[Record]
+        self,
+        repository: RecordRepository,
+        model: type[Record],
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
@@ -496,6 +498,24 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await self.delete(db_session, id)
         return True
 
+    async def delete_row_with_tags(self, db_session: AsyncSession, record_id: str) -> None:
+        """Remove a record's OWN tag bundles + the record row — WITHOUT committing.
+
+        GH #171 Task 5 scenario building block (no transaction; canon
+        docs/domain-rules/service-layer.md rules 1, 3-4): the caller's
+        scenario owns the transaction boundary and the commit. The
+        ``record_tags`` join rows are the record's OWN child links without
+        a lifecycle of their own (rule 1), so their bulk delete lives in
+        the owner repository (``RecordRepository.delete_tags_by_record_id``
+        — ONE set-based statement, #171 Task 1) and runs BEFORE the row
+        (the join's FKs carry no ondelete action — #194). The row goes by
+        the same bulk ``DELETE ... WHERE id`` statement semantics as
+        ``RecordService.delete`` (no instance-delete switch). No event
+        marks here — "records" is the scenario's own-entity mark.
+        """
+        await self._repository.delete_tags_by_record_id(db_session, record_id)
+        await db_session.execute(delete(Record).where(Record.id == record_id))
+
     async def create_row(
         self,
         db_session: AsyncSession,
@@ -647,5 +667,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
 
 @lru_cache
 def get_record_service() -> RecordService:
-    """Returns a singleton RecordService."""
-    return RecordService(get_base_repository(), Record)
+    """Returns a singleton RecordService over the OWNER repository (GH #171 T1).
+
+    The specialized ``RecordRepository`` subclasses ``BaseRepository``, so
+    the generic CRUD surface is unchanged — and the service's own-edge
+    commands (``delete_tags_by_record_id``) execute through the owner repo.
+    """
+    return RecordService(get_record_repository(), Record)

@@ -48,6 +48,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.domain.deletion import (
+    BlockingDepsError,
+    InvalidResolutionError,
+    StaleDependenciesError,
+    collect_dependencies,
+    collect_dependency_ids,
+    has_blocking_deps,
+    stale_expected_entities,
+    validate_resolutions,
+)
 from src.domain.record_visits import (
     check_activity_capacity,
     recompute_record_seats,
@@ -57,6 +67,7 @@ from src.events.emitter import mark_changed
 from src.schemas.record import VisitItem
 from src.services.client import get_client_service
 from src.services.decorators import transactional
+from src.services.payment import get_payment_service
 from src.services.record import get_record_service
 from src.services.visit import get_visit_service
 from src.services.visitor import get_visitor_service
@@ -320,3 +331,99 @@ async def patch_record(
     await recompute_record_status(db_session, record.id)
     await db_session.refresh(record)
     return record
+
+
+@transactional
+async def delete_record(
+    db_session: AsyncSession,
+    id: str,
+    resolutions: dict[str, str] | None,
+    expected: dict[str, list[str]] | None,
+) -> bool | None:
+    """Delete a record — the whole deferred-delete business chain (#285).
+
+    Formerly the commit branch of the route + ``RecordService.resolve_delete``
+    (behavior-for-behavior move, GH #171 Task 5; Corridor 2 — canon
+    docs/domain-rules/service-layer.md rule 2). The ROUTE keeps transport:
+    the form 422s (``expected_state_required`` /
+    ``dry_run_with_resolutions_forbidden``), the scope probe, the dry-run
+    preview branch (pure read — no transaction, no SSE), and the 409/404/
+    422 mapping + response format. This scenario owns the business:
+    dependency collection, snapshot verification, resolutions validation,
+    and the cascade. The #285 contract is unchanged.
+
+    Step order is identical to the pre-refactor flow:
+
+    0. existence probe — missing id → ``None`` (the route maps that to
+       404);
+    1. collect dependencies (``collect_dependencies`` — the 409 tree,
+       with per-row ``items``);
+    2. defensive blocking check → ``BlockingDepsError`` (route → 422;
+       unreachable for records — every dep is cascade — kept for parity);
+    3. expected id-set verification (rev5/rev6): collect
+       ``collect_dependency_ids`` and require
+       ``set(now_ids) ⊆ set(expected[entity])`` for every non-auto dep
+       (auto-deps — record_tags — are exempt); mismatch →
+       ``StaleDependenciesError`` carrying the fresh tree (route → 409
+       ``stale_dependencies`` + tree). Subset, not equality: a dep that
+       disappeared mid-window does not block; one that APPEARED does.
+    4. resolutions validation → ``InvalidResolutionError`` (route → 422);
+       ``resolutions=None`` (clean path — the commit declared only
+       ``expected``) behaves as {} — trivial for a clean record;
+    5. mark the own entity ("records") — AFTER every check has passed:
+       in the flow being moved ONLY the cascade was ``@transactional``
+       (the auto-mark), so the failed branches must raise BEFORE the
+       mark — the decorator then aborts without publishing (exact
+       per-branch parity: no event batch on 404/422/409-stale);
+    6. the cascade, strictly in today's order: visits
+       (``delete_visits_by_record``, marks "visits") → payments
+       (``delete_by_record``, marks "payments") → record_tags bundles +
+       the record row (``delete_row_with_tags`` — the owner service's
+       own-edge command from #171 Task 1);
+    7. return ``True`` (route → 204).
+
+    Event grid (GH #239): success publishes EXACTLY
+    ``{"records", "visits", "payments"}`` — the pre-refactor grid of
+    ``RecordService.delete``; every failure branch publishes nothing.
+
+    NOTE: call as ``delete_record(None, db_session=..., id=...,
+    resolutions=..., expected=...)`` — see the module docstring for why.
+    """
+    # ── Existence probe (route → 404 on None). The loaded row's class is
+    #    the model descriptor the deletion domain is keyed on — the
+    #    scenario never imports ORM models at runtime (canon rule 2). ──
+    record = await get_record_service().get(db_session, id)
+    if record is None:
+        return None
+    model = type(record)
+
+    # ── Dependency collection (the 409 tree) ─────────────────────────
+    deps = await collect_dependencies(db_session, model, id)
+
+    # ── Defensive blocking check (route → 422; never fires for Record).
+    if has_blocking_deps(deps):
+        raise BlockingDepsError(
+            "Entity has blocking dependencies — archive instead"
+        )
+
+    # ── Expected snapshot verification FIRST (rev5/rev6) — a stale
+    #    commit must 409 BEFORE the resolutions validation could turn
+    #    it into a 422. Auto-deps (record_tags) are exempt. ───────────
+    now_ids = await collect_dependency_ids(db_session, model, id)
+    if stale_expected_entities(model, now_ids, expected or {}):
+        raise StaleDependenciesError(deps)
+
+    # ── Resolutions validation (route → 422 on issues). ``None`` (the
+    #    clean-path declaration) validates trivially for a clean record.
+    issues = validate_resolutions(model, deps, resolutions or {})
+    if issues:
+        msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
+        raise InvalidResolutionError(msg)
+
+    # ── All checks passed — mark the own entity (selfless @transactional
+    #    parity; see the step-5 note above) and run the cascade. ──────
+    mark_changed("records")
+    await get_visit_service().delete_visits_by_record(db_session, id)
+    await get_payment_service().delete_by_record(db_session, id)
+    await get_record_service().delete_row_with_tags(db_session, id)
+    return True

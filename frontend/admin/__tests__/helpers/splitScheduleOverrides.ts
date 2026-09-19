@@ -53,7 +53,7 @@ const VIEW_KEYS = [
   'stamp',
   'setStamp',
   'currentWeek',
-  'setCurrentWeek',
+  'goToToday',
   'prevPeriod',
   'nextPeriod',
 ] as const satisfies readonly (keyof ScheduleViewContextType)[];

@@ -36,8 +36,8 @@ import {
 import { staleAwareOnError } from '@/lib/staleAwareOnError';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
-import { composeLocalISO, dayIndexToDate, calculateGridTimeRange } from '@/lib/datetime';
-import { useNavigation } from '@/contexts/NavigationContext';
+import { composeLocalISO, dayIndexToDate, calculateGridTimeRange, toISODate } from '@/lib/datetime';
+import { useScheduleView } from './ScheduleViewContext';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 // Mutation key shared by create/update — feeds the Topbar indicator
@@ -149,9 +149,17 @@ export function ScheduleDataProvider({
   const queryClient = useQueryClient();
   const { enqueuePendingAction } = usePendingActions();
   const { showToast } = useUI();
-  const { dateFrom, dateTo } = useNavigation();
-  const weekStart = dateFrom;
-  const weekEnd = dateTo;
+  // #138 Task 2: the fetch range derives from the URL view state (week of
+  // ?date) instead of NavigationContext. Same monday..sunday `YYYY-MM-DD`
+  // strings as before → React Query keys and SSE invalidations (#239) are
+  // byte-identical.
+  const { currentWeek } = useScheduleView();
+  const weekStart = useMemo(() => toISODate(currentWeek), [currentWeek]);
+  const weekEnd = useMemo(() => {
+    const sunday = new Date(currentWeek);
+    sunday.setDate(sunday.getDate() + 6);
+    return toISODate(sunday);
+  }, [currentWeek]);
   // #286 Task 5: pending-confirm dialog state — plain useState; the state
   // lives in the provider so the dialog survives the card/modal unmount.
   const [pendingActivityConfirm, setPendingActivityConfirm] =
@@ -164,10 +172,8 @@ export function ScheduleDataProvider({
   useEffect(() => {
     setPendingActivityConfirm(null);
   }, [weekStart, setPendingActivityConfirm]);
-  // Local week-Monday derivation for buildAdminSchedule + dayIndex→date math
-  // (spec §3: the data provider calls useNavigation() internally; currentWeek /
-  // setCurrentWeek STATE lives in the view context, not here).
-  const currentWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
+  // dayIndex→date math (buildAdminSchedule, addActivity, updateActivity) uses
+  // the URL-derived `currentWeek` directly — there is no separate week state.
 
   // Raw API data (activities use the week-range key; see GH #142). The
   // queryFn is a stable callback — the ensure-fresh fetchQuery (D3 step 1)

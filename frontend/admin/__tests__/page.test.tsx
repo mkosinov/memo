@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+// NavigationProvider stays ONLY until Task 3 rewires Topbar (the last
+// NavigationContext consumer in this tree).
 import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
@@ -44,10 +46,11 @@ vi.mock('../contexts/AuthContext', () => ({
 
 import { getRecordsView, getPaymentTotals } from '@memo/api-client';
 
-// usePathname is used by Sidebar (not by page itself, but shared context may trigger it)
-vi.mock('next/navigation', () => ({
-  usePathname: () => '/',
-}));
+// #138 Task 2: ScheduleViewProvider reads the URL via useScheduleView, so the
+// page tree needs App Router APIs — reactive stand-in (push/replace update
+// params and re-render subscribers). usePathname covers Sidebar too.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 function renderPage() {
   const queryClient = new QueryClient({
@@ -59,10 +62,8 @@ function renderPage() {
         <NavigationProvider>
           <UserSettingsProvider>
             <PendingActionsProvider>
-          <ScheduleProvider>
               <SchedulePage />
-            </ScheduleProvider>
-          </PendingActionsProvider>
+            </PendingActionsProvider>
           </UserSettingsProvider>
         </NavigationProvider>
       </UIProvider>
@@ -72,6 +73,7 @@ function renderPage() {
 
 describe('Schedule Page', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.mocked(getRecordsView).mockClear();
     vi.mocked(getPaymentTotals).mockClear();
   });

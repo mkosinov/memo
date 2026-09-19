@@ -30,6 +30,7 @@ from src.schemas.record import (
 )
 from src.services.activity import get_activity_service
 from src.services.record import RecordService, get_record_service, map_record
+from src.usecases.records import create_record as create_record_scenario
 
 router = APIRouter(tags=["records"])
 
@@ -160,7 +161,12 @@ async def create_record(
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
     await _activity_scoped_or_404(session, data.activity_id, scope)
-    record = await service.create(db_session=session, data=data)
+    # Corridor 2 (GH #171): the multi-entity booking chain lives in the
+    # usecases layer — the route stays transport-only and passes the
+    # master scope through UNCHANGED (scoped access was already gated on
+    # the target activity above). Leading None = the @transactional
+    # wrapper's unused self slot (selfless-function convention).
+    record = await create_record_scenario(None, db_session=session, data=data)
     return map_record(record)
 
 

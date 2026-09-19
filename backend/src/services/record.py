@@ -503,85 +503,39 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await self.delete(db_session, id)
         return True
 
-    @transactional
-    async def create(
-        self, db_session: AsyncSession, data: RecordCreate
+    async def create_row(
+        self,
+        db_session: AsyncSession,
+        *,
+        activity_id: str,
+        client_id: str | None,
+        seats: int,
+        comment: str | None = None,
+        custom_price: int | None = None,
     ) -> Record:
-        """Create record with nested visits, auto-compute seats.
+        """Insert ONE record row — WITHOUT committing, no recalculation.
 
-        Supports both phone-based and client-ID-based flows.
-        Raises HTTPException 409 if activity is at capacity.
+        GH #171 Task 3: the row-level remainder of the former
+        ``RecordService.create`` — the find-or-create / visit-insert /
+        recalculation orchestration moved to the ``create_record``
+        scenario (usecases, Corridor 2 — canon
+        docs/domain-rules/service-layer.md rules 2, 5, 6). This is the
+        owner service's own-entity row op (rule 1): add + flush so the
+        caller's scenario gets a populated ``id``; the transaction
+        boundary, the visit batch, and the recalculation timing belong
+        to the scenario. Value-typed parameters — no foreign
+        ORM/schema objects.
         """
-        # ── Capacity check ─────────────────────────────────────────────
-        effective_seats = len(data.visits)
-        await check_activity_capacity(db_session, data.activity_id, seats=effective_seats)
-
-        # ── Resolve client ──────────────────────────────────────────────
-        if data.phone:
-            client = await self._resolve_client_by_phone(db_session, data)
-        else:
-            client = None
-
-        # ── Resolve visitors (name-based, ID-based, or anonymous) ───────
-        visitor_ids: list[str | None] = []
-        for item in data.visits:
-            if item.name:
-                # Name-based flow: find-or-create Visitor
-                visitor = await self._resolve_visitor_by_name(
-                    db_session, client_id=client.id if client else data.client_id, name=item.name, age=item.age,
-                )
-                visitor_ids.append(visitor.id)
-            elif item.visitor_id:
-                # ID-based flow: use existing Visitor directly
-                visitor_ids.append(item.visitor_id)
-            else:
-                # Anonymous visit — no visitor linked
-                visitor_ids.append(None)
-
-        # GH #239 §3.3: conditional cascade marks live in the resolvers
-        # (creation branches only) — see _resolve_client_by_phone /
-        # _resolve_visitor_by_name below.
-
-        # ── Create Record (status derived after visits flush) ──────────
         record = Record(
-            activity_id=data.activity_id,
-            client_id=client.id if client else data.client_id,
+            activity_id=activity_id,
+            client_id=client_id,
             status="pending",
-            seats=effective_seats,
-            comment=data.comment,
-            custom_price=data.custom_price,
+            seats=seats,
+            comment=comment,
+            custom_price=custom_price,
         )
         db_session.add(record)
         await db_session.flush()
-
-        # ── Create Visits ───────────────────────────────────────────────
-        for i, item in enumerate(data.visits):
-            visit = Visit(
-                record_id=record.id,
-                visitor_id=visitor_ids[i],
-                # GH #257 US1: the booking tail's default tariff rides on the
-                # VisitItem — persist it (parity with the PUT path :646).
-                tariff_id=item.tariff_id,
-                price=item.price,
-                custom_price=item.custom_price,
-                status=item.status.value,
-            )
-            db_session.add(visit)
-
-        await db_session.flush()
-
-        # GH #239 §3.3: nested visits are always created by this flow
-        mark_changed("visits")
-
-        # ── Recompute seats and status from actual visits ────────────────
-        # Route final persisted seats through recompute_record_seats so
-        # create/update/patch all share the same single source of truth
-        # (US-8). The inline `seats=effective_seats` above is only an
-        # initial value before the visits are flushed; after the flush
-        # we always recompute from the DB.
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-        await db_session.refresh(record)
         return record
 
     @staticmethod

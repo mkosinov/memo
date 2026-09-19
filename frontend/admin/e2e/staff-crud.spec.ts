@@ -13,6 +13,8 @@ import { createTestMaster, cleanup } from './fixtures/factories';
 // Tests — Staff Page
 // ---------------------------------------------------------------------------
 
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
 test.describe('Staff — Table and Navigation', () => {
   test('navigates to staff page and renders table', async ({ page }) => {
     await waitForStaffReady(page);
@@ -45,23 +47,46 @@ test.describe('Staff — Table and Navigation', () => {
     await expect(positionsHeader).not.toContainText('↕');
   });
 
-  test('«Архив» status column shows the badge after enabling it via the column picker (GH #220 Task 2)', async ({ page }) => {
-    await waitForStaffReady(page);
+  test('«Архив» status column shows the badge after enabling it via the column picker (GH #220 Task 2)', async ({ page, request }) => {
+    // The default view is server-filtered to status=active, and the seed
+    // holds no archived person — create one via API so both badge texts can
+    // be observed, then archive it (parity with archive-restore-parity.spec).
+    const person = await createTestMaster(request, { first_name: 'Архивная', last_name: `Бейджева ${Date.now()}` });
+    try {
+      const archived = await request.post(`${BACKEND}/api/v1/staff/${person.id}/archive`, { data: {} });
+      expect(archived.ok()).toBeTruthy();
 
-    await page.click('[aria-label="Настроить колонки"]');
-    await page.getByLabel('Архив').check();
-    await page.keyboard.press('Escape');
+      await waitForStaffReady(page);
 
-    const archiveHeader = page.locator('table thead th').filter({ hasText: 'Архив' });
-    await expect(archiveHeader).toBeVisible();
+      await page.click('[aria-label="Настроить колонки"]');
+      await page.getByLabel('Архив').check();
+      await page.keyboard.press('Escape');
 
-    // Seed contains both an active person («Активен») and an archived one
-    // («Архив») — the badge reflects the inverted `archived` field (#207).
-    // Scoped to the table: the status filter's hidden <option> also reads
-    // «Архив» and would win the DOM-first getByText match otherwise.
-    const table = page.locator('table');
-    await expect(table.getByText('Активен').first()).toBeVisible();
-    await expect(table.getByText('Архив', { exact: true }).first()).toBeVisible();
+      const archiveHeader = page.locator('table thead th').filter({ hasText: 'Архив' });
+      await expect(archiveHeader).toBeVisible();
+
+      const table = page.locator('table');
+      // Active seed rows render «Активен» (scoped to the table: the status
+      // filter's hidden <option> also reads «Архив» and would win the
+      // DOM-first getByText match otherwise).
+      await expect(table.getByText('Активен').first()).toBeVisible();
+
+      // Switch the server filter to archived — our person's badge reads
+      // «Архив» (inverted `archived` field, #207).
+      const filtered = page.waitForResponse(
+        (resp) => resp.status() === 200 && resp.url().includes('status=archived'),
+        { timeout: 10_000 },
+      );
+      await page.getByLabel('Фильтр по статусу').selectOption('archived');
+      await filtered;
+      await page.waitForTimeout(300);
+
+      const archivedRow = page.locator(`[data-testid="master-row-${person.id}"]`);
+      await expect(archivedRow).toBeVisible({ timeout: 10_000 });
+      await expect(archivedRow.getByText('Архив', { exact: true })).toBeVisible();
+    } finally {
+      await cleanup(request, `/api/v1/staff/${person.id}`);
+    }
   });
 
   test('staff are loaded from API and rows keep the master-row-* testid', async ({ page }) => {

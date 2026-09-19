@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-19
+
+### Changed
+- **GH #138 — URL как источник правды: view-state расписания и период записей в URL** — branch
+  `feat/138-schedule-url-state` (13 commits: `8b9774ab..37c4197b`; спека
+  `docs/specs/2026-07-17-schedule-view-url-state-138-design.md` rev5, план
+  `docs/plans/2026-09-19-schedule-view-url-state-138-plan.md`, задачи T1–T10):
+  - **Расписание:** вид, дата и колонки живут в URL — `?view=week|day`, `?date=YYYY-MM-DD`,
+    `?col=<id>`; новый хук `useScheduleView` (replace-навигация + фикс последовательной записи против
+    гонок параллельных апдейтов), `ScheduleViewContext` — прокси над хуком; Topbar/Toolbar пишут через
+    сеттеры хука; страница расписания обёрнута в Suspense (`useSearchParams`).
+  - **Записи:** период записей живёт в URL `?from`/`?to` (`useRecordsPeriod`, RecordsFilters);
+    `/clients` переведён на `GridSettingsProvider`.
+  - **Удалено:** императивная навигация — CustomEvent-шина `__memo-*` (тестовые бэкдоры) и
+    `NavigationContext` удалены; Menubar MiniCalendar стал навигатором + индикатором периода
+    (подсветка недели/дня на /schedule, красный диапазон на /records, клиппинг по границам месяца).
+  - **DayView:** перестановка колонок доступна с клавиатуры — KeyboardSensor + фикс activator node
+    (клавиши больше не перехватываются вне drag).
+  - **E2E:** 11 спеков переведены с `__memo-*`-хуков на реальные взаимодействия; новый
+    `schedule-url-state.spec.ts` — URL-сценарии US-1..US-7.
+  - **Tests:** admin vitest **2218 passed** (137 файлов); lint **0 errors / 35 warnings** (бюджет 38);
+    `tsc` clean; e2e US-1..US-7 зелёные в таргетированных прогонах (полные локальные шарды деградировали
+    от насыщения хоста — финальное решенье за CI).
+
 ## [Unreleased] — 2026-09-18
 
 ### Changed

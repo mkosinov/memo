@@ -359,12 +359,17 @@ function MiniCalendarContent() {
                   period.kind === 'schedule' &&
                   (period.view === 'day' ? isSameDay(day, period.date) : isInIndicatorWeek(day));
 
-                // /records with a valid explicit ?from&to → red range tint.
-                // Edges carry distinct rounding ("[5 6 7]" — start/end read).
+                // /records with a valid explicit ?from&to → red range tint,
+                // CLIPPED to the visible month (spec §2.3 «срез видимого
+                // месяца»): out-of-month ghost cells stay plain. Edges carry
+                // distinct rounding ("[5 6 7]" — start/end read).
                 const dayKey = toISODate(day);
-                const isRangeStart = period.kind === 'range' && dayKey === toISODate(period.from);
-                const isRangeEnd = period.kind === 'range' && dayKey === toISODate(period.to);
+                const isRangeStart =
+                  inMonth && period.kind === 'range' && dayKey === toISODate(period.from);
+                const isRangeEnd =
+                  inMonth && period.kind === 'range' && dayKey === toISODate(period.to);
                 const inRange =
+                  inMonth &&
                   period.kind === 'range' &&
                   dayKey >= toISODate(period.from) &&
                   dayKey <= toISODate(period.to);

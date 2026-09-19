@@ -479,6 +479,26 @@ describe('MiniCalendar — URL-driven navigator (#138 T4)', () => {
     expect(daySpan('12 июня')).not.toHaveClass('bg-red-400/45');
   });
 
+  it('/records range is clipped to the visible month: ghosts keep no red classes', () => {
+    // ?from=Jul 28 → displayed month is JULY; the grid renders Aug 1–5 as
+    // trailing out-of-month ghosts INSIDE the ?from..?to span — spec §2.3
+    // «срез видимого месяца»: they must stay plain ghosts, no red, no edges.
+    __resetNavigation('?from=2026-07-28&to=2026-08-05', '/records');
+    renderWithProviders();
+    expect(screen.getByText('Июль 2026')).toBeInTheDocument();
+    // In-month range days keep the range treatment (start edge / middle / end)
+    expect(daySpan('28 июля')).toHaveClass('bg-red-400/45', 'rounded-l-full');
+    expect(daySpan('30 июля')).toHaveClass('bg-red-400/25');
+    expect(daySpan('31 июля')).not.toHaveClass('rounded-l-full');
+    // August ghosts: dimmed, NO range classes
+    for (const ghost of ['1 августа', '2 августа', '4 августа', '5 августа']) {
+      expect(daySpan(ghost)).not.toHaveClass('bg-red-400/45');
+      expect(daySpan(ghost)).not.toHaveClass('bg-red-400/25');
+      expect(daySpan(ghost)).not.toHaveClass('rounded-l-full');
+      expect(daySpan(ghost)).not.toHaveClass('rounded-r-full');
+    }
+  });
+
   // ── Push targets ──────────────────────────────────────────────────────────
 
   it('day click pushes /schedule?view=week&date=<day>', () => {

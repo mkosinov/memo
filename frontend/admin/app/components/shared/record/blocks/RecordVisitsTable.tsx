@@ -8,6 +8,7 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
+import { ADULT_AGE_SENTINEL, KIDS_AGES, TEEN_AGES } from '@/lib/age-groups';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
 import { InlineEditRow } from '../InlineEditRow';
@@ -159,16 +160,16 @@ function AgeSelect({
       data-testid={testId}
     >
       <optgroup label="Дети">
-        {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
+        {KIDS_AGES.map((n) => (
           <option key={n} value={String(n)}>{n}</option>
         ))}
       </optgroup>
       <optgroup label="Подростки">
-        {[12, 13, 14, 15, 16, 17].map((n) => (
+        {TEEN_AGES.map((n) => (
           <option key={n} value={String(n)}>{n}</option>
         ))}
       </optgroup>
-      <option value="adult">Взрослый</option>
+      <option value={ADULT_AGE_SENTINEL}>Взрослый</option>
     </select>
   );
 }

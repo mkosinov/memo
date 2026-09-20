@@ -17,9 +17,11 @@ Client outer transaction on mid-cascade failure) lives in Task 14 — it require
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from src.models.client import Client
 from src.models.visitor import Visitor
+from src.services.decorators import _TRANSACTIONAL_MARKER
 from src.services.visitor import VisitorService, get_visitor_service
 
 
@@ -92,4 +94,90 @@ async def test_delete_cascade_is_non_decorated_core_that_does_not_commit(db_sess
         "boundary. If the visitor is gone after rollback, the extracted core "
         "committed mid-cascade, breaking atomicity for the Client→visitors "
         "outer @transactional (Task 10 / atomicity fault-injection Task 14)."
+    )
+
+
+# ── GH #171 Task 2 — get_or_create_by_name (move from RecordService) ────────
+
+
+async def test_get_or_create_by_name_is_not_transactional():
+    """The scenario-helper must NOT be wrapped by @transactional."""
+    assert not hasattr(VisitorService.get_or_create_by_name, _TRANSACTIONAL_MARKER), (
+        "get_or_create_by_name is a scenario building block — it must NOT "
+        "commit; the usecases layer owns the transaction boundary"
+    )
+
+
+async def test_get_or_create_by_name_finds_existing_visitor(db_session):
+    """(client_id, name) hit returns the existing row — no second visitor."""
+    client = Client(name="C")
+    db_session.add(client)
+    await db_session.commit()
+    existing = Visitor(client_id=client.id, name="Алиса", age=30)
+    db_session.add(existing)
+    await db_session.commit()
+
+    service = get_visitor_service()
+    visitor = await service.get_or_create_by_name(db_session, client.id, "Алиса")
+
+    assert visitor.id == existing.id
+    assert visitor.age == 30  # untouched on hit — no defaults applied
+    rows = (await db_session.execute(select(Visitor))).scalars().all()
+    assert len(rows) == 1
+
+
+async def test_get_or_create_by_name_creates_with_age(db_session):
+    """Miss → new visitor with the caller's name and age, flushed."""
+    client = Client(name="C")
+    db_session.add(client)
+    await db_session.commit()
+
+    service = get_visitor_service()
+    visitor = await service.get_or_create_by_name(
+        db_session, client.id, "Борис", age=35
+    )
+
+    assert visitor.id is not None  # flushed — id assigned
+    assert visitor.client_id == client.id
+    assert visitor.name == "Борис"
+    assert visitor.age == 35
+    rows = (await db_session.execute(select(Visitor))).scalars().all()
+    assert len(rows) == 1
+
+
+async def test_get_or_create_by_name_same_name_different_clients(db_session):
+    """Lookup keys on (client_id, name) — the same name under another client
+    does NOT hit (mirrors the RecordService resolver's two-column filter)."""
+    c1 = Client(name="C1")
+    c2 = Client(name="C2")
+    db_session.add_all([c1, c2])
+    await db_session.commit()
+    db_session.add(Visitor(client_id=c1.id, name="Алиса"))
+    await db_session.commit()
+
+    service = get_visitor_service()
+    visitor = await service.get_or_create_by_name(db_session, c2.id, "Алиса")
+
+    assert visitor.client_id == c2.id
+    rows = (await db_session.execute(select(Visitor))).scalars().all()
+    assert len(rows) == 2
+
+
+async def test_get_or_create_by_name_does_not_commit(db_session):
+    """No-commit property: rollback after a creation undoes it (mock-free)."""
+    from tests.conftest import query_db
+
+    client = Client(name="C")
+    db_session.add(client)
+    await db_session.commit()
+
+    service = get_visitor_service()
+    visitor = await service.get_or_create_by_name(db_session, client.id, "Гость")
+    await db_session.rollback()
+
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM visitors WHERE id='{visitor.id}'"
+    )[0]["c"] == 0, (
+        "get_or_create_by_name must NOT commit — the scenario layer owns "
+        "the transaction boundary (canon rule 3)"
     )

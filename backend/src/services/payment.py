@@ -14,10 +14,11 @@ from functools import lru_cache
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.record import Record
-from src.repositories.generic import get_base_repository
+from src.repositories.payment import PaymentRepository, get_payment_repository
 from src.repositories.search import search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
@@ -40,6 +41,21 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
     """
 
     NOT_NULL_FIELDS = {"amount"}
+
+    def __init__(
+        self,
+        repository: PaymentRepository,
+        model: type,
+        response_schema: type[PaymentResponse],
+    ) -> None:
+        """Narrow the repository type to the owner repo (GH #171 T1).
+
+        The service's bulk commands (``delete_by_record``) execute through
+        ``PaymentRepository`` — the declared attribute type lets mypy see
+        the bulk methods without casts.
+        """
+        super().__init__(repository, model, response_schema)
+        self._repository: PaymentRepository = repository
 
     def _build_list_stmt(
         self,
@@ -156,10 +172,34 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
             data = data.model_copy(update={"created_at": datetime.utcnow()})
         return await super().create(db_session, data)
 
+    # ── GH #171 Task 2 — scenario building block (no transaction) ───────
+
+    async def delete_by_record(self, db_session: AsyncSession, record_id: str) -> None:
+        """Remove ALL payments of one record — WITHOUT committing.
+
+        Non-transactional service method for the usecases layer (canon
+        docs/domain-rules/service-layer.md rules 3-4): the caller's
+        scenario owns the transaction boundary and the commit. Value-typed
+        input (``record_id``), the set-based DELETE itself lives in the
+        owner repository (``PaymentRepository.delete_by_record_id`` — one
+        statement, no per-row loop); no recalculation happens here. Marks
+        the helper's OWN entity ("payments") so the scenario publishes one
+        consistent event batch; outside an active transaction the mark is
+        a no-op.
+        """
+        await self._repository.delete_by_record_id(db_session, record_id)
+        mark_changed("payments")
+
 
 @lru_cache
 def get_payment_service() -> PaymentService:
-    return PaymentService(get_base_repository(), Payment, PaymentResponse)
+    """Singleton PaymentService over the OWNER repository (GH #171 T1).
+
+    The specialized ``PaymentRepository`` subclasses ``BaseRepository``,
+    so the generic CRUD surface is unchanged — and the service's bulk
+    commands (``delete_by_record``) execute through the owner repo.
+    """
+    return PaymentService(get_payment_repository(), Payment, PaymentResponse)
 
 
 async def get_payment_totals(

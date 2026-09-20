@@ -39,6 +39,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     шрифтовой дрифт контейнера vs CI-базлайны при нуле CSS-изменений, 1 — stale seed общей
     overnight-БД, 1 — activity S5, исправлен и реверифицирован); CI — авторитетный merge-гейт.
   - Status: `docs/status/2026-09-20-record-delete-unified-contract-243.md`
+- **GH #171 — рефактор сервисного слоя: usecases-слой, «оркестратор вместо трактора»** — branch
+  `171-service-usecases` (14 commits `8e949899..c050aa5b`; спека
+  `docs/specs/2026-09-18-service-usecases-design.md` rev2, план
+  `docs/plans/2026-09-19-service-usecases-plan.md`; 25 файлов; для пользователя — без
+  изменений поведения):
+  - **Новый слой `backend/src/usecases/`** (коридор 2 канона): четыре сценария записи
+    переехали из `RecordService` в `usecases/records.py` — `create_record`,
+    `update_record`, `patch_record`, `delete_record`; каждый — публичная
+    `@transactional`-функция (одна транзакция + один пакет событий #239), составлена
+    только из вызовов сервисов и домена.
+  - **Репозитории владельцев — табличные bulk-команды:** `delete_by_record_id` для
+    платежей и посещений, снос собственных связок `record_tags` — репозиторий записей.
+  - **Методы сервисов без транзакции** для сценариев: `PaymentService.delete_by_record`,
+    снос/вставка пачки посещений, «найти или создать» в `ClientService`/`VisitorService`
+    (перенос поведение-в-поведение, включая канал по умолчанию).
+  - **`RecordService` сужен** до своей сущности: чтения + операции строки записи, импорты
+    чужих ORM-моделей удалены; сервисные тесты перепривязаны на сценарии.
+  - **Удаление:** контракт #285 не изменён — deferred-delete набор API-тестов зелёный
+    без правок; каскад в прежнем порядке (посещения → платежи → `record_tags` → строка);
+    в `domain/deletion.py` добавлен `StaleDependenciesError` (пин: stale-ветка не
+    публикует события).
+  - **Тесты:** новый пакет `backend/tests/usecases/` (4 модуля: create/update-patch/
+    delete/atomicity); 4 теста атомарности — сбой шага в середине сценария не оставляет
+    частичных изменений; полный backend 2324 pass / 0 fail / 15 skip.
+  - **Линт:** ruff 365 против baseline 379 на main — 0 новых находок.
+  - Domain-rules: `docs/domain-rules/service-layer.md` rev4 (канон внедрён, живая схема
+    коридоров 1 и 2); план — 8/8 задач (см. `## Статус` в плане); #171 закрывается при
+    merge.
 
 ## [Unreleased] — 2026-09-19
 

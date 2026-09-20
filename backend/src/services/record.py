@@ -1,4 +1,20 @@
-"""Business logic for record CRUD operations with nested visits."""
+"""Record reads (list, view, point get, scope) and record-row operations.
+
+GH #171 Task 6: the multi-entity write flows (create / update / patch /
+delete chains) live in the ``usecases.records`` scenarios (Corridor 2 —
+canon docs/domain-rules/service-layer.md rule 2); this service is the
+narrow owner of the record table:
+
+- reads: ``list`` / ``list_view`` (Corridor 3-style display composites —
+  foreign tables are read in ONE query, rule 8), ``get`` / ``get_scoped``;
+- record-row operations: ``create_row`` / ``update_row`` / ``patch_row``
+  (no commit — the caller's scenario owns the transaction) and
+  ``delete_row_with_tags`` (the owner's own-edge cleanup — ``record_tags``
+  bundles + the record row).
+
+No cache marks and no foreign-ORM writes here: visits/payments/clients/
+visitors are handled by their owner services behind the scenarios.
+"""
 
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -10,20 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.domain.dates import day_range
-from src.domain.deletion import (
-    BlockingDepsError,
-    InvalidResolutionError,
-    collect_dependencies,
-    has_blocking_deps,
-    validate_resolutions,
-)
-from src.domain.record_visits import (
-    check_activity_capacity,
-    recompute_record_seats,
-    recompute_record_status,
-)
-from src.domain.visit_status import VisitStatus
-from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -32,22 +34,18 @@ from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
 from src.models.staff import Staff
-from src.models.tag import record_tags
 from src.models.visit import Visit
-from src.models.visitor import Visitor
-from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.record import RecordRepository, get_record_repository
 from src.repositories.search import SearchField, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
     RecordListParams,
-    RecordPatch,
     RecordResponse,
     RecordUpdate,
     RecordViewResponse,
     VisitResponse,
 )
-from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 # Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
@@ -123,7 +121,9 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     ]
 
     def __init__(
-        self, repository: BaseRepository, model: type[Record]
+        self,
+        repository: RecordRepository,
+        model: type[Record],
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
@@ -416,357 +416,131 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         return result.scalar_one_or_none()
 
-    @transactional
-    async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Hard-delete a record and its visits, payments, and record_tags join rows.
+    async def delete_row_with_tags(self, db_session: AsyncSession, record_id: str) -> None:
+        """Remove a record's OWN tag bundles + the record row — WITHOUT committing.
 
-        All cascade deletes run as explicit SQL inside this single
-        ``@transactional`` transaction (no per-record commit) so the
-        unit is atomic: if any statement fails, nothing persists. The
-        dependent rows (visits, payments) are removed BEFORE the record
-        so no FK constraint can fire. The record_tags join table has FKs
-        with NO ondelete action, so its rows are removed BEFORE the
-        record — otherwise the DB raises IntegrityError (FK on) or
-        leaves orphan rows (FK off) (#194).
+        GH #171 Task 5 scenario building block (no transaction; canon
+        docs/domain-rules/service-layer.md rules 1, 3-4): the caller's
+        scenario owns the transaction boundary and the commit. The
+        ``record_tags`` join rows are the record's OWN child links without
+        a lifecycle of their own (rule 1), so their bulk delete lives in
+        the owner repository (``RecordRepository.delete_tags_by_record_id``
+        — ONE set-based statement, #171 Task 1) and runs BEFORE the row
+        (the join's FKs carry no ondelete action — #194). The row goes by
+        a bulk ``DELETE ... WHERE id`` statement (no instance-delete
+        switch); the whole cascade is orchestrated by the
+        ``usecases.records.delete_record`` scenario (GH #171 Task 5).
+        No event marks here — "records" is the scenario's own-entity mark.
         """
-        record = await self._repository.get(db_session, Record, id)
-        if not record:
-            return False
+        await self._repository.delete_tags_by_record_id(db_session, record_id)
+        await db_session.execute(delete(Record).where(Record.id == record_id))
 
-        await db_session.execute(delete(Visit).where(Visit.record_id == id))
-        await db_session.execute(delete(Payment).where(Payment.record_id == id))
-        await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
-        await db_session.execute(delete(Record).where(Record.id == id))
-        # GH #239 §3.3: cascades above rewrote visits/payments
-        mark_changed("visits")
-        mark_changed("payments")
-        return True
-
-    async def resolve_delete(
+    async def create_row(
         self,
         db_session: AsyncSession,
-        id: str,
-        resolutions: dict[str, str] | None,
-    ) -> bool:
-        """Execute the unified DELETE-with-body resolution for records (GH #139).
-
-        Mirrors ``ArchiveService.resolve_delete``'s validation flow but
-        EXECUTES via ``self.delete`` (the existing ``@transactional``
-        cascade visits → payments → record_tags → record) instead of
-        dispatching through ``CASCADE_HANDLERS`` — no Record handlers are
-        registered in the deletion layer; the cascade intentionally lives
-        in ``RecordService.delete`` (Addendum 13 ruling).
-
-        Flow:
-          1. Existence check — ``False`` if record missing (route → 404).
-          2. Collect FK deps (``collect_dependencies``).
-          3. ``has_blocking_deps`` → raise ``BlockingDepsError`` (route → 422).
-             Record deps are never blocking (``allowed_actions`` always
-             non-empty), but the check stays for defensive consistency.
-          4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
-             errors (route → 422 with detail). ``resolutions=None`` means
-             «the commit declared only ``expected``» (clean path) — for a
-             clean record (no deps) that validates trivially; with deps
-             present the missing per-entity actions fail as today.
-          5. Execute via ``self.delete`` (the ``@transactional`` cascade
-             commits the session — no separate ``@transactional`` needed
-             here).
-
-        Returns ``True`` on success, ``False`` if the record was missing.
-        Raises ``ResolutionError`` subtypes for 422 paths (caught in the
-        router).
-        """
-        # 1. Existence check.
-        record = await self._repository.get(db_session, Record, id)
-        if record is None:
-            return False
-
-        # 2. Collect deps.
-        deps = await collect_dependencies(db_session, Record, id)
-
-        # 3. Blocked deps → 422 (won't happen for Record — all deps are cascade).
-        if has_blocking_deps(deps):
-            raise BlockingDepsError(
-                "Entity has blocking dependencies — archive instead"
-            )
-
-        # 4. Validate resolutions body against the matrix. ``None`` (clean
-        # path: the commit declared only ``expected``) behaves as {} —
-        # with no deps that validates trivially; with deps present the
-        # missing per-entity actions fail exactly as a partial body would.
-        issues = validate_resolutions(Record, deps, resolutions or {})
-        if issues:
-            msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
-            raise InvalidResolutionError(msg)
-
-        # 5. Execute via the existing @transactional cascade.
-        await self.delete(db_session, id)
-        return True
-
-    @transactional
-    async def create(
-        self, db_session: AsyncSession, data: RecordCreate
+        *,
+        activity_id: str,
+        client_id: str | None,
+        seats: int,
+        comment: str | None = None,
+        custom_price: int | None = None,
     ) -> Record:
-        """Create record with nested visits, auto-compute seats.
+        """Insert ONE record row — WITHOUT committing, no recalculation.
 
-        Supports both phone-based and client-ID-based flows.
-        Raises HTTPException 409 if activity is at capacity.
+        GH #171 Task 3: the row-level remainder of the former
+        ``RecordService.create`` — the find-or-create / visit-insert /
+        recalculation orchestration moved to the ``create_record``
+        scenario (usecases, Corridor 2 — canon
+        docs/domain-rules/service-layer.md rules 2, 5, 6). This is the
+        owner service's own-entity row op (rule 1): add + flush so the
+        caller's scenario gets a populated ``id``; the transaction
+        boundary, the visit batch, and the recalculation timing belong
+        to the scenario. Value-typed parameters — no foreign
+        ORM/schema objects.
         """
-        # ── Capacity check ─────────────────────────────────────────────
-        effective_seats = len(data.visits)
-        await check_activity_capacity(db_session, data.activity_id, seats=effective_seats)
-
-        # ── Resolve client ──────────────────────────────────────────────
-        if data.phone:
-            client = await self._resolve_client_by_phone(db_session, data)
-        else:
-            client = None
-
-        # ── Resolve visitors (name-based, ID-based, or anonymous) ───────
-        visitor_ids: list[str | None] = []
-        for item in data.visits:
-            if item.name:
-                # Name-based flow: find-or-create Visitor
-                visitor = await self._resolve_visitor_by_name(
-                    db_session, client_id=client.id if client else data.client_id, name=item.name, age=item.age,
-                )
-                visitor_ids.append(visitor.id)
-            elif item.visitor_id:
-                # ID-based flow: use existing Visitor directly
-                visitor_ids.append(item.visitor_id)
-            else:
-                # Anonymous visit — no visitor linked
-                visitor_ids.append(None)
-
-        # GH #239 §3.3: conditional cascade marks live in the resolvers
-        # (creation branches only) — see _resolve_client_by_phone /
-        # _resolve_visitor_by_name below.
-
-        # ── Create Record (status derived after visits flush) ──────────
         record = Record(
-            activity_id=data.activity_id,
-            client_id=client.id if client else data.client_id,
+            activity_id=activity_id,
+            client_id=client_id,
             status="pending",
-            seats=effective_seats,
-            comment=data.comment,
-            custom_price=data.custom_price,
+            seats=seats,
+            comment=comment,
+            custom_price=custom_price,
         )
         db_session.add(record)
         await db_session.flush()
-
-        # ── Create Visits ───────────────────────────────────────────────
-        for i, item in enumerate(data.visits):
-            visit = Visit(
-                record_id=record.id,
-                visitor_id=visitor_ids[i],
-                # GH #257 US1: the booking tail's default tariff rides on the
-                # VisitItem — persist it (parity with the PUT path :646).
-                tariff_id=item.tariff_id,
-                price=item.price,
-                custom_price=item.custom_price,
-                status=item.status.value,
-            )
-            db_session.add(visit)
-
-        await db_session.flush()
-
-        # GH #239 §3.3: nested visits are always created by this flow
-        mark_changed("visits")
-
-        # ── Recompute seats and status from actual visits ────────────────
-        # Route final persisted seats through recompute_record_seats so
-        # create/update/patch all share the same single source of truth
-        # (US-8). The inline `seats=effective_seats` above is only an
-        # initial value before the visits are flushed; after the flush
-        # we always recompute from the DB.
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-        await db_session.refresh(record)
         return record
 
-    @staticmethod
-    async def _resolve_client_by_phone(
-        db_session: AsyncSession, data: RecordCreate,
-    ) -> Client:
-        """Find existing client by phone or create a new one."""
-        result = await db_session.execute(
-            select(Client).where(Client.phone == data.phone)
-        )
-        client = result.scalar_one_or_none()
-        if not client:
-            first_name = data.visits[0].name if data.visits else "Гость"
-            client = Client(
-                phone=data.phone,
-                name=first_name,
-                channel="whatsapp",
-            )
-            db_session.add(client)
-            await db_session.flush()
-            # GH #239 §3.3: conditional mark — only when actually created
-            mark_changed("clients")
-        return client
-
-    @staticmethod
-    async def _resolve_visitor_by_name(
+    async def update_row(
+        self,
         db_session: AsyncSession,
+        id: str,
+        *,
+        activity_id: str,
         client_id: str | None,
-        name: str,
-        age: int | None = None,
-    ) -> Visitor:
-        """Find existing visitor by client_id + name or create a new one."""
-        result = await db_session.execute(
-            select(Visitor).where(
-                Visitor.client_id == client_id,
-                Visitor.name == name,
-            )
-        )
-        visitor = result.scalar_one_or_none()
-        if not visitor:
-            visitor = Visitor(
-                client_id=client_id,
-                name=name,
-                age=age,
-            )
-            db_session.add(visitor)
-            await db_session.flush()
-            # GH #239 §3.3: conditional mark — only when actually created
-            mark_changed("visitors")
-        return visitor
-
-    @transactional
-    async def update(
-        self, db_session: AsyncSession, id: str, data: RecordUpdate
+        comment: str | None,
+        custom_price: int | None,
     ) -> Record | None:
-        """Full-update record: replace visits, recalculate seats.
+        """Apply the scalar field writes of a full update — WITHOUT
+        committing, no visit handling, no recalculation.
 
-        Re-checks activity capacity (Variant 1 from #129): after the record's own
-        visits are deleted, the record's stored ``seats`` is recomputed BEFORE
-        the capacity check so the occupied sum reflects only *other* records.
-        If over capacity, raises 409 and the transaction rolls back, restoring
-        the record to its pre-update state.
+        GH #171 Task 4: the row-level remainder of the former
+        ``RecordService.update`` — the visit delete/recompute/capacity/
+        re-insert orchestration moved to the ``update_record`` scenario
+        (usecases, Corridor 2 — canon docs/domain-rules/service-layer.md
+        rules 2, 5). This is the owner service's own-entity row op
+        (rule 1): load (missing → None), write the PUT scalar fields +
+        ``updated_at``, flush. The transaction boundary, the visit
+        batch, and the recalculation timing belong to the scenario.
+        Value-typed parameters — no foreign ORM/schema objects.
         """
         record = await self.get(db_session, id)
         if not record:
             return None
 
-        record.activity_id = data.activity_id
-        record.client_id = data.client_id
-        record.comment = data.comment
-        record.custom_price = data.custom_price
+        record.activity_id = activity_id
+        record.client_id = client_id
+        record.comment = comment
+        record.custom_price = custom_price
         record.updated_at = datetime.now(UTC)
-
-        # Remove the record's own existing visits first (so they don't self-count)
-        for existing_visit in list(record.visits):
-            await db_session.delete(existing_visit)
         await db_session.flush()
-
-        # CRITICAL: check_activity_capacity sums the stored Record.seats COLUMN,
-        # not live visit counts. Deleting visits does NOT change Record.seats —
-        # it keeps its old value until recompute_record_seats runs. So we MUST
-        # recompute seats here (→ 0 visits) BEFORE the capacity check,
-        # otherwise the occupied sum still includes this
-        # record's stale old seats → double-count → a shrink (US-6) would
-        # falsely 409. This resets the record's own contribution.
-        await recompute_record_seats(db_session, record.id)
-
-        # Capacity re-check with the record's own seats already reset in the sum
-        effective_seats = len(data.visits)
-        await check_activity_capacity(
-            db_session, data.activity_id, seats=effective_seats
-        )
-
-        # Only now insert the new visits
-        for visit_item in data.visits:
-            visit = Visit(
-                record_id=record.id,
-                visitor_id=visit_item.visitor_id,
-                tariff_id=visit_item.tariff_id,
-                price=visit_item.price,
-                custom_price=visit_item.custom_price,
-                status=visit_item.status.value,
-            )
-            db_session.add(visit)
-
-        await db_session.flush()
-
-        # Recompute seats and status from actual visits
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-
-        await db_session.refresh(record)
         return record
 
-    @transactional
-    async def patch(
-        self, db_session: AsyncSession, id: str, data: RecordPatch
+    async def patch_row(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        fields: dict[str, str | int | None],
     ) -> Record | None:
-        """Partial-update record — only fields explicitly sent are changed.
+        """Apply the EXPLICITLY-SENT scalar fields of a partial update —
+        WITHOUT committing, no visit handling, no recalculation.
 
-        Handles visits specially: if ``visits`` is provided in the patch,
-        deactivates existing visits and creates new ones; otherwise visits
-        are left untouched. Seats and status are always recomputed via
-        domain free functions after the flush.
-
-        Capacity re-check (#129 Variant 1): only fires when the patch touches
-        ``visits`` (the ``seats_changed`` guard). A patch
-        of only ``comment``/``custom_price`` does not change seats and skips
-        the capacity query.
+        GH #171 Task 4: the row-level remainder of the former
+        ``RecordService.patch`` — the seats_changed visit orchestration
+        moved to the ``patch_record`` scenario (usecases, Corridor 2 —
+        canon rules 2, 5). ``fields`` is the caller's
+        ``model_dump(exclude_unset=True)`` restricted to the scalar keys
+        (``comment`` / ``custom_price``) — only those are written, plus
+        ``updated_at``. Missing id → None. Value-typed input only.
         """
         record = await self.get(db_session, id)
         if not record:
             return None
 
-        update_data = data.model_dump(exclude_unset=True)
-
-        if "comment" in update_data:
-            record.comment = update_data["comment"]
-        if "custom_price" in update_data:
-            record.custom_price = update_data["custom_price"]
-
-        # ── Capacity re-check (only when seats may change) ─────────────
-        seats_changed = "visits" in update_data
-        if "visits" in update_data:
-            for existing_visit in list(record.visits):
-                await db_session.delete(existing_visit)
-            await db_session.flush()
-
-        if seats_changed:
-            # CRITICAL (same as update): reset Record.seats to reflect the
-            # current DB state BEFORE the capacity check, so the occupied
-            # sum doesn't double-count this record's stale old seats.
-            # recompute_record_seats counts visits still in the DB (0 if we
-            # just deleted them for a visits-patch).
-            await recompute_record_seats(db_session, record.id)
-            effective_seats = len(update_data["visits"])
-            await check_activity_capacity(
-                db_session, record.activity_id, seats=effective_seats
-            )
-
-        # ── Insert new visits (if provided) ───────────────────────────
-        if "visits" in update_data:
-            for visit_item in update_data["visits"]:
-                visit = Visit(
-                    record_id=record.id,
-                    visitor_id=visit_item.get("visitor_id"),
-                    tariff_id=visit_item.get("tariff_id"),
-                    price=visit_item["price"],
-                    custom_price=visit_item.get("custom_price"),
-                    status=visit_item.get("status", VisitStatus.WAITING),
-                )
-                db_session.add(visit)
-
+        if "comment" in fields:
+            record.comment = fields["comment"]
+        if "custom_price" in fields:
+            record.custom_price = fields["custom_price"]
         record.updated_at = datetime.now(UTC)
         await db_session.flush()
-
-        # Recompute seats and status from actual active visits in DB
-        await recompute_record_seats(db_session, record.id)
-        await recompute_record_status(db_session, record.id)
-
-        await db_session.refresh(record)
         return record
 
 
 @lru_cache
 def get_record_service() -> RecordService:
-    """Returns a singleton RecordService."""
-    return RecordService(get_base_repository(), Record)
+    """Returns a singleton RecordService over the OWNER repository (GH #171 T1).
+
+    The specialized ``RecordRepository`` subclasses ``BaseRepository``, so
+    the generic CRUD surface is unchanged — and the service's own-edge
+    commands (``delete_tags_by_record_id``) execute through the owner repo.
+    """
+    return RecordService(get_record_repository(), Record)

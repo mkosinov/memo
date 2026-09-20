@@ -4,11 +4,13 @@ Cascade logic lives in the domain layer (record_visits.py) as free
 functions. VisitService orchestrates but never calls another service.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.record_visits import (
     check_activity_capacity,
@@ -19,10 +21,21 @@ from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.record import Record
 from src.models.visit import Visit
-from src.repositories.generic import BaseRepository, get_base_repository
+from src.repositories.visit import VisitRepository, get_visit_repository
 from src.schemas.common import PaginatedResponse
 from src.schemas.visit import VisitCreate, VisitPatch, VisitResponse, VisitUpdate
 from src.services.decorators import transactional
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.schemas.record import VisitItem
+
+# ``list`` is shadowed by ``VisitService.list`` inside the class body, so a
+# bare ``list[...]`` annotation there is invalid for mypy ("function not
+# valid as a type"). A module-level alias sidesteps the shadowing (same
+# trick as ``ModelList`` in repositories/generic.py).
+type VisitItemList = list[VisitItem]
 
 
 class VisitService:
@@ -32,8 +45,15 @@ class VisitService:
     # — canonical entity name declared explicitly (spec §3.3/§3.4).
     entity_name: str = "visits"
 
-    def __init__(self, repository: BaseRepository) -> None:
-        self._repository = repository
+    def __init__(self, repository: VisitRepository) -> None:
+        """Hold the OWNER repository (GH #171 T1).
+
+        The specialized ``VisitRepository`` subclasses ``BaseRepository``,
+        so the generic CRUD surface is unchanged — and the service's bulk
+        scenario helpers (``delete_visits_by_record``/``create_visits_bulk``)
+        execute through the owner repo.
+        """
+        self._repository: VisitRepository = repository
 
     async def list(
         self,
@@ -261,8 +281,64 @@ class VisitService:
         mark_changed("records")
         return visit
 
+    # ── GH #171 Task 2 — scenario building blocks (no transaction) ──────
+
+    async def delete_visits_by_record(
+        self, db_session: AsyncSession, record_id: str, *, mark_visits: bool = True,
+    ) -> None:
+        """Remove ALL visits of one record — WITHOUT committing, no recalc.
+
+        Non-transactional service method for the usecases layer (canon
+        docs/domain-rules/service-layer.md rules 3-4): the caller's
+        scenario owns the transaction boundary AND the recalculation
+        timing (seats/status recomputes belong to the scenario, interleaved
+        before the replacement batch). Value-typed input (``record_id``);
+        the set-based DELETE lives in the owner repository
+        (``VisitRepository.delete_by_record_id`` — one statement, no
+        per-row loop). Marks the helper's OWN entity ("visits") — unless
+        ``mark_visits=False`` (the caller publishes the entity itself or
+        folds the change into its own batch); outside an active
+        transaction the mark is a no-op.
+        """
+        await self._repository.delete_by_record_id(db_session, record_id)
+        if mark_visits:
+            mark_changed("visits")
+
+    async def create_visits_bulk(
+        self, db_session: AsyncSession, record_id: str, items: VisitItemList,
+        *, mark_visits: bool = True,
+    ) -> None:
+        """Insert a BATCH of visits from VALUE payloads — no commit, no recalc.
+
+        Non-transactional scenario building block (canon rules 2-4,
+        GH #171 Task 3 fix): the caller passes ``VisitItem`` payloads plus
+        the owning ``record_id`` — never ORM rows — so the usecases layer
+        stays free of ORM-model imports. The SERVICE builds the rows (its
+        own entity — allowed) and delegates insertion to the owner
+        repository (``VisitRepository.create_bulk`` — insertmanyvalues,
+        no per-row loop). Capacity/cascade/recalculation timing is the
+        scenario's job — nothing is recomputed here. Marks the helper's
+        OWN entity ("visits") — unless ``mark_visits=False`` (the caller
+        publishes the entity itself or folds the change into its own
+        batch); outside an active transaction the mark is a no-op.
+        """
+        rows = [
+            Visit(
+                record_id=record_id,
+                visitor_id=item.visitor_id,
+                tariff_id=item.tariff_id,
+                price=item.price,
+                custom_price=item.custom_price,
+                status=item.status.value,
+            )
+            for item in items
+        ]
+        await self._repository.create_bulk(db_session, rows)
+        if mark_visits:
+            mark_changed("visits")
+
 
 @lru_cache
 def get_visit_service() -> VisitService:
-    """Returns a singleton VisitService."""
-    return VisitService(get_base_repository())
+    """Returns a singleton VisitService over the OWNER repository (GH #171 T1)."""
+    return VisitService(get_visit_repository())

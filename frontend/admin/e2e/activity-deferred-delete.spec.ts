@@ -331,10 +331,12 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
 
       // The commit failure surfaces as the card returning…
       await expect(card).toBeVisible({ timeout: 15_000 });
-      // …and the error toast «Не удалось удалить. Изменение отменено».
+      // …and the honest no-response toast «Не удалось подтвердить
+      // удаление» (#243): a network-lost commit is a non-ApiError —
+      // the outcome is unknown, so no «Изменение отменено» claim.
       const errorToast = page
         .locator('[data-testid="toast-error"]')
-        .filter({ hasText: 'Не удалось удалить. Изменение отменено' });
+        .filter({ hasText: 'Не удалось подтвердить удаление' });
       await expect(errorToast).toBeVisible();
 
       await page.context().setOffline(false);

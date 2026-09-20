@@ -33,6 +33,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     визуальный гейт пройден (скриншоты в `/tmp`, не коммитятся).
   - Status: `docs/status/2026-09-19-clients-status-column-220.md`
 
+### Changed
+- **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits → deferred**
+  — branch `record-delete-unified-contract-243` (11 commits: `83a4f8db..56743303`, base `8b18b548`;
+  спека `docs/specs/2026-09-19-record-delete-error-rollback-243-design.md` rev6,
+  план `docs/plans/2026-09-19-record-delete-unified-contract-243-plan.md`; 17 файлов, +836/−257):
+  - Удаление платежа (вкладка клиента в модалке записи) и анонимного визита переведены на общий
+    отложенный конвейер `PendingActions` (5с окно с отменой) — код теперь полностью соответствует
+    канону `docs/domain-rules/deletion.md`; мгновенные `deletePayment`/`deleteVisit` удалены как
+    мёртвый код (S1/S2).
+  - **Undo восстанавливает строку на исходной позиции** (S5), а не в конец списка.
+  - **Честный тост при потере ответа** (S3): если commit так и не получил ответа сервера,
+    показывается «Не удалось подтвердить удаление» — в дефолтном обработчике
+    `PendingActionsContext` И в `staleAwareOnError` (поверхности records/activities, решение
+    архитектора по спеке «текст применяется ко всем отложенным удалениям»); 404 = тихий успех
+    — без изменений.
+  - **Tests:** vitest **2196p/0f** (139 файлов); tsc clean; eslint 0 errors/37 warnings
+    (бюджет 38); новые/адаптированные e2e S1–S3 (records) + S5 (records/activity); Playwright
+    полный **432p/1s/20f** — все 20 провалов triaged как env (18 visual font-glyph drift +
+    2 конфликта общей seed-БД, свидетельство в PR) — CI авторитетный гейт.
+
 ### Fixed
 - **GH #203 — ServiceModal: NULL max_age → 0 блокировал edit-save открытых услуг** — branch
   `service-modal-null-max-age-203` (3 commits: `1d8f97d0..4aa19858`, base `514a2b96`;

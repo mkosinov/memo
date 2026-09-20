@@ -348,6 +348,41 @@ describe('PendingActionsContext commit error handling (#285 D4)', () => {
     );
   });
 
+  it('(д) commit throws non-ApiError (no server response) — undo + honest toast «Не удалось подтвердить удаление»', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    // Network failure / abort / timeout — the server never answered, so the
+    // deletion outcome is unknown (#243 S3): the row returns, but the text
+    // must NOT claim «Изменение отменено».
+    const commit = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    const undo = vi.fn();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit,
+        undo,
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(showToastMock).toHaveBeenCalledWith(
+      'Не удалось подтвердить удаление',
+      'error',
+    );
+    expect(showToastMock).not.toHaveBeenCalledWith(
+      'Не удалось удалить. Изменение отменено',
+      'error',
+    );
+  });
+
   it('(г) action with custom onError — onError receives the raw error; default path suppressed', async () => {
     vi.useFakeTimers();
     const { api } = renderProvider();

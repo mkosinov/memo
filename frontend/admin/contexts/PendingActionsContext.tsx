@@ -101,7 +101,16 @@ export function PendingActionsProvider({ children }: { children: React.ReactNode
             return;
           }
           action.undo();
-          showToast('Не удалось удалить. Изменение отменено', 'error');
+          // #243 S3 (deletion.md branch 5): an ApiError means the server
+          // answered with an error — the deletion is cancelled. A non-ApiError
+          // (network failure, abort, timeout) means the server never answered:
+          // the deletion outcome is UNKNOWN, so the honest toast must not
+          // claim «Изменение отменено».
+          if (err instanceof ApiError) {
+            showToast('Не удалось удалить. Изменение отменено', 'error');
+          } else {
+            showToast('Не удалось подтвердить удаление', 'error');
+          }
         }
       }, action.delayMs);
       timersRef.current.set(action.id, timer);

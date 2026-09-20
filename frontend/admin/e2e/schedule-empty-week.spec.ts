@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
+import { gotoScheduleWeek } from './fixtures/helpers';
 import { openCombobox } from './helpers/combobox';
 
 /**
@@ -16,7 +16,7 @@ import { openCombobox } from './helpers/combobox';
  * created here self-heal on the next reset, no manual cleanup.
  */
 
-/** Navigate to the empty week of 2099-01-05 (inline dispatch, dayview-column-reorder.spec.ts:54 pattern). */
+/** Deep-link to the empty week of 2099-01-05 (#138: /schedule?view=week&date=…). */
 const EMPTY_WEEK_DATE = '2099-01-05';
 const TOPBAR = '[data-testid="center-content"]';
 
@@ -51,15 +51,7 @@ async function deselectAllFilters(page: import('@playwright/test').Page) {
 }
 
 async function navigateToEmptyWeek(page: import('@playwright/test').Page) {
-  await waitForScheduleReady(page);
-  await page.evaluate((date: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-week-view', {
-        detail: { date: `${date}T12:00:00` },
-      }),
-    );
-  }, EMPTY_WEEK_DATE);
-  await waitForScheduleGrid(page);
+  await gotoScheduleWeek(page, EMPTY_WEEK_DATE);
   // No cards can exist on this week — the hint must be there too.
   await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
 }

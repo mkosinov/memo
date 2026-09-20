@@ -15,6 +15,7 @@ The board = the development trajectory (durable, cross-session). The scratchpad 
 - **Status** — lifecycle stage: `Backlog → In Design (G1a) → Spec OK (G1b) → Ready to IMPL (G2) → In IMPL → PR (G7) → In-main → deployed`
 - **Priority** — importance (Critical/High/Medium/Low)
 - **Next Up** (1/2/3) — the user's explicit queue: which task to take next. Only the manager changes it, on the user's word.
+- **host** — which machine owns the card (single select: `imac` / `macbook` / `hk` / `gcp`). The single ownership source for `In IMPL` / `In Design` cards (2026-09-20, replaced the CLAIM-comment mechanism): stamped automatically on entering those statuses (`status` arg > `GH_BOARD_HOST` env > the container's label file — in-container manager runs resolve themselves), cleared automatically on leaving. The auto-impl watcher budgets per host (`HOST_BUDGETS` in the script: imac 2 / macbook 1); an In IMPL card with an empty host blocks no one.
 
 Status is gate-anchored: each status names the last workflow gate passed. Flip it at gate approval, not by feel. Single exception: `In IMPL` flips at IMPL dispatch, before G3 evidence exists — a flip placed after the blocking dispatch lands hours late or never (see touchpoint below). (In Review and Staging / QA were removed — never used.)
 
@@ -37,7 +38,8 @@ python3 .opencode/scripts/gh_board.py show 176                    # read one car
 python3 .opencode/scripts/gh_board.py show all                    # the whole board as a table
 python3 .opencode/scripts/gh_board.py set-next-up 176 1          # put an issue in the queue (1|2|3); "none" — remove
 python3 .opencode/scripts/gh_board.py shift                      # after Next Up 1 completes: clear it, shift 2→1, 3→2
-python3 .opencode/scripts/gh_board.py status 176 "In IMPL"       # move a card's status
+python3 .opencode/scripts/gh_board.py status 176 "In IMPL"       # move a card's status; optional 3rd arg = host value (imac/macbook/hk/gcp); entering In IMPL/In Design stamps host, leaving clears it
+python3 .opencode/scripts/gh_board.py host 176                    # read the card's host field (empty when unset)
 python3 .opencode/scripts/gh_board.py merged 176 177 "short title" # v2: append the "Recently merged" scratchpad line
 ```
 

@@ -4,10 +4,14 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UIProvider } from '../contexts/UIContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { WeekView } from '../app/components/schedule/WeekView';
+
+// #138 Task 2: ScheduleViewProvider reads the URL via useScheduleView —
+// reactive App Router stand-in.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 // ─── Helper: compute a date in the current week ──────────────────────────────
 
@@ -102,6 +106,7 @@ function createTestQueryClient() {
 
 describe('Schedule pipeline integration: enrichment from API to ActivityCard', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
 
     // Mock masters API (raw MasterViewResponse — acting-only view, GH #266)
@@ -194,7 +199,6 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     render(
       <QueryClientProvider client={queryClient}>
         <UIProvider>
-          <NavigationProvider>
             <UserSettingsProvider>
             <PendingActionsProvider>
           <ScheduleProvider>
@@ -202,7 +206,6 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
             </ScheduleProvider>
           </PendingActionsProvider>
           </UserSettingsProvider>
-          </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
     );
@@ -226,7 +229,6 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
     render(
       <QueryClientProvider client={queryClient}>
         <UIProvider>
-          <NavigationProvider>
             <UserSettingsProvider>
             <PendingActionsProvider>
           <ScheduleProvider>
@@ -234,7 +236,6 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
             </ScheduleProvider>
           </PendingActionsProvider>
           </UserSettingsProvider>
-          </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
     );
@@ -251,6 +252,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
 
 describe('Schedule pipeline: nullable visitor_id impact', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
 
     vi.mocked(getAllMasters).mockResolvedValue([
@@ -336,7 +338,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <UIProvider>
-          <NavigationProvider>
             <UserSettingsProvider>
             <PendingActionsProvider>
           <ScheduleProvider>
@@ -344,7 +345,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
             </ScheduleProvider>
           </PendingActionsProvider>
           </UserSettingsProvider>
-          </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
     );
@@ -379,7 +379,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <UIProvider>
-          <NavigationProvider>
             <UserSettingsProvider>
             <PendingActionsProvider>
           <ScheduleProvider>
@@ -387,7 +386,6 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
             </ScheduleProvider>
           </PendingActionsProvider>
           </UserSettingsProvider>
-          </NavigationProvider>
         </UIProvider>
       </QueryClientProvider>,
     );

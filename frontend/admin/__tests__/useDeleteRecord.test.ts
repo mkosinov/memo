@@ -503,6 +503,30 @@ describe('useDeleteRecord (deferred #285)', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors'] });
     });
 
+    it('non-ApiError commit error (network/abort) → honest toast «Не удалось подтвердить удаление» (#243 S3)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCaches(queryClient);
+      const { result } = renderHook(() => useDeleteRecord(), { wrapper });
+
+      await act(async () => {
+        await result.current.removeRecord(mockRecordView);
+      });
+      const { onError } = lastEnqueuedAction();
+
+      // A route.abort / offline fetch rejects with a non-ApiError — the
+      // server never answered, the deletion outcome is UNKNOWN.
+      await act(async () => {
+        onError!(new TypeError('Failed to fetch'));
+      });
+
+      expectRowRestored(queryClient);
+      expect(mockShowToast).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Не удалось подтвердить удаление',
+        'error',
+      );
+    });
+
     it('non-409 commit error → context-default surface: undo + default toast, no action slot', async () => {
       mockResolveDeleteRecord.mockRejectedValue(
         new ApiError(500, 'Internal error', 'INTERNAL'),

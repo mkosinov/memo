@@ -105,6 +105,21 @@ class InvalidResolutionError(ResolutionError):
     """Resolutions body is missing or has wrong actions → 422 with details."""
 
 
+class StaleDependenciesError(Exception):
+    """The deferred-delete commit's ``expected`` snapshot is stale (#285 rev5/rev6).
+
+    Raised by the ``delete_record`` scenario (GH #171 Task 5) when the
+    server-side dependency id-sets are NOT a subset of the caller-confirmed
+    ``expected`` (a dep appeared or was swapped mid-undo-window). Carries the
+    freshly collected ``DependencyNode`` tree so the ROUTE can render the
+    pinned 409 ``stale_dependencies`` payload (transport stays in the route).
+    """
+
+    def __init__(self, nodes: list[DependencyNode]) -> None:
+        super().__init__("stale_dependencies")
+        self.nodes = nodes
+
+
 # ─── FK dependency descriptor ───────────────────────────────────────────────────
 
 

@@ -138,3 +138,20 @@ FastAPI, SQLAlchemy async, pytest; фронтенд не затрагивает�
 ## Порядок
 
 Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 → Task 7 → Task 8. Задачи 3–5 можно вести последовательно в одной ветке (общая зона `usecases/records.py`); параллельное кодирование задач 3–5 не допускается — конфликт зоны.
+
+## Статус
+
+✅ **Завершён 2026-09-20** — 8/8 задач, ветка `171-service-usecases` (14 коммитов `8e949899..c050aa5b`):
+
+| Task | Коммит(ы) | DoD |
+|------|-----------|-----|
+| Task 1 — bulk-команды в репозиториях | `cb3ab90e` | ✅ |
+| Task 2 — методы сервисов без транзакции | `c052ec18` | ✅ |
+| Task 3 — пакет usecases + create_record | `8ad08e37`, `be9e897b` | ✅ |
+| Task 4 — update_record / patch_record | `3bca48e6`, `123e6e1b`, `1223b22f` (фикс event-grid), `8d0291c2` | ✅ |
+| Task 5 — delete_record | `e7809d72`, `b974f0f2` (пин no-publish stale-ветки) | ✅ |
+| Task 6 — сужение RecordService | `f00a4147` | ✅ |
+| Task 7 — тесты атомарности (4) | `f34050c2`, `a60ce2e9` (фикс таутологии) | ✅ |
+| Task 8 — полный регресс + линт | `c050aa5b` | ✅ |
+
+Итог: backend 2324 pass / 0 fail / 15 skip; ruff 365 против baseline 379 на main (0 новых находок); контракт #285 не изменён (API-набор зелёный без правок); сценарии US1–US4 + 4 теста атомарности зелёные. Ревью: compliance ✅ на T4–T7; quality — 3 minor, все закрыты (`b974f0f2`, `1223b22f`, `a60ce2e9`).

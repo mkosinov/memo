@@ -21,7 +21,7 @@ Gate chips (labels on the issue, max one): `gate:concept` / `gate:spec` / `gate:
 ## Step 2 — Claim
 
 - Git pre-flight: `git fetch origin && git status -sb`; behind → `git pull --ff-only`; diverged (ahead+behind) → STOP, report, reset nothing.
-- `gh_board.py status N "In Design"`; one-line issue comment: `auto-design: taken <UTC>`.
+- `gh_board.py status N "In Design" imac` (third arg = the host field value — this watcher runs on the iMac host; the field is the single ownership source for In IMPL/In Design cards); one-line issue comment: `auto-design: taken <UTC>`.
 
 ## Step 3 — Scout + actuality + step-0 report
 

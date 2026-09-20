@@ -3,7 +3,6 @@
 import React from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Menubar, ADMIN_ONLY_SECTIONS } from '../components/layout/Menubar';
-import { NavigationProvider } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ErrorBoundary, NoAccessScreen } from '../components/error';
@@ -90,9 +89,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <ErrorBoundary>
       <AuthGate>
-        <NavigationProvider>
-          <MainShell>{children}</MainShell>
-        </NavigationProvider>
+        <MainShell>{children}</MainShell>
       </AuthGate>
     </ErrorBoundary>
   );

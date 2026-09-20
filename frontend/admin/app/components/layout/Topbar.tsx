@@ -3,14 +3,13 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useMutationState } from '@tanstack/react-query';
 import { useScheduleData, SCHEDULE_ACTIVITY_MUTATION_KEY } from '@/contexts/schedule/ScheduleDataContext';
+import { useScheduleView as useScheduleUrlView } from '@/hooks/useScheduleView';
 import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { useSavingToast } from '@/hooks/useSavingToast';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, formatWeekRange, formatDayLabel } from '@/lib/utils';
-import { getMonday, toISODate } from '@/lib/datetime';
-import { useNavigation } from '@/contexts/NavigationContext';
 import { MultiSelect } from '../shared/MultiSelect';
 import { CalendarPopover } from '../shared/CalendarPopover';
 import type { Master, Location } from '@memo/domain';
@@ -25,11 +24,9 @@ function groupMastersBySpecialty(master: Master): string {
 
 export function Topbar() {
   const { masters, locations } = useScheduleData();
+  // View state: consumed straight from the URL hook — the single writer of
+  // /schedule?view=&date=&col= (#138 Task 3). Day-anchor logic lives there.
   const {
-    filterMasterIds,
-    filterLocationIds,
-    setFilterMasterIds,
-    setFilterLocationIds,
     viewMode,
     setViewMode,
     selectedDay,
@@ -39,6 +36,13 @@ export function Topbar() {
     setColumnMode,
     prevPeriod,
     nextPeriod,
+  } = useScheduleUrlView();
+  // Non-view concerns (filter lists) stay on the context.
+  const {
+    filterMasterIds,
+    filterLocationIds,
+    setFilterMasterIds,
+    setFilterLocationIds,
   } = useScheduleView();
   const {
     cellHeight,
@@ -50,7 +54,6 @@ export function Topbar() {
     workingHoursEnd,
     setWorkingHoursEnd,
   } = useGridSettings();
-  const { selectDateRange } = useNavigation();
   const { settings, updateSettings } = useUserSettings();
 
   // Beforeunload guard while any schedule mutation is in flight (spec §5).
@@ -98,28 +101,13 @@ export function Topbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [zoomOpen]);
 
+  // #138 Task 3: pure delegation — the hook's setViewMode owns the day anchor
+  // (today if the viewed week is current, else its Monday) and writes the URL.
+  // Topbar duplicates neither.
   const handleViewModeSwitch = useCallback((newMode: 'day' | 'week') => {
     if (newMode === viewMode) return;
-
-    if (newMode === 'week') {
-      // DayView → WeekView: Show week containing selectedDay
-      const monday = getMonday(selectedDay);
-      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(toISODate(monday), toISODate(sunday));
-    } else {
-      // WeekView → DayView: Show today if in current week, else first day of week
-      const today = new Date();
-      const weekMonday = getMonday(currentWeek);
-      const weekSunday = new Date(weekMonday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      if (today >= weekMonday && today <= weekSunday) {
-        setSelectedDay(today);
-      } else {
-        setSelectedDay(weekMonday);
-      }
-    }
-
     setViewMode(newMode);
-  }, [viewMode, selectedDay, currentWeek, selectDateRange, setSelectedDay, setViewMode]);
+  }, [viewMode, setViewMode]);
 
   const handleDayButtonClick = useCallback(() => {
     handleViewModeSwitch('day');
@@ -144,22 +132,13 @@ export function Topbar() {
     setGridFrequency(freq);
   }, [setGridFrequency]);
 
+  // Date selection writes ONLY ?date in both modes: the hook derives
+  // currentWeek = Monday of ?date, so a week-view selection moves the week
+  // without ever touching ?view (#138 Task 3 DoD).
   const handleCalendarDateSelect = useCallback((date: Date) => {
-    if (viewMode === 'week') {
-      // In week mode: select the week containing the clicked date
-      const monday = getMonday(date);
-      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(toISODate(monday), toISODate(sunday));
-    } else {
-      // In day mode: select the single day
-      setSelectedDay(date);
-      // Also navigate the week range to contain this day
-      const monday = getMonday(date);
-      const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-      selectDateRange(toISODate(monday), toISODate(sunday));
-    }
+    setSelectedDay(date);
     setCalendarOpen(false);
-  }, [viewMode, selectDateRange, setSelectedDay]);
+  }, [setSelectedDay]);
 
   const dayLabel = columnMode === 'masters' ? 'День по мастерам' : 'День по локациям';
 

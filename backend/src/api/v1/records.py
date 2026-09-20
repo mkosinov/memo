@@ -12,9 +12,8 @@ from src.auth.scope import ScopeContext, get_optional_scope, get_scope
 from src.db import SessionDep
 from src.domain.deletion import (
     ResolutionError,
+    StaleDependenciesError,
     collect_dependencies,
-    collect_dependency_ids,
-    stale_expected_entities,
 )
 from src.errors import ErrorCode, ErrorDetail
 from src.models.record import Record
@@ -30,6 +29,18 @@ from src.schemas.record import (
 )
 from src.services.activity import get_activity_service
 from src.services.record import RecordService, get_record_service, map_record
+from src.usecases.records import (
+    create_record as create_record_scenario,
+)
+from src.usecases.records import (
+    delete_record as delete_record_scenario,
+)
+from src.usecases.records import (
+    patch_record as patch_record_scenario,
+)
+from src.usecases.records import (
+    update_record as update_record_scenario,
+)
 
 router = APIRouter(tags=["records"])
 
@@ -160,7 +171,12 @@ async def create_record(
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
     await _activity_scoped_or_404(session, data.activity_id, scope)
-    record = await service.create(db_session=session, data=data)
+    # Corridor 2 (GH #171): the multi-entity booking chain lives in the
+    # usecases layer — the route stays transport-only and passes the
+    # master scope through UNCHANGED (scoped access was already gated on
+    # the target activity above). Leading None = the @transactional
+    # wrapper's unused self slot (selfless-function convention).
+    record = await create_record_scenario(None, db_session=session, data=data)
     return map_record(record)
 
 
@@ -203,7 +219,13 @@ async def update_record(
     # must be inside the master's scope (RecordPatch carries no
     # activity_id, so PATCH cannot re-target and needs no gate).
     await _activity_scoped_or_404(session, data.activity_id, scope)
-    record = await service.update(db_session=session, id=record_id, data=data)
+    # Corridor 2 (GH #171 Task 4): the full-update chain (visits replace +
+    # recalculation + capacity re-check) lives in the usecases layer —
+    # the route stays transport-only. Leading None = the @transactional
+    # wrapper's unused self slot (selfless-function convention).
+    record = await update_record_scenario(
+        None, db_session=session, id=record_id, data=data,
+    )
     if not record:
         raise HTTPException(
             status_code=404,
@@ -225,7 +247,12 @@ async def patch_record(
 ) -> RecordResponse:
     """Partial-update a record by ID (PATCH). Only sent fields are changed."""
     await _scoped_or_404(service, session, record_id, scope)
-    record = await service.patch(db_session=session, id=record_id, data=data)
+    # Corridor 2 (GH #171 Task 4): the partial-update chain lives in the
+    # usecases layer — same convention as PUT above (selfless scenario,
+    # keyword args; RecordPatch carries no activity_id → no re-target gate).
+    record = await patch_record_scenario(
+        None, db_session=session, id=record_id, data=data,
+    )
     if not record:
         raise HTTPException(
             status_code=404,
@@ -262,7 +289,7 @@ async def delete_record(
     record_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    body: RecordDeleteBody | None = Body(default=None),
+    body: Annotated[RecordDeleteBody | None, Body()] = None,
     dry_run: Annotated[
         bool | None,
         Query(
@@ -280,10 +307,12 @@ async def delete_record(
     Mirrors the masters/clients routes (GH #139, Addendum 13); #285 rev7
     removes the legacy no-body "execute-if-clean" mode. Record deps
     (visits, payments, record_tags) are never blocking; record with none
-    → clean delete. Execution stays in ``RecordService.delete`` (the
-    ``@transactional`` cascade visits → payments → record_tags → record);
-    validation runs via the deletion layer free functions in
-    ``RecordService.resolve_delete``.
+    → clean delete. The business chain lives in the ``delete_record``
+    scenario (usecases, Corridor 2 — GH #171 Task 5): dependency
+    collection, expected snapshot verification, resolutions validation,
+    and the cascade (visits → payments → record_tags → record); the
+    ROUTE keeps transport — the form 422s, the scope probe, the dry-run
+    preview (pure read), and the 409/404/422 mapping + response format.
 
     * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
       ``collect_dependencies`` → empty → 204 WITHOUT deleting; non-empty
@@ -295,16 +324,15 @@ async def delete_record(
       before anything else. Same for a body whose ``expected`` is absent
       (e.g. ``{"resolutions": {...}}`` alone — the rejected legacy shape).
     * Body ``{resolutions?, expected}`` — the deferred-delete commit:
-      existence probe → ``collect_dependencies`` +
-      ``collect_dependency_ids`` → **expected id-set verification
-      (rev5/rev6)** — for every collected non-auto dep
-      ``set(now_ids) ⊆ set(expected[entity])``; mismatch → 409
-      ``stale_dependencies`` + current tree (parsed by
-      ``ApiError.dependencies``). Subset, not equality: a dep that
-      disappeared in the undo window does not block; one that APPEARED
-      does; auto-deps (record_tags) are exempt (§3 D9a). Only on a match
-      → ``service.resolve_delete`` validates ``resolutions`` as today →
-      204 (ResolutionError → 422; missing → 404).
+      scope probe → the scenario (existence → collect deps → **expected
+      id-set verification (rev5/rev6)** — for every collected non-auto
+      dep ``set(now_ids) ⊆ set(expected[entity])``; mismatch →
+      ``StaleDependenciesError`` → 409 ``stale_dependencies`` + current
+      tree (parsed by ``ApiError.dependencies``). Subset, not equality:
+      a dep that disappeared in the undo window does not block; one that
+      APPEARED does; auto-deps (record_tags) are exempt (§3 D9a). Only
+      on a match → resolutions validation (ResolutionError → 422) →
+      cascade → 204; missing id → 404.
 
     GH #263 T2: the scope gate runs FIRST (one query) — чужая запись →
     404 before any dependency collection or cascade; for the dry-run
@@ -339,21 +367,21 @@ async def delete_record(
             return _dependencies_response(deps, detail="has_dependencies")
         return  # 204 — preview only: no service.delete, no SSE marks.
 
-    # Body branch: the commit of the deferred delete. Expected id-set
-    # verification FIRST (rev5/rev6) — a stale commit must fail with 409
-    # BEFORE the resolutions validation could turn it into a 422.
-    deps = await collect_dependencies(session, Record, record_id)
-    now_ids = await collect_dependency_ids(session, Record, record_id)
-    if stale_expected_entities(Record, now_ids, expected or {}):
-        return _dependencies_response(deps, detail="stale_dependencies")
-
-    # Match → resolution validation (as today) + execution.
+    # Body branch: the commit of the deferred delete — the business chain
+    # lives in the usecases scenario (GH #171 Task 5, Corridor 2): the
+    # scenario collects dependencies, verifies the expected snapshot
+    # (rev5/rev6) BEFORE the resolutions validation, validates
+    # resolutions, and runs the cascade; the ROUTE keeps only transport —
+    # the 409 stale_dependencies rendering, the 422 mapping, and 404.
     try:
-        ok = await service.resolve_delete(
-            db_session=session, id=record_id, resolutions=resolutions
+        ok = await delete_record_scenario(
+            None, db_session=session, id=record_id,
+            resolutions=resolutions, expected=expected,
         )
+    except StaleDependenciesError as exc:
+        return _dependencies_response(exc.nodes, detail="stale_dependencies")
     except ResolutionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not ok:
         raise HTTPException(
             status_code=404,

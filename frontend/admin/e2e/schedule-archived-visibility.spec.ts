@@ -7,7 +7,7 @@ import {
   createTestMaster,
   createTestService,
 } from './fixtures/factories';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { waitForScheduleReady, gotoScheduleDay } from './fixtures/helpers';
 
 /**
  * GH #267 — Schedule archived visibility, e2e scenarios S1–S7.
@@ -122,13 +122,14 @@ async function setArchivedToggle(
   expect(await toggle.isChecked()).toBe(checked);
 }
 
-/** Dispatch the schedule into DayView on the given ISO date (YYYY-MM-DD). */
-async function switchToDay(page: Page, date: string) {
-  await page.evaluate((d: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-day-view', { detail: { date: `${d}T12:00:00` } }),
-    );
-  }, date);
+/**
+ * Deep-link the schedule into DayView on the given ISO date (YYYY-MM-DD).
+ * `col` pins the column mode explicitly — a full page load resets the URL
+ * to exactly the given params (#138), so locations-mode tests must pass
+ * `col: 'locations'` or the reload lands back on masters.
+ */
+async function switchToDay(page: Page, date: string, col?: 'masters' | 'locations') {
+  await gotoScheduleDay(page, date, { col });
   await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 10_000 });
 }
 
@@ -242,7 +243,7 @@ test('S2: archived location — hidden by default, toggle reveals card and day-v
     // DayView shows the selected day — navigate explicitly to the activity's
     // own day. The factory `start` is UTC; convert to the LOCAL date first
     // (same as S6), so the opened week always contains the card's grid day.
-    await switchToDay(page, localIsoDate(new Date(activity.start)));
+    await switchToDay(page, localIsoDate(new Date(activity.start)), 'locations');
     await expect(
       page.locator(`[data-testid="archived-column-header-${location.id}"]`),
     ).toBeVisible({ timeout: 10_000 });

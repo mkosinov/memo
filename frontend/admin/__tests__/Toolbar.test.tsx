@@ -5,12 +5,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toolbar } from '../app/components/layout/Toolbar';
 import { ToastContainer } from '../app/components/toast/ToastContainer';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider, useUI } from '../contexts/UIContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { getActivities } from '@memo/api-client';
-import { getMonday, toISODate, shiftDateKey } from '../lib/datetime';
+import { toISODate, shiftDateKey } from '../lib/datetime';
+
+// #138 Task 2: the viewed week lives in the URL (?date) via useScheduleView —
+// NavigationContext is gone from this tree. The reactive stand-in lets push/
+// replace update params and re-render subscribers.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
@@ -48,18 +53,16 @@ function createQueryWrapper({ children }: { children: React.ReactNode }) {
   });
   return (
     <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
-        <UIProvider>
-          <UserSettingsProvider>
-            <PendingActionsProvider>
-          <ScheduleProvider>
+      <UIProvider>
+        <UserSettingsProvider>
+          <PendingActionsProvider>
+            <ScheduleProvider>
               {children}
               <ToastContainer />
             </ScheduleProvider>
           </PendingActionsProvider>
-          </UserSettingsProvider>
-        </UIProvider>
-      </NavigationProvider>
+        </UserSettingsProvider>
+      </UIProvider>
     </QueryClientProvider>
   );
 }
@@ -79,6 +82,7 @@ function renderWithProviders() {
 
 describe('Toolbar', () => {
   beforeEach(() => {
+    __resetNavigation();
     document.documentElement.removeAttribute('data-theme');
   });
 
@@ -153,14 +157,17 @@ describe('Toolbar', () => {
     expect(screen.queryByTestId('toast-container')).not.toBeInTheDocument();
   });
 
-  // #242 spec §6/§7: the button passes week_start = Monday of the VIEWED week
-  // (NavigationContext dateFrom). Observable via the popup's source fetch:
+  // #242 spec §6/§7 + #138 Task 2: the button passes week_start = Monday of the
+  // VIEWED week — now the week of ?date in the URL (contract: viewed week =
+  // week of ?date). Observable via the popup's source fetch:
   // getActivities on [viewedMonday−7 … viewedMonday−1].
-  it('opens the popover with week_start = viewed week Monday (source fetch = Monday−7…−1)', async () => {
+  it('opens the popover with week_start = week of ?date (source fetch = Monday−7…−1)', async () => {
+    // View a FIXED week via the URL: ?date=2026-09-16 (Wednesday) → Monday 09-14.
+    __resetNavigation('?view=week&date=2026-09-16');
     renderWithProviders();
     fireEvent.click(screen.getByRole('button', { name: /Копировать прошлую/i }));
 
-    const viewedMonday = toISODate(getMonday(new Date()));
+    const viewedMonday = '2026-09-14';
     const calls = (getActivities as ReturnType<typeof vi.fn>).mock.calls as Array<
       [Record<string, unknown>]
     >;

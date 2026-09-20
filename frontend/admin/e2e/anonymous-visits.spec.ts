@@ -4,8 +4,16 @@ import {
   openAddTab,
   getFirstActivity,
   phoneMaskDisplay,
+  waitForClientsReady,
 } from './fixtures/helpers';
-import { createTestClient, createTestVisitor, cleanup, cleanupRecord } from './fixtures/factories';
+import {
+  createTestClient,
+  createTestActivity,
+  createTestRecord,
+  createTestVisitor,
+  cleanup,
+  cleanupRecord,
+} from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 import {
   openRecordTab,
@@ -473,6 +481,93 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       await cleanupAll();
       if (extraRecordId) await cleanupRecord(request, extraRecordId);
       await cleanup(request, `/api/v1/clients/${extraClient.id}`);
+    }
+  });
+
+  // ── #243 S2: the «−» stepper runs the deferred contract — undo toast, ─────
+  // cancel restores the row; no server DELETE inside the window.
+  //
+  // Surface: the stepper lives in RecordHeader on the CLIENT-PAGE record tab
+  // (the activity modal's ClientTab has no header stepper — wave6 Scenario 3
+  // precedent). The row itself is the real anonymous visit (visitor_id =
+  // null); «−» deletes it through deleteVisitDeferred (the same pipeline the
+  // row × button uses — Tasks 1-2 of #243).
+  test('S2: «−» stepper — undo toast, «Отменить» restores the anonymous visit, no server DELETE', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `S2 Stepper ${Date.now()}`;
+    const client = await createTestClient(request, { name: clientName });
+    const activity = await createTestActivity(request, { capacity: 1 });
+    // One ANONYMOUS visit (no visitor name → visitor_id = null, #257 D10).
+    const record = await createTestRecord(request, activity.id, client.id, {
+      visits: [{ price: 3500 }],
+    });
+    const seeded = await fetchRecord(request, record.id);
+    const visitId = seeded.visits[0].id;
+    const visitDeletes: string[] = [];
+
+    try {
+      // The stepper's surface is the client-page record tab (wave6 pattern).
+      await waitForClientsReady(page, { waitForName: clientName });
+      const clientRow = page.locator('table tbody tr').filter({ hasText: clientName });
+      await expect(clientRow).toBeVisible({ timeout: 10_000 });
+      await clientRow.click();
+
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+      const recordTabButton = modal
+        .locator('[data-testid="client-card-left-panel"] button')
+        .nth(1);
+      await expect(recordTabButton).toBeVisible({ timeout: 10_000 });
+      await recordTabButton.click();
+      const tab = page.locator('[data-testid="client-record-tab"]');
+      await expect(tab).toBeVisible({ timeout: 10_000 });
+      await page.locator('#record-date').waitFor({ state: 'visible', timeout: 10_000 });
+
+      const header = page.locator('[data-testid="record-header"]');
+      const counter = header.locator('[data-testid="anonym-visits-count"]');
+      const visitRow = page.locator(`[data-testid="visit-row-${visitId}"]`);
+      await expect(visitRow).toBeVisible({ timeout: 10_000 });
+      await expect(counter).toHaveText('1 анонимных');
+
+      // Network counter for the visit's DELETE — registered BEFORE the click.
+      const onRequest = (req: { method(): string; url(): string }) => {
+        if (
+          req.method() === 'DELETE' &&
+          req.url().includes(`/api/v1/visits/${visitId}`)
+        ) {
+          visitDeletes.push(req.url());
+        }
+      };
+      page.on('request', onRequest);
+
+      // ACTION: «−» → optimistic removal + the undo toast.
+      await header.locator('[data-testid="anonym-visits-dec"]').click();
+      await expect(visitRow).not.toBeVisible({ timeout: 5_000 });
+      await expect(counter).toHaveText('0 анонимных');
+      const toast = page
+        .locator('[data-testid="toast-info"]')
+        .filter({ hasText: 'Удалено. Отменить' });
+      await expect(toast).toBeVisible();
+
+      // Undo inside the window: the row (and the counter) return.
+      await toast.locator('button:has-text("Отменить")').click();
+      await expect(visitRow).toBeVisible({ timeout: 5_000 });
+      await expect(counter).toHaveText('1 анонимных');
+      await expect(toast).toBeHidden();
+
+      // Let the full window elapse: no server DELETE may have been sent…
+      await page.waitForTimeout(5_500);
+      expect(visitDeletes).toHaveLength(0);
+      page.off('request', onRequest);
+      // …and the server never lost the visit.
+      const afterUndo = await fetchRecord(request, record.id);
+      expect(afterUndo.visits.some((v) => v.id === visitId)).toBe(true);
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });
 

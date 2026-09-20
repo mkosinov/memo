@@ -2,18 +2,23 @@
 # auto_impl_watch.sh — контейнерный наблюдатель IMPL-конвейера memo.
 #
 # Инвариант (раз в INTERVAL): если есть карточка Ready to IMPL, доступная
-# этому наблюдателю, — захватить её (комментарий-замок + статус In IMPL)
+# этому наблюдателю, — захватить её (статус In IMPL + поле host на борде)
 # и запустить фоном `opencode run` (дефолтный агент memo = manager).
-# ГЛОБАЛЬНОГО мьютекса нет: две машины могут вести разные карточки
-# параллельно; гонку за одну карточку ломает тайбрейк по комментариям
-# (пост-замок, пауза, выигрывает самый ранний claim).
+# ГЛОБАЛЬНОГО мьютекса и глобального бюджета нет: слоты ПО МАШИНАМ
+# (HOST_BUDGETS в gh_board.py, imac 2 / macbook 1); гонку за одну карточку
+# ломает тайбрейк по полю host (запись, пауза, перечитывание — владеет
+# последний писавший, ранний отходит).
 #
 # Старт:  docker exec -d opencode bash /root/workspace/memo/.opencode/scripts/auto_impl_watch.sh
-# Стоп:   docker exec opencode pkill -f auto_impl_watch
+# Стоп:   docker exec opencode pkill -f '^bash /root/workspace/memo/.opencode/scripts/auto_impl_watch\.sh$'
+#         ВАЖНО: якоря ^…$ обязательны — без них pkill -f убивает и entrypoint-обёртку
+#         контейнера (в её cmdline тоже есть имя скрипта) → контейнер перезапускается
+#         по restart-политике и ГИБНУТ все живые сессии менеджеров (инцидент 2026-09-20).
 # Вкл.:   docker exec opencode touch /root/.local/state/opencode/auto-impl.enabled
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
 #
-# Метка хоста: /root/.local/state/opencode/auto-impl-host ("imac"/"laptop").
+# Метка хоста: /root/.local/state/opencode/auto-impl-host — должна совпадать
+# с вариантом поля host на борде ("imac"/"macbook";hk/gcp зарезервированы).
 # Повторные попытки по issue ПРОДОЛЖАЮТ существующую сессию менеджера
 # (opencode run --session <id>): id берётся из БД — последняя сессия с
 # названием «<N> IMPL. …». Отдельного реестра сессий нет, БД = источник истины.
@@ -25,12 +30,13 @@
 # (auto-impl.pids: "PID issue"); процесс менеджера завершился → слот свободен.
 # Открытые UI/TUI-окна и ручные сессии юзера ёмкость НЕ занимают (грабли
 # 14.09: открытые окна блокировали конвейер).
-# Выбор карточки: gh_board.py pick-next (Next Up → первая Ready to IMPL;
-# пропуск карточек со свежими замками и с незакрытыми depends-on из тела issue).
-# Все события карточки пишутся в ОДИН комментарий на issue «auto-impl log:»
-# (новые записи внизу — вся история остаётся в одном месте): CLAIM при захвате,
-# BLOCKED при гейт-фейле менеджера. Последняя запись свежее CLAIM_TTL_HOURS
-# (1ч, константа в gh_board.py) — карточка в полёте или отдыхает.
+# Выбор карточки: gh_board.py pick-next "$HOST_LABEL" (Next Up → первая
+# Ready to IMPL; бюджет слотов своей машины по полю host; пропуск карточек
+# со свежими записями и с незакрытыми depends-on из тела issue).
+# Владение карточкой = поле host на борде (единственный источник, 2026-09-20;
+# CLAIM-комментарии больше не пишутся). Комментарий «auto-impl log:» на issue
+# остаётся каналом BLOCKED-событий менеджера; свежая BLOCKED-запись —
+# карточка отдыхает (CLAIM_TTL_HOURS = 1ч в gh_board.py).
 
 set -uo pipefail
 
@@ -40,7 +46,7 @@ LOG="$STATE/auto-impl-watch.log"
 LOCK=/tmp/auto-impl-watch.lock
 PIDS_FILE="$STATE/auto-impl.pids"
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
-TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает поставить свой claim
+TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает перезаписать поле host
 
 cd "$REPO" || exit 1
 mkdir -p "$STATE"
@@ -55,6 +61,7 @@ echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 HOST_LABEL=$(cat "$STATE/auto-impl-host" 2>/dev/null || hostname)
+export GH_BOARD_HOST="$HOST_LABEL"   # gh_board.py подставляет метку в pick-next и status
 echo "=== auto-impl watcher start $(date -Is) host=$HOST_LABEL interval=${INTERVAL}s ==="
 
 while true; do
@@ -75,31 +82,29 @@ while true; do
         continue
     fi
 
-    PICK=$(python3 .opencode/scripts/gh_board.py pick-next) || { echo "$(date -Is) board query failed: $PICK"; continue; }
+    PICK=$(python3 .opencode/scripts/gh_board.py pick-next "$HOST_LABEL") || { echo "$(date -Is) board query failed: $PICK"; continue; }
     case "$PICK" in
         NONE|"") continue ;;
         *[!0-9]*) echo "$(date -Is) unexpected pick output: $PICK"; continue ;;
     esac
     N="$PICK"
 
+    # захват одним действием: статус In IMPL + поле host (GH_BOARD_HOST экспортирован)
     echo "$(date -Is) claiming #$N on $HOST_LABEL"
-    python3 .opencode/scripts/gh_board.py auto-log "$N" "CLAIM host=$HOST_LABEL" \
-        || { echo "$(date -Is) claim log failed — skip"; continue; }
-
-    # тайбрейк гонки: после TIEBREAK_WAIT последняя запись в логе должна быть
-    # нашей (один общий лог-комментарий; чужая запись поверх нашей = проигрыш)
-    sleep "$TIEBREAK_WAIT"
-    LAST=$(python3 .opencode/scripts/gh_board.py auto-state "$N" 2>/dev/null) || LAST=""
-    case "$LAST" in
-        *"host=$HOST_LABEL"*) : ;;
-        *) echo "$(date -Is) #$N lost claim race — back off"; continue ;;
-    esac
-
-    # захват статуса ДО запуска сессии
     if ! python3 .opencode/scripts/gh_board.py status "$N" "In IMPL"; then
         echo "$(date -Is) status claim failed — skip"
         continue
     fi
+
+    # тайбрейк гонки: после TIEBREAK_WAIT поле host на карточке должно быть
+    # нашим (два наблюдателя могли захватить одновременно; владеет последний
+    # писавший, ранний молча отходит)
+    sleep "$TIEBREAK_WAIT"
+    OWNER=$(python3 .opencode/scripts/gh_board.py host "$N" 2>/dev/null) || OWNER=""
+    case "$OWNER" in
+        "$HOST_LABEL") : ;;
+        *) echo "$(date -Is) #$N lost claim race (owner=${OWNER:-none}) — back off"; continue ;;
+    esac
 
     # свежий харнесс перед стартом
     git pull --ff-only >/dev/null 2>&1 || echo "$(date -Is) WARN: git pull failed, starting on current tree"

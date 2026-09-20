@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.record import Record
 from src.models.tag import visitor_tags
@@ -198,6 +199,47 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         session (Task 10) keeping the Client→visitors cascade atomic.
         """
         return await self._delete_cascade(db_session, id)
+
+    # ── GH #171 Task 2 — scenario building block (no transaction) ───────
+
+    async def get_or_create_by_name(
+        self,
+        db_session: AsyncSession,
+        client_id: str | None,
+        name: str,
+        age: int | None = None,
+    ) -> Visitor:
+        """Find the visitor by (client_id, name), or create one — WITHOUT
+        committing.
+
+        Non-transactional scenario building block for the usecases layer
+        (canon docs/domain-rules/service-layer.md rules 3-4) — moved
+        BEHAVIOR-FOR-BEHAVIOR from ``RecordService._resolve_visitor_by_name``
+        (the future create_record scenario re-links it in Task 6): lookup
+        by the exact (``client_id``, ``name``) pair; on a miss a visitor
+        is created with the caller's ``age`` and flushed so ``id`` is
+        populated. ``mark_changed("visitors")`` fires ONLY on the creation
+        branch (GH #239 §3.3); outside an active transaction the mark is
+        a no-op. Value-typed parameters — no foreign ORM/schema objects.
+        """
+        result = await db_session.execute(
+            select(Visitor).where(
+                Visitor.client_id == client_id,
+                Visitor.name == name,
+            )
+        )
+        visitor = result.scalar_one_or_none()
+        if not visitor:
+            visitor = Visitor(
+                client_id=client_id,
+                name=name,
+                age=age,
+            )
+            db_session.add(visitor)
+            await db_session.flush()
+            # GH #239 §3.3: conditional mark — only when actually created
+            mark_changed("visitors")
+        return visitor
 
 
 @lru_cache

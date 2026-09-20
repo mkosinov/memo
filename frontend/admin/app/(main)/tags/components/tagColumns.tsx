@@ -15,8 +15,8 @@ export const tagColumns = (): ColumnDef<TagResponse>[] => [
  * Action config factory. Callbacks are captured by the parent wrapper
  * (§6.15: wrapper useMemo's the output). Rows also open the edit modal via
  * onRowClick; "Редактировать" stays in the menu (existing behaviour + the
- * unchanged tags-crud e2e and dropdown baseline). Delete keeps the §6.9
- * locked window.confirm path — the parent implements it in onDelete.
+ * unchanged tags-crud e2e and dropdown baseline). Delete is the deferred
+ * GH #318 flow — the parent's onDelete runs the dry-run/deferred hook.
  */
 export const tagActions = (cbs: {
   onEdit: (t: TagResponse) => void;

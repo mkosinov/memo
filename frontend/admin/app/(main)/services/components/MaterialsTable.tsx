@@ -11,7 +11,7 @@ import { MaterialModal } from './MaterialModal';
 import { ServiceFilters } from './ServiceFilters';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
-import { materialColumns, materialActions } from './materialsColumns';
+import { materialColumns, materialActions } from './materialColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { invalidateEntities } from '@/lib/invalidate';
 

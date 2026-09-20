@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import React from 'react';
 import type { MaterialResponse } from '@memo/api-client';
-import { materialColumns } from '../app/(main)/services/components/materialsColumns';
+import { materialColumns } from '../app/(main)/services/components/materialColumns';
 
 // ─── Fixtures (mirrors the MaterialsTable.test.tsx mock shape) ──────────────
 

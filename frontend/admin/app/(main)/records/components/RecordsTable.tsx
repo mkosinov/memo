@@ -13,7 +13,7 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { DiamondIcon } from '@/app/components/shared/DiamondIcon';
 import { ClientQuickCard } from './ClientQuickCard';
-import { recordColumns, recordsActions, formatPrice, formatDateRu } from './recordsColumns';
+import { recordColumns, recordsActions, formatPrice, formatDateRu } from './recordColumns';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 

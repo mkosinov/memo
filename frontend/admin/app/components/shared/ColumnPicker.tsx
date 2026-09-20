@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { Fragment, useId, useState, useRef, useEffect } from 'react';
 
 interface Column {
   key: string;
@@ -20,6 +20,7 @@ export function ColumnPicker({
   onToggle,
 }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
+  const uid = useId();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,22 +72,31 @@ export function ColumnPicker({
             // column ⇒ it is always the "last visible" one, yet the spec must
             // still be able to click its label and have the attempt no-op).
             return (
-              <label
-                key={col.key}
-                className="flex items-center gap-2 px-2 py-1 text-sm rounded"
-                style={{
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.5 : 1,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(col.key)}
-                  className="rounded"
-                />
-                <span style={{ color: 'var(--ink)' }}>{col.label}</span>
-              </label>
+              <Fragment key={col.key}>
+                <label
+                  className="flex items-center gap-2 px-2 py-1 text-sm rounded"
+                  style={{
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(col.key)}
+                    aria-describedby={
+                      disabled ? `${uid}-guard-${col.key}` : undefined
+                    }
+                    className="rounded"
+                  />
+                  <span style={{ color: 'var(--ink)' }}>{col.label}</span>
+                </label>
+                {disabled && (
+                  <span id={`${uid}-guard-${col.key}`} className="sr-only">
+                    Последняя видимая колонка — скрыть нельзя
+                  </span>
+                )}
+              </Fragment>
             );
           })}
         </div>

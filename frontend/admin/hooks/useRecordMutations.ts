@@ -473,8 +473,11 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     async (visitId: string) => {
       // 1. Snapshot the visit from the canonical cache BEFORE removing.
       //    The helper guards `old == null` so we still pass through safely.
+      //    #243 S5: the snapshot ALSO captures the row's original index — the
+      //    undo must re-insert it at its old position, not at the end.
       const record = queryClient.getQueryData<RecordResponse>(qk.record(recordId));
-      const savedVisit = record?.visits.find((v) => v.id === visitId);
+      const savedVisitIndex = record?.visits.findIndex((v) => v.id === visitId) ?? -1;
+      const savedVisit = savedVisitIndex === -1 ? undefined : record?.visits[savedVisitIndex];
 
       // 2. Optimistically remove from canonical + list caches via helper.
       removeVisit(queryClient, recordId, visitId);
@@ -490,11 +493,16 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         kind: 'delete',
         message: 'Удалено. Отменить',
         delayMs: 5000,
-        // Undo: write the snapshotted visit back via the helper.
-        // The helper guards `old == null` (spec §7) — if the canonical
-        // record was removed, we silently no-op.
+        // Undo: write the snapshotted visit back via the helper — at its
+        // ORIGINAL index (#243 S5; negative index → helper appends, add-path
+        // semantics). The helper guards `old == null` (spec §7) — if the
+        // canonical record was removed, we silently no-op.
         undo: () => {
-          if (savedVisit) upsertVisit(queryClient, recordId, savedVisit);
+          if (savedVisit) {
+            upsertVisit(queryClient, recordId, savedVisit, {
+              atIndex: savedVisitIndex,
+            });
+          }
         },
         // Commit: call the real API and reconcile (canonical + lists).
         // The optimistic remove already removed it from caches; if the API
@@ -513,9 +521,15 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   const deletePaymentDeferred = useCallback(
     async (paymentId: string) => {
-      // 1. Snapshot the payment from the per-record cache BEFORE removing.
+      // 1. Snapshot the payment from BOTH caches BEFORE removing.
+      //    #243 S5: per-record and global lists have independent orderings —
+      //    each index is captured separately so the undo restores the row in
+      //    place in both.
       const savedPayments = queryClient.getQueryData<PaymentResponse[]>(qk.recordPayments(recordId));
-      const savedPayment = savedPayments?.find((p) => p.id === paymentId);
+      const savedPaymentIndex = savedPayments?.findIndex((p) => p.id === paymentId) ?? -1;
+      const savedPayment = savedPaymentIndex === -1 ? undefined : savedPayments?.[savedPaymentIndex];
+      const savedGlobalPayments = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      const savedGlobalIndex = savedGlobalPayments?.findIndex((p) => p.id === paymentId) ?? -1;
 
       // 2. Optimistically remove from BOTH per-record and global ['payments'] via helper.
       removePayment(queryClient, recordId, paymentId);
@@ -526,8 +540,15 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         kind: 'delete',
         message: 'Удалено. Отменить',
         delayMs: 5000,
+        // Undo: restore the snapshotted payment into BOTH keys at their
+        // original positions (#243 S5; negative index → helper appends).
         undo: () => {
-          if (savedPayment) upsertPayment(queryClient, recordId, savedPayment);
+          if (savedPayment) {
+            upsertPayment(queryClient, recordId, savedPayment, {
+              atIndex: savedPaymentIndex,
+              globalAtIndex: savedGlobalIndex,
+            });
+          }
         },
         // Commit: API delete + targeted reconcile of per-record + global ['payments'].
         // Absorbs #130 Bug 2 — old code did not reconcile ['payments'] after API success.

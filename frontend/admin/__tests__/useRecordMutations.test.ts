@@ -1217,13 +1217,24 @@ describe('useRecordMutations', () => {
 
     it('undo restores the visit via upsertVisit helper and cancels the commit', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      seedRecordWithVisit(queryClient);
+      // #243 S5: seed the deleted visit as a MIDDLE row (index 1 of 3) so the
+      // undo position is observable — appending would put it after 'visit-c'.
+      const visitA = { ...existingVisit, id: 'visit-a' };
+      const visitC = { ...existingVisit, id: 'visit-c' };
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [visitA, existingVisit, visitC],
+      });
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deleteVisitDeferred('visit-existing');
       });
+
+      // Row removed from the middle optimistically
+      const afterRemove = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(afterRemove?.visits.map((v) => v.id)).toEqual(['visit-a', 'visit-c']);
 
       // Grab the undo function
       const action = mockEnqueuePendingAction.mock.calls[0][0] as {
@@ -1234,10 +1245,16 @@ describe('useRecordMutations', () => {
       });
 
       // The provider would not call commit() if undo runs first; verify the undo
-      // restored the canonical cache (the row is back).
+      // restored the canonical cache — the row is back AT ITS ORIGINAL INDEX
+      // (#243 S5), not appended to the end.
       const cached = queryClient.getQueryData<RecordResponse>(['record', recordId]);
-      expect(cached?.visits).toHaveLength(1);
-      expect(cached?.visits[0].id).toBe('visit-existing');
+      expect(cached?.visits).toHaveLength(3);
+      expect(cached?.visits.map((v) => v.id)).toEqual([
+        'visit-a',
+        'visit-existing',
+        'visit-c',
+      ]);
+      expect(mockDeleteVisit).not.toHaveBeenCalled();
     });
 
     it('deletePaymentDeferred removes row + enqueues pending action, no DELETE sent', async () => {
@@ -1328,13 +1345,27 @@ describe('useRecordMutations', () => {
 
     it('undo restores payment and cancels the commit', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      seedPaymentsCache(queryClient);
+      // #243 S5: seed BOTH keys with the deleted row at NON-FINAL positions —
+      // per-record index 1 of 3, global index 0 of 3. The per-record and global
+      // lists have independent orderings, so each restore uses its own index.
+      const payA = { ...existingPayment, id: 'pay-a' };
+      const payB = { ...existingPayment, id: 'pay-b' };
+      const payX = { ...existingPayment, id: 'pay-x', record_id: 'r-other' };
+      const payY = { ...existingPayment, id: 'pay-y', record_id: 'r-other' };
+      queryClient.setQueryData(['payments', recordId], [payA, existingPayment, payB]);
+      queryClient.setQueryData(['payments'], [existingPayment, payX, payY]);
 
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
         await result.current.deletePaymentDeferred('pay-existing');
       });
+
+      // Rows removed optimistically from BOTH keys
+      const afterRemove = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
+      expect(afterRemove?.map((p) => p.id)).toEqual(['pay-a', 'pay-b']);
+      const globalAfterRemove = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(globalAfterRemove?.map((p) => p.id)).toEqual(['pay-x', 'pay-y']);
 
       const action = mockEnqueuePendingAction.mock.calls[0][0] as {
         undo: () => void;
@@ -1343,10 +1374,13 @@ describe('useRecordMutations', () => {
         action.undo();
       });
 
-      // Payment restored in per-record cache
+      // Payment restored in per-record cache AT ITS ORIGINAL INDEX (S5)
       const cached = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
-      expect(cached).toHaveLength(1);
-      expect(cached![0].id).toBe('pay-existing');
+      expect(cached?.map((p) => p.id)).toEqual(['pay-a', 'pay-existing', 'pay-b']);
+      // Global list restored AT ITS ORIGINAL INDEX too (S5)
+      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
+      expect(global?.map((p) => p.id)).toEqual(['pay-existing', 'pay-x', 'pay-y']);
+      expect(mockDeletePayment).not.toHaveBeenCalled();
     });
   });
 

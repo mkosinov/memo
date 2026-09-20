@@ -10,7 +10,10 @@
 # последний писавший, ранний отходит).
 #
 # Старт:  docker exec -d opencode bash /root/workspace/memo/.opencode/scripts/auto_impl_watch.sh
-# Стоп:   docker exec opencode pkill -f auto_impl_watch
+# Стоп:   docker exec opencode pkill -f '^bash /root/workspace/memo/.opencode/scripts/auto_impl_watch\.sh$'
+#         ВАЖНО: якоря ^…$ обязательны — без них pkill -f убивает и entrypoint-обёртку
+#         контейнера (в её cmdline тоже есть имя скрипта) → контейнер перезапускается
+#         по restart-политике и ГИБНУТ все живые сессии менеджеров (инцидент 2026-09-20).
 # Вкл.:   docker exec opencode touch /root/.local/state/opencode/auto-impl.enabled
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
 #

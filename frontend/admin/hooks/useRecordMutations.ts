@@ -162,9 +162,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         }
       }
 
-      // 3. Default price from first tariff if any
-      const firstTariff = serviceTariffs[0];
-
       // 4. Create record — #257 unified visitors model: the unfilled tail is
       //    appended to `visits` as ANONYMOUS visit elements (no visitor_id);
       //    default tariff/price via the single resolver (GH #284 — same rule

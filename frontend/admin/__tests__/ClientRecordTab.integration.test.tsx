@@ -240,13 +240,21 @@ describe('ClientRecordTab — integration with shared atoms', () => {
     });
   });
 
-  it('deletePayment fires deletePayment mutation', async () => {
+  it('deletePayment goes through deletePaymentDeferred (PendingActions) — deferred contract', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     fireEvent.click(screen.getByTestId('payment-p1-delete'));
 
+    // deletePaymentDeferred delegates to PendingActions — must call enqueuePendingAction
+    // and must NOT immediately call the deletePayment API (the provider owns the timer).
     await waitFor(() => {
-      expect(deletePayment).toHaveBeenCalledWith('p1');
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'delete',
+          message: expect.stringContaining('Отменить'),
+        }),
+      );
     });
+    expect(deletePayment).not.toHaveBeenCalled();
   });
 
   it('saveRecord fires patchRecord on save', async () => {

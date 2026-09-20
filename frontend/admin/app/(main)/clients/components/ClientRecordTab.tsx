@@ -46,6 +46,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     addPayment,
     patchPayment,
     deletePayment,
+    deletePaymentDeferred,
     updateRecord,
     addVisit,
     patchVisit,
@@ -347,7 +348,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         payments={Array.isArray(payments) ? payments : []}
         onAddPayment={addPayment}
         onPatchPayment={patchPayment}
-        onDeletePayment={deletePayment}
+        onDeletePayment={(paymentId: string) => deletePaymentDeferred(paymentId)}
       />
 
       {/* Comment */}

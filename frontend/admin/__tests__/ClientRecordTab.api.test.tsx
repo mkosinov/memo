@@ -438,6 +438,24 @@ describe('ClientRecordTab — API interactions', () => {
     expect(apiDeleteVisit).not.toHaveBeenCalled();
   });
 
+  it('delete payment uses deletePaymentDeferred (enqueuePendingAction), not direct deletePayment API', async () => {
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    // Click × button on a saved payment row (testIdPrefix 'payment')
+    fireEvent.click(screen.getByTestId('payment-p1-delete'));
+
+    // deletePaymentDeferred delegates to PendingActions — must call enqueuePendingAction
+    // and must NOT immediately call deletePayment API (the provider owns the timer).
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'delete',
+          message: expect.stringContaining('Отменить'),
+        }),
+      );
+    });
+    expect(deletePayment).not.toHaveBeenCalled();
+  });
+
   it('record-level Save calls patchRecord with custom_price+comment (no visits field)', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     const textarea = screen.getByPlaceholderText('Добавить комментарий...');

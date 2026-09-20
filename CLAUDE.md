@@ -38,6 +38,12 @@ verify — don't ask "продолжить?" between tasks.
 - **Circuit breaker**: 3 failed attempts on the same problem → stop and escalate to the
   user with what was tried. Don't loop.
 - **Verify before done**: exercise the affected flow, not just tests (`/verify`, `/code-review`).
+- **Awaiting-handoff rule (orchestration, 2026-09-20 #227 incident)**: when a dispatched agent
+  returns an intermediate "awaiting X" result (CI run, long job), the dispatch is already
+  `completed` — its later final report has NO path back to the orchestrator, and its PTY
+  notification wakes only its own session. The orchestrator must therefore immediately set its
+  OWN watch/timer on X and drive the follow-up (e.g. board flip after merge) itself. Never end
+  your turn passively relying on someone else's watch to wake you.
 
 ## Layout
 

@@ -45,7 +45,6 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   const {
     addPayment,
     patchPayment,
-    deletePayment,
     deletePaymentDeferred,
     updateRecord,
     addVisit,

@@ -291,20 +291,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [recordId, queryClient, invalidateRecord],
   );
 
-  const deletePayment = useCallback(
-    async (paymentId: string) => {
-      // Optimistic: remove from BOTH per-record and global ['payments'] caches.
-      removePayment(queryClient, recordId, paymentId);
-      await apiDeletePayment(paymentId);
-      // Targeted invalidation: the record's payment tab uses ['payments', recordId].
-      invalidateRecord();
-      // R4 (US-4): RecordsTable reads `paid` from the view row — prefix
-      // ['records'] invalidation catches all pages/filters so the badge refreshes.
-      invalidateEntities(queryClient, ['records']);
-    },
-    [recordId, queryClient, invalidateRecord],
-  );
-
   // ── Record-level visit / visitor mutations (non fine-grained) ─────────
 
   const addVisitorToRecord = useCallback(
@@ -378,29 +364,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       // Reader: ScheduleActivityCard + RecordModal
       upsertVisit(queryClient, recordId, visit);
       return visit;
-    },
-    [recordId, queryClient],
-  );
-
-  const deleteVisit = useCallback(
-    async (visitId: string) => {
-      // Snapshot BEFORE the optimistic remove — rollback needs the visit data
-      // if the server keeps it.
-      const saved = queryClient
-        .getQueryData<RecordResponse>(qk.record(recordId))
-        ?.visits.find((v) => v.id === visitId);
-      // Optimistic: remove visit from BOTH canonical and list caches via helper.
-      // Reader: ScheduleActivityCard + RecordModal
-      removeVisit(queryClient, recordId, visitId);
-      try {
-        await apiDeleteVisit(visitId);
-      } catch (e) {
-        // Server kept the visit → restore the cache so the header count/seats
-        // don't drift until an unrelated refetch. Rethrow: existing
-        // catch/toast callers keep working.
-        if (saved) upsertVisit(queryClient, recordId, saved);
-        throw e;
-      }
     },
     [recordId, queryClient],
   );
@@ -589,12 +552,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     addVisitor,
     deleteVisitor,
     addPayment,
-    deletePayment,
     addVisitorToRecord,
     updateVisitStatus,
     addVisit,
     patchVisit,
-    deleteVisit,
     addAnonymousVisit,
     convertAnonymousVisit,
     patchPayment,

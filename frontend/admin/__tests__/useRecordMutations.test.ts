@@ -892,97 +892,6 @@ describe('useRecordMutations', () => {
     });
   });
 
-  describe('deleteVisit', () => {
-    it('calls the deleteVisit API', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteVisit('visit-1');
-      });
-
-      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-1');
-    });
-
-    it('optimistically removes visit from BOTH canonical and list caches via removeVisit helper', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const existingVisit = {
-        id: 'visit-1',
-        record_id: recordId,
-        visitor_id: 'vis-1',
-        tariff_id: 't1',
-        price: 3500,
-        custom_price: null,
-        status: 'waiting',
-        created_at: '',
-        updated_at: '',
-      };
-      const otherRecord = { ...mockRecordResponse, id: 'r2', visits: [] };
-      queryClient.setQueryData(['record', recordId], {
-        ...mockRecordResponse,
-        visits: [existingVisit],
-      });
-      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
-        items: [{ ...mockRecordResponse, visits: [existingVisit] }, otherRecord],
-        total: 2,
-        page: 1,
-        per_page: 10,
-      });
-
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteVisit('visit-1');
-      });
-
-      // Canonical no longer has visit-1
-      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
-      expect(canonical?.visits).toHaveLength(0);
-      // List cache copy also no longer has visit-1
-      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
-        'records',
-        '2026-06-10',
-        '2026-06-10',
-      ]);
-      expect(listCache?.items[0]?.visits).toHaveLength(0);
-      // r2 untouched
-      expect(listCache?.items[1]?.id).toBe('r2');
-    });
-
-    it('restores the visit to the cache and rethrows when the API rejects', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const existingVisit = {
-        id: 'visit-1',
-        record_id: recordId,
-        visitor_id: 'vis-1',
-        tariff_id: 't1',
-        price: 3500,
-        custom_price: null,
-        status: 'waiting',
-        created_at: '',
-        updated_at: '',
-      };
-      queryClient.setQueryData(['record', recordId], {
-        ...mockRecordResponse,
-        visits: [existingVisit],
-      });
-      mockDeleteVisit.mockRejectedValue(new Error('delete failed'));
-
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await expect(
-        act(async () => {
-          await result.current.deleteVisit('visit-1');
-        }),
-      ).rejects.toThrow('delete failed');
-
-      // Server kept the visit → cache is restored, no drift
-      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
-      expect(canonical?.visits).toHaveLength(1);
-      expect(canonical?.visits[0]?.id).toBe('visit-1');
-    });
-  });
-
   describe('patchPayment', () => {
     it('calls the patchPayment API and returns the updated payment', async () => {
       const { wrapper } = createQueryClientWrapper();
@@ -1032,53 +941,6 @@ describe('useRecordMutations', () => {
     });
   });
 
-  describe('deletePayment', () => {
-    it('calls deletePayment API with the payment id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deletePayment('pay1');
-      });
-
-      expect(mockDeletePayment).toHaveBeenCalledWith('pay1');
-    });
-
-    it('removes payment from BOTH [payments, recordId] AND global [payments] via helper', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const existing = { ...mockPaymentResponse, id: 'pay1', amount: 3500 };
-      const other = { ...mockPaymentResponse, id: 'pay-other', amount: 100 };
-      queryClient.setQueryData(['payments', recordId], [existing, other]);
-      queryClient.setQueryData(['payments'], [existing, other]);
-
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deletePayment('pay1');
-      });
-
-      const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);
-      expect(perRecord?.map((p) => p.id)).toEqual(['pay-other']);
-      const global = queryClient.getQueryData<PaymentResponse[]>(['payments']);
-      expect(global?.map((p) => p.id)).toEqual(['pay-other']);
-    });
-
-    it('invalidates [records] so RecordsTable paid badge refreshes (R4/US-4)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deletePayment('pay1');
-      });
-
-      // Reader: RecordsTable reads `paid` from the view row — prefix ['records']
-      // catches all pages/filters. Existing ['record', id] invalidation stays.
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-    });
-  });
-
   // ─── Optimistic cache update tests — helpers route through setQueryData + setQueriesData ─
 
   describe('optimistic cache updates (helpers route through setQueryData + setQueriesData)', () => {
@@ -1110,7 +972,7 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('deleteVisit uses removeVisit helper (canonical + list keys)', async () => {
+    it('deleteVisitDeferred uses removeVisit helper (canonical + list keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
       const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
@@ -1132,7 +994,7 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.deleteVisit('visit-1');
+        await result.current.deleteVisitDeferred('visit-1');
       });
 
       expect(setQueryDataSpy).toHaveBeenCalledWith(
@@ -1203,7 +1065,7 @@ describe('useRecordMutations', () => {
       expect(globalCall).toBeDefined();
     });
 
-    it('deletePayment uses removePayment helper (per-record + global keys)', async () => {
+    it('deletePaymentDeferred uses removePayment helper (per-record + global keys)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
       queryClient.setQueryData(['payments', recordId], [mockPaymentResponse]);
@@ -1212,7 +1074,7 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.deletePayment('pay1');
+        await result.current.deletePaymentDeferred('pay1');
       });
 
       const perRecordCall = setQueryDataSpy.mock.calls.find(
@@ -1811,8 +1673,18 @@ describe('useRecordMutations', () => {
     });
   });
 
-  describe('deleteVisit — stepper −1 semantics (#257)', () => {
-    it('deletes immediately WITHOUT enqueueing an undo pending action (header per-seat delete)', async () => {
+  describe('instant deletePayment/deleteVisit removed (#243 phase 1)', () => {
+    it('is no longer exposed by the hook — callers must use the deferred variants', () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      expect(result.current).not.toHaveProperty('deleteVisit');
+      expect(result.current).not.toHaveProperty('deletePayment');
+      // The deferred replacements remain available.
+      expect(result.current.deleteVisitDeferred).toBeDefined();
+      expect(result.current.deletePaymentDeferred).toBeDefined();
+    });
+
+    it('deleteVisitDeferred enqueues a pending action instead of firing an instant DELETE', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       queryClient.setQueryData(['record', recordId], {
         ...mockRecordResponse,
@@ -1821,14 +1693,26 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.deleteVisit('visit-anon');
+        await result.current.deleteVisitDeferred('visit-anon');
       });
 
-      // Real DELETE goes out right away (no deferred/undo path for the stepper)
-      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-anon');
-      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
-      // The deferred 5s-window variant remains available separately
-      expect(result.current.deleteVisitDeferred).toBeDefined();
+      // Deferred contract: enqueue, NOT instant DELETE.
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      expect(mockDeleteVisit).not.toHaveBeenCalled();
+    });
+
+    it('deletePaymentDeferred enqueues a pending action instead of firing an instant DELETE', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      queryClient.setQueryData(['payments', recordId], [mockPaymentResponse]);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.deletePaymentDeferred('pay1');
+      });
+
+      // Deferred contract: enqueue, NOT instant DELETE.
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      expect(mockDeletePayment).not.toHaveBeenCalled();
     });
   });
 });

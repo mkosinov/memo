@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from src.models.enums import TariffAudience
+
 # Sort whitelist for GET /api/v1/services (#205 Task 3, spec §4.5).
 # ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
 ServiceSortBy = Literal[
@@ -35,9 +37,18 @@ class ServiceMaterialItem(BaseModel):
 
 
 class TariffBase(BaseModel):
+    """Shared tariff fields (GH #284 Task 2).
+
+    ``audience`` is typed by the ``TariffAudience`` enum (Task 1): absent →
+    ``all`` (backward compat with pre-#284 clients), unknown string → 422
+    instead of a silent junk write. Subclasses (Create/Update/Response)
+    inherit it.
+    """
+
     title: str
     description: str | None = None
     price: int
+    audience: TariffAudience = TariffAudience.ALL
 
 
 class TariffCreate(TariffBase):

@@ -28,6 +28,65 @@ TARIFF_PAYLOAD = {
 }
 
 
+class TestTariffAudience:
+    """#284: ``audience`` typed enum on nested Tariff schemas (GH #284 Task 2).
+
+    Contract: absent field → ``all`` (backward compat), explicit
+    ``kid``/``adult``/``all`` round-trip, garbage string → 422 (no silent
+    junk writes). Follows the pattern of Task 1 (enum + DB column exist
+    already) — this pins the schema layer only.
+    """
+
+    def test_create_tariff_without_audience_defaults_all(self, api_client) -> None:
+        """POST without audience → response audience == 'all' (old clients ok)."""
+        payload = {
+            **SERVICE_PAYLOAD,
+            "tariffs": [TARIFF_PAYLOAD],
+        }
+        response = api_client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["tariffs"][0]["audience"] == "all"
+
+    def test_create_tariff_explicit_audience_round_trip(self, api_client) -> None:
+        """POST with audience='kid' → echoed back as 'kid' in response."""
+        payload = {
+            **SERVICE_PAYLOAD,
+            "tariffs": [{**TARIFF_PAYLOAD, "audience": "kid"}],
+        }
+        response = api_client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["tariffs"][0]["audience"] == "kid"
+
+    def test_update_tariff_audience_round_trip(self, api_client) -> None:
+        """PUT replacing tariffs with audience='adult' → echoed as 'adult'."""
+        create_resp = api_client.post("/api/v1/services", json=SERVICE_PAYLOAD)
+        assert create_resp.status_code == 201
+        service_id = create_resp.json()["id"]
+
+        response = api_client.put(
+            f"/api/v1/services/{service_id}",
+            json={
+                **SERVICE_PAYLOAD,
+                "tariffs": [{**TARIFF_PAYLOAD, "audience": "adult"}],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["tariffs"][0]["audience"] == "adult"
+
+    def test_create_tariff_unknown_audience_422(self, api_client) -> None:
+        """POST with audience='seniors' (garbage) → 422, service not created."""
+        payload = {
+            **SERVICE_PAYLOAD,
+            "tariffs": [{**TARIFF_PAYLOAD, "audience": "seniors"}],
+        }
+        response = api_client.post("/api/v1/services", json=payload)
+
+        assert response.status_code == 422
+
+
 def _create_tag(api_client) -> str:
     """Create a tag via POST /api/tags and return its ID."""
     response = api_client.post("/api/v1/tags", json=TAG_PAYLOAD)

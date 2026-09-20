@@ -18,7 +18,7 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
    - behind → `git pull --ff-only`, continue;
    - **diverged (ahead+behind) → STOP**: show the user, reset nothing (precedent — passenger commit cc8bc52).
 3. Board: `next-up` (§7) → show the trajectory to the user.
-4. The user picks an issue → `status N "In Design"`. Guard: the issue must not sit in `In IMPL` — one issue lives in one phase at a time.
+4. The user picks an issue → `status N "In Design" imac` (third arg = the host field value; design runs on the iMac host — the field is the single ownership source for In IMPL/In Design cards). Guard: the issue must not sit in `In IMPL` — one issue lives in one phase at a time.
 5. **Scout (pre-design recon) — by dispatch, not by hand.** Right after the issue is picked, dispatch built-in read-only subagents to gather facts (zcode — `Explore`, opencode — `explorer`; a cheap model is these agents' default). Default is **one**; wide scope (many subsystems / dependency issues) — several in parallel, one per zone, in a single Agent-tool message. The prompt: issue number, what the issue claims, what to verify against the live tree (dependencies, consumers, patterns) — plus an **actuality check**: is the gap the issue describes still there, claim-by-claim against live code and recently merged PRs.
    - Back comes a **compact fact sheet**: key files' structure/size vs the issue's claims; every claim confirmed/denied with `file:line`; dependency issues' state (open/closed + a one-line delta); consumer inventory; ready patterns to reuse; ending with the **actuality verdict**: `actual` / `partially stale` / `stale`.
    - **Stale-issue auto-close (2026-09-18, user decision):** verdict `stale` — every load-bearing claim of the issue contradicted by the live tree AND the described gap verifiably gone (already implemented or fully superseded; cite `file:line` and the PR/merge that closed it). The main session FIRST re-verifies 1–2 load-bearing claims itself against the code (scout reports err in paths — #287 lesson); confirmed → comment the evidence on the issue, `gh issue close N --reason "not planned"`, board card → `Not planned`, report in this session. A wrong close is one click to reopen. A doubtful verdict never closes: comment what is off and keep designing. `partially stale` → correct the stale claims in an issue comment and bake the corrections into the concept and spec; the issue body itself is not edited.
@@ -122,7 +122,7 @@ Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands th
 ```bash
 python3 .zcode/scripts/gh_board.py next-up
 python3 .zcode/scripts/gh_board.py show 247                # read one card; `show all` = whole board
-python3 .zcode/scripts/gh_board.py status 176 "Ready to IMPL"
+python3 .zcode/scripts/gh_board.py status 176 "Ready to IMPL"   # leaving In Design/In IMPL clears the host field automatically
 python3 .zcode/scripts/gh_board.py set-next-up 176 1   # only on the user's word
 ```
 

@@ -305,7 +305,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     }
   });
 
-  // ── S5: commit failure (offline in window) — card restored + red toast ───
+  // ── S5: commit failure (no response) — card restored + red toast ─────────
 
   test('S5: network lost in window — commit fails, card returns with red toast, activity survives', async ({
     page,
@@ -318,16 +318,37 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
+      // Abort the committing DELETE BEFORE the click (records.spec.ts S3b
+      // pattern): the request never reaches the server, so the fetch rejects
+      // with a network error (non-ApiError) and the deletion outcome stays
+      // UNKNOWN. context.setOffline() is NOT reliable for this — loopback
+      // requests to 127.0.0.1:8000 can still land (row deleted server-side
+      // while the client saw a network error), breaking the DB assertion.
+      await page.route(`**/api/v1/activities/${activity.id}*`, (route) => {
+        const req = route.request();
+        if (req.method() === 'DELETE' && req.postData() !== null) {
+          return route.abort('failed');
+        }
+        return route.continue();
+      });
+      // No waitForResponse — an aborted request never answers. waitForRequest
+      // pins the attempt itself (fires even for aborted requests).
+      const commitAttempt = page.waitForRequest(
+        (req) =>
+          req.url().includes(`/api/v1/activities/${activity.id}`) &&
+          req.method() === 'DELETE' &&
+          req.postData() !== null,
+        { timeout: 15_000 },
+      );
+
       await enableDeleteMode(page);
       await clickCard(page, activity.id);
 
       await expect(card).not.toBeVisible();
       await expect(undoToast(page)).toBeVisible();
 
-      // Kill the network INSIDE the 5s window (setOffline pattern #239):
-      // the scheduled commit fetch fails → staleAwareOnError default
-      // branch: undo + red toast.
-      await page.context().setOffline(true);
+      // Window expires → the commit DELETE attempt fires and is aborted.
+      await commitAttempt;
 
       // The commit failure surfaces as the card returning…
       await expect(card).toBeVisible({ timeout: 15_000 });
@@ -339,14 +360,11 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
         .filter({ hasText: 'Не удалось подтвердить удаление' });
       await expect(errorToast).toBeVisible();
 
-      await page.context().setOffline(false);
-
-      // The activity is still alive in the DB.
+      // The activity is still alive in the DB (nothing reached the server).
       const row = queryDBRow(`SELECT id FROM activities WHERE id='${activity.id}'`);
       expect(row).not.toBeNull();
       expect(row!.id).toBe(activity.id);
     } finally {
-      await page.context().setOffline(false);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });

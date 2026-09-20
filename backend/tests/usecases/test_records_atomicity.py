@@ -187,23 +187,11 @@ async def test_create_record_mid_step_failure_leaves_no_partial_state(
     await db_session.rollback()
     assert await _count(db_session, select(func.count()).select_from(Record)) == baseline_records
     assert await _count(db_session, select(func.count()).select_from(Visit)) == baseline_visits
-    # The find-or-created client and its visitor are gone too.
+    # The find-or-created client and its visitor are gone too (fresh query).
     assert (
-        await _count(
-            db_session,
-            select(func.count()).select_from(Visitor).where(Visitor.name == "Атом"),
-        )
-        == baseline_clients * 0 + (
-            await _count(
-                db_session,
-                select(func.count())
-                .select_from(Visitor)
-                .where(Visitor.name == "Атом"),
-            )
-        )
-        * 0
-        or True  # placeholder never taken — see the precise assertions below
-    ) is True
+        await _count(db_session, select(func.count()).select_from(Visitor))
+        == baseline_clients
+    ), "no orphaned visitors may survive the failed create"
     clients_left = (
         (await db_session.execute(
             select(Visitor).where(Visitor.name == "Атом"),

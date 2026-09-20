@@ -7,8 +7,8 @@ asserting the published ``(entities, origin)`` payloads:
 * rollback silence — a failed mutation publishes NOTHING (spec §5);
 * own entity — auto-mark of the service's ``entity_name`` (spec §3.3);
 * cascades — the binding §3.3 table sets (visit hooks, activity delete,
-  record delete, record create nested, resolve_delete executor, master
-  archive/restore user cascade);
+  record delete via the ``delete_record`` scenario, record create nested,
+  resolve_delete executor, master archive/restore user cascade);
 * origin — ``X-Memo-Tab-Id`` on mutating requests becomes the origin
   envelope; absent header → ``None`` (spec §2.4/§4.2).
 
@@ -142,14 +142,14 @@ class TestRecordDeleteCascade:
     def test_delete_record_marks_visits_and_payments(
         self, api_client, create_record, subscriber
     ) -> None:
-        """RecordService.delete raw-SQL path → {records, visits, payments}."""
+        """Record delete via the unified route → {records, visits, payments}."""
         record = create_record()
         _drain(subscriber)
 
         # Execute mode: the unified DELETE route requires the commit body
         # (resolutions + the expected id-sets confirmed at dry-run — #285
-        # rev7); RecordService.delete is the executor and marks
-        # {visits, payments} (§3.3).
+        # rev7); the ``delete_record`` scenario is the executor and marks
+        # {visits, payments} via the owner helpers (§3.3, GH #171 Task 6).
         resp = api_client.request(
             "DELETE", f"/api/v1/records/{record['id']}",
             json={
@@ -293,14 +293,46 @@ class TestCascadeSourceAudit:
             assert f'mark_changed("{entity}")' in src, f"activity.py lost mark_changed({entity!r})"
 
     def test_record_delete_marks_visits_payments(self) -> None:
-        src = self._source("src/services/record.py")
+        """GH #171 Task 6: the record-delete cascade marks live in the
+        scenario helpers — ``delete_visits_by_record`` marks "visits"
+        (visit.py), ``delete_by_record`` marks "payments" (payment.py).
+        The narrowed ``record.py`` must carry NO marks: its delete bodies
+        moved to the ``delete_record`` scenario (Task 5), so a re-appearing
+        mark here is cascade drift."""
+        visit_src = self._source("src/services/visit.py")
+        assert 'mark_changed("visits")' in visit_src, (
+            "visit.py lost mark_changed('visits') — the delete_record "
+            "scenario relies on it for the visits cascade mark"
+        )
+        payment_src = self._source("src/services/payment.py")
+        assert 'mark_changed("payments")' in payment_src, (
+            "payment.py lost mark_changed('payments') — the delete_record "
+            "scenario relies on it for the payments cascade mark"
+        )
+        record_src = self._source("src/services/record.py")
         for entity in ("visits", "payments"):
-            assert f'mark_changed("{entity}")' in src, f"record.py lost mark_changed({entity!r})"
+            assert f'mark_changed("{entity}")' not in record_src, (
+                f"record.py re-acquired mark_changed({entity!r}) — the delete "
+                "cascade lives in the usecases scenario + owner helpers (Task 6)"
+            )
 
     def test_record_create_nested_conditional_marks(self) -> None:
-        src = self._source("src/services/record.py")
+        """GH #171 Task 6: the phone-flow conditional marks live in the
+        owner helpers the ``create_record`` scenario composes —
+        "clients" (client.py), "visitors" (visitor.py), "visits"
+        (visit.py). The narrowed ``record.py`` must carry NO marks."""
+        client_src = self._source("src/services/client.py")
+        assert 'mark_changed("clients")' in client_src
+        visitor_src = self._source("src/services/visitor.py")
+        assert 'mark_changed("visitors")' in visitor_src
+        visit_src = self._source("src/services/visit.py")
+        assert 'mark_changed("visits")' in visit_src
+        record_src = self._source("src/services/record.py")
         for entity in ("visits", "clients", "visitors"):
-            assert f'mark_changed("{entity}")' in src, f"record.py lost mark_changed({entity!r})"
+            assert f'mark_changed("{entity}")' not in record_src, (
+                f"record.py re-acquired mark_changed({entity!r}) — the "
+                "phone-flow marks live in the owner services (Task 6)"
+            )
 
     def test_deletion_executor_marks_dispatched_deps(self) -> None:
         """The generic resolve_delete executor marks dep.entity for every

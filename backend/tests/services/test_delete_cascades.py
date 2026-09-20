@@ -9,8 +9,11 @@ Data is set up via direct ORM inserts (committed) rather than the API factories,
 because these tests target the service's cascade SQL directly; ORM inserts give
 precise control over the pre-delete DB state without going through the API.
 
-Cascade contract (#194 Task 5, updated by #211):
-  * RecordService.delete       → delete record + its visits + its payments
+Cascade contract (#194 Task 5, updated by #211, GH #171 Task 6):
+  * Record delete (visits/payments/record_tags/record row) → the
+    ``usecases.records.delete_record`` SCENARIO (tests rebound in
+    tests/services/test_record_service.py — Task 6); the service keeps
+    reads and record-row operations only
   * ActivityService.delete     → delete activity + its records (+ their visits/payments)
                                   + unlink photos (activity_id := NULL)
   * VisitorService.delete      → delete visitor + its visits
@@ -41,7 +44,6 @@ from src.models.tag import Tag, activity_tags, record_tags, visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.services.activity import get_activity_service
-from src.services.record import get_record_service
 from src.services.visitor import get_visitor_service
 
 pytestmark = pytest.mark.asyncio
@@ -150,41 +152,6 @@ async def _await_scalar(db_session, stmt):
 async def _await_all(db_session, stmt):
     """Run a select and return scalars().all()."""
     return (await db_session.execute(stmt)).scalars().all()
-
-
-# ─── RecordService.delete ──────────────────────────────────────────────────────
-
-async def test_record_delete_removes_visits_and_payments(db_session):
-    """RecordService.delete hard-deletes the record plus its visits and payments.
-
-    repo.get afterwards returns None; unrelated activity + client survive.
-    """
-    activity = await _insert_activity(db_session)
-    client = await _insert_client(db_session)
-    record = await _insert_record(
-        db_session, activity, client, num_visits=2, num_payments=1,
-    )
-    record_id = record.id
-
-    service = get_record_service()
-    result = await service.delete(db_session=db_session, id=record_id)
-
-    assert result is True
-    # Record gone
-    assert await _await_scalar(db_session, select(Record).where(Record.id == record_id)) is None
-    # Service-level: repo.get returns None afterwards
-    assert await service._repository.get(db_session, Record, record_id) is None
-    # Visits for this record gone
-    assert await _await_all(
-        db_session, select(Visit).where(Visit.record_id == record_id),
-    ) == []
-    # Payments for this record gone
-    assert await _await_all(
-        db_session, select(Payment).where(Payment.record_id == record_id),
-    ) == []
-    # Activity + client untouched
-    assert await _await_scalar(db_session, select(Activity).where(Activity.id == activity.id)) is not None
-    assert await _await_scalar(db_session, select(Client).where(Client.id == client.id)) is not None
 
 
 # ─── ActivityService.delete ─────────────────────────────────────────────────────
@@ -358,31 +325,6 @@ async def _insert_tag(db_session, label: str = "T") -> Tag:
     db_session.add(tag)
     await db_session.commit()
     return tag
-
-
-async def test_record_delete_cleans_record_tags_join_rows(db_session):
-    """Deleting a tagged record removes its record_tags join rows; the tag survives."""
-    activity = await _insert_activity(db_session)
-    client = await _insert_client(db_session)
-    record = await _insert_record(db_session, activity, client)
-    tag = await _insert_tag(db_session, "rec-tag")
-    await db_session.execute(
-        record_tags.insert().values(record_id=record.id, tag_id=tag.id)
-    )
-    await db_session.commit()
-
-    service = get_record_service()
-    result = await service.delete(db_session=db_session, id=record.id)
-
-    assert result is True
-    from tests.conftest import query_db
-    # join rows gone
-    assert query_db(
-        f"SELECT COUNT(*) AS c FROM record_tags WHERE record_id='{record.id}'"
-    )[0]["c"] == 0
-    assert query_db("SELECT COUNT(*) AS c FROM record_tags")[0]["c"] == 0
-    # tag row survives (independent entity)
-    assert query_db(f"SELECT COUNT(*) AS c FROM tags WHERE id='{tag.id}'")[0]["c"] == 1
 
 
 async def test_activity_delete_cleans_activity_tags_and_record_tags_join_rows(db_session):

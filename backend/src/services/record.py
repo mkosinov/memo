@@ -1,4 +1,20 @@
-"""Business logic for record CRUD operations with nested visits."""
+"""Record reads (list, view, point get, scope) and record-row operations.
+
+GH #171 Task 6: the multi-entity write flows (create / update / patch /
+delete chains) live in the ``usecases.records`` scenarios (Corridor 2 —
+canon docs/domain-rules/service-layer.md rule 2); this service is the
+narrow owner of the record table:
+
+- reads: ``list`` / ``list_view`` (Corridor 3-style display composites —
+  foreign tables are read in ONE query, rule 8), ``get`` / ``get_scoped``;
+- record-row operations: ``create_row`` / ``update_row`` / ``patch_row``
+  (no commit — the caller's scenario owns the transaction) and
+  ``delete_row_with_tags`` (the owner's own-edge cleanup — ``record_tags``
+  bundles + the record row).
+
+No cache marks and no foreign-ORM writes here: visits/payments/clients/
+visitors are handled by their owner services behind the scenarios.
+"""
 
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -10,14 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.domain.dates import day_range
-from src.domain.deletion import (
-    BlockingDepsError,
-    InvalidResolutionError,
-    collect_dependencies,
-    has_blocking_deps,
-    validate_resolutions,
-)
-from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -26,9 +34,7 @@ from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
 from src.models.staff import Staff
-from src.models.tag import record_tags
 from src.models.visit import Visit
-from src.models.visitor import Visitor
 from src.repositories.record import RecordRepository, get_record_repository
 from src.repositories.search import SearchField, search_predicate
 from src.schemas.common import PaginatedResponse
@@ -40,7 +46,6 @@ from src.schemas.record import (
     RecordViewResponse,
     VisitResponse,
 )
-from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 # Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
@@ -411,93 +416,6 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         )
         return result.scalar_one_or_none()
 
-    @transactional
-    async def delete(self, db_session: AsyncSession, id: str) -> bool:
-        """Hard-delete a record and its visits, payments, and record_tags join rows.
-
-        All cascade deletes run as explicit SQL inside this single
-        ``@transactional`` transaction (no per-record commit) so the
-        unit is atomic: if any statement fails, nothing persists. The
-        dependent rows (visits, payments) are removed BEFORE the record
-        so no FK constraint can fire. The record_tags join table has FKs
-        with NO ondelete action, so its rows are removed BEFORE the
-        record — otherwise the DB raises IntegrityError (FK on) or
-        leaves orphan rows (FK off) (#194).
-        """
-        record = await self._repository.get(db_session, Record, id)
-        if not record:
-            return False
-
-        await db_session.execute(delete(Visit).where(Visit.record_id == id))
-        await db_session.execute(delete(Payment).where(Payment.record_id == id))
-        await db_session.execute(delete(record_tags).where(record_tags.c.record_id == id))
-        await db_session.execute(delete(Record).where(Record.id == id))
-        # GH #239 §3.3: cascades above rewrote visits/payments
-        mark_changed("visits")
-        mark_changed("payments")
-        return True
-
-    async def resolve_delete(
-        self,
-        db_session: AsyncSession,
-        id: str,
-        resolutions: dict[str, str] | None,
-    ) -> bool:
-        """Execute the unified DELETE-with-body resolution for records (GH #139).
-
-        Mirrors ``ArchiveService.resolve_delete``'s validation flow but
-        EXECUTES via ``self.delete`` (the existing ``@transactional``
-        cascade visits → payments → record_tags → record) instead of
-        dispatching through ``CASCADE_HANDLERS`` — no Record handlers are
-        registered in the deletion layer; the cascade intentionally lives
-        in ``RecordService.delete`` (Addendum 13 ruling).
-
-        Flow:
-          1. Existence check — ``False`` if record missing (route → 404).
-          2. Collect FK deps (``collect_dependencies``).
-          3. ``has_blocking_deps`` → raise ``BlockingDepsError`` (route → 422).
-             Record deps are never blocking (``allowed_actions`` always
-             non-empty), but the check stays for defensive consistency.
-          4. ``validate_resolutions`` → raise ``InvalidResolutionError`` if
-             errors (route → 422 with detail). ``resolutions=None`` means
-             «the commit declared only ``expected``» (clean path) — for a
-             clean record (no deps) that validates trivially; with deps
-             present the missing per-entity actions fail as today.
-          5. Execute via ``self.delete`` (the ``@transactional`` cascade
-             commits the session — no separate ``@transactional`` needed
-             here).
-
-        Returns ``True`` on success, ``False`` if the record was missing.
-        Raises ``ResolutionError`` subtypes for 422 paths (caught in the
-        router).
-        """
-        # 1. Existence check.
-        record = await self._repository.get(db_session, Record, id)
-        if record is None:
-            return False
-
-        # 2. Collect deps.
-        deps = await collect_dependencies(db_session, Record, id)
-
-        # 3. Blocked deps → 422 (won't happen for Record — all deps are cascade).
-        if has_blocking_deps(deps):
-            raise BlockingDepsError(
-                "Entity has blocking dependencies — archive instead"
-            )
-
-        # 4. Validate resolutions body against the matrix. ``None`` (clean
-        # path: the commit declared only ``expected``) behaves as {} —
-        # with no deps that validates trivially; with deps present the
-        # missing per-entity actions fail exactly as a partial body would.
-        issues = validate_resolutions(Record, deps, resolutions or {})
-        if issues:
-            msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
-            raise InvalidResolutionError(msg)
-
-        # 5. Execute via the existing @transactional cascade.
-        await self.delete(db_session, id)
-        return True
-
     async def delete_row_with_tags(self, db_session: AsyncSession, record_id: str) -> None:
         """Remove a record's OWN tag bundles + the record row — WITHOUT committing.
 
@@ -509,9 +427,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         the owner repository (``RecordRepository.delete_tags_by_record_id``
         — ONE set-based statement, #171 Task 1) and runs BEFORE the row
         (the join's FKs carry no ondelete action — #194). The row goes by
-        the same bulk ``DELETE ... WHERE id`` statement semantics as
-        ``RecordService.delete`` (no instance-delete switch). No event
-        marks here — "records" is the scenario's own-entity mark.
+        a bulk ``DELETE ... WHERE id`` statement (no instance-delete
+        switch); the whole cascade is orchestrated by the
+        ``usecases.records.delete_record`` scenario (GH #171 Task 5).
+        No event marks here — "records" is the scenario's own-entity mark.
         """
         await self._repository.delete_tags_by_record_id(db_session, record_id)
         await db_session.execute(delete(Record).where(Record.id == record_id))
@@ -550,55 +469,6 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         db_session.add(record)
         await db_session.flush()
         return record
-
-    @staticmethod
-    async def _resolve_client_by_phone(
-        db_session: AsyncSession, data: RecordCreate,
-    ) -> Client:
-        """Find existing client by phone or create a new one."""
-        result = await db_session.execute(
-            select(Client).where(Client.phone == data.phone)
-        )
-        client = result.scalar_one_or_none()
-        if not client:
-            first_name = data.visits[0].name if data.visits else "Гость"
-            client = Client(
-                phone=data.phone,
-                name=first_name,
-                channel="whatsapp",
-            )
-            db_session.add(client)
-            await db_session.flush()
-            # GH #239 §3.3: conditional mark — only when actually created
-            mark_changed("clients")
-        return client
-
-    @staticmethod
-    async def _resolve_visitor_by_name(
-        db_session: AsyncSession,
-        client_id: str | None,
-        name: str,
-        age: int | None = None,
-    ) -> Visitor:
-        """Find existing visitor by client_id + name or create a new one."""
-        result = await db_session.execute(
-            select(Visitor).where(
-                Visitor.client_id == client_id,
-                Visitor.name == name,
-            )
-        )
-        visitor = result.scalar_one_or_none()
-        if not visitor:
-            visitor = Visitor(
-                client_id=client_id,
-                name=name,
-                age=age,
-            )
-            db_session.add(visitor)
-            await db_session.flush()
-            # GH #239 §3.3: conditional mark — only when actually created
-            mark_changed("visitors")
-        return visitor
 
     async def update_row(
         self,

@@ -92,6 +92,22 @@ function UIConsumer() {
         Show Loading Toast
       </button>
       <button
+        data-testid="show-toast-persistent"
+        onClick={() => {
+          // #330: 6th positional param — persistent (no auto-dismiss timer).
+          shownIdRef.current = showToast(
+            'Нет соединения с сервером. Обновления приостановлены.',
+            'error',
+            undefined,
+            undefined,
+            undefined,
+            true
+          );
+        }}
+      >
+        Show Persistent Toast
+      </button>
+      <button
         data-testid="hide-shown-toast"
         onClick={() => hideToast(shownIdRef.current)}
       >
@@ -317,6 +333,37 @@ describe('UIProvider', () => {
     expect(screen.getByTestId('toast-count').textContent).toBe('1');
     act(() => {
       screen.getByTestId('hide-toast').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('0');
+    vi.useRealTimers();
+  });
+
+  // #330 §5.3: persistent toasts never get an auto-dismiss timer.
+  it('keeps a persistent toast after 60s (no auto-hide) (#330)', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-persistent').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    vi.useRealTimers();
+  });
+
+  it('hides a persistent toast via hideToast when the condition clears (#330)', () => {
+    vi.useFakeTimers();
+    renderWithContext();
+    act(() => {
+      screen.getByTestId('show-toast-persistent').click();
+    });
+    expect(screen.getByTestId('toast-count').textContent).toBe('1');
+    const shownId = screen.getByTestId('last-shown-toast-id').textContent;
+    expect(shownId).toMatch(/^toast-\d+-/);
+    act(() => {
+      screen.getByTestId('hide-shown-toast').click();
     });
     expect(screen.getByTestId('toast-count').textContent).toBe('0');
     vi.useRealTimers();

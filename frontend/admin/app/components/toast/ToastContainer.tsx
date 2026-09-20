@@ -10,7 +10,15 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   const loading = toasts.filter((t) => t.kind === 'loading');
-  const visible = [...toasts.filter((t) => t.kind !== 'loading').slice(-5), ...loading];
+  // #330 §5.3: persistent toasts are exempt from the last-5 slice — they
+  // render on top of the queue (max 5 regular + 1 persistent) and are never
+  // pushed out by a burst of action errors.
+  const persistent = toasts.filter((t) => t.persistent);
+  const visible = [
+    ...toasts.filter((t) => t.kind !== 'loading' && !t.persistent).slice(-5),
+    ...persistent,
+    ...loading,
+  ];
 
   const BORDER_BY_KIND: Record<string, string> = {
     info: 'border-transparent',
@@ -69,7 +77,7 @@ export function ToastContainer() {
               {toast.action.label}
             </button>
           )}
-          {toast.kind !== 'loading' && (
+          {toast.kind !== 'loading' && !toast.persistent && (
             <button
               onClick={() => hideToast(toast.id)}
               className="text-white/50 hover:text-white ml-1"

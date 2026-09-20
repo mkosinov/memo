@@ -42,6 +42,42 @@ const CODE_DEFAULTS: Record<string, string> = {
 };
 
 /**
+ * Read `err.name` safely for arbitrary thrown values.
+ *
+ * GH #330 §5.6: classification of timeout/abort is strictly by name —
+ * NOT `instanceof DOMException` (jsdom/polyfilled environments produce
+ * plain Errors with these names instead of real DOMException instances).
+ */
+function getErrorName(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'name' in err) {
+    return String((err as { name: unknown }).name);
+  }
+  return undefined;
+}
+
+/**
+ * Transport-class check: TypeError (fetch network failure) or an
+ * interruption error named TimeoutError/AbortError.
+ *
+ * Used by the transport-toast dedup gate (§5.4). ApiError never matches —
+ * an HTTP 401/403 response is not a connection loss and must not trip it.
+ */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError || isAbortClass(err);
+}
+
+/**
+ * Interruption-class check: err.name is TimeoutError or AbortError.
+ *
+ * Used by the retry predicate (§5.7) to disable retries for aborted
+ * requests (each retry would get a fresh timeout window).
+ */
+export function isAbortClass(err: unknown): boolean {
+  const name = getErrorName(err);
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
+/**
  * Convert any thrown error into a structured, user-friendly message.
  *
  * @param err - The error caught (any type; typically unknown in catch blocks)
@@ -52,6 +88,8 @@ const CODE_DEFAULTS: Record<string, string> = {
  *   for generic cases; preserves informative bits where useful)
  * - ApiError with unknown code → uses err.message
  * - ApiError without code → uses err.message
+ * - err.name === 'TimeoutError' → "Превышено время ожидания запроса"
+ * - err.name === 'AbortError' → "Запрос отменён" (explicit caller-signal cancel)
  * - TypeError (fetch network failure) → "Ошибка сети"
  * - Anything else → "Неизвестная ошибка"
  *
@@ -81,6 +119,16 @@ export function parseApiError(err: unknown): ParsedApiError {
     }
     // ApiError without code or unknown code: use err.message
     return { message: err.message, status: err.status, code: err.code };
+  }
+
+  if (isAbortClass(err)) {
+    // GH #330 §5.6: interruption branches, classified strictly by err.name.
+    // TimeoutError — request exceeded its deadline; AbortError — explicit
+    // cancellation via the caller's AbortSignal (currently unreachable,
+    // kept as contract insurance for future signal-passing callers).
+    return getErrorName(err) === 'TimeoutError'
+      ? { message: 'Превышено время ожидания запроса' }
+      : { message: 'Запрос отменён' };
   }
 
   if (err instanceof TypeError) {

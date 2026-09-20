@@ -46,7 +46,7 @@ Docs: `docs/domain-rules/service-layer.md` rev4 — canon marked implemented, li
 |---|------|----------------|--------|
 | T1 | Bulk commands in payment/visit/record repositories | standard | ✅ (`cb3ab90e`) |
 | T2 | Non-transactional service methods | standard | ✅ (`c052ec18`) |
-| T3 | usecases package + `create_record` | standard | ✅ (`8ad08e37`, `be9e897b`) — compliance ✅ |
+| T3 | usecases package + `create_record` | standard | ✅ (`8ad08e37`, `be9e897b`) |
 | T4 | `update_record` / `patch_record` | standard | ✅ (`3bca48e6`, `123e6e1b`, `1223b22f`, `8d0291c2`) — compliance ✅ + quality minor closed (`1223b22f` conditional event-grid visits mark) |
 | T5 | `delete_record` scenario | standard | ✅ (`e7809d72`, `b974f0f2`) — compliance ✅ + 2 quality minors closed (`b974f0f2` stale no-publish pin; dead-code checklist consumed by T6) |
 | T6 | RecordService narrowing + test rebinding | small | ✅ (`f00a4147`) — compliance ✅ |

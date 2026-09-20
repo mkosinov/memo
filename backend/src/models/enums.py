@@ -27,6 +27,12 @@ class Channel(str, enum.Enum):
     WHATSAPP = "whatsapp"
 
 
+class TariffAudience(str, enum.Enum):
+    KID = "kid"
+    ADULT = "adult"
+    ALL = "all"
+
+
 class ArchiveStatus(str, enum.Enum):
     """List filter for soft-delete entities: active (default), archived, or all."""
 

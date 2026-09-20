@@ -338,9 +338,15 @@ When a dispatched agent returns an intermediate "awaiting X" result (CI run, lon
 dispatch is already `completed` — its later final report has NO path back to you, and its PTY
 notification wakes only its own session, not yours. Therefore: **immediately set your OWN
 watch/timer on X** (pty_spawn with notifyOnExit, or an explicit re-dispatch trigger) and drive
-the follow-up yourself (e.g. board flip after merge). Never end your turn passively relying on
-someone else's watch to wake you. (Observed: PR merged 1 min after green, board flip stalled
-30 min until the user asked «?».)
+the follow-up yourself. Never end your turn passively relying on someone else's watch to wake
+you.
+
+When your own watch fires: X succeeded (e.g. CI green) → re-dispatch that agent to finish what
+it yielded (merge + final DONE report); X failed → re-dispatch it with the failure output. The
+post-merge handoff (board flip, queue shift, scratchpad collapse) runs off that final report —
+it must never depend on a wake-up the finished dispatch can no longer deliver.
+
+(Observed: PR merged 1 min after green, board flip stalled 30 min until the user asked «?».)
 
 ## Hard Rules
 

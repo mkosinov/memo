@@ -239,7 +239,7 @@ re-dispatches it, and the post-merge handoff (@manager board flip) stalls indefi
   run id + what triggers the next action, so @manager re-dispatches on completion or watches it
   itself. Never rely on your own future wake-up.
 - @manager-side counterpart: an intermediate "awaiting X" return from any subagent → @manager
-  immediately sets its OWN watch/timer on X (see CLAUDE.md).
+  immediately sets its OWN watch/timer on X (Awaiting-Handoff Rule, `.opencode/agents/manager.md`).
 
 ### Step 5.6: Suggest Post-Merge Reflection
 

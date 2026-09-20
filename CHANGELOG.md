@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-19
 
 ### Added
+- **GH #227 — DataTable polish minors: озвучка гарда пикера + полная конвенция имён `*Columns.tsx`**
+  (отложенные миноры ревью #139) — branch `227-datatable-polish-minors` (3 commits:
+  `7507fc9c..5aa7156f`, base `8b18b548`; спека
+  `docs/specs/2026-09-19-datatable-polish-minors-227-design.md` rev2,
+  план `docs/plans/2026-09-19-datatable-polish-minors-227-plan.md`; 9 файлов, +85/−22):
+  - **Озвучка гарда ColumnPicker (`7507fc9c`):** гард «последняя видимая колонка» анонсируется
+    скринридеру — пункт рендерится фрагментом (label без изменений; при активном гарде), за
+    label — sr-only span «Последняя видимая колонка — скрыть нельзя», чекбокс защищённого пункта
+    получает `aria-describedby` (`useId()` + ключ колонки — уникально при двух таблицах);
+    доступное имя не меняется — решение §6.5 (без `disabled`/`aria-disabled`) и e2e не тронуты;
+    у незащищённых пунктов атрибут и span отсутствуют. Пункт 1 issue (page-clamp) закрыт фактом
+    (реализован и покрыт в #139), из скоупа исключён.
+  - **Конвенция «файл = экспорт» для всех девяти `*Columns.tsx` (`fac02577`, `5aa7156f`):**
+    `materialsColumns.tsx` → `materialColumns.tsx` (импорт в `MaterialsTable.tsx`) и
+    `recordsColumns.tsx` → `recordColumns.tsx` (импорты в `RecordsTable.tsx` +
+    `recordsColumns.test.tsx` + `recordsTimeParity.test.ts` — только строки импорта); экспорты
+    и поведение не менялись. Вне плана (гэп плана, минимально необходимо): импорт-строка в
+    `materialsColumns.test.tsx`.
+  - **Tests:** vitest полный прогон **2193p/0f** (139 файлов; базлайн 2181 + 2 новых юнита
+    ColumnPicker: гард активен — `aria-describedby` + точный текст описания + чистое доступное
+    имя; гард не активен — атрибутов и sr-only нет); lint 0 errors (37 pre-existing warnings,
+    порог 38), `tsc --noEmit` чисто, `next build` OK; e2e `tags-crud` **11/11** standalone
+    (якорь регрессии гарда); полный e2e — PR CI; визуальный гейт пропущен осознанно (sr-only
+    вне раскладки, видимой дельты нет; visual-regression на PR CI — авторитетная проверка,
+    протокол перегенерации снапшотов — спека S2).
+  - Status: `docs/status/2026-09-19-datatable-polish-minors-227.md`
+
+### Fixed
 - **GH #220 — Клиенты: колонка «Статус» (архив/активен) + единые скрытые статус-колонки** — branch
   `220-clients-status-column` (4 commits: `0fd4bb88..9a251ab3`, base `5d3a22d1`;
   спека `docs/specs/2026-09-19-clients-status-column-220-design.md`,

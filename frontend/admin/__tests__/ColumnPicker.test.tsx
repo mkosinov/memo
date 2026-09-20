@@ -132,6 +132,59 @@ describe('ColumnPicker', () => {
     expect(onToggle).toHaveBeenCalledWith('name');
   });
 
+  it('announces the guard via aria-describedby on the last visible column', () => {
+    render(
+      <ColumnPicker
+        columns={COLUMNS}
+        visibleKeys={['capacity']}
+        onToggle={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+
+    // Guarded item: checkbox points at a guard description…
+    const capacityCheckbox = screen.getByLabelText('Вместимость');
+    expect(capacityCheckbox).toHaveAttribute('aria-describedby');
+    const describedById = capacityCheckbox.getAttribute('aria-describedby');
+    // …and the referenced element carries the exact guard text.
+    expect(screen.getByText('Последняя видимая колонка — скрыть нельзя')).toHaveAttribute(
+      'id',
+      describedById as string,
+    );
+
+    // Unprotected items: no aria-describedby at all.
+    expect(screen.getByLabelText('Название')).not.toHaveAttribute('aria-describedby');
+    expect(screen.getByLabelText('Адрес')).not.toHaveAttribute('aria-describedby');
+
+    // Control: accessible names are NOT polluted by the guard span.
+    expect(
+      screen.getByRole('checkbox', { name: 'Вместимость' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: 'Название' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders no guard description when more than one column is visible', () => {
+    render(
+      <ColumnPicker
+        columns={COLUMNS}
+        visibleKeys={['name', 'capacity']}
+        onToggle={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Настроить колонки'));
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes.length).toBeGreaterThan(1);
+    for (const checkbox of checkboxes) {
+      expect(checkbox).not.toHaveAttribute('aria-describedby');
+    }
+    expect(
+      screen.queryByText('Последняя видимая колонка — скрыть нельзя'),
+    ).not.toBeInTheDocument();
+  });
+
   it('calls onToggle freely when more than one column is visible', () => {
     const onToggle = vi.fn();
     render(

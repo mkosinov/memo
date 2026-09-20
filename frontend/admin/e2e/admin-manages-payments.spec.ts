@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, openModal, waitForClientsReady } from './fixtures/helpers';
+import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import { openRecordTab } from './helpers/anonymous-visits';
 import {

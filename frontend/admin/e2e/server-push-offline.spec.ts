@@ -337,57 +337,62 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
     await ctxA.route('**/api/v1/clients**', (route) => route.abort('connectionreset'));
     await ctxA.route('**/api/v1/records**', (route) => route.abort('connectionreset'));
 
-    await waitForScheduleReady(pageA);
-    // Let the debounce-armed flag settle (isChannelDown flips on the FIRST
-    // onerror — near-instant — but the loss toast itself is not needed here).
-    await pageA.waitForTimeout(1_000);
+    try {
+      await waitForScheduleReady(pageA);
+      // Let the debounce-armed flag settle (isChannelDown flips on the FIRST
+      // onerror — near-instant — but the loss toast itself is not needed here).
+      await pageA.waitForTimeout(1_000);
 
-    const netToasts = pageA.getByTestId('toast-error').filter({ hasText: 'Ошибка сети' });
+      const netToasts = pageA.getByTestId('toast-error').filter({ hasText: 'Ошибка сети' });
 
-    // S3 — several section transitions: two cold families fail under the
-    // gate. Route dev RSC fetches pass (only /api/v1/* data is aborted).
-    await pageA.getByRole('link', { name: 'Клиенты' }).click();
-    await pageA.waitForURL('**/clients', { timeout: 15_000 });
-    await pageA.getByRole('link', { name: 'Записи' }).click();
-    await pageA.waitForURL('**/records', { timeout: 15_000 });
-    await pageA.getByRole('link', { name: 'Расписание' }).click();
-    await pageA.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
+      // S3 — several section transitions: two cold families fail under the
+      // gate. Route dev RSC fetches pass (only /api/v1/* data is aborted).
+      await pageA.getByRole('link', { name: 'Клиенты' }).click();
+      await pageA.waitForURL('**/clients', { timeout: 15_000 });
+      await pageA.getByRole('link', { name: 'Записи' }).click();
+      await pageA.waitForURL('**/records', { timeout: 15_000 });
+      await pageA.getByRole('link', { name: 'Расписание' }).click();
+      await pageA.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
-    // Count AFTER the full retry cycle (plan Task 6: ≥4s) — a pre-gate
-    // firing that only surfaces through a retried failure lands inside
-    // the snapshot. CEILING, not zero: the very first failure can race
-    // the channel flag flip (residual R3).
-    await pageA.waitForTimeout(RETRY_CYCLE);
-    expect(await netToasts.count()).toBeLessThanOrEqual(1);
+      // Count AFTER the full retry cycle (plan Task 6: ≥4s) — a pre-gate
+      // firing that only surfaces through a retried failure lands inside
+      // the snapshot. CEILING, not zero: the very first failure can race
+      // the channel flag flip (residual R3).
+      await pageA.waitForTimeout(RETRY_CYCLE);
+      expect(await netToasts.count()).toBeLessThanOrEqual(1);
 
-    // Wait out any leaked pre-gate toast (4.5s life) so the S6 +1 count
-    // starts from a clean, observed-zero deck.
-    await netToasts.first().waitFor({ state: 'detached', timeout: TOAST_LIFE + 1_000 }).catch(() => {});
-    expect(await netToasts.count()).toBe(0);
+      // Wait out any leaked pre-gate toast (4.5s life) so the S6 +1 count
+      // starts from a clean, observed-zero deck.
+      await netToasts.first().waitFor({ state: 'detached', timeout: TOAST_LIFE + 1_000 }).catch(() => {});
+      expect(await netToasts.count()).toBe(0);
 
-    // S6 — a UI ACTION that fails: quick-add record create (plain fetch
-    // chain in useRecordMutations — NOT a query, so the §5.4 gate cannot
-    // swallow it). After the navigation phase's observed ZERO, exactly
-    // ONE action-error toast must appear.
-    const today = new Date().toISOString().slice(0, 10);
-    await openAddTab(pageA, { date: today });
-    await pageA.getByTestId('input-phone').fill(`+7999${Date.now().toString().slice(-7)}`);
-    await pageA.getByTestId('input-client-name').fill(`Push S6 ${uid()}`);
+      // S6 — a UI ACTION that fails: quick-add record create (plain fetch
+      // chain in useRecordMutations — NOT a query, so the §5.4 gate cannot
+      // swallow it). After the navigation phase's observed ZERO, exactly
+      // ONE action-error toast must appear.
+      const today = new Date().toISOString().slice(0, 10);
+      await openAddTab(pageA, { date: today });
+      await pageA.getByTestId('input-phone').fill(`+7999${Date.now().toString().slice(-7)}`);
+      await pageA.getByTestId('input-client-name').fill(`Push S6 ${uid()}`);
 
-    await pageA.getByTestId('btn-create-record').click();
-    // The action toast is transient (4.5s) — snapshot inside its lifetime,
-    // non-retrying count (a retrying toHaveCount(1) could poll past the
-    // death of a SECOND toast and pass vacuously; an instant count of 0
-    // plus the visible first toast pins exactly-one).
-    await expect(netToasts.first()).toBeVisible({ timeout: 10_000 });
-    await pageA.waitForTimeout(1_000);
-    expect(await netToasts.count()).toBe(1);
+      await pageA.getByTestId('btn-create-record').click();
+      // The action toast is transient (4.5s) — snapshot inside its lifetime,
+      // non-retrying count (a retrying toHaveCount(1) could poll past the
+      // death of a SECOND toast and pass vacuously; an instant count of 0
+      // plus the visible first toast pins exactly-one).
+      await expect(netToasts.first()).toBeVisible({ timeout: 10_000 });
+      await pageA.waitForTimeout(1_000);
+      expect(await netToasts.count()).toBe(1);
 
-    // Cleanup: no server-side leftovers exist (the create never landed —
-    // its fetch chain was aborted); the modal is closed for hygiene.
-    await closeModal(pageA);
-    await ctxA.unroute('**/api/v1/clients**');
-    await ctxA.unroute('**/api/v1/records**');
-    await ctxA.unroute('**/api/v1/events');
+      // Cleanup: no server-side leftovers exist (the create never landed —
+      // its fetch chain was aborted); the modal is closed for hygiene.
+      await closeModal(pageA);
+    } finally {
+      // Route hygiene (С5/С6/S1+S2 pattern): an assertion failure mid-test
+      // must not leave the abort routes armed on ctxA.
+      await ctxA.unroute('**/api/v1/clients**');
+      await ctxA.unroute('**/api/v1/records**');
+      await ctxA.unroute('**/api/v1/events');
+    }
   });
 });

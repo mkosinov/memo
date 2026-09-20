@@ -269,35 +269,66 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
     }
   });
 
-  // ── С5/S5 (#330): healthy channel with a short flap → NO loss toast ─────
+  // ── С5/S5 (#330): short flap below the debounce threshold → NO toast ────
 
-  twoPages('S5 (#330): brief SSE flap (2s < 5s debounce) on a healthy run → «Нет соединения» never appears', async ({
+  twoPages('S5 (#330): brief cold-start SSE flap (2s abort < 5s debounce) → «Нет соединения» never appears', async ({
     pageA,
     pageB,
     ctxA,
     request,
   }) => {
-    // A is watching the current week on a HEALTHY channel (the whole point:
-    // S5 asserts silence on a healthy run with a reconnect, not during an
-    // outage — spec §2 S5 «дрожь ниже порога молчит»).
-    await waitForScheduleReady(pageA);
-
-    // SHORT FLAP — the events route is aborted for 2s only. The ES socket
-    // dies and retries natively (retry: 5000 from the server; observed
-    // reconnect cadence under abort ~3s), onerror fires in CONNECTING
-    // state, but the 5s debounce (LOST_DEBOUNCE_MS) never elapses: the
-    // channel is back before the timer fires and onopen CANCELS it. This
-    // is exactly the sub-threshold jitter the indicator must stay silent
-    // on (vehicle rationale: see server-push-offline.spec.ts VEHICLE).
+    // COLD-START FLAP (the S1+S2/S3+S6 vehicle — see VEHICLE in
+    // server-push-offline.spec.ts): the abort route is registered BEFORE
+    // the page load — context.route() does NOT intercept an established
+    // SSE socket (probe-verified), so the abort must catch the CONNECT.
+    // Under the abort the ES constructor's connect fails, onerror fires
+    // at t≈0 in CONNECTING state and the 5s debounce (LOST_DEBOUNCE_MS)
+    // arms — the sub-threshold jitter S5 must stay silent on (spec §2 S5
+    // «дрожь ниже порога молчит»).
     await ctxA.route('**/api/v1/events', (route) => route.abort('connectionreset'));
-    await pageA.waitForTimeout(2_000);
-    await ctxA.unroute('**/api/v1/events');
 
-    // SILENCE WINDOW — wait out BOTH the debounce budget (5s from the last
-    // onerror: had the timer survived, the toast would appear by now) and
-    // the reconnect (onopen cancels any pending timer). 7s > 5s debounce,
-    // so a timer that wrongly survived the reconnect is still caught; a
-    // healthy implementation shows NOTHING.
+    // t0 = the OBSERVED first aborted connect. The listener is armed
+    // BEFORE the goto and the flap window is timed from the connect
+    // FAILURE, not from any navigation milestone: dev compile/render
+    // latency between goto and hydration is unbounded, and an unroute
+    // landing after the browser's first retry turn (~3s from t0) would
+    // turn the flap into a full 5s+ outage. The observation doubles as
+    // the ENGAGED proof — no aborted connect → no onerror → no armed
+    // debounce → the silence asserts below would be vacuous.
+    const firstConnectFail = pageA.waitForEvent('requestfailed', {
+      predicate: (r) => r.url().includes('/api/v1/events'),
+      timeout: 15_000,
+    });
+    const loaded = pageA.goto('/schedule'); // cold start under the abort
+    loaded.catch(() => {}); // no unhandled rejection if t0 never observes; re-awaited below
+    await firstConnectFail; // t0: the debounce armed with the first onerror
+
+    try {
+      // MID-FLAP SILENCE PROBE (non-retrying, ≈t0+1.5s): a broken
+      // no-debounce implementation would toast AT t0 and the toast would
+      // still be on screen here; the healthy one shows nothing (the timer
+      // is pending and fires only at t0+5s).
+      await pageA.waitForTimeout(1_500);
+      expect(await lostToast(pageA).count()).toBe(0);
+      await pageA.waitForTimeout(500); // complete the 2s flap
+    } finally {
+      await ctxA.unroute('**/api/v1/events');
+    }
+
+    // Reconnect math: the server's retry: 5000 hint (events/router.py)
+    // reaches the client only on the ready frame of a SUCCESSFUL
+    // connection — none succeeded here, so the browser-default ~3s
+    // cadence applies: the retry at ≈t0+3 connects (the unroute at t0+2
+    // let it through), onopen lands < t0+5 and CANCELS the pending timer
+    // before it fires.
+    await loaded; // load settles whenever it settles — the t0 math is done
+    await pageA.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+
+    // SILENCE WINDOW — wait out BOTH the debounce budget (5s from t0: a
+    // timer that wrongly survived the reconnect would have toasted by
+    // now — 2s flap + 7s wait = t0+9s > t0+5s) and the reconnect itself
+    // (onopen cancels any pending timer). A healthy implementation shows
+    // NOTHING.
     await pageA.waitForTimeout(7_000);
     await expect(lostToast(pageA)).toHaveCount(0);
 

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-20
+
+### Changed
+- **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на
+  deferred, честный тост ошибок без ответа сервера** — branch `record-delete-unified-contract-243`
+  (12 commits incl. docs: `83a4f8db..`, base `8b18b548`; 17 файлов, +836/−257; спека
+  `docs/specs/2026-09-19-record-delete-error-rollback-243-design.md` rev6, план
+  `docs/plans/2026-09-19-record-delete-unified-contract-243-plan.md`; канон
+  `docs/domain-rules/deletion.md` на main не менялся):
+  - **Миграция двух легаси-точек мгновенного удаления (S1/S2):** удаление платежа
+    (`ClientRecordTab` → `RecordPaymentsTable`) и анонимного визита («−» степпера) на странице
+    клиентов идут через `deletePaymentDeferred`/`deleteVisitDeferred` — окно отмены 5 с, единый
+    контракт ошибок; локальный catch с тостом у визитов удалён — ошибками владеет пайплайн.
+  - **Мёртвый код удалён:** мгновенные `deletePayment`/`deleteVisit` вырезаны из
+    `useRecordMutations` вместе с юнитами мгновенной семантики (включая блок «stepper −1
+    semantics (#257)»); wiring-тесты пинят, что обе точки используют deferred-варианты.
+  - **Позиция строки после «Отменить» (S5):** `recordCacheSync` `upsertVisit`/`upsertPayment`
+    запоминают исходный индекс в снимке — восстановление вставляет строку на место, а не в конец
+    (обе поверхности зоны записи, включая модалку расписания; оба ключа платежей).
+  - **Честный тост при обрыве связи (S3):** ошибка коммита без ответа сервера (не `ApiError`) →
+    «Не удалось подтвердить удаление» (было «Не удалось удалить. Изменение отменено» —
+    утверждало больше, чем известно); `ApiError` → прежний текст; 404 — тихий успех; строка
+    возвращается в обеих ветках. По scope-решению архитектора применено и к `staleAwareOnError`
+    (поверхность записей, кастомный `onError`) — S3/Behavioral Delta спеки («все отложенные
+    удаления») авторитетны (`d06b7933`).
+  - **Tests:** vitest полный прогон **2196p/0f** (139 файлов); tsc clean; eslint 0 errors /
+    37 warnings (бюджет 38); новые e2e — S1/S2 (тост отмены + возврат строки на странице
+    клиентов) и S3 в `records.spec.ts` (HTTP-ошибка vs route abort → два разных честных текста);
+    полный standalone e2e 432p/1s/20f — все 20 триажированы как env-обусловленные (18 —
+    шрифтовой дрифт контейнера vs CI-базлайны при нуле CSS-изменений, 1 — stale seed общей
+    overnight-БД, 1 — activity S5, исправлен и реверифицирован); CI — авторитетный merge-гейт.
+  - Status: `docs/status/2026-09-20-record-delete-unified-contract-243.md`
+
 ## [Unreleased] — 2026-09-19
 
 ### Added
@@ -32,26 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     — **3/3** зелёные standalone, staff-crud **15/15** (shard); tsc/lint чисто; полный e2e — PR CI;
     визуальный гейт пройден (скриншоты в `/tmp`, не коммитятся).
   - Status: `docs/status/2026-09-19-clients-status-column-220.md`
-
-### Changed
-- **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits → deferred**
-  — branch `record-delete-unified-contract-243` (11 commits: `83a4f8db..56743303`, base `8b18b548`;
-  спека `docs/specs/2026-09-19-record-delete-error-rollback-243-design.md` rev6,
-  план `docs/plans/2026-09-19-record-delete-unified-contract-243-plan.md`; 17 файлов, +836/−257):
-  - Удаление платежа (вкладка клиента в модалке записи) и анонимного визита переведены на общий
-    отложенный конвейер `PendingActions` (5с окно с отменой) — код теперь полностью соответствует
-    канону `docs/domain-rules/deletion.md`; мгновенные `deletePayment`/`deleteVisit` удалены как
-    мёртвый код (S1/S2).
-  - **Undo восстанавливает строку на исходной позиции** (S5), а не в конец списка.
-  - **Честный тост при потере ответа** (S3): если commit так и не получил ответа сервера,
-    показывается «Не удалось подтвердить удаление» — в дефолтном обработчике
-    `PendingActionsContext` И в `staleAwareOnError` (поверхности records/activities, решение
-    архитектора по спеке «текст применяется ко всем отложенным удалениям»); 404 = тихий успех
-    — без изменений.
-  - **Tests:** vitest **2196p/0f** (139 файлов); tsc clean; eslint 0 errors/37 warnings
-    (бюджет 38); новые/адаптированные e2e S1–S3 (records) + S5 (records/activity); Playwright
-    полный **432p/1s/20f** — все 20 провалов triaged как env (18 visual font-glyph drift +
-    2 конфликта общей seed-БД, свидетельство в PR) — CI авторитетный гейт.
 
 ### Fixed
 - **GH #203 — ServiceModal: NULL max_age → 0 блокировал edit-save открытых услуг** — branch

@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
-import { ScheduleProvider } from '@/contexts/schedule/ScheduleProvider';
+import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
@@ -132,11 +132,14 @@ function ClientsPageContent() {
 export default function ClientsPage() {
   return (
     <ClientsProvider>
-      <ScheduleProvider>
+      {/* GH #138 Task 6: /clients needs only grid settings (gridFrequency in
+          ClientRecordTab) — the schedule stack (URL view state + data) is
+          schedule-page-only and must not mount here. */}
+      <GridSettingsProvider>
         <Suspense fallback={<div className="p-4">Загрузка...</div>}>
           <ClientsPageContent />
         </Suspense>
-      </ScheduleProvider>
+      </GridSettingsProvider>
     </ClientsProvider>
   );
 }

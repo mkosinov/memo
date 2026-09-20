@@ -5,7 +5,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { getRecordsView } from '@memo/api-client';
 import type { PaginatedResponse, RecordView } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
-import { useNavigation } from '@/contexts/NavigationContext';
+import { useRecordsPeriod } from '@/hooks/useRecordsPeriod';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 import { qk } from '@/lib/queryKeys';
 
@@ -47,6 +47,12 @@ export interface RecordsContextType {
    */
   setSort: (field: string, order: SortOrder) => void;
   resetFilters: () => void;
+  /**
+   * #138 Task 5 — write the records period to the URL (?from=&to=, replace).
+   * '' removes a param; the committed navigation updates dateFrom/dateTo,
+   * which resets the page to 1 (effect below).
+   */
+  setPeriod: (from: string, to: string) => void;
   isLoading: boolean;
   /** Kept alongside `isLoading` for backwards compat with non-table consumers. */
   loading: boolean;
@@ -61,7 +67,10 @@ export interface RecordsContextType {
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
 export function RecordsProvider({ children }: { children: React.ReactNode }) {
-  const { dateFrom, dateTo } = useNavigation();
+  // #138 Task 5: the period is URL state (?from=&to=) — no params means the
+  // current-week monday..sunday, the SAME strings the old NavigationContext
+  // produced, so the query key format at the useQuery below is unchanged.
+  const { dateFrom, dateTo, setPeriod } = useRecordsPeriod();
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(1);
@@ -134,7 +143,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isPending, isFetching, data, page]);
 
-  // Date-range change (NavigationContext) resets to page 1
+  // Date-range change (URL ?from=&to=) resets to page 1
   useEffect(() => {
     setPage(1);
   }, [dateFrom, dateTo]);
@@ -162,6 +171,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       setFilters,
       setSort,
       resetFilters,
+      setPeriod,
       isLoading: recordsLoading,
       loading: recordsLoading,
       isPending,
@@ -169,7 +179,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       error: recordsError ?? null,
       refetch,
     }),
-    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, recordsLoading, isPending, isFetching, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, setPeriod, recordsLoading, isPending, isFetching, recordsError, refetch],
   );
 
   return (

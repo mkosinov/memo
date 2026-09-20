@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
+import { gotoScheduleDay } from './fixtures/helpers';
 
 /**
  * GH #258/#259 (spec §5 S3): the day view matches the week view — click an
@@ -8,9 +8,9 @@ import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
  * banner (its no-filters text is «Нет занятий на этот день») instead of the
  * old column-header label.
  *
- * Navigation uses the `__memo-switch-to-day-view` backdoor event
- * (pattern from dayview-column-reorder.spec.ts:54) to land on the far-future
- * date 2099-01-05 where no seed activity ever exists.
+ * Navigation deep-links to the far-future date 2099-01-05 where no seed
+ * activity ever exists (#138: /schedule?view=day&date=… — the URL is the
+ * source of truth).
  *
  * State purity: the per-test seed reset (#252, auto fixture in
  * fixtures/test) restores canonical state — created activities self-heal.
@@ -51,16 +51,7 @@ async function deselectAllFilters(page: import('@playwright/test').Page) {
 }
 
 async function navigateToEmptyDay(page: import('@playwright/test').Page) {
-  await waitForScheduleReady(page);
-  await page.evaluate((date: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-day-view', {
-        detail: { date: `${date}T12:00:00` },
-      }),
-    );
-  }, EMPTY_DAY);
-  await waitForScheduleGrid(page);
-  // No cards can exist on this day — the hint must be there too.
+  await gotoScheduleDay(page, EMPTY_DAY);
   await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
 }
 

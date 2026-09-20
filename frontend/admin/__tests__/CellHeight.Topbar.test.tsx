@@ -3,18 +3,22 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider, useMutationState } from '@tanstack/react-query';
 import { Topbar } from '../app/components/layout/Topbar';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { getUserSettings, createUserSettings, patchUserSettings } from '@memo/api-client';
 import {
   createMockScheduleData,
+  createMockUseScheduleView,
   createMockScheduleView,
   createMockGridSettings,
 } from './helpers/mockContexts';
 import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { ScheduleView } from '@/hooks/useScheduleView';
 import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
 import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
+
+// #138 Task 3: NavigationContext is gone from the Topbar tree. The URL hook
+// is mocked with the shared fixture — this file only asserts zoom/grid UI.
 
 vi.mock('@memo/api-client', () => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
@@ -56,27 +60,45 @@ vi.mock('@/contexts/schedule/ScheduleDataContext', async (importOriginal) => {
   };
 });
 
-vi.mock('@/contexts/schedule/ScheduleViewContext', () => ({
-  useScheduleView: vi.fn(() => createMockScheduleView()),
-}));
+// URL hook + context mocked with the shared fixtures (zoom tests need no URL).
+vi.mock('@/hooks/useScheduleView', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useScheduleView')>();
+  return {
+    ...actual,
+    useScheduleView: vi.fn(() => createMockUseScheduleView()),
+  };
+});
+
+vi.mock('@/contexts/schedule/ScheduleViewContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/contexts/schedule/ScheduleViewContext')>();
+  return {
+    ...actual,
+    useScheduleView: vi.fn(() => createMockScheduleView()),
+  };
+});
 
 vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
   useGridSettings: vi.fn(() => createMockGridSettings()),
 }));
 
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
-import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { useScheduleView as useUrlHook } from '@/hooks/useScheduleView';
+import { useScheduleView as useViewContext } from '@/contexts/schedule/ScheduleViewContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 
 interface TopbarMockOverrides {
   data?: Partial<ScheduleDataContextType>;
-  view?: Partial<ScheduleViewContextType>;
+  view?: Partial<ScheduleView>;
+  context?: Partial<ScheduleViewContextType>;
   grid?: Partial<GridSettingsContextType>;
 }
 
 function renderTopbar(overrides: TopbarMockOverrides = {}) {
+  // One fixture per render call — re-renders must keep the SAME vi.fn() setters.
+  const fixture = createMockUseScheduleView(overrides.view);
+  vi.mocked(useUrlHook).mockReturnValue(fixture);
   vi.mocked(useScheduleData).mockReturnValue(createMockScheduleData(overrides.data));
-  vi.mocked(useScheduleView).mockReturnValue(createMockScheduleView(overrides.view));
+  vi.mocked(useViewContext).mockReturnValue(createMockScheduleView(overrides.context));
   vi.mocked(useGridSettings).mockReturnValue(createMockGridSettings(overrides.grid));
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -84,11 +106,9 @@ function renderTopbar(overrides: TopbarMockOverrides = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <NavigationProvider>
-          <UserSettingsProvider>
-            <Topbar />
-          </UserSettingsProvider>
-        </NavigationProvider>
+        <UserSettingsProvider>
+          <Topbar />
+        </UserSettingsProvider>
       </UIProvider>
     </QueryClientProvider>,
   );

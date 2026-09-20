@@ -69,39 +69,6 @@ export function WeekView() {
     setModalActivity(null);
   }, []);
 
-  // Expose modal openers for E2E tests (avoids @dnd-kit pointer interception)
-  // Uses native DOM events processed by React's useEffect to ensure state flushes
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleTestOpen = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.activity) {
-        openEditModal(detail.activity);
-      }
-    };
-
-    const handleTestQuickAdd = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.activity) {
-        openQuickAdd(detail.activity);
-      }
-    };
-
-    const handleTestClose = () => {
-      closeModal();
-    };
-
-    document.addEventListener('__memo-open-modal', handleTestOpen);
-    document.addEventListener('__memo-quick-add', handleTestQuickAdd);
-    document.addEventListener('__memo-close-modal', handleTestClose);
-    return () => {
-      document.removeEventListener('__memo-open-modal', handleTestOpen);
-      document.removeEventListener('__memo-quick-add', handleTestQuickAdd);
-      document.removeEventListener('__memo-close-modal', handleTestClose);
-    };
-  }, [openEditModal, openQuickAdd, closeModal]);
-
   const handleCreateActivity = React.useCallback(
     (dayIndex: number, startMinutes: number) => {
       if (!stamp.ready || !stamp.masterId || !stamp.serviceId || stamp.locations.size === 0) return;

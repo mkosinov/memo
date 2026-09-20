@@ -35,22 +35,102 @@ function resolveRecordDate(recordId?: string): { date: string; activityId: strin
 }
 
 /**
- * Navigate the schedule page to the week containing the given date.
- * Uses the existing __memo-switch-to-week-view event in ScheduleContext.
+ * #138: the schedule URL is the single source of truth — deep-link the week
+ * view containing the given date via page.goto('/schedule?view=week&date=…').
  *
  * @param page Playwright page
  * @param date ISO date (YYYY-MM-DD)
+ * @param opts.col — optional column mode (`masters` | `locations`); a full
+ *   page load resets the URL to exactly the given params, so callers that
+ *   depend on a non-default column mode must pass it explicitly.
  */
-async function navigateToWeek(page: Page, date: string): Promise<void> {
-  await page.evaluate((d: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-week-view', {
-        detail: { date: `${d}T12:00:00` },
-      }),
-    );
-  }, date);
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+export async function gotoScheduleWeek(
+  page: Page,
+  date: string,
+  opts?: { col?: string },
+): Promise<void> {
+  const col = opts?.col ? `&col=${opts.col}` : '';
+  await page.goto(`/schedule?view=week&date=${date}${col}`);
+  // The grid renders on EMPTY weeks too (GH #258/#259) — a week without
+  // cards (e.g. the 2099 empty-week specs) is a legitimate landing state,
+  // so wait for the grid, not for cards. Callers that need cards rely on
+  // locator auto-waiting (clickActivityCard / card assertions).
+  await page.waitForSelector('[data-testid="day-column-0"], [data-testid^="activity-"]', {
+    timeout: 10_000,
+  });
   await page.waitForTimeout(300); // small buffer for activity cards to render
+}
+
+/**
+ * #138: deep-link the day view of the given date via
+ * page.goto('/schedule?view=day&date=…').
+ *
+ * @param page Playwright page
+ * @param date ISO date (YYYY-MM-DD)
+ * @param opts.col — optional column mode (`masters` | `locations`); see
+ *   gotoScheduleWeek.
+ */
+export async function gotoScheduleDay(
+  page: Page,
+  date: string,
+  opts?: { col?: string },
+): Promise<void> {
+  const col = opts?.col ? `&col=${opts.col}` : '';
+  await page.goto(`/schedule?view=day&date=${date}${col}`);
+  await page.waitForSelector('[data-testid="day-column-0"]', { timeout: 10_000 });
+}
+
+/**
+ * Open the activity details modal by clicking the activity card (#138 US-7 —
+ * real user interaction; the card-click pilot proved clicks stable with the
+ * dnd-kit distance:5 activation constraint). Falls back to a dispatched
+ * click if the drag sensor intercepts the pointer.
+ *
+ * Waits for the modal's records fetch (['records','activity',id]) so client
+ * tabs are ready — tolerant (.catch): React Query may dedupe an in-flight
+ * request.
+ */
+export async function clickActivityCard(page: Page, card: Locator): Promise<void> {
+  const recordsWait = page
+    .waitForResponse(
+      (r) => r.url().includes('/api/v1/records') && r.url().includes('activity_id='),
+      { timeout: 10_000 },
+    )
+    .then(() => {})
+    .catch(() => {});
+  try {
+    await card.click({ timeout: 5_000 });
+  } catch {
+    await card.dispatchEvent('click');
+  }
+  await recordsWait;
+  await page.waitForSelector('[data-testid="activity-details-modal"]', {
+    state: 'visible',
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Close the activity details modal the way a user does — click the backdrop
+ * (#138: the old close event is gone; Escape is not wired, spec §5.3).
+ * The backdrop is inert while a save is in flight; the guard above tolerates
+ * that (caller decides when closing is safe). No-op-tolerant: if the modal
+ * is already closed, nothing happens.
+ */
+export async function closeModal(page: Page): Promise<void> {
+  const backdrop = page.locator('[data-testid="details-modal-backdrop"]');
+  if ((await backdrop.count()) === 0) return;
+  try {
+    await backdrop.click({ timeout: 3_000, position: { x: 10, y: 10 } });
+  } catch {
+    // Backdrop may be covered mid-animation — fall back to the ✕ button.
+    const closeBtn = page.locator('[data-testid="modal-close-btn"]');
+    if (await closeBtn.count()) await closeBtn.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await page
+    .locator('[data-testid="activity-details-modal"]')
+    .waitFor({ state: 'hidden', timeout: 5_000 })
+    .catch(() => {});
 }
 
 /**
@@ -138,7 +218,7 @@ export async function getFirstActivity(page: Page) {
  * ['records','activity',id] via GET /api/v1/records?activity_id=… on mount,
  * and its booking tabs render only after that resolves (#191).
  *
- * Register BEFORE dispatching the open event. Tolerant (.catch) in case
+ * Register BEFORE opening the modal (card click / quick-add click).
  * React Query dedupes the request (e.g. same activity re-opened while a
  * fetch is already in flight) — helper must never introduce flakiness.
  */
@@ -154,10 +234,10 @@ function waitForModalRecords(page: Page): Promise<void> {
 
 /**
  * Open the activity details modal for an activity that has records (client tabs).
- * Dispatches a custom event that the modal listens to.
+ * Clicks the activity card (real user interaction, #138 US-7).
  *
  * Uses DB lookup to find the target record's week, then navigates directly
- * to that week via __memo-switch-to-week-view — no fragile walk-back logic.
+ * to that week via page.goto — no fragile walk-back logic.
  *
  * @param opts.recordId — target a specific record (e.g., seed "r1").
  *   If omitted, picks any active record (deterministic: smallest id).
@@ -174,18 +254,17 @@ export async function openModal(
   }
 
   // Step 2: navigate to that week
-  await navigateToWeek(page, resolved.date);
+  await gotoScheduleWeek(page, resolved.date);
 
-  let card: ReturnType<typeof page.locator> | null = null;
+  let targetCard: ReturnType<typeof page.locator> | null = null;
   let activity: unknown = null;
 
   if (opts?.recordId) {
     // Targeted mode: pick the card whose testid matches the resolved activity id.
     const targeted = page.locator(`[data-testid="activity-${resolved.activityId}"]`);
-    const count = await targeted.count();
-    if (count > 0) {
-      card = targeted.first();
-      activity = await card.evaluate((el: any) => {
+    if ((await targeted.count()) > 0) {
+      targetCard = targeted.first();
+      activity = await targetCard.evaluate((el: any) => {
         const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
         if (!k) return null;
         let c = (el as any)[k];
@@ -198,8 +277,9 @@ export async function openModal(
     }
   }
 
-  if (!activity) {
-    // Fallback / no recordId: scan visible cards for the first one with client tabs.
+  if (!activity || !targetCard) {
+    // Fallback / no recordId: scan visible cards for the first one with
+    // client tabs (open via real click, close via backdrop if wrong).
     const MAX_ACTIVITIES_PER_WEEK = 5;
     const cardCount = await page.locator('[data-testid^="activity-"]').count();
     const toTry = Math.min(cardCount, MAX_ACTIVITIES_PER_WEEK);
@@ -220,44 +300,20 @@ export async function openModal(
       });
       if (!candidateActivity) continue;
 
-      const recordsWait = waitForModalRecords(page);
-      await page.evaluate((act: any) => {
-        document.dispatchEvent(new CustomEvent('__memo-open-modal', {
-          detail: { activity: act },
-        }));
-      }, candidateActivity);
-      await recordsWait;
-
-      await page.waitForSelector('[data-testid="activity-details-modal"]', {
-        state: 'visible',
-        timeout: 10_000,
-      });
+      await clickActivityCard(page, candidate);
 
       const hasClientTabs =
         (await page.locator('[data-testid^="tab-client-"]').count()) > 0;
       if (hasClientTabs) return candidateActivity;
 
-      await page.evaluate(() => {
-        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-      });
+      await closeModal(page);
       await page.waitForTimeout(300);
     }
     return null;
   }
 
-  // Targeted mode: dispatch the activity from the matched card and verify modal.
-  const recordsWait = waitForModalRecords(page);
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', {
-      detail: { activity: act },
-    }));
-  }, activity);
-  await recordsWait;
-
-  await page.waitForSelector('[data-testid="activity-details-modal"]', {
-    state: 'visible',
-    timeout: 10_000,
-  });
+  // Targeted mode: click the matched card and verify the modal.
+  await clickActivityCard(page, targetCard);
 
   return activity;
 }
@@ -266,7 +322,9 @@ export async function openModal(
  * Open the modal directly on the "new booking" (+) tab.
  * Useful for testing record creation flows.
  *
- * Navigates to the target week first (via DB lookup) so activities are visible.
+ * Navigates to the target week first (via DB lookup) so activities are
+ * visible, then clicks the card's quick-add button (#138: real interaction —
+ * the old quick-add event is gone).
  *
  * @param opts.date — ISO date (YYYY-MM-DD) to target. If omitted, picks
  *   any active record's week so we land on a week with activities.
@@ -280,17 +338,23 @@ export async function openAddTab(
     throw new Error('openAddTab: no active records found to navigate to');
   }
 
-  await navigateToWeek(page, targetDate);
+  await gotoScheduleWeek(page, targetDate);
 
-  const activity = await getFirstActivity(page);
-  if (!activity) {
+  const firstCard = page.locator('[data-testid^="activity-"]').first();
+  if (!(await firstCard.isVisible())) {
     throw new Error(`openAddTab: no activity found on week of ${targetDate}`);
   }
 
   const recordsWait = waitForModalRecords(page);
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-quick-add', { detail: { activity: act } }));
-  }, activity);
+  // The (+) quick-add button on the card opens the modal in quickAdd mode
+  // (the new-record tab is active). stopPropagation guards against the
+  // card's own click handler; a plain click is enough.
+  const quickAddBtn = firstCard.locator('[data-testid="btn-quick-add"]');
+  try {
+    await quickAddBtn.click({ timeout: 5_000 });
+  } catch {
+    await quickAddBtn.dispatchEvent('click');
+  }
   await recordsWait;
 
   await page.waitForSelector('[data-testid="activity-details-modal"]', {

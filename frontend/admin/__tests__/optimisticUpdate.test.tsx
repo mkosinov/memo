@@ -2,12 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
 import { UIProvider } from '../contexts/UIContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { useScheduleData } from '../contexts/schedule/ScheduleDataContext';
 import { getMonday, toISODate } from '@/lib/datetime';
+
+// #138 Task 2: ScheduleViewProvider reads the URL via useScheduleView —
+// reactive App Router stand-in.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => {
@@ -98,7 +102,6 @@ function renderWithContext() {
   const queryClient = createTestQueryClient();
   const utils = render(
     <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
         <UserSettingsProvider>
           <UIProvider>
             <PendingActionsProvider>
@@ -108,7 +111,6 @@ function renderWithContext() {
             </PendingActionsProvider>
           </UIProvider>
         </UserSettingsProvider>
-      </NavigationProvider>
     </QueryClientProvider>,
   );
   return { queryClient, ...utils };
@@ -129,6 +131,7 @@ function getActivityQueryKey(): string[] {
 
 describe('updateMutation — optimistic update features', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
   });
 

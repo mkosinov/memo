@@ -3,10 +3,14 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StampPanel } from '../app/components/stamp/StampPanel';
 import { ScheduleProvider } from '../contexts/schedule/ScheduleProvider';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
+
+// #138 Task 2: ScheduleViewProvider reads the URL via useScheduleView —
+// reactive App Router stand-in.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
 
 // Mock api-client so React Query hooks don't make real network calls
 vi.mock('@memo/api-client', () => {
@@ -68,7 +72,6 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = createTestQueryClient();
   return (
     <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
         <UIProvider>
           <UserSettingsProvider>
             <PendingActionsProvider>
@@ -76,7 +79,6 @@ function Wrapper({ children }: { children: React.ReactNode }) {
           </PendingActionsProvider>
           </UserSettingsProvider>
         </UIProvider>
-      </NavigationProvider>
     </QueryClientProvider>
   );
 }
@@ -96,6 +98,10 @@ async function selectServiceOption(optionTestId: string) {
 }
 
 describe('StampPanel', () => {
+  beforeEach(() => {
+    __resetNavigation();
+  });
+
   it('renders master, service comboboxes and location checkboxes', () => {
     render(
       <Wrapper>

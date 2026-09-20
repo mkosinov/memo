@@ -119,10 +119,10 @@ async function openToolbar(page: Page): Promise<void> {
 }
 
 /**
- * Switch the schedule to the week starting on `monday` (week view) and wait
- * for BOTH the grid and the target-week fetch to settle (dayview-column-
- * reorder.spec.ts:54 dispatch pattern). Tolerant fetch wait: a cached week
- * may not issue a new request.
+ * Deep-link the schedule to the week starting on `monday` (week view) and
+ * wait for BOTH the grid and the target-week fetch to settle (#138:
+ * /schedule?view=week&date=… — the URL is the source of truth). Tolerant
+ * fetch wait: a cached week may not issue a new request.
  */
 async function switchToWeek(page: Page, monday: string): Promise<void> {
   const weekFetched = page
@@ -131,11 +131,7 @@ async function switchToWeek(page: Page, monday: string): Promise<void> {
       { timeout: 30_000 },
     )
     .catch(() => {});
-  await page.evaluate((d: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-week-view', { detail: { date: `${d}T12:00:00` } }),
-    );
-  }, monday);
+  await page.goto(`/schedule?view=week&date=${monday}`);
   await waitForScheduleGrid(page);
   await weekFetched;
   await page.waitForTimeout(300); // render buffer

@@ -21,6 +21,7 @@ import type {
 import type { PhotosContextType } from '@/contexts/PhotosContext';
 import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
 import type { ScheduleViewContextType } from '@/contexts/schedule/ScheduleViewContext';
+import type { ScheduleView } from '@/hooks/useScheduleView';
 import type { GridSettingsContextType } from '@/contexts/schedule/GridSettingsContext';
 import type { ClientWithStats } from '@memo/api-client';
 import { mockMasters, mockServices, mockLocations, mockMasterResponse, mockServiceResponse, mockLocationResponse } from './mockData';
@@ -71,6 +72,30 @@ export function createMockScheduleData(
   };
 }
 
+/**
+ * #138 Task 2 — fixture for the URL-state hook `useScheduleView`
+ * (hooks/useScheduleView.ts). The ScheduleViewProvider PROXIES this hook, so
+ * context contract tests mock the hook module with this factory and assert
+ * the proxy wiring. Defaults mirror the hook's no-param behavior
+ * (view=week, col=masters, date=today); `currentWeek` is pinned to
+ * 2026-06-01 (a Monday) like createMockScheduleView.
+ */
+export function createMockUseScheduleView(overrides?: Partial<ScheduleView>): ScheduleView {
+  return {
+    viewMode: 'week',
+    setViewMode: vi.fn(),
+    selectedDay: new Date(),
+    setSelectedDay: vi.fn(),
+    columnMode: 'masters',
+    setColumnMode: vi.fn(),
+    currentWeek: new Date('2026-06-01'),
+    goToToday: vi.fn(),
+    prevPeriod: vi.fn(),
+    nextPeriod: vi.fn(),
+    ...overrides,
+  };
+}
+
 export function createMockScheduleView(
   overrides?: Partial<ScheduleViewContextType>,
 ): ScheduleViewContextType {
@@ -88,7 +113,7 @@ export function createMockScheduleView(
     stamp: { masterId: null, serviceId: null, locations: new Set(), ready: false },
     setStamp: vi.fn(),
     currentWeek: new Date('2026-06-01'),
-    setCurrentWeek: vi.fn(),
+    goToToday: vi.fn(),
     prevPeriod: vi.fn(),
     nextPeriod: vi.fn(),
     ...overrides,
@@ -132,6 +157,8 @@ export function createMockRecordsContext(
     setFilters: vi.fn(),
     setSort: vi.fn(),
     resetFilters: vi.fn(),
+    // #138 Task 5: URL period writer — no-op by default, override per-test.
+    setPeriod: vi.fn(),
     isLoading: false,
     loading: false,
     isPending: false,

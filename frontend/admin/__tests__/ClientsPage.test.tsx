@@ -8,10 +8,24 @@ import { createMockClientsTableState } from './helpers/mockContexts';
 
 // ─── Mock contexts ───────────────────────────────────────────────────────
 
-// GH #141 Task 11: the page mounts the split-context ScheduleProvider
-// composition; stub it — page-level tests assert layout/pager behavior only.
+// GH #138 Task 6: /clients is decoupled from the schedule stack — the page
+// mounts ONLY GridSettingsProvider (ClientRecordTab reads gridFrequency from
+// it). The stub asserts the NEW contract: page children must render through
+// GridSettingsProvider, not ScheduleProvider. If the page ever regresses to
+// ScheduleProvider, the ScheduleProvider stub below makes it fail loudly
+// (ScheduleProvider renders nothing).
+vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
+  GridSettingsProvider: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="grid-settings-provider">{children}</div>
+  ),
+}));
+
 vi.mock('@/contexts/schedule/ScheduleProvider', () => ({
-  ScheduleProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ScheduleProvider: () => {
+    throw new Error(
+      'page must not mount ScheduleProvider — /clients uses GridSettingsProvider only (GH #138 T6)',
+    );
+  },
 }));
 
 // importOriginal keeps the real `defaultFilters` export available — the

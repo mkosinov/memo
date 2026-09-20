@@ -3,6 +3,7 @@ import {
   waitForRecordsReady,
   waitForScheduleReady,
   openAddTab,
+  closeModal,
 } from './fixtures/helpers';
 import { cleanupRecord, cleanup } from './fixtures/factories';
 import {
@@ -141,9 +142,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
     // attempt's write (it switches to the settings tab after creation) so
     // the retry write starts from a clean surface.
     const resetSurface = async () => {
-      await pageA.evaluate(() => {
-        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-      });
+      await closeModal(pageA);
     };
 
     try {
@@ -169,9 +168,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
 
       // The modal stays open after creation (switches to the settings tab) —
       // close it so the sidebar link is clickable.
-      await pageA.evaluate(() => {
-        document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-      });
+      await closeModal(pageA);
 
       // Back to /records via the sidebar LINK (SPA navigation — cache
       // survives). Own invalidation must have marked ['records'] stale, so

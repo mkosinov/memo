@@ -16,6 +16,7 @@ import type {
   ServiceResponse,
   MasterViewResponse,
   StaffResponse,
+  TariffResponse,
   PositionResponse,
   MyProfile,
 } from '@memo/api-client';
@@ -38,8 +39,8 @@ export const mockServices: Service[] = [
     defaultChildPrice: 2500,
     defaultIndividualPrice: 5000,
     tariffs: [
-      { id: 't1', title: 'Взрослый', price: 3500, description: null },
-      { id: 't2', title: 'Детский', price: 2500, description: null },
+      { id: 't1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+      { id: 't2', title: 'Детский', price: 2500, description: null, audience: 'kid' },
     ],
   },
   {
@@ -52,7 +53,7 @@ export const mockServices: Service[] = [
     defaultChildPrice: 2000,
     defaultIndividualPrice: 4000,
     tariffs: [
-      { id: 't3', title: 'Взрослый', price: 2800, description: null },
+      { id: 't3', title: 'Взрослый', price: 2800, description: null, audience: 'adult' },
     ],
   },
 ];
@@ -170,9 +171,9 @@ export const mockPayment: PaymentResponse = {
 
 // ─── Tariffs (used by SettingsTab, NewRecordTab, ClientTab) ───────────────
 
-export const mockTariffs = [
-  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+export const mockTariffs: TariffResponse[] = [
+  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
 ];
 
 // ─── LocationResponse (API shape) ────────────────────────────────────────
@@ -234,8 +235,8 @@ export const mockServiceResponse: ServiceResponse = {
   duration: 150,
   record_info: '',
   tariffs: [
-    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
   ],
   tags: [],
   materials: [],

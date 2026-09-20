@@ -51,7 +51,7 @@ const mockService: ServiceResponse = {
   max_age: 99,
   duration: 120,
   record_info: '',
-  tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 }],
+  tariffs: [{ id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500, audience: 'adult' }],
   tags: [{ id: 'tag1', title: 'глина' }],
   materials: [],
   archived: false,

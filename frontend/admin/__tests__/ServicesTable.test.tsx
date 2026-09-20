@@ -37,8 +37,8 @@ const mockService1: ServiceResponse = {
   duration: 150,
   record_info: '',
   tariffs: [
-    { id: 't-1', service_id: 'svc-1', title: 'Взрослый', description: null, price: 3500 },
-    { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500 },
+    { id: 't-1', service_id: 'svc-1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
+    { id: 't-2', service_id: 'svc-1', title: 'Детский', description: null, price: 2500, audience: 'kid' },
   ],
   tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
@@ -58,7 +58,7 @@ const mockService2: ServiceResponse = {
   duration: 120,
   record_info: '',
   tariffs: [
-    { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800 },
+    { id: 't-3', service_id: 'svc-2', title: 'Взрослый', description: null, price: 2800, audience: 'adult' },
   ],
   tags: [{ id: 'tag-2', title: 'акрил' }],
   materials: [],

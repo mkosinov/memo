@@ -98,7 +98,8 @@
           "description": "",
           "price": 2500,
           "id": "tariff-1",
-          "service_id": "service-1"
+          "service_id": "service-1",
+          "audience": "all"
         }
       ],
       "tags": [
@@ -135,7 +136,8 @@
           "description": "",
           "price": 2500,
           "id": "tariff-1",
-          "service_id": "service-1"
+          "service_id": "service-1",
+          "audience": "all"
         }
       ],
       "tags": [

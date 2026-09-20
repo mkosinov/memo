@@ -622,6 +622,7 @@ const validTariff = {
   title: 'Взрослый',
   description: 'Билет для взрослого',
   price: 2500,
+  audience: 'all' as const,
 };
 
 const validTag = {
@@ -712,6 +713,32 @@ describe('ServiceResponseSchema', () => {
     const data = { ...validService, materials: [{ ...validServiceMaterialItem, note: null }] };
     const result = ServiceResponseSchema.parse(data);
     expect(result.materials[0].note).toBeNull();
+  });
+
+  // ─── GH #284: tariff audience (read shape) ───
+
+  it('parses tariff audience (kid/adult/all)', () => {
+    const data = {
+      ...validService,
+      tariffs: [
+        { ...validTariff, id: 'tariff-kid', audience: 'kid' },
+        { ...validTariff, id: 'tariff-adult', audience: 'adult' },
+        { ...validTariff, id: 'tariff-all', audience: 'all' },
+      ],
+    };
+    const result = ServiceResponseSchema.parse(data);
+    expect(result.tariffs.map(t => t.audience)).toEqual(['kid', 'adult', 'all']);
+  });
+
+  it('rejects a tariff response without audience (backend always sends it)', () => {
+    const { audience: _audience, ...noAudience } = validTariff;
+    const data = { ...validService, tariffs: [noAudience] };
+    expect(() => ServiceResponseSchema.parse(data)).toThrow();
+  });
+
+  it('rejects an unknown audience value (422 contract)', () => {
+    const data = { ...validService, tariffs: [{ ...validTariff, audience: 'senior' }] };
+    expect(() => ServiceResponseSchema.parse(data)).toThrow();
   });
 });
 
@@ -1397,6 +1424,26 @@ describe('TariffCreateSchema', () => {
 
   it('rejects negative price', () => {
     const data = { title: 'Бесплатный', price: -100 };
+    expect(() => TariffCreateSchema.parse(data)).toThrow();
+  });
+
+  // ─── GH #284: tariff audience (write shape) ───
+
+  it('defaults audience to "all" when absent', () => {
+    const data = { title: 'Единый', price: 2000 };
+    const result = TariffCreateSchema.parse(data);
+    expect(result.audience).toBe('all');
+  });
+
+  it('accepts explicit audience values', () => {
+    const result = TariffCreateSchema.parse({ title: 'Детский', price: 1500, audience: 'kid' });
+    expect(result.audience).toBe('kid');
+    const result2 = TariffCreateSchema.parse({ title: 'Взрослый', price: 2500, audience: 'adult' });
+    expect(result2.audience).toBe('adult');
+  });
+
+  it('rejects an unknown audience value', () => {
+    const data = { title: 'Стандарт', price: 2000, audience: 'senior' };
     expect(() => TariffCreateSchema.parse(data)).toThrow();
   });
 });

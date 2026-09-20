@@ -33,8 +33,8 @@ import type { VisitResponse, TariffResponse } from '@memo/api-client';
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
 const mockTariffs: TariffResponse[] = [
-  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
 ];
 
 const emptyVisitorsMap = new Map<string, { name: string; age: number | null }>();

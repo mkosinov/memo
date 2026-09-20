@@ -4,8 +4,8 @@ import { AddVisitorForm } from '../AddVisitorForm';
 import type { TariffResponse } from '@memo/api-client';
 
 const mockTariffs: TariffResponse[] = [
-  { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
-  { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 2500 },
+  { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
+  { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 2500, audience: 'kid' },
 ];
 
 describe('AddVisitorForm', () => {

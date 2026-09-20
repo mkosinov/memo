@@ -289,8 +289,8 @@ describe('useServices', () => {
       ...servicesFixture[0],
       duration: 180,
       tariffs: [
-        { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500 },
-        { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 1500 },
+        { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 2500, audience: 'adult' },
+        { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 1500, audience: 'kid' },
       ],
     };
     vi.mocked(getAllServices).mockResolvedValue([twoTariffService]);

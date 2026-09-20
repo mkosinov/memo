@@ -34,6 +34,9 @@ export const TariffSchema = z.object({
   title: z.string(),
   price: z.number(),
   description: z.string().nullable(),
+  // GH #284: audience marker must survive the edit→PUT round-trip (the backend
+  // re-creates tariffs on service update — dropping it silently resets marks).
+  audience: z.enum(['kid', 'adult', 'all']),
 });
 export type Tariff = z.infer<typeof TariffSchema>;
 

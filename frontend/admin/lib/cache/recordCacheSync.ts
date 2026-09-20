@@ -127,15 +127,12 @@ export function upsertVisit(
   qc: QueryClient,
   recordId: string,
   visit: VisitResponse,
+  position: UpsertPosition = {},
 ): void {
-  patchRecordEverywhere(qc, recordId, (record) => {
-    const idx = record.visits.findIndex((v) => v.id === visit.id);
-    const visits =
-      idx === -1
-        ? [...record.visits, visit]
-        : record.visits.map((v) => (v.id === visit.id ? visit : v));
-    return { ...record, visits };
-  });
+  patchRecordEverywhere(qc, recordId, (record) => ({
+    ...record,
+    visits: upsertById(record.visits, visit, position.atIndex),
+  }));
 }
 
 /** Remove a visit from canonical + list caches. */
@@ -155,22 +152,17 @@ export function upsertPayment(
   qc: QueryClient,
   recordId: string,
   payment: PaymentResponse,
+  position: PaymentUpsertPosition = {},
 ): void {
   // Per-record payments
   qc.setQueryData<PaymentResponse[]>(['payments', recordId], (old) => {
     if (old == null) return old;
-    const idx = old.findIndex((p) => p.id === payment.id);
-    return idx === -1
-      ? [...old, payment]
-      : old.map((p) => (p.id === payment.id ? payment : p));
+    return upsertById(old, payment, position.atIndex);
   });
   // Global payments list
   qc.setQueryData<PaymentResponse[]>(['payments'], (old) => {
     if (old == null) return old;
-    const idx = old.findIndex((p) => p.id === payment.id);
-    return idx === -1
-      ? [...old, payment]
-      : old.map((p) => (p.id === payment.id ? payment : p));
+    return upsertById(old, payment, position.globalAtIndex);
   });
 }
 
@@ -198,4 +190,45 @@ export function seedRecordFromList(
   if (qc.getQueryData<RecordResponse>(['record', record.id]) == null) {
     qc.setQueryData(['record', record.id], record);
   }
+}
+
+// ── #243 S5: position-preserving restore ────────────────────────────────────
+// Deferred-delete snapshots capture the row's ORIGINAL index per cache key;
+// the undo path re-inserts at that position instead of appending (the row must
+// not "jump to the end" after «Отменить»). Omitted/negative index (row absent
+// at defer time, or a plain add) keeps the append semantics.
+
+/**
+ * Insert-or-replace `row` in `list` by id. Replacement keeps the current
+ * position (a refetch-returned row is not moved); insertion honors
+ * `atIndex` — clamped into [0, list.length] (beyond-the-end and negative
+ * indices degrade to append, never sparse arrays).
+ */
+function upsertById<T extends { id: string }>(
+  list: T[],
+  row: T,
+  atIndex?: number,
+): T[] {
+  const idx = list.findIndex((r) => r.id === row.id);
+  if (idx !== -1) return list.map((r) => (r.id === row.id ? row : r));
+  if (atIndex == null || !Number.isFinite(atIndex) || atIndex < 0 || atIndex > list.length) {
+    return [...list, row];
+  }
+  const next = list.slice();
+  next.splice(atIndex, 0, row);
+  return next;
+}
+
+/** Position hints for a restore: original index per affected cache key. */
+export interface UpsertPosition {
+  /** Original index in the canonical record's visits array. */
+  atIndex?: number;
+}
+
+/** Position hints for a payment restore: per-record and global keys have INDEPENDENT orderings. */
+export interface PaymentUpsertPosition {
+  /** Original index in the ['payments', recordId] list. */
+  atIndex?: number;
+  /** Original index in the global ['payments'] list. */
+  globalAtIndex?: number;
 }

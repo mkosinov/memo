@@ -50,7 +50,6 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     updateRecord,
     addVisit,
     patchVisit,
-    deleteVisit,
     addAnonymousVisit,
     deleteVisitDeferred,
     convertAnonymousVisit,
@@ -110,14 +109,13 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
     }
   }, [addAnonymousVisit, tariffs, showToast]);
 
+  // Deferred contract (#243 S2): the pending-actions pipeline owns the toast,
+  // 5s undo window, commit and error handling (rollback + its own error
+  // toast) — no local catch here.
   const handleDeleteAnonymousVisit = useCallback(async () => {
     if (!lastAnonymousVisit) return;
-    try {
-      await deleteVisit(lastAnonymousVisit.id);
-    } catch (err) {
-      showToast(parseApiError(err).message, 'error');
-    }
-  }, [deleteVisit, lastAnonymousVisit, showToast]);
+    await deleteVisitDeferred(lastAnonymousVisit.id);
+  }, [deleteVisitDeferred, lastAnonymousVisit]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 

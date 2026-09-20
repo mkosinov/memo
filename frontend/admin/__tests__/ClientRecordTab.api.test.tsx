@@ -438,6 +438,46 @@ describe('ClientRecordTab — API interactions', () => {
     expect(apiDeleteVisit).not.toHaveBeenCalled();
   });
 
+  it('anonymous-visit "−" uses deleteVisitDeferred (enqueuePendingAction), not direct deleteVisit API (#243 S2)', async () => {
+    // Record with an anonymous visit (visitor_id = null, #257 unified model)
+    buildDefaultQueryImpl(mockUseQuery, {
+      record: {
+        data: {
+          ...mockRecord,
+          visits: [
+            ...mockRecord.visits,
+            {
+              id: 'v-anon', record_id: 'r1', visitor_id: null,
+              price: 3500, custom_price: null, status: 'waiting',
+              created_at: '', updated_at: '',
+            },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      },
+    });
+
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    // Stepper "−" in RecordHeader deletes the last anonymous visit
+    fireEvent.click(screen.getByTestId('anonym-visits-dec'));
+
+    // Deferred contract: enqueuePendingAction with a delete-visit-<id> action;
+    // no direct deleteVisit API call — the pending-actions pipeline owns
+    // error handling (rollback + its own error toast).
+    await waitFor(() => {
+      expect(mockEnqueuePendingAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'delete-visit-v-anon',
+          kind: 'delete',
+          message: 'Удалено. Отменить',
+          delayMs: 5000,
+        }),
+      );
+    });
+    expect(apiDeleteVisit).not.toHaveBeenCalled();
+  });
+
   it('delete payment uses deletePaymentDeferred (enqueuePendingAction), not direct deletePayment API', async () => {
     render(<ClientRecordTab recordId="r1" clientId="c1" />);
     // Click × button on a saved payment row (testIdPrefix 'payment')

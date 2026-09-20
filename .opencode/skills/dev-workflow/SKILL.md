@@ -44,6 +44,10 @@ Or export once:
 export PATH="/root/.npm-global/bin:$PATH"
 ```
 
+## Commit messages
+
+Format: `type(#issue): summary` — e.g. `refactor(#138): …`, `docs(#139): …`.
+
 ## Test Execution
 
 ### CRITICAL: PTY Rule for Long Tests

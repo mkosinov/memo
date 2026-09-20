@@ -9,7 +9,8 @@
 
 Scope: investigation + this doc + GH ops only. **No `.ts` / `.tsx` / `.py` / `.css`
 / `.js` source files were modified.** In-source annotation comments will be updated
-in Wave 2 when each test is actually touched/un-skipped (per CLAUDE.md TDD rule).
+in Wave 2 when each test is actually touched/un-skipped (per the TDD rule,
+`.opencode/skills/test-driven-development`).
 
 ## Summary
 
@@ -138,7 +139,7 @@ Triage via 20-line context read:
   all were blocked by `#124` openModal, now fixed); rewrite vitest row #33 (#163,
   ~10 min testid rewrite); regenerate snapshot for row #25 (#109); re-run row #2 to
   confirm #125 still flakes; fix annotation `#XXX` → real numbers across all touched
-  rows (per CLAUDE.md TDD: update annotation when test is touched).
+  rows (per the TDD rule: update the annotation when the test is touched).
 - **Wave 3 — product fixes:** rows #19-21 (#164, stale-cache invalidation),
   #6/#7 (#159, detail-panel row-click), #8-13 (#160, column-mode dropdown product
   fix in `Topbar.tsx handleColumnModeSelect`), #24 (#155, backend write-visibility).

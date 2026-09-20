@@ -19,6 +19,7 @@ import {
   expectUpdateToast,
   clickFabRobust,
   createRecordViaUI,
+  lostToast,
   uid,
   PUSH_WINDOW,
 } from './fixtures/server-push';
@@ -265,6 +266,55 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       await expectUpdateToast(pageA);
     } finally {
       await cleanup(request, `/api/v1/activities/${created.id}`);
+    }
+  });
+
+  // ── С5/S5 (#330): healthy channel with a short flap → NO loss toast ─────
+
+  twoPages('S5 (#330): brief SSE flap (2s < 5s debounce) on a healthy run → «Нет соединения» never appears', async ({
+    pageA,
+    pageB,
+    ctxA,
+    request,
+  }) => {
+    // A is watching the current week on a HEALTHY channel (the whole point:
+    // S5 asserts silence on a healthy run with a reconnect, not during an
+    // outage — spec §2 S5 «дрожь ниже порога молчит»).
+    await waitForScheduleReady(pageA);
+
+    // SHORT FLAP — the events route is aborted for 2s only. The ES socket
+    // dies and retries natively (retry: 5000 from the server; observed
+    // reconnect cadence under abort ~3s), onerror fires in CONNECTING
+    // state, but the 5s debounce (LOST_DEBOUNCE_MS) never elapses: the
+    // channel is back before the timer fires and onopen CANCELS it. This
+    // is exactly the sub-threshold jitter the indicator must stay silent
+    // on (vehicle rationale: see server-push-offline.spec.ts VEHICLE).
+    await ctxA.route('**/api/v1/events', (route) => route.abort('connectionreset'));
+    await pageA.waitForTimeout(2_000);
+    await ctxA.unroute('**/api/v1/events');
+
+    // SILENCE WINDOW — wait out BOTH the debounce budget (5s from the last
+    // onerror: had the timer survived, the toast would appear by now) and
+    // the reconnect (onopen cancels any pending timer). 7s > 5s debounce,
+    // so a timer that wrongly survived the reconnect is still caught; a
+    // healthy implementation shows NOTHING.
+    await pageA.waitForTimeout(7_000);
+    await expect(lostToast(pageA)).toHaveCount(0);
+
+    // CHANNEL-ALIVE PIN — silence alone is ambiguous (a dead channel is
+    // also silent); the flap must have ENDED in a reconnect. B's real UI
+    // write must still push to A within the window: convergence + the
+    // standard update toast prove the channel is delivering again.
+    const marker = `Push S5 ${uid()}`;
+    let created: { id: string; client_id: string } | null = null;
+    try {
+      created = await createRecordViaUI(pageB, marker);
+      await expectUpdateToast(pageA);
+    } finally {
+      if (created) {
+        await cleanupRecord(request, created.id);
+        await cleanup(request, `/api/v1/clients/${created.client_id}`);
+      }
     }
   });
 });

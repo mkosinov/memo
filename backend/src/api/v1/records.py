@@ -31,8 +31,14 @@ from src.services.activity import get_activity_service
 from src.services.record import RecordService, get_record_service, map_record
 from src.usecases.records import (
     create_record as create_record_scenario,
+)
+from src.usecases.records import (
     delete_record as delete_record_scenario,
+)
+from src.usecases.records import (
     patch_record as patch_record_scenario,
+)
+from src.usecases.records import (
     update_record as update_record_scenario,
 )
 
@@ -283,7 +289,7 @@ async def delete_record(
     record_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    body: RecordDeleteBody | None = Body(default=None),
+    body: Annotated[RecordDeleteBody | None, Body()] = None,
     dry_run: Annotated[
         bool | None,
         Query(
@@ -375,7 +381,7 @@ async def delete_record(
     except StaleDependenciesError as exc:
         return _dependencies_response(exc.nodes, detail="stale_dependencies")
     except ResolutionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not ok:
         raise HTTPException(
             status_code=404,

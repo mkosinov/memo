@@ -2,9 +2,9 @@
 
 import pytest
 
+from src.services.decorators import _TRANSACTIONAL_MARKER
 from src.services.generic import GenericService
 from src.services.payment import PaymentService
-from src.services.decorators import _TRANSACTIONAL_MARKER
 
 
 class TestPaymentServiceClass:
@@ -20,7 +20,7 @@ class TestPaymentServiceClass:
 
     def test_not_null_fields_is_only_amount(self) -> None:
         """NOT_NULL_FIELDS should only contain 'amount' — nothing else."""
-        assert PaymentService.NOT_NULL_FIELDS == {"amount"}
+        assert {"amount"} == PaymentService.NOT_NULL_FIELDS
 
 
 # ── GH #171 Task 2 — delete_by_record (scenario building block) ─────────────
@@ -40,8 +40,9 @@ async def test_delete_by_record_removes_all_payments_of_record(
     db_session, api_client, create_record
 ):
     """ONE set-based delete: every payment of the record is gone, others stay."""
-    from src.models.payment import Payment
     from sqlalchemy import select
+
+    from src.models.payment import Payment
 
     record = create_record()
     other_record = create_record()
@@ -72,9 +73,9 @@ async def test_delete_by_record_removes_all_payments_of_record(
 @pytest.mark.asyncio
 async def test_delete_by_record_no_record_is_noop(db_session):
     """Deleting payments of a record without payments removes nothing, no raise."""
-    from src.models.payment import Payment
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
 
+    from src.models.payment import Payment
     from src.services.payment import get_payment_service
     service = get_payment_service()
     await service.delete_by_record(db_session, "no-such-record")

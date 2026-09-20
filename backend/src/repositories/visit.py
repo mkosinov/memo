@@ -9,13 +9,15 @@ never a Python loop over rows. Called only by VisitService methods.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.visit import Visit
 from src.repositories.generic import BaseRepository
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 VisitT = TypeVar("VisitT", bound=Visit)
 

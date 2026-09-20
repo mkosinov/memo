@@ -10,8 +10,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_visit_service_list(db_session, sample_visits):
     """list returns all active visits in a PaginatedResponse envelope."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     result = await service.list(db_session=db_session)
@@ -22,8 +22,8 @@ async def test_visit_service_list(db_session, sample_visits):
 @pytest.mark.asyncio
 async def test_visit_service_list_filter_by_record(db_session, sample_visits):
     """list with record_id filter returns only matching visits."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     record_id = sample_visits[0].record_id
@@ -35,9 +35,9 @@ async def test_visit_service_list_filter_by_record(db_session, sample_visits):
 @pytest.mark.asyncio
 async def test_visit_service_create_cascades_to_record(db_session, sample_record):
     """create cascades to record.seats and record.status."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
     from src.schemas.visit import VisitCreate
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     original_seats = sample_record.seats  # 3: 2 named visits + 1 anonymous visit (SQL)
@@ -59,9 +59,9 @@ async def test_visit_service_create_cascades_to_record(db_session, sample_record
 @pytest.mark.asyncio
 async def test_visit_service_update_full_replace(db_session, sample_visit):
     """update is full-replace; price changed."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
     from src.schemas.visit import VisitUpdate
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     result = await service.update(
@@ -81,14 +81,15 @@ async def test_visit_service_update_full_replace(db_session, sample_visit):
 @pytest.mark.asyncio
 async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample_visit):
     """delete hard-deletes the row and cascades to record."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     result = await service.delete(db_session=db_session, visit_id=sample_visit.id)
     assert result is True
     # Verify row is absent from DB (hard delete)
     from sqlalchemy import select
+
     from src.models.visit import Visit
     rows = await db_session.execute(select(Visit).where(Visit.id == sample_visit.id))
     assert rows.scalar_one_or_none() is None
@@ -97,8 +98,8 @@ async def test_visit_service_delete_hard_deletes_and_cascades(db_session, sample
 @pytest.mark.asyncio
 async def test_visit_service_get_existing(db_session, sample_visit):
     """get returns the visit by ID."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     result = await service.get(db_session=db_session, visit_id=sample_visit.id)
@@ -109,8 +110,8 @@ async def test_visit_service_get_existing(db_session, sample_visit):
 @pytest.mark.asyncio
 async def test_visit_service_get_nonexistent(db_session):
     """get returns None for nonexistent ID."""
-    from src.services.visit import VisitService
     from src.repositories.generic import get_base_repository
+    from src.services.visit import VisitService
 
     service = VisitService(get_base_repository())
     result = await service.get(db_session=db_session, visit_id="nonexistent-id")
@@ -123,9 +124,9 @@ async def test_visit_service_list_paginated(db_session, sample_visits):
 
     Moved verbatim from test_generic_service_list.py:177-186.
     """
+    from src.repositories.generic import get_base_repository
     from src.schemas.common import PaginatedResponse
     from src.services.visit import VisitService
-    from src.repositories.generic import get_base_repository
 
     result = await VisitService(get_base_repository()).list(db_session, page=1, per_page=2)
     assert isinstance(result, PaginatedResponse)
@@ -167,9 +168,9 @@ async def test_create_visits_bulk_is_not_transactional():
 @pytest.mark.asyncio
 async def test_delete_visits_by_record_removes_all_visits_of_record(db_session, sample_visits):
     """ONE set-based delete: every visit of the record is gone, others stay."""
-    from sqlalchemy import select, func
-    from src.models.visit import Visit
+    from sqlalchemy import func, select
 
+    from src.models.visit import Visit
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
     service = VisitService(get_visit_repository())
@@ -202,10 +203,10 @@ async def test_create_visits_bulk_inserts_batch(db_session, sample_visits, sampl
     builds the ORM rows. All mapped fields must land on the rows.
     """
     from sqlalchemy import select
-    from src.models.visit import Visit
-    from src.schemas.record import VisitItem
 
+    from src.models.visit import Visit
     from src.repositories.visit import get_visit_repository
+    from src.schemas.record import VisitItem
     from src.services.visit import VisitService
     service = VisitService(get_visit_repository())
     record_id = sample_visits[0].record_id
@@ -248,8 +249,8 @@ async def test_create_visits_bulk_inserts_batch(db_session, sample_visits, sampl
 async def test_create_visits_bulk_empty_batch_is_noop(db_session, sample_record):
     """An empty batch inserts nothing and does not raise."""
     from sqlalchemy import select
-    from src.models.visit import Visit
 
+    from src.models.visit import Visit
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
     service = VisitService(get_visit_repository())
@@ -268,10 +269,9 @@ async def test_create_visits_bulk_empty_batch_is_noop(db_session, sample_record)
 @pytest.mark.asyncio
 async def test_delete_visits_by_record_does_not_commit(db_session, sample_visits):
     """No-commit property: rollback after the bulk delete restores visits."""
-    from tests.conftest import query_db
-
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
+    from tests.conftest import query_db
     service = VisitService(get_visit_repository())
     record_id = sample_visits[0].record_id
 

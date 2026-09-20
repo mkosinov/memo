@@ -9,7 +9,7 @@ and the caller's rollback undoes every pending write of the scenario.
 METHOD: each test seeds a known baseline state (committed), then
 monkeypatches a service getter in the SCENARIO MODULE's namespace with a
 wrapper that lets the early steps run for real and explodes with
-``_StepBoom`` on a LATER step — always AFTER real writes are already
+``StepBoomError`` on a LATER step — always AFTER real writes are already
 pending in the session:
 
 - US1 ``create_record`` — client + visitor + record row are written,
@@ -23,7 +23,7 @@ pending in the session:
 
 Each fake records that it WAS called (``calls``), proving the injection
 fired mid-scenario after the partial writes — and the exact-type
-``pytest.raises(_StepBoom)`` fails with ``DID NOT RAISE`` if the
+``pytest.raises(StepBoomError)`` fails with ``DID NOT RAISE`` if the
 scenario never reaches the step or swallows the error.
 
 How the tests were validated to be ABLE to fail (TDD RED-equivalent,
@@ -57,7 +57,7 @@ from src.schemas.record import RecordCreate, RecordPatch, RecordUpdate, VisitIte
 pytestmark = pytest.mark.asyncio
 
 
-class _StepBoom(RuntimeError):
+class StepBoomError(RuntimeError):
     """Injected mid-scenario failure — must propagate, never be swallowed."""
 
 
@@ -128,7 +128,7 @@ def _visit_service_boom_on_insert(calls: list[str]):
 
         async def create_visits_bulk(self, *args, **kwargs):
             calls.append("create_visits_bulk")
-            raise _StepBoom("injected: bulk visit insert failed")
+            raise StepBoomError("injected: bulk visit insert failed")
 
     return lambda: _VisitsExplodeOnInsert()
 
@@ -144,7 +144,7 @@ def _payment_service_boom_on_delete(calls: list[str]):
 
         async def delete_by_record(self, *args, **kwargs):
             calls.append("delete_by_record")
-            raise _StepBoom("injected: payments cascade failed")
+            raise StepBoomError("injected: payments cascade failed")
 
     return lambda: _PaymentsExplodeOnDelete()
 
@@ -177,7 +177,7 @@ async def test_create_record_mid_step_failure_leaves_no_partial_state(
         visits=[VisitItem(name="Атом", price=100)],
         comment="boom",
     )
-    with pytest.raises(_StepBoom):
+    with pytest.raises(StepBoomError):
         await records_module.create_record(None, db_session=db_session, data=data)
 
     # The injection genuinely fired mid-scenario (past the client/visitor/
@@ -238,7 +238,7 @@ async def test_update_record_mid_step_failure_leaves_no_partial_state(
         custom_price=999,
         visits=[VisitItem(price=300)],
     )
-    with pytest.raises(_StepBoom):
+    with pytest.raises(StepBoomError):
         await records_module.update_record(
             None, db_session=db_session, id=record_id, data=data,
         )
@@ -283,7 +283,7 @@ async def test_patch_record_mid_step_failure_leaves_no_partial_state(
     record_id = record.id
 
     data = RecordPatch(comment="patched then boomed", visits=[VisitItem(price=777)])
-    with pytest.raises(_StepBoom):
+    with pytest.raises(StepBoomError):
         await records_module.patch_record(
             None, db_session=db_session, id=record_id, data=data,
         )
@@ -341,7 +341,7 @@ async def test_delete_record_mid_step_failure_leaves_no_partial_state(
     ]
     assert len(visit_ids) == 2 and len(payment_ids) == 2
 
-    with pytest.raises(_StepBoom):
+    with pytest.raises(StepBoomError):
         await records_module.delete_record(
             None, db_session=db_session, id=record_id,
             resolutions={"visits": "cascade", "payments": "cascade"},

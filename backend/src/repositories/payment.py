@@ -10,12 +10,15 @@ methods.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.payment import Payment
 from src.repositories.generic import BaseRepository
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class PaymentRepository(BaseRepository):

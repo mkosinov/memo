@@ -1235,15 +1235,17 @@ test.describe('Records Page — Deferred record delete (#285)', () => {
       await expect(undoToast(page)).toBeVisible();
 
       // Kill the network INSIDE the 5s window (setOffline pattern #239):
-      // the scheduled commit fetch fails → default onError: undo + red toast.
+      // the scheduled commit fetch fails with a non-ApiError (no server
+      // answer) → staleAwareOnError's honest branch: undo + «Не удалось
+      // подтвердить удаление» (#243 S3).
       await page.context().setOffline(true);
 
       // The commit failure surfaces as the row returning…
       await expect(row).toBeVisible({ timeout: 15_000 });
-      // …and the error toast «Не удалось удалить. Изменение отменено».
+      // …and the honest toast does NOT claim the deletion was cancelled.
       const errorToast = page
         .locator('[data-testid="toast-error"]')
-        .filter({ hasText: 'Не удалось удалить. Изменение отменено' });
+        .filter({ hasText: 'Не удалось подтвердить удаление' });
       await expect(errorToast).toBeVisible();
 
       await page.context().setOffline(false);
@@ -1335,6 +1337,189 @@ test.describe('Records Page — Deferred record delete (#285)', () => {
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Deferred-delete commit error toasts (#243 S3)
+// ---------------------------------------------------------------------------
+//
+// Both branch tests run the DEFERRED pipeline on a RECORD delete through the
+// records-table row dropdown: dry-run preview → optimistic row removal → 5s
+// undo window → the commit DELETE intercepted by page.route. Records are the
+// one surface whose deferred delete wires a CUSTOM onError
+// (staleAwareOnError, lib/staleAwareOnError.ts) — the 409+dependencies
+// branch and 404 are its own, and the final branch must distinguish:
+//   - ApiError (server answered) → «Не удалось удалить. Изменение отменено»;
+//   - non-ApiError (route abort — the server never answered, the deletion
+//     outcome is UNKNOWN) → «Не удалось подтвердить удаление» (#243 S3).
+test.describe('Records Page — Deferred-delete commit error toasts (#243 S3)', () => {
+  /** Clean record fixture (no visits → the dry-run is 204, no DeleteDialog). */
+  async function createCleanRecord(api: APIRequestContext, name: string) {
+    const client = await createTestClient(api, { name });
+    const activity = await createTestActivity(api);
+    const record = await createTestRecord(api, activity.id, client.id, {
+      visits: [],
+    });
+    return { client, activity, record };
+  }
+
+  /** Open the row action dropdown and click «Удалить». */
+  async function clickRowDelete(page: Page, row: Locator, recordId: string) {
+    await row.getByRole('button', { name: 'Действия' }).click();
+    const menu = page.locator(`[data-testid="dropdown-${recordId}"]`);
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Удалить' }).click();
+  }
+
+  /** Commit-DELETE listener: the deferred commit carries a JSON body
+   *  (`expected`); the click's dry-run DELETE (?dry_run=true) has none —
+   *  postData() === null, so the predicate cannot match the preview. */
+  function commitDeleteWait(page: Page, recordId: string) {
+    return page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/v1/records/${recordId}`) &&
+        r.request().method() === 'DELETE' &&
+        r.request().postData() !== null,
+      { timeout: 15_000 },
+    );
+  }
+
+  // ── S3a: commit DELETE answers with an HTTP error — row returns + ApiError
+  // branch toast («Не удалось удалить. Изменение отменено») ─────────────────
+
+  test('S3a: commit DELETE fails with HTTP 500 — row returns, toast «Не удалось удалить. Изменение отменено»', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `S3a ${Date.now()}`;
+    const { client, activity, record } = await createCleanRecord(
+      request,
+      clientName,
+    );
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // Intercept the committing DELETE (a body-carrying DELETE to the
+      // record's endpoint — the dry-run preview has no body). Registered
+      // BEFORE the click so the listener cannot miss it.
+      await page.route(`**/api/v1/records/${record.id}*`, (route) => {
+        const req = route.request();
+        if (req.method() === 'DELETE' && req.postData() !== null) {
+          return route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ detail: 'INTERNAL' }),
+          });
+        }
+        return route.continue();
+      });
+      const commitWait = commitDeleteWait(page, record.id);
+
+      await clickRowDelete(page, row, record.id);
+
+      // Optimistic removal + undo toast while the window is open.
+      await expect(row).toBeHidden();
+      const undoToast = page
+        .locator('[data-testid="toast-info"]')
+        .filter({ hasText: 'Удалено. Отменить' });
+      await expect(undoToast).toBeVisible();
+
+      // Window expires → the commit DELETE fires and is answered 500.
+      const commit = await commitWait;
+      expect(commit.status()).toBe(500);
+
+      // ApiError branch: the row is restored from the snapshot…
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      // …and the honest toast says the deletion was cancelled.
+      const errorToast = page
+        .locator('[data-testid="toast-error"]')
+        .filter({ hasText: 'Не удалось удалить. Изменение отменено' });
+      await expect(errorToast).toBeVisible();
+
+      // The record survived (the failed commit changed nothing).
+      const dbRow = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRow).not.toBeNull();
+      expect(dbRow!.id).toBe(record.id);
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
+
+  // ── S3b: commit DELETE aborted (no response) — row returns + non-ApiError
+  // branch toast («Не удалось подтвердить удаление»). The e2e proof of the
+  // staleAwareOnError fix: without the ApiError/non-ApiError distinction the
+  // final branch would claim «Изменение отменено» here. ─────────────────────
+
+  test('S3b: commit DELETE aborted with no response — row returns, toast «Не удалось подтвердить удаление»', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `S3b ${Date.now()}`;
+    const { client, activity, record } = await createCleanRecord(
+      request,
+      clientName,
+    );
+
+    try {
+      await waitForRecordsReady(page);
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // Abort the committing DELETE — the request never reaches the server,
+      // so the fetch rejects with a network error (non-ApiError) and the
+      // deletion outcome stays UNKNOWN (deletion.md branch 5).
+      await page.route(`**/api/v1/records/${record.id}*`, (route) => {
+        const req = route.request();
+        if (req.method() === 'DELETE' && req.postData() !== null) {
+          return route.abort('failed');
+        }
+        return route.continue();
+      });
+      // No waitForResponse — an aborted request never answers. waitForRequest
+      // pins the attempt itself (fires even for aborted requests).
+      const commitAttempt = page.waitForRequest(
+        (req) =>
+          req.url().includes(`/api/v1/records/${record.id}`) &&
+          req.method() === 'DELETE' &&
+          req.postData() !== null,
+        { timeout: 15_000 },
+      );
+
+      await clickRowDelete(page, row, record.id);
+
+      // Optimistic removal + undo toast while the window is open.
+      await expect(row).toBeHidden();
+      const undoToast = page
+        .locator('[data-testid="toast-info"]')
+        .filter({ hasText: 'Удалено. Отменить' });
+      await expect(undoToast).toBeVisible();
+
+      // Window expires → the commit DELETE attempt fires and is aborted.
+      await commitAttempt;
+
+      // non-ApiError branch: the row is restored from the snapshot…
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      // …and the honest toast does NOT claim the deletion was cancelled.
+      const confirmToast = page
+        .locator('[data-testid="toast-error"]')
+        .filter({ hasText: 'Не удалось подтвердить удаление' });
+      await expect(confirmToast).toBeVisible();
+
+      // The record survived (nothing reached the server).
+      const dbRow = queryDBRow(`SELECT id FROM records WHERE id='${record.id}'`);
+      expect(dbRow).not.toBeNull();
+      expect(dbRow!.id).toBe(record.id);
+    } finally {
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });
 });

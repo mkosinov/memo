@@ -1462,6 +1462,26 @@ describe('useRecordMutations', () => {
       // so a stray non-null tariff value would still fail this assertion).
       expect(payload.visits?.[0]).toEqual({ tariff_id: undefined, price: 0 });
     });
+
+    it('anonymous tail defaults via the resolver — first adult, not the first in list (GH #284)', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      // Kid-first list proves the classifier (not array position) picks the
+      // default: anonymous seats have no age → adult side → t1.
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, seats: 1, visitors: [] },
+          [
+            { id: 't2', price: 2500, audience: 'kid' },
+            { id: 't1', price: 3500, audience: 'adult' },
+          ],
+        );
+      });
+
+      const payload = mockCreateRecord.mock.calls[0][0];
+      expect(payload.visits?.[0]).toEqual({ tariff_id: 't1', price: 3500 });
+    });
   });
 
   describe('addAnonymousVisit — stepper +1 (US2, #257)', () => {

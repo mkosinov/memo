@@ -76,8 +76,8 @@ export const mockServiceResponse = {
   duration: 150,
   record_info: '',
   tariffs: [
-    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+    { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
   ],
   tags: [],
   archived: false,

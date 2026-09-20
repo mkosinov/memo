@@ -18,23 +18,30 @@
 
 import { isKidsAge } from '@/lib/age-groups';
 
-/** Narrow structural type — enough for the resolver, decoupled from full Tariff. */
+/**
+ * Narrow structural type — enough for the resolver, decoupled from full Tariff.
+ * `audience` is optional: elements without it (legacy callers passing bare
+ * {id, price}) can never match kid/adult and fall back to the first in list —
+ * the legacy behaviour the spec prescribes when no group info exists.
+ * The resolver is generic over the element type, so the caller keeps `price`.
+ */
 export interface TariffLike {
   id: string;
-  audience: 'kid' | 'adult' | 'all';
+  audience?: 'kid' | 'adult' | 'all';
 }
 
 /** Age as selected in the UI: a number 3–17, the 'adult' sentinel, or empty. */
 export type SelectedAge = number | 'adult' | null | undefined;
 
-export function resolveDefaultTariff(
-  tariffs: TariffLike[],
+export function resolveDefaultTariff<T extends TariffLike>(
+  tariffs: T[],
   age: SelectedAge,
-): TariffLike | null {
+): T | null {
   const first = tariffs[0];
   if (!first) return null;
 
-  const wanted: TariffLike['audience'] = typeof age === 'number' && isKidsAge(age) ? 'kid' : 'adult';
+  const wanted: NonNullable<TariffLike['audience']> =
+    typeof age === 'number' && isKidsAge(age) ? 'kid' : 'adult';
   const match = tariffs.find((t) => t.audience === wanted);
   return match ?? first;
 }

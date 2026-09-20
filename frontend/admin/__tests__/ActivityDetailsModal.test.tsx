@@ -25,6 +25,7 @@ import {
   createMockUIContext,
 } from './helpers/mockContexts';
 import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { Tariff } from '@memo/domain';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -1026,6 +1027,43 @@ describe('NewRecordTab — visitor optional, tariff required; typed phone must b
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Test' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
     // With no tariffs and adding a visitor, should handle gracefully
+  });
+
+  it('added visitor defaults to the resolver tariff (first adult), not the first in list (GH #284)', () => {
+    // Kid-first list proves the classifier (not array position) picks the default.
+    const kidFirst: Tariff[] = [
+      { id: 't2', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+      { id: 't1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    render(<NewRecordTab {...defaultProps} serviceTariffs={kidFirst} />);
+    fireEvent.click(screen.getByText(/\+ Добавить посетителя/));
+
+    const row = screen.getByTestId('visitor-form-row');
+    const select = row.querySelector('select') as HTMLSelectElement;
+    expect(select.value).toBe('t1');
+  });
+
+  it('changing visitor age re-resolves the default tariff (overwrites manual pick) (GH #284)', () => {
+    // Spec §2.5: ANY age change re-substitutes the tariff — manual pick is
+    // clobbered by design (owner decision).
+    render(<NewRecordTab {...defaultProps} />);
+    fireEvent.click(screen.getByText(/\+ Добавить посетителя/));
+
+    const row = screen.getByTestId('visitor-form-row');
+    const ageInput = row.querySelector('input[type="number"]') as HTMLInputElement;
+    const select = row.querySelector('select') as HTMLSelectElement;
+
+    // Manual pick: Детский
+    fireEvent.change(select, { target: { value: 't2' } });
+    expect(select.value).toBe('t2');
+
+    // Age 14 → adult side → back to Взрослый
+    fireEvent.change(ageInput, { target: { value: '14' } });
+    expect(select.value).toBe('t1');
+
+    // Age 7 → kid side → Детский
+    fireEvent.change(ageInput, { target: { value: '7' } });
+    expect(select.value).toBe('t2');
   });
 });
 

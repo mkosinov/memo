@@ -53,4 +53,34 @@ describe('AddVisitorForm', () => {
     fireEvent.click(screen.getByText('Отмена'));
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it('initial tariff is the resolver default (first adult), not the first in list (GH #284)', () => {
+    // Kid-first list proves the classifier (not array position) picks it.
+    const kidFirst: TariffResponse[] = [
+      { id: 't2', service_id: 's1', title: 'Детский', description: null, price: 2500, audience: 'kid' },
+      { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
+    ];
+    render(<AddVisitorForm tariffs={kidFirst} onAdd={vi.fn()} onCancel={vi.fn()} />);
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+  });
+
+  it('age change re-resolves the default tariff, overwriting a manual pick (GH #284 spec §2.5)', () => {
+    render(
+      <AddVisitorForm tariffs={mockTariffs} onAdd={vi.fn()} onCancel={vi.fn()} />,
+    );
+    const ageInput = screen.getByTestId('add-visitor-age');
+    const tariffSelect = screen.getByTestId('add-visitor-tariff') as HTMLSelectElement;
+
+    // Manual pick: Детский
+    fireEvent.change(tariffSelect, { target: { value: 't2' } });
+    expect(tariffSelect.value).toBe('t2');
+
+    // Age 14 → adult side → re-resolved to Взрослый (manual pick clobbered)
+    fireEvent.change(ageInput, { target: { value: '14' } });
+    expect(tariffSelect.value).toBe('t1');
+
+    // Age 7 → kid side → Детский
+    fireEvent.change(ageInput, { target: { value: '7' } });
+    expect(tariffSelect.value).toBe('t2');
+  });
 });

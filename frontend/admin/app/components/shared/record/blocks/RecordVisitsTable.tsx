@@ -9,6 +9,7 @@ import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 import { ADULT_AGE_SENTINEL, KIDS_AGES, TEEN_AGES } from '@/lib/age-groups';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
 import { InlineEditRow } from '../InlineEditRow';
@@ -76,15 +77,17 @@ function visitResponseToRow(
 }
 
 function makeEmptyVisitRow(tariffs: TariffResponse[]): VisitRow {
-  const firstTariff = tariffs[0];
+  // GH #284: the single resolver owns the default — empty age → adult side
+  // (first adult tariff; none → first in list); no tariffs → no tariff.
+  const defaultTariff = resolveDefaultTariff(tariffs, null);
   return {
     id: null,
     clientId: transientId(),
     visitor_id: null,
     name: '',
     age: null,
-    tariff_id: firstTariff?.id ?? null,
-    price: firstTariff?.price ?? 0,
+    tariff_id: defaultTariff?.id ?? null,
+    price: defaultTariff?.price ?? 0,
     status: 'waiting' as VisitStatus,
   };
 }
@@ -415,8 +418,18 @@ export function RecordVisitsTable({
                   <AgeSelect
                     value={isNew ? formState.age : (visitor?.age ?? formState.age)}
                     onChange={(age) => {
+                      // GH #284 (spec §2.5): ANY age change re-substitutes the
+                      // tariff via the resolver — even overwriting a manual
+                      // pick (owner decision, no undo) — and rewrites the row
+                      // price, reusing the same mechanism as a manual tariff
+                      // change in that branch (handleChange / onPatchVisit).
+                      const reTariff = resolveDefaultTariff(tariffs, age);
                       if (isNew) {
                         handleChange('age', age);
+                        if (reTariff) {
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
+                        }
                       } else if (r.id && r.visitor_id == null) {
                         // In-flight guard first: a pending conversion for this
                         // visit ignores the re-entry entirely (no second call,
@@ -433,8 +446,15 @@ export function RecordVisitsTable({
                           // #257 D7: conversion with the tracked name + age.
                           convertAnonymousRow(formState.name, age);
                         }
+                        // Re-substitution persists like a manual tariff change.
+                        if (reTariff) {
+                          onPatchVisit(r.id, { tariff_id: reTariff.id, price: reTariff.price });
+                        }
                       } else if (r.visitor_id) {
                         onChangeVisitor(r.visitor_id, { age });
+                        if (reTariff) {
+                          onPatchVisit(r.id!, { tariff_id: reTariff.id, price: reTariff.price });
+                        }
                       }
                     }}
                     testId={isNew ? 'add-visitor-age' : `visit-${r.id}-age`}

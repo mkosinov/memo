@@ -193,6 +193,72 @@ describe('RecordVisitsTable — new-row save (preserves existing behavior)', () 
   });
 });
 
+// ─── Tests: default-tariff resolver (GH #284, spec §2.4–2.5) ──────────────────
+
+describe('RecordVisitsTable — default tariff via resolver (GH #284)', () => {
+  it('draft row defaults to the first adult tariff, not the first in list', () => {
+    // Spec §2.4: empty age → «взрослая» сторона → first tariff with audience="adult".
+    // mockTariffs = [Взрослый(adult, 3500), Детский(kid, 2500)] — first IS adult here,
+    // so use a kid-first list to prove the classifier (not position) picks it.
+    const kidFirstTariffs: TariffResponse[] = [
+      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    render(<RecordVisitsTable
+      visits={[]}
+      visitorsMap={emptyVisitorsMap}
+      tariffs={kidFirstTariffs}
+      totalCost={0}
+      recordStatus="waiting"
+      clientId="c1"
+      onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+      onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+      onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+      onChangeVisitor={vi.fn()}
+      onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+    />);
+
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+  });
+
+  it('age change on a new row ALWAYS re-resolves the tariff and rewrites the price (overwrites manual pick)', () => {
+    // Spec §2.5: any age change re-substitutes the tariff by the rule — even
+    // clobbering a manual tariff pick (owner decision, no undo mechanism).
+    renderVisitsTable();
+
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    // Manual pick: Детский (kid, 2500)
+    fireEvent.change(screen.getByTestId('add-visitor-tariff'), { target: { value: 't2' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t2');
+
+    // Age 7 (kid) → re-resolve keeps kid side: Детский, price 2500
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '7' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t2');
+    expect(draftPriceValue()).toBe('2500');
+
+    // Age 14 (teen → adult side) → re-resolve flips to Взрослый, price 3500
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '14' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+    expect(draftPriceValue()).toBe('3500');
+
+    // Back to «Взрослый» sentinel → still the adult tariff
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: 'adult' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+    expect(draftPriceValue()).toBe('3500');
+  });
+
+  /** The price input of the single unsaved draft row (row testid = visit-row-new). */
+  function draftPriceValue(): string {
+    const row = screen.getByTestId('visit-row-new');
+    const input = row.querySelector('input[type="number"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    return input.value;
+  }
+});
+
 // ─── Tests: new behavior (RED — failing against current code) ────────────────
 
 describe('RecordVisitsTable — saved rows derive from visits prop (useMemo)', () => {

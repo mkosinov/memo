@@ -28,6 +28,7 @@ import {
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -112,7 +113,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   const createRecordMutation = useCallback(
     async (
       input: CreateRecordInput,
-      serviceTariffs: Array<{ id: string; price: number }>,
+      serviceTariffs: Array<{ id: string; price: number; audience?: 'kid' | 'adult' | 'all' }>,
     ) => {
       // 1. Resolve or create client.
       //    GH #221: a picked client binds by id — no lookup, no create.
@@ -166,18 +167,19 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
       // 4. Create record — #257 unified visitors model: the unfilled tail is
       //    appended to `visits` as ANONYMOUS visit elements (no visitor_id);
-      //    default tariff/price = first tariff of the service (same default as
-      //    the draft row «+ Добавить» and the booking form). seats = len(visits)
-      //    — derived on the backend; no separate counter field exists anymore.
+      //    default tariff/price via the single resolver (GH #284 — same rule
+      //    as the draft row, the booking form and the stepper). seats =
+      //    len(visits) — derived on the backend; no separate counter field.
+      const seatsDefault = resolveDefaultTariff(serviceTariffs, null);
       await createRecord({
         activity_id: activityId,
         client_id: clientId,
         visits: [
           ...visitData.map((vd) => {
-            // Lookup tariff price by id; fall back to firstTariff
+            // Lookup tariff price by id; fall back to the resolver default
             const tariff = vd.tariffId
               ? serviceTariffs.find((t) => t.id === vd.tariffId)
-              : firstTariff;
+              : seatsDefault;
             return {
               visitor_id: vd.visitorId,
               tariff_id: vd.tariffId || undefined,
@@ -186,9 +188,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
           }),
           ...Array.from({ length: input.seats }, () => ({
             // Незаполненный хвост — анонимные визиты: visitor_id отсутствует,
-            // тариф/цена дефолтные (US1); бэкенд резолвит отсутствие как anonymous.
-            tariff_id: firstTariff?.id || undefined,
-            price: firstTariff?.price ?? 0,
+            // тариф/цена дефолтные через резолвер (GH #284); бэкенд резолвит
+            // отсутствие как anonymous.
+            tariff_id: seatsDefault?.id || undefined,
+            price: seatsDefault?.price ?? 0,
           })),
         ],
       });
@@ -372,8 +375,9 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   /**
    * Stepper +1 (US2): append ONE anonymous visit (visitor_id = null) with the
-   * service's default tariff (first tariff — the same default as the draft row
-   * and the booking form). Capacity is enforced by the backend VisitService.
+   * service's default tariff (resolved by the caller via resolveDefaultTariff —
+   * GH #284, the same rule as the draft row and the booking form). Capacity is
+   * enforced by the backend VisitService.
    * Cache shape mirrors `addVisit` minus the createVisitor step.
    */
   const addAnonymousVisit = useCallback(

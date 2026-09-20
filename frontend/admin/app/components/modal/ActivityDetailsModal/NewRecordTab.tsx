@@ -7,6 +7,7 @@ import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import type { CreateRecordInput } from '@/hooks/useRecordMutations';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 
 interface NewVisitor {
   tempId: string;
@@ -65,7 +66,13 @@ export function NewRecordTab({ activity, serviceTariffs, onSubmit, showToast }: 
   const addVisitor = useCallback(() => {
     setVisitors((prev) => [
       ...prev,
-      { tempId: `v_${Date.now()}`, name: '', age: '', tariffId: serviceTariffs[0]?.id || '' },
+      // GH #284: default via the single resolver (empty age → adult side).
+      {
+        tempId: `v_${Date.now()}`,
+        name: '',
+        age: '',
+        tariffId: resolveDefaultTariff(serviceTariffs, null)?.id ?? '',
+      },
     ]);
   }, [serviceTariffs]);
 
@@ -78,6 +85,19 @@ export function NewRecordTab({ activity, serviceTariffs, onSubmit, showToast }: 
       prev.map((v) => (v.tempId === tempId ? { ...v, [field]: value } : v)),
     );
   }, []);
+
+  // GH #284 (spec §2.5): ANY age change re-substitutes the tariff via the
+  // resolver — including clobbering a manual pick (owner decision, no undo).
+  const updateVisitorAge = useCallback((tempId: string, age: string, currentTariffId: string) => {
+    setVisitors((prev) =>
+      prev.map((v) => {
+        if (v.tempId !== tempId) return v;
+        const resolved = resolveDefaultTariff(serviceTariffs, age === '' ? null : Number(age));
+        // Only the typed age belongs to this row — resolve per visitor age.
+        return { ...v, age, tariffId: resolved?.id ?? currentTariffId };
+      }),
+    );
+  }, [serviceTariffs]);
 
   const handleSubmit = useCallback(() => {
     // If there are visitors, validate tariff is selected
@@ -196,7 +216,7 @@ export function NewRecordTab({ activity, serviceTariffs, onSubmit, showToast }: 
               className="w-20 rounded-lg border px-3 py-2 text-sm"
               style={inputStyle}
               value={visitor.age}
-              onChange={(e) => updateVisitor(visitor.tempId, 'age', e.target.value)}
+              onChange={(e) => updateVisitorAge(visitor.tempId, e.target.value, visitor.tariffId)}
             />
             <select
               className="w-28 rounded-lg border px-2 py-2 text-sm"

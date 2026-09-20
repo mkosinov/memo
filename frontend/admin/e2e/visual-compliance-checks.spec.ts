@@ -23,7 +23,7 @@
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import path from 'path';
+import { resolveTestDbPath } from './lib/db-path';
 import {
   createTestClient,
   createTestActivity,
@@ -32,6 +32,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 import { switchToRecordsTab } from './fixtures/scenarios';
+import { gotoScheduleWeek, clickActivityCard, closeModal } from './fixtures/helpers';
 
 const SHOTS = '/tmp/visual-compliance-manual';
 
@@ -40,8 +41,12 @@ function log(line: string) {
 }
 
 function dbPath() {
-  if (process.env.TEST_DB_PATH) return process.env.TEST_DB_PATH;
-  return path.resolve(__dirname, '../../../../backend/test_memo.db');
+  // GH #209: shared resolver — the previous local "TEST_DB_PATH wins"
+  // precedence is gone; a SHARD_ID × TEST_DB_PATH conflict is a loud error.
+  return resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 }
 
 function clean() {
@@ -72,53 +77,17 @@ test.describe.configure({ mode: 'serial' });
  * client tab. Mirrors the pattern from unify-caches.spec.ts.
  */
 async function openClientTabFor(page: Page, recordId: string, activityId: string) {
-  // 1. Navigate to /schedule and wait for it to be ready
-  await page.goto('/schedule');
-  // Wait for the schedule page to render
-  await page.waitForSelector('h1, [data-testid^="activity-"]', { timeout: 30_000 });
-  // The seed activities are in June 2026; we created our own TODAY, so the
-  // current week (July 13-19) should have cards once factories complete.
-  // Navigate to the week containing our activity (today).
+  // 1. Deep-link to the week containing our activity (today; #138 URL state).
   const today = new Date().toISOString().slice(0, 10);
-  await page.evaluate((d: string) => {
-    document.dispatchEvent(
-      new CustomEvent('__memo-switch-to-week-view', {
-        detail: { date: `${d}T12:00:00` },
-      }),
-    );
-  }, today);
+  await gotoScheduleWeek(page, today);
   await page.waitForSelector(`[data-testid="activity-${activityId}"]`, { timeout: 30_000 });
-  await page.waitForTimeout(500);
 
-  // 2. Find the specific activity card by its data-testid
+  // 2. Click the specific activity card by its data-testid.
   const card = page.locator(`[data-testid="activity-${activityId}"]`);
   await expect(card).toBeVisible({ timeout: 5_000 });
+  await clickActivityCard(page, card);
 
-  // 3. Read the activity object from the React fiber
-  const activity = await card.evaluate((el: any) => {
-    const k = Object.keys(el).find((x: string) => x.startsWith('__reactFiber'));
-    if (!k) return null;
-    let c = (el as any)[k];
-    while (c) {
-      if (c.memoizedProps?.activity) return c.memoizedProps.activity;
-      c = c.return;
-    }
-    return null;
-  });
-  if (!activity) throw new Error(`No React fiber activity for card ${activityId}`);
-
-  // 4. Dispatch the open-modal event
-  await page.evaluate((act: any) => {
-    document.dispatchEvent(new CustomEvent('__memo-open-modal', {
-      detail: { activity: act },
-    }));
-  }, activity);
-
-  await expect(
-    page.locator('[data-testid="activity-details-modal"]'),
-  ).toBeVisible({ timeout: 10_000 });
-
-  // 5. Switch to the client tab
+  // 3. Switch to the client tab
   await switchToRecordsTab(page);
   await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible({ timeout: 5_000 });
@@ -172,9 +141,7 @@ test('Check 1: add-visitor + Enter keeps new row in the visits table', async ({ 
 
     log(`Check 1 PASS — ${savedCount} saved visit-row(s), ${namedCount} with our name`);
   } finally {
-    await page.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    }).catch(() => {});
+    await closeModal(page).catch(() => {});
     await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
@@ -226,9 +193,7 @@ test('Check 2: delete-visitor removes the row from the visits table', async ({ p
 
     log(`Check 2 PASS — row visit-row-${visitId} no longer in DOM after delete`);
   } finally {
-    await page.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    }).catch(() => {});
+    await closeModal(page).catch(() => {});
     await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);
@@ -274,9 +239,7 @@ test('Check 3: undo toast "Удалено. Отменить" is visible after de
 
     log(`Check 3 PASS — toast contains "Удалено" + "Отменить"`);
   } finally {
-    await page.evaluate(() => {
-      document.dispatchEvent(new CustomEvent('__memo-close-modal'));
-    }).catch(() => {});
+    await closeModal(page).catch(() => {});
     await cleanupRecord(request, record.id);
     await cleanup(request, `/api/v1/clients/${client.id}`);
     await cleanup(request, `/api/v1/activities/${activity.id}`);

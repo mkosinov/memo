@@ -15,21 +15,19 @@
  * Retries on "database is locked" to handle concurrent backend writes.
  */
 
-import path from 'path';
 import { sqliteExecWithRetry } from './sqlite-exec';
+import { resolveTestDbPath } from '../lib/db-path';
 
 /**
- * Resolve DB path: per-shard (test_memo_shard{id}.db) or fallback.
- * SHARD_ID is set by test-all.sh; falls back to TEST_DB_PATH or default.
+ * Resolve DB path via the shared GH #209 resolver (e2e/lib/db-path.ts):
+ * SHARD_ID → canonical shard DB; a SHARD_ID × TEST_DB_PATH conflict is a
+ * loud error (no silent precedence).
  */
 function resolveDBPath(): string {
-  const shardId = process.env.SHARD_ID;
-  if (shardId) {
-    // Resolve relative to this file's location (frontend/admin/e2e/fixtures/)
-    return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
-  }
-  return process.env.TEST_DB_PATH
-    || path.resolve(__dirname, '../../../../backend/test_memo.db');
+  return resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 }
 
 const DB_PATH = resolveDBPath();

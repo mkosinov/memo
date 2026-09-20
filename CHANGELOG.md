@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-20
 
 ### Changed
+- **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на
+  deferred, честный тост ошибок без ответа сервера** — branch `record-delete-unified-contract-243`
+  (12 commits incl. docs: `83a4f8db..`, base `8b18b548`; 17 файлов, +836/−257; спека
+  `docs/specs/2026-09-19-record-delete-error-rollback-243-design.md` rev6, план
+  `docs/plans/2026-09-19-record-delete-unified-contract-243-plan.md`; канон
+  `docs/domain-rules/deletion.md` на main не менялся):
+  - **Миграция двух легаси-точек мгновенного удаления (S1/S2):** удаление платежа
+    (`ClientRecordTab` → `RecordPaymentsTable`) и анонимного визита («−» степпера) на странице
+    клиентов идут через `deletePaymentDeferred`/`deleteVisitDeferred` — окно отмены 5 с, единый
+    контракт ошибок; локальный catch с тостом у визитов удалён — ошибками владеет пайплайн.
+  - **Мёртвый код удалён:** мгновенные `deletePayment`/`deleteVisit` вырезаны из
+    `useRecordMutations` вместе с юнитами мгновенной семантики (включая блок «stepper −1
+    semantics (#257)»); wiring-тесты пинят, что обе точки используют deferred-варианты.
+  - **Позиция строки после «Отменить» (S5):** `recordCacheSync` `upsertVisit`/`upsertPayment`
+    запоминают исходный индекс в снимке — восстановление вставляет строку на место, а не в конец
+    (обе поверхности зоны записи, включая модалку расписания; оба ключа платежей).
+  - **Честный тост при обрыве связи (S3):** ошибка коммита без ответа сервера (не `ApiError`) →
+    «Не удалось подтвердить удаление» (было «Не удалось удалить. Изменение отменено» —
+    утверждало больше, чем известно); `ApiError` → прежний текст; 404 — тихий успех; строка
+    возвращается в обеих ветках. По scope-решению архитектора применено и к `staleAwareOnError`
+    (поверхность записей, кастомный `onError`) — S3/Behavioral Delta спеки («все отложенные
+    удаления») авторитетны (`d06b7933`).
+  - **Tests:** vitest полный прогон **2196p/0f** (139 файлов); tsc clean; eslint 0 errors /
+    37 warnings (бюджет 38); новые e2e — S1/S2 (тост отмены + возврат строки на странице
+    клиентов) и S3 в `records.spec.ts` (HTTP-ошибка vs route abort → два разных честных текста);
+    полный standalone e2e 432p/1s/20f — все 20 триажированы как env-обусловленные (18 —
+    шрифтовой дрифт контейнера vs CI-базлайны при нуле CSS-изменений, 1 — stale seed общей
+    overnight-БД, 1 — activity S5, исправлен и реверифицирован); CI — авторитетный merge-гейт.
+  - Status: `docs/status/2026-09-20-record-delete-unified-contract-243.md`
 - **GH #171 — рефактор сервисного слоя: usecases-слой, «оркестратор вместо трактора»** — branch
   `171-service-usecases` (14 commits `8e949899..c050aa5b`; спека
   `docs/specs/2026-09-18-service-usecases-design.md` rev2, план
@@ -41,30 +70,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-09-19
 
-### Fixed
-- **GH #203 — ServiceModal: NULL max_age → 0 блокировал edit-save открытых услуг** — branch
-  `service-modal-null-max-age-203` (3 commits: `1d8f97d0..4aa19858`, base `514a2b96`;
-  спека `docs/specs/2026-09-18-service-modal-null-max-age-design.md` rev4,
-  план `docs/plans/2026-09-19-service-modal-null-max-age-plan.md`; 7 файлов, +676/−21):
-  - **Клиентский фикс (3 прод-файла; сервер, миграции, api-client не тронуты — схемы уже `int | None`):**
-    услуга без верхней возрастной границы (`max_age = null`) редактируется и сохраняется —
-    инициализация `null` → `''` (фиксированный список полей, не по флагу `required`: у `min_age`
-    сохраняется 0-инициализация), пустое поле показывает placeholder «без ограничения»
-    (`serviceFields.tsx` + добавленный в `FieldRenderer` проброс `placeholder` в числовой инпут),
-    перекрёстное правило «Возраст от ≤ Возраст до» срабатывает только когда ОБА значения заполнены
-    (`value !== '' && value != null`, без truthy-проверок — `0` валиден), сабмит нормализует
-    `'' → null` только для `max_age` (по образцу `MyDataModal`, не генерически);
-    `ServicesTable.tsx` — edit-маппер (PUT-ветка `handleEditSubmit`) больше не подменяет
-    `max_age` на 18 через `?? 18` (create-ветка не тронута).
-  - **Клиентская валидация тарифов (решение пользователя «вариант B», гейт C 2026-09-19):**
-    required-поля элементов тарифов (цена и др.) валидируются на клиенте по их конфигам
-    (`itemFields`: required, min/max — те же механизмы, что у полей верхнего уровня), ошибка
-    выводится под соответствующим полем элемента; составные ключи ошибок (`tariffs.0.price`)
-    очищаются при следующем сабмите — принятое ограничение.
-  - **Domain-rules:** `docs/domain-rules/services.md` — строка `max_age` помечена
-    опциональной/nullable (`null` = без верхней границы, паритет с миграцией `275ba490cab8`),
-    ссылка на несуществующий zod `max_age: min(0).max(18)` заменена на живой
-    `maxAge: z.string().optional()`; диапазон 0–18 описан как клиентская валидация формы
+### Added
+- **GH #220 — Клиенты: колонка «Статус» (архив/активен) + единые скрытые статус-колонки** — branch
+  `220-clients-status-column` (4 commits: `0fd4bb88..9a251ab3`, base `5d3a22d1`;
+  спека `docs/specs/2026-09-19-clients-status-column-220-design.md`,
+  план `docs/plans/2026-09-19-clients-status-column-220-plan.md`; 12 файлов, +710/−12):
+  - В таблице клиентов — последняя колонка «Статус» (ключ `archived`, `defaultVisible: false`,
+    `sortable: false` — в серверном whitelist сортировки `archived` нет) с бейджем «Активен»/«Архив»
+    на CSS-переменных (паттерн serviceColumns); контракт данных не менялся — `archived` уже в
+    `ClientWithStats`; бэкенд/migrations/api-client не тронуты.
+  - **AA-контраст статус-токенов** (`globals.css`, WCAG 2.2 AA ≥ 4.5:1 на 12px): light —
+    `--ink-light` `#888888` → `#5f5f65`, `--success` `#6B8E6E` → `#2f6b2f` + новый
+    `--success-bg` `#dcfce7`; dark — `--ink-light` `#777780` → `#9c9ca5`, `--success` `#8fd18f` +
+    `--success-bg` `#1f2f24`; проверено вживую (light 5.86/5.77, dark 7.84/4.82).
+  - **Унификация:** колонки «Архив»/«Статус» сотрудников (staff) и материалов (materials) переведены
+    на `defaultVisible: false` — единое правило для всех архивируемых сущностей; e2e `staff-crud`
+    обновлён (дефолтный набор заголовков; тесту с бейджем колонка включается через пикер).
+  - Tests: vitest полный прогон **2181p/0f** (12 новых/обновлённых юнитов: ClientsTable,
+    clientColumns, StaffTable, staffColumns, MaterialsTable, materialsColumns); новый e2e
+    `clients-status-column.spec.ts` — 3 сценария (включение через пикер + бейджи; deep-link на
+    архивного клиента; флип бейджа при архивации/восстановлении без перезагрузки при фильтре «Все»)
+    — **3/3** зелёные standalone, staff-crud **15/15** (shard); tsc/lint чисто; полный e2e — PR CI;
+    визуальный гейт пройден (скриншоты в `/tmp`, не коммитятся).
+  - Status: `docs/status/2026-09-19-clients-status-column-220.md`
+
+### Changed
+- **GH #138 — URL как источник правды: view-state расписания и период записей живут в URL** —
+  branch `feat/138-schedule-url-state` (13 commits: `8b9774ab..37c4197b`, base `8b9774ab`;
+  спека `docs/specs/2026-07-17-schedule-view-url-state-138-design.md` rev5,
+  план `docs/plans/2026-09-19-schedule-view-url-state-138-plan.md`; 52 файла, +2710/−1341):
+  - **Расписание (`/schedule?view=week|day&date=YYYY-MM-DD&col=masters|locations`):** новый
+    хук `useScheduleView` — единственная точка чтения/записи URL-состояния; строгий парсинг
+    (enum-вайтлист, `date` — только реальная календарная дата) с тихим фолбэком на дефолты
+    (week/masters/today); сериализованный райтер — последовательные синхронные записи
+    компонуются (колонки + вид в одном хендлере Topbar'а) и дают один вызов роутера;
+    шаги навигации (view/date/prev/next/today) пишутся через push, переключение отображения
+    колонок — через replace (без шагов истории); `ScheduleViewContext` — прокси над хуком
+    (локально остались только штамп и списки фильтров), страница обёрнута в `<Suspense>`.
+  - **Записи (`/records?from=…&to=…`):** период переносится в URL тем же идиомом
+    (`useRecordsPeriod`); сеттеры `RecordsFilters` идут через хук.
+  - **Удалены тестовые бэкдоры из продакшн-кода:** CustomEvent-шина `__memo-*` и
+    `NavigationContext` (с потребителями, переехавшими на URL-хук / GridSettingsProvider);
+    Menubar MiniCalendar стал навигатором и индикатором периода — подсветка недели/дня на
+    `/schedule`, красный диапазон на `/records` (с клиппингом по видимому месяцу);
+    DayView reorder колонок переоборудуем с клавиатуры (`KeyboardSensor` + фикс
+    activator-node, без перехвата клавиш вне drag).
+  - **E2E честные:** 11 спеков переведены с `__memo-*` на реальные взаимодействия
+    (клики/DnD/клавиатура); новый `schedule-url-state.spec.ts` — US-1..US-7 (deep links,
+    канонизация параметров, browser-back, «Сегодня», переходы между страницами,
+    невалидные параметры, round-trip периода записей, персист после refresh).
+  - **Tests:** admin vitest **2218 passed / 0 failed** (137 файлов); `tsc` clean; lint
+    0 errors / 35 warnings (бюджет 38); e2e US-1..US-7 и переведённые спеки зелёные
+    в точечных прогонах; полный локальный шард не диагностируем (хост был насыщен
+    посторонней задачей + очистка кэша браузера) — авторитетный гейт CI.
     (commit `4aa19858`).
   - **Tests:** новые `frontend/admin/__tests__/ServiceModal.test.tsx` (13 тестов, сценарии
     спеки §4.3–4.5, RED→GREEN) + юнит edit-маппера в `__tests__/ServicesTable.test.tsx`;
@@ -79,6 +137,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     с тегами; заводится отдельным GH-issue (архитектор), в #203 не включён.
   - Plan: `docs/plans/2026-09-19-service-modal-null-max-age-plan.md` (on main, unchanged by IMPL)
   - Status: `docs/status/2026-09-19-service-modal-null-max-age-203.md`
+
+### Test Infra
+- **GH #209 — e2e env guardrails (постмортем-остаток, только test-infra)** — branch
+  `209-e2e-env-guardrails` (7 commits: `4c1592a5..56e5cbc0`, base `5d3a22d1`; спека
+  `docs/specs/2026-09-18-e2e-env-guardrails-design.md` rev2, план
+  `docs/plans/2026-09-18-e2e-env-guardrails-plan.md`; 15 файлов, +390/−44; продуктовый код,
+  схема БД и API не затронуты):
+  - **SHARD_ID whitelist (S1):** `scripts/e2e-shard-start.sh` на входе отсекает любой `SHARD_ID`
+    вне {1, 2} — exit 1 с текстом `must be 1 or 2` до подъёма стека и создания мусорной БД
+    (`test_memo_shardrest.db` больше не появится); новый кейс dryrun-теста пинит поведение.
+  - **Громкий конфликт `SHARD_ID × TEST_DB_PATH` (S2):** новый общий хелпер
+    `frontend/admin/e2e/lib/db-path.ts` `resolveTestDbPath` — единственный источник пути тестовой
+    БД для всех 6 мест TS-слоя (globalSetup, db-query, seed-reset, factories, unify-caches,
+    visual-compliance-checks — у последнего исчез обратный приоритет «TEST_DB_PATH побеждает»);
+    конфликт путей → throw с именованием обеих переменных и подсказкой, совпадающие пути — тихо ок;
+    относительный `TEST_DB_PATH` резолвится от корня репо, не от `process.cwd()`.
+  - **CI-guard «0 spec-файлов» (S3):** в обеих шард-джобах `test.yml` и в `update-snapshots.yml`
+    guard-шаг до старта стека: `playwright test --project=<проект> --list` — ненулевой выход
+    («проект не найден») или ноль строк `.spec.ts` в stdout (регрессия фильтра / не тот worktree)
+    валит job рано и понятно, с указанием на regex в `playwright.config.ts:118,125`.
+  - **Dryrun-тест подключён к CI и локальному прогону (S4):** новая джоба `shard-script-checks`
+    в `test.yml` (параллельно e2e-матрице, без браузеров) + ранний шаг в `scripts/test-all.sh`
+    (на заглушках, миллисекунды; на macOS без `timeout` — skip с предупреждением).
+  - **Канон в скилле `dev-workflow` (S3/S4, осознанно без автоматизации):** дрилл регенерации
+    снапшотов (ручной `update-snapshots.yml` → артефакт `updated-snapshots-shard-rest` → PNG в
+    `e2e/**/*-snapshots/` → коммит; локально — только итерации, шард из {1, 2}), протокол
+    переиспользования стека (порт ≠ идентичность: проверить `SHARD_ID`/`DATABASE_URL`/
+    `NEXT_DIST_DIR` процесса-владельца, иначе убить и поднять свежий), чеклист свежего worktree
+    (`uv sync --extra dev`, `corepack enable && pnpm install`); перекрёстная ссылка на канон
+    `docs/tests_workflow.md` (второго параллельного канона нет).
+  - **Tests:** dryrun-сюита **7/7**, admin vitest **2170 passed / 0 failed** (новый
+    `__tests__/db-path.test.ts` — 8 кейсов; `seed-reset.test.ts` переведён на новый контракт),
+    `tsc --noEmit` clean, симуляции guard'а 3/3; зелёные прогоны обоих workflow — верификация
+    в CI на PR-времени (сквозной DoD плана, у оркестратора на finishing).
+  - Plan: `docs/plans/2026-09-18-e2e-env-guardrails-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-19-e2e-env-guardrails-209.md`
 
 ## [Unreleased] — 2026-09-18
 

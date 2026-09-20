@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useMemo, useCallback, useState, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Calendar,
   Clipboard,
@@ -13,11 +13,9 @@ import {
   ChevronRight,
   Image as ImageIcon,
 } from 'lucide-react';
-import { useNavigation } from '@/contexts/NavigationContext';
 import { useUI } from '@/contexts/UIContext';
 import { useMasters } from '@/hooks/useMasters';
 import { useAuth } from '@/contexts/AuthContext';
-import type { ViewModeType } from '@/contexts/schedule/ScheduleViewContext';
 import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from '@/lib/utils';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
@@ -88,36 +86,136 @@ const isAdminOnly = (href: string): boolean =>
 const PHOTO_ITEM = { label: 'Фото', Icon: ImageIcon, href: '/photos' } as const;
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
+// #138 T4 (spec §2.3): the calendar is a NAVIGATOR + period indicator, not an
+// owner of the period. It reads the CURRENT page's period via useSearchParams
+// (under Suspense — the layout tree has no data-bearing ancestor) and
+// navigates by pushing /schedule?view=&date=. Month paging/picker is local
+// display state, re-synced to the page's period on EVERY navigation.
 
 interface MiniCalendarProps {
-  selectedWeek: Date;
-  selectedDay: Date;
-  viewMode: 'day' | 'week';
-  onWeekSelect: (date: Date) => void;
   collapsed: boolean;
 }
 
-function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, collapsed }: MiniCalendarProps) {
-  const today = new Date();
+const MINI_VIEW_MODES = ['week', 'day'] as const;
+type MiniViewMode = (typeof MINI_VIEW_MODES)[number];
+
+/** Strict `YYYY-MM-DD` AND a real calendar date (mirrors useScheduleView). */
+function parseDateParam(raw: string | null): Date | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [y, m, d] = raw.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  // Reject rollovers like 2026-02-31 (Date would silently land in March)
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+    return null;
+  }
+  return date;
+}
+
+/** Today's local midnight. */
+function todayMidnight(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/** The period of the CURRENT page, as the mini calendar mirrors it. */
+type CalendarPeriod =
+  | { kind: 'schedule'; view: MiniViewMode; date: Date }
+  | { kind: 'range'; from: Date; to: Date }
+  | { kind: 'neutral'; today: Date };
+
+function readPagePeriod(pathname: string, params: URLSearchParams): CalendarPeriod {
+  const today = todayMidnight();
+  if (pathname === '/schedule') {
+    const rawView = params.get('view');
+    const view: MiniViewMode =
+      rawView !== null && (MINI_VIEW_MODES as readonly string[]).includes(rawView)
+        ? (rawView as MiniViewMode)
+        : 'week';
+    return { kind: 'schedule', view, date: parseDateParam(params.get('date')) ?? today };
+  }
+  if (pathname === '/records') {
+    const from = parseDateParam(params.get('from'));
+    const to = parseDateParam(params.get('to'));
+    // Red range ONLY for an explicit valid pair (from ≤ to) — the default
+    // current-week records period stays uncoloured (spec §2.3).
+    if (from && to && from.getTime() <= to.getTime()) {
+      return { kind: 'range', from, to };
+    }
+  }
+  return { kind: 'neutral', today };
+}
+
+function MiniCalendar({ collapsed }: MiniCalendarProps) {
+  // useSearchParams in a layout-level client component requires a Suspense
+  // boundary for prerendering; fallback null keeps the sidebar shape stable.
+  return (
+    <Suspense fallback={null}>
+      {!collapsed && <MiniCalendarContent />}
+    </Suspense>
+  );
+}
+
+function MiniCalendarContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const today = todayMidnight();
+  const period = useMemo(
+    () => readPagePeriod(pathname, searchParams),
+    [pathname, searchParams],
+  );
+
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const monthButtonRef = useRef<HTMLButtonElement>(null);
   const [pickerTop, setPickerTop] = useState(0);
 
+  // Displayed month = local state; re-synced to the page's period on EVERY
+  // navigation (e.g. /records?from=… shows the ?from month; a day click on
+  // /schedule shows the ?date month). Month arrows/picker write NO URL.
+  const [monthAnchor, setMonthAnchor] = useState<Date>(
+    () => new Date(today.getFullYear(), today.getMonth(), 1),
+  );
+  const searchKey = searchParams.toString();
+  useEffect(() => {
+    const p = readPagePeriod(pathname, new URLSearchParams(searchKey));
+    const anchor = p.kind === 'range' ? p.from : p.kind === 'schedule' ? p.date : p.today;
+    setMonthAnchor(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
+  }, [pathname, searchKey]);
+
+  // Navigation: day click → week view of that day; double-click → day view.
+  // Pushing an identical URL creates no history entry (native router).
+  const pushSchedule = useCallback(
+    (view: MiniViewMode, date: Date) => {
+      router.push(`/schedule?view=${view}&date=${toISODate(date)}`);
+    },
+    [router],
+  );
+
+  const handleDayClick = useCallback((day: Date) => pushSchedule('week', day), [pushSchedule]);
+
+  const handleDayDoubleClick = useCallback((day: Date) => pushSchedule('day', day), [pushSchedule]);
+
   const handleGoToToday = useCallback(() => {
-    const now = new Date();
-    const monday = getMonday(now);
-    onWeekSelect(monday);
-    // Also dispatch event so ScheduleContext can reset selectedDay
-    document.dispatchEvent(new CustomEvent('__memo-go-to-today'));
-    // In day mode, also select the single day
-    if (viewMode === 'day') {
-      document.dispatchEvent(new CustomEvent('__memo-select-day', { detail: { date: now } }));
-    }
-  }, [onWeekSelect, viewMode]);
+    // Keep the current view when already on /schedule (incl. day mode — legacy
+    // behaviour); from any other page land on the current week.
+    const view = period.kind === 'schedule' ? period.view : 'week';
+    pushSchedule(view, today);
+  }, [period, pushSchedule, today]);
+
+  const handlePrevMonth = useCallback(() => {
+    setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1));
+  }, [monthAnchor]);
+
+  const handleNextMonth = useCallback(() => {
+    setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 1));
+  }, [monthAnchor]);
 
   const calendarDays = useMemo(() => {
-    const firstDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
-    const lastDayOfMonth = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 0);
+    const year = monthAnchor.getFullYear();
+    const month = monthAnchor.getMonth();
+    const firstDayOfMonth = new Date(year, month, 1);
+    const lastDayOfMonth = new Date(year, month + 1, 0);
 
     const startDate = getMonday(firstDayOfMonth);
     startDate.setDate(startDate.getDate() - 7);
@@ -134,7 +232,7 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
       current.setDate(current.getDate() + 1);
     }
     return days;
-  }, [selectedWeek]);
+  }, [monthAnchor]);
 
   const weeks = useMemo(() => {
     const result: Date[][] = [];
@@ -150,45 +248,18 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
     return result;
   }, [calendarDays]);
 
-  const currentWeekMonday = getMonday(selectedWeek);
+  // Week-row indicator: mirrors the page's period (schedule date / today).
+  // Suppressed entirely in range mode — the red range replaces it.
+  const indicatorMonday =
+    period.kind === 'range' ? null : getMonday(period.kind === 'schedule' ? period.date : period.today);
 
-  const handleWeekClick = (weekMonday: Date) => {
-    onWeekSelect(weekMonday);
-  };
-
-  const handleDayClick = (day: Date) => {
-    // Always switch to week view containing this day
-    document.dispatchEvent(new CustomEvent('__memo-switch-to-week-view', { detail: { date: day } }));
-  };
-
-  const handleDayDoubleClick = (day: Date) => {
-    // Double-click in WeekView: switch to DayView and select that day
-    document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date: day } }));
-  };
-
-  const handlePrevMonth = useCallback(() => {
-    // Use 15th of prev month to ensure getMonday returns a date in the prev month
-    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() - 1, 15);
-    onWeekSelect(target);
-  }, [selectedWeek, onWeekSelect]);
-
-  const handleNextMonth = useCallback(() => {
-    // Use 15th of next month to ensure getMonday returns a date in the next month
-    const target = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth() + 1, 15);
-    onWeekSelect(target);
-  }, [selectedWeek, onWeekSelect]);
-
-  const isInCurrentWeek = (date: Date) => {
-    const dMonday = getMonday(date);
-    return dMonday.getTime() === currentWeekMonday.getTime();
-  };
+  const isInIndicatorWeek = (date: Date) =>
+    indicatorMonday !== null && getMonday(date).getTime() === indicatorMonday.getTime();
 
   const isCurrentMonth = (date: Date) =>
-    date.getMonth() === selectedWeek.getMonth();
+    date.getMonth() === monthAnchor.getMonth();
 
-  if (collapsed) return null;
-
-  const monthName = MONTHS[selectedWeek.getMonth()];
+  const monthName = MONTHS[monthAnchor.getMonth()];
 
   return (
     <div className="px-3 py-2">
@@ -227,16 +298,16 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
             }}
             className="flex items-center gap-1 text-xs font-semibold text-white/90 hover:text-white transition-colors"
           >
-            {monthName} {selectedWeek.getFullYear()}
+            {monthName} {monthAnchor.getFullYear()}
           </button>
 
           {showMonthPicker && (
             <MonthYearPicker
-              selectedMonth={selectedWeek.getMonth()}
-              selectedYear={selectedWeek.getFullYear()}
+              selectedMonth={monthAnchor.getMonth()}
+              selectedYear={monthAnchor.getFullYear()}
               onSelect={(month, year) => {
-                const target = new Date(year, month, 1);
-                onWeekSelect(target);
+                // Local display state — paging/picker writes no URL (#138 §2.3)
+                setMonthAnchor(new Date(year, month, 1));
                 setShowMonthPicker(false);
               }}
               onClose={() => setShowMonthPicker(false)}
@@ -268,28 +339,55 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
       {/* Calendar grid */}
       <div className="space-y-0.5">
         {weeks.map((week, wi) => {
-          const weekMonday = week[0];
-          const isActive = weekMonday.getTime() === currentWeekMonday.getTime();
+          const weekIsActive = isInIndicatorWeek(week[0]);
 
           return (
             <div
               key={wi}
               className={`w-full grid grid-cols-7 gap-0 rounded-md py-0.5 transition-colors duration-150
-                ${isActive ? 'bg-brand/30' : ''}`}
+                ${weekIsActive ? 'bg-brand/30' : ''}`}
             >
               {week.map((day, di) => {
                 const isDayToday = isSameDay(day, today);
-                const inWeek = isInCurrentWeek(day);
+                const inWeek = isInIndicatorWeek(day);
                 const inMonth = isCurrentMonth(day);
 
-                // Highlight logic based on viewMode
-                let isHighlighted = false;
-                if (viewMode === 'day') {
-                  // Day mode: highlight the specific selected day
-                  isHighlighted = isSameDay(day, selectedDay);
-                } else {
-                  // Week mode: highlight entire week row
-                  isHighlighted = isActive;
+                // Day-level brand highlight (existing inline toggle):
+                // day view → the single selected day; week view → every day
+                // of the active week. Range mode replaces it with red.
+                const isDayHighlighted =
+                  period.kind === 'schedule' &&
+                  (period.view === 'day' ? isSameDay(day, period.date) : isInIndicatorWeek(day));
+
+                // /records with a valid explicit ?from&to → red range tint,
+                // CLIPPED to the visible month (spec §2.3 «срез видимого
+                // месяца»): out-of-month ghost cells stay plain. Edges carry
+                // distinct rounding ("[5 6 7]" — start/end read).
+                const dayKey = toISODate(day);
+                const isRangeStart =
+                  inMonth && period.kind === 'range' && dayKey === toISODate(period.from);
+                const isRangeEnd =
+                  inMonth && period.kind === 'range' && dayKey === toISODate(period.to);
+                const inRange =
+                  inMonth &&
+                  period.kind === 'range' &&
+                  dayKey >= toISODate(period.from) &&
+                  dayKey <= toISODate(period.to);
+
+                // Shape + background: circle for today/day-highlight, pill
+                // edges for the range range start/end, plain tint for the middle.
+                let shapeClass = 'rounded-full';
+                let highlightBg = '';
+                if (isRangeStart || isRangeEnd) {
+                  shapeClass = `${isRangeStart ? 'rounded-l-full' : ''} ${isRangeEnd ? 'rounded-r-full' : ''}`;
+                  highlightBg = 'bg-red-400/45';
+                } else if (inRange) {
+                  shapeClass = '';
+                  highlightBg = 'bg-red-400/25';
+                } else if (isDayToday) {
+                  highlightBg = 'bg-brand text-white';
+                } else if (isDayHighlighted) {
+                  highlightBg = 'bg-brand/40 text-white';
                 }
 
                 return (
@@ -302,10 +400,9 @@ function MiniCalendar({ selectedWeek, selectedDay, viewMode, onWeekSelect, colla
                     aria-label={formatDate(day)}
                   >
                     <span
-                      className={`relative flex items-center justify-center w-5 h-5 text-[11px] rounded-full
+                      className={`relative flex items-center justify-center w-5 h-5 text-[11px] ${shapeClass}
                         ${!inMonth ? 'text-white/20' : isDayToday ? 'text-white font-bold' : inWeek ? 'text-white/90' : 'text-white/50'}
-                        ${isDayToday ? 'bg-brand text-white' : ''}
-                        ${isHighlighted && !isDayToday ? 'bg-brand/40 text-white' : ''}
+                        ${highlightBg}
                       `}
                     >
                       {day.getDate()}
@@ -367,7 +464,6 @@ function MasterLegend({ collapsed, masters }: MasterLegendProps) {
 // ─── Menubar ──────────────────────────────────────────────────────────────
 
 export function Menubar() {
-  const { dateFrom, selectDateRange } = useNavigation();
   const { data: masters = [] } = useMasters();
   const { sidebarCollapsed, toggleSidebar } = useUI();
   const { status, user } = useAuth();
@@ -389,35 +485,9 @@ export function Menubar() {
     [isAdmin],
   );
 
-  // Track viewMode & selectedDay via custom events from ScheduleContext
-  // (Menubar lives outside ScheduleProvider in the component tree)
-  const [viewMode, setViewMode] = useState<ViewModeType>('week');
-  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
-
-  React.useEffect(() => {
-    const handleViewMode = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.viewMode) setViewMode(detail.viewMode);
-    };
-    const handleSelectedDay = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.selectedDay) setSelectedDay(new Date(detail.selectedDay));
-    };
-    document.addEventListener('__memo-view-mode-changed', handleViewMode);
-    document.addEventListener('__memo-selected-day-changed', handleSelectedDay);
-    return () => {
-      document.removeEventListener('__memo-view-mode-changed', handleViewMode);
-      document.removeEventListener('__memo-selected-day-changed', handleSelectedDay);
-    };
-  }, []);
-
-  const selectedWeek = useMemo(() => new Date(dateFrom + 'T00:00:00'), [dateFrom]);
-
-  const handleWeekSelect = useCallback((date: Date) => {
-    const monday = getMonday(date);
-    const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-    selectDateRange(toISODate(monday), toISODate(sunday));
-  }, [selectDateRange]);
+  // #138 T4: the view-mode/selected-day mirror state (event-driven) and the
+  // NavigationContext period wiring are gone — MiniCalendar reads the page
+  // period from searchParams itself.
 
   const toggleMenu = useCallback((menu: string) => {
     setOpenMenu(prev => prev === menu ? null : menu);
@@ -449,13 +519,7 @@ export function Menubar() {
       {/* ── Scrollable Content ── */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {/* MiniCalendar */}
-        <MiniCalendar
-          selectedWeek={selectedWeek}
-          selectedDay={selectedDay}
-          viewMode={viewMode}
-          onWeekSelect={handleWeekSelect}
-          collapsed={sidebarCollapsed}
-        />
+        <MiniCalendar collapsed={sidebarCollapsed} />
 
         {!sidebarCollapsed && <div className="border-t border-white/10 mx-3" />}
 

@@ -250,6 +250,60 @@ describe('upsertVisit', () => {
     expect(dateList?.items[0].visits).toHaveLength(1);
     expect(dateList?.items[0].visits[0].status).toBe('visited');
   });
+
+  // #243 S5: undo must return the row to its ORIGINAL position, not the end.
+  it('restore: inserts the visit back at its ORIGINAL index (S5), not at the end', () => {
+    const visitA = makeVisit('v-a');
+    const removed = makeVisit(visitId); // middle row — original index 1
+    const visitC = makeVisit('v-c');
+    const seeded = makeRecord(recordId, { visits: [visitA, removed, visitC] });
+    qc.setQueryData(['record', recordId], seeded);
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [seeded],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
+
+    removeVisit(qc, recordId, visitId);
+    // Undo: same row object, original index captured at defer time.
+    upsertVisit(qc, recordId, removed, { atIndex: 1 });
+
+    const canonical = qc.getQueryData<RecordResponse>(['record', recordId]);
+    expect(canonical?.visits.map((v) => v.id)).toEqual(['v-a', visitId, 'v-c']);
+    const dateList = qc.getQueryData<PaginatedResponse<RecordResponse>>([
+      'records',
+      '2026-01-01',
+      '2026-01-31',
+    ]);
+    expect(dateList?.items[0].visits.map((v) => v.id)).toEqual([
+      'v-a',
+      visitId,
+      'v-c',
+    ]);
+  });
+
+  // Guard: a negative/omitted index (row wasn't in cache at defer time) keeps
+  // the add-path append semantics.
+  it('restore: clamps atIndex beyond list length to the end (no sparse arrays)', () => {
+    const only = makeVisit('v-only');
+    qc.setQueryData(['record', recordId], makeRecord(recordId, { visits: [only] }));
+
+    upsertVisit(qc, recordId, makeVisit(visitId), { atIndex: 99 });
+
+    const canonical = qc.getQueryData<RecordResponse>(['record', recordId]);
+    expect(canonical?.visits.map((v) => v.id)).toEqual(['v-only', visitId]);
+  });
+
+  it('restore: negative atIndex falls back to append (add-path semantics)', () => {
+    const only = makeVisit('v-only');
+    qc.setQueryData(['record', recordId], makeRecord(recordId, { visits: [only] }));
+
+    upsertVisit(qc, recordId, makeVisit(visitId), { atIndex: -1 });
+
+    const canonical = qc.getQueryData<RecordResponse>(['record', recordId]);
+    expect(canonical?.visits.map((v) => v.id)).toEqual(['v-only', visitId]);
+  });
 });
 
 describe('removeVisit', () => {
@@ -344,6 +398,49 @@ describe('upsertPayment', () => {
 
     const global = qc.getQueryData<PaymentResponse[]>(['payments']);
     expect(global?.[0].amount).toBe(5000);
+  });
+
+  // #243 S5: per-record and global lists have INDEPENDENT orderings, so the
+  // restore takes a separate index for each key.
+  it('restore: inserts back at ORIGINAL indexes in BOTH keys (S5)', () => {
+    // Per-record: removed row sat at index 1 ('p-a' before it).
+    qc.setQueryData(['payments', recordId], [
+      makePayment('p-a'),
+      makePayment(paymentId),
+      makePayment('p-b'),
+    ]);
+    // Global: same payment row sat at index 0, before rows of other records.
+    qc.setQueryData<PaymentResponse[]>(['payments'], [
+      makePayment(paymentId, { record_id: recordId }),
+      makePayment('p-x', { record_id: otherRecordId }),
+      makePayment('p-y', { record_id: otherRecordId }),
+    ]);
+
+    const removed = makePayment(paymentId);
+    removePayment(qc, recordId, paymentId);
+    upsertPayment(qc, recordId, removed, {
+      atIndex: 1,
+      globalAtIndex: 0,
+    });
+
+    const perRecord = qc.getQueryData<PaymentResponse[]>(['payments', recordId]);
+    expect(perRecord?.map((p) => p.id)).toEqual(['p-a', paymentId, 'p-b']);
+    const global = qc.getQueryData<PaymentResponse[]>(['payments']);
+    expect(global?.map((p) => p.id)).toEqual([paymentId, 'p-x', 'p-y']);
+  });
+
+  it('restore: global list without globalAtIndex falls back to append', () => {
+    qc.setQueryData(['payments', recordId], [makePayment('p-a')]);
+    qc.setQueryData<PaymentResponse[]>(['payments'], [
+      makePayment('p-x', { record_id: otherRecordId }),
+    ]);
+
+    upsertPayment(qc, recordId, makePayment(paymentId), { atIndex: 0 });
+
+    const perRecord = qc.getQueryData<PaymentResponse[]>(['payments', recordId]);
+    expect(perRecord?.map((p) => p.id)).toEqual([paymentId, 'p-a']);
+    const global = qc.getQueryData<PaymentResponse[]>(['payments']);
+    expect(global?.map((p) => p.id)).toEqual(['p-x', paymentId]);
   });
 });
 

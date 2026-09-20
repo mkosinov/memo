@@ -55,6 +55,38 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: frontend/admin
 
+      # CI guard (#209): fail EARLY if the `shard-rest` Playwright project
+      # resolves 0 spec files (project-name typo, testMatch filter regression,
+      # or a worktree path swept by the regexes) — before the stack starts.
+      # `--list` prints spec paths to stdout only; stderr (config-error traces
+      # with absolute .spec.ts paths) is NOT scanned.
+      - name: Spec-file guard (shard-rest)
+        run: |
+          list_output=$(mktemp)
+          if ! pnpm exec playwright test --project=shard-rest --list > "$list_output"; then
+            echo "ERROR: playwright --list failed for project 'shard-rest'."
+            echo "Likely cause: project name typo vs playwright.config.ts."
+            rm -f "$list_output"
+            exit 1
+          fi
+          spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
+          rm -f "$list_output"
+          if [ "$spec_count" -eq 0 ]; then
+            echo "ERROR: project 'shard-rest' resolved 0 spec files."
+            echo "Likely cause: test-filter regression or worktree path swept by the"
+            echo "testMatch regexes (frontend/admin/playwright.config.ts:118,125)."
+            exit 1
+          fi
+          echo "Spec-file guard OK: ${spec_count} spec files in project 'shard-rest'."
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: 2
+          SHARD_PORT: 3003
+          BACKEND_PORT: 8002
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
+          BACKEND_URL: http://127.0.0.1:8002
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
+
       - name: Start E2E stack (shard-rest)
         run: |
           SHARD_ID=2 \

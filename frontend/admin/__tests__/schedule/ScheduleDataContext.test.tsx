@@ -8,10 +8,19 @@ import {
 } from '../../contexts/schedule/ScheduleDataContext';
 import { ScheduleProvider } from '../../contexts/schedule/ScheduleProvider';
 import { useGridSettings } from '../../contexts/schedule/GridSettingsContext';
-import { useScheduleView } from '../../contexts/schedule/ScheduleViewContext';
-import { NavigationProvider, useNavigation } from '../../contexts/NavigationContext';
-import { toISODate } from '@/lib/datetime';
+import {
+  ScheduleViewProvider,
+  useScheduleView,
+} from '../../contexts/schedule/ScheduleViewContext';
+import { toISODate, shiftDateKey } from '@/lib/datetime';
 import { transformService } from '../../lib/transformers';
+
+// #138 Task 2: the view half of the composition reads the URL (?view=&date=&col=)
+// via hooks/useScheduleView. The App Router APIs are mocked with a REACTIVE
+// stand-in: push/replace update the params and re-render subscribers, so tests
+// navigate through the real UI (prev/nextPeriod) instead of hand-poking state.
+vi.mock('next/navigation', async () => await import('../helpers/nextNavigationMock'));
+import { __resetNavigation } from '../helpers/nextNavigationMock';
 
 // ─── Mock api-client ─────────────────────────────────────────────────────────
 // Partial mock (importOriginal) — the real ApiError class stays because the
@@ -178,19 +187,13 @@ function seedDictionaries(masters = [masterM1], services = [serviceS1], location
 }
 
 // Test component consuming ONLY the data context.
-/** Week navigation driver: moves dateFrom/dateTo one week forward (#286). */
+/** Week navigation driver: steps the viewed week forward via the URL hook (#286 → #138). */
 function NextWeekNav() {
-  const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  const { nextPeriod } = useScheduleView();
   return (
     <button
       data-testid="next-week"
-      onClick={() => {
-        const from = new Date(dateFrom + 'T00:00:00');
-        const to = new Date(dateTo + 'T00:00:00');
-        from.setDate(from.getDate() + 7);
-        to.setDate(to.getDate() + 7);
-        selectDateRange(toISODate(from), toISODate(to));
-      }}
+      onClick={() => nextPeriod()}
     />
   );
 }
@@ -392,7 +395,7 @@ function renderDataProvider(opts: DataProviderOpts = {}) {
 
   const utils = render(
     <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
+      <ScheduleViewProvider>
         <UserSettingsProvider>
           <ScheduleDataProvider
             filterMasterIds={opts.filterMasterIds ?? []}
@@ -407,7 +410,7 @@ function renderDataProvider(opts: DataProviderOpts = {}) {
             </SettingsGate>
           </ScheduleDataProvider>
         </UserSettingsProvider>
-      </NavigationProvider>
+      </ScheduleViewProvider>
     </QueryClientProvider>,
   );
   return { queryClient, setFilterMasterIds, setFilterLocationIds, ...utils };
@@ -431,11 +434,9 @@ function renderWithSchedule(children: React.ReactNode) {
   vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   const utils = render(
     <QueryClientProvider client={queryClient}>
-      <NavigationProvider>
-        <UserSettingsProvider>
-          <ScheduleProvider>{children}</ScheduleProvider>
-        </UserSettingsProvider>
-      </NavigationProvider>
+      <UserSettingsProvider>
+        <ScheduleProvider>{children}</ScheduleProvider>
+      </UserSettingsProvider>
     </QueryClientProvider>,
   );
   return { queryClient, ...utils };
@@ -445,6 +446,7 @@ function renderWithSchedule(children: React.ReactNode) {
 
 describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
     vi.mocked(getAllMasters).mockResolvedValue([] as never);
     vi.mocked(getAllLocations).mockResolvedValue([] as never);
@@ -487,6 +489,45 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
     expect(getMasters).not.toHaveBeenCalled();
     expect(getServices).not.toHaveBeenCalled();
     expect(getLocations).not.toHaveBeenCalled();
+  });
+
+  // #138 Task 2: the fetch range derives from the URL view state, not
+  // NavigationContext — ?date=2026-09-16 (a Wednesday) ⇒ monday..sunday
+  // 2026-09-14..2026-09-20, SAME `YYYY-MM-DD` format (cache keys + SSE
+  // invalidations #239 stay identical).
+  it('fetch range = monday..sunday of the URL ?date week (#138)', async () => {
+    __resetNavigation('?view=week&date=2026-09-16');
+    renderDataProvider();
+
+    await waitFor(() => {
+      expect(getActivities).toHaveBeenCalled();
+    });
+    expect(getActivities).toHaveBeenCalledWith({
+      date_from: '2026-09-14',
+      date_to: '2026-09-20',
+      per_page: 100,
+    });
+  });
+
+  it('stepping the viewed week via the URL moves the fetch range (#138)', async () => {
+    renderDataProvider();
+    await waitFor(() => {
+      expect(getActivities).toHaveBeenCalled();
+    });
+    vi.mocked(getActivities).mockClear();
+
+    // Real UI path: nextPeriod pushes ?date=<next monday> → params update →
+    // the provider refetches the NEW week's range.
+    act(() => {
+      screen.getByTestId('next-week').click();
+    });
+
+    await waitFor(() => {
+      expect(getActivities).toHaveBeenCalled();
+    });
+    const calls = vi.mocked(getActivities).mock.calls as Array<[Record<string, unknown>]>;
+    expect(calls.every(([p]) => p.date_from === shiftDateKey(weekStartKey(), 7))).toBe(true);
+    expect(calls.every(([p]) => p.date_to === shiftDateKey(weekEndKey(), 7))).toBe(true);
   });
 
   it('provides masters, services, locations from React Query hooks', async () => {
@@ -1067,6 +1108,7 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
 
 describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
     vi.mocked(getAllMasters).mockResolvedValue([] as never);
     vi.mocked(getAllLocations).mockResolvedValue([] as never);
@@ -1357,6 +1399,7 @@ describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
 
 describe('ScheduleDataProvider — staleAwareOnError(activities) commit branches (#286 D7)', () => {
   beforeEach(() => {
+    __resetNavigation();
     vi.clearAllMocks();
     vi.mocked(getAllMasters).mockResolvedValue([] as never);
     vi.mocked(getAllLocations).mockResolvedValue([] as never);
@@ -1449,7 +1492,7 @@ describe('ScheduleDataProvider — staleAwareOnError(activities) commit branches
   });
 });
 
-// ─── week-range key helpers (NavigationProvider defaults to the current week) ─
+// ─── week-range key helpers (no ?date → the URL hook defaults to the current week) ─
 
 function weekStartKey(): string {
   return toISODate(mondayOfCurrentWeek());

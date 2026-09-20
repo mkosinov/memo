@@ -22,14 +22,19 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-vi.mock('@/contexts/NavigationContext', () => ({ useNavigation: vi.fn() }));
+// #138 Task 5: the date inputs write the URL via useRecordsPeriod →
+// next/navigation — the old NavigationContext mock is replaced by the shared
+// next-navigation mock (default: /records, no params).
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
 vi.mock('@memo/api-client', () => ({
   getAllLocations: vi.fn(),
   getAllServices: vi.fn(),
   getAllMasters: vi.fn(),
 }));
 
-import { useNavigation } from '@/contexts/NavigationContext';
+import {
+  __resetNavigation,
+} from './helpers/nextNavigationMock';
 import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
 import { RecordsFilters } from '../app/(main)/records/components/RecordsFilters';
 import {
@@ -39,8 +44,6 @@ import {
   mockMasterResponse2,
 } from './helpers/mockData';
 import type { ServiceResponse } from '@memo/api-client';
-
-const mockUseNavigation = vi.mocked(useNavigation);
 
 type RecordsFiltersProps = React.ComponentProps<typeof RecordsFilters>;
 
@@ -111,11 +114,7 @@ const ARCHIVED_SERVICE: ServiceResponse = {
 };
 
 beforeEach(() => {
-  mockUseNavigation.mockReturnValue({
-    dateFrom: '2026-01-01',
-    dateTo: '2026-01-31',
-    selectDateRange: vi.fn(),
-  } as unknown as ReturnType<typeof useNavigation>);
+  __resetNavigation('', '/records');
 });
 
 afterEach(() => {

@@ -16,7 +16,10 @@
  *   the target and the commit goal is achieved. (The PendingActions pipeline
  *   normally returns early on 404 before onError; this branch guards direct
  *   callers and keeps the contract in one place.)
- * - Any other error: context-default surface — undo + generic red toast.
+ * - Any other error: context-default surface — undo + honest toast: an
+ *   ApiError (server answered) → «Не удалось удалить. Изменение отменено»;
+ *   a non-ApiError (server never answered) → «Не удалось подтвердить
+ *   удаление» (#243 S3, same one-branch distinction as the default handler).
  */
 import type { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@memo/api-client';
@@ -50,8 +53,16 @@ export function staleAwareOnError(
       );
       return;
     }
-    // Non-409/404 — the context-default surface (undo + default error toast).
+    // Non-409/404 — the context-default surface (undo + honest toast, #243
+    // S3): an ApiError means the server answered with an error — the
+    // deletion is cancelled. A non-ApiError (network failure, abort,
+    // timeout) means the server never answered: the deletion outcome is
+    // UNKNOWN, so the toast must not claim «Изменение отменено».
     undo();
-    showToast('Не удалось удалить. Изменение отменено', 'error');
+    if (err instanceof ApiError) {
+      showToast('Не удалось удалить. Изменение отменено', 'error');
+    } else {
+      showToast('Не удалось подтвердить удаление', 'error');
+    }
   };
 }

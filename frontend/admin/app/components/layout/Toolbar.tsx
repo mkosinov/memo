@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useUI } from '@/contexts/UIContext';
-import { useNavigation } from '@/contexts/NavigationContext';
+import { useScheduleView } from '@/contexts/schedule/ScheduleViewContext';
+import { toISODate } from '@/lib/datetime';
 import { StampPanel } from '@/app/components/stamp/StampPanel';
 import { CopyLastWeekPopover } from '@/app/components/schedule/CopyLastWeekPopover';
 
@@ -50,10 +51,12 @@ function AccordionSection({ title, children, contentTestId }: AccordionSectionPr
 
 export function Toolbar() {
   const { rightPanelCollapsed, toggleRightPanel } = useUI();
-  const { dateFrom } = useNavigation();
+  // #138 Task 2: viewed week = week of ?date in the URL (#242 coordination) —
+  // the copy anchor follows the URL, not NavigationContext.
+  const { currentWeek } = useScheduleView();
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
 
-  // week_start = Monday of the VIEWED week (NavigationContext dateFrom); the
+  // week_start = Monday of the VIEWED week; the
   // popover fetches the source week itself and owns the success/info/error
   // toasts from the mutation result (spec §6) — the Toolbar shows no toasts.
   const handleCopyLastWeek = () => setCopyPopoverOpen(prev => !prev);
@@ -130,7 +133,7 @@ export function Toolbar() {
           The popover owns the real toasts; the Toolbar shows none. */}
       {copyPopoverOpen && (
         <CopyLastWeekPopover
-          weekStart={dateFrom}
+          weekStart={toISODate(currentWeek)}
           onClose={() => setCopyPopoverOpen(false)}
         />
       )}

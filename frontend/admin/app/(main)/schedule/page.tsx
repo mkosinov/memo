@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { Topbar } from '../../components/layout/Topbar';
 import { Toolbar } from '../../components/layout/Toolbar';
 import { StampFab } from '../../components/layout/StampFab';
@@ -33,9 +34,15 @@ export default function SchedulePage() {
   // (GH #140 US-2: each tab fetches its own ['client', id], deduped — no
   // clients-list dependency), so /schedule no longer fires the 7
   // records-context queries.
+  //
+  // #138 Task 2 (spec §4): the tree reads ?view=&date=&col= via
+  // useSearchParams — the Suspense boundary is MANDATORY for the Next 14
+  // static build (same pattern as app/(main)/clients/page.tsx).
   return (
-    <ScheduleProvider>
-      <ScheduleView />
-    </ScheduleProvider>
+    <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+      <ScheduleProvider>
+        <ScheduleView />
+      </ScheduleProvider>
+    </Suspense>
   );
 }

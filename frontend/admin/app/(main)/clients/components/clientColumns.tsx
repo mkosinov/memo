@@ -25,8 +25,13 @@ function formatDate(iso: string | null): string {
  * even though the doc list omits it — kept as-is for parity (server tolerates
  * the field).
  *
- * Pre-#139 Clients had NO `archived` column — archive status is shown via
- * the menu-item label toggle only. Kept that parity: no `archived` column.
+ * Pre-#139 Clients had NO `archived` column — archive status was shown via
+ * the menu-item label toggle only. GH #220 Task 1 adds it (last, after
+ * «Сумма оплат»): hidden by default, NON-sortable (the clients sort whitelist
+ * has no `archived` key — a sortable header would silently sort by name,
+ * #220 spec «Техническое резюме»; precedent — services badge columns #139
+ * §6.2). Badge follows the serviceColumns pattern: CSS variables, not the
+ * location Tailwind palette. Text «Активен»/«Архив» per client gender.
  */
 export const clientColumns = (): ColumnDef<ClientWithStats>[] => [
   {
@@ -70,6 +75,24 @@ export const clientColumns = (): ColumnDef<ClientWithStats>[] => [
     render: (c) => (
       <span className="font-medium" style={{ color: 'var(--ink)' }}>
         {formatRub(c.total_paid)}
+      </span>
+    ),
+  },
+  {
+    key: 'archived',
+    label: 'Статус',
+    defaultVisible: false,
+    sortable: false, // no server sort key — clients sort whitelist has no `archived` mapping (#220)
+    render: (c) => (
+      <span
+        data-testid="client-archived-badge"
+        className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{
+          backgroundColor: !c.archived ? 'var(--success-bg)' : 'var(--surface)',
+          color: !c.archived ? 'var(--success)' : 'var(--ink-light)',
+        }}
+      >
+        {c.archived ? 'Архив' : 'Активен'}
       </span>
     ),
   },

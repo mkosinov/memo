@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigation } from '@/contexts/NavigationContext';
+import { useRecordsPeriod } from '@/hooks/useRecordsPeriod';
 import { displayMasterName } from '@/lib/utils';
-import { getMonday, toISODate } from '@/lib/datetime';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import { useLocationsRaw } from '@/hooks/useLocations';
@@ -25,15 +24,6 @@ interface RecordsFiltersProps {
   onReset: () => void;
 }
 
-function getCurrentWeekRange(): { dateFrom: string; dateTo: string } {
-  const monday = getMonday(new Date());
-  const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-  return {
-    dateFrom: toISODate(monday),
-    dateTo: toISODate(sunday),
-  };
-}
-
 export function RecordsFilters({
   locationId,
   serviceId,
@@ -47,7 +37,12 @@ export function RecordsFilters({
   onSearchChange,
   onReset,
 }: RecordsFiltersProps) {
-  const { dateFrom, dateTo, selectDateRange } = useNavigation();
+  // #138 Task 5: the date inputs write the URL period (?from=&to=, replace).
+  // dateFrom/dateTo come back from searchParams (default: current week), so
+  // the inputs always display a concrete range. An untouched ABSENT side
+  // stays absent (the spec's deliberate half-filter): handlers pass
+  // explicitTo/explicitFrom (null → ''), NOT the defaulted display value.
+  const { dateFrom, dateTo, explicitFrom, explicitTo, setPeriod } = useRecordsPeriod();
 
   // Selection data owned by this component (GH #213 §6.4, R2): the shared RAW
   // hooks (#140) on the CANONICAL keys — TanStack dedupes with every other
@@ -115,10 +110,11 @@ export function RecordsFilters({
     }, 300);
   };
 
+  // Reset = today's behavior: remove BOTH period params AND clear the other
+  // filters (via the page's onReset → context resetFilters).
   const handleReset = () => {
     onReset();
-    const { dateFrom: monday, dateTo: sunday } = getCurrentWeekRange();
-    selectDateRange(monday, sunday);
+    setPeriod('', '');
   };
 
   return (
@@ -141,7 +137,7 @@ export function RecordsFilters({
         <input
           type="date"
           value={dateFrom}
-          onChange={(e) => selectDateRange(e.target.value, dateTo)}
+          onChange={(e) => setPeriod(e.target.value, explicitTo ?? '')}
           className="rounded-lg border px-2 py-1.5 text-xs"
           style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
           aria-label="Фильтр по дате от"
@@ -153,7 +149,7 @@ export function RecordsFilters({
         <input
           type="date"
           value={dateTo}
-          onChange={(e) => selectDateRange(dateFrom, e.target.value)}
+          onChange={(e) => setPeriod(explicitFrom ?? '', e.target.value)}
           className="rounded-lg border px-2 py-1.5 text-xs"
           style={{ borderColor: 'var(--line)', color: 'var(--ink-mid)', backgroundColor: 'var(--white)' }}
           aria-label="Фильтр по дате до"

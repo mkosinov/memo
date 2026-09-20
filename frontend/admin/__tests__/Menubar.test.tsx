@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Menubar } from '../app/components/layout/Menubar';
-import { NavigationProvider } from '../contexts/NavigationContext';
 import { UIProvider } from '../contexts/UIContext';
 import { DAYS_FULL, MONTHS_GENITIVE } from '../lib/utils';
 
@@ -26,9 +25,11 @@ vi.mock('@memo/api-client', () => {
   });
 });
 
-vi.mock('next/navigation', () => ({
-  usePathname: () => '/schedule',
-}));
+// #138 T4: MiniCalendar reads the page period from searchParams and pushes
+// /schedule URLs — the reactive next/navigation mock (pathname + query)
+// replaces the static usePathname stub.
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation, __currentQuery, __lastPushedUrl } from './helpers/nextNavigationMock';
 
 // GH #247 §4.5: the bottom-left user block reads the session user from
 // AuthContext. Unit tests mock the context module (MainLayoutGuard pattern).
@@ -77,9 +78,7 @@ function renderWithProviders() {
   return render(
     <QueryClientProvider client={queryClient}>
       <UIProvider>
-        <NavigationProvider>
-          <Menubar />
-        </NavigationProvider>
+        <Menubar />
       </UIProvider>
     </QueryClientProvider>
   );
@@ -100,6 +99,8 @@ describe('Menubar', () => {
     vi.setSystemTime(MOCK_NOW);
     // Default: an authenticated admin (the historical hardcoded state, now real).
     mockUseAuth.mockReturnValue(mockAuthState());
+    // #138 T4: default URL = /schedule with no params → today's period.
+    __resetNavigation();
   });
 
   afterEach(() => {
@@ -387,5 +388,168 @@ describe('Menubar role filtering (GH #263)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
     expect(screen.getByRole('link', { name: 'Сотрудники' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
+  });
+});
+
+// ─── #138 T4: MiniCalendar — searchParams-driven navigator + indicator ─────
+// Spec §2.3: the mini calendar no longer owns the period (no NavigationContext,
+// no __memo-* events). It reads the CURRENT page's period via useSearchParams,
+// navigates by pushing /schedule?view=&date=, and mirrors the period:
+//   /schedule ?view=&date=  → week-row bg-brand/30 or day bg-brand/40
+//   /records valid ?from&to → red range (distinct edges), month from ?from
+//   otherwise               → neutral today-week, no day highlight
+// Month paging/picker is LOCAL state, re-synced on every navigation.
+// MOCK_NOW = 2026-06-15 (a Monday); schedule-highlight tests use JULY dates to
+// discriminate against the today-default (June) that the old prop-driven code
+// rendered.
+
+describe('MiniCalendar — URL-driven navigator (#138 T4)', () => {
+  beforeEach(() => {
+    vi.setSystemTime(MOCK_NOW);
+    mockUseAuth.mockReturnValue(mockAuthState());
+    __resetNavigation();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const dayBtn = (label: string) => screen.getByRole('button', { name: label });
+  const daySpan = (label: string) => dayBtn(label).querySelector('span');
+
+  // ── Highlight states ──────────────────────────────────────────────────────
+
+  it('/schedule?view=week&date=2026-07-16: week row gets bg-brand/30 + existing inline day toggles', () => {
+    __resetNavigation('?view=week&date=2026-07-16');
+    renderWithProviders();
+    expect(screen.getByText('Июль 2026')).toBeInTheDocument();
+    expect(dayBtn('16 июля').parentElement).toHaveClass('bg-brand/30');
+    // A different week is NOT highlighted
+    expect(dayBtn('2 июля').parentElement).not.toHaveClass('bg-brand/30');
+    // Existing inline-toggle logic (unchanged): in week mode every day of the
+    // active week carries bg-brand/40, days outside it do not.
+    expect(daySpan('16 июля')).toHaveClass('bg-brand/40');
+    expect(daySpan('20 июля')).not.toHaveClass('bg-brand/40');
+    expect(daySpan('2 июля')).not.toHaveClass('bg-brand/40');
+  });
+
+  it('/schedule?view=day&date=2026-07-16: only the ?date day carries bg-brand/40, week row stays tinted', () => {
+    __resetNavigation('?view=day&date=2026-07-16');
+    renderWithProviders();
+    expect(screen.getByText('Июль 2026')).toBeInTheDocument();
+    expect(daySpan('16 июля')).toHaveClass('bg-brand/40');
+    // Other days of the same week are NOT day-highlighted in day mode
+    expect(daySpan('15 июля')).not.toHaveClass('bg-brand/40');
+    // Existing row behaviour (unchanged): the week stays tinted bg-brand/30
+    expect(dayBtn('16 июля').parentElement).toHaveClass('bg-brand/30');
+  });
+
+  it('/records with a valid ?from&to pair: red range with distinct edges, month from ?from, no brand week rows', () => {
+    __resetNavigation('?from=2026-06-10&to=2026-06-12', '/records');
+    renderWithProviders();
+    // Displayed month is initialized from ?from
+    expect(screen.getByText('Июнь 2026')).toBeInTheDocument();
+    // Start / middle / end of the range
+    expect(daySpan('10 июня')).toHaveClass('bg-red-400/45', 'rounded-l-full');
+    expect(daySpan('11 июня')).toHaveClass('bg-red-400/25');
+    expect(daySpan('11 июня')).not.toHaveClass('rounded-l-full');
+    expect(daySpan('11 июня')).not.toHaveClass('rounded-r-full');
+    expect(daySpan('12 июня')).toHaveClass('bg-red-400/45', 'rounded-r-full');
+    // The red range replaces the brand week-row indicator entirely
+    expect(dayBtn('11 июня').parentElement).not.toHaveClass('bg-brand/30');
+    expect(dayBtn('15 июня').parentElement).not.toHaveClass('bg-brand/30');
+  });
+
+  it('other pages: neutral today-week highlight, no day-level highlight', () => {
+    __resetNavigation('', '/clients');
+    renderWithProviders();
+    expect(dayBtn('15 июня').parentElement).toHaveClass('bg-brand/30'); // week of 2026-06-15
+    expect(daySpan('16 июня')).not.toHaveClass('bg-brand/40');
+    expect(daySpan('16 июня')).not.toHaveClass('bg-red-400/25');
+  });
+
+  it('/records without a valid pair: neutral highlight, no red range', () => {
+    __resetNavigation('?from=garbage&to=2026-06-12', '/records');
+    renderWithProviders();
+    expect(dayBtn('15 июня').parentElement).toHaveClass('bg-brand/30');
+    expect(daySpan('12 июня')).not.toHaveClass('bg-red-400/25');
+    expect(daySpan('12 июня')).not.toHaveClass('bg-red-400/45');
+  });
+
+  it('/records range is clipped to the visible month: ghosts keep no red classes', () => {
+    // ?from=Jul 28 → displayed month is JULY; the grid renders Aug 1–5 as
+    // trailing out-of-month ghosts INSIDE the ?from..?to span — spec §2.3
+    // «срез видимого месяца»: they must stay plain ghosts, no red, no edges.
+    __resetNavigation('?from=2026-07-28&to=2026-08-05', '/records');
+    renderWithProviders();
+    expect(screen.getByText('Июль 2026')).toBeInTheDocument();
+    // In-month range days keep the range treatment (start edge / middle / end)
+    expect(daySpan('28 июля')).toHaveClass('bg-red-400/45', 'rounded-l-full');
+    expect(daySpan('30 июля')).toHaveClass('bg-red-400/25');
+    expect(daySpan('31 июля')).not.toHaveClass('rounded-l-full');
+    // August ghosts: dimmed, NO range classes
+    for (const ghost of ['1 августа', '2 августа', '4 августа', '5 августа']) {
+      expect(daySpan(ghost)).not.toHaveClass('bg-red-400/45');
+      expect(daySpan(ghost)).not.toHaveClass('bg-red-400/25');
+      expect(daySpan(ghost)).not.toHaveClass('rounded-l-full');
+      expect(daySpan(ghost)).not.toHaveClass('rounded-r-full');
+    }
+  });
+
+  // ── Push targets ──────────────────────────────────────────────────────────
+
+  it('day click pushes /schedule?view=week&date=<day>', () => {
+    __resetNavigation('?from=2026-06-10&to=2026-06-12', '/records');
+    renderWithProviders();
+    fireEvent.click(dayBtn('20 июня'));
+    expect(__lastPushedUrl()).toBe('/schedule?view=week&date=2026-06-20');
+  });
+
+  it('day double-click pushes /schedule?view=day&date=<day>', () => {
+    renderWithProviders();
+    fireEvent.doubleClick(dayBtn('20 июня'));
+    expect(__lastPushedUrl()).toBe('/schedule?view=day&date=2026-06-20');
+  });
+
+  it('«Сегодня» pushes view=week&date=today from another page', () => {
+    __resetNavigation('', '/records');
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: /Сегодня/ }));
+    expect(__lastPushedUrl()).toBe('/schedule?view=week&date=2026-06-15');
+  });
+
+  it('«Сегодня» keeps the day view when /schedule is already in day view', () => {
+    __resetNavigation('?view=day&date=2026-07-16');
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: /Сегодня/ }));
+    expect(__lastPushedUrl()).toBe('/schedule?view=day&date=2026-06-15');
+  });
+
+  // ── Local month paging ────────────────────────────────────────────────────
+
+  it('month arrows page the grid locally without touching the URL', () => {
+    __resetNavigation('?view=week&date=2026-06-16');
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Следующий месяц' }));
+    expect(screen.getByText('Июль 2026')).toBeInTheDocument();
+    expect(__lastPushedUrl()).toBeNull();
+    expect(__currentQuery()).toBe('?view=week&date=2026-06-16');
+    fireEvent.click(screen.getByRole('button', { name: 'Предыдущий месяц' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Предыдущий месяц' }));
+    expect(screen.getByText('Май 2026')).toBeInTheDocument();
+    expect(__lastPushedUrl()).toBeNull();
+  });
+
+  it('a day click in a locally paged month pushes that day; navigation re-syncs the month', () => {
+    __resetNavigation('?view=week&date=2026-06-16');
+    renderWithProviders();
+    fireEvent.click(screen.getByRole('button', { name: 'Следующий месяц' }));
+    fireEvent.click(dayBtn('15 июля'));
+    expect(__lastPushedUrl()).toBe('/schedule?view=week&date=2026-07-15');
+    // A real navigation re-render → the grid re-syncs to the new page period
+    act(() => {
+      __resetNavigation('?view=week&date=2026-08-20');
+    });
+    expect(screen.getByText('Август 2026')).toBeInTheDocument();
   });
 });

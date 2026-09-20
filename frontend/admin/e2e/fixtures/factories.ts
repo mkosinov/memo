@@ -13,9 +13,9 @@
  */
 
 import crypto from 'node:crypto';
-import path from 'node:path';
 import { type APIRequestContext, expect } from '@playwright/test';
 import { sqliteExecWithRetry } from './sqlite-exec';
+import { resolveTestDbPath } from '../lib/db-path';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -382,12 +382,10 @@ export async function createTestClientTag(api: APIRequestContext, clientId: stri
 // by db-query.ts / sqlite-exec.ts for DB verification).
 
 function resolveDBPath(): string {
-  const shardId = process.env.SHARD_ID;
-  if (shardId) {
-    return path.resolve(__dirname, `../../../../backend/test_memo_shard${shardId}.db`);
-  }
-  return process.env.TEST_DB_PATH
-    || path.resolve(__dirname, '../../../../backend/test_memo.db');
+  return resolveTestDbPath({
+    shardId: process.env.SHARD_ID,
+    testDbPath: process.env.TEST_DB_PATH,
+  });
 }
 
 function sqlValue(v: string | number | null | undefined): string {

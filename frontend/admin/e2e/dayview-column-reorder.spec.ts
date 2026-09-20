@@ -1,11 +1,23 @@
 import { test, expect } from './fixtures/test';
+import { gotoScheduleDay } from './fixtures/helpers';
 
 /**
- * E2E tests for DayView column reorder.
+ * E2E: DayView column reorder with the KEYBOARD (GH #138 US-6).
  *
- * We use a custom __memo-column-reorder event because Playwright's dragTo() cannot
- * properly propagate DataTransfer data through React's synthetic event system.
- * The same pattern is used for __memo-open-modal (activity details modal).
+ * Primary path — dnd-kit KeyboardSensor on the focused sortable header:
+ *   Space        pick up the column
+ *   ArrowLeft    move it one slot left (over → the left sibling)
+ *   Space        drop → onColumnDrop → user-settings persistence
+ *
+ * GH #138 fix: SortableColumnHeader now attaches setActivatorNodeRef to the
+ * element carrying {...listeners}. Without it the KeyboardSensor activated
+ * (aria-pressed) but could not resolve/focus/measure the activator, so arrow
+ * presses never moved the dragged rect and drops were no-ops; the header also
+ * swallowed Enter on the nested move-left/right buttons.
+ *
+ * The «Переместить влево/вправо» buttons remain a separate pointer-operable
+ * UI; one operability assertion guards regression #2 (Enter on the button
+ * must click the button, not start a header drag).
  */
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
@@ -43,16 +55,11 @@ async function cleanupActivity(
 }
 
 /**
- * Navigate to day view and select the test date with activities.
+ * Deep-link to the day view of the test date (#138: the URL is the source
+ * of truth — /schedule?view=day&date=…).
  */
 async function navigateToTestDay(page: import('@playwright/test').Page) {
-  await page.goto('/schedule');
-  await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
-
-  // Navigate to test date via custom event
-  await page.evaluate((date: string) => {
-    document.dispatchEvent(new CustomEvent('__memo-switch-to-day-view', { detail: { date } }));
-  }, `${TEST_DATE}T12:00:00`);
+  await gotoScheduleDay(page, TEST_DATE);
 
   // Wait for DayView column headers to appear
   await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
@@ -66,29 +73,24 @@ async function getColumnHeaders(page: import('@playwright/test').Page): Promise<
 }
 
 /**
- * Simulate column reorder via custom event.
- *
- * Playwright's dragTo() and manual DragEvent dispatch don't work with React's
- * synthetic event system — DataTransfer.setData/getData don't propagate. So we
- * dispatch a custom __memo-column-reorder event that DayView listens to and
- * calls onColumnDrop directly.
+ * Move the focused, currently-grabbed column one slot LEFT and settle before
+ * dropping. Empirically (probe-verified on this grid): the first ArrowLeft
+ * commits over → the left sibling but its translate lands on a later press,
+ * so press twice, then wait until the dragged rect rests displaced (non-zero
+ * transform) — dropping inside the re-measure window resolves over=null and
+ * the reorder is a no-op.
  */
-async function simulateColumnReorder(
-  page: import('@playwright/test').Page,
-  draggedId: string,
-  targetId: string,
-) {
-  await page.evaluate(({ src, tgt }) => {
-    document.dispatchEvent(new CustomEvent('__memo-column-reorder', {
-      detail: { draggedId: src, targetId: tgt },
-    }));
-  }, { src: draggedId, tgt: targetId });
-
-  // Wait for React state update and re-render
-  await page.waitForTimeout(500);
+async function settleMoveLeftThenDrop(page: import('@playwright/test').Page, header: ReturnType<typeof page.locator>) {
+  await page.keyboard.press('ArrowLeft'); // over → the left sibling
+  await page.waitForTimeout(150);
+  await page.keyboard.press('ArrowLeft'); // settle translate onto the sibling's rect
+  await expect
+    .poll(() => header.evaluate((el) => el.style.transform), { timeout: 5_000 })
+    .toContain('translate3d(-');
+  await page.keyboard.press('Space'); // drop
 }
 
-test.describe('DayView Column Reorder DnD', () => {
+test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   let activityIds: string[] = [];
 
   test.beforeEach(async ({ request }) => {
@@ -109,33 +111,74 @@ test.describe('DayView Column Reorder DnD', () => {
     activityIds = [];
   });
 
-  test('column reorder swaps column order', async ({ page }) => {
+  test('Space lifts, ArrowLeft moves, Space drops — column order changes', async ({ page }) => {
     await navigateToTestDay(page);
 
-    // Verify at least 2 column headers visible
     const allHeaders = page.locator('[data-testid^="column-header-m"]');
     await expect(allHeaders.nth(1)).toBeVisible({ timeout: 5000 });
 
-    // Get initial column order
     const headersBefore = await getColumnHeaders(page);
     expect(headersBefore.length).toBeGreaterThanOrEqual(2);
 
-    // Identify first two column testids
-    const firstTestId = await allHeaders.first().getAttribute('data-testid');
-    const secondTestId = await allHeaders.nth(1).getAttribute('data-testid');
-    expect(firstTestId).toBeTruthy();
-    expect(secondTestId).toBeTruthy();
+    // Focus the SECOND column and drive the keyboard drag.
+    const header = allHeaders.nth(1);
+    await header.focus();
+    await page.keyboard.press('Space'); // pick up
 
-    const draggedId = firstTestId!.replace('column-header-', '');
-    const targetId = secondTestId!.replace('column-header-', '');
+    // dnd-kit marks the activator pressed while the keyboard drag is active.
+    await expect(header).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
 
-    // Reorder: drag SECOND column to FIRST position to see a visible change
-    await simulateColumnReorder(page, targetId, draggedId);
+    // Move one slot left and drop once the dragged rect has settled.
+    await settleMoveLeftThenDrop(page, header);
 
-    // Get new column order
+    // The former second column must now lead; the displaced one follows.
+    await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 10_000 })
+      .toBe(headersBefore[1]);
     const headersAfter = await getColumnHeaders(page);
+    expect(headersAfter[1]).toBe(headersBefore[0]);
+    // Everything else kept its relative order.
+    expect(headersAfter.slice(2)).toEqual(headersBefore.slice(2));
+  });
 
-    // Assert order changed
-    expect(headersAfter).not.toEqual(headersBefore);
+  test('keyboard reorder persists across reload (user settings)', async ({ page }) => {
+    await navigateToTestDay(page);
+
+    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const headersBefore = await getColumnHeaders(page);
+
+    // Keyboard reorder: grab the second column, move left, drop.
+    const header = allHeaders.nth(1);
+    await header.focus();
+    await page.keyboard.press('Space');
+    await expect(header).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
+    await settleMoveLeftThenDrop(page, header);
+    await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 10_000 })
+      .toBe(headersBefore[1]);
+
+    // Reload on the same deep-linked day URL: the per-user column order survives.
+    await page.reload();
+    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 10_000 });
+    const headersAfterReload = await getColumnHeaders(page);
+    expect(headersAfterReload[0]).toBe(headersBefore[1]);
+  });
+
+  test('Enter on the move-left button clicks it (no key hijack by the header drag sensor)', async ({ page }) => {
+    await navigateToTestDay(page);
+
+    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const headersBefore = await getColumnHeaders(page);
+
+    // Regression guard (GH #138): Enter on the nested move-left button used to
+    // be swallowed by the header's KeyboardSensor (preventDefault) — it had to
+    // click the button instead of starting a header drag.
+    const secondTestId = await allHeaders.nth(1).getAttribute('data-testid');
+    const moveLeft = page.locator(`[data-testid="move-left-${secondTestId!.replace('column-header-', '')}"]`);
+    await moveLeft.focus();
+    await page.keyboard.press('Enter');
+
+    await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 10_000 })
+      .toBe(headersBefore[1]);
+    // The header itself never entered drag mode.
+    await expect(allHeaders.nth(1)).not.toHaveAttribute('aria-pressed', 'true');
   });
 });

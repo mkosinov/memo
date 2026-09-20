@@ -36,7 +36,9 @@
 # Владение карточкой = поле host на борде (единственный источник, 2026-09-20;
 # CLAIM-комментарии больше не пишутся). Комментарий «auto-impl log:» на issue
 # остаётся каналом BLOCKED-событий менеджера; свежая BLOCKED-запись —
-# карточка отдыхает (CLAIM_TTL_HOURS = 1ч в gh_board.py).
+# карточка отдыхает (CLAIM_TTL_HOURS = 1ч в gh_board.py). Блокер, ждущий
+# юзера, дополнительно отмечается полем gate (значение blocked); снимается
+# менеджером при продолжении либо автоматически при уходе из In IMPL.
 
 set -uo pipefail
 
@@ -121,12 +123,12 @@ while true; do
 
     if [ -n "$SID" ]; then
         echo "$(date -Is) #$N → continue session $SID"
-        MSG="Auto-IMPL retry: время отдыха по прежнему блокеру прошло — переоцени гейты и продолжай работу. Если блокер ещё в силе — снова auto-impl blocked и стоп, ничего не начиная."
+        MSG="Auto-IMPL retry: время отдыха по прежнему блокеру прошло — переоцени гейты и продолжай работу (если на карточке стоял gate=blocked — сними: gh_board.py gate $N none). Если блокер ещё в силе — снова auto-impl blocked (и gate blocked, если он ждёт пользователя) и стоп, ничего не начиная."
         # --attach: сессия живёт на работающем сервере (:4096) — сразу видна в вебе
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --session "$SID" "$MSG" > "$STATE/auto-impl-$N.log" 2>&1 &
     else
-        HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, а на issue ДОПОЛНИ комментарий, начинающийся с «auto-impl log:», строкой «auto-impl blocked: <причина>» (gh issue view $N --json comments → найди id → gh api -X PATCH repos/mkosinov/memo/issues/comments/<id> -f body=<весь текст с новой строкой>; не выходит — создай обычный комментарий с тем же началом), и остановись, ничего не начиная. Блокеры по ходу работы — так же допиши «auto-impl blocked: …»; карточку в Ready to IMPL не возвращать. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
+        HANDOFF="Авто-IMPL: карточка #$N взята из Ready to IMPL (статус уже In IMPL). Организуй IMPL по её спеке и плану из репо. ПЕРЕД СТАРТОМ проверь гейты плана (T0): если зависимость не смержена или в плане открытое юзер-решение — верни карточку на борде в статус Ready to IMPL, а на issue ДОПОЛНИ комментарий, начинающийся с «auto-impl log:», строкой «auto-impl blocked: <причина>» (gh issue view $N --json comments → найди id → gh api -X PATCH repos/mkosinov/memo/issues/comments/<id> -f body=<весь текст с новой строкой>; не выходит — создай обычный комментарий с тем же началом), и остановись, ничего не начиная. Блокеры по ходу работы — так же допиши «auto-impl blocked: …»; карточку в Ready to IMPL не возвращать. Блокер, который ждёт решения пользователя, ДОПОЛНИТЕЛЬНО отметь полем gate на борде: python3 .opencode/scripts/gh_board.py gate $N blocked (снял блокер и продолжил — gh_board.py gate $N none; уход карточки из In IMPL снимает автоматически). Зависимостные блокеры (мерж не случился) gate НЕ ставят — они снимаются сами. По завершении — штатный finishing: PR, борд In-main, сдвиг очереди."
         # --attach: сессия создаётся на работающем сервере (:4096) — сразу видна в вебе
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &

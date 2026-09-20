@@ -7,7 +7,7 @@ description: DESIGN phase on the host (zcode) in the host/container split topolo
 
 ## 0. Topology and role
 
-DESIGN (gates A/B/C — restructured 2026-09-18; board: `In Design` → `Ready to IMPL` + gate chips, §2) is this interactive zcode host session. IMPL (G3–G7) is the opencode container (@manager/@architect) — we do not go there. The session merges the manager+architect roles for DESIGN: talks to the user at the gates and dispatches subagents **one level deep** (panel, plan reviewer) — nested dispatch is unnecessary and unavailable (depth limit).
+DESIGN (gates A/B/C — restructured 2026-09-18; board: `In Design` → `Ready to IMPL` + the gate field, §2) is this interactive zcode host session. IMPL (G3–G7) is the opencode container (@manager/@architect) — we do not go there. The session merges the manager+architect roles for DESIGN: talks to the user at the gates and dispatches subagents **one level deep** (panel, plan reviewer) — nested dispatch is unnecessary and unavailable (depth limit).
 
 Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/dev/superagents/docs/workflow/design-phase.md` (this phase) + `impl-phase.md`; migration plan: `~/dev/superagents/docs/plans/2026-09-05-host-design-container-impl-split-plan.md`.
 
@@ -34,21 +34,21 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
   - **Open questions** or an explicit "OK to mark this done?"
   Then the answer to the new message. If no dispatches happened since the user's last message and nothing awaits their decision — say "no outstanding tasks" and answer immediately. Edits in the current turn — the final message must summarize them.
 
-## 2. Gates (A and C auto by default; B always the user's; the card sits in `In Design` for the whole design — a chip marks the pending ask; the only design flip is → `Ready to IMPL` at Gate C)
+## 2. Gates (A and C auto by default; B always the user's; the card sits in `In Design` for the whole design — the `gate` field marks the pending ask; the only design flip is → `Ready to IMPL` at Gate C)
 
 Restructured 2026-09-18 by user decision: the old interactive G1a brainstorm and the plan-approval G2 are replaced by auto gates; the panel-reviewed spec at Gate B is the main human gate. Board statuses (renamed by the user in the web UI the same day; the old `Spec OK (G1b)` option is deleted): `In Design` — ALL design work, gates A/B/C live here; `Ready to IMPL` — plan pushed, the IMPL start signal.
 
 | Gate | Decides | User stop only when | After the gate |
 |---|---|---|---|
-| A — concept | what we build / deliberately do NOT (scope boundaries) | ≥2 concepts remain divergent after the filter below | auto-OK → the spec is written, no stop. Divergence stop → chip `gate:concept` |
-| B — spec | the spec — after the panel's consolidated report and fixes | always — the user's OK is mandatory | chip `gate:spec` removed; commit + **push** the spec; the card stays `In Design` |
-| C — plan | the plan — after plan-reviewer | the plan forces a spec change | auto-OK: fixes folded in; commit + **push** the plan; card → `Ready to IMPL`. Stop → chip `gate:plan`. Gate C is the last point where the discussion may still return to Gate A |
+| A — concept | what we build / deliberately do NOT (scope boundaries) | ≥2 concepts remain divergent after the filter below | auto-OK → the spec is written, no stop. Divergence stop → `gate N concept` |
+| B — spec | the spec — after the panel's consolidated report and fixes | always — the user's OK is mandatory | `gate N none`; commit + **push** the spec; the card stays `In Design` |
+| C — plan | the plan — after plan-reviewer | the plan forces a spec change | auto-OK: fixes folded in; commit + **push** the plan; card → `Ready to IMPL`. Stop → `gate N plan`. Gate C is the last point where the discussion may still return to Gate A |
 
-### Gate chips (the pending ask is a label on the issue, not a board status)
+### The gate field (the pending ask is a single-select field on the board card, not a label and not a board status; replaced the gate:* issue labels 2026-09-20)
 
-- Exactly one of `gate:concept` / `gate:spec` / `gate:plan` may sit on an issue; set together with the stop message, removed the moment the user answers (a new stop replaces the old chip). No chip + `In Design` = the agent is working, nothing awaits the user.
-- One writer: only the design session of that issue touches its chips.
-- Read–check–repair: on any session start and on return from IMPL, cross-check (status × chip) against git — the spec on main = Gate B passed, the plan on main = Gate C passed. On mismatch git wins: repair the chip/status and say so out loud.
+- Exactly one value may sit in the field: `concept` / `spec` / `plan` (a design stop) or `blocked` (an IMPL blocker awaiting the user — set by the container manager); set together with the stop message via `gh_board.py gate N <value>`, cleared (`gate N none`) the moment the user answers (a new stop replaces the old value). Empty + `In Design` = the agent is working, nothing awaits the user. Leaving `In Design`/`In IMPL` via `status` clears the field automatically.
+- One writer: only the design session of that issue touches its gate value.
+- Read–check–repair: on any session start and on return from IMPL, cross-check (status × gate) against git — the spec on main = Gate B passed, the plan on main = Gate C passed. On mismatch git wins: repair the gate/status and say so out loud.
 - `gh_board.py status` matches option names exactly (`In Design`, `Ready to IMPL`); pickers match by prefix. Agents never rename or add board options (2026-09-09 incident).
 
 ### Gate A divergence filter (run before any user stop)
@@ -105,7 +105,7 @@ superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
 
 ## 5. Gate C — plan review
 
-Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands the approved spec): the prompt carries the spec path + plan path. No spec-changing findings → Gate C auto-OK: fold the fixes into the plan text, commit + push, board → `Ready to IMPL` — no user stop. The closing report lists the plan's tasks, one line each, plus the spec/plan paths. Findings that change the spec (from the reviewer or from writing the plan itself) → STOP: chip `gate:plan`; what was found, why the spec changes, the proposed fix — the user decides; this is the last point where the discussion can still return to Gate A.
+Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands the approved spec): the prompt carries the spec path + plan path. No spec-changing findings → Gate C auto-OK: fold the fixes into the plan text, commit + push, board → `Ready to IMPL` — no user stop. The closing report lists the plan's tasks, one line each, plus the spec/plan paths. Findings that change the spec (from the reviewer or from writing the plan itself) → STOP: `gate N plan`; what was found, why the spec changes, the proposed fix — the user decides; this is the last point where the discussion can still return to Gate A.
 
 ## 6. DESIGN session DoD (the seam contract)
 
@@ -128,12 +128,12 @@ python3 .zcode/scripts/gh_board.py set-next-up 176 1   # only on the user's word
 
 - The script's golden source is **the memo repo itself** (`.zcode/scripts/gh_board.py`, Project #3 constants baked in). The script is part of the seam: it lives in git, so both the host and the container have it after a pull; the container copy is `.opencode/scripts/gh_board.py`. No extra copies outside the harness folders.
 - **No raw-GraphQL fallback.** ALL board interaction — reads and writes — goes through the script; never hand-write `gh api graphql` against the project. Field-definition mutations (`updateProjectV2Field`: adding/renaming status options) are forbidden for agents: the mutation replaces the whole option list and detaches every card's value (2026-09-09: 65/69 cards lost Status this way). A new status is added by the user in the GitHub web UI, which appends safely.
-- One writer per issue: DESIGN flips (`In Design` → `Ready to IMPL`; inside the design the pending gate is a chip, §2; fast-track goes straight to `In IMPL`) — this session; IMPL flips — the container manager. The script adds an issue to the board on first contact.
+- One writer per issue: DESIGN flips (`In Design` → `Ready to IMPL`; inside the design the pending gate is the `gate` field value, §2; fast-track goes straight to `In IMPL`) — this session; IMPL flips — the container manager. The script adds an issue to the board on first contact.
 
 ## 8. Rules
 
 - One issue = one phase at a time; the board is the guard. DESIGN on X + IMPL on Y in parallel — allowed.
 - One DESIGN session = one issue.
 - Parallel DESIGN sessions (different issues, different host sessions): simultaneous push → `git pull --rebase`.
-- Return from IMPL: the card goes to `In Design` + an issue comment — a broken spec restarts the design, a broken plan additionally sets the `gate:plan` chip (decision needed); that is a new DESIGN session's starting point (§1.1).
+- Return from IMPL: the card goes to `In Design` + an issue comment — a broken spec restarts the design, a broken plan additionally sets `gate N plan` (decision needed); that is a new DESIGN session's starting point (§1.1).
 - DESIGN-phase agents and skills live **in this repo**: `.zcode/agents/` + `.zcode/skills/` — `design-phase` (the phase protocol) and `brainstorming` (standalone explicit-invocation dialogue — «побрейнштормим»; since the 2026-09-18 gate restructure no design gate routes through it) (git = source of truth for the memo port). Superagents canon: bodies — `~/dev/superagents/.opencode/agents/`, reference seed of host ports — `~/dev/superagents/.zcode/agents/`; a canon change is ported by editing the files in `.zcode/agents/` (the port is marked in each file's header). Canon v3.4 (2026-09-06): panel `spec-review-*` → `spec-panel-*`; `spec-reviewer` split into `plan-reviewer` (G2, host) + `code-compliance-reviewer` (G5, container-only). The omniroute model catalog is the local `~/.zcode/v2/config.json` (with keys — never committed).

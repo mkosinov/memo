@@ -136,6 +136,14 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
     401 on miss) and ``get_optional_scope`` (lenient: anonymous /
     expired → unscoped). One session-cookie lookup shape, no drift
     between the strict and optional consumers.
+
+    GH #344 (spec §4.1): a successful resolve ALSO stages the request's
+    audit actor (``user_id`` + ``role`` contextvar) — both guard paths
+    flow through here, so the journal author is set on every guarded
+    route with zero extra DB hits. The author comes only from the
+    server-side session, never from request data. No author → the
+    ``@transactional`` audit insertion is skipped (seeds/CLI/anonymous
+    are not journaled, spec §12).
     """
     if token is None:
         return None
@@ -144,7 +152,15 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
     from src.auth.service import get_auth_service
 
     async with db_manager.async_session() as db_session:
-        return await get_auth_service().resolve(db_session, token)
+        authed = await get_auth_service().resolve(db_session, token)
+    if authed is not None:
+        # LAZY import — cycle hazard: a top-level import would form
+        # audit → scope → permissions → audit (mask_phone precedes the
+        # actor here; see the WARNING in src/events/audit.py).
+        from src.events.audit import set_actor
+
+        set_actor(user_id=authed.id, role=authed.role)
+    return authed
 
 
 async def require_session(request: Request) -> AuthedUser:

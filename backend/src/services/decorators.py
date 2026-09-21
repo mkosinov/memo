@@ -19,6 +19,18 @@ published and the accumulator is discarded. The wrapper also stamps the
 bound method with ``__memo_transactional__ = True`` for test
 introspection (completeness discovery).
 
+GH #344 (spec §4.4) — the wrapper is also the SINGLE audit insertion
+point. It opens a parallel audit accumulator (token-based, mirroring
+the #239 name accumulator) BEFORE the wrapped call; after a successful
+method return and BEFORE ``commit()`` the OWNING wrapper — the one whose
+``open_audit()`` returned a token — inserts the accumulated journal
+rows into the same session: one commit for action + journal, one
+rollback on error. Inner decorated wrappers see an already-open
+accumulator and insert nothing (no duplicate rows per level). No actor
+in the request context → nothing is inserted (spec §4.1: seeds, CLI,
+session-less fixtures, anonymous mutations are not journaled); the
+method itself still runs and commits.
+
 Usage:
     from src.services.decorators import transactional
 
@@ -52,6 +64,32 @@ type _AsyncFunc[**P, R] = Callable[P, Awaitable[R]]
 # Marker attribute stamped on wrapped methods: "this method commits via
 # @transactional" — test introspection (entity completeness walk) keys on it.
 _TRANSACTIONAL_MARKER = "__memo_transactional__"
+
+
+def _insert_audit_rows(session: Any) -> None:
+    """Insert the accumulated audit rows into ``session`` (spec §4.4).
+
+    Called by the OWNING wrapper after a successful method return and
+    BEFORE ``commit()`` — action + journal in one commit, rolled back
+    together on any error. Skipped entirely when no actor is staged
+    (spec §4.1: no author → no journal row) or when nothing accumulated
+    (no marks — repository auto-collection arrives in Task 3).
+
+    LAZY imports — cycle hazard precedents: the audit module must not be
+    imported at ``decorators`` top level (same rule as
+    ``src.events.entities`` — see its WARNING), and the model import
+    lives here, not in the accumulator module.
+    """
+    from src.events import audit
+
+    if audit.current_actor() is None:
+        return  # no author → no journal (§4.1); the action itself stands
+    rows = audit.draw_rows()
+    if not rows:
+        return
+    from src.models.audit_log import AuditLog
+
+    session.add_all(AuditLog(**row) for row in rows)
 
 
 def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
@@ -118,6 +156,13 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
         else:
             entity_name = None  # bare function — no service class to resolve
         token = emitter.start_accumulation({entity_name} if entity_name else set())
+        # ── GH #344: open the audit accumulator (spec §4.4) ─────────────
+        # The wrapper that receives a token OWNS it (transaction outer
+        # boundary); nested wrappers get None and neither insert nor
+        # reset. LAZY import — cycle precedent (see above + audit.py).
+        from src.events import audit as _audit
+
+        audit_token = _audit.open_audit()
         try:
             if has_self:
                 result = await func(self, *args, **kwargs)
@@ -125,6 +170,10 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
                 # Staticmethod (or unbound function) — ``self`` is not a
                 # real parameter of ``func``, so don't pass it.
                 result = await func(*args, **kwargs)
+            # Audit insert BEFORE commit (§4.4): action + journal in one
+            # commit; owner-only (nested wrappers inserted nothing).
+            if audit_token is not None:
+                _insert_audit_rows(session)
             await session.commit()
             # Emit only on success — after commit, before returning (§3.3).
             hub.publish(emitter.accumulated() or set(), emitter.get_origin())
@@ -132,6 +181,8 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
         finally:
             # Rollback path: the accumulator is discarded without publishing.
             emitter.reset_accumulation(token)
+            # Owner-only reset (§4.4); None token (inner wrapper) is a no-op.
+            _audit.reset_audit(audit_token)
 
     setattr(wrapper, _TRANSACTIONAL_MARKER, True)
     return cast("_AsyncFunc[P, R]", wrapper)

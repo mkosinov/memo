@@ -22,14 +22,16 @@
 # Повторные попытки по issue ПРОДОЛЖАЮТ существующую сессию менеджера
 # (opencode run --session <id>): id берётся из БД — последняя сессия с
 # названием «<N> IMPL. …». Отдельного реестра сессий нет, БД = источник истины.
-# Ёмкость машины (сколько ЗАПУСКОВ наблюдателя может быть в полёте):
-#   1) env AUTO_IMPL_MAX_SESSIONS (compose, применяется при recreate контейнера);
-#   2) файл /root/.local/state/opencode/auto-impl-max (перекрывает env, читается
-#      каждый цикл — можно менять на живую без recreate).
-# По умолчанию 1. «Занято» = число живых PID в реестре запусков наблюдателя
-# (auto-impl.pids: "PID issue"); процесс менеджера завершился → слот свободен.
-# Открытые UI/TUI-окна и ручные сессии юзера ёмкость НЕ занимают (грабли
-# 14.09: открытые окна блокировали конвейер).
+# Ёмкость машины = бюджет хоста на БОРДЕ (HOST_BUDGETS в gh_board.py:
+# imac 2 / macbook 1) — карточки «In IMPL» с меткой этого хоста, считается
+# внутри pick-next. Финишный менеджер, чья карточка ушла в PR (G7) на CI,
+# НЕ считается (2026-09-21, решение юзера: карточка на CI не занимает
+# IMPL слот) — карточка больше не в In IMPL. Реестр auto-impl.pids УДАЛЁН
+# (2026-09-21): был дублем борд-бюджета, состояние живёт на борде. Открытые
+# UI/TUI-окна и ручные сессии юзера без карточки In IMPL ёмкость не занимают
+# (грабли 14.09: открытые окна блокировали конвейер). Заморозка машины без
+# снятия флага: файл /root/.local/state/opencode/auto-impl-max = 0 (читается
+# каждый цикл; env AUTO_IMPL_MAX_SESSIONS больше не используется).
 # Выбор карточки: gh_board.py pick-next "$HOST_LABEL" (Next Up → первая
 # Ready to IMPL; бюджет слотов своей машины по полю host; пропуск карточек
 # со свежими записями и с незакрытыми depends-on из тела issue).
@@ -46,13 +48,11 @@ REPO=/root/workspace/memo
 STATE=/root/.local/state/opencode
 LOG="$STATE/auto-impl-watch.log"
 LOCK=/tmp/auto-impl-watch.lock
-PIDS_FILE="$STATE/auto-impl.pids"
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
 TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает перезаписать поле host
 
 cd "$REPO" || exit 1
 mkdir -p "$STATE"
-touch "$PIDS_FILE"
 exec >>"$LOG" 2>&1
 
 if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
@@ -71,16 +71,10 @@ while true; do
 
     [ -f "$STATE/auto-impl.enabled" ] || continue
 
-    # локальная ёмкость: живые запуски ТОЛЬКО этого наблюдателя (реестр PID).
-    # Мёртвые PID вычищаются на каждом цикле: процесс менеджера завершился —
-    # слот свободен. UI/TUI-окна и ручные сессии юзера не считаются.
-    MAX=$(cat "$STATE/auto-impl-max" 2>/dev/null || echo "${AUTO_IMPL_MAX_SESSIONS:-1}")
-    if [ -f "$PIDS_FILE" ]; then
-        awk '{ if (system("kill -0 " $1 " 2>/dev/null") == 0) print }' "$PIDS_FILE" > "$PIDS_FILE.tmp" \
-            && mv "$PIDS_FILE.tmp" "$PIDS_FILE"
-    fi
-    COUNT=$(wc -l < "$PIDS_FILE" 2>/dev/null || echo 0)
-    if [ "${COUNT:-0}" -ge "$MAX" ]; then
+    # ёмкость решает борд (HOST_BUDGETS по In IMPL+host внутри pick-next;
+    # карточка на CI, статус PR (G7), не считается). Здесь — только ручная
+    # заморозка машины без снятия флага: auto-impl-max = 0.
+    if [ "$(cat "$STATE/auto-impl-max" 2>/dev/null || true)" = "0" ]; then
         continue
     fi
 
@@ -133,6 +127,5 @@ while true; do
         nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
             --title "$TITLE" "$HANDOFF" > "$STATE/auto-impl-$N.log" 2>&1 &
     fi
-    echo "$! #$N" >> "$PIDS_FILE"
     echo "$(date -Is) #$N launched (pid $!, session: ${SID:-new}, title: $TITLE, log: $STATE/auto-impl-$N.log)"
 done

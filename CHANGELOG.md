@@ -197,6 +197,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     коридоров 1 и 2); план — 8/8 задач (см. `## Статус` в плане); #171 закрывается при
     merge.
 
+### Test Infra
+- **GH #341 — Фиксированные `created_at` сид-фото: календарь-независимые photos-базлайны** — branch
+  `341-photos-seed-fixed-dates` (3 commits: `64c25d7d..d527e5b7`, base `582c3a3e`; 2 исходных файла
+  +76/−7 и 4 PNG-базлайна; спека `docs/specs/2026-09-20-photos-seed-fixed-dates-341-design.md`,
+  план `docs/plans/2026-09-20-photos-seed-fixed-dates-341-plan.md` — оба на main, веткой не
+  менялись; прод-код, API и схема БД не затронуты):
+  - **Сид:** семь сид-фото ph1–ph7 получают явные фиксированные нарастающие `created_at` — новая
+    `PHOTO_FIXED_DATES` рядом с `WEEK_FIXED_START`: дни 2026-06-15…21, 12:00 (naive-литералы,
+    колонка naive; aware-объект уронил бы вставку). Дефолт `AbstractModel.created_at =
+    datetime.utcnow` для сид-фото больше не срабатывает — колонка «Дата» перестаёт показывать
+    «сегодня», а дефолтная сортировка `created_at desc` остаётся детерминированной: ph7 первой
+    строкой, как и раньше (нарастающие даты вместо микросекунд вставки). Сид-приём тот же, что у
+    записей r1–r6 и занятий (`WEEK_FIXED_START`), — все даты базлайна живут в одном июньском окне.
+  - **Страж контракта:** новый `test_seed_photos_fixed_dates` в `backend/tests/test_seed.py` —
+    семь ожиданий жёстко прописаны литералами (намеренно НЕ импортируются из `PHOTO_FIXED_DATES`,
+    иначе правка константы молча прошла бы тест; mutation-bite проверен) плюс проверки строгого
+    нарастания и уникальности дат. Правка фиксированных дат сида теперь валит юнит-тест, а не
+    красный CI.
+  - **Базлайны (разовая регенерация):** `photos-table-filled`, `photos-table-dropdown-open`,
+    `photos-table-sort-active`, `photos-table-picker-open`; `empty`/`skeleton`/`error` без строк в
+    кадре не тронуты. Гигиена диффа соблюдена — в регенерации только `photos-table-*` PNG.
+  - **Tests:** pytest `tests/test_seed.py` **29/29** (28 существующих + новый страж); e2e
+    `visual-regression` update-прогон **61/61**; функциональные `photos-crud` +
+    `master-role-photos` **21/21** без правок (С3 — новое фото с реальным «сейчас» по-прежнему
+    первой строкой); чистые прогоны photos **7/7** дважды, в т.ч. после полного пересоздания
+    шард-БД с пересевом (С2/С4). Локально 14 не-photos визуальных тестов красные по известному
+    локальному env-условию (anonymous-render, pre-existing, не связано с #341; CI main зелёный).
+  - **DoD:** все пункты issue закрыты. Ручной cross-midnight прогон в окне был невозможен (старт
+    UTC 07:43, до полуночи ~16 ч) — календарь-независимость подтверждена конструкцией: часы в
+    спеке пиннятся `page.clock` (2026-06-15), а в базлайнах только фиксированные июньские даты.
+  - Plan: `docs/plans/2026-09-20-photos-seed-fixed-dates-341-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-21-photos-seed-fixed-dates-341.md`
+
 ## [Unreleased] — 2026-09-19
 
 ### Added

@@ -697,75 +697,396 @@ test.describe('UUID search — #216 pre-flight', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests — deep-link ?clientId= (GH #216)
+// Tests — deep-link ?clientId= (GH #232 — machine narrowing by id set)
 // ---------------------------------------------------------------------------
+//
+// Spec 2026-09-21-clients-deeplink-id-param-232 §2 (US-1…US-7) / §4. The
+// address is the single writer of the narrowing: `?clientId=<uuid>` repeated
+// narrows the table via the machine field `clientIds` (repeated `id` query
+// keys on the list GET) — the SEARCH BOX never carries the UUID anymore.
+// Exactly one valid id auto-opens the card (latch #216 blocks re-open after
+// a close while the id stays the sole one); two or more never auto-open. A
+// chip «Открыт по ссылке» / «Открыто по ссылке: N» renders above the table;
+// its ✕ removes ONLY the clientId occurrences from the address. Closing the
+// card does not touch the table, the filters, or the address.
 
-test.describe('Deep-link ?clientId= — #216', () => {
-  test('19. deep-link opens the client card for a client beyond page 1; close keeps the narrowed view', async ({
+test.describe('Deep-link ?clientId= — #232', () => {
+  // ── US-1: single id — narrowing, empty search, auto-open, F5 restore ────
+
+  test('US-1: single id narrows to the client, search stays empty, card auto-opens, F5 restores', async ({
     page,
     request,
   }) => {
-    // GH #216: 20 fillers (names sorting before the target) push the target
-    // («ЯЯ-…» sorts last under SQLite BINARY collation — Cyrillic Я > А and
-    // all Cyrillic > Latin) beyond page 1 of the default name-asc list.
-    // The fix narrows via q=<uuid> exact-id → modal opens from the row.
-    const ts = uid();
-    const fillers: Awaited<ReturnType<typeof createTestClient>>[] = [];
-    const target = await createTestClient(request, { name: `ЯЯ-deeplink-${ts}` });
+    const target = await createTestClient(request, { name: `US1-deeplink-${uid()}` });
+
     try {
-      for (let i = 0; i < 20; i++) {
-        fillers.push(await createTestClient(request, { name: `АА-filler-${i}-${ts}` }));
-      }
-
-      // Premise self-check (spec §7 T4): the target must NOT be on unfiltered
-      // page 1 — otherwise this test silently degrades to the page-1 path.
-      const resp = await request.get(
-        `${BACKEND}/api/v1/clients?sort_by=name&sort_order=asc&per_page=20`,
-      );
-      expect(resp.ok()).toBeTruthy();
-      const page1 = await resp.json();
-      expect(page1.total).toBeGreaterThanOrEqual(21);
-      expect(page1.items.some((c: { id: string }) => c.id === target.id)).toBe(false);
-
-      // Deep-link: modal opens over the narrowed table.
       await page.goto(`/clients?clientId=${target.id}`);
+
+      // Address keeps the param; the table narrows to exactly the target…
       await expect(page).toHaveURL(new RegExp(`clientId=${target.id}`));
       const modal = page.locator('[data-testid="client-card-modal"]');
       await expect(modal).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('table tbody tr')).toHaveCount(1);
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue(target.id);
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+
+      // …the search box stays EMPTY (the UUID lives in the machine field)…
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+
+      // …the chip shows the single-id copy…
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
+
+      // …and the status filter is forced to «Все» (#216: archived reachable).
       const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
       await expect(statusSelect).toHaveValue('all');
 
-      // Concept point 4: close → param stripped, NO auto-clear of the search.
-      await closeByBackdrop(page);
-      await expect(page).not.toHaveURL(/clientId=/);
+      // F5 — the same state is restored from the address alone.
+      await page.reload();
+      await expect(modal).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('table tbody tr')).toHaveCount(1);
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue(target.id);
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
-      for (const f of fillers) {
-        await cleanup(request, `/api/v1/clients/${f.id}`);
-      }
     }
   });
 
-  // ── S1 (#231): deep-link mount fires EXACTLY ONE narrowed list request ───
+  // ── US-2: closing the card keeps the narrowed table and the address ─────
+
+  test('US-2: close keeps table/address/search untouched; row click re-opens, no auto-re-open', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US2-deeplink-${uid()}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}`);
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+
+      // Close — NOTHING changes: table still narrowed, address still has the
+      // param, search still empty, chip still up.
+      await closeByBackdrop(page);
+      await expect(page).toHaveURL(new RegExp(`clientId=${target.id}`));
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
+
+      // No auto-re-open: give the latch a window to (wrongly) fire — the
+      // modal must stay closed after a list refetch settles.
+      await page.waitForTimeout(1000);
+      await expect(modal).not.toBeVisible();
+
+      // A manual row click re-opens the card over the narrowed table.
+      await page.locator('table tbody tr').filter({ hasText: target.name }).click();
+      await expect(modal).toBeVisible({ timeout: 5_000 });
+      await closeByBackdrop(page);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+    }
+  });
+
+  // ── US-3: multi-id — narrowing without a modal, chip «N», click to open ─
+
+  test('US-3: multi-id narrows to the set, no auto-open, chip «Открыто по ссылке: N», row click opens', async ({
+    page,
+    request,
+  }) => {
+    const a = await createTestClient(request, { name: `US3-a-${uid()}` });
+    const b = await createTestClient(request, { name: `US3-b-${uid()}` });
+    const c = await createTestClient(request, { name: `US3-c-${uid()}` });
+
+    try {
+      await page.goto(`/clients?clientId=${a.id}&clientId=${b.id}&clientId=${c.id}`);
+
+      // Narrowed to the three clients in the standard page sort…
+      await expect(page.locator('table tbody tr')).toHaveCount(3, { timeout: 10_000 });
+      for (const cl of [a, b, c]) {
+        await expect(
+          page.locator('table tbody tr').filter({ hasText: cl.name }),
+        ).toBeVisible();
+      }
+
+      // …NO modal auto-open (cards open by row clicks)…
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).not.toBeVisible();
+
+      // …the chip shows the multi-id copy with the count…
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыто по ссылке: 3',
+      );
+
+      // …and the search box stays empty.
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+
+      // A row click opens the card; closing it keeps the narrowed table.
+      await page.locator('table tbody tr').filter({ hasText: b.name }).click();
+      await expect(modal).toBeVisible({ timeout: 5_000 });
+      await closeByBackdrop(page);
+      await expect(page.locator('table tbody tr')).toHaveCount(3);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${a.id}`);
+      await cleanup(request, `/api/v1/clients/${b.id}`);
+      await cleanup(request, `/api/v1/clients/${c.id}`);
+    }
+  });
+
+  // ── US-4: chip ✕ — targeted removal; user filters survive ───────────────
+
+  test('US-4: chip ✕ removes the narrowing from the address; user filters survive', async ({
+    page,
+    request,
+  }) => {
+    // User filter ON TOP of the narrowing: a search that matches the target
+    // (AND semantics — spec §3.3). The ✕ must remove the narrowing WITHOUT
+    // touching that user filter.
+    const ts = uid();
+    const target = await createTestClient(request, { name: `US4target-${ts}` });
+    const other = await createTestClient(request, { name: `US4other-${ts}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}`);
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+
+      // The auto-opened card overlays the page — close it first (US-2: the
+      // narrowed table and the address stay put) before layering a user
+      // filter on top of the narrowing.
+      await closeByBackdrop(page);
+
+      // AND: a user filter narrowing further (search by the shared prefix).
+      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      await searchInput.fill(`US4target-${ts}`);
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible({ timeout: 10_000 });
+
+      // ✕ on the chip — targeted removal only.
+      await page.getByRole('button', { name: 'Снять сужение' }).click();
+
+      // The param is gone from the address (everything else in its place)…
+      await expect(page).not.toHaveURL(/clientId=/);
+      await expect(page).toHaveURL(/\/clients$/);
+
+      // …the chip is gone…
+      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+
+      // …the user filter SURVIVES (target still matches, other does not)…
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: other.name }),
+      ).toHaveCount(0);
+      await expect(searchInput).toHaveValue(`US4target-${ts}`);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+      await cleanup(request, `/api/v1/clients/${other.id}`);
+    }
+  });
+
+  // ── US-4b: full reset also clears the param from the address ────────────
+
+  test('US-4b: «Сбросить фильтры» clears the narrowing from the address too', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US4b-deeplink-${uid()}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}`);
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+      await closeByBackdrop(page);
+
+      // Full reset — spec §3.5: resetFilters' documented extra job is
+      // dropping clientId from the address; the status select returns to
+      // the default «Активные».
+      await page.getByText('Сбросить фильтры').click();
+      await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
+      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
+      await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+    }
+  });
+
+  // ── US-5: dead link (deleted), archived link, partial list ───────────────
+
+  test('US-5: dead link keeps empty table + chip + address; archived opens; partial list shows found only', async ({
+    page,
+    request,
+  }) => {
+    // (a) Deleted client: one id pointing at nobody. The address is NOT
+    // silently wiped — empty table + chip stay visible.
+    const dead = await createTestClient(request, { name: `US5-dead-${uid()}` });
+    await cleanup(request, `/api/v1/clients/${dead.id}`); // hard-delete (no deps)
+
+    await page.goto(`/clients?clientId=${dead.id}`);
+    await expect(page).toHaveURL(new RegExp(`clientId=${dead.id}`));
+    await expect(page.getByText('Нет записей')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+      'Открыт по ссылке',
+    );
+    await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+    // No modal can open for a vanished client.
+    await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
+
+    // ✕ on the dead chip — full table comes back, address clean.
+    await page.getByRole('button', { name: 'Снять сужение' }).click();
+    await expect(page).not.toHaveURL(/clientId=/);
+    await expect(
+      page.locator('table tbody tr').first(),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // (b) Partial list: one dead + one live id — found shown, missing
+    // silently dropped from the selection.
+    const live = await createTestClient(request, { name: `US5-live-${uid()}` });
+    try {
+      await page.goto(`/clients?clientId=${dead.id}&clientId=${live.id}`);
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: live.name }),
+      ).toBeVisible();
+      await expect(
+        page.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
+      ).toHaveText('Открыто по ссылке: 2');
+      // Two ids ⇒ no auto-open.
+      await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
+    } finally {
+      await cleanup(request, `/api/v1/clients/${live.id}`);
+    }
+  });
+
+  test('US-5b: deep link on an ARCHIVED client finds and opens it (status=all)', async ({
+    page,
+    request,
+  }) => {
+    const archived = await createTestClient(request, { name: `US5b-arch-${uid()}` });
+    const archResp = await request.post(
+      `${BACKEND}/api/v1/clients/${archived.id}/archive`,
+    );
+    expect(archResp.ok()).toBeTruthy();
+
+    try {
+      await page.goto(`/clients?clientId=${archived.id}`);
+      // Found via the forced status=all (#216 behavior preserved)…
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: archived.name }),
+      ).toBeVisible();
+
+      // …and the card opens automatically (single valid id).
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+      await closeByBackdrop(page);
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${archived.id}`);
+    }
+  });
+
+  // ── US-6: garbage values are dropped, valid ones work ───────────────────
+
+  test('US-6: garbage in the param is dropped; the valid id narrows; all-garbage = full table', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US6-deeplink-${uid()}` });
+
+    try {
+      // Mix: not-a-uuid, an empty value, a padded uuid — only the strict
+      // UUID shape survives parsing (spec §3.3).
+      const padded = `  ${target.id}  `;
+      await page.goto(
+        `/clients?clientId=abc&clientId=&clientId=${encodeURIComponent(padded)}&clientId=${target.id}`,
+      );
+
+      // Exactly one valid id ⇒ narrowed to it, single-id chip, auto-open.
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 10_000 });
+      await closeByBackdrop(page);
+
+      // All-garbage ⇒ the param is ignored entirely: full default table,
+      // no chip, no modal.
+      await page.goto(`/clients?clientId=abc&clientId=${encodeURIComponent(' %20 ')}`);
+      await expect(page).toHaveURL(/clientId=/); // address NOT wiped
+      await expect(
+        page.locator('table tbody tr').first(),
+      ).toBeVisible({ timeout: 10_000 });
+      const rows = await page.locator('table tbody tr').count();
+      expect(rows).toBeGreaterThan(1); // full table, not a narrowing
+      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+    }
+  });
+
+  // ── US-7: manual row click on the full table writes no param ────────────
+
+  test('US-7: manual row click opens the card without touching the address', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US7-click-${uid()}` });
+
+    try {
+      await waitForClientsReady(page, { waitForName: target.name });
+
+      // Full table, no narrowing chip in play.
+      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+
+      const row = page.locator('table tbody tr').filter({ hasText: target.name });
+      await expect(row).toBeVisible({ timeout: 10_000 });
+      await row.click();
+
+      const modal = page.locator('[data-testid="client-card-modal"]');
+      await expect(modal).toBeVisible({ timeout: 5_000 });
+
+      // Status-quo regression (spec US-7): the address gains NO param.
+      await expect(page).toHaveURL(/\/clients$/);
+
+      await closeByBackdrop(page);
+      await expect(page).toHaveURL(/\/clients$/);
+      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+    }
+  });
+
+  // ── S1 (#231, re-anchored to #232): deep-link mount fires EXACTLY ONE
+  //    narrowed list request — id=<uuid>&status=all ─────────────────────────
   //
-  // Spec 2026-09-19-clients-deeplink-single-request §3 S1 / §6: before #231
-  // the deep-link mount fired TWO list GETs — the default (status=active) one
-  // plus the narrowed q=<uuid> one; the initialFilters seed (Tasks 1–2) kills
-  // the default. The counter matches the LIST endpoint (pathname
-  // /api/v1/clients, GET) and is deliberately NOT filtered by q=: the killed
-  // default request (same pathname, no q=, status=active) must stay visible
+  // Spec 2026-09-19-clients-deeplink-single-request §3 S1 / §6 + #232 §3.2:
+  // the initialFilters seed kills the default (status=active) GET — only the
+  // narrowed one fires, now carrying the machine `id` key (repeated) instead
+  // of the old q=<uuid>. The counter matches the LIST endpoint (pathname
+  // /api/v1/clients, GET) and is deliberately NOT filtered by id=: the killed
+  // default request (same pathname, no id=, status=active) must stay visible
   // to the counter, or the regression this test guards would be invisible
   // again. Point paths under /api/v1/clients/<id>… are NOT list traffic —
-  // the auto-opened card's visitors GET (/api/v1/clients/<id>/visitors) is
-  // expected in the window and must not count. Fixture traffic goes through
-  // the `request` context before goto, so it never reaches the page-scoped
-  // counter.
+  // the auto-opened card's visitors GET is expected in the window and must
+  // not count. Fixture traffic goes through the `request` context before
+  // goto, so it never reaches the page-scoped counter.
 
-  test('S1: deep-link mount fires exactly one list request — narrowed q=<uuid>&status=all', async ({
+  test('S1: deep-link mount fires exactly one list request — narrowed id=<uuid>&status=all', async ({
     page,
     request,
   }) => {
@@ -785,14 +1106,14 @@ test.describe('Deep-link ?clientId= — #216', () => {
 
       await page.goto(`/clients?clientId=${clientId}`);
 
-      // Observation window: closes on the narrowed list response (q=<uuid>),
+      // Observation window: closes on the narrowed list response (id=<uuid>),
       // then +500 ms to catch a late stray request (US-1 convention).
       await page.waitForResponse(
         (resp) => {
           const url = new URL(resp.url());
           return (
             url.pathname === '/api/v1/clients' &&
-            url.searchParams.get('q') === clientId &&
+            url.searchParams.getAll('id').includes(clientId) &&
             resp.status() === 200
           );
         },
@@ -802,8 +1123,10 @@ test.describe('Deep-link ?clientId= — #216', () => {
 
       expect(listRequests).toHaveLength(1);
       const only = new URL(listRequests[0]!);
-      expect(only.searchParams.get('q')).toBe(clientId);
+      expect(only.searchParams.getAll('id')).toEqual([clientId]);
       expect(only.searchParams.get('status')).toBe('all');
+      // The narrowing is machine-only: no q key on the narrowed request.
+      expect(only.searchParams.get('q')).toBeNull();
     } finally {
       await cleanup(request, `/api/v1/clients/${clientId}`);
     }

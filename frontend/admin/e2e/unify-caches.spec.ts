@@ -416,11 +416,19 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
         .toBe(true);
 
       // 4. Navigate to /clients (modal can be closed first)
+      // #232: the deep link narrows via the machine id filter (NOT the
+      // search box — old-scheme «UUID in search» is gone); the card
+      // auto-opens and the narrowing chip renders.
       await page.locator('[data-testid="modal-close-btn"]').click();
       await page.goto('/clients?clientId=' + client.id);
       await expect(
         page.locator('[data-testid="client-card-modal"]'),
       ).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
 
       // 5. Switch to the record tab (left panel) — it shows the SAME visits table
       await page

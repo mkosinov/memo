@@ -134,8 +134,9 @@ test.describe('Clients — «Статус» column (GH #220 Task 3)', () => {
     expect(archBody.archived).toBe(true);
 
     try {
-      // Deep-link — GH #216 narrows via q=<uuid> and forces status=all, so
-      // the archived client IS reachable and the card modal auto-opens.
+      // Deep-link — #232 narrows via the machine id filter and forces
+      // status=all, so the archived client IS reachable and the card modal
+      // auto-opens.
       await page.goto(`/clients?clientId=${client.id}`);
       await expect(page).toHaveURL(new RegExp(`clientId=${client.id}`));
       const modal = page.locator('[data-testid="client-card-modal"]');
@@ -146,8 +147,18 @@ test.describe('Clients — «Статус» column (GH #220 Task 3)', () => {
       const row = page.locator('table tbody tr').filter({ hasText: client.name });
       await expect(row).toBeVisible({ timeout: 10_000 });
 
-      // Close the card to inspect the table itself.
+      // #232 new scheme: the narrowing is machine-only (empty search, chip
+      // present).
+      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
+        'Открыт по ссылке',
+      );
+
+      // Close the card to inspect the table itself — #232: closing does NOT
+      // wipe the address (old scheme did router.replace('/clients')).
       await closeByBackdrop(page);
+      await expect(page).toHaveURL(new RegExp(`clientId=${client.id}`));
+      await expect(page.locator('table tbody tr')).toHaveCount(1);
 
       // No «Статус» column yet; enabling shows the «Архив» badge.
       await expect(

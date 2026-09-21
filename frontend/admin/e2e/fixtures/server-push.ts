@@ -41,6 +41,21 @@ export function expectUpdateToast(page: Page) {
 }
 
 /**
+ * GH #330 §5.3 — locator of the persistent connection-loss toast
+ * («Нет соединения с сервером. Обновления приостановлены.», toast-error
+ * kind). Strictly one instance exists at a time (ServerEventsProvider
+ * guards by lostToastId); the text filter also cleanly separates it from
+ * transient transport toasts («Ошибка сети»), which share the same
+ * toast-error testid. Callers `.first()` when stacking with other errors
+ * is possible.
+ */
+export function lostToast(page: Page) {
+  return page.getByTestId('toast-error').filter({
+    hasText: 'Нет соединения с сервером',
+  });
+}
+
+/**
  * Frame-logger: opens a dedicated browser context + blank page that
  * subscribes DIRECTLY to the backend SSE stream (`new EventSource(eventsUrl)`)
  * and records every `invalidate` frame as `{entities, origin, ts}` into a

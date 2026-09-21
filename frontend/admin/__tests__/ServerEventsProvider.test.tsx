@@ -6,20 +6,31 @@ import { ServerEventsProvider } from '../app/ServerEventsProvider';
 import { useUI } from '@/contexts/UIContext';
 import { eventsUrl, getTabId } from '@memo/api-client';
 import { createMockUIContext } from './helpers/mockContexts';
+import { setChannelDown, isChannelDown } from '../app/lib/connectionHealth';
 
 /**
  * Unit tests for ServerEventsProvider (GH #239, spec §4.2/§4.3/§5):
  * origin suppression, burst-collapse toast, reconnect blanket invalidation,
  * malformed-frame tolerance, unmount cleanup.
+ *
+ * GH #330 (spec §5.1/§5.2): connection-loss detection — 5 s debounce to a
+ * single persistent toast, fatal CLOSED vs recoverable CONNECTING errors,
+ * connectionHealth flag hygiene, toast/timer cleanup.
  */
 
 // ─── Mocked EventSource (class capturing handlers) ─────────────────────────
 
 type Handler = (ev: unknown) => void;
 
+const READY_STATE_CONNECTING = 0;
+const READY_STATE_CLOSED = 2;
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
+  static CONNECTING = READY_STATE_CONNECTING;
+  static CLOSED = READY_STATE_CLOSED;
   url: string;
+  readyState: number = READY_STATE_CONNECTING;
   onopen: Handler | null = null;
   onerror: Handler | null = null;
   onmessage: Handler | null = null;
@@ -39,6 +50,7 @@ class MockEventSource {
 
   close(): void {
     this.closed = true;
+    this.readyState = READY_STATE_CLOSED;
   }
 
   // Test drivers
@@ -47,10 +59,23 @@ class MockEventSource {
   }
 
   open(): void {
+    this.readyState = READY_STATE_CONNECTING;
     this.onopen?.({});
   }
 
   error(): void {
+    this.onerror?.({});
+  }
+
+  /** Recoverable failure — browser will retry (spec §5.1 CONNECTING). */
+  errorRecoverable(): void {
+    this.readyState = READY_STATE_CONNECTING;
+    this.onerror?.({});
+  }
+
+  /** Fatal closure — HTTP 401 / proxy refusal (spec §5.1 CLOSED). */
+  errorFatal(): void {
+    this.readyState = READY_STATE_CLOSED;
     this.onerror?.({});
   }
 }
@@ -80,16 +105,19 @@ function renderProvider() {
     invalidateQueries: vi.spyOn(qc, 'invalidateQueries').mockResolvedValue(),
   };
   void qcSpy;
-  const showToast = vi.fn();
+  // Real UIContext.showToast always returns a toast id — mirror the contract
+  // (the provider stores it to hide exactly this toast later).
+  const showToast = vi.fn(() => 'toast-id');
+  const hideToast = vi.fn();
   mockUseUI.mockReturnValue(
-    createMockUIContext({ showToast: showToast as never }),
+    createMockUIContext({ showToast: showToast as never, hideToast: hideToast as never }),
   );
   const rendered = render(
     <QueryClientProvider client={qc}>
       <ServerEventsProvider>{null}</ServerEventsProvider>
     </QueryClientProvider>,
   );
-  return { qc, showToast, unmount: () => rendered.unmount() };
+  return { qc, showToast, hideToast, unmount: () => rendered.unmount() };
 }
 
 function lastInstance(): MockEventSource {
@@ -108,6 +136,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getTabId).mockReturnValue('me');
   vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
+  setChannelDown(false);
 });
 
 afterEach(() => {
@@ -220,5 +249,183 @@ describe('ServerEventsProvider', () => {
   it('subscribes to the invalidate event by name', () => {
     renderProvider();
     expect(lastInstance().listeners.has('invalidate')).toBe(true);
+  });
+});
+
+describe('ServerEventsProvider — connection loss (GH #330 §5.1/§5.2)', () => {
+  it('mount resets the channel-down flag', () => {
+    setChannelDown(true);
+    renderProvider();
+    expect(isChannelDown()).toBe(false);
+  });
+
+  it('recoverable error → flag down-state set, no toast before 5 s debounce', () => {
+    vi.useFakeTimers();
+    const { showToast } = renderProvider();
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    expect(isChannelDown()).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(4999);
+    });
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('connection lost ≥ 5 s → exactly ONE persistent error toast', () => {
+    vi.useFakeTimers();
+    const { showToast } = renderProvider();
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+    // showToast(message, kind, undo, countdownMs, action, persistent)
+    expect(showToast).toHaveBeenCalledWith(
+      'Нет соединения с сервером. Обновления приостановлены.',
+      'error',
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    // Toast id must be captured for hideToast — simulate the provider wiring
+    // by checking repeated errors never spawn a second toast.
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('flap shorter than 5 s (error → open) → no toast, flag reset', () => {
+    vi.useFakeTimers();
+    const { showToast } = renderProvider();
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+      lastInstance().open();
+    });
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).not.toHaveBeenCalled();
+    expect(isChannelDown()).toBe(false);
+  });
+
+  it('reconnect after toast shown → hides the toast, resets flag, no second debounce', () => {
+    vi.useFakeTimers();
+    const { showToast, hideToast } = renderProvider();
+    let toastId = 'unset';
+    showToast.mockImplementation(() => {
+      toastId = 'toast-from-show';
+      return toastId;
+    });
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+    act(() => {
+      lastInstance().open();
+    });
+    expect(hideToast).toHaveBeenCalledWith(toastId);
+    expect(isChannelDown()).toBe(false);
+    // Timer cancelled: no further toast without a new error.
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('fatal closure (readyState CLOSED, e.g. 401) → NO toast, flag stays up=false', () => {
+    vi.useFakeTimers();
+    const { showToast } = renderProvider();
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(3000);
+      lastInstance().errorFatal();
+    });
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).not.toHaveBeenCalled();
+    expect(isChannelDown()).toBe(false);
+  });
+
+  it('fatal closure after toast shown → hides the toast and resets flag', () => {
+    vi.useFakeTimers();
+    const { showToast, hideToast } = renderProvider();
+    showToast.mockImplementation(() => 'toast-fatal-case');
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    act(() => {
+      lastInstance().errorFatal();
+    });
+    expect(hideToast).toHaveBeenCalledWith('toast-fatal-case');
+    expect(isChannelDown()).toBe(false);
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('repeated recoverable errors while down do not restart the debounce', () => {
+    vi.useFakeTimers();
+    const { showToast } = renderProvider();
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(3000);
+      lastInstance().errorRecoverable();
+    });
+    // 3 s since the SECOND error would be < 5 s — but the debounce started
+    // at the FIRST error, so the toast is already due at t=5 s from t0.
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('unmount clears pending debounce timer and shown toast', () => {
+    vi.useFakeTimers();
+    const { showToast, hideToast, unmount } = renderProvider();
+    showToast.mockImplementation(() => 'toast-unmount');
+    // Pending debounce (not yet fired) + then a shown toast case:
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1);
+    // A second pending debounce window for the unmount cleanup check.
+    act(() => {
+      lastInstance().open();
+    });
+    act(() => {
+      lastInstance().errorRecoverable();
+    });
+    unmount();
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(showToast).toHaveBeenCalledTimes(1); // pending timer was cleared
+    expect(hideToast).toHaveBeenCalledWith('toast-unmount'); // toast hidden
   });
 });

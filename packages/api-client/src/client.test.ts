@@ -331,6 +331,61 @@ describe('401 unauthorized handler', () => {
   });
 });
 
+// ─── Request timeouts (GH #330) ──────────────────────────────────────────────
+// Every request gets an AbortSignal.timeout ceiling: 30s for JSON, 120s for
+// FormData uploads (slow mobile uplinks). A caller-provided signal always
+// wins — explicit cancellation must reach fetch untouched. No fake timers:
+// AbortSignal.timeout's internal timer is not managed by them.
+
+describe('api() request timeouts', () => {
+  it('asks AbortSignal.timeout for the 30s threshold on JSON requests', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api('/test', schema, { method: 'POST', body: '{}' });
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+  });
+
+  it('asks AbortSignal.timeout for the 120s threshold on FormData requests', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { id: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array([1])], { type: 'image/png' }), 'p.png');
+    await api('/test', schema, { method: 'POST', body: form });
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+  });
+
+  it('passes a real short caller-signal through to fetch instead of a timeout', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    // Fetch-mock behaves like real fetch: rejects when the received signal aborts.
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () =>
+          reject(new DOMException('This operation was aborted', 'AbortError')),
+        );
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const promise = api('/test', schema, { method: 'POST', body: '{}', signal: controller.signal });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(promise).rejects.toThrow('This operation was aborted');
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBe(controller.signal);
+    expect(timeoutSpy).not.toHaveBeenCalled();
+  });
+});
+
 // ─── 409 dependency-tree exposure (GH #207 §5) ────────────────────────────────
 // The unified DELETE dry-run answers {detail: "has_dependencies", dependencies: [...]}.
 // The hook layer needs the tree to render the delete dialog (§7), so ApiError

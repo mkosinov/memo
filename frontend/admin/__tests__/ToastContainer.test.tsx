@@ -53,6 +53,23 @@ function renderWithActionToast(action: { label: string; onAction: () => void }) 
   );
 }
 
+// #330 §5.3: persistent toast — no × button, not evicted by the last-5 slice.
+function renderWithPersistentToast(queueMessages: string[] = []) {
+  function TestHarness() {
+    const { showToast } = useUI();
+    React.useEffect(() => {
+      queueMessages.forEach((message) => showToast(message));
+      showToast('Нет соединения с сервером. Обновления приостановлены.', 'error', undefined, undefined, undefined, true);
+    }, []);
+    return <ToastContainer />;
+  }
+  return render(
+    <UIProvider>
+      <TestHarness />
+    </UIProvider>
+  );
+}
+
 describe('ToastContainer', () => {
   it('renders nothing when there are no toasts', () => {
     const { container } = renderWithProvider();
@@ -182,5 +199,30 @@ describe('ToastContainer action slot (#285 D4 rev8)', () => {
   it('undo toast rendering is untouched (action slot is additive)', () => {
     renderWithToasts(['Удалено'], [() => {}]);
     expect(screen.getByText('Отменить')).toBeInTheDocument();
+  });
+});
+
+// ── #330 §5.3: persistent toast (connection-loss indicator) ────────────────
+describe('ToastContainer persistent toast (#330)', () => {
+  it('renders a persistent toast', () => {
+    renderWithPersistentToast();
+    expect(screen.getByText('Нет соединения с сервером. Обновления приостановлены.')).toBeInTheDocument();
+  });
+
+  it('does not render the close button for a persistent toast', () => {
+    renderWithPersistentToast();
+    const toast = screen.getByTestId('toast-error');
+    expect(within(toast).queryByRole('button', { name: 'Закрыть' })).not.toBeInTheDocument();
+  });
+
+  it('does not evict the persistent toast from a full 5-toast queue', () => {
+    renderWithPersistentToast(['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven']);
+    // the queue keeps its own last-5 slice
+    expect(screen.queryByText('One')).not.toBeInTheDocument();
+    expect(screen.queryByText('Two')).not.toBeInTheDocument();
+    expect(screen.getByText('Three')).toBeInTheDocument();
+    expect(screen.getByText('Seven')).toBeInTheDocument();
+    // the persistent toast renders on top of the queue (5 + 1 max)
+    expect(screen.getByText('Нет соединения с сервером. Обновления приостановлены.')).toBeInTheDocument();
   });
 });

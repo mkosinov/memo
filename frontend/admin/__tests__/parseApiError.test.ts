@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { ApiError } from '@memo/api-client';
-import { parseApiError } from '../app/lib/api/parseApiError';
+import { parseApiError, isNetworkError, isAbortClass } from '../app/lib/api/parseApiError';
+
+// GH #330 §5.6: classification must rely on err.name, never on
+// `instanceof DOMException` — jsdom/polyfilled environments produce plain
+// Errors with these names. These factories are deliberately NOT DOMException.
+function timeoutError(): Error {
+  return Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' });
+}
+
+function abortError(): Error {
+  return Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+}
 
 describe('parseApiError', () => {
   it('returns capacity-specific message for ACTIVITY_AT_CAPACITY with N/M in message', () => {
@@ -75,6 +86,15 @@ describe('parseApiError', () => {
     expect(parseApiError(err).message).toBe('Ошибка сети');
   });
 
+  // GH #330 §5.6 — interruption branches (classified strictly by err.name).
+  it('returns timeout message for TimeoutError (by name, not DOMException)', () => {
+    expect(parseApiError(timeoutError())).toEqual({ message: 'Превышено время ожидания запроса' });
+  });
+
+  it('returns cancellation message for AbortError (by name)', () => {
+    expect(parseApiError(abortError())).toEqual({ message: 'Запрос отменён' });
+  });
+
   it('returns "Неизвестная ошибка" for unknown error types', () => {
     expect(parseApiError('string error')).toEqual({ message: 'Неизвестная ошибка' });
     expect(parseApiError(null)).toEqual({ message: 'Неизвестная ошибка' });
@@ -87,5 +107,38 @@ describe('parseApiError', () => {
     const result = parseApiError(err);
     expect(result.status).toBe(404);
     expect(result.code).toBe('TAG_NOT_FOUND');
+  });
+});
+
+// GH #330 §5.6 — transport-error classifiers for the toast dedup gate (§5.4)
+// and the retry predicate (§5.7).
+describe('isNetworkError', () => {
+  it('recognizes all three transport classes (TypeError, TimeoutError, AbortError)', () => {
+    expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isNetworkError(timeoutError())).toBe(true);
+    expect(isNetworkError(abortError())).toBe(true);
+  });
+
+  it('never recognizes ApiError (401/403 must not trip the dedup gate)', () => {
+    expect(isNetworkError(new ApiError(401, 'Unauthorized', 'AUTH_UNAUTHORIZED'))).toBe(false);
+    expect(isNetworkError(new ApiError(403, 'Forbidden', 'AUTH_FORBIDDEN'))).toBe(false);
+    expect(isNetworkError(new ApiError(500, 'Server error', 'INTERNAL_ERROR'))).toBe(false);
+  });
+
+  it('does not recognize plain errors or non-errors', () => {
+    expect(isNetworkError(new Error('boom'))).toBe(false);
+    expect(isNetworkError('string')).toBe(false);
+    expect(isNetworkError(null)).toBe(false);
+  });
+});
+
+describe('isAbortClass', () => {
+  it('recognizes only TimeoutError and AbortError', () => {
+    expect(isAbortClass(timeoutError())).toBe(true);
+    expect(isAbortClass(abortError())).toBe(true);
+    // Transport-but-not-abort and HTTP errors are excluded.
+    expect(isAbortClass(new TypeError('Failed to fetch'))).toBe(false);
+    expect(isAbortClass(new ApiError(401, 'Unauthorized', 'AUTH_UNAUTHORIZED'))).toBe(false);
+    expect(isAbortClass(new Error('boom'))).toBe(false);
   });
 });

@@ -29,12 +29,27 @@ interface TextareaFieldConfig {
   placeholder?: string;
 }
 
+/** Static-option select (GH #284). Options are fixed at config level (no dictionary). */
+export interface SelectFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface SelectFieldConfig {
+  type: 'select';
+  key: string;
+  label: string;
+  options: SelectFieldOption[];
+  /** Init value for NEW rows (GH #284: audience defaults to "all"). */
+  defaultValue?: string;
+}
+
 interface NestedListFieldConfig {
   type: 'nested-list';
   key: string;
   label: string;
   itemLabel: string;
-  itemFields: (TextFieldConfig | NumberFieldConfig | TextareaFieldConfig)[];
+  itemFields: (TextFieldConfig | NumberFieldConfig | TextareaFieldConfig | SelectFieldConfig)[];
   addButtonText: string;
   emptyText: string;
 }
@@ -58,7 +73,8 @@ export type ServiceFieldConfig =
   | NumberFieldConfig
   | TextareaFieldConfig
   | NestedListFieldConfig
-  | MaterialsFieldConfig;
+  | MaterialsFieldConfig
+  | SelectFieldConfig;
 
 export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
@@ -159,6 +175,21 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
         key: 'description',
         label: 'Описание',
         placeholder: 'Описание тарифа',
+      },
+      {
+        // GH #284: возрастная группа тарифа. Canonical values go to the API
+        // (TariffCreateSchema.audience), Russian lowercase labels are display
+        // only (owner decision); new rows default to «единый» (all). NO
+        // duplicate-group validation (canvas case — spec §2 п.2).
+        type: 'select',
+        key: 'audience',
+        label: 'Возрастная группа',
+        defaultValue: 'all',
+        options: [
+          { value: 'kid', label: 'детский' },
+          { value: 'adult', label: 'взрослый' },
+          { value: 'all', label: 'единый' },
+        ],
       },
     ],
   },

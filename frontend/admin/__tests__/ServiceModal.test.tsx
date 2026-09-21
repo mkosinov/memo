@@ -215,9 +215,9 @@ describe('ServiceModal — create with empty max_age (GH #203 §4.4)', () => {
     expect(payload.max_age).toBeNull();
     // Unfilled min_age keeps the 0-init semantics («с рождения»).
     expect(payload.min_age).toBe(0);
-    // The tariff went through untouched.
+    // The tariff went through untouched (+ GH #284: audience defaults to "all").
     expect(payload.tariffs).toEqual([
-      { title: 'Базовый', price: 0, description: '' },
+      { title: 'Базовый', price: 0, description: '', audience: 'all' },
     ]);
   });
 
@@ -288,6 +288,114 @@ describe('ServiceModal — required numbers and tariff item fields (GH #203 §4.
     const tariffTitle = inputByLabel(/^Название/, 1);
     expect(errorTextFor(tariffTitle)).toBe('Обязательное поле');
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Tariff audience select (GH #284 spec §5: ServiceModal NestedList) ─────
+
+describe('ServiceModal — tariff audience select (GH #284)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('edit prefill: select restores the tariff audience and offers детский/взрослый/единый', () => {
+    renderModal({
+      service: {
+        ...NULL_AGE_SERVICE,
+        tariffs: [
+          { id: 't-1', service_id: 'svc-null', title: 'Детский', description: null, price: 1500, audience: 'kid' },
+        ],
+      },
+    });
+
+    // Programmatic label: «Возрастная группа: {tariff title}» — the row's
+    // title, not a column header (spec §5 a11y).
+    const select = screen.getByLabelText('Возрастная группа: Детский') as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    // Canonical values, Russian lowercase labels (owner decision).
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+      ['kid', 'детский'],
+      ['adult', 'взрослый'],
+      ['all', 'единый'],
+    ]);
+    expect(select.value).toBe('kid');
+  });
+
+  it('new tariff row defaults to «единый» (all) and the audience round-trips on submit', async () => {
+    const { onSubmit } = renderCreateWithTariff();
+
+    // Default mirrors TariffCreateSchema (optional, default "all").
+    const select = screen.getByLabelText('Возрастная группа: Базовый') as HTMLSelectElement;
+    expect(select.value).toBe('all');
+
+    fireEvent.change(select, { target: { value: 'kid' } });
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.tariffs).toEqual([
+      { title: 'Базовый', price: 0, description: '', audience: 'kid' },
+    ]);
+  });
+
+  it('label tracks the tariff title live (renaming retargets the programmatic label)', () => {
+    renderModal({
+      service: {
+        ...NULL_AGE_SERVICE,
+        tariffs: [
+          { id: 't-1', service_id: 'svc-null', title: 'Базовый', description: null, price: 2000, audience: 'all' },
+        ],
+      },
+    });
+
+    expect(screen.getByLabelText('Возрастная группа: Базовый')).toBeInTheDocument();
+    changeValue(inputByLabel(/^Название/, 1), 'Холст малый');
+    expect(screen.getByLabelText('Возрастная группа: Холст малый')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Возрастная группа: Базовый')).not.toBeInTheDocument();
+  });
+
+  it('no duplicate-group validation: two kid tariffs save without errors (spec §2 п.2)', async () => {
+    const { onSubmit } = renderModal({
+      service: {
+        ...NULL_AGE_SERVICE,
+        tariffs: [
+          { id: 't-1', service_id: 'svc-null', title: 'Детский малый', description: null, price: 1500, audience: 'kid' },
+          { id: 't-2', service_id: 'svc-null', title: 'Детский большой', description: null, price: 2500, audience: 'kid' },
+        ],
+      },
+    });
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    const tariffs = payload.tariffs as Record<string, unknown>[];
+    // Duplicate kid groups are legal (canvas case) — no validation kicks in
+    // and both audiences survive the round-trip untouched.
+    expect(tariffs.map((t) => [t.title, t.audience])).toEqual([
+      ['Детский малый', 'kid'],
+      ['Детский большой', 'kid'],
+    ]);
+    expect(screen.queryByText('Обязательное поле')).not.toBeInTheDocument();
+  });
+
+  it('a tariff without audience (legacy shape) falls back to «единый» in the editor', () => {
+    renderModal({
+      service: {
+        ...NULL_AGE_SERVICE,
+        tariffs: [
+          { id: 't-1', service_id: 'svc-null', title: 'Базовый', description: null, price: 2000 },
+        ],
+      },
+    });
+
+    expect(
+      (screen.getByLabelText('Возрастная группа: Базовый') as HTMLSelectElement).value,
+    ).toBe('all');
   });
 });
 

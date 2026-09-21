@@ -5,6 +5,8 @@ import {
   waitForToast,
   openRowActionDropdown,
   clickRowArchiveAction,
+  expectDeepLinkChip,
+  expectClientSearchEmpty,
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { createTestClient, cleanup } from './fixtures/factories';
@@ -149,10 +151,8 @@ test.describe('Clients — «Статус» column (GH #220 Task 3)', () => {
 
       // #232 new scheme: the narrowing is machine-only (empty search, chip
       // present).
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыт по ссылке',
-      );
+      await expectClientSearchEmpty(page);
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
 
       // Close the card to inspect the table itself — #232: closing does NOT
       // wipe the address (old scheme did router.replace('/clients')).

@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures/test';
-import { waitForClientsReady, openAddTab, phoneMaskDisplay } from './fixtures/helpers';
+import {
+  waitForClientsReady,
+  openAddTab,
+  phoneMaskDisplay,
+  clientSearchInput,
+  expectDeepLinkChip,
+  expectClientSearchEmpty,
+} from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import {
   createTestClient,
@@ -87,7 +94,7 @@ test.describe('Clients page', () => {
     await waitForClientsReady(page);
 
     // Search input
-    await expect(page.locator('input[placeholder*="Поиск"]')).toBeVisible();
+    await expect(clientSearchInput(page)).toBeVisible();
 
     // Status filter
     await expect(page.locator('select').first()).toBeVisible();
@@ -317,7 +324,7 @@ test.describe('Clients page', () => {
       await waitForClientsReady(page, { waitForName: uniqueName });
 
       // Type the unique name into the search box
-      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      const searchInput = clientSearchInput(page);
       await searchInput.fill(uniqueName);
 
       // Wait for debounced search to kick in (300ms debounce + network)
@@ -671,7 +678,7 @@ test.describe('UUID search — #216 pre-flight', () => {
     try {
       await waitForClientsReady(page, { waitForName: client.name });
 
-      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      const searchInput = clientSearchInput(page);
       await expect(searchInput).toBeVisible();
 
       // Full UUID → q=<uuid> → exactly one row (that client), pager total 1.
@@ -732,12 +739,10 @@ test.describe('Deep-link ?clientId= — #232', () => {
       ).toBeVisible();
 
       // …the search box stays EMPTY (the UUID lives in the machine field)…
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expectClientSearchEmpty(page);
 
       // …the chip shows the single-id copy…
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыт по ссылке',
-      );
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
 
       // …and the status filter is forced to «Все» (#216: archived reachable).
       const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
@@ -747,10 +752,8 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await page.reload();
       await expect(modal).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('table tbody tr')).toHaveCount(1);
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыт по ссылке',
-      );
+      await expectClientSearchEmpty(page);
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
     }
@@ -763,6 +766,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
     request,
   }) => {
     const target = await createTestClient(request, { name: `US2-deeplink-${uid()}` });
+    let foreign: { id: string } | null = null;
 
     try {
       await page.goto(`/clients?clientId=${target.id}`);
@@ -774,15 +778,33 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await closeByBackdrop(page);
       await expect(page).toHaveURL(new RegExp(`clientId=${target.id}`));
       await expect(page.locator('table tbody tr')).toHaveCount(1);
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыт по ссылке',
-      );
+      await expectClientSearchEmpty(page);
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
 
-      // No auto-re-open: give the latch a window to (wrongly) fire — the
-      // modal must stay closed after a list refetch settles.
-      await page.waitForTimeout(1000);
-      await expect(modal).not.toBeVisible();
+      // No auto-re-open, probed deterministically (no blind sleep): a
+      // foreign clients write (API context) broadcasts the SSE invalidate
+      // frame → the active narrowed list query refetches → the auto-open
+      // effect re-runs on the fresh `items` identity. Await that refetch,
+      // then poll modal-absence for a short bounded window so a latch
+      // regression that fires on the refetch commit cannot slip through.
+      const narrowedRefetch = page.waitForResponse(
+        (resp) => {
+          const url = new URL(resp.url());
+          return (
+            url.pathname === '/api/v1/clients' &&
+            url.searchParams.getAll('id').includes(target.id) &&
+            resp.status() === 200
+          );
+        },
+        { timeout: 10_000 },
+      );
+      foreign = await createTestClient(request, { name: `US2-foreign-${uid()}` });
+      await narrowedRefetch;
+      const absenceDeadline = Date.now() + 750; // ~1 React commit >> effect run
+      while (Date.now() < absenceDeadline) {
+        await expect(modal).not.toBeVisible();
+        await page.waitForTimeout(150);
+      }
 
       // A manual row click re-opens the card over the narrowed table.
       await page.locator('table tbody tr').filter({ hasText: target.name }).click();
@@ -790,6 +812,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await closeByBackdrop(page);
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
+      if (foreign) await cleanup(request, `/api/v1/clients/${foreign.id}`);
     }
   });
 
@@ -819,12 +842,10 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await expect(modal).not.toBeVisible();
 
       // …the chip shows the multi-id copy with the count…
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыто по ссылке: 3',
-      );
+      await expectDeepLinkChip(page, 'Открыто по ссылке: 3');
 
       // …and the search box stays empty.
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expectClientSearchEmpty(page);
 
       // A row click opens the card; closing it keeps the narrowed table.
       await page.locator('table tbody tr').filter({ hasText: b.name }).click();
@@ -861,7 +882,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await closeByBackdrop(page);
 
       // AND: a user filter narrowing further (search by the shared prefix).
-      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      const searchInput = clientSearchInput(page);
       await searchInput.fill(`US4target-${ts}`);
       await expect(
         page.locator('table tbody tr').filter({ hasText: target.name }),
@@ -933,10 +954,8 @@ test.describe('Deep-link ?clientId= — #232', () => {
     await page.goto(`/clients?clientId=${dead.id}`);
     await expect(page).toHaveURL(new RegExp(`clientId=${dead.id}`));
     await expect(page.getByText('Нет записей')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-      'Открыт по ссылке',
-    );
-    await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+    await expectDeepLinkChip(page, 'Открыт по ссылке');
+    await expectClientSearchEmpty(page);
     // No modal can open for a vanished client.
     await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
 
@@ -956,9 +975,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await expect(
         page.locator('table tbody tr').filter({ hasText: live.name }),
       ).toBeVisible();
-      await expect(
-        page.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
-      ).toHaveText('Открыто по ссылке: 2');
+      await expectDeepLinkChip(page, 'Открыто по ссылке: 2');
       // Two ids ⇒ no auto-open.
       await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
     } finally {
@@ -1001,6 +1018,10 @@ test.describe('Deep-link ?clientId= — #232', () => {
     request,
   }) => {
     const target = await createTestClient(request, { name: `US6-deeplink-${uid()}` });
+    // Second factory row makes the all-garbage leg self-contained: the
+    // "full table" claim is proven by THESE two rows being present (no
+    // reliance on unrelated seed counts).
+    const filler = await createTestClient(request, { name: `US6-filler-${uid()}` });
 
     try {
       // Mix: not-a-uuid, an empty value, a padded uuid — only the strict
@@ -1015,27 +1036,28 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await expect(
         page.locator('table tbody tr').filter({ hasText: target.name }),
       ).toBeVisible();
-      await expect(page.locator('[data-testid="client-deeplink-chip"] span[aria-live]')).toHaveText(
-        'Открыт по ссылке',
-      );
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
       const modal = page.locator('[data-testid="client-card-modal"]');
       await expect(modal).toBeVisible({ timeout: 10_000 });
       await closeByBackdrop(page);
 
       // All-garbage ⇒ the param is ignored entirely: full default table,
-      // no chip, no modal.
+      // no chip, no modal. Both factory rows prove the "full table" part
+      // without depending on seed data.
       await page.goto(`/clients?clientId=abc&clientId=${encodeURIComponent(' %20 ')}`);
       await expect(page).toHaveURL(/clientId=/); // address NOT wiped
       await expect(
-        page.locator('table tbody tr').first(),
+        page.locator('table tbody tr').filter({ hasText: target.name }),
       ).toBeVisible({ timeout: 10_000 });
-      const rows = await page.locator('table tbody tr').count();
-      expect(rows).toBeGreaterThan(1); // full table, not a narrowing
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: filler.name }),
+      ).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
       await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
-      await expect(page.locator('input[placeholder*="Поиск"]')).toHaveValue('');
+      await expectClientSearchEmpty(page);
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
+      await cleanup(request, `/api/v1/clients/${filler.id}`);
     }
   });
 
@@ -1239,7 +1261,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       //    ordering under fullyParallel seeds.
       await page.locator('a[aria-label="Клиенты"]').click();
       await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
-      const searchInput = page.locator('input[placeholder*="Поиск"]');
+      const searchInput = clientSearchInput(page);
       await expect(searchInput).toBeVisible({ timeout: 10_000 });
       await searchInput.fill(newClientName);
       // Wait for debounced search to kick in (300ms debounce + network)

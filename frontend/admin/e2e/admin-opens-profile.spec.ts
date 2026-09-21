@@ -1,10 +1,10 @@
 import { test, expect } from './fixtures/test';
-import type { Page } from '@playwright/test';
 import {
-  waitForScheduleReady,
-  openModal,
   gotoScheduleWeek,
   clickActivityCard,
+  resolveRecordDate,
+  expectDeepLinkChip,
+  expectClientSearchEmpty,
 } from './fixtures/helpers';
 import {
   createTestClient,
@@ -13,7 +13,6 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
-import { queryDBRow } from './fixtures/db-query';
 
 /**
  * US-M04 (GH #232 re-anchored): admin opens a client profile from a record's
@@ -25,15 +24,6 @@ import { queryDBRow } from './fixtures/db-query';
  * card directly, instead of relying on seed data via openModal().
  */
 
-/** Resolve the record's activity date (YYYY-MM-DD) from the DB. */
-function recordActivityDate(recordId: string): string | null {
-  const row = queryDBRow(
-    `SELECT substr(a.start, 1, 10) AS d FROM records r ` +
-      `JOIN activities a ON r.activity_id = a.id WHERE r.id = '${recordId.replace(/'/g, "''")}'`,
-  );
-  return row?.d ?? null;
-}
-
 test('US-M04: Admin can open client profile from a record', async ({
   page,
   request,
@@ -44,9 +34,9 @@ test('US-M04: Admin can open client profile from a record', async ({
 
   try {
     // Navigate to the week of the record's activity and open its card.
-    const targetDate = recordActivityDate(record.id);
-    if (!targetDate) throw new Error(`No activity date for record ${record.id}`);
-    await gotoScheduleWeek(page, targetDate);
+    const resolved = resolveRecordDate(record.id);
+    if (!resolved) throw new Error(`No activity date for record ${record.id}`);
+    await gotoScheduleWeek(page, resolved.date);
     const card = page.locator(`[data-testid="activity-${activity.id}"]`);
     await expect(card).toBeVisible({ timeout: 5_000 });
     await clickActivityCard(page, card);
@@ -79,10 +69,8 @@ test('US-M04: Admin can open client profile from a record', async ({
     await expect(
       newPage.locator('[data-testid="client-card-modal"]'),
     ).toBeVisible({ timeout: 10_000 });
-    await expect(newPage.locator('input[placeholder*="Поиск"]')).toHaveValue('');
-    await expect(
-      newPage.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
-    ).toHaveText('Открыт по ссылке');
+    await expectClientSearchEmpty(newPage);
+    await expectDeepLinkChip(newPage, 'Открыт по ссылке');
 
     await newPage.close();
   } finally {

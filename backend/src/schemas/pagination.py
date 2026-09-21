@@ -3,6 +3,7 @@
 from typing import Annotated, TypeVar
 from uuid import UUID
 
+from fastapi import Query
 from pydantic import BaseModel, BeforeValidator, Field
 
 # GH #232 §3.1: one canonical ceiling for BOTH list-size caps — the
@@ -26,6 +27,24 @@ def _dedup_ids(v: list[_T] | None) -> list[_T] | None:
     if v is None:
         return None
     return list(dict.fromkeys(v))
+
+# GH #232 §3.1 Task 2 review: the ONE canonical ``?id=`` query contract —
+# UUID-only values (garbage → 422 via uuid_parsing), the shared
+# MAX_LIST_IDS ceiling (>100 DISTINCT values after dedup → 422 too_long),
+# and order-preserving dedup of repeats BEFORE the cap. Both injection
+# shapes reuse this alias so the contract cannot drift between them:
+#   * ``Annotated[ClientListParams, Query()]`` model field (clients…):
+#     the ``id`` field below carries the SAME validator + max_length;
+#   * sibling scalar-style param (locations — scalar mixing with the
+#     Depends() pagination model forbids the model shape, fastapi #12481):
+#     ``IdListQuery`` in ``api/v1/locations.py`` wraps this alias.
+# Query constraints ride INSIDE the Annotated (default outside) — the
+# canonical FastAPI shape.
+IdQueryParam = Annotated[
+    list[UUID] | None,
+    BeforeValidator(_dedup_ids),
+    Query(max_length=MAX_LIST_IDS),
+]
 
 
 class PaginationParams(BaseModel):
@@ -52,7 +71,10 @@ class PaginationParams(BaseModel):
     # (BeforeValidator runs ahead of field constraints). max_length, not
     # le: pydantic 2 applies le to the whole list object and raises
     # TypeError (→ 500); max_length is the list-length constraint
-    # (too_long → 422).
+    # (too_long → 422). The element type + validator mirror the shared
+    # ``IdQueryParam`` alias above (the Depends shape re-declares them as
+    # a field because FastAPI ignores a Query() inside a model field's
+    # Annotated — only the constraints below reach validation).
     id: Annotated[list[UUID] | None, BeforeValidator(_dedup_ids)] = Field(
         default=None, max_length=MAX_LIST_IDS
     )

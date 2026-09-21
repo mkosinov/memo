@@ -6,13 +6,15 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Generic, TypeVar, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel
 from sqlalchemy import Select, delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
 
 from src.domain.deletion import (
     CASCADE_HANDLERS,
@@ -85,7 +87,9 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         equality-only «column = value»; an IN-list is not an equality).
         """
         stmt = select(self._model)
-        id_pred = ids_in_predicate(getattr(self._model, "id"), ids)
+        # ``self._model`` is typed ``type`` — the ignore keeps the id access
+        # honest (every concrete model has the AbstractModel UUID PK).
+        id_pred = ids_in_predicate(self._model.id, ids)  # type: ignore[attr-defined]
         if id_pred is not None:
             stmt = stmt.where(id_pred)
         for key, value in filters.items():

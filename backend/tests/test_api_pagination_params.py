@@ -91,3 +91,21 @@ def test_id_filter_sibling_query_over_100_values_returns_422(api_client, endpoin
     ids = [str(UUID(int=i)) for i in range(101)]
     resp = api_client.get(endpoint, params=[("id", v) for v in ids])
     assert resp.status_code == 422
+
+
+# Repeat-parity: dedup runs BEFORE the MAX_LIST_IDS cap on BOTH injection
+# shapes — ?id=X repeated 101 times is ONE distinct id → 200, not 422.
+# Guards the shared-contract reuse (#232 review Task 2): the sibling-Query
+# shape must not restate the cap without the shared _dedup_ids validator.
+@pytest.mark.parametrize("endpoint", ID_FILTER_ENDPOINTS)
+def test_id_filter_repeated_keys_over_100_dedup_before_cap_ok(api_client, endpoint):
+    resp = api_client.get(endpoint, params=[("id", str(UUID(int=1)))] * 101)
+    assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
+def test_id_filter_sibling_query_repeated_keys_over_100_dedup_before_cap_ok(
+    api_client, endpoint,
+):
+    resp = api_client.get(endpoint, params=[("id", str(UUID(int=1)))] * 101)
+    assert resp.status_code == 200

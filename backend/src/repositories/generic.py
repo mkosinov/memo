@@ -7,10 +7,8 @@ objects for create/update payloads.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, TypeAlias, TypeVar
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy import Select, func, not_, select
@@ -20,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.base import Base
 from src.models.enums import ArchiveStatus
 from src.repositories.search import SearchField, ids_in_predicate, search_predicate
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -70,9 +72,9 @@ class BaseRepository:
         stmt = select(table)
         if options:
             stmt = stmt.options(*options)
-        # GH #232: ``table.id`` is the AbstractModel UUID PK — ``getattr``
+        # GH #232: ``table.id`` is the AbstractModel UUID PK — the ignore
         # keeps the TypeVar honest (no declared ``id`` on ``type[ModelType]``).
-        id_pred = ids_in_predicate(getattr(table, "id"), ids)
+        id_pred = ids_in_predicate(table.id, ids)  # type: ignore[attr-defined]
         if id_pred is not None:
             stmt = stmt.where(id_pred)
         if q is not None:
@@ -267,7 +269,7 @@ class ArchiveRepository(BaseRepository):
             stmt = stmt.where(table.is_active)
         elif status == ArchiveStatus.ARCHIVED:
             stmt = stmt.where(not_(table.is_active))
-        id_pred = ids_in_predicate(getattr(table, "id"), ids)
+        id_pred = ids_in_predicate(table.id, ids)  # type: ignore[attr-defined]
         if id_pred is not None:
             stmt = stmt.where(id_pred)
         if q is not None:

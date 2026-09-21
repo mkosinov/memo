@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -24,7 +23,7 @@ from src.schemas.location import (
     LocationUpdate,
     ReorderRequest,
 )
-from src.schemas.pagination import MAX_LIST_IDS, PaginationParams
+from src.schemas.pagination import IdQueryParam, PaginationParams
 from src.services.location import LocationService, get_location_service
 
 router = APIRouter(tags=["locations"])
@@ -63,12 +62,12 @@ _LOCATION_SORT_MAP: dict[str, list] = {
 
 
 # GH #232 §3.1: typed ``?id=`` list for the locations list — the shared
-# MAX_LIST_IDS ceiling (parity with the pagination-model field; garbage →
-# 422 via uuid_parsing, >100 keys → 422 too_long). Query constraints ride
-# INSIDE the Annotated (default outside) — the canonical FastAPI shape.
-IdListQuery = Annotated[
-    list[UUID] | None, Query(max_length=MAX_LIST_IDS)
-]
+# canonical contract (``IdQueryParam`` in schemas/pagination.py: UUID-only,
+# MAX_LIST_IDS ceiling, dedup of repeats BEFORE the cap). The sibling-param
+# shape is required by upstream fastapi #12481 (scalar query params mixed
+# with the Depends() pagination model forbid the ``Annotated[Model,
+# Query()]`` form) — only the CONTRACT is shared, not the injection shape.
+IdListQuery = IdQueryParam
 
 
 def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) -> list:
@@ -99,9 +98,9 @@ async def list_locations(
     q: str | None = Query(None, min_length=2, max_length=100),
     # GH #232 §3.1: the Depends() pagination model silently drops
     # list-typed fields (FastAPI body-classification quirk), so the ``id``
-    # set rides a sibling scalar-style Query param (UUID-only, ≤100 keys —
-    # MAX_LIST_IDS parity via the IdListQuery alias above; repeats deduped
-    # server-side by SQL IN).
+    # set rides a sibling scalar-style Query param — the shared
+    # IdListQuery contract (UUID-only, dedup of repeats BEFORE the
+    # ≤MAX_LIST_IDS cap; row-level dedup follows from SQL IN).
     id: IdListQuery = None,
 ) -> PaginatedResponse[LocationResponse]:
     """Return locations filtered by archive status (default: active),

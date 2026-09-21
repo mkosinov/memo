@@ -15,15 +15,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-import pytest
-
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
 from src.repositories.generic import ArchiveRepository
 from src.schemas.location import LocationResponse
 from src.services.location import LocationService
 
-pytestmark = pytest.mark.asyncio
+# No module-level asyncio mark: the two _list_stmt tests are SYNC —
+# asyncio_mode=auto (pyproject) picks up only the async defs.
 
 
 def _location_service() -> LocationService:

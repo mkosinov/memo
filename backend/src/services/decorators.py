@@ -159,10 +159,15 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
         # ── GH #344: open the audit accumulator (spec §4.4) ─────────────
         # The wrapper that receives a token OWNS it (transaction outer
         # boundary); nested wrappers get None and neither insert nor
-        # reset. LAZY import — cycle precedent (see above + audit.py).
+        # reset. ``entity_name`` doubles as the TARGET entity (spec
+        # §4.2): repository auto-collection journals rows only for the
+        # transaction's own service entity; ``None`` (selfless scenario
+        # wrapper) keeps auto-collection off — scenarios mark their rows
+        # explicitly (§4.3). LAZY import — cycle precedent (see above +
+        # audit.py).
         from src.events import audit as _audit
 
-        audit_token = _audit.open_audit()
+        audit_token = _audit.open_audit(entity_name)
         try:
             if has_self:
                 result = await func(self, *args, **kwargs)

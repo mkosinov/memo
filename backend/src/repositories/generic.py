@@ -3,6 +3,25 @@
 Stateless — single instance serves all models. Each method takes
 ``table`` (SQLAlchemy model class) and accepts Pydantic ``BaseModel``
 objects for create/update payloads.
+
+GH #344 Task 3 — every MUTATION method auto-collects a raw audit
+record ``{entity, action, entity_id, before, after}`` into the
+accumulator opened by ``@transactional`` (spec §4.2/§4.6):
+
+* the entity name comes from the #239 dictionary (``MODEL_ENTITY``),
+  imported LAZILY inside the staging helper — a top-level import would
+  drag every service into the repository import graph (cycle hazard,
+  see ``src/events/entities.py`` WARNING);
+* the audit module owns the accumulator-side rules (target entity,
+  seniority, serialization/masking/label) — the repository only builds
+  the raw diff: old values are read from the row BEFORE mutation,
+  ``create`` snapshots the signature key fields with ``before=None``,
+  ``delete`` with ``after=None``;
+* no-op writes stage nothing: a field whose value did not change never
+  enters the diff, and an empty diff means no journal row (§5.1);
+* ``reorder`` stages ONE row per operation — no ``entity_id``, label
+  «N объектов», no snapshot — and none at all when the order did not
+  actually change (§4.6).
 """
 
 from __future__ import annotations
@@ -31,6 +50,103 @@ ModelType = TypeVar("ModelType", bound=Base)
 # rejects subscripting the ``type``-statement alias form ("Bad number of
 # arguments for type alias"), while this TypeAlias form works.
 ModelList: TypeAlias = list
+
+
+# ─── GH #344: repository-side audit auto-collection (spec §4.2/§4.6) ──────────
+
+
+def _stage_auto(
+    table: type[Base],
+    *,
+    action: str,
+    entity_id: str | None,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    entity_label: str | None = None,
+) -> None:
+    """Stage one raw audit record for a repository mutation (spec §4.2).
+
+    Cheap no-op outside an open accumulator (reads/seeds/CLI never pay
+    for journaling); the entity name resolution is lazy (import-cycle
+    hazard — ``MODEL_ENTITY``'s module walks every service). The
+    accumulator-side rules — target-entity match, seniority vs explicit
+    ``mark_audit``, pair composition, serialization/masking/label —
+    live in the audit module (``stage_auto``).
+    """
+    from src.events import audit
+
+    if audit.pending_rows() is None:
+        return  # no open accumulator — nothing is journaled (§4.1 context)
+    # LAZY import — cycle hazard: the dictionary module walks all services.
+    from src.events.entities import MODEL_ENTITY
+
+    entity = MODEL_ENTITY.get(table)
+    if entity is None:
+        return  # not a canonical #239 entity — never journaled
+    audit.stage_auto(
+        entity=entity,
+        action=action,
+        entity_id=entity_id,
+        before=before,
+        after=after,
+        entity_label=entity_label,
+    )
+
+
+def _raw_diff(instance: Any, payload: dict[str, Any]) -> tuple[dict, dict] | None:
+    """``(before, after)`` raw dicts for payload fields that CHANGE.
+
+    ``before`` is read from the (not-yet-mutated) row — the caller must
+    invoke this BEFORE applying ``setattr``s (spec §4.2 invariant:
+    old values are fixed before the first in-session mutation).
+    Unchanged fields are dropped (no-op fields never journal, §5.1);
+    ``None`` when NOTHING changed → no journal row at all.
+    """
+    before: dict[str, Any] = {}
+    after: dict[str, Any] = {}
+    for key, new in payload.items():
+        old = getattr(instance, key, None)
+        if old != new:
+            before[key] = old
+            after[key] = new
+    return (before, after) if after else None
+
+
+def _raw_snapshot(
+    instance: Any, table: type[Base]
+) -> dict[str, Any]:
+    """Raw snapshot dict of the signature key fields (create/delete, §5.1).
+
+    Only the signature-declared carrying fields, never blobs/free text.
+    Missing attributes snapshot as ``None`` (signature/model drift
+    stays inert).
+    """
+    # LAZY imports — cycle hazard (see _stage_auto).
+    from src.events import audit
+    from src.events.entities import MODEL_ENTITY
+
+    entity = MODEL_ENTITY.get(table)
+    fields = audit.entity_snapshot_fields(entity) if entity is not None else ()
+    return {field: getattr(instance, field, None) for field in fields}
+
+
+def _stage_reorder(table: type[Base], updated: list[Any], changed: bool) -> None:
+    """One audit row per reorder operation (spec §4.6).
+
+    ``entity_id`` is null, the label is «N объектов» (N = reordered
+    objects), no snapshot; an operation that did not change any
+    ``sort_order`` stages nothing (no-op).
+    """
+    if not changed or not updated:
+        return
+    _stage_auto(
+        table,
+        action="reorder",
+        entity_id=None,
+        before=None,
+        after=None,
+        entity_label=f"{len(updated)} объектов",
+    )
 
 
 class BaseRepository:
@@ -154,6 +270,15 @@ class BaseRepository:
         session.add(instance)
         await session.flush()
         await session.refresh(instance)
+        # Audit AFTER refresh: server/Python defaults are populated, so
+        # the create snapshot carries the real persisted key fields.
+        _stage_auto(
+            table,
+            action="create",
+            entity_id=instance.id,
+            before=None,
+            after=_raw_snapshot(instance, table),
+        )
         return instance
 
     async def update(
@@ -163,10 +288,15 @@ class BaseRepository:
         instance = await self.get(session, table, id)
         if not instance:
             return None
-        for key, value in obj.model_dump().items():
+        payload = obj.model_dump()
+        raw_diff = _raw_diff(instance, payload)
+        for key, value in payload.items():
             setattr(instance, key, value)
         await session.flush()
         await session.refresh(instance)
+        if raw_diff is not None:  # no-op (empty diff) → no journal row
+            _stage_auto(table, action="update", entity_id=id,
+                        before=raw_diff[0], after=raw_diff[1])
         return instance
 
     async def patch(
@@ -176,10 +306,14 @@ class BaseRepository:
         instance = await self.get(session, table, id)
         if not instance:
             return None
+        raw_diff = _raw_diff(instance, data)
         for key, value in data.items():
             setattr(instance, key, value)
         await session.flush()
         await session.refresh(instance)
+        if raw_diff is not None:  # no-op (empty diff) → no journal row
+            _stage_auto(table, action="update", entity_id=id,
+                        before=raw_diff[0], after=raw_diff[1])
         return instance
 
     async def delete(
@@ -189,6 +323,13 @@ class BaseRepository:
         instance = await self.get(session, table, id)
         if not instance:
             return False
+        _stage_auto(
+            table,
+            action="delete",
+            entity_id=id,
+            before=_raw_snapshot(instance, table),
+            after=None,
+        )
         await session.delete(instance)
         await session.flush()
         return True
@@ -202,13 +343,17 @@ class BaseRepository:
         Returns the reordered records in the new order.
         """
         updated: list[ModelType] = []
+        changed = False
         for idx, record_id in enumerate(ids):
             instance = await self.get(session, table, record_id)
             if instance:
+                if instance.sort_order != idx:
+                    changed = True
                 instance.sort_order = idx
                 await session.flush()
                 await session.refresh(instance)
                 updated.append(instance)
+        _stage_reorder(table, updated, changed)
         return updated
 
 
@@ -280,13 +425,17 @@ class ArchiveRepository(BaseRepository):
         Returns the reordered records in the new order.
         """
         updated: list[ModelType] = []
+        changed = False
         for idx, record_id in enumerate(ids):
             instance = await self.get(session, table, record_id)
             if instance and instance.is_active:
+                if instance.sort_order != idx:
+                    changed = True
                 instance.sort_order = idx
                 await session.flush()
                 await session.refresh(instance)
                 updated.append(instance)
+        _stage_reorder(table, updated, changed)
         return updated
 
 

@@ -18,10 +18,17 @@ Components:
   anonymous record creation are not journaled, spec §12).
 
 * **Accumulator** — the list of raw row dicts staged by
-  :func:`mark_audit` (explicit marks per spec §4.3; repository
-  auto-collection arrives in Task 3 and uses the same channel).
-  ``mark_audit`` outside an open accumulator is a no-op with a debug
-  log (same contract as ``mark_changed``).
+  :func:`mark_audit` (explicit marks per spec §4.3) and
+  :func:`stage_auto` (repository auto-collection, spec §4.2 — Task 3).
+  ``mark_audit``/``stage_auto`` outside an open accumulator is a no-op
+  with a debug log (same contract as ``mark_changed``). The accumulator
+  also carries the transaction's TARGET entity (the service entity the
+  ``@transactional`` wrapper resolved): ``stage_auto`` writes only on
+  an exact match — cascade children of corridor-2 scenarios never
+  match and are silently dropped (spec §4.2 "one action — one row").
+  Seniority (spec §4.2): an explicit ``mark_audit`` for the same row
+  (entity + entity_id) DISPLACES the auto-collected record — in either
+  order — so one operation never yields two journal rows for one row.
 
 Serialization (spec §4.2/§5.1) happens at MARK time so the pending row
 is always JSON-insertable: dates → ISO strings, decimals → strings,
@@ -213,6 +220,20 @@ _actor: contextvars.ContextVar[AuditActor | None] = contextvars.ContextVar(
 _pending: contextvars.ContextVar[list[dict[str, Any]] | None] = (
     contextvars.ContextVar("audit_pending", default=None)
 )
+# The transaction's TARGET entity (the service entity the owning
+# ``@transactional`` wrapper resolved, spec §4.2): repository
+# auto-collection stages rows only on an exact match. Written/cleared
+# together with ``_pending`` by open_audit/reset_audit; ``None`` for a
+# selfless scenario wrapper → auto-collection is off (cascade children
+# of corridor-2 scenarios are never journaled).
+_target: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "audit_target", default=None
+)
+
+# Row-dict key marking repository AUTO-collected rows (spec §4.2);
+# stripped by ``draw_rows()`` before insertion — explicit rows never
+# carry it, and the seniority rule keys on it.
+_AUTO_FLAG = "_auto"
 
 
 @dataclass(frozen=True)
@@ -244,8 +265,17 @@ def current_actor() -> AuditActor | None:
 # ─── Accumulator (token ownership, mirrors emitter.start/reset_accumulation) ──
 
 
-def open_audit() -> contextvars.Token[list[dict[str, Any]] | None] | None:
+def open_audit(
+    target: str | None = None,
+) -> tuple[contextvars.Token[list[dict[str, Any]] | None],
+           contextvars.Token[str | None]] | None:
     """Open a fresh accumulator; ``None`` when one is already open.
+
+    ``target`` is the transaction's TARGET entity (spec §4.2) — the
+    canonical service entity the owning ``@transactional`` wrapper
+    resolved. Repository auto-collection (:func:`stage_auto`) stages
+    rows only when the mutated table's entity matches it; ``None``
+    (selfless scenario wrapper) keeps auto-collection off entirely.
 
     The ``None`` return is the ownership signal for nested decorated
     wrappers (spec §4.4): only the wrapper whose ``open_audit()`` returned
@@ -254,13 +284,24 @@ def open_audit() -> contextvars.Token[list[dict[str, Any]] | None] | None:
     """
     if _pending.get() is not None:
         return None  # sentinel: an accumulator is already open — not the owner
-    return _pending.set([])
+    pending_token = _pending.set([])
+    target_token = _target.set(target)
+    return pending_token, target_token
 
 
-def reset_audit(token: contextvars.Token[list[dict[str, Any]] | None] | None) -> None:
+def reset_audit(
+    token: tuple[contextvars.Token[list[dict[str, Any]] | None],
+                 contextvars.Token[str | None]] | None,
+) -> None:
     """Close the accumulator (owner wrapper ``finally``); ``None`` is a no-op."""
     if token is not None:
-        _pending.reset(token)
+        _pending.reset(token[0])
+        _target.reset(token[1])
+
+
+def current_target() -> str | None:
+    """The open accumulator's target entity; ``None`` when none is set."""
+    return _target.get()
 
 
 def pending_rows() -> list[dict[str, Any]] | None:
@@ -272,14 +313,19 @@ def draw_rows() -> list[dict[str, Any]] | None:
     """Take all staged rows (owner wrapper, pre-commit); clears the list.
 
     ``None`` when no accumulator is open; otherwise the (now emptied)
-    list is returned for insertion into the owning session.
+    list is returned for insertion into the owning session. The internal
+    auto-collection marker (``_auto``) is stripped from every row — the
+    inserting wrapper builds ``AuditLog(**row)`` and must not see it.
     """
     rows = _pending.get()
     if rows is None:
         return None
-    rows_copy = list(rows)
+    drawn = [
+        {key: value for key, value in row.items() if key != _AUTO_FLAG}
+        for row in rows
+    ]
     rows.clear()
-    return rows_copy
+    return drawn
 
 
 def derive_entity_label(entity: str, fields: dict[str, Any] | None) -> str | None:
@@ -341,10 +387,12 @@ def mark_audit(
     """Stage one journal row in the current transaction's accumulator.
 
     Explicit marks (spec §4.3 — scenarios and non-repository mutations)
-    supersede repository auto-collection for the same row (§4.2 seniority
-    rule — enforced by the collector in Task 3, not here). No-op with a
-    debug log when no accumulator is open (outside ``@transactional``,
-    or a task spawned before the transaction opened).
+    SUPERSDE repository auto-collection for the same row: a matching
+    staged auto row (same entity + entity_id) is removed first, and a
+    later ``stage_auto`` for the same row is skipped (§4.2 seniority
+    rule) — one operation never yields two rows for one target row.
+    No-op with a debug log when no accumulator is open (outside
+    ``@transactional``, or a task spawned before the transaction opened).
 
     The row is a plain dict keyed by ``AuditLog`` column names (the model
     import stays with the inserting wrapper — this module imports no
@@ -358,6 +406,7 @@ def mark_audit(
             "mark_audit(%s/%s) outside a transaction — ignored", entity, action
         )
         return
+    _displace_auto(rows, entity, entity_id)
     actor = _actor.get()
     if entity_label is None:
         entity_label = derive_entity_label(entity, changes) or entity
@@ -374,6 +423,117 @@ def mark_audit(
             "changes": _serialize_changes(changes),
         }
     )
+
+
+def stage_auto(
+    *,
+    entity: str,
+    action: str,
+    entity_id: str | None,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    entity_label: str | None = None,
+) -> bool:
+    """Stage one AUTO-collected row from the repository (spec §4.2).
+
+    The repository stages the RAW record — ``{entity, action, entity_id,
+    before, after}`` with old values read off the row before mutation
+    (``before=None`` for ``create``, ``after=None`` for ``delete``) — and
+    this module owns every accumulator-side rule plus the finalization:
+
+    * TARGET ENTITY — the row is staged only when ``entity`` matches the
+      accumulator's target (the corridor-1 service entity); mismatched
+      cascade children are dropped, and a target-less accumulator
+      (selfless scenario) stages nothing.
+    * SENIORITY — when an explicit ``mark_audit`` row already covers the
+      same (entity, entity_id), this row is NOT staged (§4.2).
+    * FINALIZATION — ``{field: [before, after]}`` pairs are composed
+      from the raw dicts, the label is derived from the signature
+      dictionary, and serialization/masking run through the same
+      canonical pipeline as ``mark_audit`` (override ``entity_label``
+      for reorder's «N объектов»).
+
+    Returns ``True`` when the row was staged.
+    """
+    rows = _pending.get()
+    if rows is None:
+        logger.debug(
+            "stage_auto(%s/%s) outside a transaction — ignored", entity, action
+        )
+        return False
+    if entity != _target.get():
+        return False  # not the transaction's target entity — cascade child
+    if _explicit_covers(rows, entity, entity_id):
+        return False  # an explicit mark supersedes auto-collection (§4.2)
+    actor = _actor.get()
+    changes = _compose_pairs(before, after)
+    if entity_label is None:
+        entity_label = derive_entity_label(entity, changes) or entity
+    rows.append(
+        {
+            "user_id": actor.user_id if actor else None,
+            "user_role": actor.role if actor else None,
+            "action": action,
+            "entity": entity,
+            "entity_id": entity_id,
+            "entity_label": (
+                entity_label[:_LABEL_MAX] if entity_label else entity_label
+            ),
+            "changes": _serialize_changes(changes),
+            _AUTO_FLAG: True,
+        }
+    )
+    return True
+
+
+def _compose_pairs(
+    before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Compose the ``{field: [before, after]}`` snapshot from raw dicts.
+
+    ``create`` carries only ``after`` (pairs as ``[None, value]``),
+    ``delete`` only ``before`` (``[value, None]``), ``update`` both
+    (same keys — the repository's field diff); ``None``/``None`` (the
+    reorder operation row) composes to ``None`` (no snapshot, §4.6).
+    """
+    if before is None and after is None:
+        return None
+    fields = after if after is not None else before
+    assert fields is not None  # narrowed above; for the type checker
+    return {
+        field: [
+            before.get(field) if before is not None else None,
+            after.get(field) if after is not None else None,
+        ]
+        for field in fields
+    }
+
+
+def _explicit_covers(
+    rows: list[dict[str, Any]], entity: str, entity_id: str | None
+) -> bool:
+    """An explicit (non-auto) staged row already journals this row?"""
+    return any(
+        row.get("entity") == entity
+        and row.get("entity_id") == entity_id
+        and _AUTO_FLAG not in row
+        for row in rows
+    )
+
+
+def _displace_auto(
+    rows: list[dict[str, Any]], entity: str, entity_id: str | None
+) -> None:
+    """Drop staged AUTO rows for this target — the explicit mark wins."""
+    rows[:] = [
+        row
+        for row in rows
+        if not (
+            row.get("entity") == entity
+            and row.get("entity_id") == entity_id
+            and _AUTO_FLAG in row
+        )
+    ]
 
 
 # ─── Canonical serializer + masking (spec §4.2, §5.1) ─────────────────────────

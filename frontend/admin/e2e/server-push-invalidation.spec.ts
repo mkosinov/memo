@@ -155,7 +155,9 @@ function makeC3Retry(frameLog: FrameLog) {
         await run(attempt); // то же expect, свежий таймаут — re-arm
         return; // зелено с первой попытки
       } catch (err) {
-        errors.push(`попытка ${attempt}: ${summarizeError(err)}`);
+        errors.push(
+          `попытка ${attempt}: ${summarizeError(err)}; ${describeFrames(framesAtStart)}`,
+        );
         if (attempt === 1) {
           // Съеденный повтор: зелёный прогон должен остаться читаемым.
           console.warn(`[#271] ${label}: попытка 1 не прошла, пере-вооружаю (бюджет 1 повтор)`);
@@ -163,9 +165,7 @@ function makeC3Retry(frameLog: FrameLog) {
       }
     }
     throw new Error(
-      `${label}: бюджет повторов исчерпан (2 попытки).\n` +
-        `${errors.join('\n')}\n` +
-        `${describeFrames(frameLog.frames.length)} (за всё время наблюдения)`,
+      `${label}: бюджет повторов исчерпан (2 попытки).\n${errors.join('\n')}`,
     );
   };
 
@@ -483,16 +483,16 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
     // also silent); the flap must have ENDED in a reconnect. B's real UI
     // write must still push to A within the window: convergence + the
     // standard update toast prove the channel is delivering again.
-      const marker = `Push S5 ${uid()}`;
-      let created: { id: string; client_id: string } | null = null;
-      try {
-        created = await createRecordViaUI(pageB, marker);
-        await expectUpdateToast(pageA);
-      } finally {
-        if (created) {
-          await cleanupRecord(request, created.id);
-          await cleanup(request, `/api/v1/clients/${created.client_id}`);
-        }
+    const marker = `Push S5 ${uid()}`;
+    let created: { id: string; client_id: string } | null = null;
+    try {
+      created = await createRecordViaUI(pageB, marker);
+      await expectUpdateToast(pageA);
+    } finally {
+      if (created) {
+        await cleanupRecord(request, created.id);
+        await cleanup(request, `/api/v1/clients/${created.client_id}`);
       }
-    });
+    }
   });
+});

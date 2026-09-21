@@ -116,6 +116,129 @@ describe('ClientsContext factory config (GH #140)', () => {
   });
 });
 
+// ─── #232: clientIds machine field → repeated `id` query keys ─────────────
+
+describe('ClientsContext clientIds machine field (#232)', () => {
+  beforeEach(() => {
+    mockGetClientsWithStats.mockResolvedValue(envelope());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it('sends ids when clientIds is set (seed or setFilters)', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a', 'id-b'], status: 'all' }}>
+            {children}
+          </ClientsProvider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    // Machine field reaches the fetcher as `ids` (api-client serializes it as
+    // repeated `id` query keys — explicit keys, no filters spread). The raw
+    // machine field never reaches the wire (suppressed after the spread, same
+    // pattern as `search`).
+    expect(lastWireParams().ids).toEqual(['id-a', 'id-b']);
+    expect(lastWireParams()).toHaveProperty('clientIds', undefined);
+    expect(result.current.filters.clientIds).toEqual(['id-a', 'id-b']);
+    // Deep-link status stays 'all' (archived reachable, #216 behavior).
+    expect(result.current.filters.status).toBe('all');
+  });
+
+  it('ids absent when clientIds is null (default filters)', async () => {
+    const { Wrapper } = setup();
+    renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    expect(lastWireParams().ids).toBeUndefined();
+  });
+
+  it('setFilters({clientIds}) updates the wire ids live', async () => {
+    const { Wrapper } = setup();
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      result.current.setFilters({ clientIds: ['id-a'] });
+    });
+
+    await waitFor(() => {
+      expect(lastWireParams().ids).toEqual(['id-a']);
+    });
+    // setFilters resets page to 1 (merge-patch contract of the factory).
+    expect(lastWireParams().page).toBe(1);
+  });
+
+  it('setFilters({clientIds: null}) drops ids from the wire', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a'], status: 'all' }}>
+            {children}
+          </ClientsProvider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+    expect(lastWireParams().ids).toEqual(['id-a']);
+
+    act(() => {
+      result.current.setFilters({ clientIds: null });
+    });
+
+    await waitFor(() => {
+      expect(lastWireParams().ids).toBeUndefined();
+    });
+  });
+
+  it('resetFilters clears clientIds (config defaults)', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a'], status: 'all' }}>
+            {children}
+          </ClientsProvider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      result.current.resetFilters();
+    });
+
+    await waitFor(() => {
+      expect(result.current.filters).toEqual(defaultFilters);
+    });
+  });
+});
+
 // ─── #231 T1: initialFilters seed-at-mount (deep-link single request) ───
 
 describe('ClientsContext factory initialFilters seed (#231)', () => {

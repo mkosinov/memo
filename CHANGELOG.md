@@ -77,6 +77,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status: `docs/status/2026-09-21-connection-loss-indicator-330.md`
 
 ### Fixed
+- **GH #328 — ServiceModal: поле тегов услуги (починка молчаливого стирания связей `service_tags`)** —
+  branch `328-servicemodal-tags` (6 commits `b3914eb6..cd095090`, base `9100d3ca`; 7 файлов, +656/−20;
+  спека `docs/specs/2026-09-20-servicemodal-tags-328-design.md` rev2 (панель 5/6 PASS) и план
+  `docs/plans/2026-09-20-servicemodal-tags-328-plan.md` (5/5 задач) — оба на main, веткой не менялись):
+  - **Исходный баг:** edit-save услуги отправлял `tag_ids: []` (форма тегов не знала), а канон полного
+    обновления PUT заменяет набор связей — связи `service_tags` молча стирались. Теперь форма
+    предзаполняется из `service.tags` и на сабмите маппит чипы `{id,title}[]` → `string[]`
+    `tag_ids` рядом с существующим маппингом материалов; бэкенд, контракт API, api-client и БД
+    **не менялись**.
+  - **Новое поле «Теги» в форме услуги:** чипы выбранных тегов с крестиком удаления + серверный
+    `RemoteSearchSelect` (`getTags({q, per_page: 10})`, поиск от 2 символов, дубли по id блокирует
+    пикер); работает и при создании, и при редактировании (в т.ч. архивированных — PUT признак
+    архива не трогает); изменение набора помечает форму «грязной» (подтверждение закрытия — из
+    общего `handleChange`).
+  - **Доступность (панель best-practices):** видимый лейбл связан с полем поиска через
+    `htmlFor`/`id` (`useId`), кнопки-крестики чипов несут `aria-label="Удалить тег {title}"`;
+    общий `RemoteSearchSelect` получил необязательный `inputId` (backward-compatible: внутренний
+    лейбл рендерится только при непустом `label`, `aria-label` только когда он и есть доступное имя).
+  - **e2e (новый `services-tags.spec.ts`, S1–S4):** S1 — правка только «Длительность» сохраняет
+    сид-связь (`s4`→`tag3`), строгие GET-ассерты после сохранения ловят до-фиксовое `tag_ids: []`;
+    S2 — смена набора через typeahead; S3 — создание с тегом (очистка через deferred-delete execute
+    body); S4 — снятие всех тегов без ошибок; восстановление в `finally` полным PUT-payload с
+    `tag_ids` из GET-снапшота, sqlite-чтений нет.
+  - **Чистка:** из `services-null-max-age.spec.ts` удалены sqlite-чтение тегов и битый комментарий
+    «`tags` приходит пустым» / «форма всегда шлёт `[]`» (разрешён разведкой §2.6 спеки) — оба теста
+    зелёные до и после.
+  - **Tests:** admin vitest **2342p/0f** (после T3), tsc clean, eslint 0 errors (3 pre-existing
+    warnings); e2e `services-tags` **4/4**, регресс `services` shard-rest **10/10**,
+    `services-null-max-age` **2/2**; визуальный гейт G4.5 **4/4 autonomous PASS**; полный e2e — CI.
+  - Deviation (санкционировано): S2/S4 — на `s1` вместо плановых `s5`/`s7` — полный PUT услуги с
+    визит-связанными тарифами падает `INTEGRITY_VIOLATION` (pre-existing, вне скоупа); заведён #357.
+  - Out of scope (спека §7): контракт PUT/бэкенд, перевод услуг на PATCH, bulk-теги из таблицы,
+    вынос общего «тегового поля» в shared-слой.
+  - Status: `docs/status/2026-09-21-servicemodal-tags-328.md`
 - **GH #231 — Deep-link `/clients?clientId=X`: один суженный запрос вместо двух** — branch
   `231-clients-deeplink-single-request` (3 commits `69920a24..93426dff`, base `d8e07f60`;
   5 файлов, +240/−34; спека `docs/specs/2026-09-19-clients-deeplink-single-request-design.md`

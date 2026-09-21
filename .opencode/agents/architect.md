@@ -457,18 +457,24 @@ Trigger: all tasks done, tests green. Run ONCE per phase. Skip if no user-visibl
 2. Dispatch `docser` with structured handoff. It commits meta docs into the FEATURE branch.
 3. Wait for commit SHA.
 
-## Step 6: Finishing
+## Step 6: Finishing (two dispatches — split at the PR-created boundary)
 
 1. Invoke `finishing-a-development-branch` skill.
 2. Verify the local pre-push gate (fast suites only — unit/integration + typecheck/lint, per the
    skill's Merge Gate Policy). Failing → report BLOCKED, do NOT fix.
-3. Auto-flow: push (background) → `gh pr create` → `gh pr checks --watch` → ALL green (CI is the
-   authoritative merge gate, incl. e2e shards) → `gh pr merge --squash --delete-branch` → update
-   local main → cleanup worktree + local branch. CI unavailable (quota/outage, verified with a
-   real run) → full local run incl. e2e as the merge gate (outage protocol).
-4. **Error escalation (Gate G7):** push fails / PR errors / red CI / merge errors → STOP, preserve worktree, report NEEDS_APPROVAL with PR URL and error summary.
-5. Explicit fallbacks (merge locally / keep branch / discard) — only if the manager relays an explicit user request.
-6. Report DONE: merged PR url, branch/worktree cleanup status.
+3. **Dispatch 1:** push → `gh pr create` — the PR description carries `Closes #N` (the only
+   legitimate place for a closing keyword; it auto-closes the issue at merge) → return
+   `PR_CREATED: <pr-url> branch=<branch>` IMMEDIATELY. Do NOT watch CI in this dispatch —
+   @manager flips the card to `PR (G7)` and re-dispatches you for the finish.
+4. **Dispatch 2 (the @manager re-dispatch):** `gh pr checks --watch` → ALL green (CI is the
+   authoritative merge gate, incl. e2e shards) → `gh pr merge --squash --delete-branch` →
+   update local main → cleanup worktree + local branch. CI unavailable (quota/outage, verified
+   with a real run) → full local run incl. e2e as the merge gate (outage protocol). The merge
+   completes in the SAME dispatch — never end this dispatch mid-watch.
+5. **Error escalation (Gate G7):** push fails / PR errors (Dispatch 1); red CI / merge errors
+   (Dispatch 2) → STOP, preserve worktree, report NEEDS_APPROVAL with PR URL and error summary.
+6. Explicit fallbacks (merge locally / keep branch / discard) — only if the manager relays an explicit user request.
+7. Report DONE: merged PR url, branch/worktree cleanup status.
 7. **Scratchpad Delta (v2):** the final delta is the ready-to-paste `## Recently merged` entry (issue, short title, PR) — nothing else. List follow-up candidates in the report: the manager files them as GH issues or drops them — they never go into the scratchpad.
 
 ---

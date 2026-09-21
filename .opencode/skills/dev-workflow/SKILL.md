@@ -228,6 +228,32 @@ caveats" sections) is the single source of truth for snapshot provenance,
 date stability, and why CI-only recording matters. This drill is a shortcut,
 not a second canon.
 
+### 7. Offline simulation: `setOffline` vs established SSE sockets
+
+`context.setOffline(true)` blocks NEW requests but does NOT kill an
+ESTABLISHED EventSource (SSE) socket (probe-verified on dev Chromium,
+GH #330: 27s offline → zero `onerror` events — the "zombie channel" keeps
+working). Asserting channel death after `setOffline` is vacuous. Same
+for any established socket (WebSocket included; the app is SSE-only
+today). When the scenario needs the channel DOWN, kill the connection
+ESTABLISHMENT — cold-start abort registered BEFORE `page.goto`:
+
+```ts
+await ctx.route('**/api/v1/events', (r) => r.abort('connectionreset'));
+```
+
+The ES connect fails deterministically (`onerror`, `readyState 0`);
+restore with `ctx.unroute(...)` → the reconnect fires `open`.
+`navigator.onLine` stays TRUE — SPA navigation and plain fetches keep
+working unless the abort pattern covers them.
+
+`setOffline` is NOT banned: it is the right tool for offline HTTP traffic
+(mutations/refetch — records.spec.ts S5), and it is per-context.
+
+History: "route.abort does not reliably intercept EventSource" (#239
+plan/spec §6) is about an ALREADY-ESTABLISHED socket; #330's plan S1/S2
+`setOffline` recipe was superseded by the route.abort vehicle (PR #350).
+
 ## Git worktrees
 
 ```bash

@@ -19,7 +19,9 @@ import {
  * Verifies that the correct user-facing Russian error messages appear
  * in toasts for various failure modes:
  *   1. Activity at capacity → "Недостаточно мест"
- *   2. Delete non-existent tag → "Не найдено"
+ *   2. Delete non-existent tag → "Не найдено" (#318: the 404 fires on the
+ *      dry-run preview DELETE ?dry_run=true — D5 keeps the error toast;
+ *      the D4 quiet-404 rule is commit-phase only)
  *   3. Empty location name → "Проверьте правильность заполнения полей"
  *   4. Server error 500 → "Ошибка сервера"
  *   5. Network offline → "Ошибка сети"
@@ -115,11 +117,11 @@ test.describe('Scenario 1 — Activity at capacity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 2 — Delete non-existent tag → "Не найдено"
+// Scenario 2 — Delete non-existent tag → "Не найдено" (#318 dry-run contract)
 // ---------------------------------------------------------------------------
 
 test.describe('Scenario 2 — Delete non-existent tag', () => {
-  test('shows "Не найдено" when deleting a non-existent tag', async ({ page }) => {
+  test('shows "Не найдено" when deleting a non-existent tag — 404 on the dry-run is an error toast, not the dialog (#318 contract)', async ({ page }) => {
     await waitForTagsReady(page);
 
     // Get the first real tag's ID from the table so we can intercept its delete
@@ -128,20 +130,29 @@ test.describe('Scenario 2 — Delete non-existent tag', () => {
     const testId = await firstRow.getAttribute('data-testid');
     const tagId = testId?.replace('tag-row-', '');
 
-    // Intercept DELETE for this specific tag — return 404 with TAG_NOT_FOUND
-    await page.route(`**/api/v1/tags/${tagId}`, (route) => {
-      if (route.request().method() === 'DELETE') {
-        route.fulfill({
-          status: 404,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            detail: { code: 'TAG_NOT_FOUND', message: 'Tag not found' },
-          }),
-        });
-      } else {
-        route.continue();
-      }
-    });
+    // Intercept DELETE for this specific tag — return 404 with TAG_NOT_FOUND.
+    // #318 contract: the row's delete click fires the DRY-RUN preview
+    // `DELETE /api/v1/tags/{id}?dry_run=true` FIRST (useTagsMutations
+    // removeTag → dryRunDeleteTag). The URL predicate matches by pathname,
+    // so the ?dry_run=true query string cannot break the interception the
+    // way the old glob (`**/api/v1/tags/{id}`, anchored at the full URL
+    // incl. query) did — the mock 404 must fire on the dry-run itself.
+    await page.route(
+      (url) => url.pathname === `/api/v1/tags/${tagId}`,
+      (route) => {
+        if (route.request().method() === 'DELETE') {
+          route.fulfill({
+            status: 404,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              detail: { code: 'TAG_NOT_FOUND', message: 'Tag not found' },
+            }),
+          });
+        } else {
+          route.continue();
+        }
+      },
+    );
 
     // Set up dialog handler BEFORE clicking delete
     page.on('dialog', (dialog) => dialog.accept());
@@ -156,8 +167,22 @@ test.describe('Scenario 2 — Delete non-existent tag', () => {
     await expect(dropdown).toBeVisible();
     await dropdown.locator('button:has-text("Удалить")').click();
 
-    // Verify toast shows "Не найдено"
+    // Verify toast shows "Не найдено" — a 404 on the DRY-RUN keeps its
+    // error surface (D5: non-409 dry-run errors are never intercepted;
+    // parseApiError maps TAG_NOT_FOUND → «Не найдено»). The D4 quiet-404
+    // rule is COMMIT-phase only (pinned in tags-delete-contract.spec.ts).
     await expectErrorToast(page, 'Не найдено');
+
+    // No dependency dialog (a 409-with-tree would open one) — a 404 dry-run
+    // never reaches the DeleteDialog, and the deferred pipeline never
+    // starts: no optimistic removal, the row stays visible.
+    await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+    await expect(firstRow).toBeVisible();
+    // The undo toast of the deferred flow (optimistic delete) must not
+    // appear either — the flow died on the dry-run.
+    await expect(
+      page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено. Отменить' }),
+    ).toHaveCount(0);
   });
 });
 

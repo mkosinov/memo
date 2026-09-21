@@ -59,6 +59,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status: `docs/status/2026-09-21-clients-deeplink-single-request-231.md`
 
 ### Changed
+- **GH #318 — Tags: удаление занятого тега — единый контракт удалений (этап 1 из #346)** —
+  branch `318-tags-busy-delete` (7 commits `086adb67..cca86cef`, base `c7ce190f`; 21 файл,
+  +3687/−162; спека `docs/specs/2026-09-19-tags-busy-delete-318-design.md` rev9, план
+  `docs/plans/2026-09-20-tags-busy-delete-318-plan.md`; канон `docs/domain-rules/_overview.md`
+  + `tags.md` на main не менялся):
+  - **Домен — Tag входит в семейную матрицу (D1):** `FK_MATRIX[Tag]` — 8 join-зависимостей
+    (`service_tags`, `activity_tags`, `master_tags`, `location_tags`, `client_tags`,
+    `visitor_tags`, `record_tags`, `photo_tags`), все `cascade` / `auto=False` (perspective-auto
+    правило: та же join-таблица остаётся auto на стороне родителя и видима на стороне тега);
+    8 счётчиков + 8 id-коллекторов + 8 item-коллекторов (`{id, label}`, PII-граница — без
+    телефонов, Client с NULL name → «Аноним», master id = `staff_id`) + 8 Core-хендлеров
+    join-delete; `resolve_delete` поднят с `ArchiveService` на `GenericService` (`086adb67`).
+  - **Полный DELETE-контракт `/api/v1/tags/{id}` (D2, зеркало записей #285):**
+    `?dry_run=true` — чистое превью (занят → 409 `has_dependencies` с деревом+items, чист →
+    204 без удаления, нет → 404); голый DELETE и тело без `expected` → 422
+    `expected_state_required` (проверка формы раньше probe — неизвестный id тоже 422);
+    `?dry_run`+`resolutions` → 422 `dry_run_with_resolutions_forbidden`; тело
+    `{resolutions?, expected}` → probe → `collect_dependencies` → subset-сверка `expected`
+    (409 `stale_dependencies` на появление сверх подтверждённого; исчезнувшая не блокирует) →
+    валидация `resolutions` → `resolve_delete` → 204 (`2586b9d7`).
+  - **Отложенное удаление с кольцом 5 с (D4):** api-client `dryRunDeleteTag` +
+    `resolveDeleteTag(id, {expected, resolutions?})` (обязательный `expected`); `useDeleteTag`
+    по образцу `useDeleteRecord` (dry-run по клику → enqueue, диалог на 409, confirm →
+    `{resolutions, expected}` из items, undo из item-снапшота кэша `['tags']`, commit-фейлы:
+    404 тихо / 409-stale «данные изменились»+«Обновить» / сеть → undo); `TagsTable` проводка;
+    `DeleteDialog` — тег-сторонние подписи («Услуги: 2 (сняты)» + однострочники), родительская
+    сторона без изменений (`2bed6e56`, `95a1ea18`).
+  - **Extras:** `cleanupTag` для e2e-фикстур — голый `DELETE /tags` в `cleanup()` молча утекал
+    бы под 422-контрактом, 4 call-site исправлены + аудит существующих e2e на голый DELETE
+    `/tags` (`cca86cef`).
+  - **Tests:** pytest полный **2376p/0f** (15 skip pre-existing); vitest полный **2300p/0f**;
+    новый e2e `tags-delete-contract` S1/S2/S3/S9 **4/4** + затронутые аудитом спеки **10/10**
+    (standalone; полный e2e — CI PR); визуальный комплаенс **13/13 PASS**
+    (`/tmp/opencode/visual-318/`); сценарии S1–S10 спеки §4 закрыты (e2e/pytest/vitest по
+    маппингу задач).
+  - Status: `docs/status/2026-09-21-tags-busy-delete-318.md`
 - **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на
   deferred, честный тост ошибок без ответа сервера** — branch `record-delete-unified-contract-243`
   (12 commits incl. docs: `83a4f8db..`, base `8b18b548`; 17 файлов, +836/−257; спека

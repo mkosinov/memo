@@ -422,6 +422,14 @@ export function linkPhotoTag(photoId: string, tagId: string): void {
   );
 }
 
+/** Link a record to a tag via the record_tags join table (GH #318 — the
+ *  table has no API writer; backend domain tests insert the same way). */
+export function linkRecordTag(recordId: string, tagId: string): void {
+  executeSQL(
+    `INSERT INTO record_tags (record_id, tag_id) VALUES (${sqlValue(recordId)}, ${sqlValue(tagId)})`,
+  );
+}
+
 /**
  * Link an already-seeded user to a staff card by phone (users have no create
  * endpoint; backend tests link via UPDATE users SET staff_id=…). Renamed from
@@ -583,6 +591,12 @@ export async function cleanup(api: APIRequestContext, path: string) {
     // apply (bare DELETE → 422 expected_state_required).
     return cleanupActivity(api, activityMatch[1]);
   }
+  const tagMatch = path.match(/^\/api\/v1\/tags\/([^/?]+)$/);
+  if (tagMatch) {
+    // #318 unified DELETE contract — same as records/activities: the bare
+    // DELETE (and the resolutions-only retry below) would 422 now.
+    return cleanupTag(api, tagMatch[1]);
+  }
   try {
     const resp = await api.delete(`${BACKEND}${path}`);
     if (resp.status() === 409) {
@@ -656,6 +670,56 @@ export async function cleanupRecord(api: APIRequestContext, recordId: string) {
           : { expected };
     }
     await api.delete(`${BACKEND}/api/v1/records/${recordId}`, { data: payload });
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Hard-delete a tag in cleanup under the GH #318 DELETE contract (a mirror
+ * of {@link cleanupRecord} — the tag route is the same family shape).
+ *
+ * The bare DELETE is rejected now (422 `expected_state_required`; the old
+ * `cleanup` resolutions-only retry too). Flow:
+ *   1. `?dry_run=true` preview — pure, never deletes:
+ *        404 → already gone, done;
+ *        204 → clean tag → execute with `{expected: {}}`;
+ *        409 → tree: build `expected` from the nodes' `items` ids (every
+ *              tag dep is non-auto and carries items) and `resolutions` =
+ *              cascade for every dep → execute.
+ * All 8 tag deps are cascade + items-carrying, so the busy path always
+ * sends both maps. `stale_dependencies` at execute-time is impossible:
+ * `expected` is built from the tree fetched milliseconds earlier.
+ */
+export async function cleanupTag(api: APIRequestContext, tagId: string) {
+  try {
+    const preview = await api.delete(`${BACKEND}/api/v1/tags/${tagId}?dry_run=true`);
+    if (preview.status() === 404) return; // already deleted — nothing to clean
+    let payload: Record<string, unknown> = { expected: {} };
+    if (preview.status() === 409) {
+      const body = (await preview.json().catch(() => null)) as {
+        dependencies?: Array<{
+          entity: string;
+          allowed_actions?: string[];
+          items?: Array<{ id: string }> | null;
+        }>;
+      } | null;
+      const expected: Record<string, string[]> = {};
+      const resolutions: Record<string, string> = {};
+      for (const dep of body?.dependencies ?? []) {
+        if (dep.items && dep.items.length > 0) {
+          expected[dep.entity] = dep.items.map((item) => item.id);
+        }
+        if ((dep.allowed_actions ?? []).includes('cascade')) {
+          resolutions[dep.entity] = 'cascade';
+        }
+      }
+      payload =
+        Object.keys(resolutions).length > 0
+          ? { resolutions, expected }
+          : { expected };
+    }
+    await api.delete(`${BACKEND}/api/v1/tags/${tagId}`, { data: payload });
   } catch {
     // Ignore cleanup errors
   }

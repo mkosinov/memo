@@ -16,7 +16,7 @@ type ArchiveFn = (id: string) => Promise<unknown>;
 
 function renderDialog(props: {
   entityName: string;
-  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record';
+  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag';
   entityId: string;
   dependencies: DependencyNode[];
   onDone: () => void;
@@ -639,5 +639,180 @@ describe('DeleteDialog — Mode A (material 409, GH #223 §7)', () => {
     const row = screen.getByTestId('dep-service_materials');
     expect(row).toHaveTextContent('→ Материалы: 2 (удалены)');
     expect(row.querySelector('input')).toBeNull();
+  });
+});
+
+// ─── GH #318 (spec D9) — tag-side labels ─────────────────────────────────────
+// The tag dry-run tree reuses the eight *_tags entities, but FROM THE TAG'S
+// SIDE (all non-auto, relation = the PARENT entity). Five of them used to be
+// hardcoded in AUTO_ENTITY_LABEL as «Теги» (parent side) — removed there so
+// the tag side derives plurals from the relation; the parent side falls into
+// the RELATION_PLURAL['Тег'] fallback and renders unchanged.
+
+describe('DeleteDialog — tag-side labels (GH #318 D9)', () => {
+  // Tag tree fixture (D1: all 8 non-auto cascade, relations = parents; the
+  // two-dep subset keeps the render assertions focused).
+  const TAG_TREE: DependencyNode[] = [
+    {
+      entity: 'service_tags', auto: false,
+      relation: 'Услуга',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'svc-1', label: 'Стрижка' },
+        { id: 'svc-2', label: 'Маникюр' },
+      ],
+    },
+    {
+      entity: 'master_tags', auto: false,
+      relation: 'Мастер',
+      count: 3,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'st-1', label: 'Анна' },
+        { id: 'st-2', label: 'Мария' },
+        { id: 'st-3', label: 'Ольга' },
+      ],
+    },
+  ];
+
+  it('tag title: «Удаление «тега Живопись»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: TAG_TREE,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «тега Живопись»/)).toBeInTheDocument();
+  });
+
+  it('dep lines label PARENT plurals via relation — not «Теги» (AUTO_ENTITY_LABEL fallback removed)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: TAG_TREE,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const serviceRow = screen.getByTestId('dep-service_tags');
+    expect(serviceRow).toHaveTextContent('Услуги — будут сняты:');
+    expect(serviceRow).not.toContainHTML('Теги');
+
+    const masterRow = screen.getByTestId('dep-master_tags');
+    expect(masterRow).toHaveTextContent('Мастера — будут сняты:');
+  });
+
+  it('item one-liners render under each parent group (D6/D9в)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: TAG_TREE,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText('Стрижка')).toBeInTheDocument();
+    expect(screen.getByText('Маникюр')).toBeInTheDocument();
+    expect(screen.getByText('Анна')).toBeInTheDocument();
+  });
+
+  it('counter-line suffix for the tag type is «снят/сняты», not «удалён/удалены» (per-type suffix)', () => {
+    // Node WITHOUT items exercises the legacy counter line with the
+    // tag-specific suffix (nodes with items hide the counter line).
+    const tree: DependencyNode[] = [
+      { entity: 'location_tags', auto: false, relation: 'Локация', count: 1, allowed_actions: ['cascade'], message: null },
+      { entity: 'client_tags', auto: false, relation: 'Клиент', count: 5, allowed_actions: ['cascade'], message: null },
+      { entity: 'photo_tags', auto: false, relation: 'Фото', count: 3, allowed_actions: ['cascade'], message: null },
+    ];
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: tree,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-location_tags')).toHaveTextContent('→ Локации: 1 (снят)');
+    expect(screen.getByTestId('dep-client_tags')).toHaveTextContent('→ Клиенты: 5 (сняты)');
+    expect(screen.getByTestId('dep-photo_tags')).toHaveTextContent('→ Фото: 3 (сняты)');
+  });
+
+  it('group headers for item nodes use the «сняты» tail too (D9в header wording)', () => {
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: TAG_TREE,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // Both item-carrying nodes render «— будут сняты:» headers.
+    expect(screen.getByText('Услуги — будут сняты:')).toBeInTheDocument();
+    expect(screen.getByText('Мастера — будут сняты:')).toBeInTheDocument();
+  });
+
+  it('confirm enqueues through onResolve with cascade resolutions (tag flow)', async () => {
+    const onResolve = vi.fn<ResolveFn>().mockResolvedValue(undefined);
+    const onDone = vi.fn();
+    renderDialog({
+      entityName: 'Живопись',
+      entityType: 'tag',
+      entityId: 't1',
+      dependencies: TAG_TREE,
+      onResolve,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    // Choice deps exist → checkbox gates the button.
+    toggleConfirm();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('t1', {
+        service_tags: 'cascade',
+        master_tags: 'cascade',
+      }),
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('PARENT side renders unchanged: master_tags auto dep still «→ Теги: N (удалены)» via RELATION_PLURAL fallback', () => {
+    renderDialog({
+      entityName: 'Анна',
+      entityType: 'master',
+      entityId: 'm1',
+      dependencies: MASTER_ALL_AUTO,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/→ Теги: 2 \(удалены\)/)).toBeInTheDocument();
+  });
+
+  it('PARENT record side: record_tags auto dep «→ Теги: 3 (удалены)» unchanged', () => {
+    const RECORD_AUTO_TAGS: DependencyNode[] = [
+      { entity: 'record_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'], message: null },
+    ];
+    renderDialog({
+      entityName: '12.05',
+      entityType: 'record',
+      entityId: 'r1',
+      dependencies: RECORD_AUTO_TAGS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/→ Теги: 3 \(удалены\)/)).toBeInTheDocument();
   });
 });

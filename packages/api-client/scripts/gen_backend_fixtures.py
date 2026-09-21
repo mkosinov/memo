@@ -5,12 +5,18 @@ emits). Each entity has an active pair (DB is_active=true -> archived=false)
 and an archived pair (DB is_active=false -> archived=true). #207 Task 15;
 #266: the staff card replaces the old master entity (the /masters list became
 a read-only acting-masters VIEW — not archive-aware, so no pair for it).
+
+GH #217 Task 5 rename: ``ClientWithStats`` → ``ClientViewResponse`` (internal
+Python name; the emitted JSON keys — incl. "client_with_stats" — and the
+archived-inversion shape are unchanged). Imported aliased to keep the diff
+minimal.
 """
 
 import json
 from pathlib import Path
 
-from src.schemas.client import ClientResponse, ClientWithStats
+from src.schemas.client import ClientResponse
+from src.schemas.client import ClientViewResponse as ClientWithStats
 from src.schemas.location import LocationResponse
 from src.schemas.material import MaterialResponse
 from src.schemas.service import ServiceResponse

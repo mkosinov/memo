@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime
 from functools import lru_cache
 from typing import TypeVar
-from uuid import UUID
 
 from sqlalchemy import ColumnElement, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,7 +128,6 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         order_by=None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         q: str | None = None,
-        ids: Sequence[UUID] | None = None,
         master_key: str | None = None,
         **filters,
     ) -> PaginatedResponse[ClientResponse]:

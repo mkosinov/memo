@@ -9,7 +9,7 @@
 
 ## Architecture
 
-Коридор 2 канона `docs/domain-rules/service-layer.md`: эндпоинт → сценарий usecases, декорированный `@transactional` (selfless-вызов `delete_activity(None, db_session=..., id=...)`, прецедент — `delete_record` в `api/v1/records.py:377`). Сценарий составляет вызовы сервисов и домена, ORM-модели не импортирует (правило 2); модель занятия берёт из загруженной при проверке существования строки (`type(loaded)`). Сбор id записей — переиспользованием `collect_dependency_ids` (`domain/deletion.py:919`). Помощники — без транзакции (правило 3), bulk по набору id одной командой (правило 4), вложенных декорированных вызовов нет (правило 5). Обе сетки марок событий и порядок каскада — идентичны текущим (см. спеку «Марки событий»).
+Коридор 2 канона `docs/domain-rules/service-layer.md`: эндпоинт → сценарий usecases, декорированный `@transactional` (selfless-вызов `delete_activity(None, db_session=..., id=...)`, прецедент — `delete_record` в `api/v1/records.py:387`). Сценарий составляет вызовы сервисов и домена, ORM-модели не импортирует (правило 2); модель занятия берёт из загруженной при проверке существования строки (`type(loaded)`). Сбор id записей — переиспользованием `collect_dependency_ids` (`domain/deletion.py:1266`). Помощники — без транзакции (правило 3), bulk по набору id одной командой (правило 4), вложенных декорированных вызовов нет (правило 5). Обе сетки марок событий и порядок каскада — идентичны текущим (см. спеку «Марки событий»).
 
 ## Tech Stack
 
@@ -27,7 +27,7 @@ Required Docs: спека §«Выбранный концепт» шаг 3; `doc
 
 small | Сценарии 1 (чистое занятие: фото открепляются и без записей), 3 (связки и строки записей)
 
-`RecordService.delete_rows_with_tags_bulk(db_session, record_ids)` — `record_tags` затем `Record` по набору id, марки «records» и «tags» (за record_tags); без транзакции; рядом с `delete_row_with_tags` (`record.py:419`), который не трогается. `PhotoService.unlink_from_activity(db_session, activity_id)` — `UPDATE photos SET activity_id = NULL`, марка «photos», безусловно; без транзакции. Юнит-тесты по той же конвенции, включая случай пустого набора.
+`RecordService.delete_rows_with_tags_bulk(db_session, record_ids)` — `record_tags` затем `Record` по набору id, марки «records» и «tags» (за record_tags); без транзакции; рядом с `delete_row_with_tags` (`record.py:345`), который не трогается. `PhotoService.unlink_from_activity(db_session, activity_id)` — `UPDATE photos SET activity_id = NULL`, марка «photos», безусловно; без транзакции. Юнит-тесты по той же конвенции, включая случай пустого набора.
 
 Required Docs: спека §«Выбранный концепт» шаги 3–4, §«Марки событий»; `docs/domain-rules/deletion.md` (фото выживает при потере владельца, FK → NULL).
 

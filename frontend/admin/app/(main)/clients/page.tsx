@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
+import type { ClientFilters } from '@/contexts/ClientsContext';
 import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
@@ -15,7 +16,7 @@ function ClientsPageContent() {
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
   // GH #140 — page-scoped factory state; lookups by id go through useClient.
-  const { items, setFilters, isPending, isFetching } = useClientsTable();
+  const { items, isPending, isFetching } = useClientsTable();
   const searchParams = useSearchParams();
   const router = useRouter();
   const clientIdFromQuery = searchParams.get('clientId');
@@ -23,17 +24,6 @@ function ClientsPageContent() {
   // was already opened. Prevents the find-effect from re-opening the modal
   // after a user close while the param is still in the URL (before strip lands).
   const consumedClientIdRef = useRef<string | null>(null);
-
-  // GH #216: deep-link ?clientId=N → narrow the table to that client.
-  // Server q= matches a full UUID by exact id equality (GH #212) → ≤1 row →
-  // always page 1 → the find-effect below sees the row regardless of its
-  // position in the unfiltered list. status forced to 'all' so archived
-  // clients are reachable (display default stays 'active').
-  useEffect(() => {
-    if (clientIdFromQuery) {
-      setFilters({ search: clientIdFromQuery, status: 'all' });
-    }
-  }, [clientIdFromQuery, setFilters]);
 
   // GH #216 close-race fix: once the param has left the URL, the latch clears so
   // a future deep-link with the same id opens the modal again.
@@ -129,17 +119,36 @@ function ClientsPageContent() {
   );
 }
 
-export default function ClientsPage() {
+// #231 §5.2 — boundary rebuild: the param reader sits ABOVE ClientsProvider so
+// the deep-link seed can be passed down as initialFilters (one narrowed GET on
+// mount instead of default + narrowed). The value is carried verbatim, without
+// validation — the dead-link cleanup in ClientsPageContent already copes with
+// garbage values.
+function ClientsPageInner() {
+  const searchParams = useSearchParams();
+  const clientId = searchParams.get('clientId');
+  const initialFilters: Partial<ClientFilters> | undefined = clientId
+    ? { search: clientId, status: 'all' }
+    : undefined;
   return (
-    <ClientsProvider>
+    <ClientsProvider initialFilters={initialFilters}>
       {/* GH #138 Task 6: /clients needs only grid settings (gridFrequency in
           ClientRecordTab) — the schedule stack (URL view state + data) is
           schedule-page-only and must not mount here. */}
       <GridSettingsProvider>
-        <Suspense fallback={<div className="p-4">Загрузка...</div>}>
-          <ClientsPageContent />
-        </Suspense>
+        <ClientsPageContent />
       </GridSettingsProvider>
     </ClientsProvider>
+  );
+}
+
+export default function ClientsPage() {
+  // #231: the Suspense boundary moves to the very top — the provider (and its
+  // first GET) now lives under the boundary. Nothing observable renders outside
+  // it, so the «Загрузка...» fallback stays the first visible frame, as before.
+  return (
+    <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+      <ClientsPageInner />
+    </Suspense>
   );
 }

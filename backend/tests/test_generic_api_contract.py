@@ -213,7 +213,7 @@ class TestGenericApiListContract:
         # #207 §3.1: archive-capable Response schemas need is_active injected
         # from inverted `archived` before model_validate (see
         # _validate_response_body). Hard-delete entities → no-op.
-        _validate_response_body(matches[0], cfg)  # item shape; extras ignored (ClientWithStats)
+        _validate_response_body(matches[0], cfg)  # item shape; extras ignored (ClientViewResponse)
 
     @pytest.mark.parametrize("service_cls,cfg", _contract_params())
     def test_list_explicit_pagination_echoed(self, service_cls, cfg, api_client):

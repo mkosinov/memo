@@ -1,6 +1,7 @@
 """API tests for GET /api/v1/records/view — composite records-table read (GH #213 Task 4).
 
-Covers the router wiring of ``RecordService.list_view`` (Task 3):
+Covers the router wiring of the ``list_records_view`` free function
+(GH #217 Task 1 — Corridor 3, ADR 007; formerly ``RecordService.list_view``):
   - route order: ``/view`` is NOT captured by the ``/{record_id}`` path
     param (declared BEFORE it — spec §4; otherwise a 404 id-lookup)
   - pagination envelope ``{items, total, page, per_page}`` + cross-endpoint

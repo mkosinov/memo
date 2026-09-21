@@ -66,8 +66,8 @@ class ClientResponse(BaseModel):
     ``is_active`` stays as the DB/ORM column but is ``exclude=True`` so it never
     serializes to JSON. The API exposes ``archived`` (inverted: ``archived = not
     is_active``, ``archived = true`` = in archive) via a computed field (#207 §3.1).
-    ``ClientWithStats`` inherits this computed field — the manual builder in
-    ``list_clients_with_stats`` keeps passing ``is_active=row.is_active`` (the
+    ``ClientViewResponse`` inherits this computed field — the manual builder in
+    ``list_clients_view`` keeps passing ``is_active=row.is_active`` (the
     excluded field still accepts it as a constructor kwarg; ``archived`` derives).
     """
 
@@ -88,8 +88,12 @@ class ClientResponse(BaseModel):
         return not self.is_active
 
 
-class ClientWithStats(ClientResponse):
-    """Response schema extending ClientResponse with aggregated metrics."""
+class ClientViewResponse(ClientResponse):
+    """Response schema extending ClientResponse with aggregated metrics.
+
+    Renamed from ``ClientWithStats`` (GH #217 Task 5; naming decision —
+    ADR 007 item 5). Internal Python name only — JSON contract unchanged.
+    """
 
     records_count: int = 0
     last_record: str | None = None

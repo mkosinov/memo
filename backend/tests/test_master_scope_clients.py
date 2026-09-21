@@ -14,7 +14,7 @@ clients.md):
   (indistinguishable from missing);
 * Mask for role=master in EVERY client-bearing response (D3): both
   assembly points — generic ``ClientResponse`` path AND the manual
-  ``ClientWithStats`` builder — plus the typeahead: ``phone`` →
+  ``ClientViewResponse`` builder — plus the typeahead: ``phone`` →
   ``mask_phone`` (last 4 digits), ``email`` → ``null``; name/channel
   visible. Mutations are NEVER masked: the master creates a client with
   the full number (POST → 201 unmasked);
@@ -207,7 +207,7 @@ class TestClientMask:
         return {"master": master, "client": client}
 
     def test_stats_list_masked(self, masked_world) -> None:
-        """ClientWithStats path (manual builder): phone masked, email null;
+        """ClientViewResponse path (manual builder): phone masked, email null;
         name/channel intact."""
         mc = masked_world["master"]["client"]
         resp = mc.get("/api/v1/clients")

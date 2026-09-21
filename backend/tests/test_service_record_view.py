@@ -1,6 +1,8 @@
-"""RecordService.list_view — display fields for the records view (GH #213 Task 3).
+"""list_records_view — display fields for the records view (GH #213 Task 3, #217 Task 1).
 
-Service-level contract tests for the composite read query:
+Service-level contract tests for the composite read (Corridor 3 free
+function in the record service module — ADR 007 / canon rule 8), rebound
+from the former ``RecordService.list_view`` method (behavior unchanged):
   - archived client/master/service/location RESOLVE their names (no
     is_active filters on display resolution — US-3, photos precedent)
   - anonymous record → client_name None
@@ -31,7 +33,7 @@ from src.models.staff import Staff
 from src.models.visit import Visit
 from src.schemas.activity import ActivityResponse
 from src.schemas.record import RecordListParams
-from src.services.record import get_record_service
+from src.services.record import list_records_view
 
 pytestmark = pytest.mark.asyncio
 
@@ -179,9 +181,8 @@ async def _seed_world(
 
 
 async def _list_view(db_session, **params):
-    """Call RecordService.list_view with RecordListParams defaults + overrides."""
-    service = get_record_service()
-    return await service.list_view(db_session, RecordListParams(**params))
+    """Call list_records_view with RecordListParams defaults + overrides."""
+    return await list_records_view(db_session, RecordListParams(**params))
 
 
 async def test_archived_entities_resolve_display_names(db_session) -> None:

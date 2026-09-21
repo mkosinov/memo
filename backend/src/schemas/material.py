@@ -55,8 +55,8 @@ class MaterialResponse(MaterialBase):
     linked to the material — one canonical definition regardless of the
     request's ``status`` slice. Carries a Pydantic default (``= 0``) so
     generic ``GenericService``/``ArchiveService`` paths that don't run the
-    ``MaterialService._attach_counts`` helper still validate (e.g. ``create``,
-    which returns 0 by definition).
+    material service module's ``_attach_counts`` helper still validate
+    (e.g. ``create``, which returns 0 by definition).
     """
 
     model_config = ConfigDict(from_attributes=True)

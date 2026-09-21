@@ -70,6 +70,7 @@ Alternatives considered:
 
 ## References
 
-- Spec: docs/specs/2026-09-20-composite-reads-form-217-design.md (rev4)
-- Canon: docs/domain-rules/service-layer.md (rev5, rule 8)
+- Spec: docs/specs/2026-09-20-composite-reads-form-217-design.md (rev5 + errata rev6)
+- Plan / implementation: docs/plans/2026-09-20-composite-reads-form-217-plan.md (branch `feature/composite-reads-free-functions`; status docs/status/2026-09-21-composite-reads-form-217.md)
+- Canon: docs/domain-rules/service-layer.md (rev6, rule 8)
 - GH #217 (this decision), #206 (pagination consolidation), #171 (usecases layer), #213 (records view composite), #263 (master scope), #239 (transactional decorator)

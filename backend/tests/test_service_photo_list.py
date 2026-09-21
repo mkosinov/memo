@@ -1,6 +1,9 @@
-"""PhotoService.list rides the BaseRepository.list_custom row core (GH #213 §5.2).
+"""list_photos_view rides the BaseRepository.list_custom row core (GH #213
+§5.2, #217 Task 3).
 
-Contract test for the migration off the hand-rolled count+slice:
+Contract test for the composite read (Corridor 3 free function in the
+photo service module — ADR 007 / canon rule 8), rebound from the former
+``PhotoService.list`` method (behavior unchanged):
   - the list path MUST delegate to ``list_custom`` (the shared row-tuple core)
   - the stmt handed over carries NO order_by — the core computes COUNT on the
     unordered subquery, so photos' count-order deviation is fixed by
@@ -15,13 +18,13 @@ import pytest
 from src.models.photo import Photo
 from src.repositories.generic import BaseRepository
 from src.schemas.photo import PhotoListParams
-from src.services.photo import get_photo_service
+from src.services.photo import list_photos_view
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_photo_list_rides_list_custom_core(db_session, monkeypatch) -> None:
-    """PhotoService.list delegates count+order+slice to the repo row core.
+    """list_photos_view delegates count+order+slice to the repo row core.
 
     5 photos, page 2 of per_page 3 → the ordered-count deviation can't hide:
     the core counts the UNordered stmt (total stays 5), the order arrives
@@ -39,13 +42,12 @@ async def test_photo_list_rides_list_custom_core(db_session, monkeypatch) -> Non
 
     monkeypatch.setattr(BaseRepository, "list_custom", spy)
 
-    service = get_photo_service()
-    items, total = await service.list(
+    items, total = await list_photos_view(
         db_session,
         PhotoListParams(sort_by="filename", sort_order="asc", page=2, per_page=3),
     )
 
-    assert len(calls) == 1, "PhotoService.list must ride BaseRepository.list_custom"
+    assert len(calls) == 1, "list_photos_view must ride BaseRepository.list_custom"
     stmt, kwargs = calls[0]
     # count-order deviation fixed by construction: UNordered stmt in,
     # ordering via the core's order_by= parameter (never baked into the stmt)

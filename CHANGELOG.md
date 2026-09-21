@@ -137,6 +137,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status: `docs/status/2026-09-21-clients-deeplink-single-request-231.md`
 
 ### Changed
+- **GH #217 — Composite reads aligned to free functions (Corridor 3 / ADR 007)** — branch
+  `feature/composite-reads-free-functions` (7 commits `fb8e5098..be9d5d02`, base `5fdeac5b`;
+  35 files, +1224/−618; spec `docs/specs/2026-09-20-composite-reads-form-217-design.md`
+  rev5 + errata rev6 `6c080b1d`, plan `docs/plans/2026-09-20-composite-reads-form-217-plan.md`;
+  ADR `docs/decisions/007-composite-reads-free-functions.md`):
+  - **Records (T1, standard):** `RecordService.list_view` → module-level free function
+    `list_records_view`; the shared blocks (`_build_list_stmt`, `_sort_columns`,
+    `search_fields`, `map_record`) hoisted to module level and reused by `RecordService.list`;
+    the route calls the function directly with the session (no service dep).
+  - **Masters (T2, standard):** `MasterViewService` (class + both cached factories + the dead
+    `_model = Staff` binding) disbanded into `list_masters_view` (GET /masters, re-homed onto
+    `list_custom` — a count-equivalence test pins the switch) and `list_all_masters_view`
+    (GET /masters/all, `BARE_LIST_MAX_ROWS + 1` guard preserved → 422); archive statuses kept.
+  - **Photos (T3, small):** `PhotoService.list` → `list_photos_view`; `GET /photos/web` stays
+    a hand-written router query (erratum rev6 — it never rode the composite).
+  - **Helpers (T4, small):** `ActivityService.sum_active_seats_bulk` and
+    `MaterialService._attach_counts` become module-level functions.
+  - **Clients (T5, small):** `list_clients_with_stats` → `list_clients_view`, schema
+    `ClientWithStats` → `ClientViewResponse` (internal Python names; HTTP/JSON contract
+    unchanged); the fixtures script rebound. Hand-written cheap count kept (documented
+    exception, #206 rationale).
+  - **Tests:** backend full **2407 passed / 15 skipped / 0 failed**; ruff & mypy no new
+    findings vs baseline; e2e phase verification — US1 clients 24/24, US2 records-view core
+    (incl. exact-one-request), US3 staff 15/15, US4 photos 20/20, US7 materials 4/4, scope
+    gates (master-role-photos, master-role-record-create, `test_master_scope_contract.py`)
+    green. `MasterViewService` and `queries/` no longer exist; all 7 composites are free
+    functions in their service modules; №2/№3/№4 run via `list_custom`, №1 documented
+    exception.
+  - Known environmental flakes (CI adjudicates): admin-manages-payments ×2 and
+    `schedule.spec.ts:158` — non-deterministic under load, green isolated, no regression
+    mechanism (zero frontend changes).
+  - Status: `docs/status/2026-09-21-composite-reads-form-217.md`
 - **GH #318 — Tags: удаление занятого тега — единый контракт удалений (этап 1 из #346)** —
   branch `318-tags-busy-delete` (7 commits `086adb67..cca86cef`, base `c7ce190f`; 21 файл,
   +3687/−162; спека `docs/specs/2026-09-19-tags-busy-delete-318-design.md` rev9, план

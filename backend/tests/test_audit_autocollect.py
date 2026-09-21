@@ -490,6 +490,11 @@ class TestAutoCollectEndToEnd:
         )
         # The cascade really happened: the visit row exists...
         assert query_db(f"SELECT id FROM visits WHERE record_id = '{record.id}'")
-        # ...but the journal carries no record/visit/visitor/payment rows.
-        entities = {r["entity"] for r in audit_rows()}
-        assert not entities & {"records", "visits", "visitors", "payments"}
+        # ...and the journal carries EXACTLY the scenario's own explicit
+        # "records" row (Task 4, §4.3) — no cascade child rows: the
+        # find-or-created visitor/client and the bulk-inserted visits
+        # never journal (§4.2 "one action — one row").
+        rows = audit_rows()
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("create", "records", record.id)
+        ]

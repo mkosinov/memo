@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -33,6 +33,41 @@ def _to_response(model: UserSettings) -> UserSettingsResponse:
         show_archived_locations=model.show_archived_locations,
         created_at=model.created_at,
         updated_at=model.updated_at,
+    )
+
+
+# GH #344: journaled settings fields for an explicit mark (§5.1) — the
+# ENTITY_SIGNATURES snapshot set (user_id, theme, language); the JSON
+# column_order_* blobs are UI state, not journal payload.
+_SETTINGS_MARK_FIELDS = ("theme", "language")
+
+
+def _mark_settings_audit(
+    orm: UserSettings, action: str, old: dict[str, Any] | None = None
+) -> None:
+    """Stage ONE journal row for a settings write (spec §4.3).
+
+    ``old=None`` → create mark (after-pairs); otherwise update pairs over
+    the fields that actually changed (§5.1 no-op rule). LAZY audit
+    import — cycle discipline (src/events/entities.py WARNING).
+    """
+    from src.events.audit import mark_audit
+
+    if old is None:
+        changes: dict[str, Any] | None = {
+            f: [None, getattr(orm, f)] for f in _SETTINGS_MARK_FIELDS
+        }
+    else:
+        changes = {
+            f: [old[f], getattr(orm, f)]
+            for f in _SETTINGS_MARK_FIELDS
+            if old[f] != getattr(orm, f)
+        }
+    mark_audit(
+        entity="user_settings",
+        action=action,
+        entity_id=orm.id,
+        changes=changes,
     )
 
 
@@ -84,6 +119,8 @@ class UserSettingsService:
         session.add(orm)
         await session.flush()
         await session.refresh(orm)
+        # GH #344 (§4.3): explicit create mark (signature key fields).
+        _mark_settings_audit(orm, "create")
         return _to_response(orm)
 
     @transactional
@@ -119,10 +156,18 @@ class UserSettingsService:
                 update_data["column_order_locations"]
             )
 
+        # GH #344 (§4.2): "before" half fixed before the first mutation;
+        # nothing sent → full no-op → no journal row (§5.1).
+        _old = {f: getattr(orm, f) for f in _SETTINGS_MARK_FIELDS}
         for key, value in update_data.items():
             setattr(orm, key, value)
         await session.flush()
         await session.refresh(orm)
+        # GH #344 (§4.3): mark only when the request actually carried a
+        # field (the diff may be empty for a column_order-only update —
+        # the action still journals with its scalar diff).
+        if update_data:
+            _mark_settings_audit(orm, "update", _old)
         return _to_response(orm)
 
     @transactional

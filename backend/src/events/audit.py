@@ -363,6 +363,54 @@ def derive_entity_label(entity: str, fields: dict[str, Any] | None) -> str | Non
     return joiner.join(parts)
 
 
+def derive_row_label(entity: str, row: Any) -> str | None:
+    """Derive ``entity_label`` from an ORM ROW's label fields (§5.1).
+
+    The snapshot-free marks (archive/restore, §4.6) still need the row's
+    carrying signature («Студия», «Иванов Иван») — ``changes`` is ``None``
+    there, so ``derive_entity_label`` would fall back to the bare title.
+    This helper reads the signature's label fields off the live row
+    (``getattr`` walk — missing attributes stay inert) and renders them
+    through the same pipeline. ``None`` for unknown entities; callers
+    fall back to the dictionary title.
+    """
+    sig = ENTITY_SIGNATURES.get(entity)
+    if sig is None:
+        return None
+    fields = {field: getattr(row, field, None) for field in sig.label_fields}
+    return derive_entity_label(entity, fields)
+
+
+def snapshot_pairs_after(entity: str, row: Any) -> dict[str, Any] | None:
+    """``{field: [None, value]}`` pairs for an explicit CREATE mark (§5.1).
+
+    Reads the signature's snapshot fields off the freshly created row;
+    fields whose value is ``None`` carry no information and are skipped.
+    ``None`` when nothing carries a value (the mark then journals
+    ``changes=None``).
+    """
+    return _pairs(entity, row, after=True)
+
+
+def snapshot_pairs_before(entity: str, row: Any) -> dict[str, Any] | None:
+    """``{field: [value, None]}`` pairs for an explicit DELETE mark (§5.1).
+
+    Same as :func:`snapshot_pairs_after` with the pair direction of a
+    delete snapshot (what disappeared).
+    """
+    return _pairs(entity, row, after=False)
+
+
+def _pairs(entity: str, row: Any, *, after: bool) -> dict[str, Any] | None:
+    fields = entity_snapshot_fields(entity)
+    pairs = {
+        field: ([None, value] if after else [value, None])
+        for field in fields
+        if (value := getattr(row, field, None)) is not None
+    }
+    return pairs or None
+
+
 # [before, after] pair → the value to render (after wins; delete keeps before).
 def _pair_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)) and len(value) == 2:

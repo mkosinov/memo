@@ -300,6 +300,19 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         # activity_tags always die with the activity.
         mark_changed("photos")
         mark_changed("tags")
+        # GH #344 (§4.5): the deferred-delete COMMIT journals the final
+        # DELETE — the activity snapshot staged BEFORE the row disappears;
+        # the cascaded records/visits/payments/join writes never journal.
+        # LAZY audit import — cycle discipline (entities.py WARNING).
+        from src.events.audit import derive_row_label, mark_audit, snapshot_pairs_before
+
+        mark_audit(
+            entity="activities",
+            action="delete",
+            entity_id=id,
+            entity_label=derive_row_label("activities", activity),
+            changes=snapshot_pairs_before("activities", activity),
+        )
         return True
 
     @transactional

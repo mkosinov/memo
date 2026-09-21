@@ -169,22 +169,36 @@ class ProfileService:
 
     async def _apply_update(
         self, db_session: AsyncSession, user_id: str, payload: dict[str, object]
-    ) -> tuple[User, Staff | None, Master | None, UserProfile | None]:
+    ) -> tuple[User, Staff | None, Master | None, UserProfile | None, dict[str, object] | None]:
         """Apply the sent payload to both halves; flush (no commit).
 
         Raises IntegrityError to the caller when the lazy-create INSERT
         loses the concurrent-writer race (``user_profiles.user_id``
         UNIQUE) — ``update`` handles the recovery.
+
+        GH #344 (§4.3): returns the card half's audit DIFF (or ``None``
+        when no card field changed) instead of staging it — the caller
+        stages ONE mark after the recovery settles, so the retry never
+        double-marks (the accumulator is not session-scoped and would
+        survive the rollback).
         """
         user, staff, master, profile = await self._context(
             db_session, user_id
         )
 
+        card_diff: dict[str, object] | None = None
         # 1. Card half — only while has_staff; ignored otherwise (D7).
         if staff is not None:
+            # §4.2 invariant: "before" fixed before the first mutation.
+            old = {f: getattr(staff, f) for f in _CARD_FIELDS}
             for field in _CARD_FIELDS:
                 if field in payload:
                     setattr(staff, field, payload[field])
+            card_diff = {
+                f: [old[f], getattr(staff, f)]
+                for f in _CARD_FIELDS
+                if old[f] != getattr(staff, f)
+            } or None
 
         # 2. Private half — lazy row create on first meaningful write.
         profile_payload = {
@@ -199,7 +213,22 @@ class ProfileService:
         # ``specialties`` is accepted-but-ignored (read-only, #266 D5);
         # role/has_staff/has_master are view fields, never written.
         await db_session.flush()
-        return user, staff, master, profile
+        return user, staff, master, profile, card_diff
+
+    def _mark_card_audit(self, staff_id: str, diff: dict[str, object]) -> None:
+        """One ``update``/``staff`` journal row for the card half (§4.3).
+
+        LAZY audit import — cycle discipline (src/events/entities.py
+        WARNING).
+        """
+        from src.events.audit import mark_audit
+
+        mark_audit(
+            entity="staff",
+            action="update",
+            entity_id=staff_id,
+            changes=diff,
+        )
 
     @transactional
     async def update(
@@ -218,14 +247,22 @@ class ProfileService:
         """
         payload = data.model_dump(exclude_unset=True)
         try:
-            user, staff, master, profile = await self._apply_update(
+            user, staff, master, profile, card_diff = await self._apply_update(
                 db_session, user_id, payload
             )
         except IntegrityError:
             await db_session.rollback()
-            user, staff, master, profile = await self._apply_update(
+            user, staff, master, profile, card_diff = await self._apply_update(
                 db_session, user_id, payload
             )
+
+        # GH #344 (§4.3): ONE explicit ``update``/``staff`` row — staged
+        # after the recovery settles so the retry never double-marks.
+        # ``staff`` is non-None whenever card_diff is (the diff is built
+        # only inside the ``staff is not None`` branch of _apply_update).
+        if card_diff is not None:
+            assert staff is not None
+            self._mark_card_audit(staff.id, card_diff)
 
         # Re-read the freshly written halves for the response (the ORM
         # objects are in the identity map — plain attribute reads suffice).
@@ -253,6 +290,12 @@ class ProfileService:
         old_url = staff.avatar_url
         staff.avatar_url = avatar_url
         await db_session.flush()
+        # GH #344 (§4.3): explicit ``update``/``staff`` row (avatar swap
+        # on the card half); no-op re-set of the same URL writes nothing.
+        if old_url != avatar_url:
+            self._mark_card_audit(
+                staff.id, {"avatar_url": [old_url, avatar_url]}
+            )
         return old_url
 
     def _to_response(

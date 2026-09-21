@@ -203,19 +203,12 @@ export default function RemoteSearchSelect<
 
   return (
     <div ref={containerRef} className="relative">
-      {/* The internal label is hidden when empty (label="") — the consumer
-          renders its own visible label bound to the input via htmlFor+inputId
-          (GH #328 §6.2); aria-label would then override that association, so
-          it only lands when this label is the intended accessible name. */}
-      {label && (
-        <label
-          htmlFor={inputId}
-          className="block text-xs font-medium mb-1"
-          style={LABEL_COLOR}
-        >
-          {label} {required && <span className="text-red-500">*</span>}
-        </label>
-      )}
+      <label
+        className="block text-xs font-medium mb-1"
+        style={LABEL_COLOR}
+      >
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
       <div className="relative">
         <input
           type="text"
@@ -227,7 +220,7 @@ export default function RemoteSearchSelect<
           style={INPUT_STYLE}
           readOnly={!!selectedLabel}
           id={inputId}
-          aria-label={label || undefined}
+          aria-label={label}
           data-testid={inputTestId}
         />
         {selectedLabel && (

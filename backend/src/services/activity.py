@@ -224,26 +224,6 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         )
         return int(result.scalar() or 0)
 
-    async def sum_active_seats_bulk(
-        self, db_session: AsyncSession, activity_ids: list[str]
-    ) -> dict[str, int]:
-        """Return {activity_id: occupied_seats} for the given activities in ONE query.
-
-        Active definition reuses ACTIVE_RECORD_STATUSES (same as active_record_filter)
-        so the batch view can never drift from the per-activity capacity check.
-        """
-        if not activity_ids:
-            return {}
-        result = await db_session.execute(
-            select(Record.activity_id, func.coalesce(func.sum(Record.seats), 0))
-            .where(
-                Record.activity_id.in_(activity_ids),
-                Record.status.in_(ACTIVE_RECORD_STATUSES),
-            )
-            .group_by(Record.activity_id)
-        )
-        return {row[0]: int(row[1]) for row in result.all()}
-
     async def count_records(
         self, db_session: AsyncSession, activity_id: str
     ) -> int:
@@ -530,3 +510,32 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
 def get_activity_service() -> ActivityService:
     """Returns a singleton ActivityService."""
     return ActivityService(get_base_repository(), Activity)
+
+
+async def sum_active_seats_bulk(
+    db_session: AsyncSession, activity_ids: list[str]
+) -> dict[str, int]:
+    """Return {activity_id: occupied_seats} for the given activities in ONE query.
+
+    Corridor 3 free function (GH #217 Task 4, ADR 007 / canon rule 8 —
+    behavior-for-behavior move of the former ``ActivityService`` method,
+    removed with no residual shim): a dict-shaped batch enrichment —
+    no page, no total — so it takes the session directly instead of
+    riding the repository list mechanics. The name keeps the content
+    verb (ADR 007 naming convention; ``view`` is reserved for table
+    pages). The only caller is the GET /activities handler.
+
+    Active definition reuses ACTIVE_RECORD_STATUSES (same as active_record_filter)
+    so the batch view can never drift from the per-activity capacity check.
+    """
+    if not activity_ids:
+        return {}
+    result = await db_session.execute(
+        select(Record.activity_id, func.coalesce(func.sum(Record.seats), 0))
+        .where(
+            Record.activity_id.in_(activity_ids),
+            Record.status.in_(ACTIVE_RECORD_STATUSES),
+        )
+        .group_by(Record.activity_id)
+    )
+    return {row[0]: int(row[1]) for row in result.all()}

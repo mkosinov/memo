@@ -778,6 +778,28 @@ export async function deleteTag(id: string): Promise<void> {
   await api(`/api/v1/tags/${id}`, z.any(), { method: 'DELETE' });
 }
 
+// Dry-run preview (GH #318, mirror of records GH #285 rev7): DELETE ?dry_run=true
+// without body. 204 No Content → resolves; 409 → ApiError with .dependencies tree
+// (nodes carry items: [{id, label}] for one-line previews).
+export async function dryRunDeleteTag(id: string): Promise<void> {
+  await api(`/api/v1/tags/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #318) — body contract mirrors records: {expected, resolutions?}.
+// `expected` is MANDATORY (contract "every delete carries state"): uuid id-sets
+// snapshotted from the dry-run tree; backend answers 409 stale_dependencies on
+// mismatch. resolutions (nullify/cascade) optional — pure path sends only expected.
+export interface ResolveDeleteTagPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeleteTag(id: string, payload: ResolveDeleteTagPayload): Promise<void> {
+  const body: ResolveDeleteTagPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/tags/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
+}
+
 // ─── Services CRUD ─────────────────────────────────────────────────────────
 
 export async function createService(data: z.input<typeof ServiceCreateSchema>): Promise<ServiceResponse> {

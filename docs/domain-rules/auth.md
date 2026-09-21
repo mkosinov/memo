@@ -69,6 +69,7 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Further staff: created in sqladmin (admin-only login; password field hashes on save, blank on edit = unchanged). The lockout reset also lives there: clear the lock fields on the user.
 - Роль при создании учётки из карточки сотрудника и при смене должностей **авто-подставляется должностью** (шаблоны #263, D10): должность «мастер» → `role=master`, «админ» → `role=admin`; несколько должностей — старшая (admin > master); прочие должности роль не трогают; ручная правка остаётся. Подстановка — UX-удобство: доступ по-прежнему один `users.role` + матрица выше.
 - Dev seed: demo admin + demo master, dev-only.
+- Creating a user always creates its `UserSettings` row (guaranteed child record, GH #319): the `create_user` scenario and the staff-card «Учётка» flow do it in the same transaction; the seed creates both rows directly.
 - `SECRET_KEY` (env): signs the sqladmin session cookie; production fails fast when unset, dev defaults to a fixed dev constant.
 
 ## Error Codes

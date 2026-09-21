@@ -3,25 +3,38 @@
 
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
-  python3 .zcode/scripts/gh_board.py pick-next                   — token for auto-impl watcher: NONE | <issue>
+  python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
+  python3 .zcode/scripts/gh_board.py host N                     — the card's host field value (watcher tiebreak token)
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
-  python3 .zcode/scripts/gh_board.py auto-log N "CLAIM host=X"   — append an entry to the issue's auto-impl log comment
+  python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
   python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
-  python3 .zcode/scripts/gh_board.py status N "In IMPL"          — move a card's status
+  python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it
+  python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|none — the pending-ask marker: a design gate stop or an IMPL blocker awaiting the user
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
   python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
 
 Project constants are hardcoded (IDs are stable for Project #3).
+Card ownership lives in the single-select field "host" (options: imac,
+macbook, hk, gcp — created manually 2026-09-20): claiming is a field write
+and the race tiebreak re-reads the field. This replaced the CLAIM-comment
+mechanism; the auto-impl log comment remains the BLOCKED channel only.
+The pending-ask marker lives in the single-select field "gate" (options:
+concept, spec, plan, blocked — created manually 2026-09-20): a design
+session stamps it at a gate stop, an IMPL manager stamps "blocked" when a
+blocker awaits the user; it is emptied at the user's answer and
+automatically when the card leaves In IMPL/In Design. It replaced the
+gate:* issue labels.
 The script is part of the host/container seam and travels via git.
 Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
 and .opencode/scripts/ (container); when editing, change both (or edit
 one and copy over).
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -47,6 +60,10 @@ NEXT_UP_OPTS = {"1": "ad936c13", "2": "8167d82e", "3": "ece04007"}
 
 _status_field_id = None
 _status_opts = None
+_host_field_id = None
+_host_field_opts = None
+_gate_field_id = None
+_gate_field_opts = None
 
 
 def gql(query: str) -> dict:
@@ -63,16 +80,28 @@ def gql(query: str) -> dict:
 
 
 def load_status_field():
-    global _status_field_id, _status_opts
+    global _status_field_id, _status_opts, _host_field_id, _host_field_opts, _gate_field_id, _gate_field_opts
     if _status_field_id:
         return
     d = gql(f'query {{ node(id: "{PROJECT_ID}") {{ ... on ProjectV2 {{ fields(first: 30) {{ nodes {{ __typename ... on ProjectV2SingleSelectField {{ id name options {{ id name }} }} }} }} }} }} }}')
     for f in d["node"]["fields"]["nodes"]:
-        if f["__typename"] == "ProjectV2SingleSelectField" and f["name"] == "Status":
+        if f["__typename"] != "ProjectV2SingleSelectField":
+            continue
+        if f["name"] == "Status":
             _status_field_id = f["id"]
             _status_opts = {o["name"]: o["id"] for o in f["options"]}
-            return
-    sys.exit("Status field not found")
+        elif f["name"] == HOST_FIELD_NAME:
+            _host_field_id = f["id"]
+            _host_field_opts = {o["name"]: o["id"] for o in f["options"]}
+        elif f["name"] == GATE_FIELD_NAME:
+            _gate_field_id = f["id"]
+            _gate_field_opts = {o["name"]: o["id"] for o in f["options"]}
+    if not _status_field_id:
+        sys.exit("Status field not found")
+    if not _host_field_id:
+        sys.exit(f"'{HOST_FIELD_NAME}' single-select field not found — create it on the project (options: imac, macbook, hk, gcp)")
+    if not _gate_field_id:
+        sys.exit(f"'{GATE_FIELD_NAME}' single-select field not found — create it on the project (options: concept, spec, plan, blocked)")
 
 
 def items_with_fields() -> list[dict]:
@@ -100,6 +129,8 @@ def items_with_fields() -> list[dict]:
                 "state": c["state"],
                 "status": vals.get("Status"),
                 "next_up": vals.get("Next Up"),
+                "host": vals.get(HOST_FIELD_NAME),
+                "gate": vals.get(GATE_FIELD_NAME),
             })
         if not page["pageInfo"]["hasNextPage"]:
             break
@@ -120,7 +151,7 @@ def find_item(number: int) -> dict:
     return {
         "item_id": d2["addProjectV2ItemById"]["item"]["id"],
         "number": number, "title": issue["title"], "state": issue["state"],
-        "status": None, "next_up": None,
+        "status": None, "next_up": None, "host": None, "gate": None,
     }
 
 
@@ -141,11 +172,15 @@ def cmd_next_up():
         return
     print("Trajectory (Next Up):")
     for it in items:
-        print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}] {it['title']}")
+        g = f" gate={it['gate']}" if it["gate"] else ""
+        print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}{g}] {it['title']}")
 
 
-CLAIM_TTL_HOURS = 1  # auto-impl: свежесть последних записей (claim/blocked) в часах
-MAX_TOTAL_INFLIGHT = 3  # auto-impl: глобальный бюджет карточек In IMPL (iMac 2 + ноутбук 1); ручные сессии тоже считаются — они двигают карточки так же
+CLAIM_TTL_HOURS = 1  # auto-impl: freshness of claim/blocked log entries — a fresh entry means the card is in flight or resting
+HOST_BUDGETS = {"imac": 2, "macbook": 1}  # auto-impl: per-machine In IMPL slots (replaced the global MAX_TOTAL_INFLIGHT on 2026-09-20: parked cards on one machine must not starve another)
+DEFAULT_HOST_BUDGET = 1  # unknown hosts (hk, gcp — reserved) get one slot
+HOST_FIELD_NAME = "host"  # single-select ownership field; options imac/macbook/hk/gcp
+GATE_FIELD_NAME = "gate"  # single-select pending-ask field; options concept/spec/plan/blocked (replaced the gate:* issue labels 2026-09-20)
 AUTO_IMPL_LOG_PREFIX = "auto-impl log:"
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
 _NUM_RE = re.compile(r"#(\d+)")
@@ -205,22 +240,48 @@ def _open_deps(number: int) -> list[int]:
     return open_deps
 
 
-def cmd_pick_next():
+def _resolve_host(explicit: str | None = None) -> str | None:
+    """Which machine this invocation acts for: an explicit arg wins, then the
+    GH_BOARD_HOST env (set by the watcher), then the container's host-label
+    file (covers manual manager runs inside the container). None = unresolved."""
+    if explicit:
+        return explicit.strip().lower()
+    env = os.environ.get("GH_BOARD_HOST", "").strip()
+    if env:
+        return env.lower()
+    label = Path("/root/.local/state/opencode/auto-impl-host")
+    try:
+        if label.is_file():
+            return label.read_text().strip().lower() or None
+    except OSError:
+        pass
+    return None
+
+
+def cmd_pick_next(host_arg: str | None = None):
     """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
     Candidates: OPEN issues with board status "Ready to IMPL".
     Order: Next Up position ascending (99 = unset), then board order.
     Skipped: cards whose auto-impl log comment's LAST entry is a fresh
-    (<= CLAIM_TTL_HOURS) CLAIM/BLOCKED, cards with legacy standalone
-    claim/blocked comments that fresh, and cards whose body declares
-    `depends-on: #N` with N still OPEN.
-    Deliberately NO per-machine busy check here — but the GLOBAL budget holds:
-    if In IMPL cards >= MAX_TOTAL_INFLIGHT, nothing new starts anywhere.
-    Manual IMPL sessions count too — their hosts move cards to In IMPL the
-    same way."""
+    (<= CLAIM_TTL_HOURS) CLAIM/BLOCKED (legacy claims + blocked rest),
+    cards with legacy standalone claim/blocked comments that fresh, and
+    cards whose body declares `depends-on: #N` with N still OPEN.
+    Budget: PER-HOST — cards "In IMPL" whose host field names this machine
+    count against HOST_BUDGETS[host]. In IMPL cards with an empty host block
+    no one (stderr warning) — ownership lives in the field, there is no
+    comment fallback. Manual IMPL sessions count too: they stamp the host
+    via the label file."""
+    host = _resolve_host(host_arg)
+    if not host:
+        sys.exit("pick-next needs a host: pass it as an argument or set GH_BOARD_HOST")
     load_status_field()
     items = [it for it in items_with_fields() if it["state"] == "OPEN"]
-    in_flight = sum(1 for it in items if (it["status"] or "").lower() == "in impl")
-    if in_flight >= MAX_TOTAL_INFLIGHT:
+    in_impl = [it for it in items if (it["status"] or "").lower() == "in impl"]
+    orphans = [f"#{it['number']}" for it in in_impl if not it["host"]]
+    if orphans:
+        print(f"warn: In IMPL cards without host (blocking no one): {', '.join(orphans)}", file=sys.stderr)
+    mine = sum(1 for it in in_impl if (it["host"] or "") == host)
+    if mine >= HOST_BUDGETS.get(host, DEFAULT_HOST_BUDGET):
         print("NONE")
         return
     # статус на борде — "Ready to IMPL (G2)": матч по префиксу, не по точной строке
@@ -320,8 +381,9 @@ def cmd_auto_log(number: int, entry: str):
 
 
 def cmd_auto_state(number: int):
-    """Last line of the auto-impl log ("<ts> <entry>") or nothing — the
-    watcher tiebreak reads this: the last CLAIM entry's host owns the card."""
+    """Last line of the auto-impl log ("<ts> <entry>") or nothing.
+    Diagnostics for humans; since 2026-09-20 the claim tiebreak reads the
+    host field (cmd_host), not this log."""
     _, body = _auto_impl_log(number)
     if not body:
         return
@@ -330,15 +392,26 @@ def cmd_auto_state(number: int):
         print(entries[-1])
 
 
+def cmd_host(number: int):
+    """The card's host field value (token protocol for the watcher tiebreak):
+    prints the option name, or nothing when the card has no host."""
+    for it in items_with_fields():
+        if it["number"] == number:
+            if it["host"]:
+                print(it["host"])
+            return
+    sys.exit(f"#{number} is not on the board")
+
+
 def cmd_show(arg: str):
     if arg == "all":
         items = sorted(items_with_fields(), key=lambda it: it["number"])
         if not items:
             print("Board is empty.")
             return
-        print(f"{'#':>5}  {'Status':<18} {'NextUp':<6}  Title")
+        print(f"{'#':>5}  {'Status':<18} {'NextUp':<6} {'Host':<7} {'Gate':<8}  Title")
         for it in items:
-            print(f"{it['number']:>5}  {(it['status'] or '-'):<18} {(it['next_up'] or '-'):<6}  {it['title']} [{it['state']}]")
+            print(f"{it['number']:>5}  {(it['status'] or '-'):<18} {(it['next_up'] or '-'):<6} {(it['host'] or '-'):<7} {(it['gate'] or '-'):<8}  {it['title']} [{it['state']}]")
         return
     if not arg.isdigit():
         sys.exit("argument must be an issue number or 'all'")
@@ -348,6 +421,8 @@ def cmd_show(arg: str):
             print(f"#{number} [{it['state']}] {it['title']}")
             print(f"  Status: {it['status'] or '-'}")
             print(f"  Next Up: {it['next_up'] or '-'}")
+            print(f"  Host: {it['host'] or '-'}")
+            print(f"  Gate: {it['gate'] or '-'}")
             return
     sys.exit(f"#{number} is not on the board. It is added automatically by the first set-next-up/status call.")
 
@@ -381,13 +456,50 @@ def cmd_shift():
     print("Queue shifted. Position 3 is free.")
 
 
-def cmd_status(number: int, status: str):
+def cmd_status(number: int, status: str, host: str | None = None):
+    """Move a card's status. Entering In IMPL/In Design also stamps the host
+    field (arg > GH_BOARD_HOST > container label file; unresolved → warning,
+    field left as is); leaving those statuses clears host AND gate — a card
+    that left its phase carries no stale ownership or pending ask."""
     load_status_field()
     if status not in _status_opts:
         sys.exit(f"Unknown status '{status}'. Available: {', '.join(_status_opts)}")
     it = find_item(number)
     set_field(it["item_id"], _status_field_id, _status_opts[status])
     print(f"#{number}: Status → {status}")
+    if status.lower().startswith(("in impl", "in design")):
+        h = _resolve_host(host)
+        if not h:
+            print("warn: host not resolved (arg/GH_BOARD_HOST/label file) — host field left unchanged", file=sys.stderr)
+        elif h not in _host_field_opts:
+            sys.exit(f"Unknown host '{h}'. Field options: {', '.join(_host_field_opts)}")
+        else:
+            set_field(it["item_id"], _host_field_id, _host_field_opts[h])
+            print(f"#{number}: host → {h}")
+    else:
+        if it["host"]:
+            set_field(it["item_id"], _host_field_id, None)
+            print(f"#{number}: host cleared")
+        if it["gate"]:
+            set_field(it["item_id"], _gate_field_id, None)
+            print(f"#{number}: gate cleared")
+
+
+def cmd_gate(number: int, value: str):
+    """Set the card's gate field — the single "this card awaits the user"
+    marker: concept|spec|plan = a design gate stop, blocked = an IMPL
+    blocker awaiting the user; none = the ask is answered (also cleared
+    automatically when the card leaves In IMPL/In Design via cmd_status)."""
+    load_status_field()
+    it = find_item(number)
+    if value == "none":
+        set_field(it["item_id"], _gate_field_id, None)
+        print(f"#{number}: gate cleared")
+        return
+    if value not in _gate_field_opts:
+        sys.exit(f"Unknown gate '{value}'. Available: {', '.join(_gate_field_opts)}, none")
+    set_field(it["item_id"], _gate_field_id, _gate_field_opts[value])
+    print(f"#{number}: gate → {value}")
 
 
 def cmd_issue(number: int):
@@ -465,24 +577,26 @@ if __name__ == "__main__":
     cmd = args[0]
     if cmd == "next-up":
         cmd_next_up()
-    elif cmd == "pick-next":
-        cmd_pick_next()
+    elif cmd == "pick-next" and len(args) <= 2:
+        cmd_pick_next(args[1] if len(args) == 2 else None)
     elif cmd == "pick-next-design":
         cmd_pick_next_design()
     elif cmd == "auto-log" and len(args) == 3:
         cmd_auto_log(int(args[1]), args[2])
     elif cmd == "auto-state" and len(args) == 2:
         cmd_auto_state(int(args[1]))
-    elif cmd == "pick-next":
-        cmd_pick_next()
+    elif cmd == "host" and len(args) == 2:
+        cmd_host(int(args[1]))
     elif cmd == "show" and len(args) == 2:
         cmd_show(args[1])
     elif cmd == "set-next-up" and len(args) == 3:
         cmd_set_next_up(int(args[1]), args[2])
     elif cmd == "shift":
         cmd_shift()
-    elif cmd == "status" and len(args) == 3:
-        cmd_status(int(args[1]), args[2])
+    elif cmd == "status" and len(args) in (3, 4):
+        cmd_status(int(args[1]), args[2], args[3] if len(args) == 4 else None)
+    elif cmd == "gate" and len(args) == 3:
+        cmd_gate(int(args[1]), args[2])
     elif cmd == "merged" and len(args) >= 3:
         cmd_merged(int(args[1]), int(args[2]), " ".join(args[3:]).strip())
     elif cmd == "issue" and len(args) == 2:

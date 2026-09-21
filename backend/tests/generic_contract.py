@@ -424,6 +424,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # constraint.
         search_override={"title": "Живопись"},
         search_query="жив",
+        # GH #318 D2 — deferred-delete commit state (records-flavor
+        # contract: bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot, mirror of ActivityService).
+        delete_body={"expected": {}},
     ),
     VisitorService: EntityConfig(
         service_factory=get_visitor_service,

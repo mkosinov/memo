@@ -8,7 +8,8 @@ import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import { PendingActionsProvider } from '../contexts/PendingActionsContext';
 import { ErrorBoundary } from './components/error';
 import { ToastContainer } from './components/toast/ToastContainer';
-import { parseApiError } from './lib/api/parseApiError';
+import { parseApiError, isNetworkError, isAbortClass } from './lib/api/parseApiError';
+import { isChannelDown } from './lib/connectionHealth';
 import { ServerEventsProvider } from './ServerEventsProvider';
 
 function QueryClientWithErrorReporting({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,13 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
         // Silent queries (meta.silent === true) skip the toast
         if ((query.meta as { silent?: boolean } | undefined)?.silent) return;
         console.error('[Query]', query.queryKey, err);
+        // GH #330 §5.4: while the SSE channel is down, the persistent
+        // connection-loss toast is already on screen — a per-query
+        // transport toast would duplicate it. Suppress ONLY transport-class
+        // errors (TypeError/Timeout/Abort); ApiError (4xx/5xx, incl.
+        // 401/403) is never a connection loss and always keeps its toast.
+        // The gate sits AFTER console.error — diagnostics are not muted.
+        if (isNetworkError(err) && isChannelDown()) return;
         const { message } = parseApiError(err);
         showToast(message, 'error');
       },
@@ -26,7 +34,12 @@ function QueryClientWithErrorReporting({ children }: { children: React.ReactNode
     defaultOptions: {
       queries: {
         staleTime: 30_000,
-        retry: 2,
+        // GH #330 §5.7: aborted/timed-out requests are NOT retried — each
+        // retry would get a fresh timeout window and drag the eventual
+        // error toast out to ~90–95 s. TypeError (network blip) keeps the
+        // old < 2 retries: blip + retry delay closes the dedup-gate race
+        // window (R3). Same numeric budget as the previous `retry: 2`.
+        retry: (failureCount, error) => failureCount < 2 && !isAbortClass(error),
         refetchOnWindowFocus: false,
         // GH #239: reconnect convergence is owned by the SSE channel
         // (ServerEventsProvider blanket-invalidates on reconnect). TanStack's

@@ -54,9 +54,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     обновлён ещё spec-коммитом `93edacff` на main — правок канона веткой не требуется.
   - Status: `docs/status/2026-09-21-tariff-age-autofill-284.md`
 
-## [Unreleased] — 2026-09-20
+- **GH #330 — Потеря связи с сервером: явный индикатор + таймауты запросов** — branch
+  `330-connection-loss-indicator` (7 commits `ecbecf99..ed56d6bd`, base `6877d175`; 16 файлов,
+  +1117/−15; спека `docs/specs/2026-09-19-connection-loss-indicator-330-design.md` rev2, план
+  `docs/plans/2026-09-20-connection-loss-indicator-330-plan.md` — оба на main, веткой не менялись):
+  - **Персистентный индикатор связи:** после 5 с непрерывного отказа SSE-канала показывается один
+    неубираемый тост «Нет соединения с сервером. Обновления приостановлены.» — крестика нет, лимит
+    «видимо 5» не действует и очередь его не вытесняет; дрожь короче 5 с молчит (дебаунс), при
+    восстановлении канала тост снимается автоматически. Источник правды состояния связи — SSE-канал
+    (#239); silent reconnect не менялся.
+  - **Таймауты запросов:** общий `packages/api-client` прерывает зависшие запросы через
+    `AbortSignal.timeout` — 30 с по умолчанию, 120 с для `FormData`-загрузок; поведение наследует и
+    web-витрина (option A, user-approved); timeout/abort-класс не ретраится, текст ошибки —
+    «Превышено время ожидания запроса».
+  - **Дедуп транспортных тостов:** пока канал лежит, транспортные query-тосты («Ошибка сети»)
+    подавляются; `ApiError` 4xx/5xx и per-action mutation-тосты не затронуты.
+  - **Tests:** admin vitest **143 файла / 2299 passed / 0 failed**; api-client **392 passed / 0 failed**
+    (включая новые timeout-тесты); tsc clean; eslint 0 errors / 36 warnings (бюджет 38); Playwright
+    точечно (server-push ×2) **9/9**; полный e2e — shard-schedule **123 passed** + shard-rest
+    **321 passed**, pytest **2324 passed / 15 skipped**, новых красных нет; ручной S4-проб —
+    заблокированный запрос прерван на ~33.5 с, без ретраев (`blocked=1`).
+  - Status: `docs/status/2026-09-21-connection-loss-indicator-330.md`
+
+### Fixed
+- **GH #231 — Deep-link `/clients?clientId=X`: один суженный запрос вместо двух** — branch
+  `231-clients-deeplink-single-request` (3 commits `69920a24..93426dff`, base `d8e07f60`;
+  5 файлов, +240/−34; спека `docs/specs/2026-09-19-clients-deeplink-single-request-design.md`
+  rev3 и план `docs/plans/2026-09-20-clients-deeplink-single-request-plan.md` — оба на main;
+  канон `docs/domain-rules/clients.md` обновлён спека-коммитом `774dc57d`):
+  - **Сид фильтров при монтировании:** страница читает `?clientId=` во время рендера над
+    `ClientsProvider` (новый `ClientsPageInner`, `Suspense`-граница поднята наверх) и передаёт
+    затравку `{ search: clientId, status: 'all' }` дословно; фабрика `createPagedListContext`
+    получила необязательный проп `initialFilters?: Partial<F>` (только with-filters перегрузка) —
+    ленивый инициализатор `useState` мержит его поверх дефолтов конфига однократно при монтировании.
+    Ушёл второй (мусорный дефолтный) GET: карточка клиента открывается по первому ответу. Параметр,
+    прилетающий после монтирования, сознательно не подхватывается (сид, не живая синхронизация);
+    URL фабрика не читает.
+  - **Без изменений:** обычный `/clients` (один дефолтный GET), поиск (300 мс / от 2 символов),
+    сортировка/пагинация, «Сбросить фильтры», снятие параметра при закрытии модалки и у мёртвой
+    ссылки; удалён только `setFilters`-эффект #216, остальные четыре эффекта — построчно.
+  - **Tests:** admin vitest **2303p/0f** (143 файла); e2e `clients.spec.ts` — **22/22 ×3 прогона
+    подряд без флейков** (изолированный shard-2 стек), новый S1-счётчик (`page.on('request')` до
+    `goto`, считает ВСЕ `/api/v1/clients*` без предфильтра по `q=`) ассертит ровно 1 запрос с
+    `q=<uuid>&status=all`; tsc 0 ошибок; eslint 0 errors / 36 pre-existing warnings. Только
+    фронтенд — бэкенд, api-client и БД не тронуты.
+  - Out of scope (свои issues): живая URL-синхронизация фильтров #349, `?id=` + серверное
+    разрешение страницы #232.
+  - Status: `docs/status/2026-09-21-clients-deeplink-single-request-231.md`
 
 ### Changed
+- **GH #318 — Tags: удаление занятого тега — единый контракт удалений (этап 1 из #346)** —
+  branch `318-tags-busy-delete` (7 commits `086adb67..cca86cef`, base `c7ce190f`; 21 файл,
+  +3687/−162; спека `docs/specs/2026-09-19-tags-busy-delete-318-design.md` rev9, план
+  `docs/plans/2026-09-20-tags-busy-delete-318-plan.md`; канон `docs/domain-rules/_overview.md`
+  + `tags.md` на main не менялся):
+  - **Домен — Tag входит в семейную матрицу (D1):** `FK_MATRIX[Tag]` — 8 join-зависимостей
+    (`service_tags`, `activity_tags`, `master_tags`, `location_tags`, `client_tags`,
+    `visitor_tags`, `record_tags`, `photo_tags`), все `cascade` / `auto=False` (perspective-auto
+    правило: та же join-таблица остаётся auto на стороне родителя и видима на стороне тега);
+    8 счётчиков + 8 id-коллекторов + 8 item-коллекторов (`{id, label}`, PII-граница — без
+    телефонов, Client с NULL name → «Аноним», master id = `staff_id`) + 8 Core-хендлеров
+    join-delete; `resolve_delete` поднят с `ArchiveService` на `GenericService` (`086adb67`).
+  - **Полный DELETE-контракт `/api/v1/tags/{id}` (D2, зеркало записей #285):**
+    `?dry_run=true` — чистое превью (занят → 409 `has_dependencies` с деревом+items, чист →
+    204 без удаления, нет → 404); голый DELETE и тело без `expected` → 422
+    `expected_state_required` (проверка формы раньше probe — неизвестный id тоже 422);
+    `?dry_run`+`resolutions` → 422 `dry_run_with_resolutions_forbidden`; тело
+    `{resolutions?, expected}` → probe → `collect_dependencies` → subset-сверка `expected`
+    (409 `stale_dependencies` на появление сверх подтверждённого; исчезнувшая не блокирует) →
+    валидация `resolutions` → `resolve_delete` → 204 (`2586b9d7`).
+  - **Отложенное удаление с кольцом 5 с (D4):** api-client `dryRunDeleteTag` +
+    `resolveDeleteTag(id, {expected, resolutions?})` (обязательный `expected`); `useDeleteTag`
+    по образцу `useDeleteRecord` (dry-run по клику → enqueue, диалог на 409, confirm →
+    `{resolutions, expected}` из items, undo из item-снапшота кэша `['tags']`, commit-фейлы:
+    404 тихо / 409-stale «данные изменились»+«Обновить» / сеть → undo); `TagsTable` проводка;
+    `DeleteDialog` — тег-сторонние подписи («Услуги: 2 (сняты)» + однострочники), родительская
+    сторона без изменений (`2bed6e56`, `95a1ea18`).
+  - **Extras:** `cleanupTag` для e2e-фикстур — голый `DELETE /tags` в `cleanup()` молча утекал
+    бы под 422-контрактом, 4 call-site исправлены + аудит существующих e2e на голый DELETE
+    `/tags` (`cca86cef`).
+  - **Tests:** pytest полный **2376p/0f** (15 skip pre-existing); vitest полный **2300p/0f**;
+    новый e2e `tags-delete-contract` S1/S2/S3/S9 **4/4** + затронутые аудитом спеки **10/10**
+    (standalone; полный e2e — CI PR); визуальный комплаенс **13/13 PASS**
+    (`/tmp/opencode/visual-318/`); сценарии S1–S10 спеки §4 закрыты (e2e/pytest/vitest по
+    маппингу задач).
+  - Status: `docs/status/2026-09-21-tags-busy-delete-318.md`
 - **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на
   deferred, честный тост ошибок без ответа сервера** — branch `record-delete-unified-contract-243`
   (12 commits incl. docs: `83a4f8db..`, base `8b18b548`; 17 файлов, +836/−257; спека
@@ -118,6 +200,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-19
 
 ### Added
+- **GH #227 — DataTable polish minors: озвучка гарда пикера + полная конвенция имён `*Columns.tsx`**
+  (отложенные миноры ревью #139) — branch `227-datatable-polish-minors` (3 commits:
+  `7507fc9c..5aa7156f`, base `8b18b548`; спека
+  `docs/specs/2026-09-19-datatable-polish-minors-227-design.md` rev2,
+  план `docs/plans/2026-09-19-datatable-polish-minors-227-plan.md`; 9 файлов, +85/−22):
+  - **Озвучка гарда ColumnPicker (`7507fc9c`):** гард «последняя видимая колонка» анонсируется
+    скринридеру — пункт рендерится фрагментом (label без изменений; при активном гарде), за
+    label — sr-only span «Последняя видимая колонка — скрыть нельзя», чекбокс защищённого пункта
+    получает `aria-describedby` (`useId()` + ключ колонки — уникально при двух таблицах);
+    доступное имя не меняется — решение §6.5 (без `disabled`/`aria-disabled`) и e2e не тронуты;
+    у незащищённых пунктов атрибут и span отсутствуют. Пункт 1 issue (page-clamp) закрыт фактом
+    (реализован и покрыт в #139), из скоупа исключён.
+  - **Конвенция «файл = экспорт» для всех девяти `*Columns.tsx` (`fac02577`, `5aa7156f`):**
+    `materialsColumns.tsx` → `materialColumns.tsx` (импорт в `MaterialsTable.tsx`) и
+    `recordsColumns.tsx` → `recordColumns.tsx` (импорты в `RecordsTable.tsx` +
+    `recordsColumns.test.tsx` + `recordsTimeParity.test.ts` — только строки импорта); экспорты
+    и поведение не менялись. Вне плана (гэп плана, минимально необходимо): импорт-строка в
+    `materialsColumns.test.tsx`.
+  - **Tests:** vitest полный прогон **2193p/0f** (139 файлов; базлайн 2181 + 2 новых юнита
+    ColumnPicker: гард активен — `aria-describedby` + точный текст описания + чистое доступное
+    имя; гард не активен — атрибутов и sr-only нет); lint 0 errors (37 pre-existing warnings,
+    порог 38), `tsc --noEmit` чисто, `next build` OK; e2e `tags-crud` **11/11** standalone
+    (якорь регрессии гарда); полный e2e — PR CI; визуальный гейт пропущен осознанно (sr-only
+    вне раскладки, видимой дельты нет; visual-regression на PR CI — авторитетная проверка,
+    протокол перегенерации снапшотов — спека S2).
+  - Status: `docs/status/2026-09-19-datatable-polish-minors-227.md`
+
+### Fixed
 - **GH #220 — Клиенты: колонка «Статус» (архив/активен) + единые скрытые статус-колонки** — branch
   `220-clients-status-column` (4 commits: `0fd4bb88..9a251ab3`, base `5d3a22d1`;
   спека `docs/specs/2026-09-19-clients-status-column-220-design.md`,

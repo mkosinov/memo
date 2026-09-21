@@ -26,7 +26,7 @@ import type {
 import { mockMasterResponse, createMockLocationResponse } from './helpers/mockData';
 import { buildAdminSchedule } from '@/lib/buildSchedule';
 import { parseLocalISO } from '@/lib/datetime';
-import { recordColumns } from '../app/(main)/records/components/recordsColumns';
+import { recordColumns } from '../app/(main)/records/components/recordColumns';
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 

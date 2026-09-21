@@ -40,6 +40,12 @@ function isAuthPath(path: string): boolean {
   return path.startsWith('/api/v1/auth/');
 }
 
+// Request ceilings (GH #330): JSON round-trips get 30s; FormData uploads
+// (GH #262 portraits) get 120s for slow mobile uplinks. Shared by admin and
+// web — the single client is the single point of enforcement.
+const REQUEST_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
+
 async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, options?: RequestInit): Promise<T> {
   const method = options?.method;
   const headers: Record<string, string> = {
@@ -57,6 +63,11 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     // Cookie sessions (GH #247 spec §4.1): the memo_session cookie rides along
     // on every request so the backend can resolve the session user.
     credentials: 'include',
+    // AFTER the spread on purpose: a caller's explicit signal must never be
+    // overridden by the timeout ceiling (GH #330).
+    signal: options?.signal ?? AbortSignal.timeout(
+      options?.body instanceof FormData ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+    ),
   });
 
   if (!res.ok) {

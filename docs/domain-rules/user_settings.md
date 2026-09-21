@@ -18,14 +18,17 @@ UserSettings stores per-user UI preferences: theme, language, column ordering fo
 - None.
 
 ## Invariants
-- One UserSettings record per user_id (uniqueness enforced at service level)
-- Records are hard-deleted (row physically removed)
+- **At-rest invariant (GH #319):** every user has a settings row. A missing row is created on first read (get-or-create) and at user creation (creation scenario + seed). GET never returns 404 for a live user.
+- One UserSettings record per user_id — uniqueness enforced at the **DB level** (UNIQUE constraint on `user_id`)
+- DELETE = reset to defaults: the row is hard-deleted (physically removed) and recreated with defaults on the next read
+- The row dies with the user: staff-card deletion cascade removes the user's settings row together with the user row
 
 ## Business Logic
 
 ### Backend
 - **Identified by user_id, not by primary key**, for all non-DELETE operations
-- **Own-only (GH #247 spec §3.8, breaking):** all endpoints require a session; GET/PUT/PATCH take **no** `user_id` query param — the session user is the only addressable user (a stale `?user_id=` from an old client is ignored). POST takes `user_id` in the body (create schema). DELETE by `/{settings_id}` resolves the row's `user_id` and rejects non-owned rows with 403 `AUTH_FORBIDDEN`
+- **Own-only (GH #247 spec §3.8, breaking):** all endpoints require a session; GET/PUT/PATCH take **no** `user_id` query param — the session user is the only addressable user (a stale `?user_id=` from an old client is ignored). POST also takes the user from the session — a `user_id` in the body is ignored (GH #319; previously accepted from the body). DELETE by `/{settings_id}` resolves the row's `user_id` and rejects non-owned rows with 403 `AUTH_FORBIDDEN`
+- **Get-or-create (GH #319):** GET creates the defaults row when missing (atomic SQLite `INSERT ... ON CONFLICT(user_id) DO NOTHING` + SELECT, written to DB; response marked `Cache-Control: no-store`)
 
 ### Frontend
 - SettingsPanel reads on mount, writes on change
@@ -35,11 +38,11 @@ UserSettings stores per-user UI preferences: theme, language, column ordering fo
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/user-settings | Get the session user's settings (own-only) |
-| POST | /api/v1/user-settings | Create (body takes user_id) |
+| GET | /api/v1/user-settings | Get the session user's settings; get-or-create — creates defaults if missing (`no-store`) |
+| POST | /api/v1/user-settings | Create (user taken from the session; body `user_id` ignored) |
 | PUT | /api/v1/user-settings | Partial update (session user's row, own-only) |
 | PATCH | /api/v1/user-settings | Partial update (session user's row, own-only) |
-| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) |
+| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) — reset to defaults, recreated on next read |
 
 ## Relationships
-- UserSettings → belongs to User (logical, not enforced FK)
+- UserSettings → belongs to User (FK + UNIQUE on `user_id`, enforced at the DB level)

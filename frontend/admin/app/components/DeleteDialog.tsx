@@ -29,7 +29,7 @@ import type { DependencyNode } from '@memo/api-client';
 // the real DELETE runs in the 5s commit. The rendering is unchanged for every
 // other entity (instant resolveDelete).
 
-export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity';
+export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -70,15 +70,14 @@ export interface DeleteDialogProps {
 // Auto deps use friendly plural labels; choice deps derive the plural from the
 // backend `relation` label via RELATION_PLURAL. `relation` is the backend's
 // single source of truth — extend one of these maps when the matrix grows.
+// GH #318 D9: the five *_tags join entities are DELIBERATELY ABSENT — both
+// sides of each join now derive from `relation` (parent side: relation «Тег»
+// → RELATION_PLURAL fallback «Теги»; tag side: relation = the parent entity
+// → its plural). The entity-keyed map is side-blind and must not own them.
 const AUTO_ENTITY_LABEL: Record<string, string> = {
   users: 'Пользователь',
   masters: 'Мастер', // GH #266: the schedule extension row (relation «Мастер»)
-  master_tags: 'Теги',
   staff_positions: 'Должности', // GH #266: M2M position links (relation «Должность»)
-  location_tags: 'Теги',
-  service_tags: 'Теги',
-  client_tags: 'Теги',
-  record_tags: 'Теги',
   tariffs: 'Тарифы',
   photos: 'Фото',
 };
@@ -97,10 +96,17 @@ const RELATION_PLURAL: Record<string, string> = {
   // Service delete → relation «Материал» → «Материалы» (deletion.py:166/:204).
   Услуга: 'Услуги',
   Материал: 'Материалы',
-  // Join/tag relation shared by record_tags and activity_tags (#286) — the
-  // entity-keyed map above covers record_tags; the relation fallback covers
-  // the activity tree's tag node.
+  // Join/tag relation shared by the *_tags joins (#286/#318) — parent-side
+  // trees (relation «Тег») fall here; the tag-side tree carries the PARENT
+  // relation labels (below) instead.
   Тег: 'Теги',
+  // GH #318 D9: tag-side tree relations — the eight *_tags joins FROM THE
+  // TAG'S SIDE ship the parent entity as `relation` (deletion.py FK_MATRIX[Tag]).
+  Занятие: 'Занятия',
+  Мастер: 'Мастера',
+  Локация: 'Локации',
+  Клиент: 'Клиенты',
+  Фото: 'Фото',
 };
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */
@@ -113,6 +119,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   client: 'клиента',
   record: 'записи',
   activity: 'занятия', // #286: deferred activity delete (schedule card/modal)
+  tag: 'тега', // #318: deferred tag delete (tags directory)
 };
 
 // #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are
@@ -151,10 +158,15 @@ function actionMarker(dep: DependencyNode): string {
   return dep.allowed_actions[0] === 'nullify' ? '○' : '→';
 }
 
-function actionSuffix(dep: DependencyNode): string {
+function actionSuffix(dep: DependencyNode, entityType: DeleteDialogEntityType): string {
   if (dep.allowed_actions[0] === 'nullify') {
     const tail = NULLIFY_TAIL[dep.entity] ?? '';
     return pluralSuffix(dep.count, `отвязан${tail}`, `отвязаны${tail}`, `отвязаны${tail}`);
+  }
+  // #318 D9: the tag dialog unlinks, never destroys — the parents stay, the
+  // links die. Per-type suffix («снят/сняты»), the AUTO_LINES_HIDDEN pattern.
+  if (entityType === 'tag') {
+    return pluralSuffix(dep.count, 'снят', 'сняты', 'сняты');
   }
   return pluralSuffix(dep.count, 'удалён', 'удалены', 'удалены');
 }
@@ -173,12 +185,21 @@ function depLabel(dep: DependencyNode): string {
 /** Max item lines shown before the «и ещё N» tail (spec D9в). */
 const ITEM_LINES_CAP = 10;
 
-function DepItemGroup({ dep }: { dep: DependencyNode }) {
+function DepItemGroup({
+  dep,
+  entityType,
+}: {
+  dep: DependencyNode;
+  entityType: DeleteDialogEntityType;
+}) {
   const items = dep.items ?? [];
+  // #318 D9: same per-type tail as the counter line — the tag dialog's
+  // groups say «будут сняты», every other entity keeps «будут удалены».
+  const groupTail = entityType === 'tag' ? 'будут сняты' : 'будут удалены';
   return (
     <>
       <div className="font-medium" style={{ color: 'var(--ink)' }}>
-        {`${depLabel(dep)} — будут удалены:`}
+        {`${depLabel(dep)} — ${groupTail}:`}
       </div>
       <ul className="mt-1 flex flex-col gap-0.5 pl-4 list-disc">
         {items.slice(0, ITEM_LINES_CAP).map((item) => (
@@ -194,19 +215,25 @@ function DepItemGroup({ dep }: { dep: DependencyNode }) {
 
 /** A dep row: with items → the group; without → the legacy counter line
  *  («→ Посещения: 2 (удалены)», with the cascade_preview tail when present). */
-function DepRow({ dep }: { dep: DependencyNode }) {
+function DepRow({
+  dep,
+  entityType,
+}: {
+  dep: DependencyNode;
+  entityType: DeleteDialogEntityType;
+}) {
   const hasItems = Array.isArray(dep.items) && dep.items.length > 0;
   if (hasItems) {
     return (
       <li className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
-        <DepItemGroup dep={dep} />
+        <DepItemGroup dep={dep} entityType={entityType} />
       </li>
     );
   }
   const preview = dep.cascade_preview ? `; визиты: ${dep.cascade_preview.visits ?? '?'}` : '';
   return (
     <li className="text-sm" style={{ color: 'var(--ink-mid)' }} data-testid={`dep-${dep.entity}`}>
-      {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep)}${preview})`}
+      {`${actionMarker(dep)} ${depLabel(dep)}: ${dep.count} (${actionSuffix(dep, entityType)}${preview})`}
     </li>
   );
 }
@@ -388,10 +415,10 @@ export function DeleteDialog({
       </p>
       <ul className="flex flex-col gap-1.5 my-2">
         {showAutoLines && autoDeps.map((dep) => (
-          <DepRow key={dep.entity} dep={dep} />
+          <DepRow key={dep.entity} dep={dep} entityType={entityType} />
         ))}
         {choiceDeps.map((dep) => (
-          <DepRow key={dep.entity} dep={dep} />
+          <DepRow key={dep.entity} dep={dep} entityType={entityType} />
         ))}
       </ul>
       {needsConfirm && (

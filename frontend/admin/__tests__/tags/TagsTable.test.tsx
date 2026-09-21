@@ -23,10 +23,17 @@ vi.mock('@/contexts/UIContext', () => ({
   useUI: () => ({ showToast: vi.fn() }),
 }));
 
+// #318: the deferred delete hook — mocked per-test via mockRemoveTag (the
+// component consumes removeTag / removeTagResolved, never a mutation).
+const mockRemoveTag = vi.fn();
+const mockRemoveTagResolved = vi.fn();
 vi.mock('@/hooks/useTagsMutations', () => ({
   useUpdateTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteTag: () => ({
+    removeTag: mockRemoveTag,
+    removeTagResolved: mockRemoveTagResolved,
+  }),
 }));
 
 vi.mock('@/app/(main)/tags/components/TagModal', () => ({
@@ -46,7 +53,8 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 
 // ─── Import after mocks ──────────────────────────────────────────────────
 
-import { getTags } from '@memo/api-client';
+import { getTags, ApiError } from '@memo/api-client';
+import type { DependencyNode } from '@memo/api-client';
 import { TagsTable } from '@/app/(main)/tags/components/TagsTable';
 import { TagsProvider } from '@/contexts/TagsContext';
 
@@ -320,5 +328,114 @@ describe('TagsTable row parity', () => {
 
     const row = screen.getByTestId('tag-row-t-1');
     expect(row.className).toContain('hover:opacity-80');
+  });
+});
+
+// ─── GH #318 (spec D5) — deferred delete flow ────────────────────────────────
+// window.confirm is GONE: «Удалить» runs the deferred hook (dry-run inside);
+// a 409 with a dependency tree opens DeleteDialog; anything else surfaces the
+// error toast. Mirrors RecordsTable.test.tsx delete-flow cases.
+
+describe('TagsTable delete flow (GH #318 deferred)', () => {
+  const TAG_DEPS: DependencyNode[] = [
+    {
+      entity: 'service_tags', auto: false,
+      relation: 'Услуга',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'svc-1', label: 'Стрижка' },
+        { id: 'svc-2', label: 'Маникюр' },
+      ],
+    },
+  ];
+
+  /** Open the row action menu and click «Удалить» (RecordsTable pattern).
+   *  Two rows render → two «Действия» triggers; the first is t-1. */
+  async function clickDeleteOnFirstRow(): Promise<void> {
+    fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Удалить' }));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: clean path — the deferred hook resolves (204 dry-run inside).
+    mockRemoveTag.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('«Удалить» runs the deferred clean path with the row object — NO window.confirm', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    setupEnvelope();
+    await renderLoaded();
+
+    await clickDeleteOnFirstRow();
+
+    expect(mockRemoveTag).toHaveBeenCalledTimes(1);
+    expect(mockRemoveTag).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't-1', title: 'Живопись' }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
+    // Clean path → no dialog
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+  });
+
+  it('409 dry-run conflict opens DeleteDialog; the tag stays in the table', async () => {
+    mockRemoveTag.mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, TAG_DEPS),
+    );
+    setupEnvelope();
+    await renderLoaded();
+
+    await clickDeleteOnFirstRow();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument(),
+    );
+    // Row stays visible — the dry-run deleted nothing.
+    expect(screen.getByText('Живопись')).toBeInTheDocument();
+  });
+
+  it('409 dialog confirm routes to removeTagResolved with resolutions + tree', async () => {
+    mockRemoveTag.mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, TAG_DEPS),
+    );
+    mockRemoveTagResolved.mockResolvedValue(undefined);
+    setupEnvelope();
+    await renderLoaded();
+
+    await clickDeleteOnFirstRow();
+    await waitFor(() =>
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument(),
+    );
+
+    // Confirm checkbox (choice deps exist) + «Удалить».
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
+    fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+    await waitFor(() =>
+      expect(mockRemoveTagResolved).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 't-1' }),
+        { service_tags: 'cascade' },
+        TAG_DEPS,
+      ),
+    );
+    // Dialog closes immediately (enqueue is synchronous).
+    await waitFor(() =>
+      expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('non-409 error surfaces the error toast, no dialog', async () => {
+    mockRemoveTag.mockRejectedValue(new ApiError(404, 'Tag not found', 'TAG_NOT_FOUND'));
+    setupEnvelope();
+    await renderLoaded();
+
+    await clickDeleteOnFirstRow();
+
+    await waitFor(() => expect(mockRemoveTag).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 });

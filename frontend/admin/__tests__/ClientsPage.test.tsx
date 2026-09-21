@@ -28,6 +28,14 @@ vi.mock('@/contexts/schedule/ScheduleProvider', () => ({
   },
 }));
 
+// #231 seed-era: the ClientsProvider mock records the props of every render
+// so the deep-link tests can assert on `initialFilters` (replaces the
+// effect-era setFilters assertions). vi.hoisted keeps the capture array
+// available to the hoisted vi.mock factory.
+const { clientsProviderMounts } = vi.hoisted(() => ({
+  clientsProviderMounts: [] as Array<{ initialFilters?: unknown }>,
+}));
+
 // importOriginal keeps the real `defaultFilters` export available — the
 // shared mockContexts fixture imports it for createMockClientsTableState.
 vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
@@ -35,7 +43,10 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
   return {
     ...actual,
     useClientsTable: vi.fn(),
-    ClientsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    ClientsProvider: ({ children, initialFilters }: { children: React.ReactNode; initialFilters?: unknown }) => {
+      clientsProviderMounts.push({ initialFilters });
+      return <div>{children}</div>;
+    },
   };
 });
 
@@ -125,6 +136,7 @@ describe('ClientsPage', () => {
     mockSearchParams = new URLSearchParams();
     mockRouter.push.mockClear();
     mockRouter.replace.mockClear();
+    clientsProviderMounts.length = 0;
     mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
   });
 
@@ -323,37 +335,21 @@ describe('ClientsPage', () => {
   });
 });
 
-describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
+describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
     mockRouter.push.mockClear();
     mockRouter.replace.mockClear();
+    clientsProviderMounts.length = 0;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('deep-link param narrows the table: setFilters({search: id, status: all})', async () => {
+  it('deep-link param seeds the provider: initialFilters={search: id, status: all}', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'uuid-target-1']]);
-    const ctx = createMockClientsTableState({ items: [] });
-    mockUseClients.mockReturnValue(ctx);
-
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() =>
-      expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'uuid-target-1', status: 'all' }),
-    );
-  });
-
-  it('no param: deep-link setFilters not called', async () => {
-    const ctx = createMockClientsTableState({ total: 25, page: 1, perPage: 20 });
-    mockUseClients.mockReturnValue(ctx);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -363,7 +359,26 @@ describe('ClientsPage — ?clientId= deep-link (GH #216)', () => {
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(ctx.setFilters).not.toHaveBeenCalled();
+    expect(clientsProviderMounts.length).toBeGreaterThan(0);
+    // #231 §5.2: value carried verbatim (no validation), status forced to 'all'.
+    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
+    expect(seedMount).toBeDefined();
+    expect(seedMount!.initialFilters).toEqual({ search: 'uuid-target-1', status: 'all' });
+  });
+
+  it('no param: initialFilters prop not passed (undefined)', async () => {
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(clientsProviderMounts.length).toBeGreaterThan(0);
+    expect(clientsProviderMounts.every(m => m.initialFilters === undefined)).toBe(true);
   });
 
   it('find-effect opens the modal when the narrowed row arrives', async () => {

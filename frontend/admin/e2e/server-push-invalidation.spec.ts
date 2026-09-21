@@ -19,6 +19,7 @@ import {
   expectUpdateToast,
   clickFabRobust,
   createRecordViaUI,
+  lostToast,
   uid,
   PUSH_WINDOW,
 } from './fixtures/server-push';
@@ -265,6 +266,86 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       await expectUpdateToast(pageA);
     } finally {
       await cleanup(request, `/api/v1/activities/${created.id}`);
+    }
+  });
+
+  // ── С5/S5 (#330): short flap below the debounce threshold → NO toast ────
+
+  twoPages('S5 (#330): brief cold-start SSE flap (2s abort < 5s debounce) → «Нет соединения» never appears', async ({
+    pageA,
+    pageB,
+    ctxA,
+    request,
+  }) => {
+    // COLD-START FLAP (the S1+S2/S3+S6 vehicle — see VEHICLE in
+    // server-push-offline.spec.ts): the abort route is registered BEFORE
+    // the page load — context.route() does NOT intercept an established
+    // SSE socket (probe-verified), so the abort must catch the CONNECT.
+    // Under the abort the ES constructor's connect fails, onerror fires
+    // at t≈0 in CONNECTING state and the 5s debounce (LOST_DEBOUNCE_MS)
+    // arms — the sub-threshold jitter S5 must stay silent on (spec §2 S5
+    // «дрожь ниже порога молчит»).
+    await ctxA.route('**/api/v1/events', (route) => route.abort('connectionreset'));
+
+    // t0 = the OBSERVED first aborted connect. The listener is armed
+    // BEFORE the goto and the flap window is timed from the connect
+    // FAILURE, not from any navigation milestone: dev compile/render
+    // latency between goto and hydration is unbounded, and an unroute
+    // landing after the browser's first retry turn (~3s from t0) would
+    // turn the flap into a full 5s+ outage. The observation doubles as
+    // the ENGAGED proof — no aborted connect → no onerror → no armed
+    // debounce → the silence asserts below would be vacuous.
+    const firstConnectFail = pageA.waitForEvent('requestfailed', {
+      predicate: (r) => r.url().includes('/api/v1/events'),
+      timeout: 15_000,
+    });
+    const loaded = pageA.goto('/schedule'); // cold start under the abort
+    loaded.catch(() => {}); // no unhandled rejection if t0 never observes; re-awaited below
+    await firstConnectFail; // t0: the debounce armed with the first onerror
+
+    try {
+      // MID-FLAP SILENCE PROBE (non-retrying, ≈t0+1.5s): a broken
+      // no-debounce implementation would toast AT t0 and the toast would
+      // still be on screen here; the healthy one shows nothing (the timer
+      // is pending and fires only at t0+5s).
+      await pageA.waitForTimeout(1_500);
+      expect(await lostToast(pageA).count()).toBe(0);
+      await pageA.waitForTimeout(500); // complete the 2s flap
+    } finally {
+      await ctxA.unroute('**/api/v1/events');
+    }
+
+    // Reconnect math: the server's retry: 5000 hint (events/router.py)
+    // reaches the client only on the ready frame of a SUCCESSFUL
+    // connection — none succeeded here, so the browser-default ~3s
+    // cadence applies: the retry at ≈t0+3 connects (the unroute at t0+2
+    // let it through), onopen lands < t0+5 and CANCELS the pending timer
+    // before it fires.
+    await loaded; // load settles whenever it settles — the t0 math is done
+    await pageA.waitForSelector('[data-testid^="activity-"]', { timeout: 10_000 });
+
+    // SILENCE WINDOW — wait out BOTH the debounce budget (5s from t0: a
+    // timer that wrongly survived the reconnect would have toasted by
+    // now — 2s flap + 7s wait = t0+9s > t0+5s) and the reconnect itself
+    // (onopen cancels any pending timer). A healthy implementation shows
+    // NOTHING.
+    await pageA.waitForTimeout(7_000);
+    await expect(lostToast(pageA)).toHaveCount(0);
+
+    // CHANNEL-ALIVE PIN — silence alone is ambiguous (a dead channel is
+    // also silent); the flap must have ENDED in a reconnect. B's real UI
+    // write must still push to A within the window: convergence + the
+    // standard update toast prove the channel is delivering again.
+    const marker = `Push S5 ${uid()}`;
+    let created: { id: string; client_id: string } | null = null;
+    try {
+      created = await createRecordViaUI(pageB, marker);
+      await expectUpdateToast(pageA);
+    } finally {
+      if (created) {
+        await cleanupRecord(request, created.id);
+        await cleanup(request, `/api/v1/clients/${created.client_id}`);
+      }
     }
   });
 });

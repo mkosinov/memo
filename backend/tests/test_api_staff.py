@@ -575,6 +575,36 @@ class TestStaffDelete:
         )
         assert resp.status_code == 422
 
+    def test_delete_with_tags_only_no_body_409_tree_shows_master_tags(
+        self, api_client
+    ) -> None:
+        """GH #318 regression: the parent 409-tree surfaces ``master_tags``
+        through the #318 fallback counters (join-dep counters existed
+        pre-#318; items stay None — §5 boundary, no item collector from the
+        parent side). Delete-with-body still resolves (see the cascade
+        test below) — the tree only informs consent."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        tag_id = _link_master_tag(created["id"])
+
+        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        dep = deps["master_tags"]
+        assert dep["count"] == 1
+        assert dep["allowed_actions"] == ["cascade"]
+        assert dep["auto"] is True  # parent perspective (#318 D1)
+        assert "items" not in dep or dep["items"] is None  # §5 boundary
+        # Dry-run modifies nothing: card + join row alive.
+        assert api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        assert query_db(
+            f"SELECT * FROM master_tags WHERE tag_id='{tag_id}'"
+        )
+
     def test_delete_cascades_user_masters_tags_positions(
         self, api_client
     ) -> None:

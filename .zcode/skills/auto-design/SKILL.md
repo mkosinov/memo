@@ -10,7 +10,7 @@ and end the turn; the cycle continues here when they answer.
 Base directory for this skill: `.zcode/skills/auto-design/`.
 Board: `python3 .zcode/scripts/gh_board.py <subcommand>` — the only way to touch the board.
 Statuses: `In Design` — ALL design work (gates A/B/C live here); `Ready to IMPL` — plan pushed, the IMPL start signal.
-Gate chips (labels on the issue, max one): `gate:concept` / `gate:spec` / `gate:plan` — "a user decision is pending"; no chip = the agent is working, nothing awaits the user.
+Gate field `gate` on the board card (max one value): `concept` / `spec` / `plan` — "a user decision is pending" (`gh_board.py gate N <value>` / `gate N none`); empty = the agent is working, nothing awaits the user.
 
 ## Step 1 — Pick
 
@@ -21,14 +21,14 @@ Gate chips (labels on the issue, max one): `gate:concept` / `gate:spec` / `gate:
 ## Step 2 — Claim
 
 - Git pre-flight: `git fetch origin && git status -sb`; behind → `git pull --ff-only`; diverged (ahead+behind) → STOP, report, reset nothing.
-- `gh_board.py status N "In Design"`; one-line issue comment: `auto-design: taken <UTC>`.
+- `gh_board.py status N "In Design" imac` (third arg = the host field value — this watcher runs on the iMac host; the field is the single ownership source for In IMPL/In Design cards); one-line issue comment: `auto-design: taken <UTC>`.
 
 ## Step 3 — Scout + actuality + step-0 report
 
 - Dispatch the read-only scout (Explore). Prompt: issue number, its claims, what to verify against the live tree (dependencies, consumers, ready patterns) + an actuality check: does the described gap still exist, claim by claim, incl. recently merged PRs. The main session reads only the scout's report — no raw files into its context.
 - The report ends with the verdict: `actual` / `partially stale` / `stale`.
 - Right after the scout — the run's FIRST user-facing message (step-0 block): issue number; 3–5 keywords; the issue retold as a user scenario (who does what, what changes for them — plain words, no jargon); the problem it solves.
-- Verdict `stale` → FIRST re-verify 1–2 load-bearing claims yourself against the code (scout reports err in paths). Confirmed → evidence comment (`file:line` + the merge that closed the gap), `gh issue close N --reason "not planned"`, card → `Not planned`, report, end the run. Not confirmed / doubt → do NOT close: comment what is off, chip `gate:concept`, stop message, end the turn.
+- Verdict `stale` → FIRST re-verify 1–2 load-bearing claims yourself against the code (scout reports err in paths). Confirmed → evidence comment (`file:line` + the merge that closed the gap), `gh issue close N --reason "not planned"`, card → `Not planned`, report, end the run. Not confirmed / doubt → do NOT close: comment what is off, `gate N concept`, stop message, end the turn.
 - Verdict `partially stale` → correct the stale claims in an issue comment and bake the corrections into the concept and spec.
 
 ## Step 4 — Gate A: concept (auto)
@@ -36,7 +36,7 @@ Gate chips (labels on the issue, max one): `gate:concept` / `gate:spec` / `gate:
 - From the issue + scout facts: 2–3 approaches with trade-offs + scope boundaries (what we deliberately do NOT build).
 - Filter: eliminate an approach violating a rule the repo already fixes (domain-rules, design-system, the UI→service→data layer invariant, board conventions — name the rule); eliminate re-implementation of a mechanism the scout found live; internals-only differences (file layout, naming, UI micro-layout) = one concept.
 - Divergence (user stop): approaches differ in user-visible behavior / data model / API contract / scope / reversibility. Max three presented, merge near-identical ones. In doubt — stop.
-- One concept survives → write the spec immediately, no stop. Divergence → chip `gate:concept`, message (step-0 if not yet shown + approaches with trade-offs + open questions), end the turn. No spec before the user picks.
+- One concept survives → write the spec immediately, no stop. Divergence → `gate N concept`, message (step-0 if not yet shown + approaches with trade-offs + open questions), end the turn. No spec before the user picks.
 
 ## Step 5 — Spec + panel
 
@@ -47,18 +47,18 @@ Gate chips (labels on the issue, max one): `gate:concept` / `gate:spec` / `gate:
 ## Step 6 — Gate B: spec OK (mandatory stop)
 
 Message — in Russian, no jargon, no unexplained abbreviations, self-contained (understandable without opening any file): step-0 block (if not shown) → chosen concept + why, briefly, also when auto-selected → Behavioral Delta from the spec → technical summary of the spec (what changes, where, how it is tested) → premises of the issue corrected by recon (if any) → panel outcome in one line → remaining assumptions as open questions → spec path.
-Then chip `gate:spec` and end the turn. Push NOTHING before the explicit OK.
+Then `gate N spec` and end the turn. Push NOTHING before the explicit OK.
 
 ## Step 7 — After OK
 
-- Remove the `gate:spec` chip. Commit + push the spec (+ domain-rules). Commit message WITHOUT Closes/Fixes/Resolves (closing keywords belong to the IMPL PR only).
+- Clear the gate: `gh_board.py gate N none`. Commit + push the spec (+ domain-rules). Commit message WITHOUT Closes/Fixes/Resolves (closing keywords belong to the IMPL PR only).
 - Plan `docs/plans/YYYY-MM-DD-<feature>-plan.md`, in Russian. Header Goal / Architecture / Tech Stack; do NOT restate the Behavioral Delta (it lives in the spec); every task maps to a User Scenario; anchor `## Task N` + classification trivial|small|standard|large + Required Docs; no placeholders.
 - Review: agent `plan-reviewer` (prompt: spec path + plan path).
 
 ## Step 8 — Gate C: plan (auto)
 
-- No spec-changing findings → auto-OK: fold fixes into the plan, commit + push, card → `Ready to IMPL`, no chips. Closing message: the plan's tasks one line each, spec/plan paths, «скажи менеджеру в opencode: продолжаем траекторию #N». End the run.
-- Findings that change the spec (the reviewer's or your own while writing the plan) → STOP: chip `gate:plan`, message (what was found / why the spec changes / the proposed fix), end the turn. This is the last point where the discussion may return to Gate A.
+- No spec-changing findings → auto-OK: fold fixes into the plan, commit + push, card → `Ready to IMPL`, gate empty. Closing message: the plan's tasks one line each, spec/plan paths, «скажи менеджеру в opencode: продолжаем траекторию #N». End the run.
+- Findings that change the spec (the reviewer's or your own while writing the plan) → STOP: `gate N plan`, message (what was found / why the spec changes / the proposed fix), end the turn. This is the last point where the discussion may return to Gate A.
 
 ## Fast-track (docs/harness-only issues, no app code)
 
@@ -67,8 +67,8 @@ No plan: the spec carries a `## Verification` section (mechanical checks). After
 ## Rules
 
 - One design per run. The user's manual session on the same issue always wins — defer to it.
-- The design card moves only forward: `In Design` → `Ready to IMPL` (fast-track: `In Design` → `In IMPL` → `In-main`). Return from IMPL is another session's job: broken spec → `In Design`, broken plan → `In Design` + chip `gate:plan`.
-- Chips: max one `gate:*` per issue; a new stop replaces the old chip (`--remove-label`, then `--add-label`). Missing label → create: `gh label create gate:concept --color D4C5F9` (spec `FBCA04`, plan `F9D0C4`).
-- Close an issue ONLY on the Step-3 stale bar. Duplicate / not a task / missing critical info → comment + chip `gate:concept` + stop, no closing.
+- The design card moves only forward: `In Design` → `Ready to IMPL` (fast-track: `In Design` → `In IMPL` → `In-main`). Return from IMPL is another session's job: broken spec → `In Design`, broken plan → `In Design` + `gate N plan`.
+- Gate field: max one value; a new stop replaces the old value (`gh_board.py gate N <value>`); the user's answer clears it (`gate N none`). Leaving In Design/In IMPL via `status` clears it automatically.
+- Close an issue ONLY on the Step-3 stale bar. Duplicate / not a task / missing critical info → comment + `gate N concept` + stop, no closing.
 - Blocked mid-design → comment `auto-design blocked: <reason>` on the issue, card stays, explain in the session, wait for the user.
 - Spec/plan/domain-rules content in Russian; harness files in English.

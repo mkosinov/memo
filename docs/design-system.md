@@ -563,6 +563,10 @@ body.delete-mode [data-testid^="activity-"]:hover {
 - Animation: `slide-up 200ms ease-out` (`globals.css:104-110`).
 - Toast API lives in `UIContext` (`contexts/UIContext.tsx`); `duration:
   null` keeps a toast open (loading state, GH #261).
+- Persistent variant (GH #330): `showToast(..., persistent)` — no auto-dismiss
+  timer, no × dismiss button, not evicted by the last-5 slice; hidden only by
+  code via `hideToast(id)` when the condition clears. Use case: the
+  connection-lost toast.
 
 ### Select / Filter Input
 

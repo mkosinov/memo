@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, render, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PaginatedResponse, ClientWithStats } from '@memo/api-client';
@@ -12,7 +12,8 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 });
 
 import { getClientsWithStats } from '@memo/api-client';
-import { ClientsProvider, useClientsTable } from '../contexts/ClientsContext';
+import { ClientsProvider, useClientsTable, defaultFilters } from '../contexts/ClientsContext';
+import type { ClientFilters } from '../contexts/ClientsContext';
 
 const mockGetClientsWithStats = vi.mocked(getClientsWithStats);
 
@@ -112,5 +113,111 @@ describe('ClientsContext factory config (GH #140)', () => {
     await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(2));
     expect(lastWireParams().q).toBeUndefined();
     expect(lastWireParams()).toHaveProperty('search', undefined);
+  });
+});
+
+// ─── #231 T1: initialFilters seed-at-mount (deep-link single request) ───
+
+describe('ClientsContext factory initialFilters seed (#231)', () => {
+  beforeEach(() => {
+    mockGetClientsWithStats.mockResolvedValue(envelope());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it('seeds initialFilters merged over config defaults at mount', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ClientsProvider initialFilters={{ search: 'uuid-1', status: 'all' }}>
+            {children}
+          </ClientsProvider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    // Seed overrides the two seeded fields; the other 10 keep config defaults
+    expect(result.current.filters).toEqual({ ...defaultFilters, search: 'uuid-1', status: 'all' });
+    // The very first fetch is already narrowed (one request, not two)
+    expect(lastWireParams().q).toBe('uuid-1');
+    expect(lastWireParams().status).toBe('all');
+  });
+
+  it('without initialFilters the state equals config defaults', async () => {
+    const { Wrapper } = setup();
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    expect(result.current.filters).toEqual(defaultFilters);
+  });
+
+  it('ignores initialFilters prop changes after mount (one-time seed)', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let filtersNow: ClientFilters | undefined;
+    function Probe() {
+      filtersNow = useClientsTable().filters;
+      return null;
+    }
+    const ui = (seed: Partial<ClientFilters> | undefined) => (
+      <QueryClientProvider client={queryClient}>
+        <ClientsProvider initialFilters={seed}>
+          <Probe />
+        </ClientsProvider>
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(ui({ search: 'uuid-1' }));
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+    expect(filtersNow).toEqual({ ...defaultFilters, search: 'uuid-1' });
+
+    // Same tree position → Provider re-renders with the new prop, NOT remounts
+    rerender(ui({ search: 'uuid-2' }));
+
+    await act(async () => {});
+    expect(filtersNow).toEqual({ ...defaultFilters, search: 'uuid-1' });
+    // No extra fetch — the late prop value never reaches the query
+    expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1);
+  });
+
+  it('resetFilters restores CONFIG defaults, not the seed', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ClientsProvider initialFilters={{ search: 'uuid-1', status: 'all' }}>
+            {children}
+          </ClientsProvider>
+        </QueryClientProvider>
+      );
+    }
+
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      result.current.resetFilters();
+    });
+
+    await waitFor(() => {
+      expect(result.current.filters).toEqual(defaultFilters);
+    });
   });
 });

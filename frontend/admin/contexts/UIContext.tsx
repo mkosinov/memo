@@ -15,6 +15,8 @@ interface Toast {
   countdownMs?: number;
   /** Additive action slot — rendered by ToastContainer with its own label. */
   action?: ToastAction;
+  /** #330 §5.3: no auto-dismiss timer; hidden only via hideToast(id). */
+  persistent?: boolean;
 }
 
 interface UIContextType {
@@ -26,12 +28,15 @@ interface UIContextType {
   // parameter for the kind form; it is ignored for non-undo toasts.
   // #285 D4 (rev8): the 5th parameter carries the optional action slot
   // (rendered as a button with `action.label`); undo toasts are unaffected.
+  // #330 §5.3: the 6th optional parameter marks the toast persistent —
+  // no auto-dismiss timer and no × button (see ToastContainer).
   showToast: (
     message: string,
     kindOrUndo?: ToastKind | (() => void),
     undoOrCountdownMs?: (() => void) | number,
     countdownMs?: number,
     action?: ToastAction,
+    persistent?: boolean,
   ) => string;
   hideToast: (id: string) => void;
   sidebarCollapsed: boolean;
@@ -93,6 +98,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     undoOrCountdownMs?: (() => void) | number,
     countdownMs?: number,
     action?: ToastAction,
+    persistent?: boolean,
   ): string => {
     let kind: ToastKind = 'info';
     let undoFn: (() => void) | undefined;
@@ -108,10 +114,11 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       undoFn = typeof undoOrCountdownMs === 'function' ? undoOrCountdownMs : undefined;
     }
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setToasts(prev => [...prev, { id, kind, message, undo: undoFn, countdownMs: cd, action }]);
-    if (kind !== 'loading') {
+    setToasts(prev => [...prev, { id, kind, message, undo: undoFn, countdownMs: cd, action, persistent }]);
+    if (kind !== 'loading' && !persistent) {
       // #285 D4 (rev8): the lifetime rule is untouched — only `undo` selects
       // the countdown-window lifetime; action toasts (no undo) keep 4500ms.
+      // #330 §5.3: persistent toasts get no timer — hidden via hideToast(id).
       const duration = undoFn ? (cd ?? 5000) : 4500;
       const timerId = setTimeout(() => {
         toastTimers.current.delete(id);

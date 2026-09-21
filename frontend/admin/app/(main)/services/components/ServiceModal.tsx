@@ -36,9 +36,11 @@ interface FieldRendererProps {
   value: unknown;
   onChange: (key: string, value: unknown) => void;
   error?: string;
+  /** GH #284: programmatic a11y label for select controls (dynamic row label). */
+  selectAriaLabel?: string;
 }
 
-function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
+function FieldRenderer({ field, value, onChange, error, selectAriaLabel }: FieldRendererProps) {
   const { baseId } = useBaseInputClasses();
   const inputId = `${baseId}-${field.key}`;
   const errorId = `${baseId}-${field.key}-error`;
@@ -138,6 +140,34 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
         </div>
       );
 
+    case 'select':
+      // GH #284: tariff audience select. Unlike text/number controls, the
+      // label is PROGRAMMATIC («Возрастная группа: {tariff title}»): tariff
+      // rows repeat the static label per row, so the row's own title is the
+      // only discriminator (spec §5 a11y — column headers are not wired to
+      // cell controls).
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <select
+            id={inputId}
+            value={(value as string) ?? field.defaultValue ?? field.options[0]?.value ?? ''}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            aria-label={selectAriaLabel ?? field.label}
+            className={baseInputClasses}
+            style={baseStyle}
+            aria-describedby={ariaDescribedBy}
+          >
+            {field.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          {errorEl}
+        </div>
+      );
+
     default:
       return null;
   }
@@ -157,7 +187,10 @@ function NestedList({ field, items, onChange, itemErrors }: NestedListProps) {
   const addItem = () => {
     const newItem: Record<string, unknown> = {};
     field.itemFields.forEach((f) => {
-      newItem[f.key] = f.type === 'number' ? 0 : '';
+      // GH #284: select rows init to their defaultValue (audience → "all",
+      // mirroring TariffCreateSchema) — never ''.
+      newItem[f.key] =
+        f.type === 'number' ? 0 : f.type === 'select' ? (f.defaultValue ?? f.options[0]?.value ?? '') : '';
     });
     onChange([...items, newItem]);
   };
@@ -210,6 +243,13 @@ function NestedList({ field, items, onChange, itemErrors }: NestedListProps) {
                 value={item[itemField.key]}
                 onChange={(key, val) => updateItem(index, key, val)}
                 error={itemErrors?.[`${index}.${itemField.key}`]}
+                // GH #284: programmatic label keyed by the ROW's tariff title
+                // (live — renames retarget it), NOT the shared column label.
+                selectAriaLabel={
+                  itemField.type === 'select'
+                    ? `${itemField.label}: ${String(item.title ?? '')}`
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -400,15 +440,31 @@ export function ServiceModal({
         initial[f.key] = toMaterialLinkState(service?.[f.key]);
         return;
       }
+      if (f.type === 'nested-list') {
+        // GH #284: select item-fields are normalized at prefill — a tariff
+        // without audience (legacy read shape) enters state as "all" so the
+        // submit payload always carries the explicit canonical value. Extra
+        // keys (id, service_id, …) pass through untouched (spread, not
+        // reconstruct).
+        const selects = f.itemFields.filter((sf): sf is Extract<typeof sf, { type: 'select' }> => sf.type === 'select');
+        const rawItems = Array.isArray(service?.[f.key]) ? (service?.[f.key] as Record<string, unknown>[]) : [];
+        initial[f.key] = rawItems.map((item) => {
+          if (selects.length === 0) return item;
+          const normalized = { ...item };
+          selects.forEach((sf) => {
+            if (normalized[sf.key] == null) normalized[sf.key] = sf.defaultValue ?? sf.options[0]?.value ?? '';
+          });
+          return normalized;
+        });
+        return;
+      }
       initial[f.key] =
         service?.[f.key] ??
         (f.type === 'number'
           ? DEFAULT_EMPTY_NUMBER_KEYS.includes(f.key)
             ? ''
             : 0
-          : f.type === 'nested-list'
-            ? []
-            : '');
+          : '');
     });
     return initial;
   });

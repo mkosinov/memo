@@ -36,7 +36,7 @@ function makeService(overrides?: Partial<ServiceResponse>): ServiceResponse {
       { id: 'mat-1', title: 'Акварель', description: 'Акварельные краски', note: null },
       { id: 'mat-2', title: 'Масло', description: 'Масляные краски', note: 'Густые масляные краски' },
     ],
-    tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500 }],
+    tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' }],
     tags: [{ id: 'tag-1', title: 'масло' }, { id: 'tag-2', title: 'пейзаж' }],
     is_active: true,
     created_at: '2026-01-01T00:00:00',

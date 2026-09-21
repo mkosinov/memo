@@ -20,6 +20,7 @@ import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { invalidateEntities } from '@/lib/invalidate';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { formatRecordLabel } from '@/lib/utils';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 import { patchVisitor, patchActivity, ApiError } from '@memo/api-client';
 import type { ClientWithStats, DependencyNode, RecordView } from '@memo/api-client';
 
@@ -99,9 +100,10 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
 
   const handleAddAnonymousVisit = useCallback(async () => {
     try {
-      // tariffs[0] — the same first-tariff default as makeEmptyVisitRow;
-      // no service tariffs → undefined → the visit is created with price 0.
-      await addAnonymousVisit(tariffs[0]);
+      // GH #284: the default goes through the single resolver (empty age →
+      // adult side, first adult tariff; none → first in list; no service
+      // tariffs → undefined → the visit is created with price 0).
+      await addAnonymousVisit(resolveDefaultTariff(tariffs, null) ?? undefined);
     } catch (err) {
       // Capacity re-check failures (409) surface here.
       showToast(parseApiError(err).message, 'error');

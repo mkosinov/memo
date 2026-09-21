@@ -19,7 +19,7 @@ import {
 } from './helpers/mockContexts';
 
 import { patchVisit as apiPatchVisit, patchRecord } from '@memo/api-client';
-import type { RecordResponse } from '@memo/api-client';
+import type { RecordResponse, TariffResponse } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
@@ -326,9 +326,9 @@ describe('ClientTab — fully hook-driven (#127 Task 7)', () => {
 
   it('tariff dropdown uses tariffs from useRecordData', async () => {
     // Provide custom tariffs via the hook mock
-    const customTariffs = [
-      { id: 'tariff-1', service_id: 's1', title: 'Взрослый', price: 2500, description: null },
-      { id: 'tariff-2', service_id: 's1', title: 'Детский', price: 1500, description: null },
+    const customTariffs: TariffResponse[] = [
+      { id: 'tariff-1', service_id: 's1', title: 'Взрослый', price: 2500, description: null, audience: 'adult' },
+      { id: 'tariff-2', service_id: 's1', title: 'Детский', price: 1500, description: null, audience: 'kid' },
     ];
     mockUseRecordData.mockReturnValue({
       recordData: null,

@@ -214,12 +214,17 @@ export type PhotoUpdate = z.infer<typeof PhotoUpdateSchema>;
 
 // ─── TariffResponse (nested in ServiceResponse) ────────────────────────────
 
+// GH #284: canonical audience marker on tariffs. Russian display labels live in
+// the UI layer — contracts carry canonical values only.
 export const TariffResponseSchema = z.object({
   id: z.string(),
   service_id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
   price: z.number(),
+  // Backend always serializes audience (Task 1) — required, so a degraded
+  // response fails loudly instead of silently resetting marks to «all».
+  audience: z.enum(['kid', 'adult', 'all']),
 });
 
 export type TariffResponse = z.infer<typeof TariffResponseSchema>;
@@ -567,6 +572,9 @@ export const TariffCreateSchema = z.object({
   title: z.string(),
   description: z.string().optional().default(''),
   price: z.number().min(0),
+  // GH #284: absent → "all" (mirrors backend TariffBase). Carrying audience on
+  // the write shape is what keeps marks alive across the PUT re-create.
+  audience: z.enum(['kid', 'adult', 'all']).optional().default('all'),
 });
 
 export type TariffCreate = z.infer<typeof TariffCreateSchema>;

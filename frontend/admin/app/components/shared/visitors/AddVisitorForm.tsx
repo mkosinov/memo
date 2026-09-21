@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { TariffResponse } from '@memo/api-client';
 import { VisitorRow, type VisitorRowVisit } from './VisitorRow';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 
 export interface AddVisitorPayload {
   name: string;
@@ -20,7 +21,15 @@ export interface AddVisitorFormProps {
 export function AddVisitorForm({ tariffs, isReadOnly, onAdd, onCancel }: AddVisitorFormProps) {
   const [name, setName] = useState('');
   const [age, setAge] = useState<number | ''>('');
-  const [tariffId, setTariffId] = useState(tariffs[0]?.id ?? '');
+  // GH #284: the single resolver owns the initial default (empty age → adult side).
+  const [tariffId, setTariffId] = useState(resolveDefaultTariff(tariffs, null)?.id ?? '');
+
+  function handleAgeChange(raw: string) {
+    setAge(raw === '' ? '' : Number(raw));
+    // Spec §2.5: ANY age change re-substitutes the tariff via the resolver —
+    // a manual pick is clobbered by design (owner decision, no undo).
+    setTariffId(resolveDefaultTariff(tariffs, raw === '' ? null : Number(raw))?.id ?? '');
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,7 +70,7 @@ export function AddVisitorForm({ tariffs, isReadOnly, onAdd, onCancel }: AddVisi
         <input
           type="number"
           value={age}
-          onChange={(e) => setAge(e.target.value ? Number(e.target.value) : '')}
+          onChange={(e) => handleAgeChange(e.target.value)}
           placeholder="Возраст"
           disabled={isReadOnly}
           className="w-16 rounded border px-2 py-1 text-sm"

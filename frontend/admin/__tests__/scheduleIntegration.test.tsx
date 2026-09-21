@@ -138,7 +138,7 @@ describe('Schedule pipeline integration: enrichment from API to ActivityCard', (
         duration: 150,
         record_info: '',
         tariffs: [
-          { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
+          { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
         ],
         tags: [],
         materials: [],
@@ -282,7 +282,7 @@ describe('Schedule pipeline: nullable visitor_id impact', () => {
         duration: 150,
         record_info: '',
         tariffs: [
-          { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
+          { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
         ],
         tags: [],
         materials: [],

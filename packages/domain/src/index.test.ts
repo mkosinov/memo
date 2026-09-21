@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as domain from './index';
 import type { ScheduleAdminDTO } from './schedule';
 
-const tariff = { id: 't1', title: 'Базовый', price: 2500, description: null };
+const tariff = { id: 't1', title: 'Базовый', price: 2500, description: null, audience: 'all' };
 
 const baseService = {
   id: 's1',
@@ -36,6 +36,23 @@ describe('TariffSchema', () => {
   it('rejects a tariff missing title', () => {
     const { title: _title, ...rest } = tariff;
     expect(domain.TariffSchema.safeParse(rest).success).toBe(false);
+  });
+
+  // ─── GH #284: tariff audience ───
+
+  it('accepts kid/adult/all audience values (GH #284)', () => {
+    expect(domain.TariffSchema.parse({ ...tariff, audience: 'kid' }).audience).toBe('kid');
+    expect(domain.TariffSchema.parse({ ...tariff, audience: 'adult' }).audience).toBe('adult');
+    expect(domain.TariffSchema.parse({ ...tariff, audience: 'all' }).audience).toBe('all');
+  });
+
+  it('rejects a tariff missing audience (transformers must carry it — PUT round-trip)', () => {
+    const { audience: _audience, ...rest } = tariff;
+    expect(domain.TariffSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it('rejects an unknown audience value', () => {
+    expect(domain.TariffSchema.safeParse({ ...tariff, audience: 'senior' }).success).toBe(false);
   });
 });
 

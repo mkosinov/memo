@@ -438,6 +438,32 @@ describe('ClientRecordTab — API interactions', () => {
     expect(apiDeleteVisit).not.toHaveBeenCalled();
   });
 
+  it('anonymous stepper «+» creates the visit with the resolver default tariff (first adult, GH #284)', async () => {
+    // Kid-first tariff list proves the classifier (not array position) picks
+    // the default: empty age → adult side → t1 (Взрослый, 3500).
+    buildDefaultQueryImpl(mockUseQuery, {
+      services: {
+        data: [{
+          ...mockServiceResponse,
+          tariffs: [
+            { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+            { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+          ],
+        }],
+        isLoading: false,
+        error: null,
+      },
+    });
+    render(<ClientRecordTab recordId="r1" clientId="c1" />);
+    fireEvent.click(screen.getByTestId('anonym-visits-inc'));
+
+    await waitFor(() => {
+      expect(createVisit).toHaveBeenCalledWith(
+        expect.objectContaining({ visitor_id: null, tariff_id: 't1', price: 3500 }),
+      );
+    });
+  });
+
   it('anonymous-visit "−" uses deleteVisitDeferred (enqueuePendingAction), not direct deleteVisit API (#243 S2)', async () => {
     // Record with an anonymous visit (visitor_id = null, #257 unified model)
     buildDefaultQueryImpl(mockUseQuery, {

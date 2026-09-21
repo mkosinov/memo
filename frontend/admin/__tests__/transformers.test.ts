@@ -50,7 +50,7 @@ const serviceFixture: ServiceResponse = {
   max_age: 99,
   duration: 180,
   record_info: 'Запись за 24 часа',
-  tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500 }],
+  tariffs: [{ id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: 'Билет для взрослого', price: 2500, audience: 'adult' }],
   tags: [{ id: 'tag-1', title: 'масло' }],
   materials: [],
   archived: false,
@@ -131,6 +131,15 @@ describe('transformService', () => {
     const result = transformService(serviceFixture);
     expect(result.tariffs).toHaveLength(1);
     expect(result.tariffs[0]).toMatchObject({ id: 'tariff-1', title: 'Взрослый', price: 2500 });
+  });
+
+  it('carries tariff audience through (GH #284 — PUT round-trip must not reset it)', () => {
+    const kidService: ServiceResponse = {
+      ...serviceFixture,
+      tariffs: [{ ...serviceFixture.tariffs[0], id: 'tariff-kid', audience: 'kid' }],
+    };
+    const result = transformService(kidService);
+    expect(result.tariffs[0].audience).toBe('kid');
   });
 
   it('defaults tariffs to [] when raw.tariffs is undefined', () => {

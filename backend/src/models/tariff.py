@@ -18,5 +18,8 @@ class Tariff(AbstractModelSoftDelete):
     title: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price: Mapped[int] = mapped_column(Integer)
+    audience: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default="all"
+    )
 
     service: Mapped["Service"] = relationship("Service", back_populates="tariffs")

@@ -33,8 +33,8 @@ import type { VisitResponse, TariffResponse } from '@memo/api-client';
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
 const mockTariffs: TariffResponse[] = [
-  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null },
-  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null },
+  { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+  { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
 ];
 
 const emptyVisitorsMap = new Map<string, { name: string; age: number | null }>();
@@ -191,6 +191,72 @@ describe('RecordVisitsTable — new-row save (preserves existing behavior)', () 
       }),
     );
   });
+});
+
+// ─── Tests: default-tariff resolver (GH #284, spec §2.4–2.5) ──────────────────
+
+describe('RecordVisitsTable — default tariff via resolver (GH #284)', () => {
+  it('draft row defaults to the first adult tariff, not the first in list', () => {
+    // Spec §2.4: empty age → «взрослая» сторона → first tariff with audience="adult".
+    // mockTariffs = [Взрослый(adult, 3500), Детский(kid, 2500)] — first IS adult here,
+    // so use a kid-first list to prove the classifier (not position) picks it.
+    const kidFirstTariffs: TariffResponse[] = [
+      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    render(<RecordVisitsTable
+      visits={[]}
+      visitorsMap={emptyVisitorsMap}
+      tariffs={kidFirstTariffs}
+      totalCost={0}
+      recordStatus="waiting"
+      clientId="c1"
+      onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+      onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+      onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+      onChangeVisitor={vi.fn()}
+      onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+    />);
+
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+  });
+
+  it('age change on a new row ALWAYS re-resolves the tariff and rewrites the price (overwrites manual pick)', () => {
+    // Spec §2.5: any age change re-substitutes the tariff by the rule — even
+    // clobbering a manual tariff pick (owner decision, no undo mechanism).
+    renderVisitsTable();
+
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    // Manual pick: Детский (kid, 2500)
+    fireEvent.change(screen.getByTestId('add-visitor-tariff'), { target: { value: 't2' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t2');
+
+    // Age 7 (kid) → re-resolve keeps kid side: Детский, price 2500
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '7' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t2');
+    expect(draftPriceValue()).toBe('2500');
+
+    // Age 14 (teen → adult side) → re-resolve flips to Взрослый, price 3500
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '14' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+    expect(draftPriceValue()).toBe('3500');
+
+    // Back to «Взрослый» sentinel → still the adult tariff
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: 'adult' } });
+    expect((screen.getByTestId('add-visitor-tariff') as HTMLSelectElement).value).toBe('t1');
+    expect(draftPriceValue()).toBe('3500');
+  });
+
+  /** The price input of the single unsaved draft row (row testid = visit-row-new). */
+  function draftPriceValue(): string {
+    const row = screen.getByTestId('visit-row-new');
+    const input = row.querySelector('input[type="number"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    return input.value;
+  }
 });
 
 // ─── Tests: new behavior (RED — failing against current code) ────────────────
@@ -582,5 +648,222 @@ describe('RecordVisitsTable — saved anonymous row conversion (#257)', () => {
 
     expect(onChangeVisitor).toHaveBeenCalledWith('vis1', { name: 'Пётр И.' });
     expect(onConvertAnonymousVisit).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Tests: saved-row age re-substitution (GH #284 spec §2.5) ────────────────
+
+describe('RecordVisitsTable — saved-row age re-substitution (GH #284)', () => {
+  /** A saved NAMED visit (visitor bound): age changes go through
+   * onChangeVisitor + onPatchVisit, never the conversion branch. */
+  const NAMED_VISIT: VisitResponse = {
+    ...SAVED_VISIT,
+    id: 'v1',
+    visitor_id: 'vis1',
+    tariff_id: 't1', // adult 3500 — as if picked manually over a kid age
+    price: 3500,
+  };
+
+  function renderNamedRow() {
+    const visitorsMap = new Map([['vis1', { name: 'Пётр', age: 6 }]]);
+    const mocks = makeMocks();
+    const utils = renderVisitsTable({ visits: [NAMED_VISIT], visitorsMap, mocks });
+    return { ...mocks, ...utils };
+  }
+
+  it('age change on a saved named row patches the visitor age AND re-substitutes the tariff (clobbers manual pick)', async () => {
+    const { onChangeVisitor, onPatchVisit } = renderNamedRow();
+
+    // 6 → 7 (kid side): the visitor's age is patched…
+    fireEvent.change(screen.getByTestId('visit-v1-age'), { target: { value: '7' } });
+    expect(onChangeVisitor).toHaveBeenCalledWith('vis1', { age: 7 });
+
+    // …and the resolver's pick (first kid = t2, 2500) is PERSISTED through
+    // onPatchVisit — the manual adult pick t1 is clobbered (owner decision).
+    await waitFor(() =>
+      expect(onPatchVisit).toHaveBeenCalledWith('v1', { tariff_id: 't2', price: 2500 }),
+    );
+  });
+
+  it('returning the age to «Взрослый» re-substitutes the adult tariff', async () => {
+    const { onChangeVisitor, onPatchVisit } = renderNamedRow();
+
+    // 6 → «Взрослый» sentinel: visitor age patched to null…
+    fireEvent.change(screen.getByTestId('visit-v1-age'), { target: { value: 'adult' } });
+    expect(onChangeVisitor).toHaveBeenCalledWith('vis1', { age: null });
+
+    // …and the adult side of the resolver (t1, 3500) is persisted.
+    await waitFor(() =>
+      expect(onPatchVisit).toHaveBeenCalledWith('v1', { tariff_id: 't1', price: 3500 }),
+    );
+  });
+
+  it('the tariff select DISPLAYS the re-substituted tariff after the cache catches up (no stale formState)', async () => {
+    // Spec §4 scenario 4: «тариф вернулся к детскому… переподставился
+    // взрослый тариф» — IN THE ROW. The patch alone is not enough: the
+    // saved row must not revert to its pre-pick formState when the visits
+    // prop re-derives (cache catch-up rerender).
+    const visitorsMap = new Map([['vis1', { name: 'Пётр', age: 6 }]]);
+    const mocks = makeMocks();
+    const utils = renderVisitsTable({ visits: [NAMED_VISIT], visitorsMap, mocks });
+
+    // Manual adult pick (t1)…
+    fireEvent.change(screen.getByTestId('visit-v1-tariff'), { target: { value: 't1' } });
+
+    // …then age 6→7 re-substitutes the kid tariff (t2, 2500)…
+    fireEvent.change(screen.getByTestId('visit-v1-age'), { target: { value: '7' } });
+    await waitFor(() =>
+      expect(mocks.onPatchVisit).toHaveBeenCalledWith('v1', { tariff_id: 't2', price: 2500 }),
+    );
+
+    // …and the cache catch-up rerender (visit patched in the prop) must
+    // keep displaying the substituted tariff, not the mount-time formState.
+    const patchedVisit: VisitResponse = { ...NAMED_VISIT, tariff_id: 't2', price: 2500 };
+    rerender(utils, { visits: [patchedVisit], visitorsMap, mocks });
+    expect((screen.getByTestId('visit-v1-tariff') as HTMLSelectElement).value).toBe('t2');
+  });
+
+  it('the tariff select DISPLAYS a manual pick after the cache catches up (no visual revert)', async () => {
+    // Same contract for the manual pick path (spec §2.5: «смена тарифа
+    // переписывает цену строки — как сегодня», and the row keeps showing
+    // what the admin picked).
+    const visitorsMap = new Map([['vis1', { name: 'Пётр', age: 6 }]]);
+    const mocks = makeMocks();
+    const utils = renderVisitsTable({ visits: [NAMED_VISIT], visitorsMap, mocks });
+
+    // NAMED_VISIT starts on t1 (adult): manually pick the kid tariff t2.
+    fireEvent.change(screen.getByTestId('visit-v1-tariff'), { target: { value: 't2' } });
+    await waitFor(() =>
+      expect(mocks.onPatchVisit).toHaveBeenCalledWith('v1', { tariff_id: 't2', price: 2500 }),
+    );
+
+    const patchedVisit: VisitResponse = { ...NAMED_VISIT, tariff_id: 't2', price: 2500 };
+    rerender(utils, { visits: [patchedVisit], visitorsMap, mocks });
+    expect((screen.getByTestId('visit-v1-tariff') as HTMLSelectElement).value).toBe('t2');
+  });
+});
+
+// ─── Tests: draft default when tariffs load late (GH #284 e2e S5 race) ───────
+
+describe('RecordVisitsTable — draft default resolves when tariffs arrive late (GH #284)', () => {
+  /** Render + rerender with an explicit tariffs list (bypasses the module mockTariffs). */
+  function renderWithTariffs(tariffs: TariffResponse[], visits: VisitResponse[] = []) {
+    return render(
+      <RecordVisitsTable
+        visits={visits}
+        visitorsMap={emptyVisitorsMap}
+        tariffs={tariffs}
+        totalCost={0}
+        recordStatus="waiting"
+        clientId="c1"
+        onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+        onChangeVisitor={vi.fn()}
+        onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+  }
+
+  it('a draft added while tariffs were EMPTY picks up the resolver default once they load', async () => {
+    // The e2e S5 race: the admin clicks «+ Добавить» before the service's
+    // tariffs query resolves — the draft is created tariff-less and must
+    // NOT stay «— тариф —» forever (spec §2.4: the row default IS the
+    // resolver result).
+    const utils = renderWithTariffs([]);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    const select = screen.getByTestId('add-visitor-tariff') as HTMLSelectElement;
+    expect(select.value).toBe('');
+
+    // Tariffs arrive (cache catch-up rerender): adult side default (t1).
+    const loaded: TariffResponse[] = [
+      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    utils.rerender(
+      <RecordVisitsTable
+        visits={[]}
+        visitorsMap={emptyVisitorsMap}
+        tariffs={loaded}
+        totalCost={0}
+        recordStatus="waiting"
+        clientId="c1"
+        onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+        onChangeVisitor={vi.fn()}
+        onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // Empty age → adult side: Взрослый (t1) — NOT the first-in-list kid.
+    await waitFor(() => expect(select.value).toBe('t1'));
+    const row = screen.getByTestId('visit-row-new');
+    const priceInput = row.querySelector('input[type="number"]') as HTMLInputElement;
+    await waitFor(() => expect(priceInput.value).toBe('3500'));
+  });
+
+  it('a late-loaded default respects the age already picked on the draft', async () => {
+    // The admin picks age 6 BEFORE tariffs load — the late default must
+    // resolve the kid side, not the empty-age adult side.
+    const utils = renderWithTariffs([]);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+    fireEvent.change(screen.getByTestId('add-visitor-age'), { target: { value: '6' } });
+
+    const loaded: TariffResponse[] = [
+      { id: 't2', service_id: 's1', title: 'Детский', price: 2500, description: null, audience: 'kid' },
+      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    utils.rerender(
+      <RecordVisitsTable
+        visits={[]}
+        visitorsMap={emptyVisitorsMap}
+        tariffs={loaded}
+        totalCost={0}
+        recordStatus="waiting"
+        clientId="c1"
+        onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+        onChangeVisitor={vi.fn()}
+        onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const select = screen.getByTestId('add-visitor-tariff') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('t2'));
+  });
+
+  it('never clobbers the admin\'s explicit «— тариф —» pick (empty string ≠ unresolved null)', async () => {
+    const loaded: TariffResponse[] = [
+      { id: 't1', service_id: 's1', title: 'Взрослый', price: 3500, description: null, audience: 'adult' },
+    ];
+    const utils = renderWithTariffs(loaded);
+    fireEvent.click(screen.getByTestId('btn-add-visitor'));
+
+    // Explicit empty pick → tariff_id becomes '' (NOT null).
+    fireEvent.change(screen.getByTestId('add-visitor-tariff'), { target: { value: '' } });
+
+    // Any rerender (same tariffs, new array identity) keeps the explicit pick.
+    utils.rerender(
+      <RecordVisitsTable
+        visits={[]}
+        visitorsMap={emptyVisitorsMap}
+        tariffs={[...loaded]}
+        totalCost={0}
+        recordStatus="waiting"
+        clientId="c1"
+        onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
+        onDeleteVisit={vi.fn().mockResolvedValue(undefined)}
+        onChangeVisitor={vi.fn()}
+        onConvertAnonymousVisit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const select = screen.getByTestId('add-visitor-tariff') as HTMLSelectElement;
+    // Give the (not-yet-existing) effect a chance to misfire, then assert.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(select.value).toBe('');
   });
 });

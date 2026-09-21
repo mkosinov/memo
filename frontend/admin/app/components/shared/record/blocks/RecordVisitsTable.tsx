@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useUI } from '@/contexts/UIContext';
@@ -8,6 +8,8 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
 import { StatusPicker } from '@/app/components/shared/StatusPicker';
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
+import { ADULT_AGE_SENTINEL, KIDS_AGES, TEEN_AGES } from '@/lib/age-groups';
+import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
 import { InlineEditRow } from '../InlineEditRow';
@@ -75,15 +77,17 @@ function visitResponseToRow(
 }
 
 function makeEmptyVisitRow(tariffs: TariffResponse[]): VisitRow {
-  const firstTariff = tariffs[0];
+  // GH #284: the single resolver owns the default — empty age → adult side
+  // (first adult tariff; none → first in list); no tariffs → no tariff.
+  const defaultTariff = resolveDefaultTariff(tariffs, null);
   return {
     id: null,
     clientId: transientId(),
     visitor_id: null,
     name: '',
     age: null,
-    tariff_id: firstTariff?.id ?? null,
-    price: firstTariff?.price ?? 0,
+    tariff_id: defaultTariff?.id ?? null,
+    price: defaultTariff?.price ?? 0,
     status: 'waiting' as VisitStatus,
   };
 }
@@ -159,16 +163,16 @@ function AgeSelect({
       data-testid={testId}
     >
       <optgroup label="Дети">
-        {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => (
+        {KIDS_AGES.map((n) => (
           <option key={n} value={String(n)}>{n}</option>
         ))}
       </optgroup>
       <optgroup label="Подростки">
-        {[12, 13, 14, 15, 16, 17].map((n) => (
+        {TEEN_AGES.map((n) => (
           <option key={n} value={String(n)}>{n}</option>
         ))}
       </optgroup>
-      <option value="adult">Взрослый</option>
+      <option value={ADULT_AGE_SENTINEL}>Взрослый</option>
     </select>
   );
 }
@@ -200,6 +204,40 @@ function TariffSelect({
       ))}
     </select>
   );
+}
+
+/**
+ * GH #284: late-tariffs catch-up for a NEW row. A draft added while the
+ * service's tariffs query was still EMPTY is tariff-less (empty-age adult
+ * default over [] → null). Once the tariffs arrive, the row must pick up
+ * the resolver default — resolved against the row's CURRENT formState age
+ * (the admin may have picked one already). Renders nothing.
+ *
+ * The formState (InlineEditRow-owned) is the only writable surface, so the
+ * heal runs as a child of the tariff cell with handleChange access — a
+ * table-level effect cannot reach it. Fires ONCE per null→resolved
+ * transition: after the first heal formState.tariff_id is set, and an
+ * explicit «— тариф —» pick stores '' (never re-healed).
+ */
+function LateTariffsHealer({
+  tariffs,
+  formState,
+  handleChange,
+}: {
+  tariffs: TariffResponse[];
+  formState: VisitFormState;
+  handleChange: (field: keyof VisitFormState, value: any) => void;
+}) {
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (healedRef.current || formState.tariff_id != null || tariffs.length === 0) return;
+    const resolved = resolveDefaultTariff(tariffs, formState.age);
+    if (!resolved) return;
+    healedRef.current = true;
+    handleChange('tariff_id', resolved.id);
+    handleChange('price', resolved.price);
+  }, [tariffs, formState.tariff_id, formState.age, handleChange]);
+  return null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -414,8 +452,18 @@ export function RecordVisitsTable({
                   <AgeSelect
                     value={isNew ? formState.age : (visitor?.age ?? formState.age)}
                     onChange={(age) => {
+                      // GH #284 (spec §2.5): ANY age change re-substitutes the
+                      // tariff via the resolver — even overwriting a manual
+                      // pick (owner decision, no undo) — and rewrites the row
+                      // price, reusing the same mechanism as a manual tariff
+                      // change in that branch (handleChange / onPatchVisit).
+                      const reTariff = resolveDefaultTariff(tariffs, age);
                       if (isNew) {
                         handleChange('age', age);
+                        if (reTariff) {
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
+                        }
                       } else if (r.id && r.visitor_id == null) {
                         // In-flight guard first: a pending conversion for this
                         // visit ignores the re-entry entirely (no second call,
@@ -432,8 +480,26 @@ export function RecordVisitsTable({
                           // #257 D7: conversion with the tracked name + age.
                           convertAnonymousRow(formState.name, age);
                         }
+                        // Re-substitution persists like a manual tariff change.
+                        if (reTariff) {
+                          // GH #284: display sync — the row must SHOW the
+                          // substituted tariff/price (the patch alone would
+                          // leave the mount-time formState visible until the
+                          // cache catch-up rerender re-derives it).
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
+                          onPatchVisit(r.id, { tariff_id: reTariff.id, price: reTariff.price });
+                        }
                       } else if (r.visitor_id) {
+                        handleChange('age', age);
                         onChangeVisitor(r.visitor_id, { age });
+                        if (reTariff) {
+                          // GH #284: display sync — same contract as the
+                          // anonymous branch above.
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
+                          onPatchVisit(r.id!, { tariff_id: reTariff.id, price: reTariff.price });
+                        }
                       }
                     }}
                     testId={isNew ? 'add-visitor-age' : `visit-${r.id}-age`}
@@ -443,23 +509,40 @@ export function RecordVisitsTable({
                 tariff: isReadOnly ? (
                   <span className="text-ink-mid">{tariff?.title || '—'}</span>
                 ) : (
-                  <TariffSelect
-                    value={formState.tariff_id}
-                    tariffs={tariffs}
-                    onChange={(tariffId) => {
-                      const selectedTariff = tariffs.find((t) => t.id === tariffId);
-                      if (isNew) {
-                        handleChange('tariff_id', tariffId);
-                        if (selectedTariff) handleChange('price', selectedTariff.price);
-                      } else {
-                        onPatchVisit(r.id!, {
-                          tariff_id: tariffId,
-                          price: selectedTariff?.price,
-                        });
-                      }
-                    }}
-                    testId={isNew ? 'add-visitor-tariff' : `visit-${r.id}-tariff`}
-                  />
+                  <>
+                    {/* GH #284: heal the null default once tariffs arrive (see LateTariffsHealer). */}
+                    {isNew && (
+                      <LateTariffsHealer
+                        tariffs={tariffs}
+                        formState={formState}
+                        handleChange={handleChange}
+                      />
+                    )}
+                    <TariffSelect
+                      value={formState.tariff_id}
+                      tariffs={tariffs}
+                      onChange={(tariffId) => {
+                        const selectedTariff = tariffs.find((t) => t.id === tariffId);
+                        if (isNew) {
+                          handleChange('tariff_id', tariffId);
+                          if (selectedTariff) handleChange('price', selectedTariff.price);
+                        } else {
+                          // GH #284: sync the row display immediately — the
+                          // patch propagates through the cache, but until it
+                          // catches up the select must show the admin's pick,
+                          // not the mount-time formState (and never "revert"
+                          // on an unrelated rerender).
+                          handleChange('tariff_id', tariffId);
+                          if (selectedTariff) handleChange('price', selectedTariff.price);
+                          onPatchVisit(r.id!, {
+                            tariff_id: tariffId,
+                            price: selectedTariff?.price,
+                          });
+                        }
+                      }}
+                      testId={isNew ? 'add-visitor-tariff' : `visit-${r.id}-tariff`}
+                    />
+                  </>
                 ),
 
                 price: isReadOnly ? (

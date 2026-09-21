@@ -48,6 +48,7 @@ from src.models import (
     Visit,
     Visitor,
 )
+from src.models.enums import TariffAudience
 from src.models.photo import photo_tags
 from src.models.position import staff_positions
 from src.models.tag import activity_tags, service_tags
@@ -319,39 +320,50 @@ async def _seed_services(session) -> None:
 
 
 async def _seed_tariffs(session) -> None:
-    # (service_id, title, price)
+    # (service_id, title, price, audience) — GH #284: the audience marker
+    # matches the title (kid-titled → kid, adult-titled → adult, the neutral
+    # «Индивидуальный» → all), mirroring the migration backfill rule so demo
+    # data exercises the age-autofill feature end-to-end.
     tariff_data = [
         # s1 — Картина маслом
-        ("t1a", "s1", "Взрослый", 3500),
-        ("t1c", "s1", "Детский", 2500),
-        ("t1i", "s1", "Индивидуальный", 5000),
+        ("t1a", "s1", "Взрослый", 3500, "adult"),
+        ("t1c", "s1", "Детский", 2500, "kid"),
+        ("t1i", "s1", "Индивидуальный", 5000, "all"),
         # s2 — Картина акрилом
-        ("t2a", "s2", "Взрослый", 2800),
-        ("t2c", "s2", "Детский", 2000),
-        ("t2i", "s2", "Индивидуальный", 4000),
+        ("t2a", "s2", "Взрослый", 2800, "adult"),
+        ("t2c", "s2", "Детский", 2000, "kid"),
+        ("t2i", "s2", "Индивидуальный", 4000, "all"),
         # s3 — Мини-картина акрилом
-        ("t3a", "s3", "Взрослый", 2000),
-        ("t3c", "s3", "Детский", 1500),
-        ("t3i", "s3", "Индивидуальный", 3000),
+        ("t3a", "s3", "Взрослый", 2000, "adult"),
+        ("t3c", "s3", "Детский", 1500, "kid"),
+        ("t3i", "s3", "Индивидуальный", 3000, "all"),
         # s4 — Акварель
-        ("t4a", "s4", "Взрослый", 2800),
-        ("t4c", "s4", "Детский", 2000),
-        ("t4i", "s4", "Индивидуальный", 4000),
+        ("t4a", "s4", "Взрослый", 2800, "adult"),
+        ("t4c", "s4", "Детский", 2000, "kid"),
+        ("t4i", "s4", "Индивидуальный", 4000, "all"),
         # s5 — Ручная лепка
-        ("t5a", "s5", "Взрослый", 2200),
-        ("t5c", "s5", "Детский", 1800),
-        ("t5i", "s5", "Индивидуальный", 3500),
+        ("t5a", "s5", "Взрослый", 2200, "adult"),
+        ("t5c", "s5", "Детский", 1800, "kid"),
+        ("t5i", "s5", "Индивидуальный", 3500, "all"),
         # s6 — Роспись одежды
-        ("t6a", "s6", "Взрослый", 3200),
-        ("t6c", "s6", "Детский", 2500),
-        ("t6i", "s6", "Индивидуальный", 4500),
+        ("t6a", "s6", "Взрослый", 3200, "adult"),
+        ("t6c", "s6", "Детский", 2500, "kid"),
+        ("t6i", "s6", "Индивидуальный", 4500, "all"),
         # s7 — Морской пейзаж
-        ("t7a", "s7", "Взрослый", 3800),
-        ("t7c", "s7", "Детский", 2800),
-        ("t7i", "s7", "Индивидуальный", 5500),
+        ("t7a", "s7", "Взрослый", 3800, "adult"),
+        ("t7c", "s7", "Детский", 2800, "kid"),
+        ("t7i", "s7", "Индивидуальный", 5500, "all"),
     ]
-    for tid, sid, title, price in tariff_data:
-        session.add(Tariff(id=tid, service_id=sid, title=title, price=price))
+    for tid, sid, title, price, audience in tariff_data:
+        session.add(
+            Tariff(
+                id=tid,
+                service_id=sid,
+                title=title,
+                price=price,
+                audience=TariffAudience(audience),
+            )
+        )
 
 
 async def _seed_tags(session) -> None:

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule } from '../buildSchedule';
 import { toScheduleView } from '../to-schedule-vm';
+import type { ServiceResponse } from '@memo/api-client';
 
 // Mock data matching the real API response shapes
 const mockMaster = {
@@ -17,7 +18,7 @@ const mockMaster = {
   updated_at: '',
 };
 
-const mockService = {
+const mockService: ServiceResponse = {
   id: 's1',
   title: 'Картина маслом',
   description: 'Масляная живопись',
@@ -35,7 +36,7 @@ const mockService = {
     { id: 'mat1', title: 'Масло', description: 'Масляные краски — классика живописи', note: 'Густые краски, холст 40×50' },
   ],
   tariffs: [
-    { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500 },
+    { id: 't1', service_id: 's1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
   ],
   tags: [{ id: 'tag2', title: 'хит' }],
 };

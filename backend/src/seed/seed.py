@@ -77,6 +77,21 @@ WEEK3_START = _THIS_WEEK_MONDAY   # current week (so e2e tests find activities)
 # consistent screenshots regardless of when tests are run.
 WEEK_FIXED_START = datetime(2026, 6, 15)  # Monday, 2026-06-15 (original — for visual baselines)
 
+# Fixed rising created_at for the 7 seed photos (ph1–ph7): consecutive days
+# at noon starting at WEEK_FIXED_START — pins photos visual baselines to the
+# fixed week (sorted-by-created_at lists stop drifting across UTC midnight).
+# Naive datetimes: the DB column is naive; explicit values so the
+# AbstractModel default (datetime.utcnow) no longer fires for seed photos.
+PHOTO_FIXED_DATES: dict[str, datetime] = {
+    "ph1": datetime(2026, 6, 15, 12, 0, 0),
+    "ph2": datetime(2026, 6, 16, 12, 0, 0),
+    "ph3": datetime(2026, 6, 17, 12, 0, 0),
+    "ph4": datetime(2026, 6, 18, 12, 0, 0),
+    "ph5": datetime(2026, 6, 19, 12, 0, 0),
+    "ph6": datetime(2026, 6, 20, 12, 0, 0),
+    "ph7": datetime(2026, 6, 21, 12, 0, 0),
+}
+
 _SERVICE_NAME_TO_ID: dict[str, str] = {
     "Морской пейзаж": "s7",
     "Ручная лепка": "s5",
@@ -576,20 +591,22 @@ async def _seed_photos(session) -> None:
     """
     photos = [
         {"id": "ph1", "filename": "/images/client-work-1.jpg", "client_id": "c1",
-         "is_public": True},
+         "is_public": True, "created_at": PHOTO_FIXED_DATES["ph1"]},
         {"id": "ph2", "filename": "/images/client-work-2.jpg", "client_id": "c1",
-         "is_public": True},
+         "is_public": True, "created_at": PHOTO_FIXED_DATES["ph2"]},
         {"id": "ph3", "filename": "/images/card-seascape.jpg", "service_id": "s1",
-         "is_public": True},
+         "is_public": True, "created_at": PHOTO_FIXED_DATES["ph3"]},
         {"id": "ph4", "filename": "/images/studio-alpika-interior.jpg",
-         "location_id": "alpika", "is_public": True},
-        {"id": "ph5", "filename": "/images/tag-pair.jpg", "is_public": True},
+         "location_id": "alpika", "is_public": True,
+         "created_at": PHOTO_FIXED_DATES["ph4"]},
+        {"id": "ph5", "filename": "/images/tag-pair.jpg", "is_public": True,
+         "created_at": PHOTO_FIXED_DATES["ph5"]},
         # ev_1 and ev_4 both run at location 'alpika' (L1) — see
         # _ACTIVITIES_RAW indices 1 and 4.
         {"id": "ph6", "filename": "/images/guest-1.jpg", "activity_id": "ev_1",
-         "is_public": True},
+         "is_public": True, "created_at": PHOTO_FIXED_DATES["ph6"]},
         {"id": "ph7", "filename": "/images/guest-2.jpg", "activity_id": "ev_4",
-         "is_public": True},
+         "is_public": True, "created_at": PHOTO_FIXED_DATES["ph7"]},
     ]
     for p in photos:
         session.add(Photo(**p))

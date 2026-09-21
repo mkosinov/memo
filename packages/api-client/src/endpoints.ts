@@ -493,15 +493,22 @@ export async function getRecordsView(params?: {
 // ─── Clients ────────────────────────────────────────────────────────────────
 
 export async function getClientsWithStats(
-  params?: Record<string, string | number | boolean | null | undefined>,
+  // GH #232: `ids` serializes as repeated `id` query keys (backend accepts
+  // ≤100 after dedup). Keys are collected explicitly — no spread of the
+  // filters bag into searchParams.
+  params?: Record<string, string | number | boolean | string[] | null | undefined>,
 ): Promise<PaginatedResponse<ClientWithStats>> {
   const search = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
+      if (key === 'ids') return; // handled explicitly below
       if (value !== undefined && value !== null && value !== '') {
         search.append(key, String(value));
       }
     });
+    if (Array.isArray(params.ids)) {
+      for (const id of params.ids) search.append('id', id);
+    }
   }
   const qs = search.toString();
   return api(`/api/v1/clients${qs ? `?${qs}` : ''}`, ClientListResponseSchema);

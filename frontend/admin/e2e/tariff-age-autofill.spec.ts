@@ -53,37 +53,20 @@ interface ServiceWithTariffs {
   tariffs: Array<{ id: string; title: string; price: number; audience: string }>;
 }
 
-let counter = 0;
-function uid(): string {
-  counter += 1;
-  return `${Date.now()}_${counter}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
 /** Create a service with explicit audience-marked tariffs via the API. */
 async function createServiceWithTariffs(
   api: APIRequestContext,
   tariffs: TariffSeed[],
 ): Promise<ServiceWithTariffs> {
-  const resp = await api.post(`${BACKEND}/api/v1/services`, {
-    data: {
-      title: `Услуга ${uid()}`,
-      description: 'e2e #284 tariff-age-autofill',
-      image_url: '',
-      specialty: 'живопись',
-      min_age: 5,
-      max_age: null,
-      duration: 90,
-      record_info: 'e2e seed',
-      tariffs: tariffs.map((t) => ({
-        title: t.title,
-        price: t.price,
-        audience: t.audience,
-      })),
-      tag_ids: [],
-    },
+  return createTestService(api, {
+    description: 'e2e #284 tariff-age-autofill',
+    specialty: 'живопись',
+    tariffs: tariffs.map((t) => ({
+      title: t.title,
+      price: t.price,
+      audience: t.audience,
+    })),
   });
-  expect(resp.ok()).toBeTruthy();
-  return await resp.json();
 }
 
 /** The visits-table surface: client + activity (on the service) + record. */

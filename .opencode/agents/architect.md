@@ -462,7 +462,9 @@ Trigger: all tasks done, tests green. Run ONCE per phase. Skip if no user-visibl
 1. Invoke `finishing-a-development-branch` skill.
 2. Verify the local pre-push gate (fast suites only — unit/integration + typecheck/lint, per the
    skill's Merge Gate Policy). Failing → report BLOCKED, do NOT fix.
-3. Auto-flow: push (background) → `gh pr create` → `gh pr checks --watch` → ALL green (CI is the
+3. Auto-flow: push (background) → `gh pr create` — the PR description carries `Closes #N` (the
+   only legitimate place for a closing keyword; it auto-closes the issue at merge) →
+   `gh pr checks --watch` → ALL green (CI is the
    authoritative merge gate, incl. e2e shards) → `gh pr merge --squash --delete-branch` → update
    local main → cleanup worktree + local branch. CI unavailable (quota/outage, verified with a
    real run) → full local run incl. e2e as the merge gate (outage protocol).

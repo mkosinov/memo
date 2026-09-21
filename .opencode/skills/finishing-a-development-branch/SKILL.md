@@ -106,6 +106,12 @@ For detached HEAD, note the new branch name:
 This is the default success-path flow. Run it automatically after the notification.
 **Contact the user ONLY on error** (push failure, PR creation error, red CI, merge error).
 
+**The PR description must carry `Closes #N`** (N = the issue this branch implements): the
+closing keyword in the PR description is what auto-closes the issue at merge — and it is the
+ONLY legitimate place for it (never in direct-to-main commit messages; those land without a
+merge and would close the issue before any IMPL started). Omit the line only when the work
+has no issue.
+
 ```bash
 # Push branch (pre-push hook is disabled — CI runs on GitHub Actions)
 if ! git push -u origin <feature-branch>; then
@@ -118,6 +124,8 @@ fi
 if ! gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets of what changed>
+
+Closes #N
 
 ## Test Plan
 - [x] CI checks pass (GitHub Actions)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import delete, not_, select
@@ -29,6 +30,54 @@ from src.schemas.service import (
 )
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService, BARE_LIST_MAX_ROWS
+
+# GH #344: journaled field set for an explicit service mark (§5.1) — the
+# scalar columns a user action can change; free-text fields
+# (``description``/``record_info``) never survive serialization (§5.1),
+# and the nested tariffs/tag_ids/materials are non-canonical cascade
+# children (never journaled, §4.2).
+_SERVICE_MARK_FIELDS = (
+    "title",
+    "description",
+    "image_url",
+    "specialty",
+    "min_age",
+    "max_age",
+    "duration",
+    "record_info",
+)
+
+
+def _service_mark(
+    service: Service, action: str, old: dict[str, Any] | None = None
+) -> None:
+    """Stage ONE journal row for a direct service write (spec §4.3).
+
+    The full ``create``/``update``/``patch`` overrides write the row
+    around the repository (nested tariffs/tags/materials), so repo
+    auto-collection never fires — this explicit mark is the row's only
+    journal source. ``old=None`` → create mark (after-snapshot pairs over
+    the signature fields, the shape a repo-riding create stages);
+    otherwise update pairs over the fields that actually changed (§5.1 —
+    no-op fields never journal). LAZY audit import — cycle discipline
+    (src/events/entities.py WARNING).
+    """
+    from src.events.audit import mark_audit, snapshot_pairs_after
+
+    if old is None:
+        changes: dict[str, Any] | None = snapshot_pairs_after("services", service)
+    else:
+        changes = {
+            f: [old[f], getattr(service, f)]
+            for f in _SERVICE_MARK_FIELDS
+            if old[f] != getattr(service, f)
+        }
+    mark_audit(
+        entity="services",
+        action=action,
+        entity_id=service.id,
+        changes=changes,
+    )
 
 
 class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceResponse]):
@@ -264,6 +313,11 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             )
 
         await db_session.flush()
+        # GH #344 (§4.3): this override writes the row around the
+        # repository (nested tariffs/tags/materials) — auto-collection
+        # never fires, so the explicit mark is the row's only journal
+        # source; the nested children are never journaled (§4.2).
+        _service_mark(service, "create")
         return await self.get(db_session, service.id)
 
     @transactional
@@ -279,6 +333,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         tariff_data = data.tariffs
         update_data = data.model_dump(exclude={"tariffs", "tag_ids", "materials"})
 
+        # GH #344 (§4.2): the "before" half of the diff is fixed BEFORE
+        # the first in-session mutation.
+        _old = {f: getattr(service, f) for f in _SERVICE_MARK_FIELDS}
         for key, value in update_data.items():
             setattr(service, key, value)
 
@@ -304,6 +361,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         await self._replace_service_materials(db_session, id, data.materials)
 
         await db_session.flush()
+        # GH #344 (§4.3): explicit mark — the user action rewrote the row
+        # (PUT semantics); pairs carry only the changed scalar fields.
+        _service_mark(service, "update", _old)
         db_session.expunge(service)
         return await self.get(db_session, id)
 
@@ -342,6 +402,16 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
 
+        # GH #344 (§4.2): "before" half fixed before the first mutation;
+        # an empty PATCH (nothing sent) is a no-op — no journal row.
+        _old = {f: getattr(service, f) for f in _SERVICE_MARK_FIELDS}
+        _touched = (
+            bool(data_dict)
+            or tag_ids is not None
+            or tariffs_data is not None
+            or data.materials is not None
+        )
+
         # Apply scalar fields
         for key, value in data_dict.items():
             setattr(service, key, value)
@@ -373,6 +443,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             await self._replace_service_materials(db_session, id, data.materials)
 
         await db_session.flush()
+        # GH #344 (§4.3): mark only when the request actually carried a
+        # payload field (scalar, tag_ids, tariffs, or materials — a
+        # tag_ids/tariffs/materials-only patch still marks the action
+        # with the changed-scalar diff, possibly empty).
+        if _touched:
+            _service_mark(service, "update", _old)
         db_session.expunge(service)
         return await self.get(db_session, id)
 

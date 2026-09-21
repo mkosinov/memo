@@ -15,8 +15,11 @@ Covered families:
   delete journals the final DELETE (§4.5); cascade visits/payments never
   journal;
 * standalone visits / photos / staff composite / profile / user
-  settings — explicit marks where the service writes rows around the
-  repository;
+  settings / services (nested tariffs/tags/materials writes) — explicit
+  marks where the service writes rows around the repository;
+* standalone visitor delete — label + before-snapshot of the deleted
+  row (§9 scenario 6); the Client→visitors cascade reuses the bare
+  ``_delete_cascade`` core and stays silent (§8);
 * ``resolve_delete`` (deferred-delete commit for clients/services/staff/
   tags) and ``ActivityService.delete`` — the deferred-delete commit path
   (§4.5);
@@ -932,6 +935,191 @@ class TestUserSettingsAudit:
         )
         assert updated is not None
         assert audit_rows()[before:] == []
+
+
+# ─── §4.3: ServiceService — nested writes around the repository ───────────────
+
+
+def _insert_service(svc_id: str, title: str, specialty: str = "живопись") -> None:
+    """Seed a service row directly (no service call → no journal row)."""
+    from tests.conftest import query_db
+
+    query_db(
+        f"INSERT INTO services (id, title, description, image_url, specialty, "
+        f"min_age, duration, record_info, is_active, created_at, updated_at) "
+        f"VALUES ('{svc_id}', '{title}', 'о', 'https://e.com/x.jpg', "
+        f"'{specialty}', 6, 90, 'и', 1, datetime('now'), datetime('now'))"
+    )
+
+
+class TestServiceServiceAudit:
+    async def test_create_service_journals_row(self, db_session, actor, audit_rows) -> None:
+        from src.schemas.service import ServiceCreate
+        from src.services.service import get_service_service
+
+        svc = await get_service_service().create(
+            db_session,
+            ServiceCreate(
+                title="Валютная мастерская",
+                description="о",
+                image_url="https://e.com/x.jpg",
+                specialty="живопись",
+                min_age=6,
+                duration=90,
+                record_info="и",
+            ),
+        )
+        rows = audit_rows()
+        # ONE row: the service. The nested tariffs/tags/materials link
+        # writes are non-canonical cascade children — never journaled.
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("create", "services", svc.id)
+        ]
+        assert rows[0]["entity_label"] == "Валютная мастерская, живопись"
+        assert json.loads(rows[0]["changes"]) == {
+            "title": [None, "Валютная мастерская"],
+            "specialty": [None, "живопись"],
+            "duration": [None, 90],
+            "is_active": [None, True],
+        }
+
+    async def test_update_service_journals_diff_row(self, db_session, actor, audit_rows) -> None:
+        from src.schemas.service import ServiceUpdate
+        from src.services.service import get_service_service
+
+        _insert_service("svc-u", "Старое название")
+        updated = await get_service_service().update(
+            db_session,
+            "svc-u",
+            ServiceUpdate(
+                title="Новое название",
+                description="о",
+                image_url="https://e.com/x.jpg",
+                specialty="живопись",
+                min_age=6,
+                duration=120,
+                record_info="и",
+            ),
+        )
+        assert updated is not None
+        rows = audit_rows()
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("update", "services", "svc-u")
+        ]
+        assert json.loads(rows[0]["changes"]) == {
+            "title": ["Старое название", "Новое название"],
+            "duration": [90, 120],
+        }
+
+    async def test_patch_service_journals_diff_row(self, db_session, actor, audit_rows) -> None:
+        from src.schemas.service import ServicePatch
+        from src.services.service import get_service_service
+
+        _insert_service("svc-p", "Неизменное название")
+        patched = await get_service_service().patch(
+            db_session,
+            "svc-p",
+            ServicePatch(specialty="графика"),
+        )
+        assert patched is not None
+        rows = audit_rows()
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("update", "services", "svc-p")
+        ]
+        assert json.loads(rows[0]["changes"]) == {"specialty": ["живопись", "графика"]}
+
+    async def test_patch_service_noop_writes_nothing(self, db_session, actor, audit_rows) -> None:
+        from src.schemas.service import ServicePatch
+        from src.services.service import get_service_service
+
+        _insert_service("svc-n", "Неизменное название")
+        patched = await get_service_service().patch(
+            db_session, "svc-n", ServicePatch(),
+        )
+        assert patched is not None
+        assert audit_rows() == []
+
+
+# ─── §4.3/§9-6: VisitorService.delete — label of the deleted row ──────────────
+
+
+def _insert_client_for_visitor(client_id: str, phone: str) -> None:
+    """Seed a client row directly (no service call → no journal row)."""
+    from tests.conftest import query_db
+
+    query_db(
+        f"INSERT INTO clients (id, name, phone, channel, is_active, "
+        f"created_at, updated_at) VALUES ('{client_id}', 'Гость', "
+        f"'{phone}', 'telegram', 1, datetime('now'), datetime('now'))"
+    )
+
+
+def _insert_visitor(
+    vid: str, client_id: str, name: str, age: int | None = None
+) -> None:
+    """Seed a visitor row directly (no service call → no journal row)."""
+    from tests.conftest import query_db
+
+    age_sql = str(age) if age is not None else "NULL"
+    query_db(
+        f"INSERT INTO visitors (id, client_id, name, age, created_at, "
+        f"updated_at) VALUES ('{vid}', '{client_id}', '{name}', {age_sql}, "
+        f"datetime('now'), datetime('now'))"
+    )
+
+
+class TestVisitorServiceAudit:
+    async def test_delete_visitor_journals_snapshot_row_with_label(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§9 scenario 6: «удалил посетителя …» с подписью удалённого —
+        the label + before-snapshot are captured BEFORE the row dies."""
+        from src.services.visitor import get_visitor_service
+
+        _insert_client_for_visitor("cl-vis", "+79990001290")
+        _insert_visitor("vis-del", "cl-vis", "Алиса", age=30)
+        before = len(audit_rows())
+        ok = await get_visitor_service().delete(db_session, "vis-del")
+        assert ok is True
+        rows = audit_rows()[before:]
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("delete", "visitors", "vis-del")
+        ]
+        assert rows[0]["entity_label"] == "Алиса, 30"
+        assert json.loads(rows[0]["changes"]) == {
+            "client_id": ["cl-vis", None],
+            "name": ["Алиса", None],
+            "age": [30, None],
+        }
+
+    async def test_delete_missing_visitor_writes_nothing(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        from src.services.visitor import get_visitor_service
+
+        ok = await get_visitor_service().delete(db_session, "vis-none")
+        assert ok is False
+        assert audit_rows() == []
+
+    async def test_client_cascade_delete_leaves_visitors_silent(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§8: the Client→visitors USER-CHOICE cascade reuses the bare
+        ``_delete_cascade`` core — the visitor rows are cascade children
+        and never journal; only the client's own delete row appears."""
+        from src.services.client import get_client_service
+
+        _insert_client_for_visitor("cl-casc", "+79990001291")
+        _insert_visitor("vis-casc", "cl-casc", "Борис")
+        before = len(audit_rows())
+        ok = await get_client_service().resolve_delete(
+            db_session, "cl-casc", {"visitors": "cascade"},
+        )
+        assert ok is True
+        rows = audit_rows()[before:]
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("delete", "clients", "cl-casc")
+        ]
 
 
 # ─── §4.5: resolve_delete — the deferred-delete commit for dictionaries ───────

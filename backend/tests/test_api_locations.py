@@ -182,6 +182,42 @@ class TestDeleteUnifiedRoute:
         )
         assert resp.status_code == 404
 
+    def test_delete_location_with_tags_no_body_409_tree_shows_location_tags(
+        self, api_client, create_location
+    ) -> None:
+        """GH #318 regression: the parent 409-tree surfaces
+        ``location_tags`` via the fallback counter; items stay None
+        (§5 boundary — no item collector from the parent side). The
+        execute path (all-auto deps, ``{}`` body) is covered separately."""
+        location = create_location()
+        tag_id = api_client.post(
+            "/api/v1/tags", json={"title": f"lt409-{location['id'][:8]}"}
+        ).json()["id"]
+        query_db(
+            f"INSERT INTO location_tags (location_id, tag_id) "
+            f"VALUES ('{location['id']}', '{tag_id}')"
+        )
+
+        resp = api_client.delete(f"/api/v1/locations/{location['id']}")
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        dep = deps["location_tags"]
+        assert dep["count"] == 1
+        assert dep["allowed_actions"] == ["cascade"]
+        assert dep["auto"] is True  # parent perspective (#318 D1)
+        assert "items" not in dep or dep["items"] is None  # §5 boundary
+        # Dry-run modifies nothing: location + join row + tag row alive.
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+        assert (
+            query_db(
+                f"SELECT * FROM location_tags WHERE location_id='{location['id']}'"
+            )
+        )
+        assert query_db(f"SELECT * FROM tags WHERE id='{tag_id}'")
+
     def test_delete_location_with_tags_with_body_executes_204(
         self, api_client, create_location
     ) -> None:

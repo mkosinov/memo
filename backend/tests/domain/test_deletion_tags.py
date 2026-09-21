@@ -29,6 +29,7 @@ from src.domain.deletion import (
     FKDependency,
     collect_dependencies,
     collect_dependency_ids,
+    stale_expected_entities,
 )
 from src.models.activity import Activity
 from src.models.client import Client
@@ -482,3 +483,96 @@ class TestTagResolveDelete:
             if model is Tag
         }
         assert wired == {(Tag, dep.entity) for dep in FK_MATRIX[Tag]}
+
+
+# ─── 6. Expected id-set verification (subset) — #318 Task 5, D7 #285 mirror ────
+
+
+class TestStaleExpectedEntitiesTag:
+    """``stale_expected_entities(Tag, ...)`` — the subset check over the 8
+    join-table deps (mirror of ``TestStaleExpectedEntitiesActivity`` in
+    test_deletion.py, #285 D9a):
+
+    * an id present on the server but missing from ``expected`` blocks
+      (the mid-window race — a new link appeared after confirmation);
+    * swapped ids at an equal counter block (ids, not counts, are the
+      currency of ``expected`` — rev6);
+    * a dep that disappeared in the undo window does NOT block (deleting
+      less than was confirmed is fine);
+    * a missing ``expected`` key = «nothing was confirmed» for that entity.
+
+    Tag specifics vs Activity: NO auto deps and NO recursive subtree —
+    all 8 entities in ``now_ids`` are verified as user-confirmed
+    non-auto deps.
+    """
+
+    _ALL8 = (
+        "service_tags", "activity_tags", "master_tags", "location_tags",
+        "client_tags", "visitor_tags", "record_tags", "photo_tags",
+    )
+
+    @staticmethod
+    def _full(now_suffix: str = "-1", expected_suffix: str = "-1",
+              ) -> tuple[dict, dict]:
+        """now/expected covering all 8 entities, one distinct id each
+        (``{entity}{suffix}`` — entity-unique so single-entity edits in a
+        test cannot cross-contaminate other entities' id-sets)."""
+        all8 = TestStaleExpectedEntitiesTag._ALL8
+        return (
+            {e: [f"{e}{now_suffix}"] for e in all8},
+            {e: [f"{e}{expected_suffix}"] for e in all8},
+        )
+
+    def test_new_link_appeared_is_stale(self) -> None:
+        """A link added mid-window to one join table → that entity is
+        stale, the other seven confirmations stay valid."""
+        now_ids, expected = self._full()
+        now_ids["photo_tags"] = ["photo_tags-new"]  # race: new photo link
+
+        assert stale_expected_entities(Tag, now_ids, expected) == ["photo_tags"]
+
+    def test_mismatch_by_id_is_stale(self) -> None:
+        """One entity carries a different id than confirmed → stale."""
+        now_ids, expected = self._full()
+        now_ids["client_tags"] = ["client-other"]
+
+        assert stale_expected_entities(Tag, now_ids, expected) == ["client_tags"]
+
+    def test_swapped_id_blocks_at_equal_counter(self) -> None:
+        """Same counter everywhere, one id swapped → blocks (rev6: id-sets,
+        not counters, are the currency of ``expected``)."""
+        now_ids, expected = self._full()
+        now_ids["record_tags"] = ["swapped-id"]  # counter unchanged: 1 == 1
+
+        assert stale_expected_entities(Tag, now_ids, expected) == ["record_tags"]
+
+    def test_disappeared_link_does_not_block_subset(self) -> None:
+        """Expected carries ids that no longer exist — deleting less than
+        was confirmed is fine (subset semantics, #285 D9a)."""
+        now_ids, expected = self._full()
+        expected["visitor_tags"] = ["visitor_tags-1", "v-gone"]  # v-gone vanished
+
+        assert stale_expected_entities(Tag, now_ids, expected) == []
+
+    def test_full_match_returns_empty(self) -> None:
+        """All 8 confirmed exactly → nothing stale."""
+        now_ids, expected = self._full()
+
+        assert stale_expected_entities(Tag, now_ids, expected) == []
+
+    def test_missing_expected_key_means_nothing_confirmed(self) -> None:
+        """No ``service_tags`` key in expected, but a link exists → the
+        current row is stale (a missing key = «nothing was confirmed»);
+        the #318 route relies on this for its partial-expected 409."""
+        now_ids, expected = self._full()
+        del expected["service_tags"]
+
+        assert stale_expected_entities(Tag, now_ids, expected) == ["service_tags"]
+
+    def test_unknown_entity_keys_never_verified(self) -> None:
+        """now_ids keys outside the Tag matrix (e.g. a drift key) are not
+        verified — mirrors the defensive ``continue`` branch."""
+        now_ids, expected = self._full("svc-1", "svc-1")
+        now_ids["bogus_deps"] = ["x"]
+
+        assert stale_expected_entities(Tag, now_ids, expected) == []

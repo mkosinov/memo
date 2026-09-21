@@ -24,7 +24,6 @@ import {
   waitForScheduleReady,
   waitForToast,
 } from './fixtures/helpers';
-import { queryDBRows } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -45,7 +44,7 @@ interface ServiceRow {
   duration: number;
   record_info: string;
   tariffs: { title: string; description: string | null; price: number }[];
-  tags: { id: string }[];
+  tags: { id: string; title: string }[];
   materials: { id: string; note: string | null }[];
 }
 
@@ -58,15 +57,12 @@ async function getService(request: APIRequestContext, id: string): Promise<Servi
 
 /**
  * Capture the CURRENT state of a service as a restorable snapshot.
- * Tag ids come from the `service_tags` join read via sqlite — the GET body
- * carries no reliable `tag_ids` (s4 links to tag3, but `tags` arrives
- * empty), and a PUT with `tag_ids: []` hard-drops the seed link.
+ * Tag ids come straight from the GET body — it carries the eager-loaded
+ * `tags` relation (spec §2.6; the services-tags.spec.ts canon).
  */
 async function captureService(request: APIRequestContext, id: string) {
   const row = await getService(request, id);
-  const tagIds = queryDBRows(
-    `SELECT tag_id FROM service_tags WHERE service_id='${id}'`,
-  ).map((r) => r.tag_id as string);
+  const tagIds = row.tags.map((t) => t.id);
   return { row, tagIds };
 }
 
@@ -91,9 +87,9 @@ function toUpdatePayload(s: ServiceRow, tagIds: string[]) {
   };
 }
 
-/** PUT the captured state back — undo every mutation the test made,
- * including the tag links the modal's PUT silently drops (no tags UI in
- * SERVICE_FIELDS → the form always submits `tag_ids: []`). */
+/** PUT the captured state back — undo every mutation the test made.
+ * The payload is FULL and carries `tag_ids` from the snapshot: PUT is a
+ * full-update canonical replace, so a missing list would read as «wipe all». */
 async function restoreService(
   request: APIRequestContext,
   snapshot: { row: ServiceRow; tagIds: string[] },

@@ -10,10 +10,13 @@ import { test, expect } from './test';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
 import { waitForScheduleReady, openAddTab } from './helpers';
 
-/** Spec §6 — "within seconds"; deliberately BELOW the app-wide staleTime
- *  (30s) and the dictionary staleTime (1h): a test that passes without the
- *  SSE channel would be testing staleTime, not the channel. */
-export const PUSH_WINDOW = 5_000;
+/** Spec §6 — "within seconds". 10s = один цикл реконнекта `retry: 5000`
+ *  (SSE-сервер шлёт retry:5000 — оборвавшееся соединение переподключается
+ *  за ~5s, поэтому окно push-ассерта должно покрывать полный цикл
+ *  реконнекта) и втрое ниже staleTime 30с — инвариант «тест не проходит
+ *  за счёт протухания кэша» сохранён: 10с × (1+1 retry) = 20с < 30с.
+ *  Тест, который зелён без SSE-канала, проверял бы staleTime, а не канал. */
+export const PUSH_WINDOW = 10_000;
 
 /** Reconnect convergence budget (spec §6 С5 — "within ~10s of back online"). */
 export const RECONNECT_WINDOW = 10_000;

@@ -20,8 +20,10 @@ import {
   clickFabRobust,
   createRecordViaUI,
   lostToast,
+  openFrameLogger,
   uid,
   PUSH_WINDOW,
+  type FrameLog,
 } from './fixtures/server-push';
 
 /**
@@ -30,8 +32,9 @@ import {
  * Two browser contexts = two admins (A and B) via the shared serverPushPages
  * fixture (fixtures/server-push.ts): writes made through B's UI (or a bare
  * APIRequestContext) must reach A's open views within the push window — all
- * push assertions use { timeout: PUSH_WINDOW = 5s }, deliberately BELOW the
- * app-wide staleTime (30s) and the dictionary staleTime (1h). A test that
+ * push assertions use { timeout: PUSH_WINDOW = 10s }: один цикл реконнекта
+ * `retry: 5000` (упавшее соединение переподключается за ~5s) + втрое ниже
+ * app-wide staleTime (30s) и the dictionary staleTime (1h). A test that
  * passes without the SSE channel would be testing staleTime, not the channel.
  *
  * Requires: per-shard stack (backend :8021 / frontend :3021 in dev runs):
@@ -101,7 +104,126 @@ async function deleteActivityViaUI(
   expect(resp.status()).toBe(204);
 }
 
+/**
+ * #271 — inline-повтор push-утверждений С3 с бюджетом 1 retry (макс. 2
+ * попытки на утверждение). Локальная обёртка в файле спеки: без общей
+ * фикстуры, без нового DSL.
+ *
+ * Инвариант «тест не проходит за счёт истечения свежести кэша»: суммарное
+ * окно наблюдения одного утверждения = PUSH_WINDOW × (1 + 1 повтор) = 20с
+ * + накладные < staleTime 30с. Кэш-обходящих действий (перезагрузка
+ * страницы, обход кэша) в повторе НЕТ — повтор лишь пере-вооружает те же
+ * ожидания с новым таймаутом.
+ *
+ * Две семантики повтора:
+ *  - passiveRearm — пассивное пере-вооружение (DB-poll, push-1): то же
+ *    самое expect с новым таймаутом, без ре-навигации;
+ *  - envelopeRetry — конверт из нескольких ожиданий (push-2: клик «Записи»
+ *    + waitForResponse /records/view + recordRow not.toBeVisible): повтор
+ *    конверта целиком, с повторным переходом (клик по навигационной ссылке
+ *    заново; waitForResponse вооружается заново). recordRow входит в конверт
+ *    и отдельного бюджета не получает — арифметика «2 push-конверта ×
+ *    2×10с» из спеки сохраняется.
+ *
+ * Диагностика: при съеденном повторе — console.warn с именем утверждения
+ * (зелёный прогон остаётся интерпретируемым); при исчерпании бюджета —
+ * агрегирующая ошибка с номерами попыток и обеими ошибками + метаданные
+ * frameLog (счётчик кадров с начала попытки; для конверта — взведён/сработал
+ * ли waitForResponse = началось ли перечитывание). Только счётчики и факты —
+ * никогда тела кадров/ответов, URL с query-параметрами, токены.
+ */
+function makeC3Retry(frameLog: FrameLog) {
+  /** Собрать метаданные трафика кадров с момента начала попытки. */
+  const describeFrames = (framesAtStart: number): string => {
+    const seen = frameLog.frames.length - framesAtStart;
+    return `frameLog: кадров с начала попытки — ${Math.max(0, seen)}`;
+  };
+
+  /**
+   * Пассивное пере-вооружение: до 2 попыток одного expect-утверждения.
+   * Ожидание пере-вооружается тем же самым вызовом ассерта в теле run
+   * (свежий таймаут), ре-навигации нет.
+   */
+  const passiveRearm = async (
+    label: string,
+    run: (attempt: number) => Promise<void>,
+  ): Promise<void> => {
+    const errors: string[] = [];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const framesAtStart = frameLog.frames.length;
+      try {
+        await run(attempt); // то же expect, свежий таймаут — re-arm
+        return; // зелено с первой попытки
+      } catch (err) {
+        errors.push(
+          `попытка ${attempt}: ${summarizeError(err)}; ${describeFrames(framesAtStart)}`,
+        );
+        if (attempt === 1) {
+          // Съеденный повтор: зелёный прогон должен остаться читаемым.
+          console.warn(`[#271] ${label}: попытка 1 не прошла, пере-вооружаю (бюджет 1 повтор)`);
+        }
+      }
+    }
+    throw new Error(
+      `${label}: бюджет повторов исчерпан (2 попытки).\n${errors.join('\n')}`,
+    );
+  };
+
+  /**
+   * Повтор push-конверта: конверт выполняется целиком заново — повторный
+   * переход (клик) + пере-вооружённый waitForResponse + входящее в конверт
+   * утверждение recordRow (отдельного бюджета не получает).
+   *
+   * run получает хелпер markRefetch: вызов ДО await waitForResponse помечает
+   * «перечитывание взведено», успешный await — «перечитывание сработало».
+   */
+  const envelopeRetry = async (
+    label: string,
+    run: (attempt: number, h: { markRefetch: (state: 'armed' | 'fired') => void }) => Promise<void>,
+  ): Promise<void> => {
+    const errors: string[] = [];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      let refetchState: 'не взводился' | 'взведён' | 'сработал' = 'не взводился';
+      const framesAtStart = frameLog.frames.length;
+      try {
+        await run(attempt, {
+          markRefetch: (state) => {
+            refetchState = state === 'armed' ? 'взведён' : 'сработал';
+          },
+        });
+        return;
+      } catch (err) {
+        errors.push(
+          `попытка ${attempt}: ${summarizeError(err)}; перечитывание — ${refetchState}; ` +
+            describeFrames(framesAtStart),
+        );
+        if (attempt === 1) {
+          console.warn(
+            `[#271] ${label}: конверт не сошёлся с первой попытки, ` +
+              `повторяю с повторным переходом (бюджет 1 повтор)`,
+          );
+        }
+      }
+    }
+    throw new Error(
+      `${label}: бюджет повторов конверта исчерпан (2 попытки).\n${errors.join('\n')}`,
+    );
+  };
+
+  return { passiveRearm, envelopeRetry };
+}
+
+/** Любой брошенный объект/ошибку — в короткую строку для агрегата. */
+function summarizeError(err: unknown): string {
+  if (err instanceof Error) return err.message.split('\n').slice(0, 3).join(' ⏎ ');
+  return String(err);
+}
+
 twoPages.describe('Server push invalidation — external updates (GH #239 §6)', () => {
+  // #271: худшая цепочка ≈90с (2 push-конверта × 2×10с + повторы +
+  // диагностика) — таймаут поднят до 120с, чтобы диагностика успела
+  // напечататься до того, как внешний таймаут убьёт тест.
+  twoPages.setTimeout(120_000);
   // ── С1: record created via B's UI appears on A's open records table ─────
 
   twoPages('С1: B creates a record via UI → A sees the row + toast without reload', async ({
@@ -185,6 +307,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
   twoPages('С3: B deletes an activity via UI → A\'s grid refetches and records converge', async ({
     pageA,
     pageB,
+    browser,
     request,
   }) => {
     const marker = `Push C3 ${uid()}`;
@@ -193,6 +316,12 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
     const client = await createTestClient(request, { name: marker });
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
+
+    // #271: независимый контекст-слушатель SSE (как в офлайн-спеке) —
+    // источник метаданных «наблюдался ли трафик событий» для диагностики
+    // исчерпания бюджета повторов.
+    const frameLog = await openFrameLogger(browser);
+    const retry = makeC3Retry(frameLog);
 
     try {
       // A: records table shows the record (populates ['records'] cache …)
@@ -211,30 +340,48 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       await deleteActivityViaUI(pageB, activity.id, { confirm: true });
 
       // DB ASSERTION (#286) — the commit DELETE executed for real: the
-      // activity row is GONE from the shard DB after the window.
-      await expect
-        .poll(
-          () => queryDBRow(`SELECT id FROM activities WHERE id='${activity.id}'`),
-          { timeout: PUSH_WINDOW },
-        )
-        .toBeNull();
+      // activity row is GONE from the shard DB after the window. #271:
+      // пассивное пере-вооружение того же poll с новым таймаутом.
+      await retry.passiveRearm('С3/db-poll: строка activities удалена', async () => {
+        await expect
+          .poll(() => queryDBRow(`SELECT id FROM activities WHERE id='${activity.id}'`), {
+            timeout: PUSH_WINDOW,
+          })
+          .toBeNull();
+      });
 
       // PUSH ASSERTION 1 — A's grid loses the card within the push window.
-      await expect(card).not.toBeVisible({ timeout: PUSH_WINDOW });
+      // #271: пассивное пере-вооружение, без ре-навигации.
+      await retry.passiveRearm('С3/push-1: карточка исчезла из сетки A', async () => {
+        await expect(card).not.toBeVisible({ timeout: PUSH_WINDOW });
+      });
 
       // PUSH ASSERTION 2 — the records family converged: A returns to
       // /records QUICKLY (inside the 30s staleTime). The push-invalidated
       // ['records'] query must refetch despite being "fresh"; without the
-      // channel the cached row would still be served.
-      const viewResponse = pageA.waitForResponse(
-        (r) => r.url().includes('/api/v1/records/view') && r.request().method() === 'GET',
-        { timeout: PUSH_WINDOW },
+      // channel the cached row would still be served. #271: конверт из
+      // трёх ожиданий (waitForResponse + переход «Записи» + recordRow);
+      // повтор конверта — с повторным переходом, recordRow входит в конверт
+      // и отдельного бюджета не получает.
+      await retry.envelopeRetry(
+        'С3/push-2: конверт /records (переход + перечитывание + строка исчезла)',
+        async (_attempt, h) => {
+          const viewResponse = pageA.waitForResponse(
+            (r) => r.url().includes('/api/v1/records/view') && r.request().method() === 'GET',
+            { timeout: PUSH_WINDOW },
+          );
+          h.markRefetch('armed');
+          await pageA.getByRole('link', { name: 'Записи' }).click();
+          const refetch = await viewResponse; // must refetch NOW, not on stale expiry
+          h.markRefetch('fired');
+          expect(refetch.status()).toBe(200);
+          await expect(recordRow).not.toBeVisible({ timeout: PUSH_WINDOW });
+        },
       );
-      await pageA.getByRole('link', { name: 'Записи' }).click();
-      const refetch = await viewResponse; // must refetch NOW, not on stale expiry
-      expect(refetch.status()).toBe(200);
-      await expect(recordRow).not.toBeVisible({ timeout: PUSH_WINDOW });
     } finally {
+      // Logger SSE-соединение не должно утекать в следующий тест (кадры
+      // уже потреблены обёрткой).
+      await frameLog.close().catch(() => {});
       // UI delete is the test subject, not a prerequisite — if it failed,
       // remove the setup activity via the #286 cleanup contract so parallel
       // runs don't inherit it. A re-cleanup of a succeeded delete is

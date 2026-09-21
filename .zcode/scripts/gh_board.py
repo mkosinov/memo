@@ -12,7 +12,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
   python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
-  python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it
+  python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it (host survives PR (G7), clears on leaving it)
   python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|none — the pending-ask marker: a design gate stop or an IMPL blocker awaiting the user
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
   python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
@@ -460,7 +460,11 @@ def cmd_status(number: int, status: str, host: str | None = None):
     """Move a card's status. Entering In IMPL/In Design also stamps the host
     field (arg > GH_BOARD_HOST > container label file; unresolved → warning,
     field left as is); leaving those statuses clears host AND gate — a card
-    that left its phase carries no stale ownership or pending ask."""
+    that left its phase carries no stale ownership or pending ask.
+    Exception (2026-09-21): PR (G7) keeps the host — the card is still owned
+    by its machine while on CI (and returns to it if CI is red) — but it
+    occupies no IMPL slot (the budget counts only In IMPL status). Leaving
+    PR (G7) clears the label."""
     load_status_field()
     if status not in _status_opts:
         sys.exit(f"Unknown status '{status}'. Available: {', '.join(_status_opts)}")
@@ -476,6 +480,10 @@ def cmd_status(number: int, status: str, host: str | None = None):
         else:
             set_field(it["item_id"], _host_field_id, _host_field_opts[h])
             print(f"#{number}: host → {h}")
+    elif status.lower().startswith("pr"):
+        if it["gate"]:
+            set_field(it["item_id"], _gate_field_id, None)
+            print(f"#{number}: gate cleared")
     else:
         if it["host"]:
             set_field(it["item_id"], _host_field_id, None)

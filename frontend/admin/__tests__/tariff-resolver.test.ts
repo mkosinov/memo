@@ -5,6 +5,15 @@ function t(id: string, audience: TariffLike['audience']): TariffLike {
   return { id, audience };
 }
 
+/**
+ * Audience-less element (legacy caller passing bare {id, price}): can never
+ * match kid/adult → the first-in-list fallback (docstring contract). The
+ * element may sit at ANY position — fallback is by position, not by shape.
+ */
+function bare(id: string): TariffLike {
+  return { id };
+}
+
 describe('resolveDefaultTariff (GH #284)', () => {
   // ── Kids branch: age ∈ 3–11 → first audience="kid" ────────────────────────
 
@@ -79,6 +88,28 @@ describe('resolveDefaultTariff (GH #284)', () => {
     const tariffs = [t('z-first', 'all'), t('a-second', 'kid')];
     // Teen age: no adult tariff → fallback takes the first element as-is.
     expect(resolveDefaultTariff(tariffs, 15)?.id).toBe('z-first');
+  });
+
+  // ── Audience-less elements (legacy {id, price} callers) ──────────────────
+
+  it('audience-less elements never group-match — first in list wins regardless of age', () => {
+    // The docstring promise: "no group info → first in list" (legacy
+    // behaviour). Age only matters when a group marker exists.
+    const bareList = [bare('b1'), bare('b2')];
+    expect(resolveDefaultTariff(bareList, 6)?.id).toBe('b1');
+    expect(resolveDefaultTariff(bareList, 14)?.id).toBe('b1');
+    expect(resolveDefaultTariff(bareList, 'adult')?.id).toBe('b1');
+    expect(resolveDefaultTariff(bareList, null)?.id).toBe('b1');
+  });
+
+  it('a marked tariff later in the list still wins over an audience-less first element', () => {
+    // Bare elements are not "all" — they match NOTHING. The kid at index 1
+    // is the first kid for a kids age; with no adult in the list, an adult
+    // age falls back to the FIRST element (the bare one) — legacy behaviour.
+    const mixed = [bare('bare-first'), t('kid-1', 'kid')];
+    expect(resolveDefaultTariff(mixed, 6)?.id).toBe('kid-1');
+    expect(resolveDefaultTariff(mixed, 14)?.id).toBe('bare-first');
+    expect(resolveDefaultTariff(mixed, null)?.id).toBe('bare-first');
   });
 
   // ── Empty list ────────────────────────────────────────────────────────────

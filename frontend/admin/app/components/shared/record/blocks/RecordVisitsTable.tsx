@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { VisitResponse, TariffResponse, VisitPatch } from '@memo/api-client';
 import type { VisitStatus } from '@memo/domain';
 import { useUI } from '@/contexts/UIContext';
@@ -204,6 +204,40 @@ function TariffSelect({
       ))}
     </select>
   );
+}
+
+/**
+ * GH #284: late-tariffs catch-up for a NEW row. A draft added while the
+ * service's tariffs query was still EMPTY is tariff-less (empty-age adult
+ * default over [] → null). Once the tariffs arrive, the row must pick up
+ * the resolver default — resolved against the row's CURRENT formState age
+ * (the admin may have picked one already). Renders nothing.
+ *
+ * The formState (InlineEditRow-owned) is the only writable surface, so the
+ * heal runs as a child of the tariff cell with handleChange access — a
+ * table-level effect cannot reach it. Fires ONCE per null→resolved
+ * transition: after the first heal formState.tariff_id is set, and an
+ * explicit «— тариф —» pick stores '' (never re-healed).
+ */
+function LateTariffsHealer({
+  tariffs,
+  formState,
+  handleChange,
+}: {
+  tariffs: TariffResponse[];
+  formState: VisitFormState;
+  handleChange: (field: keyof VisitFormState, value: any) => void;
+}) {
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (healedRef.current || formState.tariff_id != null || tariffs.length === 0) return;
+    const resolved = resolveDefaultTariff(tariffs, formState.age);
+    if (!resolved) return;
+    healedRef.current = true;
+    handleChange('tariff_id', resolved.id);
+    handleChange('price', resolved.price);
+  }, [tariffs, formState.tariff_id, formState.age, handleChange]);
+  return null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -448,11 +482,22 @@ export function RecordVisitsTable({
                         }
                         // Re-substitution persists like a manual tariff change.
                         if (reTariff) {
+                          // GH #284: display sync — the row must SHOW the
+                          // substituted tariff/price (the patch alone would
+                          // leave the mount-time formState visible until the
+                          // cache catch-up rerender re-derives it).
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
                           onPatchVisit(r.id, { tariff_id: reTariff.id, price: reTariff.price });
                         }
                       } else if (r.visitor_id) {
+                        handleChange('age', age);
                         onChangeVisitor(r.visitor_id, { age });
                         if (reTariff) {
+                          // GH #284: display sync — same contract as the
+                          // anonymous branch above.
+                          handleChange('tariff_id', reTariff.id);
+                          handleChange('price', reTariff.price);
                           onPatchVisit(r.id!, { tariff_id: reTariff.id, price: reTariff.price });
                         }
                       }
@@ -464,23 +509,40 @@ export function RecordVisitsTable({
                 tariff: isReadOnly ? (
                   <span className="text-ink-mid">{tariff?.title || '—'}</span>
                 ) : (
-                  <TariffSelect
-                    value={formState.tariff_id}
-                    tariffs={tariffs}
-                    onChange={(tariffId) => {
-                      const selectedTariff = tariffs.find((t) => t.id === tariffId);
-                      if (isNew) {
-                        handleChange('tariff_id', tariffId);
-                        if (selectedTariff) handleChange('price', selectedTariff.price);
-                      } else {
-                        onPatchVisit(r.id!, {
-                          tariff_id: tariffId,
-                          price: selectedTariff?.price,
-                        });
-                      }
-                    }}
-                    testId={isNew ? 'add-visitor-tariff' : `visit-${r.id}-tariff`}
-                  />
+                  <>
+                    {/* GH #284: heal the null default once tariffs arrive (see LateTariffsHealer). */}
+                    {isNew && (
+                      <LateTariffsHealer
+                        tariffs={tariffs}
+                        formState={formState}
+                        handleChange={handleChange}
+                      />
+                    )}
+                    <TariffSelect
+                      value={formState.tariff_id}
+                      tariffs={tariffs}
+                      onChange={(tariffId) => {
+                        const selectedTariff = tariffs.find((t) => t.id === tariffId);
+                        if (isNew) {
+                          handleChange('tariff_id', tariffId);
+                          if (selectedTariff) handleChange('price', selectedTariff.price);
+                        } else {
+                          // GH #284: sync the row display immediately — the
+                          // patch propagates through the cache, but until it
+                          // catches up the select must show the admin's pick,
+                          // not the mount-time formState (and never "revert"
+                          // on an unrelated rerender).
+                          handleChange('tariff_id', tariffId);
+                          if (selectedTariff) handleChange('price', selectedTariff.price);
+                          onPatchVisit(r.id!, {
+                            tariff_id: tariffId,
+                            price: selectedTariff?.price,
+                          });
+                        }
+                      }}
+                      testId={isNew ? 'add-visitor-tariff' : `visit-${r.id}-tariff`}
+                    />
+                  </>
                 ),
 
                 price: isReadOnly ? (

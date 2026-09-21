@@ -63,6 +63,28 @@ async def test_seed_populates_tariffs(db_manager: DBManager) -> None:
         assert result.scalar() == 21
 
 
+async def test_seed_tariff_audiences_match_titles(db_manager: DBManager) -> None:
+    """GH #284: seeded tariff audience agrees with the title.
+
+    «Взрослый» → adult, «Детский» → kid, the neutral «Индивидуальный» → all
+    (same rule as the migration backfill), so demo data exercises the
+    age-autofill feature.
+    """
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(text("SELECT title, audience FROM tariffs"))
+        expected = {"Взрослый": "adult", "Детский": "kid", "Индивидуальный": "all"}
+        rows = result.all()
+        assert len(rows) == 21
+        for row in rows:
+            assert row.audience == expected[row.title], (
+                f"Tariff «{row.title}» has audience={row.audience!r}"
+            )
+
+
 async def test_seed_populates_tags(db_manager: DBManager) -> None:
     """Seed script creates exactly 7 tags (including 'гость')."""
     from src.seed.seed import seed_data

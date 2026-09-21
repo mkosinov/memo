@@ -11,8 +11,10 @@ vi.mock('@/hooks/useMaterials', () => ({
   useMaterialsRaw: () => ({ data: [] }),
 }));
 
-// GH #328: the tags picker searches via getTags — not exercised by the
-// modal-level scenarios (only rendered), so a static empty page is enough.
+// GH #328: the tags picker searches via getTags — and the modal-level
+// scenarios DO exercise it: addTagViaTypeahead re-mocks mockGetTags per call
+// (search → dropdown option → chip). The beforeEach static empty page is
+// only the default for scenarios that don't type into the picker.
 const mockGetTags = vi.fn();
 vi.mock('@memo/api-client', () => ({
   getTags: (...args: unknown[]) => mockGetTags(...args),

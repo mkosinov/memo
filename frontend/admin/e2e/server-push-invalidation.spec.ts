@@ -30,8 +30,9 @@ import {
  * Two browser contexts = two admins (A and B) via the shared serverPushPages
  * fixture (fixtures/server-push.ts): writes made through B's UI (or a bare
  * APIRequestContext) must reach A's open views within the push window — all
- * push assertions use { timeout: PUSH_WINDOW = 5s }, deliberately BELOW the
- * app-wide staleTime (30s) and the dictionary staleTime (1h). A test that
+ * push assertions use { timeout: PUSH_WINDOW = 10s }: один цикл реконнекта
+ * `retry: 5000` (упавшее соединение переподключается за ~5s) + втрое ниже
+ * app-wide staleTime (30s) и the dictionary staleTime (1h). A test that
  * passes without the SSE channel would be testing staleTime, not the channel.
  *
  * Requires: per-shard stack (backend :8021 / frontend :3021 in dev runs):
@@ -102,6 +103,10 @@ async function deleteActivityViaUI(
 }
 
 twoPages.describe('Server push invalidation — external updates (GH #239 §6)', () => {
+  // #271: худшая цепочка ≈90с (2 push-конверта × 2×10с + повторы +
+  // диагностика) — таймаут поднят до 120с, чтобы диагностика успела
+  // напечататься до того, как внешний таймаут убьёт тест.
+  twoPages.setTimeout(120_000);
   // ── С1: record created via B's UI appears on A's open records table ─────
 
   twoPages('С1: B creates a record via UI → A sees the row + toast without reload', async ({

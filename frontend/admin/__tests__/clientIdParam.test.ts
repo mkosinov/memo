@@ -80,26 +80,21 @@ describe('parseClientIds (#232 address parsing)', () => {
     ['empty string', ''],
     ['braced form', '{123e4567-e89b-42d3-a456-426614174000}'],
     ['urn form', 'urn:uuid:123e4567-e89b-42d3-a456-426614174000'],
-    ['wrong variant group', '123e4567-e89b-12d3-a456-426614174000'],
-    ['wrong version group', '123e4567-e89b-92d3-a456-426614174000'],
   ])('rejects %s', (_label, value) => {
-    // Strict 8-4-4-4-12 lowercase/uppercase hex; version/variant digits are
-    // NOT enforced (the backend accepts any v4-shaped hex there — the wall
-    // must not be stricter than the producer's ids).
-    const sp = new URLSearchParams([['clientId', value]]);
-    if (value.includes('-') && value.length === 36) {
-      // These two are 8-4-4-4-12 shaped — check they are either rejected as
-      // non-hex or accepted as hex; the exact policy is asserted precisely
-      // in the dedicated cases above/below.
-      const parsed = parseClientIds(sp);
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
-        expect(parsed).not.toBeNull();
-      } else {
-        expect(parsed).toBeNull();
-      }
-    } else {
-      expect(parseClientIds(sp)).toBeNull();
-    }
+    // Strict 8-4-4-4-12 lowercase/uppercase hex; anything else is dropped
+    // per component.
+    expect(parseClientIds(new URLSearchParams([['clientId', value]]))).toBeNull();
+  });
+
+  // The other side of the same policy, stated honestly: version/variant
+  // digits are NOT constrained (Postgres uuids from the producer may hold
+  // any hex there — the wall must not be stricter than the producer's ids).
+  it.each([
+    ['version nibble 1 (v1-style)', '123e4567-e89b-12d3-a456-426614174000'],
+    ['version nibble 9 (no RFC version)', '123e4567-e89b-92d3-a456-426614174000'],
+    ['variant nibble 0 (no RFC variant)', '123e4567-e89b-42d3-0456-426614174000'],
+  ])('accepts %s', (_label, value) => {
+    expect(parseClientIds(new URLSearchParams([['clientId', value]]))).toEqual([value]);
   });
 
   it('accepts arbitrary hex in version/variant positions (strict shape, not v4)', () => {

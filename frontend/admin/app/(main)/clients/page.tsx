@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
@@ -27,8 +27,12 @@ function ClientsPageContent() {
   const { items, filters, setFilters } = useClientsTable();
   const searchParams = useSearchParams();
   // #232 §3.3 — the address is the single writer of the narrowing: strict
-  // per-component UUID validation + dedup; null = no param.
-  const urlClientIds = parseClientIds(searchParams);
+  // per-component UUID validation + dedup; null = no param. Memoized on the
+  // params object identity so the array (and the sync effect below) stay
+  // stable across re-renders: Next's useSearchParams returns an object that
+  // is stable per navigation and changes exactly when the address does
+  // (AppRouter memoizes url.searchParams on the canonical URL).
+  const urlClientIds = useMemo(() => parseClientIds(searchParams), [searchParams]);
   // Auto-open rule (#232 §3.3): exactly ONE valid id opens the modal
   // automatically; two or more never do (US-3) — cards open by row clicks.
   const deepLinkId = urlClientIds && urlClientIds.length === 1 ? urlClientIds[0] : null;

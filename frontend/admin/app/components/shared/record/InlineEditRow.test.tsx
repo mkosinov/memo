@@ -29,7 +29,7 @@ const pickFormData = (row: Row): FormData => ({ name: row.name, age: row.age });
 // from useInlineEditRow) is the ONLY thing consumers use to vary behavior
 // (e.g. autoFocus, placeholders) — never a separate render path.
 const renderCell = ({
-  row,
+  row: _row,
   formState,
   isNew,
   handleChange,

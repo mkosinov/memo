@@ -36,7 +36,7 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
   const { gridFrequency } = useGridSettings();
   const { showToast } = useUI();
 
-  const { record, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData, status } =
+  const { record, activity, services, masters, locations, payments, visitorsMap, tariffs, isLoading, recordData } =
     useRecordData(recordId, clientId);
 
   // Fine-grained mutations. Note: `saveRecord` is gone — record-level ops
@@ -323,7 +323,6 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
         visitorsMap={visitorsMap}
         tariffs={tariffs}
         totalCost={total}
-        recordStatus={status}
         clientId={clientId}
         onAddVisit={addVisit}
         onPatchVisit={patchVisit}

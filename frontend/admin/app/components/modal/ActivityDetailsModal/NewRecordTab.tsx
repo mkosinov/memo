@@ -5,7 +5,6 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInput';
 import { getClientsPaged } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
-import type { ScheduleAdminDTO } from '@memo/domain';
 import type { CreateRecordInput } from '@/hooks/useRecordMutations';
 import { resolveDefaultTariff } from '@/lib/tariff-resolver';
 
@@ -21,13 +20,12 @@ interface NewVisitor {
 export type NewRecordSubmitData = CreateRecordInput;
 
 interface NewRecordTabProps {
-  activity: ScheduleAdminDTO;
   serviceTariffs: Tariff[];
   onSubmit: (data: NewRecordSubmitData) => void;
   showToast: (message: string) => void;
 }
 
-export function NewRecordTab({ activity, serviceTariffs, onSubmit, showToast }: NewRecordTabProps) {
+export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordTabProps) {
   const [pickedClient, setPickedClient] = useState<PickedClient | null>(null);
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');

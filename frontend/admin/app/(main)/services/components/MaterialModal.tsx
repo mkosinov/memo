@@ -127,7 +127,7 @@ function FieldRenderer({
 /* ── MaterialModal ────────────────────────────────────────────────── */
 
 export function MaterialModal({
-  mode,
+  mode: _mode,
   material,
   onSubmit,
   onClose,

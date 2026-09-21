@@ -20,7 +20,6 @@ import { DAYS, DAYS_FULL, MONTHS, MONTHS_GENITIVE, formatDate, isSameDay } from 
 import { getMonday, toISODate } from '@/lib/datetime';
 import { MonthYearPicker } from '../shared/MonthYearPicker';
 import { UserMenu } from './UserMenu';
-import type { Master } from '@memo/domain';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 // GH #143: hand-written SVGs replaced by lucide-react (D3–D6). Sizing contract
@@ -413,49 +412,6 @@ function MiniCalendarContent() {
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Master Legend ────────────────────────────────────────────────────────
-
-interface MasterLegendProps {
-  collapsed: boolean;
-  masters: Master[];
-}
-
-function MasterLegend({ collapsed, masters }: MasterLegendProps) {
-  if (collapsed) {
-    return (
-      <div className="px-2 py-2 space-y-1.5">
-        {masters.slice(0, 4).map(master => (
-          <div
-            key={master.id}
-            className="w-5 h-5 rounded-full mx-auto"
-            style={{ backgroundColor: master.color }}
-            title={master.shortName}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-2">
-        Мастера
-      </div>
-      <div className="space-y-1.5">
-        {masters.map(master => (
-          <div key={master.id} className="flex items-center gap-2">
-            <div
-              className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: master.color }}
-            />
-            <span className="text-xs text-white/70 truncate">{master.shortName}</span>
-          </div>
-        ))}
       </div>
     </div>
   );

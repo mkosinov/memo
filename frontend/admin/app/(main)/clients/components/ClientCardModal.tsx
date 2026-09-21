@@ -259,7 +259,6 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                     }
                   }
               }
-              onDelete={mode === 'view' && client ? handleDelete : undefined}
             />
           ) : (
             <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} client={client} />

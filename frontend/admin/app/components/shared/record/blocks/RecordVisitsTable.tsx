@@ -119,7 +119,6 @@ export interface RecordVisitsTableProps {
   visitorsMap: Map<string, { name: string; age: number | null }>;
   tariffs: TariffResponse[];
   totalCost: number;
-  recordStatus: VisitStatus;
   /** The record's client — needed for addVisit (createVisitor requires client_id). */
   clientId: string;
   isReadOnly?: boolean;
@@ -247,7 +246,6 @@ export function RecordVisitsTable({
   visitorsMap,
   tariffs,
   totalCost,
-  recordStatus,
   clientId,
   isReadOnly,
   onAddVisit,

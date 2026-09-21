@@ -74,7 +74,7 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── TagModal ───────────────────────────────────────────────────── */
 
 export function TagModal({
-  mode,
+  mode: _mode,
   tag,
   onSubmit,
   onClose,

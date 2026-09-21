@@ -15,11 +15,10 @@ const DEPS_CHOICE: DependencyNode[] = [
 // ─── Mock child components ────────────────────────────────────────────────
 
 vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
-  ClientInfoTab: ({ client, onSave, onDelete }: any) => (
+  ClientInfoTab: ({ client, onSave }: any) => (
     <div data-testid="client-info-tab">
       <span data-testid="info-client-name">{client?.name}</span>
       <button data-testid="info-save" onClick={() => onSave({ name: 'updated', phone: null, email: null, channel: null })}>Save</button>
-      <button data-testid="info-delete" onClick={onDelete}>Delete</button>
     </div>
   ),
 }));
@@ -321,14 +320,14 @@ describe('ClientCardModal', () => {
     });
   });
 
-  it('ClientInfoTab onDelete triggers the DeleteDialog flow (no window.confirm)', async () => {
+  it('footer «Удалить» with 409 + dependencies triggers the DeleteDialog flow (no window.confirm)', async () => {
     deleteHook.mutateAsync = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
     deleteHook.dependencies = DEPS_CHOICE;
     const onClose = vi.fn();
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('info-delete'));
+    fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     // 409 + dependencies → DeleteDialog opens

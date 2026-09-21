@@ -474,7 +474,7 @@ function errorsFrom(
 }
 
 export function ServiceModal({
-  mode,
+  mode: _mode,
   service,
   onSubmit,
   onClose,

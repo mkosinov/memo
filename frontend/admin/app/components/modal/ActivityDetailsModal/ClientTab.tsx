@@ -276,7 +276,6 @@ export function ClientTab({
           visitorsMap={visitorsMap}
           tariffs={tariffs}
           totalCost={totalCost}
-          recordStatus={derivedStatus}
           clientId={clientId}
           onAddVisit={addVisit}
           onPatchVisit={patchVisit}

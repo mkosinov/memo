@@ -118,7 +118,7 @@ type PagedListImplConfig<T, F extends object> = Omit<PagedListConfig<T>, 'fetche
  * difference.
  */
 export function createPagedListContext<T, F extends object>(config: WithFiltersConfig<T, F>): {
-  Provider: React.ComponentType<{ children: React.ReactNode }>;
+  Provider: React.ComponentType<{ children: React.ReactNode; initialFilters?: Partial<F> }>;
   usePagedList: () => PagedListContextValue<T> & PagedListFiltersState<F>;
 };
 export function createPagedListContext<T>(config: PagedListConfig<T>): {
@@ -140,14 +140,30 @@ export function createPagedListContext<T, F extends object>(
   const defaultSort = config.defaultSort;
   const Context = createContext<(PagedListContextValue<T> & Partial<PagedListFiltersState<F>>) | null>(null);
 
-  function Provider({ children }: { children: React.ReactNode }) {
+  function Provider({
+    children,
+    initialFilters,
+  }: {
+    children: React.ReactNode;
+    initialFilters?: Partial<F>;
+  }) {
     const [page, setPage] = useState(1);
     const [perPage, setPerPageState] = useState(defaultPerPage);
     const [sortBy, setSortBy] = useState<string | null>(defaultSort?.sortBy ?? null);
     const [sortOrder, setSortOrder] = useState<SortOrder>(defaultSort?.sortOrder ?? 'asc');
     const [status, setStatusState] = useState<ArchiveFilter>('active');
     const [search, setSearch] = useState('');
-    const [filters, setFiltersState] = useState<F | undefined>(filtersDefaults);
+    // #231 §5.1 — mount-time seed: the lazy initializer runs ONCE per provider
+    // mount; later changes of the initialFilters prop are deliberately ignored
+    // (seed, not live sync — a param arriving after mount is not picked up).
+    // Merge over config defaults mirrors setFilters semantics. The cast is
+    // sound: only the with-filters overload types the prop, and there
+    // `config.filters.defaults` is required — the overlay keeps every F key.
+    const [filters, setFiltersState] = useState<F | undefined>(() =>
+      initialFilters
+        ? ({ ...filtersDefaults, ...initialFilters } as F)
+        : filtersDefaults,
+    );
 
     // #212 §5.5 pt 2 — serverSearch: the ≥2-char clamp lives here (one place,
     // covers DataTable withSearch inputs AND *Filters bars). Shorter values are

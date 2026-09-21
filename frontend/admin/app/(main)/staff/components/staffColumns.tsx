@@ -4,6 +4,7 @@ import Image from 'next/image';
 import type { StaffResponse } from '@memo/api-client';
 import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 import { displayMasterName } from '@/lib/utils';
+import { toAvatarSrc } from '@/lib/avatar';
 
 /**
  * Columns config for the Staff table (GH #266 «Сотрудники»).
@@ -77,16 +78,16 @@ export const staffColumns = (
     defaultVisible: false,
     render: (s) =>
       s.avatar_url ? (
-        /* GH #301: unoptimized Image — avatar_url is either a RELATIVE
-         * /api/v1/files/avatar/… path or a free-form admin-entered URL
-         * (StaffModal «Аватар URL»), so it must bypass the optimizer
-         * (unconfigured remote hosts hard-fail there). 32×32 = w-8 h-8. */
+        /* GH #301: optimized Image (spec §4.3). avatar_url is either a
+         * RELATIVE /api/v1/files/avatar/… path (absolutized by toAvatarSrc)
+         * or a free-form admin-entered absolute URL (passes through; hosts
+         * beyond remotePatterns fail optimizer-side and surface as a broken
+         * image — the admin sees and fixes their own input). 32×32 = w-8 h-8. */
         <Image
-          src={s.avatar_url}
+          src={toAvatarSrc(s.avatar_url)}
           alt="avatar"
           width={32}
           height={32}
-          unoptimized
           className="w-8 h-8 rounded-full object-cover"
         />
       ) : (

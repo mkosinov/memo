@@ -32,6 +32,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { toISODate } from '@/lib/datetime';
+import { toAvatarSrc } from '@/lib/avatar';
 import type { MyProfile, MyProfileUpdate } from '@memo/api-client';
 import {
   MYDATA_MAIN_FIELDS,
@@ -332,16 +333,15 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
           {profile.has_staff && (
             <div className="flex items-center gap-4" data-testid="mydata-portrait-block">
               {avatarUrl ? (
-                /* GH #301: unoptimized Image — RELATIVE /api/v1/files/avatar/…
-                 * src stays raw (no Next rewrite in the split e2e stack);
-                 * 64×64 matches the fixed w-16 h-16 round cell. */
+                /* GH #301: optimized Image (spec §4.3). toAvatarSrc
+                 * absolutizes the RELATIVE /api/v1/files/avatar/… path so
+                 * the optimizer fetches it from the backend host. */
                 <Image
                   data-testid="mydata-avatar-preview"
-                  src={avatarUrl}
+                  src={toAvatarSrc(avatarUrl)}
                   alt="Портрет"
                   width={64}
                   height={64}
-                  unoptimized
                   className="w-16 h-16 rounded-full object-cover flex-shrink-0"
                 />
               ) : (

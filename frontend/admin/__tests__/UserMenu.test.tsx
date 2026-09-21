@@ -429,12 +429,17 @@ describe('UserMenu plate content (spec rev 3, D1/D9)', () => {
     renderMenu();
     const avatar = screen.getByTestId('user-avatar');
     expect(avatar.tagName).toBe('IMG');
-    expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/x.png');
+    // Optimized contract (GH #301 fix): src flows through /_next/image with
+    // the absolutized backend URL (toAvatarSrc) as the url param — the raw
+    // relative path would 404 in the optimizer.
+    expect(avatar).toHaveAttribute('src', expect.stringContaining('/_next/image'));
+    expect(avatar.getAttribute('src')).toContain(
+      encodeURIComponent('http://localhost:8000/api/v1/files/avatar/x.png'),
+    );
   });
 
-  // GH #301 (img → next/image): the avatar keeps the RAW served src
-  // (unoptimized — the e2e shard stack has no Next rewrite to /_next/image)
-  // and gains intrinsic 28×28 dimensions matching the fixed w-7 h-7 cell.
+  // GH #301 (img → next/image): intrinsic 28×28 dimensions matching the
+  // fixed w-7 h-7 cell.
   it('renders the avatar image with raw src and intrinsic dimensions', () => {
     mockUseAuth.mockReturnValue(
       mockAuthState({
@@ -443,7 +448,6 @@ describe('UserMenu plate content (spec rev 3, D1/D9)', () => {
     );
     renderMenu();
     const avatar = screen.getByTestId('user-avatar');
-    expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/x.png');
     expect(avatar).toHaveAttribute('width', '28');
     expect(avatar).toHaveAttribute('height', '28');
   });

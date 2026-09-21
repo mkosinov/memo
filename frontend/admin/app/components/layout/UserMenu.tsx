@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { MyDataModal } from '@/app/components/modal/MyDataModal';
 import { PasswordModal } from '@/app/components/modal/PasswordModal';
+import { toAvatarSrc } from '@/lib/avatar';
 
 // GH #143: hand-written SVGs replaced by lucide-react. Sizing contract: the
 // previous inline SVGs were 14×14, so size={14} keeps the popup geometry.
@@ -131,19 +132,17 @@ export function UserMenu({ collapsed }: UserMenuProps) {
     'w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs text-white/70 ' +
     'hover:bg-white/10 hover:text-white transition-colors';
 
-  // GH #301: unoptimized Image — the served avatar URL is a RELATIVE
-  // /api/v1/files/avatar/… path (or an arbitrary admin-entered host), and the
-  // e2e shard stack splits frontend from the API with no Next rewrite, so the
-  // raw src contract is binding (cabinet.spec.ts S3). width/height match the
-  // fixed w-7 h-7 cell.
+  // GH #301: optimized Image (spec §4.3 — a 5 MB portrait must arrive
+  // compressed at the 28 px cell). toAvatarSrc absolutizes the RELATIVE
+  // served path (/api/v1/files/avatar/…) against the API base so the
+  // optimizer can fetch it cross-host (remotePatterns in next.config.mjs).
   const avatar = avatarUrl ? (
     <Image
       data-testid="user-avatar"
-      src={avatarUrl}
+      src={toAvatarSrc(avatarUrl)}
       alt=""
       width={28}
       height={28}
-      unoptimized
       className="w-7 h-7 rounded-full object-cover flex-shrink-0"
     />
   ) : (

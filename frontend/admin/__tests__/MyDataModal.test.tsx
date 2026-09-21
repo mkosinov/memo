@@ -192,9 +192,13 @@ describe('MyDataModal — portrait block', () => {
   it('previews the current avatar', async () => {
     renderModal();
     await waitForForm();
-    expect(screen.getByTestId('mydata-avatar-preview')).toHaveAttribute(
-      'src',
-      '/api/v1/files/avatar/o.png',
+    // Optimized contract (GH #301 fix): the preview flows through the
+    // optimizer (/next/image) with the absolutized backend URL as the url
+    // param — toAvatarSrc derives it from NEXT_PUBLIC_API_URL.
+    const src = screen.getByTestId('mydata-avatar-preview').getAttribute('src') ?? '';
+    expect(src).toContain('/_next/image');
+    expect(src).toContain(
+      encodeURIComponent('http://localhost:8000/api/v1/files/avatar/o.png'),
     );
   });
 

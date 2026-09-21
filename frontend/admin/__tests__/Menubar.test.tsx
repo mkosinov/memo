@@ -316,7 +316,12 @@ describe('Menubar user block (GH #262 §5.1)', () => {
     renderWithProviders();
     const avatar = screen.getByTestId('user-avatar');
     expect(avatar.tagName).toBe('IMG');
-    expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/portrait.png');
+    // Optimized contract (GH #301 fix): /_next/image src + absolutized
+    // backend URL as the url param.
+    expect(avatar.getAttribute('src')).toContain('/_next/image');
+    expect(avatar.getAttribute('src')).toContain(
+      encodeURIComponent('http://localhost:8000/api/v1/files/avatar/portrait.png'),
+    );
   });
 
   it('does NOT render a standalone «Выйти» button (it lives in the popup)', () => {

@@ -59,7 +59,8 @@ def _service_mark(
     journal source. ``old=None`` → create mark (after-snapshot pairs over
     the signature fields, the shape a repo-riding create stages);
     otherwise update pairs over the fields that actually changed (§5.1 —
-    no-op fields never journal). LAZY audit import — cycle discipline
+    an EMPTY raw diff is a no-op: no row at all, payload presence alone
+    never journals). LAZY audit import — cycle discipline
     (src/events/entities.py WARNING).
     """
     from src.events.audit import mark_audit, snapshot_pairs_after
@@ -67,11 +68,18 @@ def _service_mark(
     if old is None:
         changes: dict[str, Any] | None = snapshot_pairs_after("services", service)
     else:
-        changes = {
+        diff = {
             f: [old[f], getattr(service, f)]
             for f in _SERVICE_MARK_FIELDS
             if old[f] != getattr(service, f)
         }
+        if not diff:
+            # §5.1 «No-op не журналируется»: nothing effectively changed
+            # (value comparison over the journaled scalars, free text
+            # included — mirrors ``BaseRepository._raw_diff`` skip and
+            # ``_record_diff`` gating) — no journal row at all.
+            return
+        changes = diff
     mark_audit(
         entity="services",
         action=action,
@@ -362,7 +370,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
 
         await db_session.flush()
         # GH #344 (§4.3): explicit mark — the user action rewrote the row
-        # (PUT semantics); pairs carry only the changed scalar fields.
+        # (PUT semantics); pairs carry only the changed scalar fields, a
+        # same-value PUT self-gates to NO row (§5.1, mirrors the repo
+        # ``_raw_diff`` skip).
         _service_mark(service, "update", _old)
         db_session.expunge(service)
         return await self.get(db_session, id)
@@ -384,6 +394,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
 
         materials (GH #223 spec §4): absent/null → existing links preserved;
         sent (incl. []) → hard-replace; [] → clear all.
+
+        Journal (§5.1): a PATCH that changes no journaled scalar (empty
+        body, same values, tag_ids/tariffs/materials-only) writes NO row.
         """
         service = await self.get(db_session, id)
         if not service:
@@ -402,15 +415,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             if field in data_dict and data_dict[field] is None:
                 del data_dict[field]
 
-        # GH #344 (§4.2): "before" half fixed before the first mutation;
-        # an empty PATCH (nothing sent) is a no-op — no journal row.
+        # GH #344 (§4.2): "before" half fixed before the first mutation.
         _old = {f: getattr(service, f) for f in _SERVICE_MARK_FIELDS}
-        _touched = (
-            bool(data_dict)
-            or tag_ids is not None
-            or tariffs_data is not None
-            or data.materials is not None
-        )
 
         # Apply scalar fields
         for key, value in data_dict.items():
@@ -443,12 +449,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             await self._replace_service_materials(db_session, id, data.materials)
 
         await db_session.flush()
-        # GH #344 (§4.3): mark only when the request actually carried a
-        # payload field (scalar, tag_ids, tariffs, or materials — a
-        # tag_ids/tariffs/materials-only patch still marks the action
-        # with the changed-scalar diff, possibly empty).
-        if _touched:
-            _service_mark(service, "update", _old)
+        # GH #344 (§4.3/§5.1): the mark self-gates on the raw scalar
+        # diff — a PATCH that changes no journaled scalar (empty body,
+        # same values, or tag_ids/tariffs/materials-only churn) writes
+        # NO row; a real change journals the changed-scalar diff (free
+        # text counts for detection, never enters the snapshot).
+        _service_mark(service, "update", _old)
         db_session.expunge(service)
         return await self.get(db_session, id)
 

@@ -1039,6 +1039,94 @@ class TestServiceServiceAudit:
         assert patched is not None
         assert audit_rows() == []
 
+    async def test_update_service_same_values_writes_nothing(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§5.1: a same-value PUT is a no-op — no journal row (mirrors
+        ``BaseRepository._raw_diff`` skip: empty diff → nothing staged)."""
+        from src.schemas.service import ServiceUpdate
+        from src.services.service import get_service_service
+
+        _insert_service("svc-put-noop", "Неизменное название")
+        updated = await get_service_service().update(
+            db_session,
+            "svc-put-noop",
+            ServiceUpdate(
+                title="Неизменное название",
+                description="о",
+                image_url="https://e.com/x.jpg",
+                specialty="живопись",
+                min_age=6,
+                duration=90,
+                record_info="и",
+            ),
+        )
+        assert updated is not None
+        assert audit_rows() == []
+
+    async def test_patch_service_same_values_writes_nothing(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§5.1: a PATCH re-sending the SAME scalar value is a no-op —
+        payload presence alone must not journal a row."""
+        from src.schemas.service import ServicePatch
+        from src.services.service import get_service_service
+
+        _insert_service("svc-patch-noop", "Неизменное название")
+        patched = await get_service_service().patch(
+            db_session,
+            "svc-patch-noop",
+            ServicePatch(title="Неизменное название"),
+        )
+        assert patched is not None
+        assert audit_rows() == []
+
+    async def test_patch_service_tag_only_noop_writes_nothing(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§5.1/§4.2: a tag-only patch re-sending the SAME tag set
+        changes no journaled scalar — no journal row (the tag links are
+        non-canonical cascade children, never journaled)."""
+        from tests.conftest import query_db
+        from src.schemas.service import ServicePatch
+        from src.services.service import get_service_service
+
+        _insert_service("svc-tag-noop", "Неизменное название")
+        _insert_tag("tag-svc-noop", "пастель")
+        query_db(
+            "INSERT INTO service_tags (service_id, tag_id) "
+            "VALUES ('svc-tag-noop', 'tag-svc-noop')"
+        )
+        patched = await get_service_service().patch(
+            db_session,
+            "svc-tag-noop",
+            ServicePatch(tag_ids=["tag-svc-noop"]),
+        )
+        assert patched is not None
+        assert audit_rows() == []
+
+    async def test_patch_service_description_only_journals_empty_changes(
+        self, db_session, actor, audit_rows
+    ) -> None:
+        """§5.1 free-text convention (mirrors ``_record_diff``): a
+        description-only edit IS an action — one row journals, but the
+        free-text field never enters the snapshot (``changes == {}``)."""
+        from src.schemas.service import ServicePatch
+        from src.services.service import get_service_service
+
+        _insert_service("svc-desc", "Неизменное название")
+        patched = await get_service_service().patch(
+            db_session,
+            "svc-desc",
+            ServicePatch(description="новое описание"),
+        )
+        assert patched is not None
+        rows = audit_rows()
+        assert [(r["action"], r["entity"], r["entity_id"]) for r in rows] == [
+            ("update", "services", "svc-desc")
+        ]
+        assert json.loads(rows[0]["changes"]) == {}
+
 
 # ─── §4.3/§9-6: VisitorService.delete — label of the deleted row ──────────────
 

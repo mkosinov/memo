@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-09-20
+## [Unreleased] — 2026-09-21
+
+### Added
+- **GH #330 — Потеря связи с сервером: явный индикатор + таймауты запросов** — branch
+  `330-connection-loss-indicator` (7 commits `ecbecf99..ed56d6bd`, base `6877d175`; 16 файлов,
+  +1117/−15; спека `docs/specs/2026-09-19-connection-loss-indicator-330-design.md` rev2, план
+  `docs/plans/2026-09-20-connection-loss-indicator-330-plan.md` — оба на main, веткой не менялись):
+  - **Персистентный индикатор связи:** после 5 с непрерывного отказа SSE-канала показывается один
+    неубираемый тост «Нет соединения с сервером. Обновления приостановлены.» — крестика нет, лимит
+    «видимо 5» не действует и очередь его не вытесняет; дрожь короче 5 с молчит (дебаунс), при
+    восстановлении канала тост снимается автоматически. Источник правды состояния связи — SSE-канал
+    (#239); silent reconnect не менялся.
+  - **Таймауты запросов:** общий `packages/api-client` прерывает зависшие запросы через
+    `AbortSignal.timeout` — 30 с по умолчанию, 120 с для `FormData`-загрузок; поведение наследует и
+    web-витрина (option A, user-approved); timeout/abort-класс не ретраится, текст ошибки —
+    «Превышено время ожидания запроса».
+  - **Дедуп транспортных тостов:** пока канал лежит, транспортные query-тосты («Ошибка сети»)
+    подавляются; `ApiError` 4xx/5xx и per-action mutation-тосты не затронуты.
+  - **Tests:** admin vitest **143 файла / 2299 passed / 0 failed**; api-client **392 passed / 0 failed**
+    (включая новые timeout-тесты); tsc clean; eslint 0 errors / 36 warnings (бюджет 38); Playwright
+    точечно (server-push ×2) **9/9**; полный e2e — shard-schedule **123 passed** + shard-rest
+    **321 passed**, pytest **2324 passed / 15 skipped**, новых красных нет; ручной S4-проб —
+    заблокированный запрос прерван на ~33.5 с, без ретраев (`blocked=1`).
+  - Status: `docs/status/2026-09-21-connection-loss-indicator-330.md`
 
 ### Changed
 - **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на

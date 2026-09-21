@@ -459,6 +459,28 @@ describe('useDeleteTag (deferred #318)', () => {
       );
     });
 
+    it('commit throw 404 → quiet success: no toast, no undo — the row stays removed (D4)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCaches(queryClient);
+      const { result } = renderHook(() => useDeleteTag(), { wrapper });
+
+      await act(async () => {
+        await result.current.removeTag(mockTag);
+      });
+      const { onError } = lastEnqueuedAction();
+
+      await act(async () => {
+        onError!(new ApiError(404, 'Tag not found', 'TAG_NOT_FOUND'));
+      });
+
+      // Quiet success: a competitor already deleted the tag — nothing to
+      // announce, nothing to roll back; the optimistic removal stands.
+      expect(mockShowToast).not.toHaveBeenCalled();
+      const envelope = queryClient.getQueryData<PaginatedResponse<TagResponse>>([...PAGE_KEY]);
+      expect(envelope?.items.find((t) => t.id === tagId)).toBeUndefined();
+      expect(queryClient.getQueryData<TagResponse[]>([...ALL_KEY])).toEqual([otherTag]);
+    });
+
     it('cascade path carries the same onError — commit 409 → undo + stale toast', async () => {
       const resolvedTag: TagResponse = { id: 't-cascade', title: 'Гончарное дело' };
       const { queryClient, wrapper } = createQueryClientWrapper();

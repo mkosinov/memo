@@ -56,6 +56,8 @@ let mockSearchParams = new URLSearchParams();
 vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   useRouter: () => mockRouter,
+  // #232 §3.5 — the narrowing chip builds its replace-target from pathname.
+  usePathname: () => '/clients',
 }));
 
 const mockUseClients = vi.mocked(useClientsTable);
@@ -687,6 +689,88 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(state.setFilters).not.toHaveBeenCalled();
+  });
+
+  // ─── Narrowing chip (#232 §3.5) ─────────────────────────────────────────
+
+  it('renders the chip between filters and table when the URL narrows (single id)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    const { container } = render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
+    expect(screen.getByText('Открыт по ссылке')).toBeInTheDocument();
+    // Between the filters block and the table (spec §3.5 placement).
+    const chip = screen.getByTestId('client-deeplink-chip');
+    const filtersBlock = screen.getByTestId('clients-filters').closest('div');
+    const tableBlock = screen.getByTestId('clients-table').closest('div');
+    expect(chip.compareDocumentPosition(filtersBlock!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+    expect(chip.compareDocumentPosition(tableBlock!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('multi-id URL renders «Открыто по ссылке: N»', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Открыто по ссылке: 2')).toBeInTheDocument());
+  });
+
+  it('no narrowing → no chip', async () => {
+    mockSearchParams = new URLSearchParams();
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25 }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
+  });
+
+  it('chip ✕ clears only the address — no setFilters from the click (#232 §3.5)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['page', '2']]);
+    const state = createMockClientsTableState({
+      // user-set filters live ON TOP of the narrowing (AND semantics, §3.3)
+      filters: { ...defaultFilters, clientIds: [U1], status: 'all', search: 'анна' },
+      items: [],
+    });
+    mockUseClients.mockReturnValue(state);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
+
+    // Address only: page param survives, clientId is gone, scroll: false.
+    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=2', { scroll: false });
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    // NO setFilters from the click — the Task 4 sync effect owns convergence.
+    // (The mount-time sync effect may fire for state/URL mismatch; clear the
+    // history first, then assert the click itself added no filter writes.)
+    vi.mocked(state.setFilters).mockClear();
     expect(state.setFilters).not.toHaveBeenCalled();
   });
 });

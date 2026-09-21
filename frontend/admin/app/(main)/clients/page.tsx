@@ -9,6 +9,7 @@ import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
+import { ClientDeepLinkChip } from './components/ClientDeepLinkChip';
 import type { ClientWithStats } from '@memo/api-client';
 
 /** Stable comparison for the machine narrowing field (order-sensitive). */
@@ -98,6 +99,12 @@ function ClientsPageContent() {
       >
         <ClientsFilters />
       </div>
+
+      {/* #232 §3.5 — narrowing chip: visible affordance for an active
+          deep-link narrowing (between the filters block and the table). The
+          ✕ removes the param from the address only; the sync effect above
+          converges the machine filter. */}
+      {urlClientIds && <ClientDeepLinkChip clientIds={urlClientIds} />}
 
       {/* Table */}
       <div

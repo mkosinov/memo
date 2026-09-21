@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseClientIds } from '@/lib/client-id-param';
+import { parseClientIds, buildUrlWithoutClientId } from '@/lib/client-id-param';
 
 /**
  * #232 §3.3 — address parsing rules for the deep-link narrowing:
@@ -107,5 +107,39 @@ describe('parseClientIds (#232 address parsing)', () => {
     const a = '123e4567-e89b-42d3-a456-426614174000';
     const sp = new URLSearchParams([['q', a], ['status', 'all'], ['clientId', a]]);
     expect(parseClientIds(sp)).toEqual([a]);
+  });
+});
+
+/**
+ * #232 §3.5 — the narrowing removal URL builder (chip ✕ and resetFilters):
+ * drop EVERY occurrence of `clientId`, keep all other query params, and
+ * return a pathname-ready href (`/clients?…` or bare `/clients`).
+ */
+describe('buildUrlWithoutClientId (#232 narrowing removal)', () => {
+  const A = '123e4567-e89b-42d3-a456-426614174000';
+  const B = '987fcdeb-51a2-43d7-91e9-c01234567890';
+
+  it('removes a single occurrence, keeps other params', () => {
+    const sp = new URLSearchParams([['clientId', A], ['status', 'all'], ['q', 'анна']]);
+    expect(buildUrlWithoutClientId(sp, '/clients')).toBe('/clients?status=all&q=%D0%B0%D0%BD%D0%BD%D0%B0');
+  });
+
+  it('removes ALL occurrences of the param', () => {
+    const sp = new URLSearchParams([['clientId', A], ['clientId', B], ['page', '2']]);
+    expect(buildUrlWithoutClientId(sp, '/clients')).toBe('/clients?page=2');
+  });
+
+  it('returns the bare pathname when nothing else is left', () => {
+    const sp = new URLSearchParams([['clientId', A]]);
+    expect(buildUrlWithoutClientId(sp, '/clients')).toBe('/clients');
+  });
+
+  it('no clientId present → pathname with the surviving query untouched', () => {
+    const sp = new URLSearchParams([['page', '3']]);
+    expect(buildUrlWithoutClientId(sp, '/clients')).toBe('/clients?page=3');
+  });
+
+  it('empty params → bare pathname', () => {
+    expect(buildUrlWithoutClientId(new URLSearchParams(), '/clients')).toBe('/clients');
   });
 });

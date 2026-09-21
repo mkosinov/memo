@@ -33,3 +33,18 @@ export function parseClientIds(searchParams: URLSearchParams): string[] | null {
   }
   return seen.size > 0 ? Array.from(seen) : null;
 }
+
+/**
+ * #232 §3.5 — narrowing-removal href: a pathname-ready URL with EVERY
+ * occurrence of `clientId` dropped and all other query params preserved.
+ * Used by the chip ✕ and the reset path (`resetFilters` responsibility):
+ * both navigate via `router.replace(url, { scroll: false })` and let the
+ * Task 4 sync effect converge the `clientIds` filter — no `setFilters` in
+ * the click handlers (the address stays the single writer).
+ */
+export function buildUrlWithoutClientId(searchParams: URLSearchParams, pathname: string): string {
+  const next = new URLSearchParams(searchParams);
+  next.delete(CLIENT_ID_PARAM);
+  const qs = next.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
+}

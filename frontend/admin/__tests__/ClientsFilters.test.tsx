@@ -13,6 +13,17 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
   };
 });
 
+// #232 §3.5 — resetFilters also cleans the address of `clientId`: the mock
+// supplies the URL the real hook would read.
+const mockRouter = { push: vi.fn(), replace: vi.fn() };
+let mockSearchParams = new URLSearchParams();
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => mockSearchParams,
+  useRouter: () => mockRouter,
+  usePathname: () => '/clients',
+}));
+
 import { useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 import { ClientsFilters } from '../app/(main)/clients/components/ClientsFilters';
@@ -21,6 +32,9 @@ const mockUseClientsTable = vi.mocked(useClientsTable);
 
 beforeEach(() => {
   mockUseClientsTable.mockReturnValue(createMockClientsTableState());
+  mockSearchParams = new URLSearchParams();
+  mockRouter.push.mockClear();
+  mockRouter.replace.mockClear();
 });
 
 afterEach(() => {
@@ -377,5 +391,43 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
     mockFiltersContext({ status: 'all' });
     render(<ClientsFilters />);
     expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
+  });
+});
+
+describe('ClientsFilters — reset cleans the address of clientId (#232 §3.5)', () => {
+  const U1 = '11111111-1111-4111-8111-111111111111';
+  const U2 = '22222222-2222-4222-8222-222222222222';
+
+  // The reset path lives in the clients domain (not the shared paged-list
+  // factory): «Сбросить фильтры» = context resetFilters + the documented
+  // responsibility to drop the narrowing param from the address.
+  it('reset with clientId in the address removes it (replace, scroll: false)', () => {
+    const resetFilters = vi.fn();
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ resetFilters }));
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    render(<ClientsFilters />);
+    fireEvent.click(screen.getByText('Сбросить фильтры'));
+    expect(resetFilters).toHaveBeenCalledTimes(1);
+    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false });
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  it('reset keeps the other query params, drops ALL clientId occurrences', () => {
+    mockSearchParams = new URLSearchParams([
+      ['clientId', U1],
+      ['clientId', U2],
+      ['page', '3'],
+    ]);
+    render(<ClientsFilters />);
+    fireEvent.click(screen.getByText('Сбросить фильтры'));
+    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=3', { scroll: false });
+  });
+
+  it('reset without clientId in the address does not navigate', () => {
+    mockSearchParams = new URLSearchParams([['page', '3']]);
+    render(<ClientsFilters />);
+    fireEvent.click(screen.getByText('Сбросить фильтры'));
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 });

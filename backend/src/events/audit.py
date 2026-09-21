@@ -31,6 +31,14 @@ fields (notes/comments/descriptions) NEVER enter the snapshot. String
 scalars in ``changes`` are clipped at 500 chars with an ``…`` suffix;
 ``entity_label`` is clipped at 255.
 
+Signature dictionary (spec §5.1/§12): ``ENTITY_SIGNATURES`` maps every
+canonical #239 entity to its journal signature — Russian header +
+label fields + snapshot key fields. ``mark_audit`` derives
+``entity_label`` from it when none is supplied explicitly (unnamed
+entities get a типовая подпись: «Платёж 3500, card»); Task 3's
+repository consumes :func:`entity_snapshot_fields` for ``create``
+snapshots.
+
 .. WARNING:: IMPORT-CYCLE HAZARD (precedent: ``entities.py``)
     ``mask_phone`` is imported LAZILY inside the masking helper: a
     top-level import would form the cycle ``permissions → audit →
@@ -51,6 +59,137 @@ from enum import Enum
 from typing import Any
 
 logger = logging.getLogger("memo.audit")
+
+
+# ─── Per-entity signature dictionary (spec §5.1, §12) ────────────────────────
+
+
+@dataclass(frozen=True)
+class EntitySignature:
+    """One entity's journal signature (§5.1): header + carrying fields.
+
+    * ``title`` — the Russian entity header («Клиент», «Платёж», …); used
+      alone when no field values are available, and as the prefix for
+      entities without a human name (payments: «Платёж 3500, card»).
+    * ``titled_label`` — prefix the title when composing the label from
+      values (§12: unnamed entities get a типовая подпись «Платёж …»);
+      named entities (clients/staff/things with a title) render bare.
+    * ``label_fields`` — up to 4 fields that form ``entity_label``
+      (name-parts/title first; phone/email are masked when rendered).
+      Empty for entities whose label is just the header (user_settings).
+    * ``snapshot_fields`` — the key fields the repository snapshots for
+      ``create``/``delete`` rows (Task 3 consumes this via
+      :func:`entity_snapshot_fields`).
+    """
+
+    title: str
+    label_fields: tuple[str, ...]
+    snapshot_fields: tuple[str, ...]
+    titled_label: bool = False
+
+
+# Canonical #239 entity name → signature. Label fields match real model
+# columns (see src/models/*); free-text fields never appear here (§5.1).
+ENTITY_SIGNATURES: dict[str, EntitySignature] = {
+    "clients": EntitySignature(
+        title="Клиент",
+        label_fields=("name", "phone"),
+        snapshot_fields=("name", "phone", "email", "channel"),
+    ),
+    "visitors": EntitySignature(
+        title="Посетитель",
+        label_fields=("name", "age"),
+        snapshot_fields=("client_id", "name", "age"),
+    ),
+    "services": EntitySignature(
+        title="Услуга",
+        label_fields=("title", "specialty"),
+        snapshot_fields=("title", "specialty", "duration", "is_active"),
+    ),
+    "locations": EntitySignature(
+        title="Локация",
+        label_fields=("title",),
+        snapshot_fields=("title", "short_title", "capacity", "is_active"),
+    ),
+    "materials": EntitySignature(
+        title="Материал",
+        label_fields=("title",),
+        snapshot_fields=("title",),
+    ),
+    "tags": EntitySignature(
+        title="Тег",
+        label_fields=("title",),
+        snapshot_fields=("title",),
+    ),
+    "positions": EntitySignature(
+        title="Должность",
+        label_fields=("title",),
+        snapshot_fields=("title", "is_system"),
+    ),
+    "activities": EntitySignature(
+        title="Занятие",
+        label_fields=("start", "duration"),
+        snapshot_fields=("master_id", "service_id", "start", "duration"),
+        titled_label=True,
+    ),
+    "records": EntitySignature(
+        title="Запись",
+        label_fields=("status", "seats"),
+        snapshot_fields=("activity_id", "client_id", "status", "seats"),
+        titled_label=True,
+    ),
+    "visits": EntitySignature(
+        title="Визит",
+        label_fields=("status", "price"),
+        snapshot_fields=("record_id", "visitor_id", "status", "price"),
+        titled_label=True,
+    ),
+    "payments": EntitySignature(
+        title="Платёж",
+        label_fields=("amount", "method"),
+        snapshot_fields=("record_id", "amount", "method"),
+        titled_label=True,
+    ),
+    "photos": EntitySignature(
+        title="Фото",
+        label_fields=("filename",),
+        snapshot_fields=("filename", "is_public"),
+    ),
+    "staff": EntitySignature(
+        title="Сотрудник",
+        label_fields=("last_name", "first_name"),
+        snapshot_fields=("first_name", "last_name"),
+    ),
+    "users": EntitySignature(
+        title="Пользователь",
+        label_fields=("phone",),
+        snapshot_fields=("phone", "role"),
+        titled_label=True,
+    ),
+    "masters": EntitySignature(
+        title="Мастер",
+        label_fields=("specialty",),
+        snapshot_fields=("staff_id", "specialty", "color"),
+        titled_label=True,
+    ),
+    # NB: no `tariffs`/`user_profiles` entries — not canonical #239 entities
+    # (tariffs are cascade children of services, profile writes are marked
+    # as "staff"); a journal row never carries those entity names.
+    "user_settings": EntitySignature(
+        title="Настройки",
+        label_fields=(),
+        snapshot_fields=("user_id", "theme", "language"),
+    ),
+}
+
+
+def entity_snapshot_fields(entity: str) -> tuple[str, ...]:
+    """Key fields for a ``create``/``delete`` snapshot; empty for unknown."""
+    return ENTITY_SIGNATURES.get(entity, EntitySignature("", (), ())).snapshot_fields
+
+# Entities whose label fields are name parts joined by a space
+# («Иванов Иван»), not a comma list.
+_NAME_PARTS_ENTITIES: frozenset[str] = frozenset({"staff"})
 
 # Free-text fields NEVER enter the snapshot (spec §5.1/Open Questions:
 # notes and descriptions can contain anything — excluded wholesale).
@@ -143,12 +282,60 @@ def draw_rows() -> list[dict[str, Any]] | None:
     return rows_copy
 
 
+def derive_entity_label(entity: str, fields: dict[str, Any] | None) -> str | None:
+    """Derive ``entity_label`` from the signature dictionary + values (§5.1).
+
+    ``fields`` is a mapping of column → value: repositories pass raw row
+    values (``after`` preferred), ``mark_audit`` passes the ``changes``
+    mapping (each ``[before, after]`` pair resolves to its after-value,
+    falling back to before — a delete has no after). ``None`` when the
+    entity has no signature or no label field carries a value; callers
+    fall back to the bare entity name.
+
+    Rendering: name-parts (``name``/``*_name``/``first_name``) join with
+    a space, everything else with ``, ``; entities without a human name
+    (payments, records, …) get the entity title as the prefix (§12:
+    «Платёж 3500, card»). Phone/email fields are masked, other values go
+    through the canonical encoder (dates → ISO, decimals → str).
+    """
+    sig = ENTITY_SIGNATURES.get(entity)
+    if sig is None:
+        return None
+    parts: list[str] = []
+    joiner = " " if entity in _NAME_PARTS_ENTITIES else ", "
+    for field in sig.label_fields:
+        value = _pair_value(fields.get(field) if fields else None)
+        if value is None:
+            continue
+        if field in PHONE_FIELDS:
+            rendered = _mask_phone_value(value)
+        elif field in EMAIL_FIELDS:
+            rendered = _mask_email_value(value)
+        else:
+            rendered = _canonical(value)
+        if rendered is not None and str(rendered) != "":
+            parts.append(str(rendered))
+    if not parts:
+        return sig.title or None
+    if sig.titled_label:
+        return f"{sig.title} {joiner.join(parts)}"
+    return joiner.join(parts)
+
+
+# [before, after] pair → the value to render (after wins; delete keeps before).
+def _pair_value(value: Any) -> Any:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        after = value[1]
+        return after if after is not None else value[0]
+    return value
+
+
 def mark_audit(
     *,
     entity: str,
     action: str,
     entity_id: str | None,
-    entity_label: str,
+    entity_label: str | None = None,
     changes: dict[str, Any] | None,
 ) -> None:
     """Stage one journal row in the current transaction's accumulator.
@@ -162,7 +349,8 @@ def mark_audit(
     The row is a plain dict keyed by ``AuditLog`` column names (the model
     import stays with the inserting wrapper — this module imports no
     models). ``changes`` is canonically serialized + masked NOW so the
-    row is always JSON-insertable.
+    row is always JSON-insertable. ``entity_label`` defaults to the
+    dictionary-derived label (§5.1); an explicit label wins (§4.3).
     """
     rows = _pending.get()
     if rows is None:
@@ -171,6 +359,8 @@ def mark_audit(
         )
         return
     actor = _actor.get()
+    if entity_label is None:
+        entity_label = derive_entity_label(entity, changes) or entity
     rows.append(
         {
             "user_id": actor.user_id if actor else None,

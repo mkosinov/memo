@@ -157,6 +157,115 @@ class TestCeilings:
         assert audit.pending_rows()[0]["changes"]["tag_ids"] == [None, ids]
 
 
+class TestEntitySignatures:
+    """The per-entity signature dictionary (spec §5.1/§12): title + key fields."""
+
+    def test_dictionary_covers_exactly_the_canonical_entities(self) -> None:
+        """Every canonical #239 entity name has a signature — and nothing else."""
+        from src.events.entities import MODEL_ENTITY
+
+        assert set(audit.ENTITY_SIGNATURES) == set(MODEL_ENTITY.values())
+
+    def test_every_signature_within_field_budget(self) -> None:
+        """§5.1: title + carrying fields; no free-text in label/snapshot."""
+        for entity, sig in audit.ENTITY_SIGNATURES.items():
+            assert sig.title, f"{entity}: empty title"
+            assert 0 < len(sig.title) <= 32, f"{entity}: title not String(32)-safe"
+            assert len(sig.label_fields) <= 4, f"{entity}: label_fields budget"
+            assert 1 <= len(sig.snapshot_fields) <= 4, f"{entity}: snapshot_fields budget"
+            for field in (*sig.label_fields, *sig.snapshot_fields):
+                assert field not in audit.FREE_TEXT_FIELDS, f"{entity}.{field}"
+
+    def test_snapshot_fields_helper(self) -> None:
+        assert audit.entity_snapshot_fields("payments") == \
+            ("record_id", "amount", "method")
+        assert audit.entity_snapshot_fields("nonexistent") == ()
+
+    def test_titles_are_russian_headers(self) -> None:
+        assert audit.ENTITY_SIGNATURES["clients"].title == "Клиент"
+        assert audit.ENTITY_SIGNATURES["payments"].title == "Платёж"
+        assert audit.ENTITY_SIGNATURES["activities"].title == "Занятие"
+
+
+class TestDerivedLabels:
+    """mark_audit without an explicit entity_label derives it from the dictionary."""
+
+    def test_client_name_from_changes_after_value(self, audit_ctx) -> None:
+        audit.mark_audit(entity="clients", action="update", entity_id="c-1",
+                         changes={"name": ["Старое Имя", "Иванов Иван"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Иванов Иван"
+
+    def test_staff_name_parts_joined_with_space(self, audit_ctx) -> None:
+        audit.mark_audit(entity="staff", action="create", entity_id="s-1",
+                         changes={"first_name": ["", "Иван"], "last_name": ["", "Иванов"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Иванов Иван"
+
+    def test_thing_title_with_extra_field(self, audit_ctx) -> None:
+        audit.mark_audit(entity="services", action="create", entity_id="s-1",
+                         changes={"title": [None, "Стрижка мужская"],
+                                  "specialty": [None, "hair"]})
+        assert audit.pending_rows()[0]["entity_label"] == \
+            "Стрижка мужская, hair"
+
+    def test_unnamed_entity_prefixes_title(self, audit_ctx) -> None:
+        audit.mark_audit(entity="payments", action="create", entity_id="p-1",
+                         changes={"amount": [None, 3500], "method": [None, "card"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Платёж 3500, card"
+
+    def test_delete_pair_prefers_before_value(self, audit_ctx) -> None:
+        audit.mark_audit(entity="payments", action="delete", entity_id="p-1",
+                         changes={"amount": [3500, None], "method": ["card", None]})
+        assert audit.pending_rows()[0]["entity_label"] == "Платёж 3500, card"
+
+    def test_phone_masked_in_derived_label(self, audit_ctx) -> None:
+        audit.mark_audit(entity="users", action="update", entity_id="u-1",
+                         changes={"phone": ["+7 909 123-45-67", "+7 909 123-45-68"]})
+        assert audit.pending_rows()[0]["entity_label"] == \
+            "Пользователь +• ••• •••-45-68"
+
+    def test_known_entity_without_values_falls_back_to_title(self, audit_ctx) -> None:
+        audit.mark_audit(entity="user_settings", action="update", entity_id="us-1",
+                         changes={"theme": ["light", "dark"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Настройки"
+
+    def test_unknown_entity_falls_back_to_raw_name(self, audit_ctx) -> None:
+        audit.mark_audit(entity="strange_thing", action="update", entity_id="x-1",
+                         changes={"foo": ["a", "b"]})
+        assert audit.pending_rows()[0]["entity_label"] == "strange_thing"
+
+    def test_derived_label_clipped_to_255(self, audit_ctx) -> None:
+        audit.mark_audit(entity="clients", action="update", entity_id="c-1",
+                         changes={"name": [None, "д" * 300]})
+        assert len(audit.pending_rows()[0]["entity_label"]) == 255
+
+    def test_explicit_label_wins_over_derivation(self, audit_ctx) -> None:
+        audit.mark_audit(entity="clients", action="update", entity_id="c-1",
+                         entity_label="Явная подпись",
+                         changes={"name": [None, "Иванов Иван"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Явная подпись"
+
+    def test_no_changes_no_label_uses_fallbacks(self, audit_ctx) -> None:
+        audit.mark_audit(entity="tags", action="delete", entity_id="t-1", changes=None)
+        assert audit.pending_rows()[0]["entity_label"] == "Тег"
+        audit.mark_audit(entity="strange_thing", action="delete", entity_id="x-1",
+                         changes=None)
+        assert audit.pending_rows()[1]["entity_label"] == "strange_thing"
+
+    def test_derive_entity_label_renders_dates_and_enums(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        label = audit.derive_entity_label(
+            "activities",
+            {"start": datetime(2026, 9, 20, 12, 0, tzinfo=ZoneInfo("UTC")),
+             "duration": 90},
+        )
+        assert label == "Занятие 2026-09-20T12:00:00+00:00, 90"
+
+    def test_derive_entity_label_unknown_entity_is_none(self) -> None:
+        assert audit.derive_entity_label("nope", {"a": 1}) is None
+
+
 class TestDrawRows:
     def test_draw_returns_and_clears(self, audit_ctx) -> None:
         audit.mark_audit(entity="clients", action="delete", entity_id="c-1",

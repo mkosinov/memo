@@ -111,7 +111,18 @@ class TestStagingPerMethod:
             )
             assert row["changes"] == {"title": [None, "Журнал"]}
             assert row["entity_label"] == "Журнал"
-            assert row["_auto"] is True
+            # Observable insert shape (not the internal auto marker):
+            # the drawn row is exactly the journal columns the wrapper
+            # inserts — no internal keys leak into it.
+            assert audit.draw_rows() == [{
+                "user_id": None,
+                "user_role": None,
+                "action": "create",
+                "entity": "tags",
+                "entity_id": instance.id,
+                "entity_label": "Журнал",
+                "changes": {"title": [None, "Журнал"]},
+            }]
         finally:
             audit.reset_audit(token)
 
@@ -210,6 +221,44 @@ class TestStagingPerMethod:
             audit.reset_audit(token)
 
 
+# ─── Deferral: no snapshot work outside an open accumulator ───────────────────
+
+
+class TestSnapshotDeferral:
+    """create/delete build their snapshot ONLY when an accumulator is open.
+
+    The snapshot build pays the lazy entities import + ``MODEL_ENTITY``
+    lookup + getattr walk; mutations outside ``@transactional`` (reads,
+    seeds, CLI) must never pay it.
+    """
+
+    async def test_create_without_accumulator_builds_no_snapshot(
+        self, db_session, monkeypatch
+    ) -> None:
+        import src.repositories.generic as generic_mod
+
+        def _boom(instance: object, table: object) -> dict:
+            raise AssertionError("snapshot built with no accumulator open")
+
+        monkeypatch.setattr(generic_mod, "_raw_snapshot", _boom)
+        await get_base_repository().create(
+            db_session, TagCreate(title="Без журнала"), Tag
+        )
+
+    async def test_delete_without_accumulator_builds_no_snapshot(
+        self, db_session, monkeypatch
+    ) -> None:
+        import src.repositories.generic as generic_mod
+
+        def _boom(instance: object, table: object) -> dict:
+            raise AssertionError("snapshot built with no accumulator open")
+
+        monkeypatch.setattr(generic_mod, "_raw_snapshot", _boom)
+        _insert_tag("tag-lazy", "Ленивый")
+        deleted = await get_base_repository().delete(db_session, Tag, "tag-lazy")
+        assert deleted is True
+
+
 # ─── Target-entity rule (spec §4.2/§4.6) ─────────────────────────────────────
 
 
@@ -257,7 +306,10 @@ class TestSeniority:
             rows = audit.pending_rows()
             assert rows is not None and len(rows) == 1
             assert rows[0]["action"] == "archive"
-            assert not rows[0].get("_auto")
+            # The surviving row IS the explicit mark (label + empty
+            # changes), observable without any internal marker key.
+            assert rows[0]["entity_label"] == "Тег (архив)"
+            assert rows[0]["changes"] is None
         finally:
             audit.reset_audit(token)
 
@@ -280,6 +332,7 @@ class TestSeniority:
             rows = audit.pending_rows()
             assert rows is not None and len(rows) == 1
             assert rows[0]["action"] == "archive"
+            assert rows[0]["entity_label"] == "Тег (архив)"
         finally:
             audit.reset_audit(token)
 

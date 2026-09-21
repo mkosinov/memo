@@ -299,11 +299,6 @@ def reset_audit(
         _target.reset(token[1])
 
 
-def current_target() -> str | None:
-    """The open accumulator's target entity; ``None`` when none is set."""
-    return _target.get()
-
-
 def pending_rows() -> list[dict[str, Any]] | None:
     """The staged rows; ``None`` outside an open accumulator."""
     return _pending.get()
@@ -387,7 +382,7 @@ def mark_audit(
     """Stage one journal row in the current transaction's accumulator.
 
     Explicit marks (spec §4.3 — scenarios and non-repository mutations)
-    SUPERSDE repository auto-collection for the same row: a matching
+    SUPERSEDE repository auto-collection for the same row: a matching
     staged auto row (same entity + entity_id) is removed first, and a
     later ``stage_auto`` for the same row is skipped (§4.2 seniority
     rule) — one operation never yields two rows for one target row.
@@ -433,7 +428,7 @@ def stage_auto(
     before: dict[str, Any] | None,
     after: dict[str, Any] | None,
     entity_label: str | None = None,
-) -> bool:
+) -> None:
     """Stage one AUTO-collected row from the repository (spec §4.2).
 
     The repository stages the RAW record — ``{entity, action, entity_id,
@@ -452,19 +447,17 @@ def stage_auto(
       dictionary, and serialization/masking run through the same
       canonical pipeline as ``mark_audit`` (override ``entity_label``
       for reorder's «N объектов»).
-
-    Returns ``True`` when the row was staged.
     """
     rows = _pending.get()
     if rows is None:
         logger.debug(
             "stage_auto(%s/%s) outside a transaction — ignored", entity, action
         )
-        return False
+        return
     if entity != _target.get():
-        return False  # not the transaction's target entity — cascade child
+        return  # not the transaction's target entity — cascade child
     if _explicit_covers(rows, entity, entity_id):
-        return False  # an explicit mark supersedes auto-collection (§4.2)
+        return  # an explicit mark supersedes auto-collection (§4.2)
     actor = _actor.get()
     changes = _compose_pairs(before, after)
     if entity_label is None:
@@ -483,7 +476,6 @@ def stage_auto(
             _AUTO_FLAG: True,
         }
     )
-    return True
 
 
 def _compose_pairs(
@@ -498,8 +490,7 @@ def _compose_pairs(
     """
     if before is None and after is None:
         return None
-    fields = after if after is not None else before
-    assert fields is not None  # narrowed above; for the type checker
+    fields = after or before or {}  # narrowed: at least one is non-None
     return {
         field: [
             before.get(field) if before is not None else None,

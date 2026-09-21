@@ -55,6 +55,19 @@ ModelList: TypeAlias = list
 # ─── GH #344: repository-side audit auto-collection (spec §4.2/§4.6) ──────────
 
 
+def _audit_open() -> bool:
+    """Is an audit accumulator open? Cheap lazy-import guard (§4.1).
+
+    Lets snapshot-bearing call sites (create/delete) DEFER the raw
+    snapshot build — the eager-argument form paid the lazy
+    ``src.events.entities`` import + ``MODEL_ENTITY`` lookup + getattr
+    dict walk even when NO accumulator was open (reads/seeds/CLI).
+    """
+    from src.events import audit
+
+    return audit.pending_rows() is not None
+
+
 def _stage_auto(
     table: type[Base],
     *,
@@ -271,14 +284,17 @@ class BaseRepository:
         await session.flush()
         await session.refresh(instance)
         # Audit AFTER refresh: server/Python defaults are populated, so
-        # the create snapshot carries the real persisted key fields.
-        _stage_auto(
-            table,
-            action="create",
-            entity_id=instance.id,
-            before=None,
-            after=_raw_snapshot(instance, table),
-        )
+        # the create snapshot carries the real persisted key fields. The
+        # guard DEFERS the snapshot build — without an open accumulator
+        # (reads/seeds/CLI) the lazy imports never even run.
+        if _audit_open():
+            _stage_auto(
+                table,
+                action="create",
+                entity_id=instance.id,
+                before=None,
+                after=_raw_snapshot(instance, table),
+            )
         return instance
 
     async def update(
@@ -323,13 +339,14 @@ class BaseRepository:
         instance = await self.get(session, table, id)
         if not instance:
             return False
-        _stage_auto(
-            table,
-            action="delete",
-            entity_id=id,
-            before=_raw_snapshot(instance, table),
-            after=None,
-        )
+        if _audit_open():  # deferred snapshot — see create()
+            _stage_auto(
+                table,
+                action="delete",
+                entity_id=id,
+                before=_raw_snapshot(instance, table),
+                after=None,
+            )
         await session.delete(instance)
         await session.flush()
         return True

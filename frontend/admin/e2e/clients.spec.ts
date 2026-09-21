@@ -749,6 +749,65 @@ test.describe('Deep-link ?clientId= — #216', () => {
       }
     }
   });
+
+  // ── S1 (#231): deep-link mount fires EXACTLY ONE narrowed list request ───
+  //
+  // Spec 2026-09-19-clients-deeplink-single-request §3 S1 / §6: before #231
+  // the deep-link mount fired TWO list GETs — the default (status=active) one
+  // plus the narrowed q=<uuid> one; the initialFilters seed (Tasks 1–2) kills
+  // the default. The counter matches the LIST endpoint (pathname
+  // /api/v1/clients, GET) and is deliberately NOT filtered by q=: the killed
+  // default request (same pathname, no q=, status=active) must stay visible
+  // to the counter, or the regression this test guards would be invisible
+  // again. Point paths under /api/v1/clients/<id>… are NOT list traffic —
+  // the auto-opened card's visitors GET (/api/v1/clients/<id>/visitors) is
+  // expected in the window and must not count. Fixture traffic goes through
+  // the `request` context before goto, so it never reaches the page-scoped
+  // counter.
+
+  test('S1: deep-link mount fires exactly one list request — narrowed q=<uuid>&status=all', async ({
+    page,
+    request,
+  }) => {
+    const client = await createTestClient(request, { name: `S1-deeplink-${uid()}` });
+    const clientId = client.id;
+
+    try {
+      // Listener registered BEFORE goto — counts every list GET from the
+      // first frame of the deep-link mount on.
+      const listRequests: string[] = [];
+      page.on('request', (req) => {
+        const url = new URL(req.url());
+        if (req.method() === 'GET' && url.pathname === '/api/v1/clients') {
+          listRequests.push(req.url());
+        }
+      });
+
+      await page.goto(`/clients?clientId=${clientId}`);
+
+      // Observation window: closes on the narrowed list response (q=<uuid>),
+      // then +500 ms to catch a late stray request (US-1 convention).
+      await page.waitForResponse(
+        (resp) => {
+          const url = new URL(resp.url());
+          return (
+            url.pathname === '/api/v1/clients' &&
+            url.searchParams.get('q') === clientId &&
+            resp.status() === 200
+          );
+        },
+        { timeout: 60_000 },
+      );
+      await page.waitForTimeout(500);
+
+      expect(listRequests).toHaveLength(1);
+      const only = new URL(listRequests[0]!);
+      expect(only.searchParams.get('q')).toBe(clientId);
+      expect(only.searchParams.get('status')).toBe('all');
+    } finally {
+      await cleanup(request, `/api/v1/clients/${clientId}`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

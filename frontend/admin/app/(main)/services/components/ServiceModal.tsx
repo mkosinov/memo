@@ -6,7 +6,9 @@ import {
   type ServiceFieldConfig,
 } from './serviceFields';
 import { Modal } from '@/app/components/shared/modal/Modal';
+import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 import { useMaterialsRaw } from '@/hooks/useMaterials';
+import { getTags } from '@memo/api-client';
 import type { ServiceMaterialLink } from '@memo/api-client';
 
 export interface ServiceModalProps {
@@ -167,6 +169,59 @@ function FieldRenderer({ field, value, onChange, error, selectAriaLabel }: Field
           {errorEl}
         </div>
       );
+
+    case 'tags': {
+      // GH #328: chips multi-picker (PhotoModal tags precedent). Unlike the
+      // photo form, the visible label binds to the search input via
+      // htmlFor/id (spec §6.2), and chip removal buttons carry aria-labels.
+      const selectedTags = (value as { id: string; title: string }[]) ?? [];
+      const searchId = `${baseId}-${field.key}-search`;
+      return (
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor={searchId}
+            className="text-xs font-medium"
+            style={{ color: 'var(--ink-light)' }}
+          >
+            {field.label}
+          </label>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {selectedTags.map((tag) => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+              >
+                {tag.title}
+                <button
+                  type="button"
+                  onClick={() => onChange(field.key, selectedTags.filter((t) => t.id !== tag.id))}
+                  className="hover:text-blue-600"
+                  aria-label={`Удалить тег ${tag.title}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+          <RemoteSearchSelect
+            value={null}
+            onChange={() => {}}
+            onSelectItem={(item) => {
+              if (!selectedTags.some((t) => t.id === item.id)) {
+                onChange(field.key, [...selectedTags, { id: item.id, title: item.title }]);
+              }
+            }}
+            onSearch={async (q) => (await getTags({ q, per_page: 10 })).items}
+            label=""
+            displayField="title"
+            placeholder={field.placeholder || 'Добавить тег...'}
+            minChars={2}
+            inputId={searchId}
+          />
+          {errorEl}
+        </div>
+      );
+    }
 
     default:
       return null;
@@ -458,6 +513,14 @@ export function ServiceModal({
         });
         return;
       }
+      if (f.type === 'tags') {
+        // GH #328: edit prefill keeps service→tag links alive across a full
+        // PUT. NOTE the key mismatch: the form key is `tag_ids`, but the
+        // read shape carries linked tags under `tags` (PhotoModal:233
+        // precedent — objects in form state, ids only on submit).
+        initial[f.key] = (service?.tags as { id: string; title: string }[]) ?? [];
+        return;
+      }
       initial[f.key] =
         service?.[f.key] ??
         (f.type === 'number'
@@ -548,6 +611,9 @@ export function ServiceModal({
         ...formData,
         max_age: formData['max_age'] === '' ? null : formData['max_age'],
         materials: toMaterialLinks((formData['materials'] as MaterialLinkState[]) ?? []),
+        // GH #328: chips hold {id, title} objects; the wire wants bare ids —
+        // without this the full PUT silently wipes service_tags.
+        tag_ids: ((formData['tag_ids'] as { id: string }[]) ?? []).map((t) => t.id),
       };
       await onSubmit(payload);
       onClose();

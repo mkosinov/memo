@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { ServiceModal } from '../app/(main)/services/components/ServiceModal';
 import type { ServiceModalProps } from '../app/(main)/services/components/ServiceModal';
@@ -9,6 +9,15 @@ import type { ServiceModalProps } from '../app/(main)/services/components/Servic
 // static empty list is enough (ServicesTable.test.tsx covers the picker).
 vi.mock('@/hooks/useMaterials', () => ({
   useMaterialsRaw: () => ({ data: [] }),
+}));
+
+// GH #328: the tags picker searches via getTags — and the modal-level
+// scenarios DO exercise it: addTagViaTypeahead re-mocks mockGetTags per call
+// (search → dropdown option → chip). The beforeEach static empty page is
+// only the default for scenarios that don't type into the picker.
+const mockGetTags = vi.fn();
+vi.mock('@memo/api-client', () => ({
+  getTags: (...args: unknown[]) => mockGetTags(...args),
 }));
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -37,6 +46,16 @@ const NULL_AGE_SERVICE: Record<string, unknown> = {
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
+
+/** GH #328 fixture: a service with one linked tag (read shape {id, title}). */
+const TAGGED_SERVICE: Record<string, unknown> = {
+  ...NULL_AGE_SERVICE,
+  id: 'svc-tagged',
+  tags: [{ id: 'tag-1', title: 'Гуашь' }],
+};
+
+/** GH #328 fixture: a second tag returned by the typeahead (getTags page). */
+const TAG_AQUARELLE = { id: 'tag-aq', title: 'Акварель' };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -423,5 +442,147 @@ describe('ServiceModal — submit normalization (GH #203 §2 п.3)', () => {
     // Only max_age is normalized — a cleared non-normalized field keeps its
     // raw form value (min_age is optional; create re-inits it to 0).
     expect(payload.min_age).toBe('');
+  });
+});
+
+// ─── GH #328: tags field (prefill chips + tag_ids in payload) ───────────────
+
+describe('ServiceModal — tags field (GH #328)', () => {
+  /** Debounce-driven flow (PhotoModal precedent): fake timers around the 300ms. */
+  function typeAndDebounce(input: HTMLElement, value: string) {
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(input, { target: { value } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  /**
+   * Add a tag chip through the typeahead: search → dropdown option → click.
+   * Returns nothing; the chip presence is the caller's assertion.
+   */
+  async function addTagViaTypeahead(tag: { id: string; title: string }) {
+    mockGetTags.mockResolvedValue({ items: [tag], total: 1, page: 1, per_page: 10 });
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Теги' }), tag.title.slice(0, 2));
+    const option = await screen.findByRole('option', { name: tag.title });
+    fireEvent.click(option);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTags.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('edit: prefilled tag renders as a chip and travels as tag_ids on save', async () => {
+    const { onSubmit } = renderModal({ service: TAGGED_SERVICE });
+
+    // The chip is visible with its title and a removal button (a11y §6.2).
+    expect(screen.getByText('Гуашь')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Удалить тег Гуашь' }),
+    ).toBeInTheDocument();
+    // The search input is wired to the visible «Теги» label.
+    expect(
+      screen.getByRole('textbox', { name: 'Теги' }),
+    ).toHaveAttribute('placeholder', 'Введите название тега...');
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.tag_ids).toEqual(['tag-1']);
+  });
+
+  it('payload: tag_ids is a bare id array — never {id,title} objects', async () => {
+    const { onSubmit } = renderModal({ service: TAGGED_SERVICE });
+    await addTagViaTypeahead(TAG_AQUARELLE);
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    // ids only, in selection order — the wire shape ServiceUpdate.tag_ids.
+    expect(payload.tag_ids).toEqual(['tag-1', 'tag-aq']);
+    expect((payload.tag_ids as unknown[]).every((id) => typeof id === 'string')).toBe(true);
+  });
+
+  it('dedupe: re-picking an already-chipped tag does NOT add a second chip', async () => {
+    const { onSubmit } = renderModal({ service: TAGGED_SERVICE });
+
+    // The typeahead returns the ALREADY linked tag (server does not exclude
+    // existing picks) — selecting it again must be a no-op.
+    await addTagViaTypeahead({ id: 'tag-1', title: 'Гуашь' });
+
+    expect(screen.getAllByText('Гуашь')).toHaveLength(1);
+
+    clickSave();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.tag_ids).toEqual(['tag-1']);
+  });
+
+  it('dirty close: adding a chip makes «Отмена» confirm; decline keeps the modal open', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { onClose } = renderModal();
+
+    await addTagViaTypeahead(TAG_AQUARELLE);
+    // The chip landed — the form is dirty.
+    expect(screen.getByText('Акварель')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('dirty close: removing a prefilled chip is dirty too; accept closes', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { onClose } = renderModal({ service: TAGGED_SERVICE });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить тег Гуашь' }));
+    expect(screen.queryByText('Гуашь')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('clean close: untouched tags field closes without the confirm prompt', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { onClose } = renderModal({ service: TAGGED_SERVICE });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  // Render-fact: SERVICE_FIELDS and the FieldRenderer 'tags' branch must stay
+  // in sync — a config entry without a render branch (or vice versa) leaves
+  // an «empty spot» in the form. Both ends are asserted by DOM contract.
+  it('render-fact: the tags field is present — label + search input wired via htmlFor', () => {
+    renderModal();
+
+    const search = screen.getByRole('textbox', { name: 'Теги' });
+    expect(search).toBeInTheDocument();
+    // The visible label binds to the input (a11y §6.2 — useId + htmlFor).
+    const label = screen.getByText('Теги', { selector: 'label' });
+    expect(label).toHaveAttribute('for', search.id);
+  });
+
+  it('searches tags via getTags({q, per_page: 10}) after the 300ms debounce (min 2 chars)', async () => {
+    renderModal();
+
+    typeAndDebounce(screen.getByRole('textbox', { name: 'Теги' }), 'Ак');
+
+    await waitFor(() => {
+      expect(mockGetTags).toHaveBeenCalledWith({ q: 'Ак', per_page: 10 });
+    });
   });
 });

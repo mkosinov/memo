@@ -32,6 +32,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     заблокированный запрос прерван на ~33.5 с, без ретраев (`blocked=1`).
   - Status: `docs/status/2026-09-21-connection-loss-indicator-330.md`
 
+### Fixed
+- **GH #231 — Deep-link `/clients?clientId=X`: один суженный запрос вместо двух** — branch
+  `231-clients-deeplink-single-request` (3 commits `69920a24..93426dff`, base `d8e07f60`;
+  5 файлов, +240/−34; спека `docs/specs/2026-09-19-clients-deeplink-single-request-design.md`
+  rev3 и план `docs/plans/2026-09-20-clients-deeplink-single-request-plan.md` — оба на main;
+  канон `docs/domain-rules/clients.md` обновлён спека-коммитом `774dc57d`):
+  - **Сид фильтров при монтировании:** страница читает `?clientId=` во время рендера над
+    `ClientsProvider` (новый `ClientsPageInner`, `Suspense`-граница поднята наверх) и передаёт
+    затравку `{ search: clientId, status: 'all' }` дословно; фабрика `createPagedListContext`
+    получила необязательный проп `initialFilters?: Partial<F>` (только with-filters перегрузка) —
+    ленивый инициализатор `useState` мержит его поверх дефолтов конфига однократно при монтировании.
+    Ушёл второй (мусорный дефолтный) GET: карточка клиента открывается по первому ответу. Параметр,
+    прилетающий после монтирования, сознательно не подхватывается (сид, не живая синхронизация);
+    URL фабрика не читает.
+  - **Без изменений:** обычный `/clients` (один дефолтный GET), поиск (300 мс / от 2 символов),
+    сортировка/пагинация, «Сбросить фильтры», снятие параметра при закрытии модалки и у мёртвой
+    ссылки; удалён только `setFilters`-эффект #216, остальные четыре эффекта — построчно.
+  - **Tests:** admin vitest **2303p/0f** (143 файла); e2e `clients.spec.ts` — **22/22 ×3 прогона
+    подряд без флейков** (изолированный shard-2 стек), новый S1-счётчик (`page.on('request')` до
+    `goto`, считает ВСЕ `/api/v1/clients*` без предфильтра по `q=`) ассертит ровно 1 запрос с
+    `q=<uuid>&status=all`; tsc 0 ошибок; eslint 0 errors / 36 pre-existing warnings. Только
+    фронтенд — бэкенд, api-client и БД не тронуты.
+  - Out of scope (свои issues): живая URL-синхронизация фильтров #349, `?id=` + серверное
+    разрешение страницы #232.
+  - Status: `docs/status/2026-09-21-clients-deeplink-single-request-231.md`
+
 ### Changed
 - **GH #243 — Единый контракт удаления, фаза 1 (зона записи): payments + anonymous visits на
   deferred, честный тост ошибок без ответа сервера** — branch `record-delete-unified-contract-243`

@@ -16,6 +16,7 @@ An ADR captures a significant architectural decision, its context, and consequen
 | 004 | SuperAgents workflow for development | Accepted | 2026-05-15 |
 | 005 | End-to-End Error Contract with Machine-Readable Codes | Accepted | 2026-06-20 |
 | 006 | HTTP Contract Tests Are End-to-End (TestClient + Test SQLite), Not Mocked-Service | Accepted | 2026-08-03 |
+| 007 | Composite Reads Stay Free Functions in Owning Service Modules (No `queries/` Layer) | Accepted | 2026-09-20 |
 
 ## When to create an ADR?
 

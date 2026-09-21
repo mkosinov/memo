@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from functools import lru_cache
 from typing import TypeVar
+from uuid import UUID
 
 from sqlalchemy import ColumnElement, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +20,7 @@ from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
 from src.repositories.generic import ArchiveRepository, get_archive_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.client import (
     ClientCreate,
     ClientListParams,
@@ -128,6 +130,7 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         order_by=None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         master_key: str | None = None,
         **filters,
     ) -> PaginatedResponse[ClientResponse]:
@@ -339,6 +342,16 @@ async def list_clients_with_stats(
         scope_pred = _client_scope_predicate(master_key)
         query = query.where(scope_pred)
         count_query = count_query.where(scope_pred)
+
+    # GH #232 §3.1: typed ``?id=`` set narrowing — the shared one-line
+    # helper, applied AFTER the scope predicate (scope + D3 masking are
+    # inherited: the narrowing only ever shrinks the already-scoped set)
+    # and hitting BOTH queries so ``total`` stays honest. Must precede the
+    # COUNT like every filter.
+    id_pred = ids_in_predicate(Client.id, params.id)
+    if id_pred is not None:
+        query = query.where(id_pred)
+        count_query = count_query.where(id_pred)
 
     # 6. Apply other filters
     # GH #212: shared search predicate (was hand-rolled search ilike) — must

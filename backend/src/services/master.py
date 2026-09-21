@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
+    from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +27,7 @@ from src.domain.errors import BareListLimitExceededError
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.models.staff import Staff
+from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.master import MasterViewResponse
 from src.services.generic import BARE_LIST_MAX_ROWS
@@ -69,14 +72,22 @@ class MasterViewService:
     async def _fetch(
         self, db_session: AsyncSession, order_by=None, limit: int | None = None,
         offset: int = 0, status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        ids: Sequence[UUID] | None = None,
     ) -> list[tuple[Staff, Master]]:
-        """staff INNER JOIN masters filtered by archive status — one query."""
+        """staff INNER JOIN masters filtered by archive status — one query.
+
+        GH #232 §3.1: ``ids`` narrows by the VIEW identity (``id`` on the
+        wire = ``staff_id``) via the shared one-line helper.
+        """
         stmt = select(Staff, Master).join(Master, Master.staff_id == Staff.id)
         if status is ArchiveStatus.ACTIVE:
             stmt = stmt.where(Master.is_active.is_(True))
         elif status is ArchiveStatus.ARCHIVED:
             stmt = stmt.where(Master.is_active.is_(False))
         # ALL → no archive filter.
+        id_pred = ids_in_predicate(Staff.id, ids)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
         if limit is not None:
@@ -92,19 +103,24 @@ class MasterViewService:
         page: int = 1,
         per_page: int = 20,
         order_by=None,
+        ids: Sequence[UUID] | None = None,
     ) -> PaginatedResponse[MasterViewResponse]:
-        """Paginated view (GH #205 envelope)."""
-        total = (
-            await db_session.execute(
-                select(func.count())
-                .select_from(Staff)
-                .join(Master, Master.staff_id == Staff.id)
-                .where(Master.is_active)
-            )
-        ).scalar_one()
+        """Paginated view (GH #205 envelope). ``ids`` (GH #232 §3.1) is the
+        typed ``?id=`` set narrowing — carried into BOTH the count and the
+        page fetch so ``total`` stays honest."""
+        count_stmt = (
+            select(func.count())
+            .select_from(Staff)
+            .join(Master, Master.staff_id == Staff.id)
+            .where(Master.is_active)
+        )
+        id_pred = ids_in_predicate(Staff.id, ids)
+        if id_pred is not None:
+            count_stmt = count_stmt.where(id_pred)
+        total = (await db_session.execute(count_stmt)).scalar_one()
         pairs = await self._fetch(
             db_session, order_by=order_by, limit=per_page,
-            offset=(page - 1) * per_page,
+            offset=(page - 1) * per_page, ids=ids,
         )
         items = [
             MasterViewResponse.model_validate(_MasterViewRow.build(s, m))

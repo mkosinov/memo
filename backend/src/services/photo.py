@@ -14,7 +14,7 @@ from src.models.client import Client
 from src.models.photo import Photo, photo_tags
 from src.models.tag import Tag
 from src.repositories.generic import get_base_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.photo import (
     OWNER_FIELDS,
     PhotoCreate,
@@ -118,6 +118,11 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
         scope = _activity_scope_predicate(master_key)
         if scope is not None:
             conds.append(scope)
+        # GH #232 §3.1: typed ``?id=`` set narrowing — AFTER the scope
+        # predicate (scope inherited), shared helper, one line.
+        id_pred = ids_in_predicate(Photo.id, params.id)
+        if id_pred is not None:
+            conds.append(id_pred)
         if params.q is not None:
             conds.append(search_predicate(params.q, [SearchField(column=Photo.filename, kind="substring")]))
         if params.client_id is not None:

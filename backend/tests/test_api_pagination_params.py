@@ -23,6 +23,13 @@ ID_FILTER_ENDPOINTS = [
     "/api/v1/records",
 ]
 
+# #232 Task 2: locations carry the ``id`` set via a sibling Query param
+# (scalar mixing with the Depends() pagination model forbids the
+# Annotated[Model, Query()] shape there — fastapi #12481).
+ID_FILTER_QUERY_ENDPOINTS = [
+    "/api/v1/locations",
+]
+
 
 @pytest.mark.parametrize("endpoint", ENDPOINTS)
 @pytest.mark.parametrize("params", [
@@ -70,3 +77,17 @@ def test_id_filter_valid_repeated_keys_ok(api_client, endpoint):
         endpoint, params=[("id", str(UUID(int=1))), ("id", str(UUID(int=2)))]
     )
     assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
+def test_id_filter_sibling_query_invalid_uuid_returns_422(api_client, endpoint):
+    # locations: the id set rides a sibling Query param — same 422 contract.
+    resp = api_client.get(endpoint, params=[("id", "garbage")])
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
+def test_id_filter_sibling_query_over_100_values_returns_422(api_client, endpoint):
+    ids = [str(UUID(int=i)) for i in range(101)]
+    resp = api_client.get(endpoint, params=[("id", v) for v in ids])
+    assert resp.status_code == 422

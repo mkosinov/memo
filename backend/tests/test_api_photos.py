@@ -683,3 +683,27 @@ async def _insert_photo_direct(
         )
         session.add(photo)
         await session.commit()
+
+
+# ─── GH #232 Task 2: ?id= set narrowing — photos view builder representative ───
+
+
+class TestPhotosListIdFilter:
+    """``GET /photos?id=X&id=Y`` — typed IN-narrowing in ``PhotoService.list``
+    (GH #232 §3.1; representative of the photos view builder)."""
+
+    def test_id_filter_returns_exactly_the_named_photos(self, api_client) -> None:
+        p1 = api_client.post(PHOTOS_URL, json={"filename": "one.jpg"}).json()
+        p2 = api_client.post(PHOTOS_URL, json={"filename": "two.jpg"}).json()
+        api_client.post(PHOTOS_URL, json={"filename": "decoy.jpg"})
+
+        resp = api_client.get(
+            PHOTOS_URL, params=[("id", p1["id"]), ("id", p2["id"])]
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(p["id"] for p in body["items"]) == sorted(
+            [p1["id"], p2["id"]]
+        )
+        assert body["total"] == 2

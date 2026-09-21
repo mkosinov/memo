@@ -1985,3 +1985,45 @@ class TestDependencyTreeAutoFlags:
         assert deps["payments"]["items"], "payments items serialize in stale tree too"
         assert "cascade_preview" not in deps["payments"]
         assert "message" not in deps["payments"]
+
+
+# ─── GH #232 Task 2: ?id= set narrowing — records view builder representative ──
+
+
+class TestRecordsListIdFilter:
+    """``GET /records?id=X&id=Y`` — typed IN-narrowing through the shared
+    ``_build_list_stmt`` (GH #232 §3.1; representative of the records view
+    builders — ``list`` and ``/view`` share the builder)."""
+
+    def test_id_filter_returns_exactly_the_named_records(
+        self, api_client, create_record
+    ) -> None:
+        r1 = create_record(comment="R One")
+        r2 = create_record(comment="R Two")
+        create_record(comment="Decoy")  # not named → must not surface
+
+        resp = api_client.get(
+            "/api/v1/records", params=[("id", r1["id"]), ("id", r2["id"])]
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(r["id"] for r in body["items"]) == sorted(
+            [r1["id"], r2["id"]]
+        )
+        assert body["total"] == 2
+
+    def test_id_filter_applies_to_view_endpoint_too(
+        self, api_client, create_record
+    ) -> None:
+        """/view shares ``_build_list_stmt`` — the narrowing must not be
+        silent on the table's read surface."""
+        keep = create_record(comment="View Keep")
+        create_record(comment="View Decoy")
+
+        resp = api_client.get("/api/v1/records/view", params=[("id", keep["id"])])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [r["id"] for r in body["items"]] == [keep["id"]]
+        assert body["total"] == 1

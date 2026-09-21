@@ -36,7 +36,7 @@ from src.models.service import Service
 from src.models.staff import Staff
 from src.models.visit import Visit
 from src.repositories.record import RecordRepository, get_record_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.record import (
     RecordCreate,
@@ -150,6 +150,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         # --- Server scope (GH #263) — conjunctive with everything below ---
         if master_key is not None:
             stmt = stmt.where(Activity.master_id == master_key)
+        # GH #232 §3.1: typed ``?id=`` set narrowing — AFTER the scope
+        # predicate (scope inherited), shared helper, one line.
+        id_pred = ids_in_predicate(Record.id, params.id)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         # --- Filter ---
         from_dt, to_dt = day_range(params.date_from, params.date_to)
         if from_dt is not None:

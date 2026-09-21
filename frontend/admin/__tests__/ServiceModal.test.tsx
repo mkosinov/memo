@@ -11,6 +11,13 @@ vi.mock('@/hooks/useMaterials', () => ({
   useMaterialsRaw: () => ({ data: [] }),
 }));
 
+// GH #328: the tags picker searches via getTags — not exercised by the
+// modal-level scenarios (only rendered), so a static empty page is enough.
+const mockGetTags = vi.fn();
+vi.mock('@memo/api-client', () => ({
+  getTags: (...args: unknown[]) => mockGetTags(...args),
+}));
+
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 /**
@@ -36,6 +43,13 @@ const NULL_AGE_SERVICE: Record<string, unknown> = {
   archived: false,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+};
+
+/** GH #328 fixture: a service with one linked tag (read shape {id, title}). */
+const TAGGED_SERVICE: Record<string, unknown> = {
+  ...NULL_AGE_SERVICE,
+  id: 'svc-tagged',
+  tags: [{ id: 'tag-1', title: 'Гуашь' }],
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -423,5 +437,38 @@ describe('ServiceModal — submit normalization (GH #203 §2 п.3)', () => {
     // Only max_age is normalized — a cleared non-normalized field keeps its
     // raw form value (min_age is optional; create re-inits it to 0).
     expect(payload.min_age).toBe('');
+  });
+});
+
+// ─── GH #328: tags field (prefill chips + tag_ids in payload) ───────────────
+
+describe('ServiceModal — tags field (GH #328)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTags.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('edit: prefilled tag renders as a chip and travels as tag_ids on save', async () => {
+    const { onSubmit } = renderModal({ service: TAGGED_SERVICE });
+
+    // The chip is visible with its title and a removal button (a11y §6.2).
+    expect(screen.getByText('Гуашь')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Удалить тег Гуашь' }),
+    ).toBeInTheDocument();
+    // The search input is wired to the visible «Теги» label.
+    expect(
+      screen.getByRole('textbox', { name: 'Теги' }),
+    ).toHaveAttribute('placeholder', 'Введите название тега...');
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.tag_ids).toEqual(['tag-1']);
   });
 });

@@ -43,6 +43,12 @@ export interface RemoteSearchSelectProps<
   onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
+  /**
+   * id for the input element — lets the consumer's own visible label bind to
+   * the input via htmlFor (used when the consumer renders the label itself,
+   * e.g. the tags multi-pickers; GH #328 spec §6.2).
+   */
+  inputId?: string;
 }
 
 interface SearchItem {
@@ -108,6 +114,7 @@ export default function RemoteSearchSelect<
   getDisplayLabel,
   onInputValueChange,
   inputTestId,
+  inputId,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -196,12 +203,19 @@ export default function RemoteSearchSelect<
 
   return (
     <div ref={containerRef} className="relative">
-      <label
-        className="block text-xs font-medium mb-1"
-        style={LABEL_COLOR}
-      >
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
+      {/* The internal label is hidden when empty (label="") — the consumer
+          renders its own visible label bound to the input via htmlFor+inputId
+          (GH #328 §6.2); aria-label would then override that association, so
+          it only lands when this label is the intended accessible name. */}
+      {label && (
+        <label
+          htmlFor={inputId}
+          className="block text-xs font-medium mb-1"
+          style={LABEL_COLOR}
+        >
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+      )}
       <div className="relative">
         <input
           type="text"
@@ -212,7 +226,8 @@ export default function RemoteSearchSelect<
           className={INPUT_CLASSES}
           style={INPUT_STYLE}
           readOnly={!!selectedLabel}
-          aria-label={label}
+          id={inputId}
+          aria-label={label || undefined}
           data-testid={inputTestId}
         />
         {selectedLabel && (

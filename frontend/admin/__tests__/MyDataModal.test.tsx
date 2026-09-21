@@ -198,6 +198,17 @@ describe('MyDataModal — portrait block', () => {
     );
   });
 
+  // GH #301 (img → next/image): raw served src preserved (unoptimized —
+  // no Next rewrite in the split e2e stack) + intrinsic 64×64 dimensions
+  // matching the fixed w-16 h-16 round cell.
+  it('previews the avatar with intrinsic dimensions', async () => {
+    renderModal();
+    await waitForForm();
+    const preview = screen.getByTestId('mydata-avatar-preview');
+    expect(preview).toHaveAttribute('width', '64');
+    expect(preview).toHaveAttribute('height', '64');
+  });
+
   it('«Загрузить фото» → uploadPortrait → AuthContext.refresh()', async () => {
     renderModal();
     await waitForForm();

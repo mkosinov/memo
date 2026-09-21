@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import type { StaffResponse } from '@memo/api-client';
 import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
 import { displayMasterName } from '@/lib/utils';
@@ -76,7 +77,18 @@ export const staffColumns = (
     defaultVisible: false,
     render: (s) =>
       s.avatar_url ? (
-        <img src={s.avatar_url} alt="avatar" className="w-8 h-8 rounded-full object-cover" />
+        /* GH #301: unoptimized Image — avatar_url is either a RELATIVE
+         * /api/v1/files/avatar/… path or a free-form admin-entered URL
+         * (StaffModal «Аватар URL»), so it must bypass the optimizer
+         * (unconfigured remote hosts hard-fail there). 32×32 = w-8 h-8. */
+        <Image
+          src={s.avatar_url}
+          alt="avatar"
+          width={32}
+          height={32}
+          unoptimized
+          className="w-8 h-8 rounded-full object-cover"
+        />
       ) : (
         <span style={{ color: 'var(--ink-light)' }}>—</span>
       ),

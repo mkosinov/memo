@@ -35,6 +35,11 @@ export const photoColumns = ({ servicesMap, locationsMap }: PhotoColumnLookup): 
     render: (p) => (
       <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center">
         {p.filename ? (
+          // GH #301: stays <img> — arbitrary external hosts (spec §4.3),
+          // unreachable by the next/image optimizer whitelist; an unoptimized
+          // <Image> would add nothing but the intrinsic-size contract the
+          // object-cover cell already enforces.
+          // eslint-disable-next-line @next/next/no-img-element -- произвольные внешние хосты (spec §4.3), вне remotePatterns
           <img
             src={p.filename}
             alt={p.filename}

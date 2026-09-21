@@ -24,6 +24,7 @@
 // explicit null.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { CalendarPopover } from '@/app/components/shared/CalendarPopover';
 import { useMyProfile, useUpdateMyProfile, useUploadPortrait } from '@/hooks/useMyProfile';
@@ -331,10 +332,16 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
           {profile.has_staff && (
             <div className="flex items-center gap-4" data-testid="mydata-portrait-block">
               {avatarUrl ? (
-                <img
+                /* GH #301: unoptimized Image — RELATIVE /api/v1/files/avatar/…
+                 * src stays raw (no Next rewrite in the split e2e stack);
+                 * 64×64 matches the fixed w-16 h-16 round cell. */
+                <Image
                   data-testid="mydata-avatar-preview"
                   src={avatarUrl}
                   alt="Портрет"
+                  width={64}
+                  height={64}
+                  unoptimized
                   className="w-16 h-16 rounded-full object-cover flex-shrink-0"
                 />
               ) : (

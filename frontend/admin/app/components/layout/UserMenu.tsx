@@ -9,6 +9,7 @@
 // plate already shows avatar + name. D9: «Аноним» fallback, never the phone.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Moon, Sun, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
@@ -130,11 +131,19 @@ export function UserMenu({ collapsed }: UserMenuProps) {
     'w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs text-white/70 ' +
     'hover:bg-white/10 hover:text-white transition-colors';
 
+  // GH #301: unoptimized Image — the served avatar URL is a RELATIVE
+  // /api/v1/files/avatar/… path (or an arbitrary admin-entered host), and the
+  // e2e shard stack splits frontend from the API with no Next rewrite, so the
+  // raw src contract is binding (cabinet.spec.ts S3). width/height match the
+  // fixed w-7 h-7 cell.
   const avatar = avatarUrl ? (
-    <img
+    <Image
       data-testid="user-avatar"
       src={avatarUrl}
       alt=""
+      width={28}
+      height={28}
+      unoptimized
       className="w-7 h-7 rounded-full object-cover flex-shrink-0"
     />
   ) : (

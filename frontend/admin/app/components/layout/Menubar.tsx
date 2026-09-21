@@ -2,6 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Calendar,
@@ -465,9 +466,14 @@ export function Menubar() {
     >
       {/* ── Logo Section ── */}
       <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : ''} p-6 border-b border-white/10`}>
-        <img
+        {/* GH #301: next/image with intrinsic 400×55 (actual PNG size) — the
+            CSS keeps governing the rendered box (collapsed: 24px wide, else
+            max-height 32px), width/height only fix the aspect-ratio for CLS. */}
+        <Image
           src="/logo-white.png"
           alt="Colour Mountains"
+          width={400}
+          height={55}
           className={`flex-shrink-0 object-contain ${sidebarCollapsed ? 'w-6 h-auto' : 'max-h-8 w-auto'}`}
         />
       </div>

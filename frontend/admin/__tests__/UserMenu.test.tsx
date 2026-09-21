@@ -432,6 +432,22 @@ describe('UserMenu plate content (spec rev 3, D1/D9)', () => {
     expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/x.png');
   });
 
+  // GH #301 (img → next/image): the avatar keeps the RAW served src
+  // (unoptimized — the e2e shard stack has no Next rewrite to /_next/image)
+  // and gains intrinsic 28×28 dimensions matching the fixed w-7 h-7 cell.
+  it('renders the avatar image with raw src and intrinsic dimensions', () => {
+    mockUseAuth.mockReturnValue(
+      mockAuthState({
+        master: { ...masterSnapshot, avatar_url: '/api/v1/files/avatar/x.png' },
+      }),
+    );
+    renderMenu();
+    const avatar = screen.getByTestId('user-avatar');
+    expect(avatar).toHaveAttribute('src', '/api/v1/files/avatar/x.png');
+    expect(avatar).toHaveAttribute('width', '28');
+    expect(avatar).toHaveAttribute('height', '28');
+  });
+
   it('renders the initial letter when avatar_url is absent', () => {
     renderMenu();
     const avatar = screen.getByTestId('user-avatar');

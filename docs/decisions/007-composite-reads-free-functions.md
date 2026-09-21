@@ -12,7 +12,7 @@ GH #217 (a post-production marker created 2026-08-18) asked whether the read sid
 
 | # | Composite | Form at decision time | Endpoints |
 |---|-----------|----------------------|-----------|
-| 1 | `list_clients_with_stats` | free function (canonical) | GET /clients |
+| 1 | `list_clients_with_stats` (renamed `list_clients_view`, 2026-09-21) | free function (canonical) | GET /clients |
 | 2 | `RecordService.list_view` | class method | GET /records/view |
 | 3 | `MasterViewService` | standalone class + 2 cached factories | GET /masters, /masters/all |
 | 4 | `PhotoService.list` | class method | GET /photos, /photos/web |
@@ -38,8 +38,9 @@ Alternatives considered:
 
 1. **No `queries/` layer.** Composite reads remain **free functions in the module of the owning service** (canon corridor 3). The five legacy-form composites (#2, #3, #4, #6, #7) are aligned to this form (plan of #217).
 2. **Execution-path rule.** Queries shaped "page of rows + total" ride the repository list mechanics (`list_custom`); aggregate results — totals, id→value dicts, batch enrichments — execute directly on the session inside the corridor-3 function; writes go only through services/scenarios. The repository is the owner of reusable mechanics (CRUD of its entity, list count/slice), not a universal SQL pipe.
-3. **Documented exception.** `list_clients_with_stats` keeps its hand-written count (GH #206 performance rationale); switching it to `list_custom` requires a measurement on real data first.
+3. **Documented exception.** `list_clients_view` (formerly `list_clients_with_stats`, renamed 2026-09-21) keeps its hand-written count (GH #206 performance rationale); switching it to `list_custom` requires a measurement on real data first.
 4. **No form guard.** Compliance is enforced by review, not an automated test; recorded as an accepted residual risk.
+5. **Naming convention** (user decision, 2026-09-21): table-page read functions are named `list_<entity>_view` (`list_clients_view`, `list_records_view`, `list_masters_view`, `list_photos_view`, future tables follow); dict-shaped composites keep content verbs (`get_payment_totals`, `sum_active_seats_bulk`). The `list_` prefix is the canon's action verb and the vocabulary of the whole read stack; "view" is reserved for table pages only. The clients response schema renames `ClientWithStats` → `ClientViewResponse` (internal Python name; JSON contract unchanged).
 
 **Triggers to revisit (extract `queries/`)** — an extensible list; any one suffices:
 

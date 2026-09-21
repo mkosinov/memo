@@ -496,8 +496,19 @@ describe('ClientCardModal', () => {
   describe('create mode', () => {
     it('calls onClientCreated instead of onClose after successful create', async () => {
       const onClientCreated = vi.fn();
-      const newClient = { ...mockClientWithStats, id: 'new-c1', name: 'Новый' };
-      createHook.mutateAsync = vi.fn().mockResolvedValue(newClient);
+      // createClient returns ClientResponse — WITHOUT stats fields (#301: the
+      // modal must complete the shape with honest zeros, never `as any`).
+      const createdResponse = {
+        id: 'new-c1',
+        name: 'Новый',
+        phone: null,
+        email: null,
+        channel: null,
+        created_at: '2026-01-01T00:00:00',
+        updated_at: '2026-01-01T00:00:00',
+        archived: false,
+      };
+      createHook.mutateAsync = vi.fn().mockResolvedValue(createdResponse);
 
       render(
         <ClientCardModal
@@ -515,7 +526,14 @@ describe('ClientCardModal', () => {
       await waitFor(() => {
         expect(createHook.mutateAsync).toHaveBeenCalled();
       });
-      expect(onClientCreated).toHaveBeenCalledWith(newClient);
+      // Honest zeros: a brand-new client has no records/payments history yet.
+      expect(onClientCreated).toHaveBeenCalledWith({
+        ...createdResponse,
+        records_count: 0,
+        last_record: null,
+        total_paid: 0,
+        missed_records: 0,
+      });
     });
   });
 });

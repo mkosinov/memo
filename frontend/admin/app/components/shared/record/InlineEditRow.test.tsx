@@ -37,7 +37,7 @@ const renderCell = ({
   row: Row;
   formState: FormData;
   isNew: boolean;
-  handleChange: (field: keyof FormData, value: any) => void;
+  handleChange: (field: keyof FormData, value: FormData[keyof FormData]) => void;
 }) => ({
   name: (
     <input

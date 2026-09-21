@@ -225,7 +225,7 @@ function LateTariffsHealer({
 }: {
   tariffs: TariffResponse[];
   formState: VisitFormState;
-  handleChange: (field: keyof VisitFormState, value: any) => void;
+  handleChange: (field: keyof VisitFormState, value: VisitFormState[keyof VisitFormState]) => void;
 }) {
   const healedRef = useRef(false);
   useEffect(() => {

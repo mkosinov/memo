@@ -187,7 +187,7 @@ export function ClientTab({
         status: newStatus,
       }));
       try {
-        await updateRecord(recordId, { visits: updatedVisits } as any);
+        await updateRecord(recordId, { visits: updatedVisits });
       } catch {
         showToast('Ошибка обновления статуса', 'error');
       }
@@ -215,7 +215,7 @@ export function ClientTab({
     async (value: string) => {
       setComment(value);
       try {
-        await updateRecord(recordId, { comment: value } as any);
+        await updateRecord(recordId, { comment: value });
       } catch {
         showToast('Ошибка сохранения комментария', 'error');
       }

@@ -46,7 +46,7 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 | POST | /api/v1/payments | Create (body: `record_id`, `amount` gt=0, `method?`, `created_at?` datetime) |
 | PUT | /api/v1/payments/{id} | Update (full replace) |
 | PATCH | /api/v1/payments/{id} | Partial update (PaymentPatch: `amount?` gt=0, `method?`) → PaymentResponse |
-| DELETE | /api/v1/payments/{id} | Hard delete |
+| DELETE | /api/v1/payments/{id} | Единый флоу #324: лист — `?dry_run=true` → 204; голый → 422; тело `{expected:{}}` |
 
 ### Batch Aggregate Endpoint: `GET /api/v1/payments/totals`
 

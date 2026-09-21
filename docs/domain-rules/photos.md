@@ -23,7 +23,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
   - DB-level CHECK constraint `ck_photos_single_owner` as defense-in-depth for writes bypassing the API.
 
 ## Invariants
-- Photos are hard-deleted (row physically removed). Photo is a general resource — on owner deletion (Client/Service/Activity/Location), the photo's owner FK is set to NULL (photo survives, becomes owner-less); the photo is never deleted by cascade.
+- Photos are hard-deleted (row physically removed). Photo is a general resource — on owner deletion (Client/Service/Activity/Location), the photo's owner FK is set to NULL (photo survives, becomes owner-less); the photo is never deleted by cascade. Own deletion — единый флоу (спека #324): `photo_tags` — видимая зависимость (теги отвязываются, чистое фото ведёт себя как лист), `?dry_run=true` → 409-превью у тегированных, кольцо 5 с, коммит `{expected: {photo_tags}}`/`{expected:{}}`.
 - Group photos = N independent rows with distinct `client_id` (same filename); copies are created individually via the single-owner modal; no grouping/sync mechanism exists (#224 closed as not-planned).
 - Zero owners at rest is legal (parent deletion or direct creation with no owner).
 
@@ -65,7 +65,7 @@ Mechanics (T5): the list builder folds in a correlated EXISTS (`EXISTS(activitie
 | POST | /api/v1/photos | — | Create |
 | PUT | /api/v1/photos/{id} | — | Full update (filename + is_public required) |
 | PATCH | /api/v1/photos/{id} | — | Partial update (tag_ids hard-replace when sent) |
-| DELETE | /api/v1/photos/{id} | — | Hard delete |
+| DELETE | /api/v1/photos/{id} | — | Единый флоу #324: `?dry_run=true` (теги → 409-превью); голый → 422; тело `{expected}` |
 
 ## Relationships
 - Photo → belongs to (Client | Service | Activity | Location) — at most one of the four

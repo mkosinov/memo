@@ -42,7 +42,7 @@ UserSettings stores per-user UI preferences: theme, language, column ordering fo
 | POST | /api/v1/user-settings | Create (user taken from the session; body `user_id` ignored) |
 | PUT | /api/v1/user-settings | Partial update (session user's row, own-only) |
 | PATCH | /api/v1/user-settings | Partial update (session user's row, own-only) |
-| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) — reset to defaults, recreated on next read |
+| DELETE | /api/v1/user-settings/{settings_id} | Hard delete by primary key (own row only, else 403) — reset to defaults, recreated on next read; единый флоу #324 (лист): голый → 422, тело `{expected:{}}`, `?dry_run=true` → 204 |
 
 ## Relationships
 - UserSettings → belongs to User (FK + UNIQUE on `user_id`, enforced at the DB level)

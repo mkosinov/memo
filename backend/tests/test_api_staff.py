@@ -1221,3 +1221,46 @@ class TestStaffHasUser:
         assert by_name["Сучёткой"]["has_user"] is True
         assert by_name["Безучётки"]["has_user"] is False
         assert with_acc["has_user"] is True
+
+
+# ─── GH #232 Task 2: ?id= set narrowing — masters view representative ─────────
+
+
+class TestMastersListIdFilter:
+    """``GET /masters?id=X`` — typed IN-narrowing in ``MasterViewService``
+    (GH #232 §3.1; representative of the masters view builder). The route
+    injects ``Annotated[PaginationParams, Query()]`` so the repeated ``id``
+    keys parse (the Depends()-model shape silently drops list fields)."""
+
+    def test_id_filter_returns_exactly_the_named_masters(
+        self, api_client
+    ) -> None:
+        m1 = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        m2 = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={**MASTER_SECTION, "color": "#123456"}
+            ),
+        ).json()
+        # a NOT-named acting master — must disappear under the narrowing
+        api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master={**MASTER_SECTION, "color": "#654321"}
+            ),
+        ).json()
+        # a plain staff card (no master section) — never in /masters
+        api_client.post("/api/v1/staff", json=_create_payload(first_name="СММ"))
+
+        resp = api_client.get(
+            "/api/v1/masters", params=[("id", m1["id"]), ("id", m2["id"])]
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(m["id"] for m in body["items"]) == sorted(
+            [m1["id"], m2["id"]]
+        )
+        assert body["total"] == 2

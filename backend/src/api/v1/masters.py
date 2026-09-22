@@ -13,7 +13,7 @@ factories (the former ``_get_master_view_service`` / ``_ServiceDep`` are
 gone with the class).
 """
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import ColumnElement, asc
@@ -44,19 +44,26 @@ _READ_GUARD = [Depends(require_permission("masters:read"))]
 @router.get("", response_model=PaginatedResponse[MasterViewResponse])
 async def list_masters(
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
+    # Annotated[..., Query()], not Depends(): FastAPI classifies list-typed
+    # model fields (``id`` #232) as BODY params under the Depends-with-model
+    # shape and silently drops them from the query contract; the Query()
+    # shape exposes them (precedent: clients/records/photos). Safe here —
+    # no scalar query params in this handler (fastapi PR #12481).
+    pagination: Annotated[PaginationParams, Query()],
 ) -> PaginatedResponse[MasterViewResponse]:
     """Return the ACTING masters (``masters.is_active = true``), paginated.
 
     Default order: ``sort_order ASC, first_name ASC, id ASC`` (GH #205
     list contract, read side). Archived-master rows disappear from the
     list while their history keeps its names/colors (records snapshot).
+    ``?id=`` (GH #232 §3.1) narrows by the view identity (staff_id).
     """
     return await list_masters_view(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         order_by=_DEFAULT_ORDER,
+        ids=pagination.id,
     )
 
 

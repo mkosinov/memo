@@ -36,6 +36,7 @@ from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.models.staff import Staff
 from src.repositories.generic import get_base_repository
+from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.master import MasterViewResponse
 from src.services.generic import BARE_LIST_MAX_ROWS
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
     from typing import Any
+    from uuid import UUID
 
     from sqlalchemy import ColumnElement, Select
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,16 +82,26 @@ class _MasterViewRow:
         )
 
 
-def _view_stmt(status: ArchiveStatus) -> Select[tuple[Staff, Master]]:
+def _view_stmt(
+    status: ArchiveStatus, ids: Sequence[UUID] | None = None,
+) -> Select[tuple[Staff, Master]]:
     """staff INNER JOIN masters filtered by archive status — no baked
     order/limit (the ``list_custom`` precondition: ordering and slicing
-    are owned by the caller)."""
+    are owned by the caller).
+
+    GH #232 §3.1: ``ids`` narrows by the VIEW identity (``id`` on the
+    wire = ``staff_id``) via the shared one-line helper — the scope
+    predicate (archive status) stays BEFORE it.
+    """
     stmt = select(Staff, Master).join(Master, Master.staff_id == Staff.id)
     if status is ArchiveStatus.ACTIVE:
         stmt = stmt.where(Master.is_active.is_(True))
     elif status is ArchiveStatus.ARCHIVED:
         stmt = stmt.where(Master.is_active.is_(False))
     # ALL → no archive filter.
+    id_pred = ids_in_predicate(Staff.id, ids)
+    if id_pred is not None:
+        stmt = stmt.where(id_pred)
     return stmt
 
 
@@ -104,6 +116,7 @@ async def list_masters_view(
     per_page: int = 20,
     order_by: Sequence[ColumnElement[Any]] | None = None,
     status: ArchiveStatus = ArchiveStatus.ACTIVE,
+    ids: Sequence[UUID] | None = None,
 ) -> PaginatedResponse[MasterViewResponse]:
     """Paginated masters view (GH #205 envelope; acting-only default).
 
@@ -117,11 +130,13 @@ async def list_masters_view(
 
     ``status`` (GH #267: active default / archived / all) survives as a
     parameter; the public GET /masters route keeps the acting-only
-    default.
+    default. ``ids`` (GH #232 §3.1) is the typed ``?id=`` set narrowing
+    by the view identity (staff_id) — carried into the statement BEFORE
+    ``list_custom`` so the subquery count and the page fetch stay honest.
     """
     rows, total = await get_base_repository().list_custom(
         db_session,
-        _view_stmt(status),
+        _view_stmt(status, ids),
         order_by=order_by,
         limit=per_page,
         offset=(page - 1) * per_page,

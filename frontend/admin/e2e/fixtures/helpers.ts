@@ -17,8 +17,12 @@ import { queryDBRow } from './db-query';
  *
  * This is the source of truth for "when is this record's activity" —
  * avoids fragile UI-based walk-back logic.
+ *
+ * Exported for specs that need the record's activity date directly (e.g.
+ * #232 admin-opens-profile) — one SQL/escaping implementation, no per-spec
+ * copies.
  */
-function resolveRecordDate(recordId?: string): { date: string; activityId: string } | null {
+export function resolveRecordDate(recordId?: string): { date: string; activityId: string } | null {
   const safeId = recordId ? recordId.replace(/'/g, "''") : null;
   const sql = safeId
     ? `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
@@ -681,4 +685,33 @@ export function phoneMaskDisplay(digits: string, mode: 'international' | 'nation
   const grouped = `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 8)} ${digits.slice(8, 10)}`;
   if (mode === 'international') return `+7 ${grouped}`;
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #232 deep-link narrowing — shared /clients page assertions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Locator for the clients-page search input (`placeholder*="Поиск"`). */
+export function clientSearchInput(page: Page): Locator {
+  return page.locator('input[placeholder*="Поиск"]');
+}
+
+/**
+ * Assert the #232 narrowing chip state on /clients: the aria-live label of
+ * `[data-testid="client-deeplink-chip"]` reads the exact copy —
+ * «Открыт по ссылке» (single id) or «Открыто по ссылке: N» (multi).
+ */
+export function expectDeepLinkChip(page: Page, text: string) {
+  return expect(
+    page.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
+  ).toHaveText(text);
+}
+
+/**
+ * Assert the /clients search box is EMPTY — the #232 narrowing is
+ * machine-only (the id set lives in the `clientIds` filter field, never in
+ * the visible search text).
+ */
+export function expectClientSearchEmpty(page: Page) {
+  return expect(clientSearchInput(page)).toHaveValue('');
 }

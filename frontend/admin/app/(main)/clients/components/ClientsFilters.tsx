@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { buildUrlWithoutClientId } from '@/lib/client-id-param';
 import { useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 
@@ -38,6 +40,13 @@ function useDebouncedCallback(
 
 export function ClientsFilters() {
   const { filters, setFilters, resetFilters } = useClientsTable();
+  // #232 §3.5 — resetFilters' documented extra responsibility in the clients
+  // domain: the full reset also drops the narrowing param from the address
+  // (other query params preserved). The URL change then converges the
+  // clientIds machine field via the Task 4 sync effect — no setFilters here.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   // dirtyRef is declared BEFORE the debounce hook that closes over it
   const dirtyRef = useRef(false);
   const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(
@@ -72,7 +81,13 @@ export function ClientsFilters() {
     dirtyRef.current = false;
     setDraft('');
     resetFilters();
-  }, [cancelSearch, resetFilters]);
+    // #232 §3.5 — the same point also cleans the address of the narrowing
+    // param (only when present; other query params survive). replace, not
+    // push: a reset is not a navigation milestone, and scroll stays put.
+    if (searchParams.has('clientId')) {
+      router.replace(buildUrlWithoutClientId(searchParams, pathname), { scroll: false });
+    }
+  }, [cancelSearch, resetFilters, router, pathname, searchParams]);
 
   const inputClass = 'rounded-lg border px-2 py-1.5 text-xs';
   const inputStyle = { borderColor: 'var(--line)' };

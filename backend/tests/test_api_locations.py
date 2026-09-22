@@ -472,3 +472,30 @@ class TestLocationListSorting:
 
         ids = self._ids(api_client.get("/api/v1/locations"))
         assert ids == [l2_new, l1_new]  # id ASC: 000... < fff...
+
+
+# ─── GH #232 Task 2: ?id= set narrowing — universal path (dictionary) ─────────
+
+
+class TestLocationListIdFilter:
+    """``GET /locations?id=X&id=Y`` — the universal ``ArchiveService`` line
+    (GH #232 §3.1); locations are the dictionary representative."""
+
+    def test_id_filter_returns_exactly_the_named_locations(
+        self, api_client, create_location
+    ) -> None:
+        first = create_location(title="Uno")
+        second = create_location(title="Dos")
+        create_location(title="Tres")  # not named → must not surface
+
+        resp = api_client.get(
+            "/api/v1/locations",
+            params=[("id", first["id"]), ("id", second["id"])],
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(loc["id"] for loc in body["items"]) == sorted(
+            [first["id"], second["id"]]
+        )
+        assert body["total"] == 2

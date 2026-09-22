@@ -7,9 +7,8 @@ objects for create/update payloads.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy import Select, func, not_, select
@@ -18,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
 from src.models.enums import ArchiveStatus
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -47,6 +50,7 @@ class BaseRepository:
         filters: dict | None = None,
         q: str | None = None,
         search_fields: Sequence[SearchField] | None = None,
+        ids: Sequence[UUID] | None = None,
         order_by=None,
         limit: int | None = None,
         offset: int = 0,
@@ -61,10 +65,18 @@ class BaseRepository:
         ``q`` narrows rows via ``search_predicate`` over ``search_fields``
         BEFORE the count (total reflects the filtered count); ``q`` without
         fields raises ValueError (fail-fast, spec §5.3 point 2).
+        ``ids`` (GH #232 §3.1) is the typed ``id IN (…)`` narrowing — a
+        SEPARATE keyword, never inside ``filters`` (the bag stays
+        equality-only); applied before the count like every predicate.
         """
         stmt = select(table)
         if options:
             stmt = stmt.options(*options)
+        # GH #232: ``table.id`` is the AbstractModel UUID PK — the ignore
+        # keeps the TypeVar honest (no declared ``id`` on ``type[ModelType]``).
+        id_pred = ids_in_predicate(table.id, ids)  # type: ignore[attr-defined]
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if q is not None:
             stmt = stmt.where(search_predicate(q, search_fields or []))
         for key, value in (filters or {}).items():
@@ -236,6 +248,7 @@ class ArchiveRepository(BaseRepository):
         filters: dict | None = None,
         q: str | None = None,
         search_fields: Sequence[SearchField] | None = None,
+        ids: Sequence[UUID] | None = None,
         order_by=None,
         limit: int | None = None,
         offset: int = 0,
@@ -246,6 +259,8 @@ class ArchiveRepository(BaseRepository):
         ``q`` narrows rows via ``search_predicate`` over ``search_fields``,
         ANDed with the status predicate and applied BEFORE the count (total
         reflects the filtered count); ``q`` without fields raises ValueError.
+        ``ids`` (GH #232 §3.1) — the typed ``id IN (…)`` narrowing, a
+        SEPARATE keyword never inside ``filters`` (see base ``list``).
         """
         stmt = select(table)
         if options:
@@ -254,6 +269,9 @@ class ArchiveRepository(BaseRepository):
             stmt = stmt.where(table.is_active)
         elif status == ArchiveStatus.ARCHIVED:
             stmt = stmt.where(not_(table.is_active))
+        id_pred = ids_in_predicate(table.id, ids)  # type: ignore[attr-defined]
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if q is not None:
             stmt = stmt.where(search_predicate(q, search_fields or []))
         for key, value in (filters or {}).items():

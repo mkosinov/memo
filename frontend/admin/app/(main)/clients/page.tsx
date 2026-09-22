@@ -1,14 +1,23 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
+import { parseClientIds } from '@/lib/client-id-param';
 import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
+import { ClientDeepLinkChip } from './components/ClientDeepLinkChip';
 import type { ClientWithStats } from '@memo/api-client';
+
+/** Stable comparison for the machine narrowing field (order-sensitive). */
+function sameIds(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
+  if ((a ?? null) === (b ?? null)) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((id, i) => id === b[i]);
+}
 
 function ClientsPageContent() {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
@@ -16,54 +25,56 @@ function ClientsPageContent() {
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
   // GH #140 — page-scoped factory state; lookups by id go through useClient.
-  const { items, isPending, isFetching } = useClientsTable();
+  const { items, filters, setFilters } = useClientsTable();
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const clientIdFromQuery = searchParams.get('clientId');
-  // GH #216 close-race fix: latch holding the param value whose deep-link modal
-  // was already opened. Prevents the find-effect from re-opening the modal
-  // after a user close while the param is still in the URL (before strip lands).
+  // #232 §3.3 — the address is the single writer of the narrowing: strict
+  // per-component UUID validation + dedup; null = no param. Memoized on the
+  // params object identity so the array (and the sync effect below) stay
+  // stable across re-renders: Next's useSearchParams returns an object that
+  // is stable per navigation and changes exactly when the address does
+  // (AppRouter memoizes url.searchParams on the canonical URL).
+  const urlClientIds = useMemo(() => parseClientIds(searchParams), [searchParams]);
+  // Auto-open rule (#232 §3.3): exactly ONE valid id opens the modal
+  // automatically; two or more never do (US-3) — cards open by row clicks.
+  const deepLinkId = urlClientIds && urlClientIds.length === 1 ? urlClientIds[0] : null;
+  // GH #216 close-race fix (rewired in #232 §3.4): latch holding the single
+  // id whose deep-link modal was already opened. Blocks auto-re-open after a
+  // user close while the id is still the sole one in the URL; resets when the
+  // auto-open condition (exactly one valid id) leaves the address.
   const consumedClientIdRef = useRef<string | null>(null);
 
-  // GH #216 close-race fix: once the param has left the URL, the latch clears so
-  // a future deep-link with the same id opens the modal again.
+  // Live sync URL → clientIds machine field (#232 §3.3). Besides the
+  // mount-time seed, the field follows the address: in-tab navigation
+  // (back/forward, manual edit, narrowing removal) converges the filter to
+  // the URL value. No reverse flow — the filter never writes the address.
   useEffect(() => {
-    if (!clientIdFromQuery) {
+    if (!sameIds(filters.clientIds, urlClientIds)) {
+      setFilters({ clientIds: urlClientIds });
+    }
+  }, [urlClientIds, filters.clientIds, setFilters]);
+
+  // GH #216 close-race fix: once the address no longer holds exactly one
+  // valid id, the latch clears — a future deep-link with the same id opens
+  // the modal again.
+  useEffect(() => {
+    if (!deepLinkId) {
       consumedClientIdRef.current = null;
     }
-  }, [clientIdFromQuery]);
+  }, [deepLinkId]);
 
-  // Open ClientCardModal when navigated with ?clientId= — exactly once per
-  // deep-link navigation (GH #216 close-race fix): after the modal has been
-  // opened for a param value, the latch blocks re-open until the param is gone.
+  // Open ClientCardModal for a single-id deep-link — exactly once per
+  // deep-link navigation (GH #216 latch, #232 §3.3 auto-open rule): after the
+  // modal has been opened for an id, the latch blocks re-open until the id
+  // leaves the address. Multi-id links never auto-open.
   useEffect(() => {
-    if (
-      clientIdFromQuery &&
-      clientIdFromQuery !== consumedClientIdRef.current &&
-      !selectedClient
-    ) {
-      const found = items.find(c => c.id === clientIdFromQuery);
+    if (deepLinkId && deepLinkId !== consumedClientIdRef.current && !selectedClient) {
+      const found = items.find((c) => c.id === deepLinkId);
       if (found) {
-        consumedClientIdRef.current = clientIdFromQuery;
+        consumedClientIdRef.current = deepLinkId;
         setSelectedClient(found);
       }
     }
-  }, [clientIdFromQuery, items, selectedClient]);
-
-  // GH #216: dead link — narrowed fetch settled with zero rows and the modal
-  // never opened → strip the param so a manual search-clear + refresh cannot
-  // re-trigger the narrowing (spec §5.5 E1).
-  useEffect(() => {
-    if (
-      clientIdFromQuery &&
-      !selectedClient &&
-      !isPending &&
-      !isFetching &&
-      items.length === 0
-    ) {
-      router.replace('/clients', { scroll: false });
-    }
-  }, [clientIdFromQuery, selectedClient, isPending, isFetching, items, router]);
+  }, [deepLinkId, items, selectedClient]);
 
   return (
     <div className="p-4 space-y-4">
@@ -89,6 +100,12 @@ function ClientsPageContent() {
         <ClientsFilters />
       </div>
 
+      {/* #232 §3.5 — narrowing chip: visible affordance for an active
+          deep-link narrowing (between the filters block and the table). The
+          ✕ removes the param from the address only; the sync effect above
+          converges the machine filter. */}
+      {urlClientIds && <ClientDeepLinkChip clientIds={urlClientIds} />}
+
       {/* Table */}
       <div
         className="rounded-xl border overflow-hidden"
@@ -97,17 +114,15 @@ function ClientsPageContent() {
         <ClientsTable onClientClick={setSelectedClient} />
       </div>
 
-      {/* Modal */}
+      {/* Modal — closing it does NOT touch the address or filters (#232 §3.4):
+          the table stays narrowed, the param stays in the URL, and the row can
+          be re-opened by a manual click (the latch only blocks auto-re-open). */}
       <ClientCardModal
         client={selectedClient}
         isOpen={!!selectedClient || isCreateMode}
         onClose={() => {
           setSelectedClient(null);
           setIsCreateMode(false);
-          // Clean up query param from URL
-          if (clientIdFromQuery) {
-            router.replace('/clients', { scroll: false });
-          }
         }}
         onClientCreated={(newClient) => {
           setSelectedClient(newClient);
@@ -121,14 +136,16 @@ function ClientsPageContent() {
 
 // #231 §5.2 — boundary rebuild: the param reader sits ABOVE ClientsProvider so
 // the deep-link seed can be passed down as initialFilters (one narrowed GET on
-// mount instead of default + narrowed). The value is carried verbatim, without
-// validation — the dead-link cleanup in ClientsPageContent already copes with
-// garbage values.
+// mount instead of default + narrowed). #232 §3.3: the values are strictly
+// validated per component and deduped (lib/client-id-param); no valid UUID
+// left = no param = default filters. Status is forced to 'all' so the link
+// reaches archived clients too (#216 behavior preserved). The search box gets
+// no UUID at any stage — the narrowing lives in the machine field clientIds.
 function ClientsPageInner() {
   const searchParams = useSearchParams();
-  const clientId = searchParams.get('clientId');
-  const initialFilters: Partial<ClientFilters> | undefined = clientId
-    ? { search: clientId, status: 'all' }
+  const clientIds = parseClientIds(searchParams);
+  const initialFilters: Partial<ClientFilters> | undefined = clientIds
+    ? { clientIds, status: 'all' }
     : undefined;
   return (
     <ClientsProvider initialFilters={initialFilters}>
@@ -143,9 +160,9 @@ function ClientsPageInner() {
 }
 
 export default function ClientsPage() {
-  // #231: the Suspense boundary moves to the very top — the provider (and its
-  // first GET) now lives under the boundary. Nothing observable renders outside
-  // it, so the «Загрузка...» fallback stays the first visible frame, as before.
+  // #231: the Suspense boundary stays at the very top — the provider (and its
+  // first GET) lives under the boundary. Nothing observable renders outside
+  // it, so the «Загрузка...» fallback stays the first visible frame.
   return (
     <Suspense fallback={<div className="p-4">Загрузка...</div>}>
       <ClientsPageInner />

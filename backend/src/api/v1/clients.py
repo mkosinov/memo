@@ -96,7 +96,13 @@ async def get_client_by_phone(
 @router.get("", response_model=PaginatedResponse[ClientViewResponse])
 async def list_clients(
     session: SessionDep,
-    params: ClientListParams = Depends(),
+    # Annotated[..., Query()], not Depends(): FastAPI classifies
+    # list-typed model fields (``id`` #232) as BODY params under the
+    # Depends-with-model shape and silently drops them from the query
+    # contract; the Query() shape exposes them (precedent: records,
+    # photos). Safe here — no scalar query params in this handler
+    # (fastapi PR #12481 mixing limitation).
+    params: Annotated[ClientListParams, Query()],
     # GH #263 T3 (D1/D4): EXISTS-scope «есть запись клиента к своей
     # активности» for the plain list; ``?phone=`` searches studio-wide,
     # both paths masked for a scoped (master) caller (D3).

@@ -6,12 +6,15 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import delete, not_, select
+from sqlalchemy import Select, delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
 
 from src.domain.deletion import (
     CASCADE_HANDLERS,
@@ -27,7 +30,7 @@ from src.domain.errors import BareListLimitExceededError
 from src.events.emitter import mark_changed
 from src.models.enums import ArchiveStatus
 from src.repositories.generic import ArchiveRepository, BaseRepository
-from src.repositories.search import SearchField
+from src.repositories.search import SearchField, ids_in_predicate
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
 
@@ -73,9 +76,22 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     # Base GenericService has NO is_active knowledge. Archive-status
     # filtering lives in ArchiveService below (#195).
-    def _list_stmt(self, **filters):
-        """Build the base select with equality filters applied."""
+    def _list_stmt(
+        self, ids: Sequence[UUID] | None = None, **filters: Any
+    ) -> Select[tuple[Any]]:
+        """Build the base select: typed ``id IN (…)`` narrowing (#232) +
+        equality filters applied.
+
+        GH #232 §3.1: ``ids`` (from ``PaginationParams.id``) is a SEPARATE
+        typed case — it never travels inside ``**filters`` (the bag stays
+        equality-only «column = value»; an IN-list is not an equality).
+        """
         stmt = select(self._model)
+        # ``self._model`` is typed ``type`` — the ignore keeps the id access
+        # honest (every concrete model has the AbstractModel UUID PK).
+        id_pred = ids_in_predicate(self._model.id, ids)  # type: ignore[attr-defined]
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(self._model, key) == value)
@@ -88,13 +104,16 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         per_page: int = 20,
         order_by=None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page of records, optionally filtered/ordered/searched.
 
         ``q`` (GH #212) narrows rows via ``search_predicate`` over
         ``self.search_fields``; the predicate lands BEFORE the COUNT, so
-        ``total`` reflects the filtered count.
+        ``total`` reflects the filtered count. ``ids`` (GH #232 §3.1) is
+        the typed ``?id=`` set narrowing — passed BESIDE the ``filters``
+        bag down to the repository (guard: ``id`` never enters the bag).
         """
         items_orm, total = await self._repository.list(
             db_session,
@@ -102,6 +121,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             filters=filters,
             q=q,
             search_fields=self.search_fields,
+            ids=ids,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
@@ -318,8 +338,13 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
       knowledge).
     """
 
-    def _list_stmt(self, status: ArchiveStatus = ArchiveStatus.ACTIVE, **filters):
-        stmt = super()._list_stmt(**filters)
+    def _list_stmt(
+        self,
+        ids: Sequence[UUID] | None = None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters: Any,
+    ) -> Select[tuple[Any]]:
+        stmt = super()._list_stmt(ids=ids, **filters)
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(self._model.is_active)
         elif status == ArchiveStatus.ARCHIVED:
@@ -334,12 +359,15 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         order_by=None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         **filters,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page filtered by archive status and ``q`` (GH #212).
 
         ``q`` ANDs with the status predicate (archived rows never surface
         under the default ACTIVE status — spec §5.1 typeahead parity).
+        ``ids`` (GH #232 §3.1) is the typed ``?id=`` narrowing, carried
+        BESIDE the ``filters`` bag (guard: never inside it).
 
         ``self._repository`` is typed ``BaseRepository`` (inherited from
         ``GenericService.__init__``), but every Archive factory injects
@@ -354,6 +382,7 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
             filters=filters,
             q=q,
             search_fields=self.search_fields,
+            ids=ids,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,

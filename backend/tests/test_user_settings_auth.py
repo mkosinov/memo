@@ -14,7 +14,7 @@ import pytest
 
 from src.auth.passwords import hash_password
 from src.errors import ErrorCode
-from tests.conftest import insert_user
+from tests.conftest import delete_settings_row, insert_user
 
 pytestmark = pytest.mark.api
 
@@ -50,6 +50,7 @@ class TestGetOwnOnly:
     def test_get_without_param_creates_defaults_when_own_row_absent(
         self, api_client
     ) -> None:
+        delete_settings_row(_me_id(api_client))  # §5.5 anomaly pattern
         resp = api_client.get("/api/v1/user-settings")
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -59,6 +60,7 @@ class TestGetOwnOnly:
         assert resp.headers.get("Cache-Control") == "no-store"
 
     def test_get_without_param_returns_own_row(self, api_client) -> None:
+        delete_settings_row(_me_id(api_client))
         created = _create_own_settings(api_client, theme="dark")
 
         resp = api_client.get("/api/v1/user-settings")
@@ -69,6 +71,7 @@ class TestGetOwnOnly:
 
     def test_stale_user_id_param_is_ignored_get(self, api_client, other_user) -> None:
         """Old client sends ?user_id=<other> — own-row semantics win."""
+        delete_settings_row(_me_id(api_client))
         created = _create_own_settings(api_client, theme="light")
 
         resp = api_client.get(f"/api/v1/user-settings?user_id={other_user['id']}")
@@ -77,9 +80,16 @@ class TestGetOwnOnly:
 
     def test_stale_param_does_not_leak_foreign_row(self, api_client, other_user) -> None:
         """?user_id=<other> with other's row present but own absent → the
-        own defaults row is created (GH #319), never the foreign row."""
+        own defaults row is created (GH #319), never the foreign row.
+
+        §5.5 anomaly pattern: both factory rows are deleted explicitly —
+        ``other_user`` so the hand-inserted 'dark' row below owns the
+        UNIQUE(user_id) slot, ``me`` so the own-absent premise is real.
+        """
         from tests.conftest import query_db
 
+        delete_settings_row(_me_id(api_client))
+        delete_settings_row(other_user["id"])
         query_db(
             f"INSERT INTO user_settings (id, user_id, theme, language, "
             f"column_order_staff, column_order_locations, created_at, updated_at) "
@@ -98,10 +108,12 @@ class TestPutPatchOwnOnly:
     """PUT/PATCH /api/v1/user-settings — no user_id param, session user only."""
 
     def test_put_without_param_404_when_own_row_absent(self, api_client) -> None:
+        delete_settings_row(_me_id(api_client))  # §5.5 anomaly pattern
         resp = api_client.put("/api/v1/user-settings", json={"theme": "dark"})
         assert resp.status_code == 404, resp.text
 
     def test_put_without_param_updates_own_row(self, api_client) -> None:
+        delete_settings_row(_me_id(api_client))
         _create_own_settings(api_client, theme="light")
 
         resp = api_client.put("/api/v1/user-settings", json={"theme": "dark"})
@@ -110,6 +122,7 @@ class TestPutPatchOwnOnly:
 
     def test_stale_user_id_param_is_ignored_put(self, api_client, other_user) -> None:
         """PUT ?user_id=<other> still targets the session user's own row."""
+        delete_settings_row(_me_id(api_client))
         created = _create_own_settings(api_client, theme="light")
 
         resp = api_client.put(
@@ -122,10 +135,12 @@ class TestPutPatchOwnOnly:
         assert body["theme"] == "dark"
 
     def test_patch_without_param_404_when_own_row_absent(self, api_client) -> None:
+        delete_settings_row(_me_id(api_client))  # §5.5 anomaly pattern
         resp = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
         assert resp.status_code == 404, resp.text
 
     def test_patch_without_param_updates_own_row(self, api_client) -> None:
+        delete_settings_row(_me_id(api_client))
         _create_own_settings(api_client, language="ru")
 
         resp = api_client.patch("/api/v1/user-settings", json={"language": "en"})
@@ -137,9 +152,14 @@ class TestDeleteOwnership:
     """DELETE /api/v1/user-settings/{settings_id} — row-level ownership."""
 
     def test_delete_foreign_row_returns_403(self, api_client, other_user) -> None:
-        """Session user deleting another user's settings row → 403."""
+        """Session user deleting another user's settings row → 403.
+
+        §5.5 anomaly pattern: delete the factory row explicitly so the
+        hand-inserted row below owns the UNIQUE(user_id) slot.
+        """
         from tests.conftest import query_db
 
+        delete_settings_row(other_user["id"])
         settings_id = f"st-{other_user['id'][:8]}"
         query_db(
             f"INSERT INTO user_settings (id, user_id, theme, language, "
@@ -157,6 +177,7 @@ class TestDeleteOwnership:
 
     def test_delete_own_row_returns_204(self, api_client, other_user, login_as) -> None:
         """A user deleting their own settings row → 204, row removed."""
+        delete_settings_row(other_user["id"])  # §5.5 anomaly pattern
         other = login_as(OTHER_PHONE, OTHER_PASSWORD)
         created = other.post("/api/v1/user-settings", json={"user_id": other_user["id"]})
         assert created.status_code == 201, created.text

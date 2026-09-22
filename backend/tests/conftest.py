@@ -141,20 +141,14 @@ def api_client(app, db_engine, _admin_hash):
 
     Loop-safety: some suites (``asyncio_mode = "auto"``) resolve this
     fixture lazily from inside a running event loop
-    (``request.getfixturevalue``), so no ``asyncio.run`` here — the
-    INSERT goes through the sync sqlite3 ``query_db`` helper and the
-    client skips the context-manager portal (the testing lifespan is a
-    no-op on startup; ``hub.drain`` on shutdown was session-end-only at
-    baseline too).
+    (``request.getfixturevalue``) — the admin goes through the
+    ``insert_user`` User factory (GH #319 §5.5: it also creates the
+    UserSettings defaults row; the settings insert is loop-safe, see
+    ``_ensure_settings_row``), and the client skips the context-manager
+    portal (the testing lifespan is a no-op on startup; ``hub.drain`` on
+    shutdown was session-end-only at baseline too).
     """
-    import uuid as _uuid
-
-    query_db(
-        "INSERT INTO users (id, phone, password_hash, role, "
-        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-        f"VALUES ('{_uuid.uuid4()}', '{ADMIN_PHONE}', '{_admin_hash}', 'admin', "
-        "0, 0, 1, datetime('now'), datetime('now'))"
-    )
+    insert_user(ADMIN_PHONE, _admin_hash, role="admin")
     c = TestClient(app)
     resp = c.post(
         "/api/v1/auth/login",
@@ -473,29 +467,16 @@ def create_record(api_client, create_activity, create_client):
 
 @pytest.fixture
 def _user():
-    """Create a user row directly in the DB (no user API endpoint)."""
+    """Create a user row directly in the DB (no user API endpoint).
+
+    GH #319 §5.5: routes through ``insert_user`` — the User factory also
+    creates the UserSettings defaults row (anomaly tests call
+    ``delete_settings_row`` explicitly).
+    """
     import uuid as _uuid
 
-    user_id = str(_uuid.uuid4())
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-
-    from sqlalchemy import text
-    from src.db import db_manager
-
-    async def _insert():
-        async with db_manager.async_session() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO users (id, phone, password_hash, role, "
-                    "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-                    "VALUES (:id, :phone, :hash, :role, 0, 0, 1, datetime('now'), datetime('now'))"
-                ),
-                {"id": user_id, "phone": phone, "hash": "test", "role": "admin"},
-            )
-            await session.commit()
-
-    asyncio.run(_insert())
-    return {"id": user_id, "phone": phone}
+    return insert_user(phone, "test", role="admin")
 
 
 @pytest.fixture
@@ -967,11 +948,16 @@ def query_db(sql: str) -> list[dict]:
         assert rows[0]["is_active"] == 0  # SQLite stores bool as 0/1
     """
     conn = sqlite3.connect(_db_file.name)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(sql).fetchall()
-    conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql).fetchall()
+        conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
+        return [dict(r) for r in rows]
+    finally:
+        # try/finally: a failed statement (e.g. IntegrityError) must NOT
+        # leak the connection with an open write — that poisons the whole
+        # session with "database is locked" (one-writer WAL).
+        conn.close()
 
 
 def query_db_params(sql: str, params: dict | None = None) -> None:
@@ -987,9 +973,11 @@ def query_db_params(sql: str, params: dict | None = None) -> None:
         )
     """
     conn = sqlite3.connect(_db_file.name)
-    conn.execute(sql, params or {})
-    conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
-    conn.close()
+    try:
+        conn.execute(sql, params or {})
+        conn.commit()  # required: Python 3.12+ no longer auto-commits on close()
+    finally:
+        conn.close()
 
 
 def insert_user(
@@ -1001,6 +989,11 @@ def insert_user(
     test_events_sse) — the ``_user`` fixture pattern as a plain helper so
     each suite controls uniqueness/role itself. Returns {id, phone}.
 
+    GH #319 §5.5: the User factory also creates the UserSettings defaults
+    row (via the shared core ``insert_defaults`` — no second creation
+    path). Tests that need the anomaly «user without a row» delete it
+    explicitly (``delete_settings_row``).
+
     Usage::
 
         from tests.conftest import insert_user
@@ -1010,12 +1003,57 @@ def insert_user(
 
     user_id = str(_uuid.uuid4())
     conn = sqlite3.connect(_db_file.name)
-    conn.execute(
-        "INSERT INTO users (id, phone, password_hash, role, staff_id, "
-        "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
-        (user_id, phone, password_hash, role, master_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            "email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, 0, 1, datetime('now'), datetime('now'))",
+            (user_id, phone, password_hash, role, master_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _ensure_settings_row(user_id)
     return {"id": user_id, "phone": phone}
+
+
+def delete_settings_row(user_id: str) -> None:
+    """GH #319 §5.5 explicit anomaly: remove the factory-created
+    UserSettings row for tests that need «user without a row» (e.g. the
+    get-or-create / 404 contract tests). Usage::
+
+        user = insert_user(...)
+        delete_settings_row(user["id"])
+    """
+    query_db_params(
+        "DELETE FROM user_settings WHERE user_id = :uid", {"uid": user_id}
+    )
+
+
+def _ensure_settings_row(user_id: str) -> None:
+    """GH #319 §5.5: create the user's UserSettings defaults row via the
+    shared core ``UserSettingsService.insert_defaults`` (the ONE creation
+    path — scenario, seed and factory all reuse it).
+
+    Loop-safe (the GH #247 T6 ``api_client`` note): some suites resolve
+    fixtures from inside a running event loop (``request.getfixturevalue``)
+    and async tests call ``insert_user`` directly — where ``asyncio.run``
+    would raise, the coroutine runs on a worker thread with its own loop.
+    """
+    from src.db import db_manager
+    from src.services.user_settings import UserSettingsService
+
+    async def _insert() -> None:
+        async with db_manager.async_session() as session:
+            await UserSettingsService.insert_defaults(session, user_id)
+            await session.commit()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_insert())
+    else:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, _insert()).result()

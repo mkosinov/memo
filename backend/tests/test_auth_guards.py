@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient
 
 from src.auth.passwords import hash_password
 from src.errors import ErrorCode
-from tests.conftest import insert_user
+from tests.conftest import delete_settings_row, insert_user
 from tests.test_events_sse import SSEStream
 
 pytestmark = pytest.mark.api
@@ -201,7 +201,10 @@ class TestAdminPasses:
         if label == "user-settings-read":
             # Own-only (spec §3.8): no ?user_id= param — create the
             # session user's row, then a plain GET must return 200.
+            # §5.5 anomaly pattern: the User factory already created the
+            # row — delete it explicitly so the POST scenario is real.
             me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+            delete_settings_row(me)
             created = api_client.post("/api/v1/user-settings", json={"user_id": me})
             assert created.status_code == 201, created.text
             resp = api_client.get(path)

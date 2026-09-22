@@ -161,3 +161,41 @@ class TestCreationPathInvariant:
             "GH #319 invariant broken: CLI create-user produced no "
             "user_settings row for the new account"
         )
+
+    def test_seed_path_guarantees_settings_row(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The dev seed (the real ``seed_data`` path) lands a
+        ``user_settings`` row for EVERY demo account (GH #319 — moved here
+        from Task 2: the seed changes with the Task 4 factory work)."""
+        # Import first: registers ALL seed models with Base.metadata so the
+        # create_all below sees the full schema (same as the cli import above).
+        from src.seed.seed import seed_data
+
+        db_path = tmp_path / "seed_invariant.db"
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+        monkeypatch.setenv("ENV", "development")
+
+        async def _run() -> None:
+            manager = DBManager(db_url)
+            async with manager.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            await seed_data(manager)
+            await manager.engine.dispose()
+
+        asyncio.run(_run())
+
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT u.phone, us.id FROM user_settings AS us "
+                "JOIN users AS u ON u.id = us.user_id "
+                "ORDER BY u.phone"
+            ).fetchall()
+        finally:
+            conn.close()
+        phones = [r[0] for r in rows]
+        assert phones == ["+79990000001", "+79990000002"], (
+            "GH #319 invariant broken: the seed produced users without "
+            f"user_settings rows (got phones {phones!r})"
+        )

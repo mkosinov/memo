@@ -157,6 +157,53 @@ class TestAuthenticatedApiClient:
         assert rows[0]["role"] == "admin"
         assert rows[0]["is_active"] == 1
 
+    def test_api_client_admin_has_settings_row(self, api_client) -> None:
+        """GH #319 §5.5: the fixture admin is born with its UserSettings
+        defaults row (the User-factory pattern)."""
+        from tests.conftest import query_db
+
+        rows = query_db(
+            "SELECT us.theme FROM user_settings AS us "
+            "JOIN users AS u ON u.id = us.user_id "
+            "WHERE u.phone='+79990000001'"
+        )
+        assert len(rows) == 1
+        assert rows[0]["theme"] == "light"
+
+
+class TestUserFactory:
+    def test_insert_user_creates_settings_row(self) -> None:
+        """GH #319 §5.5: the conftest User factory (``insert_user``) gives
+        every new user its UserSettings defaults row («база закрыта с
+        рождения»); tests that need the anomaly «no row» delete it
+        explicitly."""
+        import uuid as _uuid
+
+        from tests.conftest import insert_user, query_db
+
+        user = insert_user(
+            f"+7999{_uuid.uuid4().int % 10**10:010d}", "test-hash", role="admin"
+        )
+
+        rows = query_db(
+            f"SELECT theme, language FROM user_settings WHERE user_id='{user['id']}'"
+        )
+        assert len(rows) == 1, (
+            "GH #319: the User factory must create the settings row"
+        )
+        assert rows[0]["theme"] == "light"
+        assert rows[0]["language"] == "ru"
+
+    def test_user_factory_fixture_creates_settings_row(self, _user) -> None:
+        """GH #319 §5.5: the ``_user`` fixture (same factory family) also
+        lands the settings row."""
+        from tests.conftest import query_db
+
+        rows = query_db(
+            f"SELECT id FROM user_settings WHERE user_id='{_user['id']}'"
+        )
+        assert len(rows) == 1
+
 
 class TestLoginAs:
     def test_login_as_yields_fresh_client_for_role_user(self, login_as) -> None:

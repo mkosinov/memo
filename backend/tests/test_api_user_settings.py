@@ -1,13 +1,31 @@
 """Tests for UserSettings API endpoints.
 
 GH #247 T8 (spec §3.8): GET/PUT/PATCH are own-only — no ``user_id``
-query param; the api_client's session user is the addressed user. POST
-still takes ``user_id`` in the body (create schema unchanged).
+query param; the api_client's session user is the addressed user.
+
+GH #319: GET is get-or-create (missing row → 200 + defaults written to
+the DB, ``Cache-Control: no-store``); POST takes the user from the
+session — a ``user_id`` in the body is ignored.
 """
 
 import pytest
 
+from src.auth.passwords import hash_password
+from src.errors import ErrorCode
+from tests.conftest import insert_user
+
 pytestmark = pytest.mark.api
+
+
+OTHER_PHONE = "+79990000003"
+OTHER_PASSWORD = "master12345"
+
+
+@pytest.fixture
+def other_user():
+    """A second (master-role) user row — the insert_user pattern from
+    test_user_settings_auth.py."""
+    return insert_user(OTHER_PHONE, hash_password(OTHER_PASSWORD), "master")
 
 
 @pytest.fixture
@@ -20,11 +38,35 @@ def me(api_client) -> dict:
 
 
 class TestGetUserSettings:
-    """GET /api/v1/user-settings"""
+    """GET /api/v1/user-settings — get-or-create (GH #319)"""
 
-    def test_get_returns_404_when_no_settings(self, api_client, me) -> None:
+    def test_get_creates_defaults_when_missing(self, api_client, me) -> None:
+        """GH #319: GET with no row → 200 + model defaults + row in the DB."""
+        from tests.conftest import query_db
+
         resp = api_client.get("/api/v1/user-settings")
-        assert resp.status_code == 404, f"Expected 404, got {resp.status_code}: {resp.text}"
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["user_id"] == me["id"]
+        assert body["theme"] == "light"
+        assert body["language"] == "ru"
+        assert body["column_order_staff"] == []
+        assert body["column_order_locations"] == []
+        assert body["show_archived_masters"] is True
+        assert body["show_archived_locations"] is False
+        assert "id" in body
+        assert "created_at" in body
+        assert "updated_at" in body
+
+        # The defaults row is persisted, not synthesized in-memory
+        rows = query_db(f"SELECT id FROM user_settings WHERE user_id='{me['id']}'")
+        assert len(rows) == 1, "GET must write the defaults row to the DB"
+
+    def test_get_response_is_no_store(self, api_client, me) -> None:
+        """GH #319: the get-or-create response must not be cached."""
+        resp = api_client.get("/api/v1/user-settings")
+        assert resp.status_code == 200
+        assert resp.headers.get("Cache-Control") == "no-store"
 
     def test_get_returns_own_settings(self, api_client, me) -> None:
         # Create settings first
@@ -50,8 +92,9 @@ class TestGetUserSettings:
         assert "created_at" in body
         assert "updated_at" in body
 
-    def test_get_returns_404_for_inactive_settings(self, api_client, me) -> None:
-        # Create then hard-delete
+    def test_get_recreates_defaults_after_delete(self, api_client, me) -> None:
+        """DELETE = reset to defaults (domain rule): after a hard-delete the
+        next GET recreates the defaults row instead of returning 404."""
         create_resp = api_client.post("/api/v1/user-settings", json={
             "user_id": me["id"],
             "theme": "light",
@@ -61,9 +104,13 @@ class TestGetUserSettings:
 
         api_client.delete(f"/api/v1/user-settings/{settings_id}")
 
-        # Get should return 404
+        # Get-or-create: defaults come back (a NEW row, not the deleted one)
         resp = api_client.get("/api/v1/user-settings")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] != settings_id
+        assert body["user_id"] == me["id"]
+        assert body["theme"] == "light"
 
     def test_get_ignores_stale_user_id_param(self, api_client, me) -> None:
         """Old clients still send ?user_id= — FastAPI drops the undeclared
@@ -78,12 +125,10 @@ class TestGetUserSettings:
 
 
 class TestCreateUserSettings:
-    """POST /api/v1/user-settings"""
+    """POST /api/v1/user-settings — user from the session (GH #319)"""
 
     def test_create_with_defaults(self, api_client, me) -> None:
-        resp = api_client.post("/api/v1/user-settings", json={
-            "user_id": me["id"],
-        })
+        resp = api_client.post("/api/v1/user-settings", json={})
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         body = resp.json()
         assert body["user_id"] == me["id"]
@@ -103,8 +148,9 @@ class TestCreateUserSettings:
             "column_order_staff": ["color", "position"],
             "column_order_locations": ["name", "capacity"],
         })
-        assert resp.status_code == 201, f"Create failed: {resp.text}"
+        assert resp.status_code == 201
         body = resp.json()
+        assert body["user_id"] == me["id"]
         assert body["theme"] == "dark"
         assert body["language"] == "en"
         assert body["column_order_staff"] == ["color", "position"]
@@ -112,25 +158,38 @@ class TestCreateUserSettings:
 
     def test_create_archived_visibility_defaults(self, api_client, me) -> None:
         """GH #267: create without the new toggles → masters ON, locations OFF."""
-        resp = api_client.post("/api/v1/user-settings", json={
-            "user_id": me["id"],
-        })
+        resp = api_client.post("/api/v1/user-settings", json={})
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         body = resp.json()
         assert body["show_archived_masters"] is True
         assert body["show_archived_locations"] is False
 
-    def test_create_requires_user_id(self, api_client) -> None:
+    def test_create_ignores_foreign_user_id_in_body(self, api_client, me, other_user) -> None:
+        """GH #319: ``user_id`` in the body is ignored — the row is created for
+        the SESSION user even when the body names another user."""
         resp = api_client.post("/api/v1/user-settings", json={
+            "user_id": other_user["id"],
             "theme": "dark",
         })
-        assert resp.status_code == 422
+        assert resp.status_code == 201, f"Create failed: {resp.text}"
+        body = resp.json()
+        assert body["user_id"] == me["id"], (
+            "POST must take the user from the session, not the body"
+        )
+        assert body["theme"] == "dark"
+
+        from tests.conftest import query_db
+        foreign_rows = query_db(
+            f"SELECT id FROM user_settings WHERE user_id='{other_user['id']}'"
+        )
+        assert foreign_rows == [], "No row may be created for the foreign user"
 
     def test_create_duplicate_user_id_returns_422(self, api_client, me) -> None:
         api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
         resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
         # IntegrityError is caught by the global handler → 422
         assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == ErrorCode.INTEGRITY_VIOLATION.value
 
 
 class TestUpdateUserSettings:

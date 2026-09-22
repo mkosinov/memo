@@ -44,12 +44,19 @@ def _create_own_settings(api_client, **fields) -> dict:
 
 
 class TestGetOwnOnly:
-    """GET /api/v1/user-settings — no user_id param, session user only."""
+    """GET /api/v1/user-settings — no user_id param, session user only,
+    get-or-create (GH #319: a missing own row is created, never 404)."""
 
-    def test_get_without_param_returns_404_when_own_row_absent(self, api_client) -> None:
+    def test_get_without_param_creates_defaults_when_own_row_absent(
+        self, api_client
+    ) -> None:
         resp = api_client.get("/api/v1/user-settings")
-        assert resp.status_code == 404, resp.text
-        assert resp.json()["detail"]["code"] == ErrorCode.SETTINGS_NOT_FOUND.value
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        me = _me_id(api_client)
+        assert body["user_id"] == me
+        assert body["theme"] == "light"  # model defaults
+        assert resp.headers.get("Cache-Control") == "no-store"
 
     def test_get_without_param_returns_own_row(self, api_client) -> None:
         created = _create_own_settings(api_client, theme="dark")
@@ -69,7 +76,8 @@ class TestGetOwnOnly:
         assert resp.json()["user_id"] == created["user_id"]  # own row, not other's
 
     def test_stale_param_does_not_leak_foreign_row(self, api_client, other_user) -> None:
-        """?user_id=<other> with other's row present but own absent → 404."""
+        """?user_id=<other> with other's row present but own absent → the
+        own defaults row is created (GH #319), never the foreign row."""
         from tests.conftest import query_db
 
         query_db(
@@ -80,7 +88,10 @@ class TestGetOwnOnly:
         )
 
         resp = api_client.get(f"/api/v1/user-settings?user_id={other_user['id']}")
-        assert resp.status_code == 404, resp.text  # own row absent → 404
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["user_id"] != other_user["id"]  # own row, not the foreign one
+        assert body["theme"] == "light"  # own defaults, not the foreign 'dark'
 
 
 class TestPutPatchOwnOnly:

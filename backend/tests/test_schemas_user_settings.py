@@ -87,13 +87,19 @@ class TestUserSettingsCreate:
         assert schema.theme == "dark"
         assert schema.language == "en"
 
-    def test_create_requires_user_id(self):
-        """UserSettingsCreate fails without user_id."""
+    def test_create_user_id_defaults_to_none(self):
+        """GH #319: user_id is optional (the router stamps the session user);
+        a bare create schema carries None, not a validation error."""
         from src.schemas.user_settings import UserSettingsCreate
-        from pydantic import ValidationError
 
-        with pytest.raises(ValidationError):
-            UserSettingsCreate()
+        schema = UserSettingsCreate()
+        assert schema.user_id is None
+        assert schema.theme == "light"
+        assert schema.language == "ru"
+        assert schema.column_order_staff == []
+        assert schema.column_order_locations == []
+        assert schema.show_archived_masters is True
+        assert schema.show_archived_locations is False
 
 
 class TestUserSettingsUpdate:

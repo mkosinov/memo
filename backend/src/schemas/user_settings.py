@@ -23,9 +23,14 @@ class UserSettingsResponse(BaseModel):
 
 
 class UserSettingsCreate(BaseModel):
-    """Request schema for creating user settings."""
+    """Request schema for creating user settings.
 
-    user_id: str
+    GH #319: ``user_id`` is optional — the POST router stamps the session
+    user's id (a ``user_id`` in the body is ignored). The field stays for
+    callers that address it explicitly (contract #179 service-level create).
+    """
+
+    user_id: str | None = None
     theme: str = "light"
     language: str = "ru"
     column_order_staff: list[str] = []

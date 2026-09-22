@@ -495,7 +495,7 @@ export function createMockMyProfile(
 /** An update row with a masked phone pair — the canonical «Изменения» case. */
 export const mockAuditLogUpdate: AuditLogResponse = {
   id: 'al-1',
-  created_at: '2026-09-20T14:30:00Z',
+  created_at: '2026-09-20T14:30:00',
   user: { id: 'u-1', label: 'Иванов Иван' },
   user_role: 'admin',
   action: 'update',
@@ -511,7 +511,7 @@ export const mockAuditLogUpdate: AuditLogResponse = {
 /** A reorder row — no snapshot (changes: null), titled label. */
 export const mockAuditLogReorder: AuditLogResponse = {
   id: 'al-2',
-  created_at: '2026-09-20T12:00:00Z',
+  created_at: '2026-09-20T12:00:00',
   user: { id: 'u-2', label: 'Середа Ольга' },
   user_role: 'master',
   action: 'reorder',
@@ -524,7 +524,7 @@ export const mockAuditLogReorder: AuditLogResponse = {
 /** A create row: after-only pairs ([null, value]) incl. bool/list scalars. */
 export const mockAuditLogCreate: AuditLogResponse = {
   id: 'al-3',
-  created_at: '2026-09-19T09:00:00Z',
+  created_at: '2026-09-19T09:00:00',
   user: { id: 'u-1', label: 'Иванов Иван' },
   user_role: 'admin',
   action: 'create',
@@ -542,7 +542,7 @@ export const mockAuditLogCreate: AuditLogResponse = {
 /** A delete row from a hard-deleted author — user: null keeps the row. */
 export const mockAuditLogOrphan: AuditLogResponse = {
   id: 'al-4',
-  created_at: '2026-09-18T18:45:00Z',
+  created_at: '2026-09-18T18:45:00',
   user: null,
   user_role: 'master',
   action: 'delete',

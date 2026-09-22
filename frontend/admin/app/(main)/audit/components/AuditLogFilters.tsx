@@ -3,7 +3,7 @@
 import React from 'react';
 import { useAuditLogTable } from '@/contexts/AuditLogContext';
 import { useAuditLogAuthors } from '@/hooks/useAuditLogAuthors';
-import { ENTITY_LABELS } from '../auditLabels';
+import { ACTION_LABELS, ENTITY_LABELS } from '../auditLabels';
 
 /**
  * GH #344 §7 — the «Журнал» filter bar, по образцу клиентов
@@ -14,17 +14,15 @@ import { ENTITY_LABELS } from '../auditLabels';
  * the dropdown keeps only its «Все авторы» placeholder.
  */
 
-/** Action dropdown options — update/patch share «изменил», so patch gets
- *  the slug in parens to disambiguate the two identical labels. */
+/** Action dropdown options — derived from ACTION_LABELS (the single
+ *  vocabulary copy; the unit suite pins it against the spec). update/patch
+ *  share «изменил», so patch gets the slug in parens to disambiguate. */
 const ACTION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: '', label: 'Любое' },
-  { value: 'create', label: 'создал' },
-  { value: 'update', label: 'изменил' },
-  { value: 'patch', label: 'изменил (patch)' },
-  { value: 'delete', label: 'удалил' },
-  { value: 'archive', label: 'заархивировал' },
-  { value: 'restore', label: 'восстановил' },
-  { value: 'reorder', label: 'переставил' },
+  ...Object.entries(ACTION_LABELS).map(([value, label]) => ({
+    value,
+    label: value === 'patch' ? `${label} (patch)` : label,
+  })),
 ];
 
 /** Entity dropdown options — the 16 canonical #239 names (ENTITY_LABELS

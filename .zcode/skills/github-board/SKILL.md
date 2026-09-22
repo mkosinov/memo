@@ -42,6 +42,7 @@ python3 .opencode/scripts/gh_board.py status 176 "In IMPL"       # move a card's
 python3 .opencode/scripts/gh_board.py host 176                    # read the card's host field (empty when unset)
 python3 .opencode/scripts/gh_board.py gate 176 spec                # pending-ask marker: concept|spec|plan|blocked; none — clear
 python3 .opencode/scripts/gh_board.py merged 176 177 "short title" # v2: append the "Recently merged" scratchpad line
+python3 .opencode/scripts/gh_board.py reconcile [host] [--dry-run] # watcher-side stale-card sweep (top of every auto-impl loop): closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run → Ready to IMPL + BLOCKED auto-log entry
 ```
 
 An issue is automatically added to the board on the first set/status call if it wasn't there.
@@ -68,4 +69,5 @@ An issue is automatically added to the board on the first set/status call if it 
 - Next Up — max 3 positions, no duplicates (the script frees an occupied position automatically).
 - Every new issue gets its board card (Status=Backlog) immediately at creation — the board mirrors ALL open issues; an off-board issue is invisible to the user (2026-09-14: 28 open issues had silently accumulated off-board this way).
 - Don't move Status on every micro-task — only when the whole task's stage changes.
+- The auto-impl watcher sweeps stale cards every loop (`reconcile`): a closed issue sitting in `In IMPL`/`PR (G7)` gets the lost finishing flip (`In-main`/`Not planned` + `merged` line), a dead run on the watcher's own host returns to `Ready to IMPL` with a BLOCKED auto-log entry (2026-09-22, the third "closed/dead card in In IMPL" incident).
 - FasTP fixes without an issue: don't touch the board. FasTP on an issue: Status In IMPL → In-main as usual.

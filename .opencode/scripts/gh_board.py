@@ -5,6 +5,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
   python3 .zcode/scripts/gh_board.py host N                     — the card's host field value (watcher tiebreak token)
+  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
@@ -403,6 +404,136 @@ def cmd_host(number: int):
     sys.exit(f"#{number} is not on the board")
 
 
+def _impl_run_alive(number: int) -> bool | None:
+    """Is a `opencode run --title "#<N> IMPL.…"` process alive on THIS machine?
+    Reads /proc — meaningful only inside the Linux container where the runs
+    live; returns None when /proc is absent (a macOS host run), so the caller
+    refuses to treat the card as dead there."""
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return None
+    needle = f"#{number} IMPL".encode()
+    for p in proc.glob("[0-9]*"):
+        try:
+            cmdline = (p / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if needle in cmdline:
+            return True
+    return False
+
+
+def _closing_pr(number: int) -> tuple[int, str] | None:
+    """The merged PR whose body closes the issue (Closes/Fixes/Resolves #N)
+    → (pr_number, title), or None. Scans recent merges only — the sweep runs
+    every few minutes, the gap it repairs is minutes-to-hours old."""
+    r = subprocess.run(
+        ["gh", "pr", "list", "--state", "merged", "--limit", "30",
+         "--repo", f"{OWNER}/{REPO}", "--json", "number,title,body"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return None
+    pat = re.compile(
+        rf"(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:{OWNER}/{REPO})?#{number}\b"
+    )
+    for pr in json.loads(r.stdout or "[]"):
+        if pat.search(pr.get("body") or ""):
+            return pr["number"], pr.get("title") or ""
+    return None
+
+
+def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
+    """Watcher-side sweep of stale cards (top of every auto_impl_watch.sh
+    loop). Two repairs, both from the 2026-09-22 incident class — a closed or
+    dead card left sitting in In IMPL:
+      1. issue CLOSED while the card still sits in In IMPL / PR (G7) — the
+         finishing flip was lost (e.g. a network flake at the very end of a
+         marathon run): flip to In-main (stateReason COMPLETED) or
+         "Not planned", and record the "Recently merged" line when the
+         closing PR is found. Host-independent — issue state is global truth.
+      2. issue OPEN, status In IMPL, host = this machine (or empty), and NO
+         live "#N IMPL" run process on this machine — the dispatch died
+         without a BLOCKED report (e.g. API unreachable at plan-only start):
+         append a BLOCKED entry to the auto-impl log (the card then rests for
+         CLAIM_TTL_HOURS — crash-loop throttle) and flip back to Ready to IMPL.
+    Liveness reads /proc — run this from the container, where the processes
+    live; on a non-Linux host repair 2 is skipped (repair 1 still works)."""
+    host = _resolve_host(host_arg)
+    load_status_field()
+    for it in items_with_fields():
+        status = (it["status"] or "").lower()
+        if not (status.startswith("in impl") or status.startswith("pr")):
+            continue
+        n = it["number"]
+        if it["state"] == "CLOSED":
+            target = "In-main"
+            r = subprocess.run(
+                ["gh", "issue", "view", str(n), "--json", "stateReason",
+                 "--repo", f"{OWNER}/{REPO}"],
+                capture_output=True, text=True,
+            )
+            reason = ""
+            if r.returncode == 0:
+                try:
+                    reason = (json.loads(r.stdout) or {}).get("stateReason") or ""
+                except ValueError:
+                    pass
+            if reason and reason != "COMPLETED":
+                if "Not planned" not in _status_opts:
+                    print(f"warn: #{n} closed as {reason} but the board has no 'Not planned' status — skipped", file=sys.stderr)
+                    continue
+                target = "Not planned"
+            pr = _closing_pr(n)
+            desc = (f"#{n}: closed issue in {it['status']} → {target}"
+                    + (f" (PR #{pr[0]})" if pr else " (closing PR not found)"))
+            if dry_run:
+                print(f"would: {desc}")
+                continue
+            try:
+                cmd_status(n, target)
+            except SystemExit as e:
+                print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
+                continue
+            if pr:
+                try:
+                    cmd_merged(n, pr[0], pr[1])
+                except SystemExit as e:
+                    print(f"warn: #{n} merged line skipped: {e}", file=sys.stderr)
+            print(desc)
+            continue
+        # OPEN + In IMPL: dead-dispatch repair, own machine (or unowned) only;
+        # PR (G7) + OPEN = legitimately on CI — untouched
+        if not status.startswith("in impl"):
+            continue
+        if it["host"] and host and it["host"] != host:
+            continue
+        alive = _impl_run_alive(n)
+        if alive is None:
+            print("warn: /proc unavailable — dead-run check skipped (run reconcile from the container)", file=sys.stderr)
+            continue
+        if alive:
+            continue
+        desc = f"#{n}: In IMPL with no live run process → BLOCKED auto-log entry + Ready to IMPL"
+        if dry_run:
+            print(f"would: {desc}")
+            continue
+        # auto-log FIRST: pick-next must never see the card ready without the
+        # resting marker (a crash-loop of dead dispatches follows otherwise)
+        try:
+            cmd_auto_log(n, "BLOCKED reconciler: процесс прогона не найден — "
+                            "сессия умерла без рапорта; карточка возвращена в "
+                            "Ready to IMPL, авто-повтор после отдыха")
+        except SystemExit as e:
+            print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
+        try:
+            cmd_status(n, "Ready to IMPL")
+        except SystemExit as e:
+            print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
+            continue
+        print(desc)
+
+
 def cmd_show(arg: str):
     if arg == "all":
         items = sorted(items_with_fields(), key=lambda it: it["number"])
@@ -595,6 +726,13 @@ if __name__ == "__main__":
         cmd_auto_state(int(args[1]))
     elif cmd == "host" and len(args) == 2:
         cmd_host(int(args[1]))
+    elif cmd == "reconcile":
+        flags = [a for a in args[1:] if a.startswith("--")]
+        rest = [a for a in args[1:] if not a.startswith("--")]
+        if len(rest) > 1 or any(f != "--dry-run" for f in flags):
+            print(__doc__)
+            sys.exit(1)
+        cmd_reconcile(rest[0] if rest else None, dry_run="--dry-run" in flags)
     elif cmd == "show" and len(args) == 2:
         cmd_show(args[1])
     elif cmd == "set-next-up" and len(args) == 3:

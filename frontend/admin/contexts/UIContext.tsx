@@ -80,11 +80,15 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Clean up all pending toast timers on unmount
+  // Clean up all pending toast timers on unmount. #301: copy the ref to a
+  // local so the cleanup closes over the Map that existed when the effect
+  // ran — the lint rule's exact prescription for refs in cleanups (reading
+  // `.current` there risks a swapped/changed ref by cleanup time).
   useEffect(() => {
+    const pendingTimers = toastTimers.current;
     return () => {
-      toastTimers.current.forEach((timerId) => clearTimeout(timerId));
-      toastTimers.current.clear();
+      pendingTimers.forEach((timerId) => clearTimeout(timerId));
+      pendingTimers.clear();
     };
   }, []);
 

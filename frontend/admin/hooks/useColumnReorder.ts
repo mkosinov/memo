@@ -22,7 +22,10 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
   // Sync columnOrder with columns: preserve user order, insert new IDs at correct position
   useEffect(() => {
     if (columns.length === 0) return;
-    
+    // #301: initialOrder legitimately seeds ONLY the first initialization
+    // (persisted user order); a later identity/value change (settings
+    // refetch, defaults swapping in) must never re-seed or reorder — hence
+    // the initializedRef short-circuit below keeps this dep behavior-free.
     if (!initializedRef.current) {
       // First time: use initialOrder if provided (non-empty), otherwise sort by sortOrder
       if (initialOrder && initialOrder.length > 0) {
@@ -94,7 +97,7 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
       
       return result;
     });
-  }, [columns]);
+  }, [columns, initialOrder]);
 
   // Notify parent of order changes (after every state update to columnOrder)
   useEffect(() => {

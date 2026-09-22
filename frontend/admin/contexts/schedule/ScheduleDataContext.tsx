@@ -230,8 +230,13 @@ export function ScheduleDataProvider({
   // optimistic setQueryData/cancelQueries/invalidateQueries keep hitting it.
   const activityQueryKey = qk.activityRange(weekStart, weekEnd);
 
-  // Mutations
-  const createMutation = useMutation({
+  // Mutations. Only the STABLE callbacks are destructured (react-query v5:
+  // `mutate` = useCallback over the once-created observer, but `mutateAsync`
+  // = result property, rebuilt every render) — destructuring the mutation
+  // result object itself would re-create these useCallbacks (and the context
+  // value) on every provider re-render, breaking zoom isolation (DoD-1 /
+  // spec §3). Same reason the deps arrays list the callbacks, not the objects.
+  const { mutate: createActivityMutate } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (data: Parameters<typeof apiCreateActivity>[0]) => apiCreateActivity(data),
     // Family rule via the shared map (#239): the ['activities'] prefix —
@@ -244,7 +249,7 @@ export function ScheduleDataProvider({
   // naturally (success or real network error). The former timeout raced the
   // server-side write and rolled the optimistic UI back while the request kept
   // flying. onMutate/onError/onSettled below are verbatim from the old context.
-  const updateMutation = useMutation({
+  const { mutate: updateActivityMutate } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: ({ id, data }: { id: string; data: ActivityPatch }) => apiPatchActivity(id, data),
     onMutate: async ({ id, data }) => {
@@ -283,7 +288,7 @@ export function ScheduleDataProvider({
     },
     onSettled: () => {
       // Always sync with server after mutation completes — family rule via
-      // the shared map (#239), see createMutation. (The optimistic mechanics
+      // the shared map (#239), see the create mutation above. (The optimistic mechanics
       // above — cancelQueries/snapshot/setQueryData/restore — keep the exact
       // activityRange key on purpose; only the sync invalidation widens.)
       invalidateEntities(queryClient, ['activities']);
@@ -297,9 +302,9 @@ export function ScheduleDataProvider({
 
   // Week copy (#242, spec §7) — plain mutation, no optimistics: the copy is an
   // atomic server-side call. onSuccess invalidates the ['activities'] family
-  // prefix (same rule as createMutation); the per-week activityRange key is a
+  // prefix (same rule as the create mutation); the per-week activityRange key is a
   // narrower member of that family, so the grid refetches via the prefix.
-  const copyWeekMutation = useMutation({
+  const { mutateAsync: copyWeekMutateAsync } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (params: Parameters<typeof apiCopyWeek>[0]) => apiCopyWeek(params),
     onSuccess: () => invalidateEntities(queryClient, ['activities']),
@@ -319,7 +324,7 @@ export function ScheduleDataProvider({
   }, callbacks?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => {
     const start = composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
 
-    createMutation.mutate({
+    createActivityMutate({
       master_id: activity.masterId,
       service_id: activity.serviceId,
       location_id: activity.locationId,
@@ -334,7 +339,7 @@ export function ScheduleDataProvider({
     // not the mutation result object — that object is rebuilt every render and
     // would give the data context value a new identity on every provider
     // re-render, breaking zoom isolation (DoD-1 / spec §3).
-  }, [currentWeek, createMutation.mutate]);
+  }, [currentWeek, createActivityMutate]);
 
   const updateActivityFn = useCallback((id: string, updates: {
     dayIndex?: number;
@@ -361,8 +366,8 @@ export function ScheduleDataProvider({
     if (updates.dayIndex !== undefined && updates.startMinutes !== undefined) {
       payload.start = composeLocalISO(dayIndexToDate(currentWeek, updates.dayIndex), updates.startMinutes);
     }
-    updateMutation.mutate({ id, data: payload });
-  }, [currentWeek, updateMutation.mutate]);
+    updateActivityMutate({ id, data: payload });
+  }, [currentWeek, updateActivityMutate]);
 
   // ── Deferred activity delete (#286, D3/D4) ──────────────────────────────
   // The context owns the mechanics; ActivityCard/ActivityDetailsModal only
@@ -471,8 +476,8 @@ export function ScheduleDataProvider({
   // (popup toasts read the counters).
   const copyLastWeek = useCallback(
     (weekStart: string, locations: string[]): Promise<CopyWeekResult> =>
-      copyWeekMutation.mutateAsync({ week_start: weekStart, locations }),
-    [copyWeekMutation.mutateAsync],
+      copyWeekMutateAsync({ week_start: weekStart, locations }),
+    [copyWeekMutateAsync],
   );
 
   // Build enriched schedule using buildAdminSchedule — GH #267: fed with the

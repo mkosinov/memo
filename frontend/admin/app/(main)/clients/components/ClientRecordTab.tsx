@@ -210,7 +210,10 @@ export function ClientRecordTab({ recordId, clientId, client }: ClientRecordTabP
           showToast(parseApiError(err).message, 'error');
         });
     },
-    [clientId, queryClient, showToast],
+    // `clientId` is NOT a dep: the invalidation is the coarse ['visitors']
+    // prefix (every reader converges) and the callback reads nothing else
+    // client-specific.
+    [queryClient, showToast],
   );
 
   /**

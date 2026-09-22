@@ -146,7 +146,9 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
     }
     // specialties is read-only (D4) — structurally never part of the payload.
     return payload;
-  }, [form, profile.has_staff]);
+    // `initial` is useRef(form).current — captured once on mount, referential
+    // identity never changes, so listing it is lint-honest and behavior-free.
+  }, [form, initial, profile.has_staff]);
 
   const isDirty = Object.keys(buildPayload()).length > 0;
 

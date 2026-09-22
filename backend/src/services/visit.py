@@ -44,11 +44,9 @@ def _visit_snapshot(visit: Visit) -> dict[str, Any]:
 
 def _visit_pairs(old: dict[str, Any], visit: Visit) -> dict[str, Any]:
     """``{field: [before, after]}`` for the fields that actually changed."""
-    return {
-        f: [old[f], getattr(visit, f)]
-        for f in _VISIT_SNAPSHOT_FIELDS
-        if old[f] != getattr(visit, f)
-    }
+    from src.events.audit import diff_pairs
+
+    return diff_pairs(_VISIT_SNAPSHOT_FIELDS, old, visit)
 
 # ``list`` is shadowed by ``VisitService.list`` inside the class body, so a
 # bare ``list[...]`` annotation there is invalid for mypy ("function not

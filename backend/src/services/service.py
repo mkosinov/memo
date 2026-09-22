@@ -63,16 +63,12 @@ def _service_mark(
     never journals). LAZY audit import — cycle discipline
     (src/events/entities.py WARNING).
     """
-    from src.events.audit import mark_audit, snapshot_pairs_after
+    from src.events.audit import diff_pairs, mark_audit, snapshot_pairs_after
 
     if old is None:
         changes: dict[str, Any] | None = snapshot_pairs_after("services", service)
     else:
-        diff = {
-            f: [old[f], getattr(service, f)]
-            for f in _SERVICE_MARK_FIELDS
-            if old[f] != getattr(service, f)
-        }
+        diff = diff_pairs(_SERVICE_MARK_FIELDS, old, service)
         if not diff:
             # §5.1 «No-op не журналируется»: nothing effectively changed
             # (value comparison over the journaled scalars, free text

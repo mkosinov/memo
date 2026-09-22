@@ -194,11 +194,10 @@ class ProfileService:
             for field in _CARD_FIELDS:
                 if field in payload:
                     setattr(staff, field, payload[field])
-            card_diff = {
-                f: [old[f], getattr(staff, f)]
-                for f in _CARD_FIELDS
-                if old[f] != getattr(staff, f)
-            } or None
+            # GH #344: shared diff builder (src/events/audit.py).
+            from src.events.audit import diff_pairs
+
+            card_diff = diff_pairs(_CARD_FIELDS, old, staff) or None
 
         # 2. Private half — lazy row create on first meaningful write.
         profile_payload = {

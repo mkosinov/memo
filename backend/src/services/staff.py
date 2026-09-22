@@ -160,23 +160,21 @@ _STAFF_MARK_FIELDS = ("first_name", "last_name", "avatar_url")
 def _mark_staff_audit(staff: Staff, action: str, old: dict | None = None) -> None:
     """Stage ONE journal row for a composite card write (spec §4.3).
 
-    ``old=None`` → create mark (after-snapshot pairs); otherwise update
-    pairs over the fields that actually changed (§5.1). The cross-table
+    ``old=None`` → create mark (after-snapshot pairs; ``None``-valued
+    fields — a fresh card has no avatar — are skipped, the
+    ``snapshot_pairs_after`` convention §5.1); otherwise update pairs
+    over the fields that actually changed (§5.1). The cross-table
     children (masters/users/staff_positions) are cascade writes — never
     journaled (§4.2). LAZY audit import — cycle discipline.
     """
-    from src.events.audit import mark_audit
+    from src.events.audit import diff_pairs, mark_audit
 
     if old is None:
-        changes: dict | None = {
-            f: [None, getattr(staff, f)] for f in _STAFF_MARK_FIELDS
-        }
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict | None = diff_pairs(_STAFF_MARK_FIELDS, {}, staff) or None
     else:
-        changes = {
-            f: [old[f], getattr(staff, f)]
-            for f in _STAFF_MARK_FIELDS
-            if old[f] != getattr(staff, f)
-        }
+        changes = diff_pairs(_STAFF_MARK_FIELDS, old, staff)
     mark_audit(
         entity="staff",
         action=action,

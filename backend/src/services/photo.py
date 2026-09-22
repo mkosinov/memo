@@ -45,23 +45,21 @@ def _photo_mark(
 ) -> None:
     """Stage ONE journal row for a direct photo write (spec §4.3).
 
-    ``old=None`` → the create mark (after-snapshot pairs); otherwise the
-    update mark carries ``{field: [before, after]}`` pairs for the fields
-    that actually changed (§5.1 — no-op fields never journal). LAZY
-    audit import — cycle discipline (src/events/entities.py WARNING).
+    ``old=None`` → the create mark (after-snapshot pairs; ``None``-valued
+    fields carry no information and are skipped — the
+    ``snapshot_pairs_after`` convention, §5.1); otherwise the update mark
+    carries ``{field: [before, after]}`` pairs for the fields that
+    actually changed (§5.1 — no-op fields never journal). LAZY audit
+    import — cycle discipline (src/events/entities.py WARNING).
     """
-    from src.events.audit import mark_audit
+    from src.events.audit import diff_pairs, mark_audit
 
     if old is None:
-        changes: dict | None = {
-            f: [None, getattr(orm, f)] for f in _PHOTO_MARK_FIELDS
-        }
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict | None = diff_pairs(_PHOTO_MARK_FIELDS, {}, orm) or None
     else:
-        changes = {
-            f: [old[f], getattr(orm, f)]
-            for f in _PHOTO_MARK_FIELDS
-            if old[f] != getattr(orm, f)
-        }
+        changes = diff_pairs(_PHOTO_MARK_FIELDS, old, orm)
     mark_audit(
         entity="photos",
         action=action,

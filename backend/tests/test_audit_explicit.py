@@ -685,6 +685,13 @@ class TestStaffCompositeAudit:
             ("create", "staff", card.id)
         ]
         assert rows[0]["entity_label"] == "Иванов Иван"
+        # §5.1 alignment with ``snapshot_pairs_after``: a ``None``-valued
+        # card field (no avatar on a fresh card) carries no information —
+        # the create snapshot never carries an ``avatar_url`` key.
+        assert json.loads(rows[0]["changes"]) == {
+            "first_name": [None, "Иван"],
+            "last_name": [None, "Иванов"],
+        }
 
     async def test_create_staff_with_sections_one_row(
         self, db_session, actor, audit_rows
@@ -887,6 +894,24 @@ class TestUserSettingsAudit:
             ("create", "user_settings", created.id)
         ]
         assert rows[0]["entity_label"] == "Настройки"
+
+    def test_create_mark_skips_absent_fields(self, actor) -> None:
+        """§5.1 (``snapshot_pairs_after`` alignment): a ``None``-valued
+        settings field carries no information — the create mark never
+        carries its key (pre-flush ORM row: column defaults apply at
+        INSERT, so an unset ``theme`` reads as ``None`` here)."""
+        from src.models.user_settings import UserSettings
+        from src.services.user_settings import _mark_settings_audit
+
+        orm = UserSettings(user_id="u-1", language="ru")  # theme stays None
+        token = audit.open_audit()
+        try:
+            _mark_settings_audit(orm, "create")
+            rows = audit.pending_rows()
+        finally:
+            audit.reset_audit(token)
+        assert rows is not None and len(rows) == 1
+        assert rows[0]["changes"] == {"language": [None, "ru"]}
 
     async def test_update_settings_journals_diff_row(
         self, db_session, actor, audit_rows

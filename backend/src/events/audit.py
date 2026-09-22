@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Sequence
 
 logger = logging.getLogger("memo.audit")
 
@@ -399,6 +399,29 @@ def snapshot_pairs_before(entity: str, row: Any) -> dict[str, Any] | None:
     delete snapshot (what disappeared).
     """
     return _pairs(entity, row, after=False)
+
+
+def diff_pairs(
+    fields: Sequence[str],
+    old: dict[str, Any],
+    row: Any,
+) -> dict[str, Any]:
+    """``{field: [before, after]}`` pairs for the fields that CHANGED.
+
+    The shared builder behind every explicit-mark update diff (§5.1 —
+    no-op fields never journal): ``old`` is the "before" snapshot fixed
+    before the first in-session mutation (§4.2), ``row`` is the live
+    post-mutation ORM object. A field missing from ``old`` reads as
+    ``None``; a field missing on ``row`` also reads as ``None`` (the
+    ``getattr`` walk stays inert). Unlike the snapshot helpers this
+    never returns ``None`` — an empty diff is the caller's no-op signal
+    (skip the mark or journal ``changes={}`` per its action semantics).
+    """
+    return {
+        field: [old.get(field), getattr(row, field, None)]
+        for field in fields
+        if old.get(field) != getattr(row, field, None)
+    }
 
 
 def _pairs(entity: str, row: Any, *, after: bool) -> dict[str, Any] | None:

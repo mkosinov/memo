@@ -199,16 +199,19 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         time (cycle hazard, see ``src/events/entities.py`` WARNING); the
         service package is part of that walk. The ``@transactional``
         wrapper already resolved the same name for its own accumulator —
-        an unmapped model cannot reach this point.
+        an unmapped model cannot reach this point (explicit
+        ``if``-raise, not an ``assert``: control flow must survive
+        ``python -O``, precedent — the ``_compose_pairs`` fix c941d289).
         """
         from src.events.entities import MODEL_ENTITY
 
         entity = MODEL_ENTITY.get(self._model)
-        assert entity is not None, (
-            f"@transactional already resolved an entity for "
-            f"{type(self).__qualname__} — the audit mark cannot be behind "
-            f"an unmapped model"
-        )
+        if entity is None:
+            raise RuntimeError(
+                f"@transactional already resolved an entity for "
+                f"{type(self).__qualname__} — the audit mark cannot be "
+                f"behind an unmapped model"
+            )
         return entity
 
     @transactional

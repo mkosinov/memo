@@ -284,3 +284,61 @@ class TestDrawRows:
         assert row["user_id"] == "u-1"
         assert row["user_role"] == "admin"
         assert "id" not in row  # model default supplies the UUID
+
+
+class TestDiffPairs:
+    """The shared ``diff_pairs`` builder — explicit-mark update diffs."""
+
+    @staticmethod
+    def _row(**fields: object) -> object:
+        """A minimal attribute carrier standing in for an ORM row."""
+        return type("Row", (), fields)()
+
+    def test_changed_fields_only(self) -> None:
+        row = self._row(filename="new.jpg", is_public=True)
+        assert audit.diff_pairs(
+            ("filename", "is_public"),
+            {"filename": "old.jpg", "is_public": False},
+            row,
+        ) == {"filename": ["old.jpg", "new.jpg"], "is_public": [False, True]}
+
+    def test_unchanged_fields_never_journal(self) -> None:
+        row = self._row(a=1, b="same")
+        assert audit.diff_pairs(("a", "b"), {"a": 1, "b": "same"}, row) == {}
+
+    def test_missing_old_key_reads_as_none(self) -> None:
+        """A field absent from ``old`` (never set) diffs ``None → value``."""
+        row = self._row(theme="dark")
+        assert audit.diff_pairs(("theme",), {}, row) == {
+            "theme": [None, "dark"]
+        }
+
+    def test_row_without_attribute_reads_as_none(self) -> None:
+        row = self._row()  # no attribute at all
+        assert audit.diff_pairs(("theme",), {"theme": None}, row) == {}
+
+
+class TestAuditEntityGuard:
+    """``GenericService._audit_entity`` — narrowing, not ``assert``.
+
+    The guard must survive ``python -O`` (assert stripping): an unmapped
+    model raises ``RuntimeError`` instead of a vanishable ``AssertionError``
+    (precedent: the ``_compose_pairs`` fix, c941d289).
+    """
+
+    def test_unmapped_model_raises_runtime_error(self) -> None:
+        from src.services.generic import GenericService
+
+        unmapped = type("Unmapped", (), {})
+        service = GenericService(None, unmapped, unmapped)  # type: ignore[arg-type]
+        with pytest.raises(RuntimeError, match="unmapped model"):
+            service._audit_entity()
+
+    def test_mapped_model_resolves(self) -> None:
+        from src.models.photo import Photo
+        from src.services.generic import GenericService
+
+        service = GenericService(None, Photo, Photo)  # type: ignore[arg-type]
+        assert service._audit_entity() == "photos"
+
+

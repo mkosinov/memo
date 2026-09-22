@@ -47,22 +47,20 @@ def _mark_settings_audit(
 ) -> None:
     """Stage ONE journal row for a settings write (spec §4.3).
 
-    ``old=None`` → create mark (after-pairs); otherwise update pairs over
-    the fields that actually changed (§5.1 no-op rule). LAZY audit
-    import — cycle discipline (src/events/entities.py WARNING).
+    ``old=None`` → create mark (after-pairs; ``None``-valued fields carry
+    no information and are skipped — the ``snapshot_pairs_after``
+    convention, §5.1); otherwise update pairs over the fields that
+    actually changed (§5.1 no-op rule). LAZY audit import — cycle
+    discipline (src/events/entities.py WARNING).
     """
-    from src.events.audit import mark_audit
+    from src.events.audit import diff_pairs, mark_audit
 
     if old is None:
-        changes: dict[str, Any] | None = {
-            f: [None, getattr(orm, f)] for f in _SETTINGS_MARK_FIELDS
-        }
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes = diff_pairs(_SETTINGS_MARK_FIELDS, {}, orm) or None
     else:
-        changes = {
-            f: [old[f], getattr(orm, f)]
-            for f in _SETTINGS_MARK_FIELDS
-            if old[f] != getattr(orm, f)
-        }
+        changes = diff_pairs(_SETTINGS_MARK_FIELDS, old, orm)
     mark_audit(
         entity="user_settings",
         action=action,

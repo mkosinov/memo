@@ -122,15 +122,11 @@ def _record_diff(
     action); the journaled pairs EXCLUDE comment (§5.1 free text) and may
     be empty while the action still journals with ``changes={}``.
     """
-    pairs: dict[str, Any] = {}
-    changed = False
-    for field in _RECORD_DIFF_FIELDS:
-        new = getattr(record, field, None)
-        if old.get(field) != new:
-            changed = True
-            if field != "comment":
-                pairs[field] = [old.get(field), new]
-    return pairs, changed
+    from src.events.audit import diff_pairs
+
+    raw = diff_pairs(_RECORD_DIFF_FIELDS, old, record)
+    pairs = {f: v for f, v in raw.items() if f != "comment"}
+    return pairs, bool(raw)
 
 
 @transactional
@@ -283,14 +279,7 @@ async def update_record(
     existing = await record_service.get(db_session, id)
     if not existing:
         return None
-    _old = {
-        "activity_id": existing.activity_id,
-        "client_id": existing.client_id,
-        "custom_price": existing.custom_price,
-        "seats": existing.seats,
-        "status": existing.status,
-        "comment": existing.comment,
-    }
+    _old = {f: getattr(existing, f) for f in _RECORD_DIFF_FIELDS}
     record = await record_service.update_row(
         db_session,
         id,
@@ -383,14 +372,7 @@ async def patch_record(
     existing = await record_service.get(db_session, id)
     if not existing:
         return None
-    _old = {
-        "activity_id": existing.activity_id,
-        "client_id": existing.client_id,
-        "custom_price": existing.custom_price,
-        "seats": existing.seats,
-        "status": existing.status,
-        "comment": existing.comment,
-    }
+    _old = {f: getattr(existing, f) for f in _RECORD_DIFF_FIELDS}
     record = await record_service.patch_row(db_session, id, scalar_fields)
     if not record:
         return None

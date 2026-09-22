@@ -37,6 +37,7 @@ one and copy over).
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -45,6 +46,8 @@ from pathlib import Path
 SCRATCHPAD = Path(__file__).resolve().parents[2] / ".opencode" / "scratchpad.md"
 MERGED_BLOCK = "## Recently merged"
 MERGED_MAX = 5
+SESSION_DB = Path("/root/.local/share/opencode/opencode.db")  # container-side session store (liveness source for reconcile)
+SESSION_IDLE_LIMIT_S = 3600  # a run's sessions silent this long = stuck (the 2026-09-22 #319 dead-stream incident)
 
 # Configure per project. Get IDs via:
 #   gh api graphql -f query='query { user(login: "<owner>") { projectV2(number: <N>) { id fields(first: 30) { nodes { ... on ProjectV2SingleSelectField { name id options { id name } } } } } } }'
@@ -405,14 +408,15 @@ def cmd_host(number: int):
 
 
 def _impl_run_alive(number: int) -> bool | None:
-    """Is a `opencode run --title "#<N> IMPL.…"` process alive on THIS machine?
-    Reads /proc — meaningful only inside the Linux container where the runs
-    live; returns None when /proc is absent (a macOS host run), so the caller
-    refuses to treat the card as dead there."""
+    """Is some `opencode run` process carrying this issue in its cmdline (the
+    `--title "#N IMPL.…"` or a «продолжаем траекторию #N» prompt) alive on THIS
+    machine? Fallback liveness for the "no session rows yet" window (a launch
+    just happened, or the claim was orphaned). /proc-based — None when /proc
+    is absent (a macOS host run)."""
     proc = Path("/proc")
     if not proc.is_dir():
         return None
-    needle = f"#{number} IMPL".encode()
+    needle = f"#{number}".encode()
     for p in proc.glob("[0-9]*"):
         try:
             cmdline = (p / "cmdline").read_bytes()
@@ -421,6 +425,45 @@ def _impl_run_alive(number: int) -> bool | None:
         if needle in cmdline:
             return True
     return False
+
+
+def _run_session_fresh(number: int) -> bool | None:
+    """Is work on this card still alive server-side? The `opencode run` CLI is
+    only an attach client — it dies/detaches while the session keeps working
+    in the `opencode web` server (the "#232 frozen-log" pattern), so a live
+    process is NOT the signal. Liveness = the session store (opencode.db — the
+    #285 lesson: parts live in the DB, not in a pid): roots are the manager
+    "#N IMPL.%" and the architect "IMPL #N %" sessions plus their whole
+    parent_id subtree (deeper subagents). True = any of them wrote within
+    SESSION_IDLE_LIMIT_S. False = silent longer / no rows (no rows falls back
+    to the run-process check). None = session store absent (a host run) — the
+    caller must not treat the card as dead."""
+    if not SESSION_DB.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{SESSION_DB}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = con.execute(
+            """WITH RECURSIVE tree(id) AS (
+                   SELECT id FROM session WHERE title LIKE ? OR title LIKE ?
+                   UNION
+                   SELECT s.id FROM session s JOIN tree t ON s.parent_id = t.id
+               )
+               SELECT MAX(time_updated) FROM session WHERE id IN (SELECT id FROM tree)""",
+            (f"#{number} IMPL.%", f"IMPL #{number} %"),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    if not row or row[0] is None:
+        # сессий нет вообще: только что запущенный CLI ещё живёт в /proc,
+        # осиротевший захват (карточка заявлена, запуска не было) — нет
+        return _impl_run_alive(number)
+    idle_s = datetime.now(timezone.utc).timestamp() - row[0] / 1000.0
+    return idle_s <= SESSION_IDLE_LIMIT_S
 
 
 def _closing_pr(number: int) -> tuple[int, str] | None:
@@ -452,13 +495,17 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
          marathon run): flip to In-main (stateReason COMPLETED) or
          "Not planned", and record the "Recently merged" line when the
          closing PR is found. Host-independent — issue state is global truth.
-      2. issue OPEN, status In IMPL, host = this machine (or empty), and NO
-         live "#N IMPL" run process on this machine — the dispatch died
-         without a BLOCKED report (e.g. API unreachable at plan-only start):
-         append a BLOCKED entry to the auto-impl log (the card then rests for
+      2. issue OPEN, status In IMPL, host = this machine (or empty), and the
+         run's sessions (opencode.db) silent for over SESSION_IDLE_LIMIT_S or
+         never started — the dispatch died or wedged without a BLOCKED report
+         (e.g. API unreachable at plan-only start, a dead stream): append a
+         BLOCKED entry to the auto-impl log (the card then rests for
          CLAIM_TTL_HOURS — crash-loop throttle) and flip back to Ready to IMPL.
-    Liveness reads /proc — run this from the container, where the processes
-    live; on a non-Linux host repair 2 is skipped (repair 1 still works)."""
+    Liveness = session-store freshness (the opencode run CLI is a mere attach
+    client and dies while the session keeps working — run processes only fill
+    the "no session rows yet" window); run this from the container, where the
+    store lives; on a host run (no store) repair 2 is skipped (repair 1 still
+    works)."""
     host = _resolve_host(host_arg)
     load_status_field()
     for it in items_with_fields():
@@ -502,28 +549,29 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
                     print(f"warn: #{n} merged line skipped: {e}", file=sys.stderr)
             print(desc)
             continue
-        # OPEN + In IMPL: dead-dispatch repair, own machine (or unowned) only;
+        # OPEN + In IMPL: stuck-dispatch repair, own machine (or unowned) only;
         # PR (G7) + OPEN = legitimately on CI — untouched
         if not status.startswith("in impl"):
             continue
         if it["host"] and host and it["host"] != host:
             continue
-        alive = _impl_run_alive(n)
-        if alive is None:
-            print("warn: /proc unavailable — dead-run check skipped (run reconcile from the container)", file=sys.stderr)
+        fresh = _run_session_fresh(n)
+        if fresh is None:
+            print("warn: session store not found — stuck-run check skipped (run reconcile from the container)", file=sys.stderr)
             continue
-        if alive:
+        if fresh:
             continue
-        desc = f"#{n}: In IMPL with no live run process → BLOCKED auto-log entry + Ready to IMPL"
+        desc = (f"#{n}: In IMPL with sessions silent >{SESSION_IDLE_LIMIT_S // 60}min"
+                f" → BLOCKED auto-log entry + Ready to IMPL")
         if dry_run:
             print(f"would: {desc}")
             continue
         # auto-log FIRST: pick-next must never see the card ready without the
         # resting marker (a crash-loop of dead dispatches follows otherwise)
         try:
-            cmd_auto_log(n, "BLOCKED reconciler: процесс прогона не найден — "
-                            "сессия умерла без рапорта; карточка возвращена в "
-                            "Ready to IMPL, авто-повтор после отдыха")
+            cmd_auto_log(n, "BLOCKED reconciler: прогон завис — сессии молчат "
+                            "больше часа (или так и не стартовали); карточка "
+                            "возвращена в Ready to IMPL, авто-повтор после отдыха")
         except SystemExit as e:
             print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
         try:

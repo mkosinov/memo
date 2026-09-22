@@ -168,6 +168,10 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/materials/{id}"): "materials:write → 403",
     ("POST", "/api/v1/materials/{id}/archive"): "materials:write → 403",
     ("POST", "/api/v1/materials/{id}/restore"): "materials:write → 403",
+    # ── Audit journal (#344 §6): require_admin role gate — masters 403
+    #    at the guard itself; no master-scope layer exists or is needed. ──
+    ("GET", "/api/v1/audit-logs"): "admin-only journal (#344 §6) — require_admin → 403",
+    ("GET", "/api/v1/audit-logs/authors"): "admin-only journal (#344 §6) — require_admin → 403",
     # ── Dictionary mutations: :write tokens master lacks → 403 ──
     # (masters.py is read-only since #266 D8 — no write routes exist there)
     ("POST", "/api/v1/locations"): "locations:write → 403",

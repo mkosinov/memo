@@ -118,6 +118,12 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     setStartDateTime(
       buildDateTimeLocal(activity.date || '', activity.startMinutes, gridFrequency),
     );
+    // `activity` is the ONLY resync trigger by design: the local editable
+    // state must reset when the activity prop changes (DnD, external edit),
+    // while a mid-edit gridFrequency change (settings modal elsewhere) must
+    // NOT clobber fields the admin is typing. Adding gridFrequency would
+    // re-run the whole reset on an unrelated context switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gridFrequency is display-snapping only; resync fires on activity changes alone (see above)
   }, [activity]);
 
   const inputClass =

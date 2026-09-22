@@ -35,9 +35,19 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
     return options.filter(o => (o.searchText ?? o.label).toLowerCase().includes(q));
   }, [options, query]);
 
-  const visible: ComboboxOption[] = [{ value: '', label: clearLabel }, ...filtered];
+  // Memoized so the effects below can list `visible` / `optionDomId` in their
+  // deps honestly: the identity now changes only when the list really changes
+  // (options refetch / typing), letting the scroll-follow effect re-derive
+  // the highlighted option's DOM node instead of reading a stale closure.
+  const visible: ComboboxOption[] = useMemo(
+    () => [{ value: '', label: clearLabel }, ...filtered],
+    [clearLabel, filtered],
+  );
 
-  const optionDomId = (v: string) => `${listboxId}-opt-${v || 'clear'}`;
+  const optionDomId = useCallback(
+    (v: string) => `${listboxId}-opt-${v || 'clear'}`,
+    [listboxId],
+  );
 
   const closeDropdown = useCallback((refocusTrigger = true) => {
     setIsOpen(false);
@@ -66,7 +76,7 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
   // Clamp highlight when the visible list shrinks (typing / options refetch)
   useEffect(() => {
     setHighlightedIndex(prev => (prev < visible.length ? prev : 0));
-  }, [visible.length]);
+  }, [visible.length]); // length only — identity churn from filtering is irrelevant here
 
   // Keep the highlighted option in the scroll viewport (aria-activedescendant
   // pattern moves no DOM focus — keyboard users would lose the highlight
@@ -75,7 +85,7 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
     if (!isOpen) return;
     const el = document.getElementById(optionDomId(visible[highlightedIndex]?.value ?? ''));
     el?.scrollIntoView?.({ block: 'nearest' });
-  }, [highlightedIndex, isOpen]);
+  }, [highlightedIndex, isOpen, optionDomId, visible]);
 
   const openDropdown = () => {
     setIsOpen(true);

@@ -113,7 +113,6 @@ function renderVisitsTable(
       visitorsMap={opts.visitorsMap ?? emptyVisitorsMap}
       tariffs={mockTariffs}
       totalCost={0}
-      recordStatus="waiting"
       clientId="c1"
       onAddVisit={mocks.onAddVisit}
       onPatchVisit={mocks.onPatchVisit}
@@ -141,7 +140,6 @@ function rerender(
       visitorsMap={opts.visitorsMap ?? emptyVisitorsMap}
       tariffs={mockTariffs}
       totalCost={0}
-      recordStatus="waiting"
       clientId="c1"
       onAddVisit={mocks.onAddVisit}
       onPatchVisit={mocks.onPatchVisit}
@@ -209,7 +207,6 @@ describe('RecordVisitsTable — default tariff via resolver (GH #284)', () => {
       visitorsMap={emptyVisitorsMap}
       tariffs={kidFirstTariffs}
       totalCost={0}
-      recordStatus="waiting"
       clientId="c1"
       onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
       onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
@@ -754,7 +751,6 @@ describe('RecordVisitsTable — draft default resolves when tariffs arrive late 
         visitorsMap={emptyVisitorsMap}
         tariffs={tariffs}
         totalCost={0}
-        recordStatus="waiting"
         clientId="c1"
         onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
         onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
@@ -786,7 +782,6 @@ describe('RecordVisitsTable — draft default resolves when tariffs arrive late 
         visitorsMap={emptyVisitorsMap}
         tariffs={loaded}
         totalCost={0}
-        recordStatus="waiting"
         clientId="c1"
         onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
         onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
@@ -820,7 +815,6 @@ describe('RecordVisitsTable — draft default resolves when tariffs arrive late 
         visitorsMap={emptyVisitorsMap}
         tariffs={loaded}
         totalCost={0}
-        recordStatus="waiting"
         clientId="c1"
         onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
         onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
@@ -851,7 +845,6 @@ describe('RecordVisitsTable — draft default resolves when tariffs arrive late 
         visitorsMap={emptyVisitorsMap}
         tariffs={[...loaded]}
         totalCost={0}
-        recordStatus="waiting"
         clientId="c1"
         onAddVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}
         onPatchVisit={vi.fn().mockResolvedValue(SAVED_VISIT)}

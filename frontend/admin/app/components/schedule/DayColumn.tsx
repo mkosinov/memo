@@ -432,7 +432,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [dayIndex, slots, activities, cellHeight, gridStartMinutes, zIndices, slotHeight]);
+  }, [dayIndex, slots, activities, cellHeight, gridStartMinutes, zIndices, slotHeight, resetActiveGroup]);
 
   return (
     <div

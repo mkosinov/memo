@@ -15,11 +15,9 @@ export interface VisitorRowVisit {
 export interface VisitorRowProps {
   visit: VisitorRowVisit;
   tariffs: TariffResponse[];
-  /** When true, StatusPicker is disabled (used for preview) */
-  isPreview?: boolean;
 }
 
-export function VisitorRow({ visit, tariffs, isPreview }: VisitorRowProps) {
+export function VisitorRow({ visit, tariffs }: VisitorRowProps) {
   const tariff = tariffs.find((t) => t.id === visit.tariff_id);
 
   return (

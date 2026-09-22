@@ -246,7 +246,16 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                         email: data.email ?? undefined,
                         channel: data.channel ?? undefined,
                       });
-                      onClientCreated?.(newClient as any);
+                      // createClient returns ClientResponse (no stats yet) —
+                      // a brand-new client has honest zeros: no records, no
+                      // payments, no missed records, no last record.
+                      onClientCreated?.({
+                        ...newClient,
+                        records_count: 0,
+                        last_record: null,
+                        total_paid: 0,
+                        missed_records: 0,
+                      });
                     } catch (err) {
                       showToast(parseApiError(err).message, 'error');
                     }
@@ -259,7 +268,6 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                     }
                   }
               }
-              onDelete={mode === 'view' && client ? handleDelete : undefined}
             />
           ) : (
             <ClientRecordTab recordId={activeTab.replace('record-', '')} clientId={client!.id} client={client} />

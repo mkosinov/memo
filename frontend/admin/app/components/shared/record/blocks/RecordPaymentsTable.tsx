@@ -282,7 +282,7 @@ export function RecordPaymentsTable({
                       if (isNew) {
                         handleChange('method', method);
                       } else {
-                        onPatchPayment(r.id!, { method }).then((updated) => {
+                        onPatchPayment(r.id!, { method }).then(() => {
                           // PATCH: trust the prop as the source of truth.
                           // No local state mutation — useMemo re-derives from props.
                         });

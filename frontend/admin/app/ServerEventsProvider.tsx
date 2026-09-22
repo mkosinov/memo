@@ -20,7 +20,7 @@
  * No new UI: rendering, stacking and auto-dismiss belong to the existing
  * toast system (ToastContainer mounted in providers.tsx).
  */
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { eventsUrl, getTabId } from '@memo/api-client';
 import { invalidateEntities } from '@/lib/invalidate';
@@ -46,19 +46,22 @@ export function ServerEventsProvider({ children }: { children: React.ReactNode }
   const lostTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lostToastId = useRef<string | null>(null);
 
-  const clearLostTimer = () => {
+  // #301 (react-hooks/exhaustive-deps): both helpers are stable callbacks
+  // (refs + the stable hideToast) so the effect can list them without ever
+  // re-creating the EventSource.
+  const clearLostTimer = useCallback(() => {
     if (lostTimer.current) {
       clearTimeout(lostTimer.current);
       lostTimer.current = null;
     }
-  };
+  }, []);
 
-  const hideLostToast = () => {
+  const hideLostToast = useCallback(() => {
     if (lostToastId.current) {
       hideToast(lostToastId.current);
       lostToastId.current = null;
     }
-  };
+  }, [hideToast]);
 
   useEffect(() => {
     // #330 §5.1: start from «channel is up». A StrictMode remount must not
@@ -156,9 +159,10 @@ export function ServerEventsProvider({ children }: { children: React.ReactNode }
       hideLostToast();
       es.close();
     };
-    // showToast/hideToast are stable (useCallback with [] deps in UIContext),
-    // so adding hideToast here never re-creates the EventSource.
-  }, [qc, showToast, hideToast]);
+    // showToast/hideLostToast/clearLostTimer are stable (useCallback chains
+    // anchored in the stable UIContext callbacks), so the effect — and the
+    // EventSource — never re-create on re-renders.
+  }, [qc, showToast, clearLostTimer, hideLostToast]);
 
   return <>{children}</>;
 }

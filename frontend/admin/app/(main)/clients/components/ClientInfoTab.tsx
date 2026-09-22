@@ -19,12 +19,11 @@ interface ClientInfoTabProps {
   client: ClientWithStats | null;
   mode?: 'view' | 'create';
   onSave: (data: ClientUpdate) => Promise<void>;
-  onDelete?: () => void;
   onHasChanges?: (hasChanges: boolean) => void;
 }
 
 export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>(function ClientInfoTab(
-  { client, mode = 'view', onSave, onDelete, onHasChanges },
+  { client, mode = 'view', onSave, onHasChanges },
   ref,
 ) {
   const [name, setName] = useState(client?.name || '');

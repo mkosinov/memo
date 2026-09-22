@@ -63,7 +63,7 @@ def ids_in_predicate(
 
     The ONE-LINE narrowing helper for both consumers of the shared ``?id=``
     mechanism: the universal ``GenericService`` path and the view builders
-    (``list_clients_with_stats`` / records / masters / photos). Values are
+    (``list_clients_view`` / records / masters / photos). Values are
     canonicalized to ``str(uuid)`` BEFORE the IN-expansion — stored ids are
     ``str(uuid4)`` (String(36) columns), never UUID driver objects.
     ``None`` / empty list → ``None`` (no predicate — the filter is opt-in).

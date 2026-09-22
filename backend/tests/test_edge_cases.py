@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.schemas.activity import ActivityResponse
-from src.schemas.client import ClientWithStats
+from src.schemas.client import ClientViewResponse
 from src.schemas.payment import PaymentResponse
 from src.schemas.record import RecordResponse
 from src.schemas.service import ServiceResponse
@@ -642,23 +642,23 @@ class TestResponseContracts:
 
     def test_clients_schema(self, api_client, create_client):
         """GET /api/v1/clients — each item's keys match the serialized
-        ClientWithStats (the list endpoint shape).
+        ClientViewResponse (the list endpoint shape).
 
         #207 §3.1: ``ClientResponse.is_active: Field(..., exclude=True)`` is
         required-on-input but excluded from JSON; ``model_validate(body)``
-        raises. Keys-check via ``_serialized_keys(ClientWithStats)`` pins the
+        raises. Keys-check via ``_serialized_keys(ClientViewResponse)`` pins the
         wire contract (matches the generic ``_assert_exact_response_keys``
         fix in test_generic_api_contract.py). The list endpoint emits
-        ``ClientWithStats`` items, so check against that (not the bare
+        ``ClientViewResponse`` items, so check against that (not the bare
         ``ClientResponse``).
         """
         create_client()
         resp = api_client.get("/api/v1/clients")
         assert resp.status_code == 200
-        expected = _serialized_keys(ClientWithStats)
+        expected = _serialized_keys(ClientViewResponse)
         for item in resp.json()["items"]:
             assert set(item.keys()) == expected, (
-                f"client list item keys mismatch serialized ClientWithStats: "
+                f"client list item keys mismatch serialized ClientViewResponse: "
                 f"missing={expected - set(item.keys())}, "
                 f"extra={set(item.keys()) - expected}"
             )

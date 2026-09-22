@@ -1,8 +1,8 @@
-"""Tests for client Pydantic schemas — nullable fields, ClientPatch, ClientWithStats.
+"""Tests for client Pydantic schemas — nullable fields, ClientPatch, ClientViewResponse.
 
 Also covers the ``is_active`` → ``archived`` inversion (#207 §3.1, §14) for
-``ClientResponse`` and the ``ClientWithStats`` manual builder (second inversion
-point in ``services/client.py:list_clients_with_stats``).
+``ClientResponse`` and the ``ClientViewResponse`` manual builder (second inversion
+point in ``services/client.py:list_clients_view``).
 """
 
 from datetime import UTC, datetime
@@ -19,7 +19,7 @@ from src.schemas.client import (
     ClientPatch,
     ClientResponse,
     ClientUpdate,
-    ClientWithStats,
+    ClientViewResponse,
 )
 
 
@@ -201,13 +201,13 @@ class TestClientPatch:
         assert p.channel == Channel.TELEGRAM
 
 
-class TestClientWithStats:
-    """ClientWithStats extends ClientResponse with aggregated metrics."""
+class TestClientViewResponse:
+    """ClientViewResponse extends ClientResponse with aggregated metrics."""
 
     @pytest.mark.pure_unit
     def test_client_with_stats_fields(self):
-        """ClientWithStats has all ClientResponse fields plus stats."""
-        cws = ClientWithStats(
+        """ClientViewResponse has all ClientResponse fields plus stats."""
+        cws = ClientViewResponse(
             id="test-id",
             name="Stats Client",
             phone="+79991112233",
@@ -230,8 +230,8 @@ class TestClientWithStats:
 
     @pytest.mark.pure_unit
     def test_client_with_stats_defaults(self):
-        """ClientWithStats has sensible defaults for stats fields."""
-        cws = ClientWithStats(
+        """ClientViewResponse has sensible defaults for stats fields."""
+        cws = ClientViewResponse(
             id="test-id",
             name="Defaults",
             phone=None,
@@ -246,8 +246,8 @@ class TestClientWithStats:
 
     @pytest.mark.pure_unit
     def test_client_with_stats_nullable_client_fields(self):
-        """ClientWithStats inherits nullable fields from ClientBase."""
-        cws = ClientWithStats(
+        """ClientViewResponse inherits nullable fields from ClientBase."""
+        cws = ClientViewResponse(
             id="test-id",
             name=None,
             phone=None,
@@ -347,24 +347,24 @@ class TestClientResponseArchivedInversion:
         assert "is_active" not in dump
 
 
-class TestClientWithStatsArchivedInversion:
-    """ClientWithStats inherits the inversion from ClientResponse.
+class TestClientViewResponseArchivedInversion:
+    """ClientViewResponse inherits the inversion from ClientResponse.
 
-    Builder at ``services/client.py:list_clients_with_stats`` keeps passing
+    Builder at ``services/client.py:list_clients_view`` keeps passing
     ``is_active=row.is_active`` (constructor kwarg on the excluded field); the
     computed ``archived`` derives from it.
     """
 
     @pytest.mark.pure_unit
     def test_active_with_stats_serializes_archived_false(self) -> None:
-        cws = ClientWithStats(**_client_kwargs(is_active=True), records_count=3)
+        cws = ClientViewResponse(**_client_kwargs(is_active=True), records_count=3)
         dump = cws.model_dump()
         assert dump["archived"] is False
         assert "is_active" not in dump
 
     @pytest.mark.pure_unit
     def test_archived_with_stats_serializes_archived_true(self) -> None:
-        cws = ClientWithStats(**_client_kwargs(is_active=False), records_count=1)
+        cws = ClientViewResponse(**_client_kwargs(is_active=False), records_count=1)
         dump = cws.model_dump()
         assert dump["archived"] is True
         assert "is_active" not in dump
@@ -372,24 +372,24 @@ class TestClientWithStatsArchivedInversion:
     @pytest.mark.pure_unit
     def test_with_stats_archived_inverted_both_polarities(self) -> None:
         for is_active in (True, False):
-            cws = ClientWithStats(**_client_kwargs(is_active=is_active))
+            cws = ClientViewResponse(**_client_kwargs(is_active=is_active))
             assert cws.archived is (not is_active)
 
     @pytest.mark.pure_unit
     def test_with_stats_json_dump_excludes_is_active(self) -> None:
-        cws = ClientWithStats(**_client_kwargs(is_active=True))
+        cws = ClientViewResponse(**_client_kwargs(is_active=True))
         json_str = cws.model_dump_json()
         assert '"archived"' in json_str
         assert '"is_active"' not in json_str
 
 
-class TestClientWithStatsBuilderInversion:
-    """The manual ``list_clients_with_stats`` builder inverts correctly (#207 §3.1
+class TestClientViewResponseBuilderInversion:
+    """The manual ``list_clients_view`` builder inverts correctly (#207 §3.1
     second inversion point).
 
     Exercises the real builder via ``db_session`` (one active + one archived
     client, seeded directly as ORM rows — no dependency on PUT/PATCH archive flow)
-    and asserts each resulting ``ClientWithStats`` serializes ``archived``
+    and asserts each resulting ``ClientViewResponse`` serializes ``archived``
     inverted and omits ``is_active``.
     """
 
@@ -398,7 +398,7 @@ class TestClientWithStatsBuilderInversion:
         self, db_session
     ) -> None:
         from src.models.client import Client
-        from src.services.client import list_clients_with_stats
+        from src.services.client import list_clients_view
 
         active = Client(name="Active One", phone="+79990000001", channel="telegram")
         archived = Client(
@@ -412,7 +412,7 @@ class TestClientWithStatsBuilderInversion:
         await db_session.flush()
         active_id, archived_id = active.id, archived.id
 
-        result = await list_clients_with_stats(
+        result = await list_clients_view(
             db_session,
             ClientListParams(status=ArchiveStatus.ALL, per_page=100),
         )

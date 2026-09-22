@@ -510,16 +510,16 @@ class TestClientResponseContract:
         assert body["id"] == client_id
 
     def test_list_client_items_validate(self, api_client) -> None:
-        """Each GET /api/v1/clients item has exactly the serialized ClientWithStats keys."""
-        from src.schemas.client import ClientWithStats
+        """Each GET /api/v1/clients item has exactly the serialized ClientViewResponse keys."""
+        from src.schemas.client import ClientViewResponse
 
         api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
 
         resp = api_client.get("/api/v1/clients")
-        expected = _serialized_keys(ClientWithStats)
+        expected = _serialized_keys(ClientViewResponse)
         for item in resp.json()["items"]:
             assert set(item.keys()) == expected, (
-                f"list item keys mismatch serialized ClientWithStats: "
+                f"list item keys mismatch serialized ClientViewResponse: "
                 f"missing={expected - set(item.keys())}, "
                 f"extra={set(item.keys()) - expected}"
             )

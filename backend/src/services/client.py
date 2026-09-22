@@ -24,7 +24,7 @@ from src.schemas.client import (
     ClientListParams,
     ClientResponse,
     ClientUpdate,
-    ClientWithStats,
+    ClientViewResponse,
 )
 from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
@@ -40,7 +40,7 @@ def _client_scope_predicate(master_key: str) -> ColumnElement[bool]:
     existing row is non-archived, so the predicate is a plain EXISTS over
     records → activities. Single implementation for BOTH consumer paths:
     ``ClientService`` (generic list / point get) and the manual
-    ``list_clients_with_stats`` builder.
+    ``list_clients_view`` builder.
     """
     return (
         select(Record.id)
@@ -243,16 +243,22 @@ def get_client_service() -> ClientService:
     )
 
 
-async def list_clients_with_stats(
+async def list_clients_view(
     db_session: AsyncSession,
     params: ClientListParams,
     master_key: str | None = None,
-) -> PaginatedResponse[ClientWithStats]:
+) -> PaginatedResponse[ClientViewResponse]:
     """Return paginated clients with aggregated record/payment stats.
+
+    Table-page read function named per the ``list_<entity>_view``
+    convention (GH #217 Task 5; naming decision — ADR 007 item 5;
+    renamed from ``list_clients_with_stats``, internal name only).
 
     Accepted exception to repo-owned list (GH #206): non-ORM projection +
     separate count query excluding correlated stat subqueries. Stays
-    service-owned; CQRS read-side evaluation tracked in GH #217.
+    service-owned with the hand-written cheap count — decision — ADR 007
+    (item 3, documented exception; switching to ``list_custom`` requires
+    a measurement on real data first).
 
     GH #263 T3 (D1/D3/D4): the per-master EXISTS scope narrows rows ONLY
     when the caller did NOT pass the ``phone`` digits-filter (phone
@@ -441,14 +447,14 @@ async def list_clients_with_stats(
     result = await db_session.execute(query)
     rows = result.all()
 
-    items: list[ClientWithStats] = []
+    items: list[ClientViewResponse] = []
     for row in rows:
         last_record = None
         if row.last_record:
             last_record = row.last_record.isoformat() if isinstance(row.last_record, datetime) else str(row.last_record)
 
         items.append(
-            ClientWithStats(
+            ClientViewResponse(
                 id=row.id,
                 name=row.name,
                 phone=row.phone,

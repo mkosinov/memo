@@ -20,7 +20,11 @@ from src.schemas.photo import (
     PhotoResponse,
     PhotoUpdate,
 )
-from src.services.photo import PhotoService, get_photo_service
+from src.services.photo import (
+    PhotoService,
+    get_photo_service,
+    list_photos_view,
+)
 
 router = APIRouter(tags=["photos"])
 
@@ -110,7 +114,6 @@ async def list_public_photos(
 
 @router.get("", response_model=PaginatedResponse[PhotoResponse])
 async def list_photos(
-    service: _ServiceDep,
     session: SessionDep,
     params: Annotated[PhotoListParams, Query()],
     # GH #263 T5: scoped master sees only photos attached to HIS activities
@@ -122,12 +125,14 @@ async def list_photos(
 ) -> PaginatedResponse[PhotoResponse]:
     """Return a paginated page of photos (admin view, GH #211).
 
-    ``params`` (page/per_page/q/filters/sort) is validated at the router
-    level; filtering/sorting/pagination and the denormalized
-    ``client_name`` live in ``PhotoService.list`` (accepted exception to
-    repo-owned list, GH #206 — spec #211 §6.5).
+    Corridor 3 free function (GH #217 Task 3, ADR 007): the route calls
+    ``list_photos_view`` directly with the session as an argument — no
+    service dependency here (the module's other routes keep theirs: they
+    are CRUD). ``params`` (page/per_page/q/filters/sort) is validated at
+    the router level; filtering/sorting/pagination and the denormalized
+    ``client_name`` live in the free function (spec #211 §6.5, GH #206).
     """
-    items, total = await service.list(
+    items, total = await list_photos_view(
         db_session=session, params=params, master_key=scope.master_key
     )
     return PaginatedResponse(

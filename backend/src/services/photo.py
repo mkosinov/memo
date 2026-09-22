@@ -1,4 +1,11 @@
-"""Business logic for photo CRUD operations (GH #211 4-owner model)."""
+"""Photo business logic: point CRUD on the service class, the list
+composite as a module-level free function (GH #211 4-owner model).
+
+GH #217 Task 3 (ADR 007 / canon rule 8, Corridor 3): the photos list
+composite — the multi-column select with the denormalized ``client_name``
+— lives in the free function ``list_photos_view``; ``PhotoService``
+remains the owner of create / update / patch / delete / point gets.
+"""
 
 from __future__ import annotations
 
@@ -62,11 +69,11 @@ def _activity_scope_predicate(master_key: str | None) -> ColumnElement[bool] | N
 
     ``master_key=None`` (admin / anonymous) → ``None``: no predicate, the
     caller adds no scope condition. EXISTS (not a JOIN) so the
-    service_id-filter LEFT JOIN path in ``list`` stays untouched.
-    ``.correlate(Photo)`` pins the correlation to the photos row — without
-    it, when ``list`` ALSO joins ``Activity`` (the service_id filter),
-    auto-correlation would bind the EXISTS to that join and blow up with
-    «returned no FROM clauses».
+    service_id-filter LEFT JOIN path in ``list_photos_view`` stays
+    untouched. ``.correlate(Photo)`` pins the correlation to the photos
+    row — without it, when ``list_photos_view`` ALSO joins ``Activity``
+    (the service_id filter), auto-correlation would bind the EXISTS to
+    that join and blow up with «returned no FROM clauses».
     """
     if master_key is None:
         return None
@@ -81,88 +88,15 @@ def _activity_scope_predicate(master_key: str | None) -> ColumnElement[bool] | N
 
 
 class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
-    """Extended photo service with tag handling + paginated list."""
+    """Photo point-CRUD service: get / scoped gets / create / update / patch.
+
+    GH #217 Task 3: the LIST composite moved to the module-level free
+    function ``list_photos_view`` (Corridor 3, ADR 007 / canon rule 8) —
+    this class keeps the writes and the point reads; ``get_scoped`` /
+    ``get_activity_scoped`` stay here (the router's owner gates).
+    """
 
     NOT_NULL_FIELDS = {"filename", "is_public"}
-
-    async def list(
-        self, db_session: AsyncSession, params: PhotoListParams,
-        master_key: str | None = None,
-    ) -> tuple[list[PhotoResponse], int]:
-        """Paginated photo list riding the repo row core (GH #213 §5.2).
-
-        Service owns stmt construction (q / filters / sort whitelist) and
-        the Row→``PhotoResponse`` mapping — the denormalized
-        ``client_name`` labeled column flows through the multi-column
-        select unchanged. The repo core (``BaseRepository.list_custom``)
-        owns count (computed on the UNordered stmt — the count-order
-        deviation is fixed by construction), order, and the limit/offset
-        slice; ordering arrives via its ``order_by=`` parameter (the
-        ``RecordService.list`` convention).
-
-        GH #263 T5: a scoped master (``master_key`` not ``None``) gets the
-        EXISTS-ветка folded in — only photos attached (via
-        ``activity_id``) to HIS activities; client/service/location-owned
-        and owner-less photos are invisible (D6). ``master_key=None``
-        (admin) → no scope condition. The scope is conjunctive with the
-        query params; the LEFT JOIN path of the service_id filter is
-        untouched.
-
-        Returns ``(items, total)``; the router assembles the
-        ``PaginatedResponse`` envelope echoing the client's page/per_page.
-        """
-        client_name = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()
-        stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
-
-        conds = []
-        scope = _activity_scope_predicate(master_key)
-        if scope is not None:
-            conds.append(scope)
-        # GH #232 §3.1: typed ``?id=`` set narrowing — AFTER the scope
-        # predicate (scope inherited), shared helper, one line.
-        id_pred = ids_in_predicate(Photo.id, params.id)
-        if id_pred is not None:
-            conds.append(id_pred)
-        if params.q is not None:
-            conds.append(search_predicate(params.q, [SearchField(column=Photo.filename, kind="substring")]))
-        if params.client_id is not None:
-            conds.append(Photo.client_id == params.client_id)
-        if params.location_id is not None:
-            conds.append(Photo.location_id == params.location_id)
-        if params.activity_id is not None:
-            conds.append(Photo.activity_id == params.activity_id)
-        if params.service_id is not None:
-            # variant A: direct OR via activity — LEFT OUTER JOIN required
-            # (an INNER JOIN would drop direct-service photos; 1:0..1, so
-            # the count stays honest — spec #211 §6.7).
-            stmt = stmt.outerjoin(Activity, Activity.id == Photo.activity_id)
-            conds.append(or_(Photo.service_id == params.service_id,
-                             Activity.service_id == params.service_id))
-        if params.tag_id:
-            for t in dict.fromkeys(params.tag_id):          # dedupe, keep order
-                conds.append(Photo.tags.any(Tag.id == t))   # per-tag EXISTS, AND-chained
-        if conds:
-            stmt = stmt.where(*conds)
-
-        col = _SORT_COLUMNS[params.sort_by]
-        order_exprs = [
-            col.desc() if params.sort_order == "desc" else col.asc(),
-            Photo.id.asc(),
-        ]
-        rows, total = await self._repository.list_custom(
-            db_session,
-            stmt,
-            order_by=order_exprs,
-            limit=params.per_page,
-            offset=(params.page - 1) * params.per_page,
-        )
-
-        items = []
-        for photo, name in rows:
-            resp = PhotoResponse.model_validate(photo)
-            resp.client_name = name
-            items.append(resp)
-        return items, total
 
     async def get(
         self, db_session: AsyncSession, id: str
@@ -356,3 +290,86 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 @lru_cache
 def get_photo_service() -> PhotoService:
     return PhotoService(get_base_repository(), Photo, PhotoResponse)
+
+
+async def list_photos_view(
+    db_session: AsyncSession,
+    params: PhotoListParams,
+    master_key: str | None = None,
+) -> tuple[list[PhotoResponse], int]:
+    """Paginated photo list composite riding the repo row core (GH #213
+    §5.2; Corridor 3 free function — GH #217 Task 3, ADR 007 / canon
+    rule 8; behavior-for-behavior move of the former ``PhotoService.list``
+    method).
+
+    The function owns stmt construction (q / filters / sort whitelist)
+    and the Row→``PhotoResponse`` mapping — the denormalized
+    ``client_name`` labeled column flows through the multi-column select
+    unchanged. The repo core (``BaseRepository.list_custom``) owns count
+    (computed on the UNordered stmt — the count-order deviation is fixed
+    by construction), order, and the limit/offset slice; ordering arrives
+    via its ``order_by=`` parameter (the ``RecordService.list``
+    convention).
+
+    GH #263 T5: a scoped master (``master_key`` not ``None``) gets the
+    EXISTS-branch folded in — only photos attached (via ``activity_id``)
+    to HIS activities; client/service/location-owned and owner-less
+    photos are invisible (D6). ``master_key=None`` (admin / anonymous) →
+    no scope condition. The scope is conjunctive with the query params;
+    the LEFT JOIN path of the service_id filter is untouched.
+
+    Returns ``(items, total)``; the router assembles the
+    ``PaginatedResponse`` envelope echoing the client's page/per_page.
+    """
+    client_name = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()
+    stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
+
+    conds = []
+    scope = _activity_scope_predicate(master_key)
+    if scope is not None:
+        conds.append(scope)
+    # GH #232 §3.1: typed ``?id=`` set narrowing — AFTER the scope
+    # predicate (scope inherited), shared helper, one line.
+    id_pred = ids_in_predicate(Photo.id, params.id)
+    if id_pred is not None:
+        conds.append(id_pred)
+    if params.q is not None:
+        conds.append(search_predicate(params.q, [SearchField(column=Photo.filename, kind="substring")]))
+    if params.client_id is not None:
+        conds.append(Photo.client_id == params.client_id)
+    if params.location_id is not None:
+        conds.append(Photo.location_id == params.location_id)
+    if params.activity_id is not None:
+        conds.append(Photo.activity_id == params.activity_id)
+    if params.service_id is not None:
+        # variant A: direct OR via activity — LEFT OUTER JOIN required
+        # (an INNER JOIN would drop direct-service photos; 1:0..1, so
+        # the count stays honest — spec #211 §6.7).
+        stmt = stmt.outerjoin(Activity, Activity.id == Photo.activity_id)
+        conds.append(or_(Photo.service_id == params.service_id,
+                         Activity.service_id == params.service_id))
+    if params.tag_id:
+        for t in dict.fromkeys(params.tag_id):          # dedupe, keep order
+            conds.append(Photo.tags.any(Tag.id == t))   # per-tag EXISTS, AND-chained
+    if conds:
+        stmt = stmt.where(*conds)
+
+    col = _SORT_COLUMNS[params.sort_by]
+    order_exprs = [
+        col.desc() if params.sort_order == "desc" else col.asc(),
+        Photo.id.asc(),
+    ]
+    rows, total = await get_base_repository().list_custom(
+        db_session,
+        stmt,
+        order_by=order_exprs,
+        limit=params.per_page,
+        offset=(params.page - 1) * params.per_page,
+    )
+
+    items = []
+    for photo, name in rows:
+        resp = PhotoResponse.model_validate(photo)
+        resp.client_name = name
+        items.append(resp)
+    return items, total

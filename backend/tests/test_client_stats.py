@@ -40,7 +40,7 @@ def _add_payment(api_client, record_id, amount=3000, method="card"):
 # ─── Response Shape Tests ─────────────────────────────────────────────────────
 
 class TestClientListPaginatedResponseShape:
-    """Verify the response shape matches PaginatedResponse[ClientWithStats] schema."""
+    """Verify the response shape matches PaginatedResponse[ClientViewResponse] schema."""
 
     def test_list_returns_paginated_response(self, api_client) -> None:
         """GET /api/v1/clients returns {items, total, page, per_page}."""
@@ -338,7 +338,7 @@ class TestClientListSearch:
 class TestClientListQContract:
     """Clients-specific ``?q=`` contract beyond the generic matrix.
 
-    The clients list is a CUSTOM query path (``list_clients_with_stats``),
+    The clients list is a CUSTOM query path (``list_clients_view``),
     not the generic repository: the search predicate must hit BOTH the rows
     query and the count query (honest ``total``). Validation lives on the
     ``ClientListParams.q`` FIELD (min 2 / max 100), not a router Query param

@@ -1,9 +1,12 @@
 """US-2: list_activities issues a bounded number of queries (no N+1).
 
-Regression guard for the batched sum_active_seats_bulk fix in #129.
-Seed N activities (each with one record) and assert the SELECT count
-during GET /api/v1/activities?date_from=...&date_to=... is BOUNDED —
-must NOT scale with the number of activities (1+N → constant).
+Regression guard for the batched occupied-seats aggregate (fix in #129;
+since GH #217 Task 4 the aggregate is the module-level
+``sum_active_seats_bulk`` free function, called directly by the
+GET /activities handler). Seed N activities (each with one record) and
+assert the SELECT count during GET
+/api/v1/activities?date_from=...&date_to=... is BOUNDED — must NOT scale
+with the number of activities (1+N → constant).
 """
 
 from datetime import UTC, datetime, timedelta

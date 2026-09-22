@@ -101,10 +101,18 @@ For detached HEAD, note the new branch name:
 
 **Don't add explanation** - keep the notification to one line, then continue.
 
-### Step 5: Auto Push + PR + Auto-merge (DEFAULT)
+### Step 5: Auto Push + PR Creation (Dispatch 1 — ends at PR_CREATED)
 
 This is the default success-path flow. Run it automatically after the notification.
-**Contact the user ONLY on error** (push failure, PR creation error, red CI, merge error).
+**Contact the user ONLY on error** (push failure, PR creation error).
+
+**Two-dispatch split (2026-09-21, refines the 2026-09-20 #227 rule):** this dispatch ENDS
+right after the PR is created — CI watching and merging belong to the SECOND dispatch
+(Step 5.5), which @manager launches after flipping the card to `PR (G7)`. The split point is
+deterministic state: this dispatch returns normally, and @manager — alive, blocked on it —
+receives the report and re-dispatches. What remains FORBIDDEN is ending a dispatch while
+waiting for CI *inside* a subagent run (a finished subagent is never woken by its own
+notification — the #227 stall).
 
 **The PR description must carry `Closes #N`** (N = the issue this branch implements): the
 closing keyword in the PR description is what auto-closes the issue at merge — and it is the
@@ -139,45 +147,14 @@ fi
 # Get PR URL for reporting
 PR_URL=$(gh pr view --json url -q .url)
 echo "PR created: $PR_URL"
-echo "Waiting for CI checks to complete (may take 5-15 min)..."
 
-# Poll CI checks until completion
-# gh pr checks --watch blocks until all checks conclude, then:
-#   exit 0 = all passed, exit 1 = some failed
-# CI is the authoritative merge gate — wait for ALL jobs (including the e2e shards) to go green.
-if gh pr checks --watch; then
-  echo "✅ All CI checks passed. Auto-merging..."
-  # NOTE: run `gh pr merge --squash` WITHOUT --delete-branch. When finishing from inside a
-  # git worktree, --delete-branch tries to delete the LOCAL branch, which is checked out in the
-  # worktree ("branch is already checked out at ...") — the merge API call succeeds but the
-  # local cleanup fails, leaving a broken state. Likewise `git checkout <base-branch>` + `git pull`
-  # cannot run from inside the worktree (<base-branch> is checked out in the main working copy).
-  # So: merge ONLY here; do ALL branch/main/worktree cleanup as a separate step from the main
-  # working copy root (Step 6).
-  if ! gh pr merge --squash --subject "<title>" --body "Auto-merged: all CI checks passed."; then
-    echo "❌ Merge command failed."
-    echo "PR: $PR_URL — report to user. Preserve worktree."
-    # STOP — do NOT clean up worktree.
-    exit 1
-  fi
-  echo "✅ PR merged on GitHub. Branch/main/worktree cleanup runs from the main working copy (Step 6)."
-else
-  echo "❌ CI checks failed (red). NOT auto-merging."
-  echo "PR: $PR_URL — report to user. Preserve worktree for fixes."
-  # STOP — do NOT clean up worktree.
-  exit 1
-fi
+# END OF DISPATCH 1 — return to @manager immediately, do NOT watch CI here. Report:
+#   PR_CREATED: <PR_URL> branch=<feature-branch> worktree=<worktree path or "repo">
+# @manager flips the card to PR (G7) and re-dispatches for Step 5.5 (CI watch + merge).
 ```
 
-**On success (all CI green + merged):** proceed to Step 6 — from the **main working copy root**: pull main (fast-forward to the merge commit), delete the remote branch, remove the worktree, then delete the local branch.
-
-**On ANY error — STOP and contact the user:**
-- Push fails → report the failure, preserve worktree.
-- PR creation errors → report the error, preserve worktree.
-- CI is red / checks fail → report to user with PR URL. Do NOT auto-merge.
-- Merge command errors → report to user with PR URL. Do NOT auto-merge.
-
-In all error cases: preserve the worktree (user may need to push fixes) and let the user decide the next action.
+**On push/PR error — STOP and contact the user:** report the failure, preserve the worktree
+(user may need to push fixes) and let the user decide the next action.
 
 ### Step 5.1: Explicit User-Requested Fallbacks (NOT the default)
 
@@ -234,20 +211,58 @@ Then: Cleanup worktree (Step 6), then force-delete branch:
 git branch -D <feature-branch>
 ```
 
-### Step 5.5: Never End a Dispatch in a Waiting State (2026-09-20, #227 incident)
+### Step 5.5: Second Dispatch — CI Watch + Merge (Dispatch 2)
 
-If the finishing flow must wait for CI (Step 5's `--watch`) and the dispatch is running out of
-turns/context, **complete the merge in the SAME dispatch** — do not end the turn with
-"CI watch running, waiting for the exit notification". A finished dispatch cannot be woken by
-its own PTY notification: the notification reaches the subagent's session in the DB, but nobody
-re-dispatches it, and the post-merge handoff (@manager board flip) stalls indefinitely
-(observed: PR merged 1 min after green, board flipped 30 min later only after a user prompt).
+Launched by @manager right after the `PR_CREATED` return (the card is at `PR (G7)` by then).
+Fresh dispatch — the CI watch (5–45 min incl. e2e shards) and the merge run inside it, and the
+merge completes in the SAME dispatch (2026-09-20, #227 incident: a finished subagent is never
+re-woken by its own PTY notification — nobody re-dispatches it and the post-merge handoff
+stalls; observed: PR merged 1 min after green, board flipped 30 min later only after a user
+prompt). If you are running out of context mid-watch, complete the merge in this dispatch
+rather than yield.
 
-- If CI is still running when you must yield: return an explicit `WAITING:` report listing the
-  run id + what triggers the next action, so @manager re-dispatches on completion or watches it
-  itself. Never rely on your own future wake-up.
-- @manager-side counterpart: an intermediate "awaiting X" return from any subagent → @manager
-  immediately sets its OWN watch/timer on X (Awaiting-Handoff Rule, `.opencode/agents/manager.md`).
+```bash
+# gh pr checks --watch blocks until all checks conclude, then:
+#   exit 0 = all passed, exit 1 = some failed
+# CI is the authoritative merge gate — wait for ALL jobs (including the e2e shards) to go green.
+if gh pr checks --watch; then
+  echo "✅ All CI checks passed. Auto-merging..."
+  # NOTE: run `gh pr merge --squash` WITHOUT --delete-branch. When finishing from inside a
+  # git worktree, --delete-branch tries to delete the LOCAL branch, which is checked out in the
+  # worktree ("branch is already checked out at ...") — the merge API call succeeds but the
+  # local cleanup fails, leaving a broken state. Likewise `git checkout <base-branch>` + `git pull`
+  # cannot run from inside the worktree (<base-branch> is checked out in the main working copy).
+  # So: merge ONLY here; do ALL branch/main/worktree cleanup as a separate step from the main
+  # working copy root (Step 6).
+  if ! gh pr merge --squash --subject "<title>" --body "Auto-merged: all CI checks passed."; then
+    echo "❌ Merge command failed."
+    echo "PR: $PR_URL — report to user. Preserve worktree."
+    # STOP — do NOT clean up worktree.
+    exit 1
+  fi
+  echo "✅ PR merged on GitHub. Branch/main/worktree cleanup runs from the main working copy (Step 6)."
+else
+  echo "❌ CI checks failed (red). NOT auto-merging."
+  echo "PR: $PR_URL — report to user. Preserve worktree for fixes."
+  # STOP — do NOT clean up worktree.
+  exit 1
+fi
+```
+
+**On success (all CI green + merged):** proceed to Step 6 — from the **main working copy
+root**: pull main (fast-forward to the merge commit), delete the remote branch, remove the
+worktree, then delete the local branch — then Step 7 (`## Board Update Needed` to @manager;
+the In-main flip, issue close and `merged` scratchpad line are @manager's).
+
+**On red CI / merge error — STOP and contact the user:** report NEEDS_APPROVAL with the PR
+URL; preserve the worktree; do NOT auto-merge, do NOT clean up.
+
+**General waiting rule (any subagent, any phase):** if you must yield while something is
+still running, return an explicit `WAITING:` report listing the run id + what triggers the
+next action, so @manager re-dispatches on completion or watches it itself. Never rely on your
+own future wake-up. @manager-side counterpart: an intermediate "awaiting X" return from any
+subagent → @manager immediately sets its OWN watch/timer on X (Awaiting-Handoff Rule,
+`.opencode/agents/manager.md`).
 
 ### Step 5.6: Suggest Post-Merge Reflection
 
@@ -358,7 +373,7 @@ After a successful merge, the architect does NOT touch the GH Project board — 
 - Detect environment before the auto-flow
 - Notify before push (one line, fire-and-continue — do NOT wait for a reply)
 - Contact the user ONLY on error (push failure, PR error, red CI, merge error)
-- Complete the merge in the same dispatch — never end a turn while your own watch is supposed to wake you (Step 5.5)
+- End Dispatch 1 at `PR_CREATED`; keep CI watch + merge inside Dispatch 2 — never end a dispatch mid-watch (Step 5.5)
 - Get typed confirmation before the discard fallback
 - Clean up worktree only on the default merge success path and the explicit merge-locally / discard fallbacks
 - `cd` to main repo root before worktree removal

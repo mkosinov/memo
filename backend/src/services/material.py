@@ -23,6 +23,44 @@ from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdat
 from src.services.generic import ArchiveService
 
 
+async def _attach_counts(
+    db_session: AsyncSession, materials: list[MaterialResponse]
+) -> None:
+    """Attach ``used_in_services_count`` in place (spec §6, canonical).
+
+    Module-internal helper (GH #217 Task 4, ADR 007 / canon rule 8 —
+    behavior-for-behavior move of the former ``MaterialService`` method;
+    the underscore stays as the deliberate «internal to this module»
+    convention). Batch enrichment — no page, no total — so it takes the
+    session directly. Used by all five read/write-return paths of
+    ``MaterialService`` (list / list_all / get / update / patch).
+
+    One aggregate query for the whole batch:
+
+        SELECT material_id, COUNT(*) FROM service_materials
+        JOIN services ON services.id = service_materials.service_id
+             AND services.is_active = 1
+        WHERE material_id IN (…page ids…)
+        GROUP BY material_id
+
+    Materials with no linked ACTIVE services are absent from the result
+    → keep the schema default 0. Early-returns on an empty batch.
+    """
+    if not materials:
+        return
+    stmt = (
+        select(ServiceMaterial.material_id, func.count())
+        .join(Service, Service.id == ServiceMaterial.service_id)
+        .where(Service.is_active)
+        .where(ServiceMaterial.material_id.in_([m.id for m in materials]))
+        .group_by(ServiceMaterial.material_id)
+    )
+    result = await db_session.execute(stmt)
+    counts = {material_id: count for material_id, count in result.all()}
+    for material in materials:
+        material.used_in_services_count = counts.get(material.id, 0)
+
+
 class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialResponse]):
     """Material service with NOT NULL field protection on PATCH.
 
@@ -31,8 +69,9 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
     definition regardless of the request's ``status`` slice (the counter
     describes the material, not the requested list). Attached on every
     read path (``list`` / ``list_all`` / ``get``) and after
-    ``update``/``patch`` returns via one shared helper: a single
-    JOIN + GROUP BY aggregate for the whole page (no N+1).
+    ``update``/``patch`` returns via the module-level ``_attach_counts``
+    helper (GH #217 Task 4 — one shared aggregate for the whole page, no
+    N+1; module-internal by the underscore convention).
     ``ArchiveService.archive``/``restore`` return ``bool``; the router's
     refetch goes through ``get`` → counts attached there. ``create``
     returns 0 by definition (schema default).
@@ -48,36 +87,6 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         SearchField(Material.description),
         SearchField(Material.id, kind="uuid"),
     ]
-
-    async def _attach_counts(
-        self, db_session: AsyncSession, materials: list[MaterialResponse]
-    ) -> None:
-        """Attach ``used_in_services_count`` in place (spec §6, canonical).
-
-        One aggregate query for the whole batch:
-
-            SELECT material_id, COUNT(*) FROM service_materials
-            JOIN services ON services.id = service_materials.service_id
-                 AND services.is_active = 1
-            WHERE material_id IN (…page ids…)
-            GROUP BY material_id
-
-        Materials with no linked ACTIVE services are absent from the result
-        → keep the schema default 0. Early-returns on an empty batch.
-        """
-        if not materials:
-            return
-        stmt = (
-            select(ServiceMaterial.material_id, func.count())
-            .join(Service, Service.id == ServiceMaterial.service_id)
-            .where(Service.is_active)
-            .where(ServiceMaterial.material_id.in_([m.id for m in materials]))
-            .group_by(ServiceMaterial.material_id)
-        )
-        result = await db_session.execute(stmt)
-        counts = {material_id: count for material_id, count in result.all()}
-        for material in materials:
-            material.used_in_services_count = counts.get(material.id, 0)
 
     async def list(
         self,
@@ -99,7 +108,7 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
             q=q,
             **filters,
         )
-        await self._attach_counts(db_session, paginated.items)
+        await _attach_counts(db_session, paginated.items)
         return paginated
 
     async def list_all(
@@ -113,7 +122,7 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         items = await super().list_all(
             db_session, order_by=order_by, status=status, **filters
         )
-        await self._attach_counts(db_session, items)
+        await _attach_counts(db_session, items)
         return items
 
     async def get(
@@ -123,7 +132,7 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         material = await super().get(db_session, id)
         if material is None:
             return None
-        await self._attach_counts(db_session, [material])
+        await _attach_counts(db_session, [material])
         return material
 
     async def update(
@@ -133,7 +142,7 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         material = await super().update(db_session, id, data)
         if material is None:
             return None
-        await self._attach_counts(db_session, [material])
+        await _attach_counts(db_session, [material])
         return material
 
     async def patch(
@@ -143,7 +152,7 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         material = await super().patch(db_session, id, data)
         if material is None:
             return None
-        await self._attach_counts(db_session, [material])
+        await _attach_counts(db_session, [material])
         return material
 
 

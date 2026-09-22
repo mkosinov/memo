@@ -851,6 +851,55 @@ class TestMastersReadOnly:
         assert isinstance(body, list)
         assert [m["id"] for m in body] == [created["id"]]
 
+    def test_all_over_limit_returns_422(self, api_client, db_engine) -> None:
+        """>1000 masters → BareListLimitExceededError → 422 (#205 bare-list
+        contract; GH #217 Task 2 — the router catches the function-side
+        guard, same idiom as the 5 dictionary routers)."""
+        import asyncio
+        from datetime import UTC, datetime
+
+        from sqlalchemy import insert
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from src.models.master import Master
+        from src.models.staff import Staff
+
+        async def _seed() -> None:
+            factory = async_sessionmaker(db_engine, expire_on_commit=False)
+            now = datetime.now(UTC)
+            staff_rows = [
+                {
+                    "id": f"{i:010d}-0000-4000-8000-000000000000",
+                    "first_name": f"bulk-{i:05d}",
+                    "last_name": "Master",
+                    "is_active": True,
+                    "sort_order": i,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for i in range(1001)
+            ]
+            master_rows = [
+                {
+                    "staff_id": r["id"],
+                    "specialty": "живопись",
+                    "color": "#5B8C7A",
+                    "is_active": True,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for r in staff_rows
+            ]
+            async with factory() as session:
+                await session.execute(insert(Staff), staff_rows)
+                await session.execute(insert(Master), master_rows)
+                await session.commit()
+
+        asyncio.run(_seed())
+        resp = api_client.get("/api/v1/masters/all")
+        assert resp.status_code == 422
+        assert "1000" in str(resp.json()["detail"])
+
     def test_get_by_id_removed(self, api_client) -> None:
         created = api_client.post(
             "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)

@@ -230,12 +230,14 @@ export function ScheduleDataProvider({
   // optimistic setQueryData/cancelQueries/invalidateQueries keep hitting it.
   const activityQueryKey = qk.activityRange(weekStart, weekEnd);
 
-  // Mutations. Only the STABLE callbacks are destructured (react-query v5:
-  // `mutate` = useCallback over the once-created observer, but `mutateAsync`
-  // = result property, rebuilt every render) — destructuring the mutation
-  // result object itself would re-create these useCallbacks (and the context
-  // value) on every provider re-render, breaking zoom isolation (DoD-1 /
-  // spec §3). Same reason the deps arrays list the callbacks, not the objects.
+  // Mutations. Only the stable callbacks are destructured (react-query v5:
+  // `mutate` = useCallback over the once-created observer; `mutateAsync` =
+  // result.mutate, the constructor-bound observer method — both keep their
+  // identity across renders). The mutation RESULT OBJECT gets a new identity
+  // every render, so deps must list the destructured callbacks, not the
+  // objects — otherwise these useCallbacks (and the context value) would
+  // churn on every provider re-render, breaking zoom isolation (DoD-1 /
+  // spec §3).
   const { mutate: createActivityMutate } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (data: Parameters<typeof apiCreateActivity>[0]) => apiCreateActivity(data),
@@ -335,10 +337,11 @@ export function ScheduleDataProvider({
       comment: activity.comment ?? null,
       record_info: null,
     }, callbacks);
-    // Dep is the STABLE `mutate` (v5 useCallback over a once-created observer),
-    // not the mutation result object — that object is rebuilt every render and
-    // would give the data context value a new identity on every provider
-    // re-render, breaking zoom isolation (DoD-1 / spec §3).
+    // Dep is the STABLE `mutate` (v5 useCallback over the once-created
+    // observer), not the mutation result object — that object gets a new
+    // identity every render and would give the data context value a new
+    // identity on every provider re-render, breaking zoom isolation
+    // (DoD-1 / spec §3).
   }, [currentWeek, createActivityMutate]);
 
   const updateActivityFn = useCallback((id: string, updates: {

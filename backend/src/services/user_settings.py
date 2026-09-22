@@ -6,7 +6,7 @@ import json
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,6 +179,24 @@ class UserSettingsService:
         await session.flush()
         await session.refresh(orm)
         return _to_response(orm)
+
+    @staticmethod
+    async def delete_by_user_ids(
+        session: AsyncSession, user_ids: list[str]
+    ) -> None:
+        """Bulk-delete settings rows for the given user_ids.
+
+        Set-based bulk command (canon rule 4): one
+        ``DELETE FROM user_settings WHERE user_id IN (...)`` — filter by the
+        entity's OWN column (``user_settings.user_id``). No per-row loop.
+        Does NOT commit — the caller's transaction owns the commit boundary.
+        GH #319: cascade death — settings die with their accounts.
+        """
+        if not user_ids:
+            return
+        await session.execute(
+            delete(UserSettings).where(UserSettings.user_id.in_(user_ids))
+        )
 
     @transactional
     async def delete(self, session: AsyncSession, id: str) -> bool:

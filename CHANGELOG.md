@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-22
+
+### Changed
+- **GH #301 — Спуск линт-порога frontend/admin 38→0 (ratchet до нуля)** — branch
+  `chore/301-admin-lint-zero` (6 commits `ec1f4e68..9b2be3cb`, base `062b42e6`; 44 файла;
+  спека `docs/specs/2026-09-19-admin-lint-zero-301-design.md` и план
+  `docs/plans/2026-09-19-admin-lint-zero-301-plan.md` — оба на main, план закрыт этим docs-коммитом):
+  - **Гейт:** `frontend/admin/package.json` — `eslint . --max-warnings 0` (было 38). Фактический
+    ход счётчиков по четырём группам (порог опускался до факта после каждой): **37 → 24 → 18 → 12 → 0** —
+    unused-vars 13 фиксов (`ec1f4e68`), no-explicit-any 6 (`1e23af1e`), no-img-element 4 → `next/image`
+    + 2 обоснованных disable (`4c9bf2a9`, `c763d741`), exhaustive-deps 12 (`e8940d57` + правка
+    комментария по ревью `9b2be3cb`). Правила, `.eslintrc.json` и CI-workflow не менялись
+    (конвенция ratchet'а #143 — порог только вниз).
+  - **Картинки (T3):** логотип и аватары через `next/image` — запись `images.remotePatterns`
+    для хоста бэкенда (env-derived) в `next.config.mjs`, новый helper `lib/avatar.ts` `toAvatarSrc`;
+    фото-миниатюры (таблица/модалка) остаются `<img>` с обоснованными подавлениями (внешние хосты,
+    спека §4.3); e2e `cabinet.spec.ts` (S3) адаптирован; фрагмент про логотип в `docs/design-system.md`
+    обновлён ещё код-коммитом `4c9bf2a9`. `sharp` не добавлялся (dev-оптимизатор отдаёт `/_next/image`
+    200 с реальным сжатием; rationale — комментарий рядом с `remotePatterns`).
+  - **Suppressions (S5):** ровно 3 новых `eslint-disable`, каждый с `-- причиной`
+    (2× `@next/next/no-img-element`, 1× `react-hooks/exhaustive-deps` — `SettingsTab` `gridFrequency`);
+    безобоснованных — 0.
+  - **Tests:** lint **0 errors / 0 warnings**, exit 0 (порог доказан негативным тестом — S1:
+    пробный warning → RED → удаление → GREEN); `tsc --noEmit` exit 0; vitest **2405/2405**
+    (известный load-flake изолированно зелёный); e2e затронутых экранов **12/12 спеков (125 тестов)**;
+    визуальный гейт **4/4 поверхности**.
+  - Out of scope: `frontend/web` (#300 — отдельная дорожка), контракты компонентов (`mode` ×5,
+    `value` — follow-up #368), бэкенд и пакеты-воркспейсы.
+  - Status: `docs/status/2026-09-22-admin-lint-zero-301.md`
+
 ## [Unreleased] — 2026-09-21
 
 ### Added

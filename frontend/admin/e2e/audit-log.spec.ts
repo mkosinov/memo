@@ -9,7 +9,10 @@
  *       precedent): user B changes a payment amount through the modal UI;
  *       admin A sees «изменил платёж … 500 → 700» in the journal.
  *  С3 — author/action/entity/period filters narrow the table; reset
- *       returns the full feed.
+ *       returns the full feed. The author step first has Б — the seeded
+ *       demo master — patch HIS OWN record's payment through the modal
+ *       UI, so a Б-authored row exists and selecting Б in the filter
+ *       provably drops the admin-authored rows (narrowing, not a no-op).
  *  С4 — master: no «Журнал» menu item; direct /audit → NoAccessScreen;
  *       bare API GET /api/v1/audit-logs → 403 AUTH_FORBIDDEN.
  *  С5 — client phone changed via UI: the journal row shows the change
@@ -37,6 +40,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 import { openRecordTab } from './helpers/anonymous-visits';
+import { masterAuthStatePath } from './fixtures/auth-state';
 import type { Page } from '@playwright/test';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
@@ -219,6 +223,7 @@ test.describe('GH #344 §9 — журнал действий администр�
   test('С3: фильтры по автору/действию/сущности/периоду сужают таблицу; сброс возвращает всю ленту', async ({
     page,
     request,
+    browser,
   }) => {
     const tagName = `audit-c3-tag-${uid()}`;
     const clientName = `audit-c3-client-${uid()}`;
@@ -232,14 +237,63 @@ test.describe('GH #344 §9 — журнал действий администр�
     const client = await createTestClient(request, { name: clientName });
     clientId = client.id;
 
+    // Б — the seeded demo master, a DISTINCT author (the admin of С1/С2 is
+    // the only other journal writer in this run). His own record's payment
+    // is patched through the modal UI (master-role-payments S3 precedent:
+    // activity pinned to m1 — the seed card the demo master is linked to),
+    // which journals an update row carrying Б's user_id. Without such a
+    // row the author-filter step below could not prove narrowing.
+    const clientB = await createTestClient(request);
+    const activityB = await createTestActivity(request, { master_id: 'm1' });
+    const recordB = await createTestRecord(request, activityB.id, clientB.id, {
+      visits: [],
+    });
+    const paymentB = await createTestPayment(request, recordB.id, { amount: 500 });
+
+    const ctxB = await browser.newContext({ storageState: masterAuthStatePath() });
+    const pageB = await ctxB.newPage();
+
     try {
+      // Б changes the payment amount through the record modal UI (500→700,
+      // blur-to-commit → PATCH — same mechanics as С2, another session).
+      await openRecordTab(pageB, recordB.id);
+      const paymentRowB = pageB.locator(`[data-testid="payment-${paymentB.id}"]`);
+      await expect(paymentRowB).toBeVisible({ timeout: 10_000 });
+      const patchDoneB = pageB.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/payments/${paymentB.id}`) &&
+          r.request().method() === 'PATCH',
+        { timeout: 15_000 },
+      );
+      const amountInputB = paymentRowB.locator('input[type="number"]');
+      await amountInputB.fill('700');
+      await amountInputB.press('Enter');
+      expect((await patchDoneB).status()).toBe(200);
+      await ctxB.close();
+
+      // Б's journal row: resolved by entity_id+action because the label
+      // text «Платёж 700» also occurs in С2's admin-authored row (journal
+      // rows accumulate across the run — only ids are unambiguous).
+      await expect
+        .poll(() => findJournalRowId(request, paymentB.id, 'update'), {
+          timeout: 15_000,
+        })
+        .not.toBeNull();
+      const masterRowId = (await findJournalRowId(
+        request,
+        paymentB.id,
+        'update',
+      ))!;
+
       await waitForAuditReady(page);
 
-      // Full feed: both marker rows are visible.
+      // Full feed: all three marker rows are visible.
       const tagRow = auditRow(page, tagName);
       const clientRow = auditRow(page, clientName);
+      const masterRow = page.locator(`[data-testid="audit-row-${masterRowId}"]`);
       await expect(tagRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
+      await expect(masterRow).toBeVisible({ timeout: 10_000 });
 
       // Entity filter (Тег): the tag row stays, the client row is gone.
       await page.getByLabel('Сущность').selectOption('tags');
@@ -256,16 +310,31 @@ test.describe('GH #344 §9 — журнал действий администр�
       await expect(tagRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
 
-      // Author filter (the seed admin): both marker rows stay (the admin
-      // authored both) — the dropdown offers authors from /audit-logs/authors.
+      // Author filter (Б — the demo master): the dropdown offers both
+      // journal authors from /audit-logs/authors (admin = phone-fallback
+      // label, Б = his staff card name). Selecting Б keeps Б's row and
+      // DROPS both admin-authored marker rows — narrowing a no-op
+      // user_id filter could never demonstrate.
       const authorSelect = page.getByLabel('Автор');
       const adminOption = authorSelect.locator('option', {
         hasText: '+79990000001',
       });
       await expect(adminOption).toHaveCount(1);
-      await authorSelect.selectOption({ label: await adminOption.textContent() ?? '' });
+      const masterOption = authorSelect.locator('option', {
+        hasText: 'Середа Ольга',
+      });
+      await expect(masterOption).toHaveCount(1);
+      await authorSelect.selectOption({ label: 'Середа Ольга' });
+      await expect(masterRow).toBeVisible({ timeout: 10_000 });
+      await expect(masterRow).toContainText('изменил');
+      await expect(tagRow).toHaveCount(0);
+      await expect(clientRow).toHaveCount(0);
+
+      // Reset: the full feed returns.
+      await page.getByRole('button', { name: 'Сбросить фильтры' }).click();
       await expect(tagRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
+      await expect(masterRow).toBeVisible({ timeout: 10_000 });
 
       // Period filter (date_from tomorrow): no journal row can match —
       // the table collapses to the «Нет действий» stub.
@@ -281,8 +350,12 @@ test.describe('GH #344 §9 — журнал действий администр�
       await expect(tagRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
     } finally {
+      await ctxB.close();
       if (tagId) await cleanup(request, `/api/v1/tags/${tagId}`);
       if (clientId) await cleanup(request, `/api/v1/clients/${clientId}`);
+      await cleanupRecord(request, recordB.id);
+      await cleanup(request, `/api/v1/clients/${clientB.id}`);
+      await cleanup(request, `/api/v1/activities/${activityB.id}`);
     }
   });
 

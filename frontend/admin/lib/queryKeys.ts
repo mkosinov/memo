@@ -69,5 +69,13 @@ export const qk = {
   materials: ['materials'] as const,
   tags: ['tags'] as const,
   photos: ['photos'] as const,
+  // GH #344 §7: the «Журнал» paged-list family prefix. The journal is
+  // append-only and has no invalidation sources of its own (reads age out
+  // via the standard staleTime) — own fetches key under this prefix only.
+  auditLogs: ['audit-logs'] as const,
+  // GH #344 §7: the authors dropdown of the journal filters — a distinct
+  // lookup, NOT part of the paged family prefix (it must not be wiped by
+  // the list's key dynamics).
+  auditLogAuthors: ['audit-logs', 'authors'] as const,
   visitorsList: ['visitors'] as const, // prefix invalidation (useDeleteRecord)
 } as const;

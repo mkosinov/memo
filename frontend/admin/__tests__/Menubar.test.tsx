@@ -360,6 +360,12 @@ describe('Menubar role filtering (GH #263)', () => {
     expect(screen.queryByRole('link', { name: 'Должности' })).not.toBeInTheDocument();
   });
 
+  // GH #344 §7: «Журнал» — admin-only standalone item after «Справочников».
+  it('master does NOT see the Журнал nav item (GH #344)', () => {
+    renderAsMaster();
+    expect(screen.queryByRole('link', { name: 'Журнал' })).not.toBeInTheDocument();
+  });
+
   it('master still sees allowed items: Расписание, Записи, Услуги, Фото', () => {
     renderAsMaster();
     expect(screen.getByRole('link', { name: 'Расписание' })).toBeInTheDocument();
@@ -388,6 +394,18 @@ describe('Menubar role filtering (GH #263)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Справочники' }));
     expect(screen.getByRole('link', { name: 'Сотрудники' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Мастера' })).toBeInTheDocument();
+  });
+
+  // GH #344 §7: «Журнал» renders for the admin as a standalone link AFTER
+  // the «Справочники» collapsible (DOM order), pointing at /audit.
+  it('admin sees Журнал after Справочники, linking /audit (GH #344)', () => {
+    mockUseAuth.mockReturnValue(mockAuthState());
+    renderWithProviders();
+    const journal = screen.getByRole('link', { name: 'Журнал' });
+    expect(journal).toHaveAttribute('href', '/audit');
+    const directories = screen.getByRole('button', { name: 'Справочники' });
+    // DOM order: the directories collapsible precedes the journal item.
+    expect(directories.compareDocumentPosition(journal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

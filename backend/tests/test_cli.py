@@ -1,10 +1,12 @@
 """GH #247 §3.10: management CLI — create-user (prompt + validate + INSERT).
 
 The interactive getpass loop cannot run in CI; these tests pin the pure and
-DB parts: the prompt loop via an injected prompt function (mismatch re-ask,
-policy re-ask with hint, Ctrl-C abort), ``create_user`` INSERT semantics
-(duplicate phone, policy gate, trimmed password hash), argparse role
-choices, and ``main()`` exit codes against a temp-file DB.
+transport parts: the prompt loop via an injected prompt function (mismatch
+re-ask, policy re-ask with hint, Ctrl-C abort), argparse role choices, and
+``main()`` exit codes against a temp-file DB. The INSERT semantics (duplicate
+phone, policy gate, trimmed password hash, GH #319 settings-row guarantee)
+live with the ``usecases.user.create_user`` scenario — see
+tests/usecases/test_user_create.py (the CLI is rewired onto the scenario).
 
 DoD also includes the manual bootstrap check (spec §3.10): create a user
 via the real CLI, then log in through a pytest client.
@@ -19,71 +21,12 @@ import asyncio
 import sqlite3
 
 import pytest
-from sqlalchemy import select
 
-from src.auth.passwords import PASSWORD_POLICY_HINT_RU, verify_password
+from src.auth.passwords import PASSWORD_POLICY_HINT_RU
 from src.db.base import Base
 from src.db.database import DBManager
-from src.models.user import User
 
 pytestmark = pytest.mark.misc
-
-
-@pytest.fixture
-async def db_manager():
-    """In-memory test database manager with tables (test_seed.py pattern)."""
-    manager = DBManager("sqlite+aiosqlite:///:memory:")
-    async with manager.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield manager
-    await manager.engine.dispose()
-
-
-class TestCreateUser:
-    async def test_inserts_user_with_hashed_trimmed_password(self, db_manager: DBManager) -> None:
-        """create_user stores the trimmed phone and a hash of the trimmed
-        password; staff-card linking stays None (sqladmin's job, §2.9)."""
-        from src.cli import create_user
-
-        async with db_manager.async_session() as session:
-            user = await create_user(session, "+79990000099", "admin", "  manual-pw-99  ")
-            await session.commit()
-
-        assert user.phone == "+79990000099"
-        assert user.role == "admin"
-        assert user.staff_id is None
-
-        async with db_manager.async_session() as session:
-            stored = (await session.execute(select(User))).scalar_one()
-        assert stored.phone == "+79990000099"
-        assert stored.is_active is True
-        assert verify_password("manual-pw-99", stored.password_hash)
-
-    async def test_duplicate_phone_raises(self, db_manager: DBManager) -> None:
-        """Second create with the same phone → DuplicatePhoneError."""
-        from src.cli import DuplicatePhoneError, create_user
-
-        async with db_manager.async_session() as session:
-            await create_user(session, "+79990000099", "admin", "password123")
-            await session.commit()
-
-        async with db_manager.async_session() as session:
-            with pytest.raises(DuplicatePhoneError):
-                await create_user(session, "+79990000099", "master", "password456")
-
-    async def test_policy_violation_raises_no_row(self, db_manager: DBManager) -> None:
-        """Short password → PasswordPolicyError, nothing inserted."""
-        from src.auth.passwords import PasswordPolicyError
-        from src.cli import create_user
-
-        async with db_manager.async_session() as session:
-            with pytest.raises(PasswordPolicyError):
-                await create_user(session, "+79990000010", "admin", "short")
-            await session.commit()
-
-        async with db_manager.async_session() as session:
-            stored = (await session.execute(select(User))).scalar_one_or_none()
-        assert stored is None
 
 
 class TestPromptPassword:
@@ -160,7 +103,8 @@ class TestMain:
 
     def test_main_duplicate_phone_exits_1(self, tmp_path, monkeypatch, capsys) -> None:
         """Duplicate phone → clear Russian error on stderr, exit 1."""
-        from src.cli import create_user, main
+        from src.cli import main
+        from src.usecases.user import create_user as create_user_scenario
 
         db_path = tmp_path / "cli_dup.db"
         db_url = f"sqlite+aiosqlite:///{db_path}"
@@ -170,8 +114,13 @@ class TestMain:
             async with manager.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             async with manager.async_session() as session:
-                await create_user(session, "+79990000099", "admin", "password123")
-                await session.commit()
+                await create_user_scenario(
+                    None,
+                    db_session=session,
+                    phone="+79990000099",
+                    role="admin",
+                    password="password123",
+                )
             await manager.engine.dispose()
 
         asyncio.run(_prepare())

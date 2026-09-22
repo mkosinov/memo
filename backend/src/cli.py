@@ -15,6 +15,10 @@ mismatch or policy violation (hint printed), Ctrl-C aborts.
 Async DB access follows the ``seed.py`` pattern: a short-lived ``DBManager``
 driven by ``asyncio.run`` (DATABASE_URL env or the dev default).
 
+GH #319: the INSERT itself is the ``usecases.user.create_user`` scenario
+(ONE transaction — user row + UserSettings defaults); this module stays
+transport: prompt, argparse, exit codes.
+
 Spec: docs/specs/2026-09-08-auth-design.md §3.10
 Domain rules: docs/domain-rules/auth.md (User Provisioning)
 """
@@ -28,53 +32,20 @@ import sys
 from typing import TYPE_CHECKING
 
 # ruff: noqa: RUF001  -- Cyrillic text is intentional (Russian language app)
-from sqlalchemy import select
-
 from src.auth.passwords import (
     PASSWORD_POLICY_HINT_RU,
     PasswordPolicyError,
-    hash_password,
     validate_password,
 )
 from src.db.database import DBManager
 from src.models.enums import UserRole
-from src.models.user import User
+from src.usecases.user import DuplicatePhoneError
+from src.usecases.user import create_user as create_user_scenario
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from sqlalchemy.ext.asyncio import AsyncSession
-
 ROLE_CHOICES = [role.value for role in UserRole]
-
-
-class DuplicatePhoneError(Exception):
-    """A user with this phone already exists."""
-
-
-async def create_user(session: AsyncSession, phone: str, role: str, password: str) -> User:
-    """Validate and INSERT a staff user; return the persisted row.
-
-    The phone is trimmed (login trims too, spec §2.3); the password runs
-    through ``validate_password`` (policy gate → trimmed value) before
-    hashing. Raises ``DuplicatePhoneError`` when the phone is taken and
-    ``PasswordPolicyError`` when the password fails the policy (in which
-    case nothing is inserted).
-    """
-    phone = phone.strip()
-    existing = (await session.execute(select(User).where(User.phone == phone))).scalar_one_or_none()
-    if existing is not None:
-        raise DuplicatePhoneError(phone)
-
-    password = validate_password(password)
-    user = User(
-        phone=phone,
-        role=role,
-        password_hash=hash_password(password),
-    )
-    session.add(user)
-    await session.flush()
-    return user
 
 
 def _default_prompt(_prompt: str) -> str:  # pragma: no cover — needs a tty
@@ -122,12 +93,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run_create_user(database_url: str, args: argparse.Namespace) -> int:
-    """Connect, prompt, INSERT, disconnect. Returns the process exit code."""
+    """Connect, prompt, run the ``create_user`` scenario, disconnect.
+
+    Returns the process exit code. The scenario owns the transaction —
+    ONE commit for the user row + its UserSettings defaults (GH #319).
+    """
     manager = DBManager(database_url)
     try:
         async with manager.async_session() as session:
             try:
-                user = await create_user(session, args.phone, args.role, prompt_password())
+                user = await create_user_scenario(
+                    None,  # selfless @transactional slot (usecases convention)
+                    db_session=session,
+                    phone=args.phone,
+                    role=args.role,
+                    password=prompt_password(),
+                )
             except DuplicatePhoneError:
                 await session.rollback()
                 print(
@@ -135,7 +116,6 @@ async def _run_create_user(database_url: str, args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            await session.commit()
         print(f"Создан пользователь {user.phone} (роль: {user.role}).")
         return 0
     finally:

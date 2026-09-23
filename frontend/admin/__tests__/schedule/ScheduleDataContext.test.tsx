@@ -44,7 +44,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     deleteActivityWithExpected: vi.fn(),
     copyWeek: vi.fn(),
     getUserSettings: vi.fn(),
-    createUserSettings: vi.fn(),
     patchUserSettings: vi.fn(),
   };
 });
@@ -80,7 +79,6 @@ import {
   deleteActivityWithExpected,
   copyWeek,
   getUserSettings,
-  createUserSettings,
   patchUserSettings,
   ApiError,
 } from '@memo/api-client';
@@ -390,7 +388,6 @@ function renderDataProvider(opts: DataProviderOpts = {}) {
     show_archived_masters: opts.showArchivedMasters ?? true,
     show_archived_locations: opts.showArchivedLocations ?? false,
   } as never);
-  vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
   vi.mocked(patchUserSettings).mockResolvedValue({} as never);
 
   const utils = render(
@@ -430,7 +427,6 @@ function renderWithSchedule(children: React.ReactNode) {
     show_archived_masters: true,
     show_archived_locations: false,
   } as never);
-  vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
   vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   const utils = render(
     <QueryClientProvider client={queryClient}>

@@ -32,9 +32,11 @@ const DEFAULT_SETTINGS: UserSettings = {
 };
 
 // GH #247 §3.8/§4.6: user-settings are session-scoped — the server derives
-// the user, so GET/PUT/PATCH carry no user id. The POST create still requires
-// user_id backend-side (§3.8 left POST untouched), so the create body carries
-// the session user's id. Loading is auth-gated: the API is only touched once
+// the user, so GET/PUT/PATCH carry no user id. GH #319 §5.6: the read
+// self-heals server-side (get-or-create) — the «GET error → POST create»
+// fallback is gone; the localStorage cache is a first-render accelerator and
+// is always overwritten by any successful GET response (incl. defaults after
+// a DELETE reset). Loading is auth-gated: the API is only touched once
 // AuthContext reports `authenticated`.
 
 function loadFromStorage(): UserSettings | null {
@@ -85,63 +87,32 @@ export function UserSettingsProvider({ children }: { children: React.ReactNode }
 
       // 2. Sync from backend (when API is available)
       try {
-        const { getUserSettings, createUserSettings } = await import('@memo/api-client');
-        try {
-          const remote = await getUserSettings();
-          const remoteSettings: UserSettings = {
-            theme: remote.theme as 'light' | 'dark',
-            language: remote.language as 'ru' | 'en',
-            // GH #266 Gap C: wire field renamed column_order_masters →
-            // column_order_staff (migration step 7). Internal name stays
-            // `columnOrderMasters` — the schedule UI «Мастер» column term
-            // is unchanged (D2); only the persisted key moved.
-            columnOrderMasters: remote.column_order_staff,
-            columnOrderLocations: remote.column_order_locations,
-            // GH #267: archived-visibility toggles.
-            showArchivedMasters: remote.show_archived_masters,
-            showArchivedLocations: remote.show_archived_locations,
-          };
-          if (mountedRef.current) {
-            setSettings(remoteSettings);
-            saveToStorage(remoteSettings);
-            setReady(true);
-          }
-        } catch {
-          // No remote settings — create defaults if nothing cached
-          if (!cached && mountedRef.current) {
-            try {
-              const created = await createUserSettings({
-                user_id: user?.id,
-                theme: DEFAULT_SETTINGS.theme,
-                language: DEFAULT_SETTINGS.language,
-                // GH #266 Gap C: renamed wire key (column_order_staff).
-                column_order_staff: DEFAULT_SETTINGS.columnOrderMasters,
-                column_order_locations: DEFAULT_SETTINGS.columnOrderLocations,
-                // GH #267: archived-visibility defaults (masters visible,
-                // locations hidden — mirrors backend defaults since b0d17bb).
-                show_archived_masters: DEFAULT_SETTINGS.showArchivedMasters,
-                show_archived_locations: DEFAULT_SETTINGS.showArchivedLocations,
-              });
-              const createdSettings: UserSettings = {
-                theme: created.theme as 'light' | 'dark',
-                language: created.language as 'ru' | 'en',
-                columnOrderMasters: created.column_order_staff,
-                columnOrderLocations: created.column_order_locations,
-                showArchivedMasters: created.show_archived_masters,
-                showArchivedLocations: created.show_archived_locations,
-              };
-              if (mountedRef.current) {
-                setSettings(createdSettings);
-                saveToStorage(createdSettings);
-              }
-            } catch {
-              // Backend unavailable — use defaults
-            }
-            if (mountedRef.current) setReady(true);
-          }
+        const { getUserSettings } = await import('@memo/api-client');
+        const remote = await getUserSettings();
+        const remoteSettings: UserSettings = {
+          theme: remote.theme as 'light' | 'dark',
+          language: remote.language as 'ru' | 'en',
+          // GH #266 Gap C: wire field renamed column_order_masters →
+          // column_order_staff (migration step 7). Internal name stays
+          // `columnOrderMasters` — the schedule UI «Мастер» column term
+          // is unchanged (D2); only the persisted key moved.
+          columnOrderMasters: remote.column_order_staff,
+          columnOrderLocations: remote.column_order_locations,
+          // GH #267: archived-visibility toggles.
+          showArchivedMasters: remote.show_archived_masters,
+          showArchivedLocations: remote.show_archived_locations,
+        };
+        if (mountedRef.current) {
+          setSettings(remoteSettings);
+          saveToStorage(remoteSettings);
+          setReady(true);
         }
       } catch {
-        // api-client not available yet — use localStorage or defaults
+        // GH #319 §5.6: read self-heals server-side (get-or-create) — the old
+        // «GET error → POST create» fallback is gone. On any failure (API
+        // unreachable, api-client not loaded yet) stay on the cache
+        // (first-render accelerator) or defaults; the cache stays subordinate
+        // to any successful GET response.
         if (mountedRef.current) setReady(true);
       }
     }

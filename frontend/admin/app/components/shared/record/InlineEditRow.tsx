@@ -26,7 +26,7 @@ export interface InlineEditRowProps<T extends { id: string | null }, F> {
     row: T;
     formState: F;
     isNew: boolean;
-    handleChange: (field: keyof F, value: any) => void;
+    handleChange: (field: keyof F, value: F[keyof F]) => void;
   }) => Record<string, React.ReactNode>;
   columns: Column[];
   onAdd: (data: F) => Promise<T | undefined>;

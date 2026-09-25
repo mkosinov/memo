@@ -15,11 +15,10 @@ const DEPS_CHOICE: DependencyNode[] = [
 // ─── Mock child components ────────────────────────────────────────────────
 
 vi.mock('../app/(main)/clients/components/ClientInfoTab', () => ({
-  ClientInfoTab: ({ client, onSave, onDelete }: any) => (
+  ClientInfoTab: ({ client, onSave }: any) => (
     <div data-testid="client-info-tab">
       <span data-testid="info-client-name">{client?.name}</span>
       <button data-testid="info-save" onClick={() => onSave({ name: 'updated', phone: null, email: null, channel: null })}>Save</button>
-      <button data-testid="info-delete" onClick={onDelete}>Delete</button>
     </div>
   ),
 }));
@@ -321,14 +320,14 @@ describe('ClientCardModal', () => {
     });
   });
 
-  it('ClientInfoTab onDelete triggers the DeleteDialog flow (no window.confirm)', async () => {
+  it('footer «Удалить» with 409 + dependencies triggers the DeleteDialog flow (no window.confirm)', async () => {
     deleteHook.mutateAsync = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
     deleteHook.dependencies = DEPS_CHOICE;
     const onClose = vi.fn();
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
-    fireEvent.click(screen.getByTestId('info-delete'));
+    fireEvent.click(screen.getByText('Удалить'));
 
     await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
     // 409 + dependencies → DeleteDialog opens
@@ -497,8 +496,19 @@ describe('ClientCardModal', () => {
   describe('create mode', () => {
     it('calls onClientCreated instead of onClose after successful create', async () => {
       const onClientCreated = vi.fn();
-      const newClient = { ...mockClientWithStats, id: 'new-c1', name: 'Новый' };
-      createHook.mutateAsync = vi.fn().mockResolvedValue(newClient);
+      // createClient returns ClientResponse — WITHOUT stats fields (#301: the
+      // modal must complete the shape with honest zeros, never `as any`).
+      const createdResponse = {
+        id: 'new-c1',
+        name: 'Новый',
+        phone: null,
+        email: null,
+        channel: null,
+        created_at: '2026-01-01T00:00:00',
+        updated_at: '2026-01-01T00:00:00',
+        archived: false,
+      };
+      createHook.mutateAsync = vi.fn().mockResolvedValue(createdResponse);
 
       render(
         <ClientCardModal
@@ -516,7 +526,14 @@ describe('ClientCardModal', () => {
       await waitFor(() => {
         expect(createHook.mutateAsync).toHaveBeenCalled();
       });
-      expect(onClientCreated).toHaveBeenCalledWith(newClient);
+      // Honest zeros: a brand-new client has no records/payments history yet.
+      expect(onClientCreated).toHaveBeenCalledWith({
+        ...createdResponse,
+        records_count: 0,
+        last_record: null,
+        total_paid: 0,
+        missed_records: 0,
+      });
     });
   });
 });

@@ -9,11 +9,13 @@
 // plate already shows avatar + name. D9: «Аноним» fallback, never the phone.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Moon, Sun, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { MyDataModal } from '@/app/components/modal/MyDataModal';
 import { PasswordModal } from '@/app/components/modal/PasswordModal';
+import { toAvatarSrc } from '@/lib/avatar';
 
 // GH #143: hand-written SVGs replaced by lucide-react. Sizing contract: the
 // previous inline SVGs were 14×14, so size={14} keeps the popup geometry.
@@ -130,11 +132,17 @@ export function UserMenu({ collapsed }: UserMenuProps) {
     'w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs text-white/70 ' +
     'hover:bg-white/10 hover:text-white transition-colors';
 
+  // GH #301: optimized Image (spec §4.3 — a 5 MB portrait must arrive
+  // compressed at the 28 px cell). toAvatarSrc absolutizes the RELATIVE
+  // served path (/api/v1/files/avatar/…) against the API base so the
+  // optimizer can fetch it cross-host (remotePatterns in next.config.mjs).
   const avatar = avatarUrl ? (
-    <img
+    <Image
       data-testid="user-avatar"
-      src={avatarUrl}
+      src={toAvatarSrc(avatarUrl)}
       alt=""
+      width={28}
+      height={28}
       className="w-7 h-7 rounded-full object-cover flex-shrink-0"
     />
   ) : (

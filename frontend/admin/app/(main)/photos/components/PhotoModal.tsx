@@ -382,6 +382,9 @@ export function PhotoModal({
           {/* Image preview */}
           {mode === 'edit' && photo?.filename && (
             <div className="rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center" style={{ maxHeight: '300px' }}>
+              {/* GH #301: stays <img> — arbitrary external hosts (spec §4.3),
+                  outside the next/image optimizer whitelist. */}
+              {/* eslint-disable-next-line @next/next/no-img-element -- произвольные внешние хосты (spec §4.3), вне remotePatterns */}
               <img
                 src={photo.filename}
                 alt={photo.filename}

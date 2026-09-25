@@ -98,7 +98,7 @@ function getDisplayText(
 export default function RemoteSearchSelect<
   Q extends SearchQuery = string,
 >({
-  value,
+  value: _value,
   onChange,
   onSelectItem,
   onSearch,

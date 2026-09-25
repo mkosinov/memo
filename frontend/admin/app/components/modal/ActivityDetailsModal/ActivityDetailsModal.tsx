@@ -271,7 +271,6 @@ function ExistingActivityContent({
     if (activeTab === 'new-record') {
       return (
         <NewRecordTab
-          activity={activity}
           serviceTariffs={serviceTariffs}
           onSubmit={handleNewRecordSubmit}
           showToast={showToast}

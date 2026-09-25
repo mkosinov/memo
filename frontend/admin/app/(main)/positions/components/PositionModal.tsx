@@ -70,7 +70,7 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── PositionModal ────────────────────────────────────────────────── */
 
 export function PositionModal({
-  mode,
+  mode: _mode,
   position,
   onSubmit,
   onClose,

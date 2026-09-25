@@ -34,15 +34,13 @@ type RenderResult = ReturnType<typeof render>;
 function renderClientInfoTab(overrides?: {
   client?: ClientWithStats;
   onSave?: (data: Partial<ClientWithStats>) => Promise<void>;
-  onDelete?: () => void;
   onHasChanges?: (hasChanges: boolean) => void;
 }): RenderResult {
   const client = overrides?.client ?? mockClientWithStats;
   const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue(undefined);
-  const onDelete = overrides?.onDelete ?? vi.fn();
   const onHasChanges = overrides?.onHasChanges;
   return render(
-    <ClientInfoTab client={client} onSave={onSave} onDelete={onDelete} onHasChanges={onHasChanges} />
+    <ClientInfoTab client={client} onSave={onSave} onHasChanges={onHasChanges} />
   );
 }
 
@@ -50,21 +48,19 @@ function renderClientInfoTab(overrides?: {
 function renderClientInfoTabWithRef(overrides?: {
   client?: ClientWithStats;
   onSave?: (data: Partial<ClientWithStats>) => Promise<void>;
-  onDelete?: () => void;
   onHasChanges?: (hasChanges: boolean) => void;
 }) {
   const client = overrides?.client ?? mockClientWithStats;
   const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue(undefined);
-  const onDelete = overrides?.onDelete ?? vi.fn();
   const onHasChanges = overrides?.onHasChanges;
   render(
     <RefCapture>
       {(ref) => (
-        <ClientInfoTab client={client} onSave={onSave} onDelete={onDelete} onHasChanges={onHasChanges} ref={ref} />
+        <ClientInfoTab client={client} onSave={onSave} onHasChanges={onHasChanges} ref={ref} />
       )}
     </RefCapture>
   );
-  return { client, onSave, onDelete, getRef: () => testRefHandle };
+  return { client, onSave, getRef: () => testRefHandle };
 }
 
 describe('ClientInfoTab', () => {
@@ -166,7 +162,6 @@ describe('ClientInfoTab', () => {
       <ClientInfoTab
         client={newClient}
         onSave={vi.fn()}
-        onDelete={vi.fn()}
       />
     );
     const input = screen.getByLabelText('Имя') as HTMLInputElement;

@@ -35,6 +35,15 @@
 # Выбор карточки: gh_board.py pick-next "$HOST_LABEL" (Next Up → первая
 # Ready to IMPL; бюджет слотов своей машины по полю host; пропуск карточек
 # со свежими записями и с незакрытыми depends-on из тела issue).
+# Сверка стейл-карточек (2026-09-22): раз в цикл, ДО pick-next,
+# gh_board.py reconcile "$HOST_LABEL" чинит два класса: (1) закрытый issue в
+# In IMPL/PR (G7) — потерянный финальный флип → In-main/Not planned + строка
+# merged; (2) In IMPL своего хоста с ЗАВИСШИМ прогоном — сессии в opencode.db
+# молчат больше часа (CLI opencode run — лишь клиент-наблюдатель, он
+# отваливается, пока сессия работает в сервере) → запись BLOCKED в
+# auto-impl log (отдых CLAIM_TTL_HOURS, анти-crash-loop) + назад в
+# Ready to IMPL. Проверка живости — по базе сессий, поэтому пункт 2 работает
+# только из контейнера; с хоста (macOS) он пропускается.
 # Владение карточкой = поле host на борде (единственный источник, 2026-09-20;
 # CLAIM-комментарии больше не пишутся). Комментарий «auto-impl log:» на issue
 # остаётся каналом BLOCKED-событий менеджера; свежая BLOCKED-запись —
@@ -77,6 +86,10 @@ while true; do
     if [ "$(cat "$STATE/auto-impl-max" 2>/dev/null || true)" = "0" ]; then
         continue
     fi
+
+    # сверка стейл-карточек ДО выбора: чинить надо до захвата новых
+    python3 .opencode/scripts/gh_board.py reconcile "$HOST_LABEL" \
+        || echo "$(date -Is) reconcile failed"
 
     PICK=$(python3 .opencode/scripts/gh_board.py pick-next "$HOST_LABEL") || { echo "$(date -Is) board query failed: $PICK"; continue; }
     case "$PICK" in

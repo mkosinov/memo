@@ -20,10 +20,14 @@
  *
  * Avatar note (S3): the served portrait URL is RELATIVE
  * (`/api/v1/files/avatar/…`) and the e2e stack splits the frontend
- * (SHARD_PORT) from the API (BACKEND_PORT) with no Next rewrite, so the
- * browser <img> cannot fetch the bytes cross-port. The assertion is therefore
- * DOM-level (the <img> carries the served src) + a direct backend GET proving
- * the file is stored and served — not a cross-origin pixel load.
+ * (SHARD_PORT) from the API (BACKEND_PORT) with no Next rewrite. Since GH
+ * #301 the preview flows through the next/image OPTIMIZER (spec §4.3):
+ * toAvatarSrc absolutizes the served path against the API base, so the DOM
+ * src is `/_next/image?url=<encoded absolute avatar URL>&…` and the browser
+ * CAN load the bytes through the optimizer (it fetches server-side,
+ * cross-port is fine — remotePatterns allows the API host). The assertion
+ * decodes the url param to prove the underlying served path, then a direct
+ * backend GET proves the file is stored and served.
  */
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type Page } from '@playwright/test';
@@ -288,13 +292,18 @@ test.describe('S3 — edit name + portrait, specialty read-only', () => {
         mimeType: 'image/png',
         buffer: PNG_BYTES,
       });
-      // The preview <img> appears carrying the served avatar path. (Bytes are
-      // not fetchable cross-port in the shard stack — assert the src, then
-      // prove storage/serving with a direct backend GET below.)
+      // The preview <img> appears via the next/image optimizer (GH #301):
+      // src is /_next/image?url=<absolutized avatar URL>. Decode the url
+      // param to get the served path (asserted + fetched from the backend
+      // below) and require the img to actually decode its pixels.
       const preview = page.locator('[data-testid="mydata-avatar-preview"]');
       await expect(preview).toBeVisible({ timeout: 10_000 });
       const src = await preview.getAttribute('src');
-      expect(src).toMatch(/^\/api\/v1\/files\/avatar\/.+\.png$/);
+      expect(src).toMatch(/^\/_next\/image\?url=/);
+      const servedPath = decodeURIComponent(
+        (src!.match(/[?&]url=([^&]+)/)?.[1] ?? ''),
+      );
+      expect(servedPath).toMatch(/^https?:\/\/.+\/api\/v1\/files\/avatar\/.+\.png$/);
 
       // ── Save → toast, plate updates without a reload ─────────────────────
       await page.locator('[data-testid="mydata-submit"]').click();
@@ -313,7 +322,7 @@ test.describe('S3 — edit name + portrait, specialty read-only', () => {
         .toMatchObject({ specialty });
 
       // ── The portrait file is stored AND publicly served by the backend ────
-      const served = await request.get(`${BACKEND}${src}`);
+      const served = await request.get(servedPath);
       expect(served.ok(), 'portrait must be served by the backend').toBeTruthy();
       expect(served.headers()['content-type']).toContain('image/');
 

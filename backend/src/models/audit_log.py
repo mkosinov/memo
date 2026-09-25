@@ -11,6 +11,7 @@ and the row itself remain.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,7 +44,7 @@ class AuditLog(Base):
         String(36), nullable=True,  # null for reorder
     )
     entity_label: Mapped[str] = mapped_column(String(255))
-    changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    changes: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         Index("ix_audit_logs_entity_entity_id", "entity", "entity_id"),

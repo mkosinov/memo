@@ -53,6 +53,20 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
     ``client_tags``/``visitor_tags``/``record_tags``/``photo_tags``) —
     all cascade, NON-auto (user choice, full records-flavor dialog with
     items); the parent rows themselves always survive.
+  * ``Visit``/``Payment``/``UserSettings`` (GH #324, spec §3) — LEAVES:
+    no incoming FK edges → the empty matrix row (the key exists so the
+    routes↔matrix guard maps their DELETE routes; dry-run previews are
+    structurally empty).
+  * ``Photo`` (GH #324) — ``photo_tags`` cascade NON-auto «Тег»: the
+    PHOTO's side of the #318 edge (the tag unlink is the photo delete's
+    visible main effect; the tags themselves survive).
+  * ``Visitor`` (GH #324) — ``visits`` cascade NON-auto (``visit.visitor_id``
+    is nullable — the matrix mirrors the column but pins the single
+    action; visits die with the visitor, user decision 21.09) +
+    ``visitor_tags`` cascade AUTO (the visitor's own tags die with him).
+  * ``Position`` (GH #324) — ``staff_positions`` cascade NON-auto
+    «Сотрудник»: the POSITION's side of the #266 edge (the same join is
+    auto in FK_MATRIX[Staff] — the perspective rule); staff cards survive.
 """
 
 from __future__ import annotations
@@ -74,7 +88,7 @@ from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.photo import Photo, photo_tags
-from src.models.position import staff_positions
+from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
@@ -92,6 +106,7 @@ from src.models.tag import (
 from src.models.tariff import Tariff
 from src.models.user import User
 from src.models.user_profile import UserProfile
+from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.services.user_settings import UserSettingsService
@@ -174,92 +189,175 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         # an FK-level ON DELETE CASCADE, but the service-level handler keeps
         # the executor deterministic regardless of PRAGMA state.
         FKDependency(
-            entity="activities", relation="Активность", nullable=False,
-            action="block", auto=False, allowed_actions=[], message=_BLOCK_MESSAGE,
+            entity="activities",
+            relation="Активность",
+            nullable=False,
+            action="block",
+            auto=False,
+            allowed_actions=[],
+            message=_BLOCK_MESSAGE,
         ),
         FKDependency(
-            entity="users", relation="Пользователь", nullable=True,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="users",
+            relation="Пользователь",
+            nullable=True,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="masters", relation="Мастер", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="masters",
+            relation="Мастер",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="master_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="master_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="staff_positions", relation="Должность", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="staff_positions",
+            relation="Должность",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Location: [
         FKDependency(
-            entity="activities", relation="Активность", nullable=False,
-            action="block", auto=False, allowed_actions=[], message=_BLOCK_MESSAGE,
+            entity="activities",
+            relation="Активность",
+            nullable=False,
+            action="block",
+            auto=False,
+            allowed_actions=[],
+            message=_BLOCK_MESSAGE,
         ),
         FKDependency(
-            entity="location_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="location_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="photos", relation="Фото", nullable=True,
-            action="nullify", auto=True, allowed_actions=["nullify"],
+            entity="photos",
+            relation="Фото",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
         ),
     ],
     Service: [
         FKDependency(
-            entity="activities", relation="Активность", nullable=False,
-            action="block", auto=False, allowed_actions=[], message=_BLOCK_MESSAGE,
+            entity="activities",
+            relation="Активность",
+            nullable=False,
+            action="block",
+            auto=False,
+            allowed_actions=[],
+            message=_BLOCK_MESSAGE,
         ),
         FKDependency(
-            entity="tariffs", relation="Тариф", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="tariffs",
+            relation="Тариф",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="photos", relation="Фото", nullable=True,
-            action="nullify", auto=True, allowed_actions=["nullify"],
+            entity="photos",
+            relation="Фото",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
         ),
         FKDependency(
-            entity="service_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="service_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="service_materials", relation="Материал", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="service_materials",
+            relation="Материал",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Client: [
         FKDependency(
-            entity="records", relation="Запись", nullable=True,
-            action="nullify", auto=False, allowed_actions=["nullify"],
+            entity="records",
+            relation="Запись",
+            nullable=True,
+            action="nullify",
+            auto=False,
+            allowed_actions=["nullify"],
         ),
         FKDependency(
-            entity="visitors", relation="Посетитель", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="visitors",
+            relation="Посетитель",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="client_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="client_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="photos", relation="Фото", nullable=True,
-            action="nullify", auto=True, allowed_actions=["nullify"],
+            entity="photos",
+            relation="Фото",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
         ),
     ],
     Record: [
         FKDependency(
-            entity="visits", relation="Посещение", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="visits",
+            relation="Посещение",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="payments", relation="Платёж", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="payments",
+            relation="Платёж",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="record_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="record_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Activity: [
@@ -268,22 +366,38 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         # only; the generic resolver never executes an activity delete
         # (no handlers in NULLIFY_HANDLERS/CASCADE_HANDLERS).
         FKDependency(
-            entity="records", relation="Запись", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="records",
+            relation="Запись",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="photos", relation="Фото", nullable=True,
-            action="nullify", auto=True, allowed_actions=["nullify"],
+            entity="photos",
+            relation="Фото",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
         ),
         FKDependency(
-            entity="activity_tags", relation="Тег", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="activity_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Material: [
         FKDependency(
-            entity="service_materials", relation="Услуга", nullable=False,
-            action="cascade", auto=True, allowed_actions=["cascade"],
+            entity="service_materials",
+            relation="Услуга",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Tag: [
@@ -292,36 +406,127 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         # perspective rule — auto-ness is a property of the matrix row).
         # The parent rows always survive; only the links die.
         FKDependency(
-            entity="service_tags", relation="Услуга", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="service_tags",
+            relation="Услуга",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="activity_tags", relation="Занятие", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="activity_tags",
+            relation="Занятие",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="master_tags", relation="Мастер", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="master_tags",
+            relation="Мастер",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="location_tags", relation="Локация", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="location_tags",
+            relation="Локация",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="client_tags", relation="Клиент", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="client_tags",
+            relation="Клиент",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="visitor_tags", relation="Посетитель", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="visitor_tags",
+            relation="Посетитель",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="record_tags", relation="Запись", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="record_tags",
+            relation="Запись",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
         FKDependency(
-            entity="photo_tags", relation="Фото", nullable=False,
-            action="cascade", auto=False, allowed_actions=["cascade"],
+            entity="photo_tags",
+            relation="Фото",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
+        ),
+    ],
+    # GH #324 D1 (spec §3): the six delete-family subjects. Visit/Payment/
+    # UserSettings are LEAVES (no incoming FK edges — the empty list; the
+    # key exists so the routes↔matrix guard maps their DELETE routes).
+    Visit: [],
+    Payment: [],
+    UserSettings: [],
+    Photo: [
+        # The photo's side of the photo_tags edge — the SAME join table as
+        # (Tag, "photo_tags") seen from the other side (the perspective
+        # rule: a table legitimately appears in several matrices with
+        # different auto-ness; the registry key includes the MODEL, so
+        # these are two distinct dispatch pairs, NOT a duplicate).
+        FKDependency(
+            entity="photo_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
+        ),
+    ],
+    Visitor: [
+        # ``visit.visitor_id`` is NULLABLE (anonymous visits) — the matrix
+        # mirrors the column (nullable=True), but the action is pinned
+        # explicitly: allowed_actions=["cascade"] is the single allowed
+        # action, overriding the «nullable ⇒ nullify viable» heuristic
+        # (user decision 21.09: visits die with the visitor).
+        FKDependency(
+            entity="visits",
+            relation="Посещение",
+            nullable=True,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
+        ),
+        # The visitor's OWN tags die with him (auto) — the same join table
+        # is NON-auto in FK_MATRIX[Tag] (perspective rule).
+        FKDependency(
+            entity="visitor_tags",
+            relation="Тег",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
+        ),
+    ],
+    Position: [
+        # The position's side of the staff_positions edge — stripping it
+        # from staff IS the visible main effect (NON-auto; the SAME join
+        # table is AUTO in FK_MATRIX[Staff] — the perspective rule again).
+        FKDependency(
+            entity="staff_positions",
+            relation="Сотрудник",
+            nullable=False,
+            action="cascade",
+            auto=False,
+            allowed_actions=["cascade"],
         ),
     ],
 }
@@ -409,16 +614,13 @@ async def _count_m_activities(s: AsyncSession, entity_id: str) -> _CountResult:
 
 
 async def _count_m_users(s: AsyncSession, entity_id: str) -> _CountResult:
-    r = await s.execute(
-        select(func.count()).select_from(User).where(User.staff_id == entity_id)
-    )
+    r = await s.execute(select(func.count()).select_from(User).where(User.staff_id == entity_id))
     return r.scalar_one(), None
 
 
 async def _count_m_master_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(master_tags)
-        .where(master_tags.c.master_id == entity_id)
+        select(func.count()).select_from(master_tags).where(master_tags.c.master_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -426,15 +628,15 @@ async def _count_m_master_tags(s: AsyncSession, entity_id: str) -> _CountResult:
 async def _count_m_masters(s: AsyncSession, entity_id: str) -> _CountResult:
     """GH #266: the 1:0..1 extension row — 1 when the card is a master."""
     r = await s.execute(
-        select(func.count()).select_from(Master)
-        .where(Master.staff_id == entity_id)
+        select(func.count()).select_from(Master).where(Master.staff_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_m_staff_positions(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(staff_positions)
+        select(func.count())
+        .select_from(staff_positions)
         .where(staff_positions.c.staff_id == entity_id)
     )
     return r.scalar_one(), None
@@ -449,7 +651,8 @@ async def _count_l_activities(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_l_location_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(location_tags)
+        select(func.count())
+        .select_from(location_tags)
         .where(location_tags.c.location_id == entity_id)
     )
     return r.scalar_one(), None
@@ -485,15 +688,15 @@ async def _count_s_photos(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_s_service_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(service_tags)
-        .where(service_tags.c.service_id == entity_id)
+        select(func.count()).select_from(service_tags).where(service_tags.c.service_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_s_service_materials(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(ServiceMaterial)
+        select(func.count())
+        .select_from(ServiceMaterial)
         .where(ServiceMaterial.service_id == entity_id)
     )
     return r.scalar_one(), None
@@ -501,7 +704,8 @@ async def _count_s_service_materials(s: AsyncSession, entity_id: str) -> _CountR
 
 async def _count_mat_service_materials(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(ServiceMaterial)
+        select(func.count())
+        .select_from(ServiceMaterial)
         .where(ServiceMaterial.material_id == entity_id)
     )
     return r.scalar_one(), None
@@ -535,23 +739,18 @@ async def _count_c_visitors(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_c_client_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(client_tags)
-        .where(client_tags.c.client_id == entity_id)
+        select(func.count()).select_from(client_tags).where(client_tags.c.client_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_c_photos(s: AsyncSession, entity_id: str) -> _CountResult:
-    r = await s.execute(
-        select(func.count()).select_from(Photo).where(Photo.client_id == entity_id)
-    )
+    r = await s.execute(select(func.count()).select_from(Photo).where(Photo.client_id == entity_id))
     return r.scalar_one(), None
 
 
 async def _count_r_visits(s: AsyncSession, entity_id: str) -> _CountResult:
-    r = await s.execute(
-        select(func.count()).select_from(Visit).where(Visit.record_id == entity_id)
-    )
+    r = await s.execute(select(func.count()).select_from(Visit).where(Visit.record_id == entity_id))
     return r.scalar_one(), None
 
 
@@ -564,8 +763,7 @@ async def _count_r_payments(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_r_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(record_tags)
-        .where(record_tags.c.record_id == entity_id)
+        select(func.count()).select_from(record_tags).where(record_tags.c.record_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -586,7 +784,8 @@ async def _count_a_photos(s: AsyncSession, entity_id: str) -> _CountResult:
 
 async def _count_a_activity_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(activity_tags)
+        select(func.count())
+        .select_from(activity_tags)
         .where(activity_tags.c.activity_id == entity_id)
     )
     return r.scalar_one(), None
@@ -597,64 +796,100 @@ async def _count_a_activity_tags(s: AsyncSession, entity_id: str) -> _CountResul
 
 async def _count_t_service_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(service_tags)
-        .where(service_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(service_tags).where(service_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_activity_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(activity_tags)
-        .where(activity_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(activity_tags).where(activity_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_master_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(master_tags)
-        .where(master_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(master_tags).where(master_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_location_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(location_tags)
-        .where(location_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(location_tags).where(location_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_client_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(client_tags)
-        .where(client_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(client_tags).where(client_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_visitor_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(visitor_tags)
-        .where(visitor_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(visitor_tags).where(visitor_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_record_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(record_tags)
-        .where(record_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(record_tags).where(record_tags.c.tag_id == entity_id)
     )
     return r.scalar_one(), None
 
 
 async def _count_t_photo_tags(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(
-        select(func.count()).select_from(photo_tags)
-        .where(photo_tags.c.tag_id == entity_id)
+        select(func.count()).select_from(photo_tags).where(photo_tags.c.tag_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+# ─── GH #324: the six delete-family subjects' counters ─────────────────────────
+# Visit/Payment/UserSettings are leaves — FK_MATRIX rows are empty, so no
+# counters exist for them (collect_dependencies returns [] before dispatch).
+
+
+async def _count_p_photo_tags(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Photo → photo_tags: join rows where photo_id (the photo's side of
+    the #318 edge — auto-ness belongs to the matrix row)."""
+    r = await s.execute(
+        select(func.count()).select_from(photo_tags).where(photo_tags.c.photo_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_v_visits(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Visitor → visits: the visitor's rows via the NULLABLE
+    ``visit.visitor_id`` (anonymous visits — visitor_id IS NULL — are not
+    anybody's dependency and stay out of the count)."""
+    r = await s.execute(
+        select(func.count()).select_from(Visit).where(Visit.visitor_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_v_visitor_tags(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Visitor → visitor_tags: join rows where visitor_id (auto — the
+    visitor's own tags die with him)."""
+    r = await s.execute(
+        select(func.count()).select_from(visitor_tags).where(visitor_tags.c.visitor_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_pos_staff_positions(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Position → staff_positions: join rows where position_id (the
+    position's side of the #266 edge)."""
+    r = await s.execute(
+        select(func.count())
+        .select_from(staff_positions)
+        .where(staff_positions.c.position_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -693,6 +928,12 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Tag, "visitor_tags"): _count_t_visitor_tags,
     (Tag, "record_tags"): _count_t_record_tags,
     (Tag, "photo_tags"): _count_t_photo_tags,
+    # GH #324: the photo/visitor/position sides of the same join tables
+    # (leaves have no counters — their matrix rows are empty).
+    (Photo, "photo_tags"): _count_p_photo_tags,
+    (Visitor, "visits"): _count_v_visits,
+    (Visitor, "visitor_tags"): _count_v_visitor_tags,
+    (Position, "staff_positions"): _count_pos_staff_positions,
 }
 
 
@@ -743,8 +984,7 @@ async def _items_r_visits(s: AsyncSession, entity_id: str) -> list[DependencyIte
 async def _items_r_payments(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
     """Payment label «{amount}, {method}»; ``method IS NULL`` → «{amount}, —»."""
     r = await s.execute(
-        select(Payment.id, Payment.amount, Payment.method)
-        .where(Payment.record_id == entity_id)
+        select(Payment.id, Payment.amount, Payment.method).where(Payment.record_id == entity_id)
     )
     return [
         DependencyItem(
@@ -762,9 +1002,7 @@ async def _items_r_record_tags(s: AsyncSession, entity_id: str) -> list[Dependen
         .join(Tag, record_tags.c.tag_id == Tag.id)
         .where(record_tags.c.record_id == entity_id)
     )
-    return [
-        DependencyItem(id=row.tag_id, label=row.title) for row in r.all()
-    ]
+    return [DependencyItem(id=row.tag_id, label=row.title) for row in r.all()]
 
 
 async def _items_a_records(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
@@ -931,6 +1169,84 @@ async def _items_t_photo_tags(s: AsyncSession, entity_id: str) -> list[Dependenc
     return [DependencyItem(id=row.id, label=row.filename) for row in r.all()]
 
 
+# ─── GH #324: the six subjects' label builders — one {id, label} per dep ────────
+# Mirror of the #318 tag-side builders with the perspective flipped: the
+# item is the row that will be affected BY the subject's delete. PII
+# boundary unchanged — titles/names/dates only, no phones.
+
+
+async def _items_p_photo_tags(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Photo → photo_tags: Tag label «{title}» per link row — id =
+    ``tag_id`` within the photo's scope (the same id convention the
+    ``expected`` id-collector uses)."""
+    r = await s.execute(
+        select(Tag.id, Tag.title)
+        .join(photo_tags, Tag.id == photo_tags.c.tag_id)
+        .where(photo_tags.c.photo_id == entity_id)
+    )
+    return [DependencyItem(id=row.id, label=row.title) for row in r.all()]
+
+
+async def _items_v_visits(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Visitor → visits label «{service.title}, {price}» — the records
+    one-liner (_items_r_visits style) via ``tariff_id``; a tariff-less
+    visit degrades to «Без тарифа, {price}». Id = ``visit.id`` (the same
+    id the ``expected`` commit verifies)."""
+    r = await s.execute(
+        select(
+            Visit.id.label("visit_id"),
+            Visit.price.label("price"),
+            Tariff.id.label("tariff_id"),
+            Service.title.label("service_title"),
+        )
+        .outerjoin(Tariff, Visit.tariff_id == Tariff.id)
+        .outerjoin(Service, Tariff.service_id == Service.id)
+        .where(Visit.visitor_id == entity_id)
+    )
+    items: list[DependencyItem] = []
+    for row in r.all():
+        title = (
+            row.service_title
+            if row.tariff_id is not None and row.service_title is not None
+            else _NO_TARIFF_LABEL
+        )
+        items.append(DependencyItem(id=row.visit_id, label=f"{title}, {row.price}"))
+    return items
+
+
+async def _items_v_visitor_tags(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Visitor → visitor_tags: Tag label «{title}» per link row — id =
+    ``tag_id`` (auto dep, but the node still carries items — the tree is
+    complete; the client filters by ``auto``, not by items presence)."""
+    r = await s.execute(
+        select(Tag.id, Tag.title)
+        .join(visitor_tags, Tag.id == visitor_tags.c.tag_id)
+        .where(visitor_tags.c.visitor_id == entity_id)
+    )
+    return [DependencyItem(id=row.id, label=row.title) for row in r.all()]
+
+
+async def _items_pos_staff_positions(
+    s: AsyncSession,
+    entity_id: str,
+) -> list[DependencyItem]:
+    """Position → staff_positions: Staff label «{first_name} {last_name}»
+    per link row — id = ``staff_id`` (the id the ``expected`` commit
+    verifies; the same two-name form as _items_t_master_tags)."""
+    r = await s.execute(
+        select(Staff.id, Staff.first_name, Staff.last_name)
+        .join(staff_positions, Staff.id == staff_positions.c.staff_id)
+        .where(staff_positions.c.position_id == entity_id)
+    )
+    return [
+        DependencyItem(
+            id=row.id,
+            label=f"{row.first_name} {row.last_name}",
+        )
+        for row in r.all()
+    ]
+
+
 _ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
     (Record, "visits"): _items_r_visits,
     (Record, "payments"): _items_r_payments,
@@ -951,6 +1267,13 @@ _ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
     (Tag, "visitor_tags"): _items_t_visitor_tags,
     (Tag, "record_tags"): _items_t_record_tags,
     (Tag, "photo_tags"): _items_t_photo_tags,
+    # ─── GH #324: the six subjects' sides ────────────────────────────────
+    # (leaves have no deps — no builders. Photo/Position → the OTHER side
+    # of the #318 join edges; Visitor → visits one-liners + own tags.)
+    (Photo, "photo_tags"): _items_p_photo_tags,
+    (Visitor, "visits"): _items_v_visits,
+    (Visitor, "visitor_tags"): _items_v_visitor_tags,
+    (Position, "staff_positions"): _items_pos_staff_positions,
 }
 
 
@@ -966,7 +1289,8 @@ type _ChildrenFn = Callable[[AsyncSession, str], Awaitable[list[DependencyNode]]
 
 
 async def _activity_children_nodes(
-    session: AsyncSession, activity_id: str,
+    session: AsyncSession,
+    activity_id: str,
 ) -> list[DependencyNode]:
     """Second-level nodes for an activity: aggregated visits + payments.
 
@@ -977,9 +1301,7 @@ async def _activity_children_nodes(
     appended after the matrix nodes, so the client-side auto-filter
     keeps the dialog order records → visits → payments.
     """
-    r = await session.execute(
-        select(Record.id).where(Record.activity_id == activity_id)
-    )
+    r = await session.execute(select(Record.id).where(Record.activity_id == activity_id))
     record_ids = list(r.scalars().all())
     if not record_ids:
         return []
@@ -1021,7 +1343,9 @@ _RECURSIVE_CHILDREN: dict[type[Base], _ChildrenFn] = {
 
 
 async def collect_dependencies(
-    session: AsyncSession, model: type, entity_id: str,
+    session: AsyncSession,
+    model: type,
+    entity_id: str,
 ) -> list[DependencyNode]:
     """Run COUNT queries for each FK relation in ``FK_MATRIX[model]``.
 
@@ -1110,9 +1434,7 @@ async def _ids_r_payments(s: AsyncSession, entity_id: str) -> list[str]:
 
 
 async def _ids_r_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(record_tags.c.tag_id).where(record_tags.c.record_id == entity_id)
-    )
+    r = await s.execute(select(record_tags.c.tag_id).where(record_tags.c.record_id == entity_id))
     return list(r.scalars().all())
 
 
@@ -1133,9 +1455,7 @@ async def _ids_a_photos(s: AsyncSession, entity_id: str) -> list[str]:
 
 async def _ids_a_activity_tags(s: AsyncSession, entity_id: str) -> list[str]:
     r = await s.execute(
-        select(activity_tags.c.tag_id).where(
-            activity_tags.c.activity_id == entity_id
-        )
+        select(activity_tags.c.tag_id).where(activity_tags.c.activity_id == entity_id)
     )
     return list(r.scalars().all())
 
@@ -1146,63 +1466,81 @@ async def _ids_a_activity_tags(s: AsyncSession, entity_id: str) -> list[str]:
 
 
 async def _ids_t_service_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(service_tags.c.service_id).where(service_tags.c.tag_id == entity_id)
-    )
+    r = await s.execute(select(service_tags.c.service_id).where(service_tags.c.tag_id == entity_id))
     return list(r.scalars().all())
 
 
 async def _ids_t_activity_tags(s: AsyncSession, entity_id: str) -> list[str]:
     r = await s.execute(
-        select(activity_tags.c.activity_id).where(
-            activity_tags.c.tag_id == entity_id
-        )
+        select(activity_tags.c.activity_id).where(activity_tags.c.tag_id == entity_id)
     )
     return list(r.scalars().all())
 
 
 async def _ids_t_master_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(master_tags.c.master_id).where(master_tags.c.tag_id == entity_id)
-    )
+    r = await s.execute(select(master_tags.c.master_id).where(master_tags.c.tag_id == entity_id))
     return list(r.scalars().all())
 
 
 async def _ids_t_location_tags(s: AsyncSession, entity_id: str) -> list[str]:
     r = await s.execute(
-        select(location_tags.c.location_id).where(
-            location_tags.c.tag_id == entity_id
-        )
+        select(location_tags.c.location_id).where(location_tags.c.tag_id == entity_id)
     )
     return list(r.scalars().all())
 
 
 async def _ids_t_client_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(client_tags.c.client_id).where(client_tags.c.tag_id == entity_id)
-    )
+    r = await s.execute(select(client_tags.c.client_id).where(client_tags.c.tag_id == entity_id))
     return list(r.scalars().all())
 
 
 async def _ids_t_visitor_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(visitor_tags.c.visitor_id).where(
-            visitor_tags.c.tag_id == entity_id
-        )
-    )
+    r = await s.execute(select(visitor_tags.c.visitor_id).where(visitor_tags.c.tag_id == entity_id))
     return list(r.scalars().all())
 
 
 async def _ids_t_record_tags(s: AsyncSession, entity_id: str) -> list[str]:
-    r = await s.execute(
-        select(record_tags.c.record_id).where(record_tags.c.tag_id == entity_id)
-    )
+    r = await s.execute(select(record_tags.c.record_id).where(record_tags.c.tag_id == entity_id))
     return list(r.scalars().all())
 
 
 async def _ids_t_photo_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(photo_tags.c.photo_id).where(photo_tags.c.tag_id == entity_id))
+    return list(r.scalars().all())
+
+
+# ─── GH #324: the six subjects' id-collectors ───────────────────────────────────
+# Leaves (Visit/Payment/UserSettings) have no deps — no collectors. The
+# join tables have no single-column PK: a link row is identified by its
+# ``tag_id``/``staff_id`` within the owner's scope (the #318 convention).
+
+
+async def _ids_p_photo_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    """Photo → photo_tags: the link rows' ``tag_id`` values (the same id
+    convention as (Tag, "photo_tags") — mirrored, the other scope column)."""
+    r = await s.execute(select(photo_tags.c.tag_id).where(photo_tags.c.photo_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_v_visits(s: AsyncSession, entity_id: str) -> list[str]:
+    """Visitor → visits: ``visit.id`` collected by ``visitor_id`` — the
+    real row PK (visits are deleted rows, not join rows)."""
+    r = await s.execute(select(Visit.id).where(Visit.visitor_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_v_visitor_tags(s: AsyncSession, entity_id: str) -> list[str]:
+    """Visitor → visitor_tags: the link rows' ``tag_id`` values (auto dep —
+    still collected: the executor deletes the group and the ``expected``
+    commit carries it, spec §4)."""
+    r = await s.execute(select(visitor_tags.c.tag_id).where(visitor_tags.c.visitor_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_pos_staff_positions(s: AsyncSession, entity_id: str) -> list[str]:
+    """Position → staff_positions: the link rows' ``staff_id`` values."""
     r = await s.execute(
-        select(photo_tags.c.photo_id).where(photo_tags.c.tag_id == entity_id)
+        select(staff_positions.c.staff_id).where(staff_positions.c.position_id == entity_id)
     )
     return list(r.scalars().all())
 
@@ -1223,6 +1561,11 @@ _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Tag, "visitor_tags"): _ids_t_visitor_tags,
     (Tag, "record_tags"): _ids_t_record_tags,
     (Tag, "photo_tags"): _ids_t_photo_tags,
+    # GH #324: the photo/visitor/position sides (leaves have no deps).
+    (Photo, "photo_tags"): _ids_p_photo_tags,
+    (Visitor, "visits"): _ids_v_visits,
+    (Visitor, "visitor_tags"): _ids_v_visitor_tags,
+    (Position, "staff_positions"): _ids_pos_staff_positions,
 }
 
 
@@ -1235,7 +1578,8 @@ _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
 
 
 async def _activity_dependency_ids(
-    session: AsyncSession, activity_id: str,
+    session: AsyncSession,
+    activity_id: str,
 ) -> dict[str, list[str]]:
     """Second-level id-sets: visits and payments of EVERY record of the
     activity (one JOIN query each — no per-record N+1). Only non-empty
@@ -1266,7 +1610,9 @@ _RECURSIVE_IDS: dict[type[Base], Callable[[AsyncSession, str], Awaitable[dict[st
 
 
 async def collect_dependency_ids(
-    session: AsyncSession, model: type, entity_id: str,
+    session: AsyncSession,
+    model: type,
+    entity_id: str,
 ) -> dict[str, list[str]]:
     """Collect the id-lists of dependent rows per FK entity (#285 rev6).
 
@@ -1313,9 +1659,7 @@ async def collect_dependency_ids(
 # :func:`stale_expected_entities`. Derived from FK_MATRIX[Record]'s
 # non-auto deps so a future Record-level dep stays consistent.
 _RECURSIVE_VERIFY: dict[type[Base], frozenset[str]] = {
-    Activity: frozenset(
-        dep.entity for dep in FK_MATRIX[Record] if not dep.auto
-    ),
+    Activity: frozenset(dep.entity for dep in FK_MATRIX[Record] if not dep.auto),
 }
 
 
@@ -1437,16 +1781,16 @@ def validate_resolutions(
 # client NULLIFY handlers stay (the scenario dispatches them via
 # ``FK_MATRIX[Client]``/``NULLIFY_HANDLERS``).
 
-type _FkHandlerFn = Callable[
-    ["GenericService", AsyncSession, str], Awaitable[None]
-]
+type _FkHandlerFn = Callable[["GenericService", AsyncSession, str], Awaitable[None]]
 
 
 # ─── nullify handlers ───────────────────────────────────────────────────────────
 
 
 async def _h_nullify_service_photos(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Service → photos auto-nullify: ``Photo.service_id`` set NULL (survives)."""
     await session.execute(
@@ -1455,7 +1799,9 @@ async def _h_nullify_service_photos(
 
 
 async def _h_nullify_client_records(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Client → records user-choice nullify: ``Record.client_id`` set NULL
     (records become anonymous — survive with their payments record-scoped)."""
@@ -1465,17 +1811,19 @@ async def _h_nullify_client_records(
 
 
 async def _h_nullify_client_photos(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Client → photos auto-nullify (GH #211): ``Photo.client_id`` set NULL.
     The photo row survives — losing its owner never deletes a photo."""
-    await session.execute(
-        update(Photo).where(Photo.client_id == entity_id).values(client_id=None)
-    )
+    await session.execute(update(Photo).where(Photo.client_id == entity_id).values(client_id=None))
 
 
 async def _h_nullify_location_photos(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Location → photos auto-nullify (GH #211): ``Photo.location_id`` set NULL.
     The photo row survives — losing its owner never deletes a photo."""
@@ -1488,7 +1836,9 @@ async def _h_nullify_location_photos(
 
 
 async def _h_cascade_master_users(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Staff → users auto-cascade (§4.1, Change 2): hard-delete the linked
     ``User`` row. The User is the staff member's login account; deleting the
@@ -1519,16 +1869,16 @@ async def _h_cascade_master_users(
 
     await session.execute(
         delete(UserProfile).where(
-            UserProfile.user_id.in_(
-                select(User.id).where(User.staff_id == entity_id)
-            )
+            UserProfile.user_id.in_(select(User.id).where(User.staff_id == entity_id))
         )
     )
     await session.execute(delete(User).where(User.staff_id == entity_id))
 
 
 async def _h_cascade_master_extension(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Staff → masters auto-cascade (GH #266): hard-delete the 1:0..1
     schedule-extension row. The FK also carries ON DELETE CASCADE, but the
@@ -1538,69 +1888,71 @@ async def _h_cascade_master_extension(
 
 
 async def _h_cascade_staff_positions(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Staff → staff_positions auto-cascade (GH #266): hard-delete the M2M
     join rows. Position dictionary entries themselves survive."""
-    await session.execute(
-        delete(staff_positions).where(staff_positions.c.staff_id == entity_id)
-    )
+    await session.execute(delete(staff_positions).where(staff_positions.c.staff_id == entity_id))
 
 
 async def _h_cascade_master_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Master → master_tags auto-cascade (join): hard-delete rows where master_id."""
-    await session.execute(
-        delete(master_tags).where(master_tags.c.master_id == entity_id)
-    )
+    await session.execute(delete(master_tags).where(master_tags.c.master_id == entity_id))
 
 
 async def _h_cascade_location_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Location → location_tags auto-cascade (join): hard-delete rows where location_id."""
-    await session.execute(
-        delete(location_tags).where(location_tags.c.location_id == entity_id)
-    )
+    await session.execute(delete(location_tags).where(location_tags.c.location_id == entity_id))
 
 
 async def _h_cascade_service_tariffs(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Service → tariffs auto-cascade: hard-delete rows where service_id."""
     await session.execute(delete(Tariff).where(Tariff.service_id == entity_id))
 
 
 async def _h_cascade_service_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Service → service_tags auto-cascade (join): hard-delete rows where service_id."""
-    await session.execute(
-        delete(service_tags).where(service_tags.c.service_id == entity_id)
-    )
+    await session.execute(delete(service_tags).where(service_tags.c.service_id == entity_id))
 
 
 async def _h_cascade_service_materials(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Service → service_materials auto-cascade (join, GH #223 §7): hard-delete
     link rows where service_id. Materials themselves are untouched — only the
     links die with the service."""
-    await session.execute(
-        delete(ServiceMaterial).where(ServiceMaterial.service_id == entity_id)
-    )
+    await session.execute(delete(ServiceMaterial).where(ServiceMaterial.service_id == entity_id))
 
 
 async def _h_cascade_material_service_materials(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Material → service_materials auto-cascade (join, GH #223 §7): hard-delete
     link rows where material_id. Services themselves are untouched — deleting a
     material only detaches it from the services that referenced it."""
-    await session.execute(
-        delete(ServiceMaterial).where(ServiceMaterial.material_id == entity_id)
-    )
+    await session.execute(delete(ServiceMaterial).where(ServiceMaterial.material_id == entity_id))
 
 
 # ─── GH #318 D8: Tag → *_tags join cascades (matrix + handler pairs) ───────────
@@ -1612,75 +1964,115 @@ async def _h_cascade_material_service_materials(
 
 
 async def _h_cascade_tag_service_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → service_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(service_tags).where(service_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(service_tags).where(service_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_activity_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → activity_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(activity_tags).where(activity_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(activity_tags).where(activity_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_master_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → master_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(master_tags).where(master_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(master_tags).where(master_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_location_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → location_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(location_tags).where(location_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(location_tags).where(location_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_client_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → client_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(client_tags).where(client_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(client_tags).where(client_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_visitor_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → visitor_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(visitor_tags).where(visitor_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(visitor_tags).where(visitor_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_record_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → record_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(record_tags).where(record_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(record_tags).where(record_tags.c.tag_id == entity_id))
 
 
 async def _h_cascade_tag_photo_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
 ) -> None:
     """Tag → photo_tags auto-cascade (join): hard-delete rows where tag_id."""
-    await session.execute(
-        delete(photo_tags).where(photo_tags.c.tag_id == entity_id)
-    )
+    await session.execute(delete(photo_tags).where(photo_tags.c.tag_id == entity_id))
+
+
+# ─── GH #324: the six subjects' join-delete handlers ────────────────────────────
+# The OWNER side of the same #318/#266 edges: key = (model, entity) — the
+# model is part of the key, so (Photo, "photo_tags") next to (Tag,
+# "photo_tags") is the OTHER side of the same edge, NOT a duplicate (the
+# precedent-guard rule: these keys are never merged). Join rows die FIRST
+# (Core bulk), then the executor Core-bulk-deletes the subject row —
+# bypassing the ORM cascade, deterministic under any PRAGMA state.
+
+
+async def _h_cascade_photo_photo_tags(
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Photo → photo_tags cascade (join): hard-delete rows where photo_id.
+    The tags themselves survive — the unlink is the only effect."""
+    await session.execute(delete(photo_tags).where(photo_tags.c.photo_id == entity_id))
+
+
+async def _h_cascade_visitor_visitor_tags(
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Visitor → visitor_tags auto-cascade (join): hard-delete rows where
+    visitor_id — the visitor's own tags die with him."""
+    await session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == entity_id))
+
+
+async def _h_cascade_position_staff_positions(
+    _self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Position → staff_positions cascade (join): hard-delete rows where
+    position_id — the position is stripped from its holders; the staff
+    cards themselves survive."""
+    await session.execute(delete(staff_positions).where(staff_positions.c.position_id == entity_id))
 
 
 # ─── Dispatch tables ───────────────────────────────────────────────────────────
@@ -1720,4 +2112,11 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Tag, "visitor_tags"): _h_cascade_tag_visitor_tags,
     (Tag, "record_tags"): _h_cascade_tag_record_tags,
     (Tag, "photo_tags"): _h_cascade_tag_photo_tags,
+    # GH #324: the owner side of the same edges (key includes the model —
+    # the two sides of one edge coexist by design, never merged). NB
+    # (Visitor, "visits") gets its batch handler (record recompute) in a
+    # later #324 task — the matrix row exists already.
+    (Photo, "photo_tags"): _h_cascade_photo_photo_tags,
+    (Visitor, "visitor_tags"): _h_cascade_visitor_visitor_tags,
+    (Position, "staff_positions"): _h_cascade_position_staff_positions,
 }

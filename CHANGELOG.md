@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-22
+
+### Changed
+- **GH #301 — Спуск линт-порога frontend/admin 38→0 (ratchet до нуля)** — branch
+  `chore/301-admin-lint-zero` (6 commits `ec1f4e68..9b2be3cb`, base `062b42e6`; 44 файла;
+  спека `docs/specs/2026-09-19-admin-lint-zero-301-design.md` и план
+  `docs/plans/2026-09-19-admin-lint-zero-301-plan.md` — оба на main, план закрыт этим docs-коммитом):
+  - **Гейт:** `frontend/admin/package.json` — `eslint . --max-warnings 0` (было 38). Фактический
+    ход счётчиков по четырём группам (порог опускался до факта после каждой): **37 → 24 → 18 → 12 → 0** —
+    unused-vars 13 фиксов (`ec1f4e68`), no-explicit-any 6 (`1e23af1e`), no-img-element 4 → `next/image`
+    + 2 обоснованных disable (`4c9bf2a9`, `c763d741`), exhaustive-deps 12 (`e8940d57` + правка
+    комментария по ревью `9b2be3cb`). Правила, `.eslintrc.json` и CI-workflow не менялись
+    (конвенция ratchet'а #143 — порог только вниз).
+  - **Картинки (T3):** логотип и аватары через `next/image` — запись `images.remotePatterns`
+    для хоста бэкенда (env-derived) в `next.config.mjs`, новый helper `lib/avatar.ts` `toAvatarSrc`;
+    фото-миниатюры (таблица/модалка) остаются `<img>` с обоснованными подавлениями (внешние хосты,
+    спека §4.3); e2e `cabinet.spec.ts` (S3) адаптирован; фрагмент про логотип в `docs/design-system.md`
+    обновлён ещё код-коммитом `4c9bf2a9`. `sharp` не добавлялся (dev-оптимизатор отдаёт `/_next/image`
+    200 с реальным сжатием; rationale — комментарий рядом с `remotePatterns`).
+  - **Suppressions (S5):** ровно 3 новых `eslint-disable`, каждый с `-- причиной`
+    (2× `@next/next/no-img-element`, 1× `react-hooks/exhaustive-deps` — `SettingsTab` `gridFrequency`);
+    безобоснованных — 0.
+  - **Tests:** lint **0 errors / 0 warnings**, exit 0 (порог доказан негативным тестом — S1:
+    пробный warning → RED → удаление → GREEN); `tsc --noEmit` exit 0; vitest **2405/2405**
+    (известный load-flake изолированно зелёный); e2e затронутых экранов **12/12 спеков (125 тестов)**;
+    визуальный гейт **4/4 поверхности**.
+  - Out of scope: `frontend/web` (#300 — отдельная дорожка), контракты компонентов (`mode` ×5,
+    `value` — follow-up #368), бэкенд и пакеты-воркспейсы.
+  - Status: `docs/status/2026-09-22-admin-lint-zero-301.md`
+
 ## [Unreleased] — 2026-09-21
 
 ### Added
@@ -77,6 +107,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status: `docs/status/2026-09-21-connection-loss-indicator-330.md`
 
 ### Fixed
+- **GH #328 — ServiceModal: поле тегов услуги (починка молчаливого стирания связей `service_tags`)** —
+  branch `328-servicemodal-tags` (6 commits `b3914eb6..cd095090`, base `9100d3ca`; 7 файлов, +656/−20;
+  спека `docs/specs/2026-09-20-servicemodal-tags-328-design.md` rev2 (панель 5/6 PASS) и план
+  `docs/plans/2026-09-20-servicemodal-tags-328-plan.md` (5/5 задач) — оба на main, веткой не менялись):
+  - **Исходный баг:** edit-save услуги отправлял `tag_ids: []` (форма тегов не знала), а канон полного
+    обновления PUT заменяет набор связей — связи `service_tags` молча стирались. Теперь форма
+    предзаполняется из `service.tags` и на сабмите маппит чипы `{id,title}[]` → `string[]`
+    `tag_ids` рядом с существующим маппингом материалов; бэкенд, контракт API, api-client и БД
+    **не менялись**.
+  - **Новое поле «Теги» в форме услуги:** чипы выбранных тегов с крестиком удаления + серверный
+    `RemoteSearchSelect` (`getTags({q, per_page: 10})`, поиск от 2 символов, дубли по id блокирует
+    пикер); работает и при создании, и при редактировании (в т.ч. архивированных — PUT признак
+    архива не трогает); изменение набора помечает форму «грязной» (подтверждение закрытия — из
+    общего `handleChange`).
+  - **Доступность (панель best-practices):** видимый лейбл связан с полем поиска через
+    `htmlFor`/`id` (`useId`), кнопки-крестики чипов несут `aria-label="Удалить тег {title}"`;
+    общий `RemoteSearchSelect` получил необязательный `inputId` (backward-compatible: внутренний
+    лейбл рендерится только при непустом `label`, `aria-label` только когда он и есть доступное имя).
+  - **e2e (новый `services-tags.spec.ts`, S1–S4):** S1 — правка только «Длительность» сохраняет
+    сид-связь (`s4`→`tag3`), строгие GET-ассерты после сохранения ловят до-фиксовое `tag_ids: []`;
+    S2 — смена набора через typeahead; S3 — создание с тегом (очистка через deferred-delete execute
+    body); S4 — снятие всех тегов без ошибок; восстановление в `finally` полным PUT-payload с
+    `tag_ids` из GET-снапшота, sqlite-чтений нет.
+  - **Чистка:** из `services-null-max-age.spec.ts` удалены sqlite-чтение тегов и битый комментарий
+    «`tags` приходит пустым» / «форма всегда шлёт `[]`» (разрешён разведкой §2.6 спеки) — оба теста
+    зелёные до и после.
+  - **Tests:** admin vitest **2342p/0f** (после T3), tsc clean, eslint 0 errors (3 pre-existing
+    warnings); e2e `services-tags` **4/4**, регресс `services` shard-rest **10/10**,
+    `services-null-max-age` **2/2**; визуальный гейт G4.5 **4/4 autonomous PASS**; полный e2e — CI.
+  - Deviation (санкционировано): S2/S4 — на `s1` вместо плановых `s5`/`s7` — полный PUT услуги с
+    визит-связанными тарифами падает `INTEGRITY_VIOLATION` (pre-existing, вне скоупа); заведён #357.
+  - Out of scope (спека §7): контракт PUT/бэкенд, перевод услуг на PATCH, bulk-теги из таблицы,
+    вынос общего «тегового поля» в shared-слой.
+  - Status: `docs/status/2026-09-21-servicemodal-tags-328.md`
 - **GH #231 — Deep-link `/clients?clientId=X`: один суженный запрос вместо двух** — branch
   `231-clients-deeplink-single-request` (3 commits `69920a24..93426dff`, base `d8e07f60`;
   5 файлов, +240/−34; спека `docs/specs/2026-09-19-clients-deeplink-single-request-design.md`
@@ -103,6 +167,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Status: `docs/status/2026-09-21-clients-deeplink-single-request-231.md`
 
 ### Changed
+- **GH #217 — Composite reads aligned to free functions (Corridor 3 / ADR 007)** — branch
+  `feature/composite-reads-free-functions` (7 commits `fb8e5098..be9d5d02`, base `5fdeac5b`;
+  35 files, +1224/−618; spec `docs/specs/2026-09-20-composite-reads-form-217-design.md`
+  rev5 + errata rev6 `6c080b1d`, plan `docs/plans/2026-09-20-composite-reads-form-217-plan.md`;
+  ADR `docs/decisions/007-composite-reads-free-functions.md`):
+  - **Records (T1, standard):** `RecordService.list_view` → module-level free function
+    `list_records_view`; the shared blocks (`_build_list_stmt`, `_sort_columns`,
+    `search_fields`, `map_record`) hoisted to module level and reused by `RecordService.list`;
+    the route calls the function directly with the session (no service dep).
+  - **Masters (T2, standard):** `MasterViewService` (class + both cached factories + the dead
+    `_model = Staff` binding) disbanded into `list_masters_view` (GET /masters, re-homed onto
+    `list_custom` — a count-equivalence test pins the switch) and `list_all_masters_view`
+    (GET /masters/all, `BARE_LIST_MAX_ROWS + 1` guard preserved → 422); archive statuses kept.
+  - **Photos (T3, small):** `PhotoService.list` → `list_photos_view`; `GET /photos/web` stays
+    a hand-written router query (erratum rev6 — it never rode the composite).
+  - **Helpers (T4, small):** `ActivityService.sum_active_seats_bulk` and
+    `MaterialService._attach_counts` become module-level functions.
+  - **Clients (T5, small):** `list_clients_with_stats` → `list_clients_view`, schema
+    `ClientWithStats` → `ClientViewResponse` (internal Python names; HTTP/JSON contract
+    unchanged); the fixtures script rebound. Hand-written cheap count kept (documented
+    exception, #206 rationale).
+  - **Tests:** backend full **2407 passed / 15 skipped / 0 failed**; ruff & mypy no new
+    findings vs baseline; e2e phase verification — US1 clients 24/24, US2 records-view core
+    (incl. exact-one-request), US3 staff 15/15, US4 photos 20/20, US7 materials 4/4, scope
+    gates (master-role-photos, master-role-record-create, `test_master_scope_contract.py`)
+    green. `MasterViewService` and `queries/` no longer exist; all 7 composites are free
+    functions in their service modules; №2/№3/№4 run via `list_custom`, №1 documented
+    exception.
+  - Known environmental flakes (CI adjudicates): admin-manages-payments ×2 and
+    `schedule.spec.ts:158` — non-deterministic under load, green isolated, no regression
+    mechanism (zero frontend changes).
+  - Status: `docs/status/2026-09-21-composite-reads-form-217.md`
 - **GH #318 — Tags: удаление занятого тега — единый контракт удалений (этап 1 из #346)** —
   branch `318-tags-busy-delete` (7 commits `086adb67..cca86cef`, base `c7ce190f`; 21 файл,
   +3687/−162; спека `docs/specs/2026-09-19-tags-busy-delete-318-design.md` rev9, план
@@ -198,6 +294,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     merge.
 
 ### Test Infra
+- **GH #341 — Фиксированные `created_at` сид-фото: календарь-независимые photos-базлайны** — branch
+  `341-photos-seed-fixed-dates` (3 commits: `64c25d7d..d527e5b7`, base `582c3a3e`; 2 исходных файла
+  +76/−7 и 4 PNG-базлайна; спека `docs/specs/2026-09-20-photos-seed-fixed-dates-341-design.md`,
+  план `docs/plans/2026-09-20-photos-seed-fixed-dates-341-plan.md` — оба на main, веткой не
+  менялись; прод-код, API и схема БД не затронуты):
+  - **Сид:** семь сид-фото ph1–ph7 получают явные фиксированные нарастающие `created_at` — новая
+    `PHOTO_FIXED_DATES` рядом с `WEEK_FIXED_START`: дни 2026-06-15…21, 12:00 (naive-литералы,
+    колонка naive; aware-объект уронил бы вставку). Дефолт `AbstractModel.created_at =
+    datetime.utcnow` для сид-фото больше не срабатывает — колонка «Дата» перестаёт показывать
+    «сегодня», а дефолтная сортировка `created_at desc` остаётся детерминированной: ph7 первой
+    строкой, как и раньше (нарастающие даты вместо микросекунд вставки). Сид-приём тот же, что у
+    записей r1–r6 и занятий (`WEEK_FIXED_START`), — все даты базлайна живут в одном июньском окне.
+  - **Страж контракта:** новый `test_seed_photos_fixed_dates` в `backend/tests/test_seed.py` —
+    семь ожиданий жёстко прописаны литералами (намеренно НЕ импортируются из `PHOTO_FIXED_DATES`,
+    иначе правка константы молча прошла бы тест; mutation-bite проверен) плюс проверки строгого
+    нарастания и уникальности дат. Правка фиксированных дат сида теперь валит юнит-тест, а не
+    красный CI.
+  - **Базлайны (разовая регенерация):** `photos-table-filled`, `photos-table-dropdown-open`,
+    `photos-table-sort-active`, `photos-table-picker-open`; `empty`/`skeleton`/`error` без строк в
+    кадре не тронуты. Гигиена диффа соблюдена — в регенерации только `photos-table-*` PNG.
+  - **Tests:** pytest `tests/test_seed.py` **29/29** (28 существующих + новый страж); e2e
+    `visual-regression` update-прогон **61/61**; функциональные `photos-crud` +
+    `master-role-photos` **21/21** без правок (С3 — новое фото с реальным «сейчас» по-прежнему
+    первой строкой); чистые прогоны photos **7/7** дважды, в т.ч. после полного пересоздания
+    шард-БД с пересевом (С2/С4). Локально 14 не-photos визуальных тестов красные по известному
+    локальному env-условию (anonymous-render, pre-existing, не связано с #341; CI main зелёный).
+  - **DoD:** все пункты issue закрыты. Ручной cross-midnight прогон в окне был невозможен (старт
+    UTC 07:43, до полуночи ~16 ч) — календарь-независимость подтверждена конструкцией: часы в
+    спеке пиннятся `page.clock` (2026-06-15), а в базлайнах только фиксированные июньские даты.
+  - Plan: `docs/plans/2026-09-20-photos-seed-fixed-dates-341-plan.md` (on main, unchanged by IMPL)
+  - Status: `docs/status/2026-09-21-photos-seed-fixed-dates-341.md`
 - **GH #271 — закалка e2e-набора `server-push-invalidation` против CI-флейка С3: окно 10 с,
   ограниченный повтор С3, диагностика исчерпания** — branch `fix/271-e2e-push-invalidation-flake`
   (3 commits `74cf2911..56587530`, base `84131353`; спека

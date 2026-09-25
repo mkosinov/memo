@@ -24,6 +24,7 @@
 // explicit null.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { CalendarPopover } from '@/app/components/shared/CalendarPopover';
 import { useMyProfile, useUpdateMyProfile, useUploadPortrait } from '@/hooks/useMyProfile';
@@ -31,6 +32,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUI } from '@/contexts/UIContext';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { toISODate } from '@/lib/datetime';
+import { toAvatarSrc } from '@/lib/avatar';
 import type { MyProfile, MyProfileUpdate } from '@memo/api-client';
 import {
   MYDATA_MAIN_FIELDS,
@@ -144,7 +146,9 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
     }
     // specialties is read-only (D4) — structurally never part of the payload.
     return payload;
-  }, [form, profile.has_staff]);
+    // `initial` is useRef(form).current — captured once on mount, referential
+    // identity never changes, so listing it is lint-honest and behavior-free.
+  }, [form, initial, profile.has_staff]);
 
   const isDirty = Object.keys(buildPayload()).length > 0;
 
@@ -331,10 +335,15 @@ function MyDataForm({ profile, onClose }: { profile: MyProfile; onClose: () => v
           {profile.has_staff && (
             <div className="flex items-center gap-4" data-testid="mydata-portrait-block">
               {avatarUrl ? (
-                <img
+                /* GH #301: optimized Image (spec §4.3). toAvatarSrc
+                 * absolutizes the RELATIVE /api/v1/files/avatar/… path so
+                 * the optimizer fetches it from the backend host. */
+                <Image
                   data-testid="mydata-avatar-preview"
-                  src={avatarUrl}
+                  src={toAvatarSrc(avatarUrl)}
                   alt="Портрет"
+                  width={64}
+                  height={64}
                   className="w-16 h-16 rounded-full object-cover flex-shrink-0"
                 />
               ) : (

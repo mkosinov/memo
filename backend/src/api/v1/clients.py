@@ -22,11 +22,11 @@ from src.schemas.client import (
     ClientPatch,
     ClientResponse,
     ClientUpdate,
-    ClientWithStats,
+    ClientViewResponse,
 )
 from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorResponse
-from src.services.client import ClientService, get_client_service, list_clients_with_stats
+from src.services.client import ClientService, get_client_service, list_clients_view
 from src.services.visitor import get_visitor_service
 
 router = APIRouter(
@@ -93,17 +93,23 @@ async def get_client_by_phone(
     return result.items[0]
 
 
-@router.get("", response_model=PaginatedResponse[ClientWithStats])
+@router.get("", response_model=PaginatedResponse[ClientViewResponse])
 async def list_clients(
     session: SessionDep,
-    params: ClientListParams = Depends(),
+    # Annotated[..., Query()], not Depends(): FastAPI classifies
+    # list-typed model fields (``id`` #232) as BODY params under the
+    # Depends-with-model shape and silently drops them from the query
+    # contract; the Query() shape exposes them (precedent: records,
+    # photos). Safe here — no scalar query params in this handler
+    # (fastapi PR #12481 mixing limitation).
+    params: Annotated[ClientListParams, Query()],
     # GH #263 T3 (D1/D4): EXISTS-scope «есть запись клиента к своей
     # активности» for the plain list; ``?phone=`` searches studio-wide,
     # both paths masked for a scoped (master) caller (D3).
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
-) -> PaginatedResponse[ClientWithStats]:
+) -> PaginatedResponse[ClientViewResponse]:
     """Return paginated clients with stats aggregation, filtering, and sorting."""
-    return await list_clients_with_stats(
+    return await list_clients_view(
         db_session=session, params=params, master_key=scope.master_key
     )
 

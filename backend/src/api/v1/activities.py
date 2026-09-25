@@ -29,7 +29,11 @@ from src.schemas.activity import (
 )
 from src.schemas.common import PaginatedResponse
 from src.schemas.pagination import PaginationParams
-from src.services.activity import ActivityService, get_activity_service
+from src.services.activity import (
+    ActivityService,
+    get_activity_service,
+    sum_active_seats_bulk,
+)
 
 router = APIRouter(tags=["activities"])
 
@@ -95,7 +99,7 @@ async def list_activities(
         date_from=date_from, date_to=date_to, q=q, service_id=service_id,
         master_id=scope.master_key,
     )
-    occupied_map = await service.sum_active_seats_bulk(
+    occupied_map = await sum_active_seats_bulk(
         db_session=session, activity_ids=[a.id for a in result.items]
     )
     return PaginatedResponse(

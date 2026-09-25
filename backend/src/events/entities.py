@@ -26,9 +26,11 @@ Two deviations from a pure walk, both spec-mandated (§3.3/§3.4):
 
 GH #266 additions, same cascade-only pattern as ``User``:
 
-* ``masters`` — the old masters CRUD service collapsed into the read-only
-  ``MasterViewService`` (not a GenericService, not transactional); the
-  extension table is written only by ``StaffService`` cascades, which call
+* ``masters`` — the old masters CRUD service collapsed into read-only
+  module-level view functions (``list_masters_view`` /
+  ``list_all_masters_view`` — free functions since GH #217 Task 2, not a
+  GenericService, not transactional); the extension table is written
+  only by ``StaffService`` cascades, which call
   ``mark_changed("masters")`` explicitly — so ``Master → "masters"`` is
   declared here (cascade-only entry, same shape as ``User``).
 

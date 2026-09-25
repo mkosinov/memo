@@ -438,6 +438,58 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
             )
 
 
+async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
+    """Seed photos ph1-ph7 carry fixed rising created_at (2026-06-15..21, noon).
+
+    Guard test: expectations are hardcoded literals ON PURPOSE (not imported
+    from PHOTO_FIXED_DATES) so a later edit of the seed constant fails loudly
+    here instead of silently passing. Rising dates are the determinism
+    contract behind DESC ordering of the photos feed.
+    """
+    from datetime import datetime as _dt
+
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    expected: dict[str, _dt] = {
+        "ph1": _dt(2026, 6, 15, 12, 0, 0),
+        "ph2": _dt(2026, 6, 16, 12, 0, 0),
+        "ph3": _dt(2026, 6, 17, 12, 0, 0),
+        "ph4": _dt(2026, 6, 18, 12, 0, 0),
+        "ph5": _dt(2026, 6, 19, 12, 0, 0),
+        "ph6": _dt(2026, 6, 20, 12, 0, 0),
+        "ph7": _dt(2026, 6, 21, 12, 0, 0),
+    }
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text("SELECT id, created_at FROM photos ORDER BY id")
+        )
+        rows = result.all()
+        assert len(rows) == 7
+
+        dates: list[_dt] = []
+        for row in rows:
+            # SQLite stores datetime as ISO string; parse it.
+            created_at = (
+                _dt.fromisoformat(row.created_at)
+                if isinstance(row.created_at, str)
+                else row.created_at
+            )
+            assert row.id in expected, f"Unexpected photo id: {row.id}"
+            assert created_at == expected[row.id], (
+                f"{row.id}: expected {expected[row.id]}, got {created_at}"
+            )
+            dates.append(created_at)
+
+        # Determinism contract: strictly rising dates → stable DESC feed order.
+        assert dates == sorted(dates), (
+            f"Photo created_at must be strictly increasing by id, got {dates}"
+        )
+        assert len(set(dates)) == 7, "Photo created_at values must be unique"
+
+
 async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:
     """Records r1-r6 are linked to fixed-week activities (ev_fixed_*)."""
     from src.seed.seed import seed_data

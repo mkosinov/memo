@@ -46,7 +46,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 | POST | /api/v1/visits | Create (record_id + price required) | VisitCreate | VisitResponse (201) |
 | PUT | /api/v1/visits/{id} | Full-replace update | VisitUpdate | VisitResponse |
 | PATCH | /api/v1/visits/{id} | Partial update (all optional, no record_id) | VisitPatch | VisitResponse |
-| DELETE | /api/v1/visits/{id} | Hard delete | — | 204 |
+| DELETE | /api/v1/visits/{id} | Единый флоу #324: лист — `?dry_run=true` → 204; голый → 422; тело `{expected:{}}`; пересчёт родительской записи сохраняется | DeleteBody | 204 |
 | PUT | /api/v1/visits/{id}/status | Update status only | VisitStatusUpdate | VisitResponse |
 
 ## Relationships

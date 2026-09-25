@@ -28,7 +28,12 @@ from src.schemas.record import (
     RecordViewResponse,
 )
 from src.services.activity import get_activity_service
-from src.services.record import RecordService, get_record_service, map_record
+from src.services.record import (
+    RecordService,
+    get_record_service,
+    list_records_view,
+    map_record,
+)
 from src.usecases.records import (
     create_record as create_record_scenario,
 )
@@ -88,16 +93,21 @@ async def list_records(
 
 @router.get("/view", response_model=PaginatedResponse[RecordViewResponse],
              dependencies=_READ_GUARD)
-async def list_records_view(
-    service: _ServiceDep,
+async def get_records_view(
     session: SessionDep,
     params: Annotated[RecordListParams, Query()],
-    # GH #263 T2: same builder, same scope — list_view is the records
-    # table's read surface and must be leak-proof identically.
+    # GH #263 T2: same builder, same scope — the records table's read
+    # surface must be leak-proof identically.
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> PaginatedResponse[RecordViewResponse]:
     """Composite read for the records table — records page enriched with
     denormalized display fields from joins (GH #213 §4).
+
+    Corridor 3 free function (GH #217 Task 1, ADR 007): the route calls
+    ``list_records_view`` directly with the session as an argument — no
+    service dependency here (the module's other routes keep theirs:
+    they are CRUD); the scope arrives from ``get_scope`` and ANDs into
+    the shared builder inside the function.
 
     Same params/sort/pagination as ``GET /records`` (single
     ``RecordListParams`` class — no contract drift); display resolution
@@ -106,7 +116,7 @@ async def list_records_view(
     matches routes in declaration order and ``/view`` would otherwise be
     captured by the id path param (404 instead of a page).
     """
-    return await service.list_view(
+    return await list_records_view(
         db_session=session, params=params, master_key=scope.master_key
     )
 

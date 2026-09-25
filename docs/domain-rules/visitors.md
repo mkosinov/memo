@@ -21,7 +21,7 @@ A Visitor is an individual person attending a master class. Visitors belong to a
 
 ### Backend
 - **Scoped to Client:** list_by_client(client_id) returns all visitors for the client
-- **Cascade on delete:** hard-delete cascades to Visits (visits hard-deleted); visitor_tag join rows cleaned. Photo `visitor_id` was dropped in GH #211 — photos are NOT linked to visitors (no photo cleanup in this cascade).
+- **Cascade on delete:** единый флоу удалений (спека #324): `?dry_run=true` → 409-дерево (узел «Посещение», видимая зависимость) → диалог → кольцо 5 с → коммит `{expected: {visits, visitor_tags}}`. Каскад: визиты удаляются пачкой с пересчётом статуса/мест затронутых записей (те же функции, что при одиночном удалении визита), visitor_tag join-строки очищаются. Анонимизация визитов отклонена (решение юзера 21.09). Photo `visitor_id` was dropped in GH #211 — photos are NOT linked to visitors (no photo cleanup in this cascade). Клиент-каскад наследует пересчёт через общий путь `_delete_cascade`.
 - **Auto-created by RecordService** when name-based visit is created
 - **List-all endpoint:** `GET /api/v1/visitors` — paginated generic list, introduced in #183 **for contract completeness with GenericService** so visitors is no longer the only generic entity excluded from generic list contract coverage (#184/#185). It supersedes the previous no-list-all rule. The **production-use read path for visitors remains the scoped `GET /clients/{id}/visitors`** — the bare list is a contract endpoint, not a production consumer-facing read path.
 
@@ -48,7 +48,7 @@ The `q` predicate lands BEFORE the COUNT (inherited from `BaseRepository.list`),
 | POST | /api/v1/visitors | Create |
 | PUT | /api/v1/visitors/{id} | Update |
 | PATCH | /api/v1/visitors/{id} | Partial update |
-| DELETE | /api/v1/visitors/{id} | Hard delete (cascade: visits hard-deleted, tag join rows cleaned) |
+| DELETE | /api/v1/visitors/{id} | Единый флоу #324: `?dry_run=true` (визиты → 409-превью); голый → 422; тело `{expected}`; каскад с пересчётом записей |
 
 ## Relationships
 - Visitor → belongs to Client

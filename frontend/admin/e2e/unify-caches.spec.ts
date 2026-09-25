@@ -24,7 +24,13 @@
  */
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
-import { gotoScheduleWeek, clickActivityCard } from './fixtures/helpers';
+import {
+  gotoScheduleWeek,
+  clickActivityCard,
+  resolveRecordDate,
+  expectDeepLinkChip,
+  expectClientSearchEmpty,
+} from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
   createTestClient,
@@ -33,7 +39,6 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
-import { resolveTestDbPath } from './lib/db-path';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -42,19 +47,7 @@ const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
  * Returns null if the record or its activity is missing.
  */
 function recordActivityDate(recordId: string): string | null {
-  const { execSync } = require('child_process') as typeof import('child_process');
-  const dbPath = resolveTestDbPath({
-    shardId: process.env.SHARD_ID,
-    testDbPath: process.env.TEST_DB_PATH,
-  });
-  const safeId = recordId.replace(/'/g, "''");
-  const out = execSync(
-    `sqlite3 -json "${dbPath}" "SELECT substr(a.start, 1, 10) AS d FROM records r JOIN activities a ON r.activity_id = a.id WHERE r.id = '${safeId}'"`,
-    { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-  ).trim();
-  if (!out || out === '[]') return null;
-  const rows = JSON.parse(out) as Array<{ d: string }>;
-  return rows[0]?.d ?? null;
+  return resolveRecordDate(recordId)?.date ?? null;
 }
 
 /**
@@ -416,11 +409,17 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
         .toBe(true);
 
       // 4. Navigate to /clients (modal can be closed first)
+      // #232: the deep link narrows via the machine id filter (NOT the
+      // search box — old-scheme «UUID in search» is gone); the card
+      // auto-opens and the narrowing chip renders.
       await page.locator('[data-testid="modal-close-btn"]').click();
       await page.goto('/clients?clientId=' + client.id);
       await expect(
         page.locator('[data-testid="client-card-modal"]'),
       ).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expectClientSearchEmpty(page);
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
 
       // 5. Switch to the record tab (left panel) — it shows the SAME visits table
       await page

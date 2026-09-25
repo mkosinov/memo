@@ -192,10 +192,25 @@ describe('MyDataModal — portrait block', () => {
   it('previews the current avatar', async () => {
     renderModal();
     await waitForForm();
-    expect(screen.getByTestId('mydata-avatar-preview')).toHaveAttribute(
-      'src',
-      '/api/v1/files/avatar/o.png',
+    // Optimized contract (GH #301 fix): the preview flows through the
+    // optimizer (/next/image) with the absolutized backend URL as the url
+    // param — toAvatarSrc derives it from NEXT_PUBLIC_API_URL.
+    const src = screen.getByTestId('mydata-avatar-preview').getAttribute('src') ?? '';
+    expect(src).toContain('/_next/image');
+    expect(src).toContain(
+      encodeURIComponent('http://localhost:8000/api/v1/files/avatar/o.png'),
     );
+  });
+
+  // GH #301 (img → next/image): raw served src preserved (unoptimized —
+  // no Next rewrite in the split e2e stack) + intrinsic 64×64 dimensions
+  // matching the fixed w-16 h-16 round cell.
+  it('previews the avatar with intrinsic dimensions', async () => {
+    renderModal();
+    await waitForForm();
+    const preview = screen.getByTestId('mydata-avatar-preview');
+    expect(preview).toHaveAttribute('width', '64');
+    expect(preview).toHaveAttribute('height', '64');
   });
 
   it('«Загрузить фото» → uploadPortrait → AuthContext.refresh()', async () => {

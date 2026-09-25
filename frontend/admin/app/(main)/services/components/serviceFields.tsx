@@ -68,13 +68,21 @@ interface MaterialsFieldConfig {
   emptyText: string;
 }
 
+interface TagsFieldConfig {
+  type: 'tags';
+  key: 'tag_ids';
+  label: string;
+  placeholder?: string;
+}
+
 export type ServiceFieldConfig =
   | TextFieldConfig
   | NumberFieldConfig
   | TextareaFieldConfig
   | NestedListFieldConfig
   | MaterialsFieldConfig
-  | SelectFieldConfig;
+  | SelectFieldConfig
+  | TagsFieldConfig;
 
 export const SERVICE_FIELDS: ServiceFieldConfig[] = [
   {
@@ -134,6 +142,12 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
     label: 'Материалы',
     notePlaceholder: 'Заметка (что взять, сколько)...',
     emptyText: 'Нет активных материалов',
+  },
+  {
+    type: 'tags',
+    key: 'tag_ids',
+    label: 'Теги',
+    placeholder: 'Введите название тега...',
   },
   {
     type: 'text',

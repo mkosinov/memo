@@ -365,7 +365,7 @@ Source: `globals.css:104-110`. Used by toast items
 >                                                        {/* Menubar.tsx:537 */}
   {/* Logo — PNG (not emoji) */}
   <div className="p-6 border-b border-white/10">
-    <img src="/logo-white.png" … />                      {/* :509-513 */}
+    <Image src="/logo-white.png" width={400} height={55} … /> {/* :509-513 (GH #301) */}
   </div>
 
   {/* Scrollable: MiniCalendar + divider + nav + «Мастера» + «Справочники» + «Фото» */}

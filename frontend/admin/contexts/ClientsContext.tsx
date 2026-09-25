@@ -18,6 +18,13 @@ export interface ClientFilters {
   max_paid: number | null;
   missed_from: number | null;
   missed_to: number | null;
+  /**
+   * #232 §3.3 — machine narrowing field: the exact client ids from the
+   * deep-link address (`?clientId=…` repeated). Never rendered in the search
+   * box nor part of its controlled state; the URL is its single writer.
+   * null/undefined = no narrowing.
+   */
+  clientIds?: string[] | null;
 }
 
 /** Exported for the test fixture (createMockClientsTableState) — single source. */
@@ -51,6 +58,11 @@ const { Provider, usePagedList } = createPagedListContext<ClientWithStats, Clien
       // search→q rename (#212): ≥2 chars sends q; raw `search` suppressed after spread
       q: p.filters.search.length >= 2 ? p.filters.search : undefined,
       search: undefined,
+      // #232: machine narrowing ids — the api-client serializes `ids` as
+      // repeated `id` query keys (explicit keys, no filters-bag spread);
+      // the raw machine field itself is suppressed after the spread.
+      ids: p.filters.clientIds ?? undefined,
+      clientIds: undefined,
     }),
   withStatus: false, // status lives inside the 12-field filters
   filters: { defaults: defaultFilters },

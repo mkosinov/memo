@@ -1069,6 +1069,25 @@ describe('ServicesTable', () => {
     ]);
   });
 
+  // ─── GH #328: tags travel through the table's edit PUT ────────────────
+  // Same pass-through contract as materials: ServiceModal prefill (chips)
+  // → handleSubmit maps to bare ids → handleEditSubmit forwards data.tag_ids
+  // (`?? []` may only fire for undefined — never for a non-empty selection).
+
+  it('edit submit carries tag_ids from the form (prefilled tags → honest array, not [])', async () => {
+    setupEnvelope();
+    await renderLoaded();
+    await openEditModal('Картина маслом');
+
+    // svc-1 has tag-1 «масло» linked — the chip renders in the edit modal.
+    expect(screen.getByText('масло')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(mockUpdateMutateAsync).toHaveBeenCalled());
+    expect(updatePayloadFor('svc-1').tag_ids).toEqual(['tag-1']);
+  });
+
   it('note input keeps raw whitespace (server normalizes; UI does not trim)', async () => {
     setupEnvelope();
     await renderLoaded();

@@ -510,16 +510,16 @@ class TestClientResponseContract:
         assert body["id"] == client_id
 
     def test_list_client_items_validate(self, api_client) -> None:
-        """Each GET /api/v1/clients item has exactly the serialized ClientWithStats keys."""
-        from src.schemas.client import ClientWithStats
+        """Each GET /api/v1/clients item has exactly the serialized ClientViewResponse keys."""
+        from src.schemas.client import ClientViewResponse
 
         api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
 
         resp = api_client.get("/api/v1/clients")
-        expected = _serialized_keys(ClientWithStats)
+        expected = _serialized_keys(ClientViewResponse)
         for item in resp.json()["items"]:
             assert set(item.keys()) == expected, (
-                f"list item keys mismatch serialized ClientWithStats: "
+                f"list item keys mismatch serialized ClientViewResponse: "
                 f"missing={expected - set(item.keys())}, "
                 f"extra={set(item.keys()) - expected}"
             )
@@ -1071,3 +1071,234 @@ class TestClientListStatFilterBounds:
         body = resp.json()
         assert "code" in body["detail"]
         assert "message" in body["detail"]
+
+
+# ─── GH #232 Task 2: ?id= set narrowing on the clients list (spec §3.1) ──────
+
+
+class TestClientListIdFilter:
+    """``GET /clients?id=X&id=Y`` — typed IN-narrowing of the stats view.
+
+    Full battery per the plan: exact set; row-level dedup of a repeated id;
+    standard endpoint ordering (never the address order); AND with
+    ``status``; AND with ``q`` (including the harmless ``?id=X&q=X``
+    double mechanism — the q uuid-exact match survives); master scope:
+    unreachable clients are not returned, D3 contact masking intact.
+    """
+
+    def test_id_filter_returns_exactly_the_named_clients(
+        self, api_client, create_client
+    ) -> None:
+        """?id= narrows to the exact requested set; total follows; unknown
+        ids are silently non-matching (404-free, spec §3.1)."""
+        alpha = create_client(name="Alpha")
+        beta = create_client(name="Beta")
+        create_client(name="Decoy")  # not named → must not surface
+
+        resp = api_client.get(
+            "/api/v1/clients",
+            params=[("id", alpha["id"]), ("id", beta["id"])],
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(c["name"] for c in body["items"]) == ["Alpha", "Beta"]
+        assert body["total"] == 2
+
+    def test_repeated_id_dedups_at_row_level(self, api_client, create_client) -> None:
+        """Repeating one id in the address does NOT duplicate the row."""
+        alpha = create_client(name="Solo")
+        create_client(name="Decoy")
+
+        resp = api_client.get(
+            "/api/v1/clients",
+            params=[("id", alpha["id"]), ("id", alpha["id"]), ("id", alpha["id"])],
+        )
+
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [alpha["id"]]
+        assert body["total"] == 1
+
+    def test_row_order_is_endpoint_sort_not_address_order(
+        self, api_client, create_client
+    ) -> None:
+        """Spec §3.1: id order in the address has NO effect on row order —
+        rows come back in the standard sort (name ASC by default)."""
+        create_client(name="Aaa First")
+        zed = create_client(name="Zzz Last")
+        abc = create_client(name="Bbb Middle")
+
+        resp = api_client.get(
+            "/api/v1/clients",
+            params=[("id", zed["id"]), ("id", abc["id"])],
+        )
+
+        assert [c["name"] for c in resp.json()["items"]] == [
+            "Bbb Middle",
+            "Zzz Last",
+        ]
+
+    def test_id_filter_ands_with_status_all(
+        self, api_client, create_client
+    ) -> None:
+        """Archived client named by id is reachable via status=all only —
+        narrowing ANDs with the archive filter."""
+        gone = create_client(name="Gone Arch")
+        keep = create_client(name="Keep Active")
+        assert (
+            api_client.post(f"/api/v1/clients/{gone['id']}/archive").status_code == 200
+        )
+
+        active_only = api_client.get(
+            "/api/v1/clients", params=[("id", gone["id"]), ("id", keep["id"])]
+        )
+        assert [c["name"] for c in active_only.json()["items"]] == ["Keep Active"]
+
+        with_all = api_client.get(
+            "/api/v1/clients",
+            params=[("id", gone["id"]), ("id", keep["id"]), ("status", "all")],
+        )
+        assert sorted(c["name"] for c in with_all.json()["items"]) == [
+            "Gone Arch",
+            "Keep Active",
+        ]
+
+    def test_id_filter_ands_with_q(
+        self, api_client, create_client
+    ) -> None:
+        """Narrowing ANDs with the manual q filter: only the named client
+        whose name also matches q survives."""
+        match = create_client(name="Alpha Probe")
+        create_client(name="Alpha Decoy")  # q ✓, id ✗ (not named)
+        create_client(name="Beta Probe")  # id ✗ (not named), q ✗
+
+        resp = api_client.get(
+            "/api/v1/clients",
+            params=[("id", match["id"]), ("q", "Alpha")],
+        )
+
+        body = resp.json()
+        assert [c["name"] for c in body["items"]] == ["Alpha Probe"]
+        assert body["total"] == 1
+
+    def test_id_and_q_double_mechanism_is_harmless(
+        self, api_client, create_client
+    ) -> None:
+        """Spec §3.1: the existing q uuid-exact match (kept, §3.6) and the
+        id filter intersect without side effects — ?id=X&q=X finds X."""
+        alpha = create_client(name="Alpha")
+        create_client(name="Decoy")
+
+        resp = api_client.get(
+            "/api/v1/clients",
+            params=[("id", alpha["id"]), ("q", alpha["id"])],
+        )
+
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [alpha["id"]]
+        assert body["total"] == 1
+
+    def test_master_scope_unreachable_clients_not_returned(
+        self, api_client, create_service, create_location, make_master
+    ) -> None:
+        """Scope (D1) is inherited: a scoped master naming unreachable
+        clients (no records at all + records only on a FOREIGN master's
+        activities) gets them silently filtered out; his own client stays.
+
+        Seed per spec §4: «клиент без записей + клиент с записями только к
+        чужим активностям».
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from src.auth.passwords import hash_password
+        from tests.conftest import insert_master_user
+
+        master = make_master()
+        svc, loc = create_service(), create_location()
+        foreign_staff = insert_master_user(
+            "+79995551999", hash_password("x")
+        )["staff_id"]
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        own_act = api_client.post("/api/v1/activities", json={
+            "master_id": master["staff_id"],
+            "service_id": svc["id"], "location_id": loc["id"],
+            "start": tomorrow, "duration": 90, "capacity": 10,
+            "is_private": False,
+        }).json()
+        foreign_act = api_client.post("/api/v1/activities", json={
+            "master_id": foreign_staff,
+            "service_id": svc["id"], "location_id": loc["id"],
+            "start": tomorrow, "duration": 90, "capacity": 10,
+            "is_private": False,
+        }).json()
+
+        own = api_client.post("/api/v1/clients", json={
+            "name": "Свой", "phone": "+79001112233", "email": "own@x.io",
+            "channel": "telegram",
+        }).json()
+        own_unnamed = api_client.post("/api/v1/clients", json={
+            "name": "Свой без адреса", "phone": "+79001119999",
+            "email": "own2@x.io", "channel": "telegram",
+        }).json()
+        lonely = api_client.post("/api/v1/clients", json={
+            "name": "Без записей", "phone": "+79002223344",
+            "email": "lonely@x.io", "channel": "telegram",
+        }).json()
+        foreign_only = api_client.post("/api/v1/clients", json={
+            "name": "Чужая активность", "phone": "+79003334455",
+            "email": "foreign@x.io", "channel": "telegram",
+        }).json()
+        for act, cl in ((own_act, own), (own_act, own_unnamed),
+                        (foreign_act, foreign_only)):
+            resp = api_client.post("/api/v1/records", json={
+                "activity_id": act["id"], "client_id": cl["id"],
+                "visits": [{"name": "Гость", "price": 100, "status": "waiting"}],
+            })
+            assert resp.status_code == 201, resp.text
+
+        mc = master["client"]
+        resp = mc.get(
+            "/api/v1/clients",
+            params=[("id", own["id"]), ("id", lonely["id"]),
+                    ("id", foreign_only["id"])],
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [c["id"] for c in body["items"]] == [own["id"]]
+        assert body["total"] == 1
+
+    def test_master_scope_masking_intact_on_narrowed_rows(
+        self, api_client, create_service, create_location, make_master
+    ) -> None:
+        """D3 masking survives the narrowing: a scoped master's narrowed
+        rows come back with masked phone + null email (spec §3.1 «маскировка
+        на месте»)."""
+        from datetime import UTC, datetime, timedelta
+
+        master = make_master()
+        svc, loc = create_service(), create_location()
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        act = api_client.post("/api/v1/activities", json={
+            "master_id": master["staff_id"],
+            "service_id": svc["id"], "location_id": loc["id"],
+            "start": tomorrow, "duration": 90, "capacity": 10,
+            "is_private": False,
+        }).json()
+        own = api_client.post("/api/v1/clients", json={
+            "name": "Маскируемый", "phone": "+79005556677",
+            "email": "mask@x.io", "channel": "telegram",
+        }).json()
+        api_client.post("/api/v1/records", json={
+            "activity_id": act["id"], "client_id": own["id"],
+            "visits": [{"name": "Гость", "price": 100, "status": "waiting"}],
+        }).raise_for_status()
+
+        resp = master["client"].get("/api/v1/clients", params=[("id", own["id"])])
+
+        assert resp.status_code == 200, resp.text
+        row = resp.json()["items"][0]
+        assert row["id"] == own["id"]
+        assert row["email"] is None
+        assert "•" in row["phone"]
+        assert row["phone"].endswith("6677")  # last 4 digits stay visible

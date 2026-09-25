@@ -5,6 +5,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
   python3 .zcode/scripts/gh_board.py host N                     — the card's host field value (watcher tiebreak token)
+  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
@@ -12,7 +13,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
   python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
-  python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it
+  python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it (host survives PR (G7), clears on leaving it)
   python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|none — the pending-ask marker: a design gate stop or an IMPL blocker awaiting the user
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
   python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
@@ -36,6 +37,7 @@ one and copy over).
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -44,6 +46,8 @@ from pathlib import Path
 SCRATCHPAD = Path(__file__).resolve().parents[2] / ".opencode" / "scratchpad.md"
 MERGED_BLOCK = "## Recently merged"
 MERGED_MAX = 5
+SESSION_DB = Path("/root/.local/share/opencode/opencode.db")  # container-side session store (liveness source for reconcile)
+SESSION_IDLE_LIMIT_S = 3600  # a run's sessions silent this long = stuck (the 2026-09-22 #319 dead-stream incident)
 
 # Configure per project. Get IDs via:
 #   gh api graphql -f query='query { user(login: "<owner>") { projectV2(number: <N>) { id fields(first: 30) { nodes { ... on ProjectV2SingleSelectField { name id options { id name } } } } } } }'
@@ -403,6 +407,181 @@ def cmd_host(number: int):
     sys.exit(f"#{number} is not on the board")
 
 
+def _impl_run_alive(number: int) -> bool | None:
+    """Is some `opencode run` process carrying this issue in its cmdline (the
+    `--title "#N IMPL.…"` or a «продолжаем траекторию #N» prompt) alive on THIS
+    machine? Fallback liveness for the "no session rows yet" window (a launch
+    just happened, or the claim was orphaned). /proc-based — None when /proc
+    is absent (a macOS host run)."""
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return None
+    needle = f"#{number}".encode()
+    for p in proc.glob("[0-9]*"):
+        try:
+            cmdline = (p / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if needle in cmdline:
+            return True
+    return False
+
+
+def _run_session_fresh(number: int) -> bool | None:
+    """Is work on this card still alive server-side? The `opencode run` CLI is
+    only an attach client — it dies/detaches while the session keeps working
+    in the `opencode web` server (the "#232 frozen-log" pattern), so a live
+    process is NOT the signal. Liveness = the session store (opencode.db — the
+    #285 lesson: parts live in the DB, not in a pid): roots are the manager
+    "#N IMPL.%" and the architect "IMPL #N %" sessions plus their whole
+    parent_id subtree (deeper subagents). True = any of them wrote within
+    SESSION_IDLE_LIMIT_S. False = silent longer / no rows (no rows falls back
+    to the run-process check). None = session store absent (a host run) — the
+    caller must not treat the card as dead."""
+    if not SESSION_DB.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{SESSION_DB}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = con.execute(
+            """WITH RECURSIVE tree(id) AS (
+                   SELECT id FROM session WHERE title LIKE ? OR title LIKE ?
+                   UNION
+                   SELECT s.id FROM session s JOIN tree t ON s.parent_id = t.id
+               )
+               SELECT MAX(time_updated) FROM session WHERE id IN (SELECT id FROM tree)""",
+            (f"#{number} IMPL.%", f"IMPL #{number} %"),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    if not row or row[0] is None:
+        # сессий нет вообще: только что запущенный CLI ещё живёт в /proc,
+        # осиротевший захват (карточка заявлена, запуска не было) — нет
+        return _impl_run_alive(number)
+    idle_s = datetime.now(timezone.utc).timestamp() - row[0] / 1000.0
+    return idle_s <= SESSION_IDLE_LIMIT_S
+
+
+def _closing_pr(number: int) -> tuple[int, str] | None:
+    """The merged PR whose body closes the issue (Closes/Fixes/Resolves #N)
+    → (pr_number, title), or None. Scans recent merges only — the sweep runs
+    every few minutes, the gap it repairs is minutes-to-hours old."""
+    r = subprocess.run(
+        ["gh", "pr", "list", "--state", "merged", "--limit", "30",
+         "--repo", f"{OWNER}/{REPO}", "--json", "number,title,body"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return None
+    pat = re.compile(
+        rf"(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:{OWNER}/{REPO})?#{number}\b"
+    )
+    for pr in json.loads(r.stdout or "[]"):
+        if pat.search(pr.get("body") or ""):
+            return pr["number"], pr.get("title") or ""
+    return None
+
+
+def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
+    """Watcher-side sweep of stale cards (top of every auto_impl_watch.sh
+    loop). Two repairs, both from the 2026-09-22 incident class — a closed or
+    dead card left sitting in In IMPL:
+      1. issue CLOSED while the card still sits in In IMPL / PR (G7) — the
+         finishing flip was lost (e.g. a network flake at the very end of a
+         marathon run): flip to In-main (stateReason COMPLETED) or
+         "Not planned", and record the "Recently merged" line when the
+         closing PR is found. Host-independent — issue state is global truth.
+      2. issue OPEN, status In IMPL, host = this machine (or empty), and the
+         run's sessions (opencode.db) silent for over SESSION_IDLE_LIMIT_S or
+         never started — the dispatch died or wedged without a BLOCKED report
+         (e.g. API unreachable at plan-only start, a dead stream): append a
+         BLOCKED entry to the auto-impl log (the card then rests for
+         CLAIM_TTL_HOURS — crash-loop throttle) and flip back to Ready to IMPL.
+    Liveness = session-store freshness (the opencode run CLI is a mere attach
+    client and dies while the session keeps working — run processes only fill
+    the "no session rows yet" window); run this from the container, where the
+    store lives; on a host run (no store) repair 2 is skipped (repair 1 still
+    works)."""
+    host = _resolve_host(host_arg)
+    load_status_field()
+    for it in items_with_fields():
+        status = (it["status"] or "").lower()
+        if not (status.startswith("in impl") or status.startswith("pr")):
+            continue
+        n = it["number"]
+        if it["state"] == "CLOSED":
+            target = "In-main"
+            r = subprocess.run(
+                ["gh", "issue", "view", str(n), "--json", "stateReason",
+                 "--repo", f"{OWNER}/{REPO}"],
+                capture_output=True, text=True,
+            )
+            reason = ""
+            if r.returncode == 0:
+                try:
+                    reason = (json.loads(r.stdout) or {}).get("stateReason") or ""
+                except ValueError:
+                    pass
+            if reason and reason != "COMPLETED":
+                if "Not planned" not in _status_opts:
+                    print(f"warn: #{n} closed as {reason} but the board has no 'Not planned' status — skipped", file=sys.stderr)
+                    continue
+                target = "Not planned"
+            pr = _closing_pr(n)
+            desc = (f"#{n}: closed issue in {it['status']} → {target}"
+                    + (f" (PR #{pr[0]})" if pr else " (closing PR not found)"))
+            if dry_run:
+                print(f"would: {desc}")
+                continue
+            try:
+                cmd_status(n, target)
+            except SystemExit as e:
+                print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
+                continue
+            if pr:
+                try:
+                    cmd_merged(n, pr[0], pr[1])
+                except SystemExit as e:
+                    print(f"warn: #{n} merged line skipped: {e}", file=sys.stderr)
+            print(desc)
+            continue
+        # OPEN + In IMPL: stuck-dispatch repair, own machine (or unowned) only;
+        # PR (G7) + OPEN = legitimately on CI — untouched
+        if not status.startswith("in impl"):
+            continue
+        if it["host"] and host and it["host"] != host:
+            continue
+        fresh = _run_session_fresh(n)
+        if fresh is None:
+            print("warn: session store not found — stuck-run check skipped (run reconcile from the container)", file=sys.stderr)
+            continue
+        if fresh:
+            continue
+        desc = (f"#{n}: In IMPL with sessions silent >{SESSION_IDLE_LIMIT_S // 60}min"
+                f" → BLOCKED auto-log entry + Ready to IMPL")
+        if dry_run:
+            print(f"would: {desc}")
+            continue
+        # auto-log FIRST: pick-next must never see the card ready without the
+        # resting marker (a crash-loop of dead dispatches follows otherwise)
+        try:
+            cmd_auto_log(n, "BLOCKED reconciler: прогон завис — сессии молчат "
+                            "больше часа (или так и не стартовали); карточка "
+                            "возвращена в Ready to IMPL, авто-повтор после отдыха")
+        except SystemExit as e:
+            print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
+        try:
+            cmd_status(n, "Ready to IMPL")
+        except SystemExit as e:
+            print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
+            continue
+        print(desc)
+
+
 def cmd_show(arg: str):
     if arg == "all":
         items = sorted(items_with_fields(), key=lambda it: it["number"])
@@ -460,7 +639,11 @@ def cmd_status(number: int, status: str, host: str | None = None):
     """Move a card's status. Entering In IMPL/In Design also stamps the host
     field (arg > GH_BOARD_HOST > container label file; unresolved → warning,
     field left as is); leaving those statuses clears host AND gate — a card
-    that left its phase carries no stale ownership or pending ask."""
+    that left its phase carries no stale ownership or pending ask.
+    Exception (2026-09-21): PR (G7) keeps the host — the card is still owned
+    by its machine while on CI (and returns to it if CI is red) — but it
+    occupies no IMPL slot (the budget counts only In IMPL status). Leaving
+    PR (G7) clears the label."""
     load_status_field()
     if status not in _status_opts:
         sys.exit(f"Unknown status '{status}'. Available: {', '.join(_status_opts)}")
@@ -476,6 +659,10 @@ def cmd_status(number: int, status: str, host: str | None = None):
         else:
             set_field(it["item_id"], _host_field_id, _host_field_opts[h])
             print(f"#{number}: host → {h}")
+    elif status.lower().startswith("pr"):
+        if it["gate"]:
+            set_field(it["item_id"], _gate_field_id, None)
+            print(f"#{number}: gate cleared")
     else:
         if it["host"]:
             set_field(it["item_id"], _host_field_id, None)
@@ -587,6 +774,13 @@ if __name__ == "__main__":
         cmd_auto_state(int(args[1]))
     elif cmd == "host" and len(args) == 2:
         cmd_host(int(args[1]))
+    elif cmd == "reconcile":
+        flags = [a for a in args[1:] if a.startswith("--")]
+        rest = [a for a in args[1:] if not a.startswith("--")]
+        if len(rest) > 1 or any(f != "--dry-run" for f in flags):
+            print(__doc__)
+            sys.exit(1)
+        cmd_reconcile(rest[0] if rest else None, dry_run="--dry-run" in flags)
     elif cmd == "show" and len(args) == 2:
         cmd_show(args[1])
     elif cmd == "set-next-up" and len(args) == 3:

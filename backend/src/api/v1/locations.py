@@ -23,7 +23,7 @@ from src.schemas.location import (
     LocationUpdate,
     ReorderRequest,
 )
-from src.schemas.pagination import PaginationParams
+from src.schemas.pagination import IdQueryParam, PaginationParams
 from src.services.location import LocationService, get_location_service
 
 router = APIRouter(tags=["locations"])
@@ -61,6 +61,15 @@ _LOCATION_SORT_MAP: dict[str, list] = {
 }
 
 
+# GH #232 §3.1: typed ``?id=`` list for the locations list — the shared
+# canonical contract (``IdQueryParam`` in schemas/pagination.py: UUID-only,
+# MAX_LIST_IDS ceiling, dedup of repeats BEFORE the cap). The sibling-param
+# shape is required by upstream fastapi #12481 (scalar query params mixed
+# with the Depends() pagination model forbid the ``Annotated[Model,
+# Query()]`` form) — only the CONTRACT is shared, not the injection shape.
+IdListQuery = IdQueryParam
+
+
 def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) -> list:
     """Build the ``order_by`` list for GET /api/v1/locations.
 
@@ -87,6 +96,12 @@ async def list_locations(
     sort_by: LocationSortBy | None = Query(None),
     sort_order: SortOrder = Query("asc"),
     q: str | None = Query(None, min_length=2, max_length=100),
+    # GH #232 §3.1: the Depends() pagination model silently drops
+    # list-typed fields (FastAPI body-classification quirk), so the ``id``
+    # set rides a sibling scalar-style Query param — the shared
+    # IdListQuery contract (UUID-only, dedup of repeats BEFORE the
+    # ≤MAX_LIST_IDS cap; row-level dedup follows from SQL IN).
+    id: IdListQuery = None,
 ) -> PaginatedResponse[LocationResponse]:
     """Return locations filtered by archive status (default: active),
     sorted by sort_order, then title.
@@ -105,6 +120,14 @@ async def list_locations(
     the URL fields (``yandex_map_url``/``review_url``/``image_url`` — full
     string only, partial URLs never match); ``total`` reflects the filtered
     count. len<2 / len>100 → 422 VALIDATION_ERROR.
+
+    ``?id=`` (GH #232 §3.1): typed set narrowing through the universal
+    ``ArchiveService`` path. NOTE: the Depends() pagination model cannot
+    carry list-typed query fields (FastAPI drops them as body params), so
+    the ``id`` list is read via the router-level ``Query`` alias
+    (``IdListQuery`` above) — the pagination model keeps page/per_page
+    (scalar mixing, fastapi #12481, prevents the Annotated[Model, Query()]
+    shape here).
     """
     return await service.list(
         db_session=session,
@@ -113,6 +136,7 @@ async def list_locations(
         status=status,
         order_by=_location_order_by(sort_by, sort_order),
         q=q,
+        ids=id,
     )
 
 

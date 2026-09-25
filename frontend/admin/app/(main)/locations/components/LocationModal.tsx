@@ -132,7 +132,7 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── LocationModal ───────────────────────────────────────────────── */
 
 export function LocationModal({
-  mode,
+  mode: _mode,
   location,
   onSubmit,
   onClose,

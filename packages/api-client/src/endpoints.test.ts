@@ -758,6 +758,37 @@ describe('getClientsWithStats', () => {
       expect.anything(),
     );
   });
+
+  // GH #232: ids → repeated `id` query keys (backend ≤100 after dedup)
+  it('repeats the id query key for each element of ids', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({
+      page: 1,
+      ids: ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'],
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1&id=11111111-1111-1111-1111-111111111111&id=22222222-2222-2222-2222-222222222222',
+      expect.anything(),
+    );
+  });
+
+  it('omits the id key entirely when ids is an empty array', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({ page: 1, ids: [] });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1',
+      expect.anything(),
+    );
+  });
+
+  it('omits the id key when ids is undefined', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getClientsWithStats({ page: 1, ids: undefined });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients?page=1',
+      expect.anything(),
+    );
+  });
 });
 
 // ─── Clients Paged (GH #211: light paginated list for photo typeaheads) ─────

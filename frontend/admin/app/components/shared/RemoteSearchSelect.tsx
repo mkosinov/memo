@@ -43,6 +43,12 @@ export interface RemoteSearchSelectProps<
   onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
+  /**
+   * id for the input element — lets the consumer's own visible label bind to
+   * the input via htmlFor (used when the consumer renders the label itself,
+   * e.g. the tags multi-pickers; GH #328 spec §6.2).
+   */
+  inputId?: string;
 }
 
 interface SearchItem {
@@ -92,7 +98,7 @@ function getDisplayText(
 export default function RemoteSearchSelect<
   Q extends SearchQuery = string,
 >({
-  value,
+  value: _value,
   onChange,
   onSelectItem,
   onSearch,
@@ -108,6 +114,7 @@ export default function RemoteSearchSelect<
   getDisplayLabel,
   onInputValueChange,
   inputTestId,
+  inputId,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -212,6 +219,7 @@ export default function RemoteSearchSelect<
           className={INPUT_CLASSES}
           style={INPUT_STYLE}
           readOnly={!!selectedLabel}
+          id={inputId}
           aria-label={label}
           data-testid={inputTestId}
         />

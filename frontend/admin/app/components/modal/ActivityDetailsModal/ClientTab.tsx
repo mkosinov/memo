@@ -168,7 +168,10 @@ export function ClientTab({
           showToast(parseApiError(err).message, 'error');
         });
     },
-    [clientId, queryClient, showToast],
+    // `clientId` is NOT a dep: the invalidation is the coarse ['visitors']
+    // prefix (every reader converges) and the callback reads nothing else
+    // client-specific.
+    [queryClient, showToast],
   );
 
   // Status change on the record (RecordSummary StatusPicker) — coarse
@@ -187,7 +190,7 @@ export function ClientTab({
         status: newStatus,
       }));
       try {
-        await updateRecord(recordId, { visits: updatedVisits } as any);
+        await updateRecord(recordId, { visits: updatedVisits });
       } catch {
         showToast('Ошибка обновления статуса', 'error');
       }
@@ -215,7 +218,7 @@ export function ClientTab({
     async (value: string) => {
       setComment(value);
       try {
-        await updateRecord(recordId, { comment: value } as any);
+        await updateRecord(recordId, { comment: value });
       } catch {
         showToast('Ошибка сохранения комментария', 'error');
       }
@@ -276,7 +279,6 @@ export function ClientTab({
           visitorsMap={visitorsMap}
           tariffs={tariffs}
           totalCost={totalCost}
-          recordStatus={derivedStatus}
           clientId={clientId}
           onAddVisit={addVisit}
           onPatchVisit={patchVisit}

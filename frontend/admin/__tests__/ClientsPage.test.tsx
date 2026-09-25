@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ClientWithStats } from '@memo/api-client';
-import { useClientsTable } from '@/contexts/ClientsContext';
+import { useClientsTable, defaultFilters } from '@/contexts/ClientsContext';
 import { createMockClientsTableState } from './helpers/mockContexts';
 
 // ─── Mock contexts ───────────────────────────────────────────────────────
@@ -56,6 +56,8 @@ let mockSearchParams = new URLSearchParams();
 vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   useRouter: () => mockRouter,
+  // #232 §3.5 — the narrowing chip builds its replace-target from pathname.
+  usePathname: () => '/clients',
 }));
 
 const mockUseClients = vi.mocked(useClientsTable);
@@ -335,7 +337,12 @@ describe('ClientsPage', () => {
   });
 });
 
-describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => {
+describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => {
+  // Real-shaped UUIDs — the parser drops anything else (#232 §3.3).
+  const U1 = '11111111-1111-4111-8111-111111111111';
+  const U2 = '22222222-2222-4222-8222-222222222222';
+  const U3 = '33333333-3333-4333-8333-333333333333';
+
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
     mockRouter.push.mockClear();
@@ -347,8 +354,8 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
     vi.restoreAllMocks();
   });
 
-  it('deep-link param seeds the provider: initialFilters={search: id, status: all}', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', 'uuid-target-1']]);
+  it('seeds the provider: initialFilters={clientIds, status: all} for one valid id', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -360,10 +367,75 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
     expect(clientsProviderMounts.length).toBeGreaterThan(0);
-    // #231 §5.2: value carried verbatim (no validation), status forced to 'all'.
     const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
     expect(seedMount).toBeDefined();
-    expect(seedMount!.initialFilters).toEqual({ search: 'uuid-target-1', status: 'all' });
+    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
+  });
+
+  it('seeds the provider with all valid ids when the param repeats', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
+    expect(seedMount).toBeDefined();
+    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1, U2], status: 'all' });
+  });
+
+  it('garbage param: no seed, default filters (all components invalid)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'abc'], ['clientId', '  ']]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(clientsProviderMounts.every(m => m.initialFilters === undefined)).toBe(true);
+  });
+
+  it('mixed garbage and valid: only valid ids seed the provider', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', 'abc'], ['clientId', U1], ['clientId', '']]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
+    expect(seedMount).toBeDefined();
+    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
+  });
+
+  it('repeated identical id dedups to a single-element seed', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U1.toUpperCase()]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
+    expect(seedMount).toBeDefined();
+    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
   });
 
   it('no param: initialFilters prop not passed (undefined)', async () => {
@@ -381,12 +453,12 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
     expect(clientsProviderMounts.every(m => m.initialFilters === undefined)).toBe(true);
   });
 
-  it('find-effect opens the modal when the narrowed row arrives', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
-    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
-    mockUseClients.mockReturnValue(
-      createMockClientsTableState({ items: [target] }),
-    );
+  // ─── Auto-open rule (#232 §3.3/§3.4) ────────────────────────────────────
+
+  it('find-effect opens the modal when the narrowed row arrives (single id)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const target = { id: U1, name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [target] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -395,18 +467,16 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
       </QueryClientProvider>,
     );
 
-    // Reuse the assertion idiom the existing create-mode modal tests use.
     await waitFor(() => {
       expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
     });
   });
 
-  it('row not in items: modal stays closed (negative find branch)', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', 'c-missing']]);
-    const other = { id: 'c-other', name: 'Other', archived: false } as ClientWithStats;
-    mockUseClients.mockReturnValue(
-      createMockClientsTableState({ items: [other] }),
-    );
+  it('two ids: modal never auto-opens even though rows are present (US-3)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+    const a = { id: U1, name: 'A', archived: false } as ClientWithStats;
+    const b = { id: U2, name: 'B', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [a, b] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -419,8 +489,26 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
     expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
   });
 
-  it('dead link: settled empty list strips the param from the URL', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', 'c-gone']]);
+  it('row not in items: modal stays closed (negative find branch)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U3]]);
+    const other = { id: U1, name: 'Other', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [other] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
+  });
+
+  // ─── Modal lifecycle (#232 §3.4) ────────────────────────────────────────
+
+  it('dead link: settled empty list does NOT strip the param from the URL', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U3]]);
     mockUseClients.mockReturnValue(
       createMockClientsTableState({ items: [], isPending: false, isFetching: false }),
     );
@@ -432,17 +520,16 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
       </QueryClientProvider>,
     );
 
-    await waitFor(() =>
-      expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false }),
-    );
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    // The dead-link cleanup effect is removed (#232 §3.4): the address is
+    // never wiped silently — the empty table + chip is the honest state.
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
-  it('closing the deep-link modal does not re-open it while the param is still in the URL', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', 'c-deep-1']]);
-    const target = { id: 'c-deep-1', name: 'Deep Target', archived: false } as ClientWithStats;
-    mockUseClients.mockReturnValue(
-      createMockClientsTableState({ items: [target] }),
-    );
+  it('closing the modal keeps it closed while the param stays in the URL (latch #216)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const target = { id: U1, name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [target] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -451,19 +538,239 @@ describe('ClientsPage — ?clientId= deep-link (GH #216, #231 seed-era)', () => 
       </QueryClientProvider>,
     );
 
-    // Deep-link opens the modal via the find-effect.
     await waitFor(() => {
       expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
     });
 
-    // User closes the modal. In the unit env `mockRouter.replace` is a vi.fn()
-    // that does NOT mutate mockSearchParams, so the param REMAINS in the URL —
-    // exactly the race window where the bug bites: selectedClient=null +
-    // param present → find-effect re-runs and re-opens the modal.
+    // User closes the modal. The unit-env router mock does NOT mutate
+    // mockSearchParams, so the param REMAINS — the exact latch window.
     fireEvent.click(screen.getByTestId('modal-close'));
 
     await waitFor(() =>
       expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument(),
     );
+  });
+
+  it('closing the modal does not touch the address (no hidden router.replace)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const target = { id: U1, name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [target] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('modal-close'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument(),
+    );
+
+    // #232 §3.4: closing the card must not mutate the URL.
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  it('latch resets when the param leaves the URL — same id re-navigated reopens the modal', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const target = { id: U1, name: 'Deep Target', archived: false } as ClientWithStats;
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [target] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    // Fresh JSX per rerender — reusing one element reference makes React bail
+    // out of reconciliation (same-element bailout gotcha).
+    const ui = () => (
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui());
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('modal-close'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument(),
+    );
+
+    // Param leaves the URL (e.g. narrowing removed) → latch resets.
+    mockSearchParams = new URLSearchParams();
+    rerender(ui());
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+
+    // Same id arrives again → the modal opens again.
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    rerender(ui());
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-card-modal')).toBeInTheDocument();
+    });
+  });
+
+  // ─── Live sync: URL → clientIds machine field (#232 §3.3) ───────────────
+
+  it('sync effect converges the machine field when the state lacks the URL ids', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const state = createMockClientsTableState({ items: [] });
+    mockUseClients.mockReturnValue(state);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1] });
+    });
+  });
+
+  it('URL change (back/forward/edit) updates the machine field', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const state = createMockClientsTableState({ items: [] });
+    mockUseClients.mockReturnValue(state);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    // Fresh JSX per rerender — reusing one element reference makes React bail
+    // out of reconciliation (same-element bailout gotcha).
+    const ui = () => (
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui());
+
+    await waitFor(() => {
+      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1] });
+    });
+    // Emulate the real merge-patch landing (vi.fn does not update state).
+    state.filters = { ...state.filters, clientIds: [U1] };
+    vi.mocked(state.setFilters).mockClear();
+
+    // Back/forward or manual edit lands on two ids.
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+    rerender(ui());
+    await waitFor(() => {
+      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1, U2] });
+    });
+    state.filters = { ...state.filters, clientIds: [U1, U2] };
+    vi.mocked(state.setFilters).mockClear();
+
+    // Narrowing removed from the address. (undefined ≈ null in the page's
+    // sameIds normalization, so the write only fires once the state actually
+    // holds a narrowing.)
+    mockSearchParams = new URLSearchParams();
+    rerender(ui());
+    await waitFor(() => {
+      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: null });
+    });
+  });
+
+  it('no redundant sync write when the state already matches the URL ids', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    const state = createMockClientsTableState({
+      items: [],
+      filters: { ...defaultFilters, clientIds: [U1], status: 'all' },
+    });
+    mockUseClients.mockReturnValue(state);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(state.setFilters).not.toHaveBeenCalled();
+  });
+
+  // ─── Narrowing chip (#232 §3.5) ─────────────────────────────────────────
+
+  it('renders the chip between filters and table when the URL narrows (single id)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    const { container } = render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
+    expect(screen.getByText('Открыт по ссылке')).toBeInTheDocument();
+    // Between the filters block and the table (spec §3.5 placement).
+    const chip = screen.getByTestId('client-deeplink-chip');
+    const filtersBlock = screen.getByTestId('clients-filters').closest('div');
+    const tableBlock = screen.getByTestId('clients-table').closest('div');
+    expect(chip.compareDocumentPosition(filtersBlock!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+    expect(chip.compareDocumentPosition(tableBlock!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('multi-id URL renders «Открыто по ссылке: N»', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Открыто по ссылке: 2')).toBeInTheDocument());
+  });
+
+  it('no narrowing → no chip', async () => {
+    mockSearchParams = new URLSearchParams();
+    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25 }));
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
+  });
+
+  it('chip ✕ clears only the address — no setFilters from the click (#232 §3.5)', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['page', '2']]);
+    const state = createMockClientsTableState({
+      // user-set filters live ON TOP of the narrowing (AND semantics, §3.3)
+      filters: { ...defaultFilters, clientIds: [U1], status: 'all', search: 'анна' },
+      items: [],
+    });
+    mockUseClients.mockReturnValue(state);
+
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
+
+    // Address only: page param survives, clientId is gone, scroll: false.
+    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=2', { scroll: false });
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    // NO setFilters from the click — the Task 4 sync effect owns convergence.
+    // (The mount-time sync effect may fire for state/URL mismatch; clear the
+    // history first, then assert the click itself added no filter writes.)
+    vi.mocked(state.setFilters).mockClear();
+    expect(state.setFilters).not.toHaveBeenCalled();
   });
 });

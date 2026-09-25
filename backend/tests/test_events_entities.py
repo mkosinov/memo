@@ -144,10 +144,12 @@ class TestDriftMirror:
         assert set(MODEL_ENTITY.values()) == CANONICAL_ENTITIES
 
     def test_master_is_cascade_only_entry(self) -> None:
-        """GH #266: masters has NO service of its own (MasterViewService is
-        read-only, not GenericService) — the walk cannot derive it; the
-        explicit cascade-only entry must map Master → "masters" so
-        StaffService's mark_changed("masters") stays mirror-guarded."""
+        """GH #266: masters has NO service of its own (the masters view
+        reads are module-level free functions — not a GenericService)
+        since GH #217 Task 2 disbanded MasterViewService — the walk cannot
+        derive it; the explicit cascade-only entry must map Master →
+        "masters" so StaffService's mark_changed("masters") stays
+        mirror-guarded."""
         from src.models.master import Master
 
         assert MODEL_ENTITY[Master] == "masters"

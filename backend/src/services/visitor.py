@@ -159,30 +159,36 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         return list(result.scalars().all())
 
     async def _delete_cascade(self, db_session: AsyncSession, visitor_id: str) -> bool:
-        """Hard-delete a visitor and its visits; delete visitor_tags join
-        rows — on the GIVEN session, WITHOUT committing.
+        """Own-edge delete: visitor_tags join rows + the Visitor row — on
+        the GIVEN session, WITHOUT committing (GH #327 Task 2).
 
-        Extracted (Task 7 of #207) from ``delete`` so ``ClientService`` can call
-        this inside its OWN ``@transactional`` outer cascade loop on a SHARED
-        session — atomicity with ONE commit at the outer boundary, not N
-        mid-loop commits (§8 atomicity requirement — BLOCKER-class).
+        The visits of the visitor are NOT touched here: since #327 the
+        visits table has ONE writer — the owner service brick
+        ``VisitService.delete_visits_by_visitor`` →
+        ``VisitRepository.delete_by_visitor_id`` (canon rule 1). The
+        standalone ``delete`` composes that brick BEFORE this core;
+        the future ``usecases.clients.delete_client`` scenario does the
+        same inside its visitor-cascade loop.
 
-        All cascade deletes run as explicit SQL inside the caller's transaction.
-        Visits are removed BEFORE the visitor (visits reference visitors via FK).
-        The visitor_tags join table has FKs with NO ondelete action, so its rows
-        must be removed BEFORE the visitor — otherwise the DB raises
-        IntegrityError (FK on) or leaves orphan rows (FK off). Photos are NOT
-        touched: since GH #211 a photo is never visitor-owned (4-owner model:
-        client|service|activity|location).
+        The name and signature are kept EXACTLY as-is: the structural
+        test (``hasattr`` + no-commit) and the atomicity test's
+        monkeypatch point ride on this method (spec §3, §8). The name no
+        longer reflects the full cascade shape — that price is
+        documented in spec §8; the role lives in this docstring.
 
-        Returns False if the visitor does not exist. Does NOT commit — the
-        caller owns the transaction boundary.
+        The visitor_tags join table has FKs with NO ondelete action, so
+        its rows are removed BEFORE the visitor row — otherwise the DB
+        raises IntegrityError (FK on) or leaves orphan rows (FK off).
+        Photos are NOT touched: since GH #211 a photo is never
+        visitor-owned (4-owner model: client|service|activity|location).
+
+        Returns False if the visitor does not exist. Does NOT commit —
+        the caller owns the transaction boundary.
         """
         visitor = await self._repository.get(db_session, Visitor, visitor_id)
         if not visitor:
             return False
 
-        await db_session.execute(delete(Visit).where(Visit.visitor_id == visitor_id))
         await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == visitor_id))
         await db_session.execute(delete(Visitor).where(Visitor.id == visitor_id))
         return True
@@ -192,11 +198,15 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         """Hard-delete a visitor and cascade (visits, visitor_tags) inside one
         ``@transactional`` transaction.
 
-        Thin decorated wrapper around the non-decorated ``_delete_cascade``
-        core (Task 7 of #207) so standalone ``VisitorService.delete`` still
-        commits exactly as before — existing callers are unaffected.
-        ``ClientService`` reuses ``_delete_cascade`` directly on a shared outer
-        session (Task 10) keeping the Client→visitors cascade atomic.
+        Composition (GH #327 Task 2): the owner-service visit brick runs
+        FIRST (``get_visit_service().delete_visits_by_visitor(...,
+        mark_visits=False)`` — visits are removed before the visitor row
+        disappears), then the own-edge ``_delete_cascade`` core (tags +
+        row). Net DB effects and the event grid — the decorator's auto
+        ``"visitors"`` mark, NO ``"visits"`` mark — are identical to the
+        pre-#327 shape; ``mark_visits=False`` keeps the grid owner the
+        orchestrator (canon rule 3: decorated thin method over the
+        non-transactional cores).
 
         GH #344 (§4.3): the standalone delete journals ONE ``delete`` row
         with the deleted visitor's label + before-snapshot (§9 scenario 6)
@@ -218,6 +228,11 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
             entity_id=id,
             entity_label=derive_row_label("visitors", visitor),
             changes=snapshot_pairs_before("visitors", visitor),
+        )
+        from src.services.visit import get_visit_service
+
+        await get_visit_service().delete_visits_by_visitor(
+            db_session, id, mark_visits=False
         )
         return await self._delete_cascade(db_session, id)
 

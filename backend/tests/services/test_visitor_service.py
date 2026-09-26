@@ -181,3 +181,107 @@ async def test_get_or_create_by_name_does_not_commit(db_session):
         "get_or_create_by_name must NOT commit — the scenario layer owns "
         "the transaction boundary (canon rule 3)"
     )
+
+
+# ── GH #327 Task 2 — _delete_cascade becomes an own-edge command ──────────────
+
+
+async def test_delete_cascade_is_own_edge_visitor_tags_and_row_only(
+    db_session, db_engine
+):
+    """Direct ``_delete_cascade`` removes the visitor row and its
+    visitor_tags join rows but issues NO DELETE against the ``visits``
+    table — visits belong to the OWNER service
+    (``VisitService.delete_visits_by_visitor`` → GH #327 Task 1); the
+    standalone ``delete`` composes that brick BEFORE the own-edge core.
+
+    Observation is at the SQL-statement level, not the row level: the
+    schema FK ``visits.visitor_id → visitors`` is ``ON DELETE CASCADE``
+    (migration b7c8d9e0f1a2) and FKs are enforced (``PRAGMA
+    foreign_keys=ON`` in the engine checkout listener), so the visit ROW
+    legitimately dies WITH the visitor row at DB level — the own-edge
+    contract under test is that the SERVICE issues no visits-table SQL
+    (canon rule 1: one writer per table; statement-counter pattern of
+    ``test_delete_visits_by_visitor_is_one_delete_statement``).
+    """
+    from datetime import datetime
+
+    from sqlalchemy import event
+
+    # Setup: a visitor with a tag join row and one linked visit
+    # (committed) — the same shape as test_visitor_delete_cascades_to_visits.
+    from src.models.activity import Activity
+    from src.models.location import Location
+    from src.models.master import Master
+    from src.models.record import Record
+    from src.models.service import Service
+    from src.models.staff import Staff
+    from src.models.tag import Tag, visitor_tags
+    from src.models.visit import Visit
+
+    staff = Staff(first_name="Oe", last_name="T")
+    service = Service(title="OeSvc", description="d", image_url="http://x",
+                      specialty="s", min_age=5, duration=60, record_info="r")
+    location = Location(title="OeLoc", capacity=20)
+    db_session.add_all([staff, service, location])
+    await db_session.flush()
+    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    await db_session.flush()
+    activity = Activity(
+        master_id=staff.id, service_id=service.id, location_id=location.id,
+        start=datetime(2030, 1, 1, 12, 0), duration=90, capacity=10,
+        is_private=False,
+    )
+    db_session.add(activity)
+    client = Client(name="Oe Client", phone=None)
+    db_session.add(client)
+    await db_session.flush()
+    record = Record(activity_id=activity.id, client_id=client.id,
+                    status="pending", seats=1)
+    db_session.add(record)
+    visitor = Visitor(client_id=client.id, name="Alice")
+    db_session.add(visitor)
+    await db_session.flush()
+    tag = Tag(title="oe-tag")
+    db_session.add(tag)
+    await db_session.flush()
+    await db_session.execute(
+        visitor_tags.insert().values(visitor_id=visitor.id, tag_id=tag.id)
+    )
+    db_session.add(Visit(record_id=record.id, visitor_id=visitor.id,
+                         tariff_id=None, price=2000, custom_price=None,
+                         status="waiting"))
+    await db_session.commit()
+    visitor_id = visitor.id
+
+    # Act: direct call of the own-edge core, counting visits-table DELETEs.
+    visits_deletes = {"n": 0}
+
+    def _before(conn, cursor, statement, params, context, executemany):
+        if (
+            statement.lstrip().upper().startswith("DELETE")
+            and " FROM visits" in statement
+        ):
+            visits_deletes["n"] += 1
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", _before)
+    try:
+        result = await get_visitor_service()._delete_cascade(db_session, visitor_id)
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", _before)
+
+    # Visitor row and its tag join rows are gone (own edge executed)…
+    from tests.conftest import query_db
+
+    await db_session.rollback()  # un-observe the uncommitted deletes
+    assert result is True
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM visitor_tags WHERE visitor_id='{visitor_id}'"
+    )[0]["c"] == 1  # pre-state sanity: the join row existed
+    # …and the service issued ZERO DELETEs against the visits table.
+    assert visits_deletes["n"] == 0, (
+        "_delete_cascade must NOT touch the visits table — visits are "
+        "deleted by the owner service (VisitService.delete_visits_by_visitor, "
+        "GH #327 Task 1); the standalone delete composes that brick before "
+        "the own-edge core (canon rule 1: one writer per table)"
+    )

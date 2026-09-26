@@ -1429,9 +1429,12 @@ def validate_resolutions(
 # ─── Per-(Model, FK-entity) dep handlers — Task 10 executor dispatch ───────────
 # Called by ``GenericService.resolve_delete`` (spec §6 execution order
 # nullify → cascade → hard delete). Each handler is a free async function
-# taking ``(self, session, entity_id)`` so that ``_h_cascade_client_visitors``
-# can access ``self._visitor_service`` (injected only on ``ClientService``);
-# all other handlers ignore the ``self`` arg.
+# taking ``(self, session, entity_id)``; the shared signature is kept for
+# registry uniformity (the ``_FkHandlerFn`` type is one callable shape).
+# GH #327: the CLIENT cascade handlers are gone — the client execute
+# branch runs the ``usecases.clients.delete_client`` scenario; only the
+# client NULLIFY handlers stay (the scenario dispatches them via
+# ``FK_MATRIX[Client]``/``NULLIFY_HANDLERS``).
 
 type _FkHandlerFn = Callable[
     ["GenericService", AsyncSession, str], Awaitable[None]
@@ -1599,47 +1602,6 @@ async def _h_cascade_material_service_materials(
     )
 
 
-async def _h_cascade_client_tags(
-    _self: GenericService, session: AsyncSession, entity_id: str,
-) -> None:
-    """Client → client_tags auto-cascade (join): hard-delete rows where client_id."""
-    await session.execute(
-        delete(client_tags).where(client_tags.c.client_id == entity_id)
-    )
-
-
-async def _h_cascade_client_visitors(
-    self: GenericService, session: AsyncSession, entity_id: str,
-) -> None:
-    """Client → visitors USER-CHOICE cascade — loop ``VisitorService._delete_cascade``
-    on the SHARED session (atomicity with the outer ``ClientService.resolve_delete``
-    transaction — spec §8 BLOCKER-class: NO per-visitor commit).
-
-    Each iteration triggers (per ``VisitorService._delete_cascade`` §8 reference):
-      1. ``DELETE FROM visits WHERE visitor_id=<vid>``
-      2. ``DELETE FROM visitor_tags WHERE visitor_id=<vid>``
-      3. ``DELETE FROM visitors WHERE id=<vid>``
-
-    Photos are NOT touched — since GH #211 a photo is never visitor-owned
-    (4-owner model: client|service|activity|location).
-
-    Payments are record-scoped and EXCLUDED — records are nullified (not deleted)
-    so their payments do not flow through this cascade (§5).
-
-    ``self`` is the ``ClientService`` instance — only it carries
-    ``self._visitor_service`` (injected via DI in ``get_client_service``).
-    Base ``GenericService`` is never dispatched here for visitors because
-    ``(Client, "visitors")`` appears only in ``FK_MATRIX[Client]``.
-    """
-    visitor_ids_result = await session.execute(
-        select(Visitor.id).where(Visitor.client_id == entity_id)
-    )
-    visitor_ids = list(visitor_ids_result.scalars().all())
-    visitor_service = self._visitor_service  # type: ignore[attr-defined]
-    for vid in visitor_ids:
-        await visitor_service._delete_cascade(session, vid)
-
-
 # ─── GH #318 D8: Tag → *_tags join cascades (matrix + handler pairs) ───────────
 # One join-delete handler per FK_MATRIX[Tag] dep — delete join rows where
 # tag_id. Parent rows are NEVER touched (the tag unlink is the only effect).
@@ -1726,6 +1688,10 @@ async def _h_cascade_tag_photo_tags(
 # a handler entry in the matching table below (nullify/cascade). The base
 # ``GenericService.resolve_delete`` executor iterates ``FK_MATRIX[self._model]``
 # in spec §6 order (nullify → cascade → hard delete) and dispatches each dep.
+# GH #327: ``Client`` has NO cascade-table entries — the client execute
+# branch is the ``usecases.clients.delete_client`` scenario, which reads
+# ``FK_MATRIX[Client]`` and dispatches ``NULLIFY_HANDLERS`` itself; the
+# client CASCADE deps (visitors, client_tags) run as scenario phases.
 
 NULLIFY_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Service, "photos"): _h_nullify_service_photos,
@@ -1744,8 +1710,6 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Service, "service_tags"): _h_cascade_service_tags,
     (Service, "service_materials"): _h_cascade_service_materials,
     (Material, "service_materials"): _h_cascade_material_service_materials,
-    (Client, "client_tags"): _h_cascade_client_tags,
-    (Client, "visitors"): _h_cascade_client_visitors,  # uses self._visitor_service
     # GH #318 D8: the tag's side of the 8 join tables (matrix + handler pairs).
     (Tag, "service_tags"): _h_cascade_tag_service_tags,
     (Tag, "activity_tags"): _h_cascade_tag_activity_tags,

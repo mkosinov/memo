@@ -28,7 +28,6 @@ from src.schemas.client import (
 )
 from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
-from src.services.visitor import VisitorService, get_visitor_service
 
 ResponseT = TypeVar("ResponseT", bound=ClientResponse)
 
@@ -67,23 +66,17 @@ def _mask_client_contacts(item: ResponseT) -> ResponseT:
 
 
 class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
-    """Client service — standard ``ArchiveService`` PLUS the Client→visitors cascade.
+    """Client service — the standard ``ArchiveService`` shape (GH #327).
 
-    The unified DELETE executor (``ArchiveService.resolve_delete``) dispatches
-    on ``(self._model, dep.entity)`` via :data:`CASCADE_HANDLERS` in
-    ``src.domain.deletion``. The Client→visitors handler
-    (``_h_cascade_client_visitors``) is the ONLY dep in the §4 matrix that
-    needs an external-service reference — it loops the non-decorated
-    ``VisitorService._delete_cascade`` per visitor on the SHARED outer
-    session (atomic with the Client resolve_delete transaction — spec §8
-    BLOCKER-class: NO per-visitor commit).
-
-    To keep the executor free of ``if model is Client`` branches, the handler
-    is injected via the service instance: ``self._visitor_service``. The base
-    ``ArchiveService`` has no such attr; ``ClientService`` is the ONLY subclass
-    that adds one (via the DI factory below). Other services (Master/Location/
-    Service/Material) dispatch through the matrix's free-function handlers —
-    no service injection needed there.
+    The unified DELETE execute branch no longer lives here: the
+    ``usecases.clients.delete_client`` scenario owns the resolution
+    cascade (nullify dispatch over ``NULLIFY_HANDLERS`` + the visitors
+    cascade + this service's own-edge ``delete_row_with_tags``). The
+    former ``_visitor_service`` DI existed ONLY for the dismantled
+    ``_h_cascade_client_visitors`` handler and is gone with it — the
+    scenario resolves the ``get_visitor_service()`` singleton itself,
+    so tests that monkeypatch ``VisitorService._delete_cascade`` on
+    the singleton still intercept (the patch point is unchanged).
     """
 
     def __init__(
@@ -91,7 +84,6 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         repository: ClientRepository,
         model: type[Client],
         response_schema: type[ClientResponse],
-        visitor_service: VisitorService,
     ) -> None:
         super().__init__(repository, model, response_schema)
         # GH #327 Task 3: narrow the attribute type to the owner repo — the
@@ -102,7 +94,6 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         # ``ArchiveRepository`` singleton to the specialized one is
         # behavior-neutral for every inherited path.
         self._repository: ClientRepository = repository
-        self._visitor_service = visitor_service
 
     # GH #212 search matrix (spec §5.2): substring over name/phone/email,
     # exact id equality when q parses as a full UUID (deep-link #216).
@@ -261,11 +252,14 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
 
 @lru_cache
 def get_client_service() -> ClientService:
-    """Singleton ClientService — injects the VisitorService singleton.
+    """Singleton ClientService over the specialized owner repository.
 
-    Both singletons are ``@lru_cache``d, so tests that monkey-patch
-    ``VisitorService._delete_cascade`` (the atomicity test) patch the SAME
-    instance the ClientService holds — the executor sees the patched method.
+    GH #327: the ``_visitor_service`` DI injection is GONE — the client
+    delete cascade lives in the ``usecases.clients.delete_client``
+    scenario, which resolves the ``get_visitor_service()`` singleton
+    itself on every call. Tests that monkeypatch
+    ``VisitorService._delete_cascade`` patch that SAME singleton — the
+    scenario sees the patched method (the atomicity test's point).
 
     GH #327 Task 3: the service sits on the specialized owner repository
     (``ClientRepository``) — the generic archive singleton gave way to the
@@ -277,7 +271,6 @@ def get_client_service() -> ClientService:
         get_client_repository(),
         Client,
         ClientResponse,
-        get_visitor_service(),
     )
 
 

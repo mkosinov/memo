@@ -390,9 +390,15 @@ async def test_step_order_card_master_user(db_session, monkeypatch) -> None:
     )
 
     assert calls == [
-        "staff.archive_card",                # 1. existence probe + person flag
-        "masters.archive_active_extension",  # 2. checkbox: active link only
-        "users.deactivate_active_by_staff",  # 3. checkbox: active account only
+        # 0. existence probe for the GH #344 archive journal guard (the
+        #    no-op check reads the card before the flip — same row via
+        #    the identity map, one extra read, no extra write),
+        # 1. person flag flip,
+        # 2./3. checkbox: active link / account only.
+        "staff.get_card",
+        "staff.archive_card",
+        "masters.archive_active_extension",
+        "users.deactivate_active_by_staff",
     ], f"step order drifted: {calls}"
 
 

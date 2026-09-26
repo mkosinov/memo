@@ -291,6 +291,17 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
 
     # ─── card row blocks — scenario building blocks, no decorator ────────
 
+    async def get_card(self, db_session: AsyncSession, id: str) -> Staff | None:
+        """Read ONE staff card row (ORM object or None) — NO decorator.
+
+        A pure read block for the scenarios (GH #344 §4.2): the audit
+        "before" snapshot of the card fields is fixed by the scenario
+        BEFORE the first in-session mutation. The repository's identity
+        map returns the SAME object the following card block mutates —
+        no second query, no staleness.
+        """
+        return await self._repository.get(db_session, self._model, id)
+
     async def create_card(
         self,
         db_session: AsyncSession,

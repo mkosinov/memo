@@ -56,7 +56,7 @@ as the pre-refactor oracle by ``tests/usecases/test_staff_*.py``:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.events.emitter import mark_changed
 from src.services.decorators import transactional
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.models.enums import UserRole
+    from src.models.staff import Staff
     from src.schemas.staff import (
         CreateUserSection,
         MasterSection,
@@ -81,6 +82,46 @@ if TYPE_CHECKING:
 def _account_section(data: StaffCreate) -> CreateUserSection | None:
     """The D6 account checkbox, or ``None`` when unchecked."""
     return data.create_user if data.create_user else None
+
+
+# GH #344: journaled card fields for an explicit staff mark (§5.1) — the
+# ENTITY_SIGNATURES snapshot set plus ``avatar_url`` (a real user-facing
+# card column); sort_order is dictionary bookkeeping.
+_STAFF_MARK_FIELDS = ("first_name", "last_name", "avatar_url")
+
+
+def _mark_staff_audit(
+    staff: Staff, action: str, old: dict[str, Any] | None = None
+) -> None:
+    """Stage ONE journal row for a composite card write (spec §4.3).
+
+    ``old=None`` → create mark (after-snapshot pairs; ``None``-valued
+    fields — a fresh card has no avatar — are skipped, the
+    ``snapshot_pairs_after`` convention §5.1); otherwise update pairs
+    over the fields that actually changed (§5.1). The cross-table
+    children (masters/users/staff_positions) are cascade writes — never
+    journaled (§4.2). LAZY audit import — cycle discipline.
+
+    Moved from the former ``StaffService`` composite methods together
+    with the scenarios (GH #326 Task 3 + #344 integration): the scenario
+    OWNS the composite card write, so it owns its journal row.
+    """
+    from src.events.audit import diff_pairs, mark_audit
+
+    if old is None:
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict[str, Any] | None = (
+            diff_pairs(_STAFF_MARK_FIELDS, {}, staff) or None
+        )
+    else:
+        changes = diff_pairs(_STAFF_MARK_FIELDS, old, staff)
+    mark_audit(
+        entity="staff",
+        action=action,
+        entity_id=staff.id,
+        changes=changes,
+    )
 
 
 async def _write_section(
@@ -193,6 +234,9 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
     await db_session.flush()
     response = await get_staff_service().get(db_session, staff.id)
     assert response is not None, "just-created card must read back"
+    # GH #344 (§4.3): ONE explicit row for the card; the cross-table
+    # children (masters/users/join rows) never journal.
+    _mark_staff_audit(staff, "create")
     return response
 
 
@@ -222,7 +266,16 @@ async def update_staff(
     mark_changed("staff")
 
     # ── 1. Card fields (missing id → None) ───────────────────────────
-    staff = await get_staff_service().update_card(
+    # GH #344 (§4.2): the "before" half of the diff is fixed BEFORE the
+    # first in-session mutation — the read happens inside ``update_card``
+    # after the existence probe, the first mutation follows it. The
+    # snapshot needs the card row, so the probe is split out here.
+    staff_service = get_staff_service()
+    card = await staff_service.get_card(db_session, id)
+    if card is None:
+        return None
+    _old = {f: getattr(card, f) for f in _STAFF_MARK_FIELDS}
+    staff = await staff_service.update_card(
         db_session,
         id,
         first_name=data.first_name,
@@ -237,7 +290,7 @@ async def update_staff(
     await _write_section(db_session, id, data.master)
 
     # ── 3. Positions full replace ────────────────────────────────────
-    await get_staff_service().replace_positions(db_session, id, data.position_ids)
+    await staff_service.replace_positions(db_session, id, data.position_ids)
 
     # ── 4. Role template ─────────────────────────────────────────────
     await _apply_role_template(
@@ -245,7 +298,10 @@ async def update_staff(
     )
 
     await db_session.flush()
-    return await get_staff_service().get(db_session, id)
+    # GH #344 (§4.3): ONE explicit row — the card was rewritten (PUT
+    # semantics); pairs carry the changed card fields.
+    _mark_staff_audit(staff, "update", _old)
+    return await staff_service.get(db_session, id)
 
 
 @transactional
@@ -292,6 +348,13 @@ async def patch_staff(
     payload.pop("role", None)
 
     # ── Sent card fields (missing id → None) ─────────────────────────
+    # GH #344 (§4.2): "before" half fixed before the first mutation;
+    # nothing sent → full no-op → no journal row (§5.1). The snapshot
+    # needs the card row, so the probe is split out before ``patch_card``.
+    card = await service.get_card(db_session, id)
+    if card is None:
+        return None
+    _old = {f: getattr(card, f) for f in _STAFF_MARK_FIELDS}
     staff = await service.patch_card(db_session, id, payload)
     if staff is None:
         return None
@@ -313,6 +376,10 @@ async def patch_staff(
         await _apply_role_template(db_session, id, [], explicit_role=data.role)
 
     await db_session.flush()
+    # GH #344 (§4.3): mark only when the request actually carried a
+    # card/section/positions field (an empty PATCH is a no-op row).
+    if payload or master_sent or (positions_sent and position_ids is not None):
+        _mark_staff_audit(staff, "update", _old)
     return await service.get(db_session, id)
 
 
@@ -340,13 +407,35 @@ async def archive_staff(
     Unchecked links keep their flags (D3 — no hidden cascades, nothing
     silently restores). Grid: {staff} + masters/users by real rowcount.
 
+    GH #344 (spec §4.2): the person's archive is journaled EXPLICITLY —
+    action ``archive``, no snapshot. The D6 checkbox cascades
+    (masters/users) are child writes, never journaled (§4.2 "one action
+    — one row"). No-op guard: re-archiving an already-archived card
+    writes no journal row (§4.6).
+
     NOTE: call as ``archive_staff(None, db_session=..., id=...,
     archive_master=..., archive_user=...)``.
     """
     mark_changed("staff")
 
     # ── Existence probe + person flag ────────────────────────────────
-    found = await get_staff_service().archive_card(db_session, id)
+    service = get_staff_service()
+    card = await service.get_card(db_session, id)
+    if card is None:
+        return False
+    if card.is_active:
+        # LAZY import — the audit module is off-limits at services
+        # top level (cycle hazard, src/events/entities.py WARNING).
+        from src.events.audit import derive_row_label, mark_audit
+
+        mark_audit(
+            entity="staff",
+            action="archive",
+            entity_id=id,
+            entity_label=derive_row_label("staff", card),
+            changes=None,
+        )
+    found = await service.archive_card(db_session, id)
     if not found:
         return False
 

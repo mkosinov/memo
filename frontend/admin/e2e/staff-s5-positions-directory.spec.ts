@@ -101,19 +101,29 @@ test.describe('S5 — positions dictionary', () => {
       const row = page.locator(`[data-testid="position-row-${id}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
-      // 2. ACTION — delete through the row menu (+ the locked window.confirm).
-      page.once('dialog', (d) => void d.accept());
-      const dropdown = await openPositionRowMenu(page, id);
-      const deletePromise = page.waitForResponse((r) =>
-        r.url().includes(`/api/v1/positions/${id}`) && r.request().method() === 'DELETE',
+      // 2. ACTION — the row delete dry-runs (204: an unheld position is a
+      // leaf) → optimistic row removal + «Удалено. Отменить» ring; the
+      // COMMIT DELETE (with the {expected:{}} body) fires at the 5s window
+      // end (#324 conveyor — the preview's postData() is null, so the
+      // predicate cannot match it).
+      const commitWait = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/v1/positions/${id}`) &&
+          !r.url().includes('dry_run') &&
+          r.request().method() === 'DELETE' &&
+          r.request().postData() !== null,
       );
+      const dropdown = await openPositionRowMenu(page, id);
       await dropdown.getByRole('menuitem', { name: 'Удалить' }).click();
-      const del = await deletePromise;
 
-      // 3. VERIFY UI — toast, row gone.
-      expect(del.status()).toBe(204);
-      await waitForToast(page);
+      // 3. VERIFY UI — ring toast, row gone.
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено. Отменить' });
+      await expect(toast).toBeVisible();
+      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
       await expect(row).toHaveCount(0, { timeout: 10_000 });
+
+      const commit = await commitWait;
+      expect(commit.status()).toBe(204);
 
       // 4. VERIFY DB — physically gone (the dictionary is not archive-aware).
       expect((await request.get(`${BACKEND}/api/v1/positions/${id}`)).status()).toBe(404);
@@ -131,8 +141,8 @@ test.describe('S5 — positions dictionary', () => {
     const row = page.locator('[data-testid="position-row-master"]');
     await expect(row).toBeVisible({ timeout: 10_000 });
 
-    // 2. ACTION — request a delete of the built-in.
-    page.once('dialog', (d) => void d.accept());
+    // 2. ACTION — request a delete of the built-in (the dry-run DELETE
+    // itself carries the guard — #324: nothing is enqueued, no confirm).
     const dropdown = await openPositionRowMenu(page, 'master');
     const deletePromise = page.waitForResponse((r) =>
       r.url().includes('/api/v1/positions/master') && r.request().method() === 'DELETE',

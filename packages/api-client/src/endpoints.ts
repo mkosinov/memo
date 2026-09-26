@@ -69,7 +69,6 @@ import {
   type MaterialCreate,
   type MaterialUpdate,
   UserSettingsResponseSchema,
-  UserSettingsCreateSchema,
   type UserSettingsResponse,
   type UserSettingsUpdate,
   StaffListResponseSchema,
@@ -1100,15 +1099,6 @@ export async function getUserSettings(): Promise<UserSettingsResponse> {
   return api('/api/v1/user-settings', UserSettingsResponseSchema);
 }
 
-export async function createUserSettings(
-  data: z.input<typeof UserSettingsCreateSchema>,
-): Promise<UserSettingsResponse> {
-  return api('/api/v1/user-settings', UserSettingsResponseSchema, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
 export async function updateUserSettings(data: UserSettingsUpdate): Promise<UserSettingsResponse> {
   return api(
     '/api/v1/user-settings',
@@ -1132,8 +1122,4 @@ export async function patchUserSettings(
       body: JSON.stringify(data),
     },
   );
-}
-
-export async function deleteUserSettings(id: string): Promise<void> {
-  await api(`/api/v1/user-settings/${id}`, z.any(), { method: 'DELETE' });
 }

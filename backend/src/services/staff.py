@@ -53,6 +53,7 @@ from src.schemas.staff import (
 )
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService
+from src.services.user_settings import UserSettingsService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -425,14 +426,19 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
                     if data.master is not None
                     else UserRole.ADMIN
                 )
-            db_session.add(
-                User(
-                    phone=data.create_user.phone,
-                    password_hash=hash_password(password),
-                    role=role.value,
-                    staff_id=staff.id,
-                )
+            user = User(
+                phone=data.create_user.phone,
+                password_hash=hash_password(password),
+                role=role.value,
+                staff_id=staff.id,
             )
+            db_session.add(user)
+            await db_session.flush()
+            # GH #319: guaranteed child record — the UserSettings defaults
+            # row in the SAME transaction (silent core: no separate
+            # bus-invalidation event; the structural move of staff ops to
+            # scenarios is #326).
+            await UserSettingsService.insert_defaults(db_session, user.id)
         # Cross-table writes — surface the touched entities (§3.3); the
         # decorator's accumulator already carries the own "staff" entity.
         if data.master is not None:

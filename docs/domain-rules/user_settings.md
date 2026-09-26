@@ -28,7 +28,7 @@ UserSettings stores per-user UI preferences: theme, language, column ordering fo
 ### Backend
 - **Identified by user_id, not by primary key**, for all non-DELETE operations
 - **Own-only (GH #247 spec §3.8, breaking):** all endpoints require a session; GET/PUT/PATCH take **no** `user_id` query param — the session user is the only addressable user (a stale `?user_id=` from an old client is ignored). POST also takes the user from the session — a `user_id` in the body is ignored (GH #319; previously accepted from the body). DELETE by `/{settings_id}` resolves the row's `user_id` and rejects non-owned rows with 403 `AUTH_FORBIDDEN`
-- **Get-or-create (GH #319):** GET creates the defaults row when missing (atomic SQLite `INSERT ... ON CONFLICT(user_id) DO NOTHING` + SELECT, written to DB; response marked `Cache-Control: no-store`)
+- **Get-or-create (GH #319):** GET creates the defaults row when missing (atomic SQLite `INSERT ... ON CONFLICT(user_id) DO NOTHING` + SELECT, written to DB; response marked `Cache-Control: no-store`). The get-or-create is SILENT on the invalidation bus: no `user_settings` event on either path (create or pure read) — the row is personal, no foreign caches (spec §5.1); the commit is manual, not via the `@transactional` decorator (which is the single post-commit publish point)
 
 ### Frontend
 - SettingsPanel reads on mount, writes on change

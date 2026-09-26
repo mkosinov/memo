@@ -91,3 +91,33 @@ async def test_seed_staff_explicit_dev_env(db_manager: DBManager, monkeypatch) -
 
     rows = await _users(db_manager)
     assert len(rows) == 2
+
+
+async def test_seed_creates_settings_rows_for_both_users(db_manager: DBManager) -> None:
+    """GH #319 §5.5: the seed gives BOTH demo users their UserSettings
+    defaults rows («база закрыта с рождения») — two rows, model defaults."""
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT u.phone, us.theme, us.language, us.column_order_staff, "
+                "us.column_order_locations, us.show_archived_masters, "
+                "us.show_archived_locations "
+                "FROM user_settings AS us "
+                "JOIN users AS u ON u.id = us.user_id "
+                "ORDER BY u.phone"
+            )
+        )
+        rows = result.all()
+
+    assert [r.phone for r in rows] == ["+79990000001", "+79990000002"]
+    for r in rows:
+        assert r.theme == "light"
+        assert r.language == "ru"
+        assert r.column_order_staff == "[]"
+        assert r.column_order_locations == "[]"
+        assert bool(r.show_archived_masters) is True
+        assert bool(r.show_archived_locations) is False

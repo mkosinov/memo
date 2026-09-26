@@ -38,6 +38,7 @@ from src.models.position import Position, staff_positions
 from src.models.service import Service
 from src.models.staff import Staff
 from src.models.user import User
+from src.models.user_settings import UserSettings
 from src.schemas.activity import ActivityCreate
 from src.schemas.staff import StaffCreate, StaffPatch, StaffUpdate
 from src.services.activity import get_activity_service
@@ -231,6 +232,26 @@ async def test_create_with_user_creates_linked_account(db_session) -> None:
     assert user.is_active is True
     assert user.role == "master"
     assert verify_password("secret12345", user.password_hash)
+
+
+async def test_create_with_user_guarantees_settings_row(db_session) -> None:
+    """GH #319 invariant: the «Учётка» creation path lands the UserSettings
+    row in the SAME transaction as the account insert (transitional period —
+    the structural move to scenarios is #326)."""
+    created = await get_staff_service().create(db_session, _create_payload(
+        create_user={"phone": "+79995556684", "password": "secret12345"},
+    ))
+
+    user = (await db_session.execute(
+        select(User).where(User.staff_id == created.id)
+    )).scalar_one()
+    settings = (await db_session.execute(
+        select(UserSettings).where(UserSettings.user_id == user.id)
+    )).scalar_one_or_none()
+    assert settings is not None, (
+        "GH #319 invariant broken: «Учётка» created the account without "
+        "a user_settings row"
+    )
 
 
 async def test_create_with_user_without_master_gets_admin_role(db_session) -> None:

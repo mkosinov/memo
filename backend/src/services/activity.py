@@ -235,6 +235,29 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         )
         return int(result.scalar() or 0)
 
+    async def delete_row_with_activity_tags(
+        self, db_session: AsyncSession, activity_id: str,
+    ) -> None:
+        """Remove the activity's OWN tag links + the row — WITHOUT committing.
+
+        Non-transactional scenario building block for the activity-delete
+        scenario (GH #325; canon docs/domain-rules/service-layer.md rules
+        1, 3-4): the caller's scenario owns the transaction boundary and
+        the commit. TWO set-based commands over the owner's own tables:
+        the ``activity_tags`` links go FIRST (the join's FKs carry no
+        ondelete action — #194), then the row. Marks "tags" (the
+        activity_tags join rows); "activities" is the SCENARIO's own-entity
+        mark — not seeded here. Outside an active transaction the mark is
+        a no-op.
+        """
+        await db_session.execute(
+            delete(activity_tags).where(activity_tags.c.activity_id == activity_id)
+        )
+        await db_session.execute(
+            delete(Activity).where(Activity.id == activity_id)
+        )
+        mark_changed("tags")  # activity_tags join rows die with the activity
+
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Hard-delete an activity, its records (with their visits/payments),

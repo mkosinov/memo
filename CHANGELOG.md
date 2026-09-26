@@ -77,6 +77,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     mypy — 0 новых ошибок на 6 файлах #326 (44 vs 46 базлайна — чистое уменьшение);
     e2e `staff-*.spec.ts` идут на PR CI без правок.
   - Status: `docs/status/2026-09-26-staff-scenarios-326.md`
+- **GH #325 — Удаление занятия в сценарии (каскадный долг 1/3)** — branch
+  `325-activity-delete-scenario` (5 commits `ae0933b2..556b4c63`, base `4f08ff74`; 22 файла
+  +1129/−142; спека `docs/specs/2026-09-20-activity-delete-scenario-design.md` rev2, план
+  `docs/plans/2026-09-20-activity-delete-scenario-plan.md` — 5/5 задач, оба на main):
+  - **Сценарий (T3):** `delete_activity` — новый `backend/src/usecases/activities.py`
+    (канонический коридор 2) + helper `ActivityService.delete_row_with_activity_tags`
+    (`a130eddb`); сетка чистого занятия `{photos, tags, activities}` покрыта тестами.
+  - **Кирпичи (T1/T2):** bulk-помощники владельцев — `VisitService.delete_visits_by_record_ids`
+    и `PaymentService.delete_by_record_ids` (`ae0933b2`), `RecordService.delete_rows_with_tags_bulk`
+    + `PhotoService.unlink_from_activity` (`fb8e9aed`).
+  - **Проводка (T4):** роут `DELETE /activities/{id}` — на сценарий, `ActivityService.delete`
+    демонтирован; spy-тест и 4 каскадных теста переехали на сценарий; устаревающие упоминания
+    обновлены (докстринг роута, FK-карта, комментарии тестов); канон правило 10
+    `docs/domain-rules/service-layer.md` — снят пункт про занятие (rev8, `a724407d`).
+  - **Behavioral delta: NONE** — контракт эндпоинта и поведение не изменены (до = после:
+    422/404/409/204); событийные сетки идентичны
+    (`{records, visits, payments, tags, photos, activities}` / `{photos, tags, activities}`);
+    Gate C не сработал — контракты не правились; файл e2e-спеки не тронут.
+  - **Tests:** pytest полный **2717 passed / 15 skipped / 0 failed** (32:24); ruff delta
+    vs merge-base = 0; mypy delta = 0; e2e `activity-deferred-delete.spec.ts` **8/8** (S3 —
+    флейк 5s UI-wait, прошёл на retry, не регрессия).
+  - Follow-up (не в этом PR): S3 e2e-флейк (5s visibility-wait на compile-heavy роуте) —
+    отдельный тикет.
+  - Status: `docs/status/2026-09-26-activity-delete-scenario-325.md`
 
 ## [Unreleased] — 2026-09-22
 

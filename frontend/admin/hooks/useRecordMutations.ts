@@ -509,8 +509,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         // The optimistic remove already removed it from caches; if the API
         // fails, the row is gone from cache but also from the server — the
         // remaining inconsistency is acceptable for a delete.
+        // #324 family contract: the DELETE carries the mandatory {expected}
+        // body; visits are leaves → the clean snapshot {expected: {}}.
         commit: async () => {
-          await apiDeleteVisit(visitId);
+          await apiDeleteVisit(visitId, { expected: {} });
           // Targeted reconcile: a failed optimistic remove or stale cache
           // would be re-aligned by re-running the helper.
           removeVisit(queryClient, recordId, visitId);
@@ -553,8 +555,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         },
         // Commit: API delete + targeted reconcile of per-record + global ['payments'].
         // Absorbs #130 Bug 2 — old code did not reconcile ['payments'] after API success.
+        // #324 family contract: the DELETE carries the mandatory {expected}
+        // body; payments are leaves → the clean snapshot {expected: {}}.
         commit: async () => {
-          await apiDeletePayment(paymentId);
+          await apiDeletePayment(paymentId, { expected: {} });
           // Targeted reconcile: ensure both caches reflect the deletion even if
           // an external mutation or a stale optimistic state drifted.
           removePayment(queryClient, recordId, paymentId);

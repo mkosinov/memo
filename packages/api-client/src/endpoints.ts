@@ -675,8 +675,20 @@ export async function patchPayment(
   });
 }
 
-export async function deletePayment(id: string): Promise<void> {
-  await api(`/api/v1/payments/${id}`, z.any(), { method: 'DELETE' });
+// Execute a hard delete (GH #324 family contract, leaf): the commit carries
+// the MANDATORY {expected} body (bare DELETE → 422 expected_state_required
+// server-side). Payments are leaves — their preview tree is always empty, so
+// the default body is the leaf-clean snapshot {expected: {}}; the payload
+// param stays optional to preserve the existing one-arg in-repo call sites.
+export interface DeletePaymentPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deletePayment(id: string, payload: DeletePaymentPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/payments/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
 }
 
 // ─── Client Visitors ─────────────────────────────────────────────────────
@@ -756,8 +768,20 @@ export async function patchVisit(id: string, data: VisitPatch): Promise<VisitRes
   });
 }
 
-export async function deleteVisit(id: string): Promise<void> {
-  await api(`/api/v1/visits/${id}`, z.any(), { method: 'DELETE' });
+// Execute a hard delete (GH #324 family contract, leaf): the commit carries
+// the MANDATORY {expected} body (bare DELETE → 422 expected_state_required
+// server-side). Visits are leaves — their preview tree is always empty, so
+// the default body is the leaf-clean snapshot {expected: {}}; the payload
+// param stays optional to preserve the existing one-arg in-repo call sites.
+export interface DeleteVisitPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deleteVisit(id: string, payload: DeleteVisitPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/visits/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
 }
 
 // ─── Tags ──────────────────────────────────────────────────────────────────

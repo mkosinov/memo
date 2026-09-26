@@ -1212,7 +1212,9 @@ describe('useRecordMutations', () => {
       });
 
       expect(mockDeleteVisit).toHaveBeenCalledTimes(1);
-      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-existing');
+      // #324 family contract: the commit carries the mandatory {expected}
+      // body — visits are leaves, so the clean snapshot {expected: {}}.
+      expect(mockDeleteVisit).toHaveBeenCalledWith('visit-existing', { expected: {} });
     });
 
     it('undo restores the visit via upsertVisit helper and cancels the commit', async () => {
@@ -1307,7 +1309,9 @@ describe('useRecordMutations', () => {
       });
 
       expect(mockDeletePayment).toHaveBeenCalledTimes(1);
-      expect(mockDeletePayment).toHaveBeenCalledWith('pay-existing');
+      // #324 family contract: the commit carries the mandatory {expected}
+      // body — payments are leaves, so the clean snapshot {expected: {}}.
+      expect(mockDeletePayment).toHaveBeenCalledWith('pay-existing', { expected: {} });
       // After commit, [payments, recordId] is reconciled (row stays removed) and
       // global [payments] has pay-existing filtered out via removePayment helper.
       const perRecord = queryClient.getQueryData<PaymentResponse[]>(['payments', recordId]);

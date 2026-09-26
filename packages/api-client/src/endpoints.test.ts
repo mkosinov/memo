@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1056,14 +1056,34 @@ describe('updatePayment', () => {
   });
 });
 
+// GH #324 (family contract, leaves): the DELETE commit carries the mandatory
+// {expected} body — bare DELETE → 422 expected_state_required server-side.
+// Default is the leaf-clean snapshot {expected: {}} so existing in-repo
+// call sites keep their one-arg signature.
 describe('deletePayment', () => {
-  it('calls DELETE /api/v1/payments/:id', async () => {
+  it('calls DELETE /api/v1/payments/:id with default body {"expected":{}}', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
     await deletePayment('p-1');
     expect(api).toHaveBeenCalledWith(
       '/api/v1/payments/p-1',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
+    );
+  });
+
+  it('passes the explicit expected payload through as the body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePayment('p-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/payments/p-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
     );
   });
 });
@@ -1197,6 +1217,38 @@ describe('updateVisitStatus', () => {
       expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({ status: 'visited' }),
+      }),
+    );
+  });
+});
+
+// GH #324 (family contract, leaves): the DELETE commit carries the mandatory
+// {expected} body — bare DELETE → 422 expected_state_required server-side.
+// Default is the leaf-clean snapshot {expected: {}} so existing in-repo
+// call sites keep their one-arg signature.
+describe('deleteVisit', () => {
+  it('calls DELETE /api/v1/visits/:id with default body {"expected":{}}', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisit('v-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visits/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
+    );
+  });
+
+  it('passes the explicit expected payload through as the body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisit('v-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visits/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
       }),
     );
   });

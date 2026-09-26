@@ -188,7 +188,10 @@ class TestSeatsInvariant:
         current = _assert_invariant()  # POST visit
 
         # DELETE /visits: remove one → seats shrinks
-        del_resp = api_client.delete(f"/api/v1/visits/{visit_add.json()['id']}")
+        del_resp = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_add.json()['id']}",
+            json={"expected": {}},
+        )
         assert del_resp.status_code == 204, del_resp.text
         _assert_invariant()  # DELETE visit
 

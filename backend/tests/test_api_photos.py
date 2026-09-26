@@ -514,19 +514,25 @@ class TestPhotosCRUD:
         """DELETE /api/v1/photos/{id} hard-deletes a photo."""
         create = api_client.post(PHOTOS_URL, json={"filename": "delete-me.jpg"})
         photo_id = create.json()["id"]
-        response = api_client.delete(f"{PHOTOS_URL}/{photo_id}")
+        response = api_client.request(
+            "DELETE", f"{PHOTOS_URL}/{photo_id}", json={"expected": {}}
+        )
         assert response.status_code == 204
 
     def test_delete_photo_not_found(self, api_client) -> None:
         """DELETE /api/v1/photos/{id} returns 404 for non-existent photo."""
-        response = api_client.delete(f"{PHOTOS_URL}/nonexistent-id")
+        response = api_client.request(
+            "DELETE", f"{PHOTOS_URL}/nonexistent-id", json={"expected": {}}
+        )
         assert response.status_code == 404
 
     def test_deleted_photo_not_in_list(self, api_client) -> None:
         """Deleted photo no longer appears in GET /api/v1/photos."""
         create = api_client.post(PHOTOS_URL, json={"filename": "will-delete.jpg"})
         photo_id = create.json()["id"]
-        api_client.delete(f"{PHOTOS_URL}/{photo_id}")
+        api_client.request(
+            "DELETE", f"{PHOTOS_URL}/{photo_id}", json={"expected": {}}
+        )
         response = api_client.get(PHOTOS_URL)
         filenames = [p["filename"] for p in response.json()["items"]]
         assert "will-delete.jpg" not in filenames

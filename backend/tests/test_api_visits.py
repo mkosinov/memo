@@ -65,8 +65,10 @@ class TestVisitList:
         """Soft-deleted visits should not appear in list."""
         record = create_record()
         visit_id = record["visits"][0]["id"]
-        # Delete the visit
-        api_client.delete(f"/api/v1/visits/{visit_id}")
+        # Delete the visit (deferred-delete commit, #324)
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}}
+        )
         # List should not include it
         response = api_client.get(f"/api/v1/visits?record_id={record['id']}")
         assert response.status_code == 200
@@ -258,7 +260,9 @@ class TestVisitDelete:
         """Scenario 12: DELETE /api/v1/visits/{id} soft-deletes and returns 204."""
         record = create_record()
         visit = record["visits"][0]
-        response = api_client.delete(f"/api/v1/visits/{visit['id']}")
+        response = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit['id']}", json={"expected": {}}
+        )
         assert response.status_code == 204
 
     def test_delete_visit_cascades_seats(self, api_client, create_record) -> None:
@@ -266,20 +270,26 @@ class TestVisitDelete:
         record = create_record()
         initial_seats = record["seats"]
         visit = record["visits"][0]
-        api_client.delete(f"/api/v1/visits/{visit['id']}")
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit['id']}", json={"expected": {}}
+        )
         updated_record = api_client.get(f"/api/v1/records/{record['id']}").json()
         assert updated_record["seats"] == initial_seats - 1
 
     def test_delete_visit_not_found_404(self, api_client) -> None:
         """DELETE /api/v1/visits/{nonexistent} returns 404."""
-        response = api_client.delete("/api/v1/visits/nonexistent-id")
+        response = api_client.request(
+            "DELETE", "/api/v1/visits/nonexistent-id", json={"expected": {}}
+        )
         assert response.status_code == 404
 
     def test_delete_visit_hard_deletes_row(self, api_client, create_record) -> None:
         """After DELETE, row is absent from DB."""
         record = create_record()
         visit_id = record["visits"][0]["id"]
-        api_client.delete(f"/api/v1/visits/{visit_id}")
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}}
+        )
         rows = query_db(f"SELECT * FROM visits WHERE id='{visit_id}'")
         assert len(rows) == 0
 

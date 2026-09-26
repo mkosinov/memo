@@ -185,7 +185,9 @@ class TestPaymentTotals:
         self._create_payment(api_client, r1, 3000)
         list_resp = api_client.get("/api/v1/payments", params={"record_id": r1})
         payment_id = list_resp.json()["items"][0]["id"]
-        del_resp = api_client.delete(f"/api/v1/payments/{payment_id}")
+        del_resp = api_client.request(
+            "DELETE", f"/api/v1/payments/{payment_id}", json={"expected": {}}
+        )
         assert del_resp.status_code == 204
         response = api_client.get(
             "/api/v1/payments/totals",

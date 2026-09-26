@@ -4,14 +4,21 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1._delete_family import (
+    DryRunParam,
+    dependencies_response,
+    form_rejection,
+)
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
+from src.domain.deletion import collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.common import PaginatedResponse
+from src.models.visit import Visit
+from src.schemas.common import DeleteBody, PaginatedResponse
 from src.schemas.pagination import PaginationParams
 from src.schemas.visit import (
     VisitCreate,
@@ -71,12 +78,15 @@ async def _visit_scoped_or_404(
     session: AsyncSession,
     visit_id: str,
     scope: ScopeContext,
-) -> None:
+) -> Visit | None:
     """GH #263 T2 — shared point-op owner gate for visit mutations.
 
     ONE scope-aware query (visit → record → activity); a scoped master
     whose visit is foreign gets the same 404 as a missing visit
     (404-fast-path). Admin (``master_key=None``) passes untouched.
+
+    #324 §4.2: returns the probed row (the delete-family contract probes
+    existence through this helper — first line of both DELETE branches).
     """
     visit = await service.get_scoped(
         db_session=session, visit_id=visit_id, master_key=scope.master_key
@@ -89,6 +99,7 @@ async def _visit_scoped_or_404(
                 message="Visit not found",
             ).model_dump(),
         )
+    return visit
 
 
 # ─── CRUD handlers ─────────────────────────────────────────────────────────
@@ -234,10 +245,46 @@ async def delete_visit(
     visit_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    body: Annotated[DeleteBody | None, Body()] = None,
+    dry_run: DryRunParam = None,
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> None:
-    """Hard-delete a visit, cascade status + seats to parent record."""
+    """Unified delete contract — dry-run flag / commit body (#324 §4,
+    leaf subject — mirror of the records/tags routes #285/#318).
+
+    * ``?dry_run=true`` — PURE preview: a visit is a LEAF (empty
+      FK_MATRIX row) → always 204 WITHOUT deleting; never modifies rows.
+    * No body, no flag → 422 ``expected_state_required`` — the bare
+      hard delete is abolished; rejected before any DB access (same for
+      a resolutions-only body).
+    * Body ``{expected}`` (leaf: ``{}``) — the deferred-delete commit:
+      scope probe → ``VisitService.delete`` (NOT the generic
+      ``resolve_delete`` — the single-visit path keeps its
+      parent-record status/seats recompute, spec §4) → 204; missing or
+      foreign id → 404 (the probe runs FIRST in both branches).
+
+    Check order (security pin, §4.1-4.2): form → probe → fork.
+    """
+    rejection = form_rejection(body, dry_run)
+    if rejection is not None:
+        return rejection
+
+    # Scope-existence probe — first line of BOTH branches (§4.2): a
+    # foreign visit gets the same 404 as a missing one, before any
+    # dependency work.
     await _visit_scoped_or_404(service, session, visit_id, scope)
+
+    if dry_run:
+        # Leaf: the matrix row is empty — collect_dependencies([]) is
+        # always empty → preview 204 without deleting, no SSE marks.
+        deps = await collect_dependencies(session, Visit, visit_id)
+        if deps:  # defensive — a leaf has no counters wired
+            return dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only.
+
+    # Body branch: the deferred-delete commit. Expected verification is
+    # a no-op for a leaf (no id-collectors) — the body contract still
+    # demands ``{expected: {}}`` (the form check above).
     deleted = await service.delete(db_session=session, visit_id=visit_id)
     if not deleted:
         raise HTTPException(

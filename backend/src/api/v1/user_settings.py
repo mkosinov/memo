@@ -3,11 +3,13 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 
+from src.api.v1._delete_family import DryRunParam, form_rejection
 from src.auth.permissions import AuthedUser, require_session, verify_fetch_metadata
 from src.db import SessionDep
 from src.errors import ErrorCode, ErrorDetail
+from src.schemas.common import DeleteBody
 from src.schemas.user_settings import (
     UserSettingsCreate,
     UserSettingsPatch,
@@ -127,12 +129,29 @@ async def delete_settings(
     authed: _SessionUser,
     service: _ServiceDep,
     session: SessionDep,
+    body: Annotated[DeleteBody | None, Body()] = None,
+    dry_run: DryRunParam = None,
 ) -> None:
-    """Delete a settings record by its primary key ID (own-only).
+    """Unified delete contract — dry-run flag / commit body (#324 §4,
+    leaf subject — mirror of the records/tags routes #285/#318).
 
     Spec §3.8: resolve the row's ``user_id`` and reject non-owned rows
-    with 403 ``AUTH_FORBIDDEN``.
+    with 403 ``AUTH_FORBIDDEN`` — the probe-read + ownership gate run
+    FIRST in both branches (a foreign row is 403 before any tree work;
+    a leaf has no tree anyway).
+
+    * ``?dry_run=true`` — PURE preview: always 204 WITHOUT deleting
+      (leaf — empty FK_MATRIX row); never modifies rows.
+    * No body, no flag → 422 ``expected_state_required`` (rejected
+      before any DB access; same for a resolutions-only body).
+    * Body ``{expected}`` (leaf: ``{}``) — the deferred-delete commit →
+      204 (the row is hard-deleted; the next read recreates defaults).
     """
+    rejection = form_rejection(body, dry_run)
+    if rejection is not None:
+        return rejection
+
+    # Probe-read + own-only gate — first line of BOTH branches (§4.2).
     row = await service.get_by_id(session, settings_id)
     if row is None:
         raise _settings_not_found("Settings not found")
@@ -144,6 +163,10 @@ async def delete_settings(
                 message="Недостаточно прав",
             ).model_dump(),
         )
+
+    if dry_run:
+        return  # 204 — preview only: a leaf never has dependencies.
+
     deleted = await service.delete(session, settings_id)
     if not deleted:
         raise _settings_not_found("Settings not found")

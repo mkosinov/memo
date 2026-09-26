@@ -52,6 +52,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     под нагрузкой (класс #271).
   - Status: `docs/status/2026-09-25-audit-log-344.md`
 
+## [Unreleased] — 2026-09-26
+
+### Changed
+- **GH #326 — Staff-операции в сценарии (каскадный долг 2/3)** — branch
+  `326-staff-scenarios` (5 commits `17cc91ed..41c0072a`, base `20b710f7`; 19 файлов
+  +4072/−1137; спека `docs/specs/2026-09-21-staff-scenarios-326-design.md` rev2, план
+  `docs/plans/2026-09-21-staff-scenarios-326-plan.md` — 5/5 задач T1–T5, оба на main):
+  - **Сценарии (T3/T4):** пять staff-операций записи переехали из композитов `StaffService`
+    в `backend/src/usecases/staff.py` (канонический коридор 2) — `create_staff` /
+    `update_staff` / `patch_staff` / `archive_staff` (`b8671856`) и `delete_staff` на общем
+    ядре `_resolve_delete_core` (`f9610d0d`); композиты демонтированы.
+  - **Владельцы (T1/T2):** владение записью разделено по сущностям — `UserService` — владелец
+    `users` + новый `resolve_account_role` (`17cc91ed`); `MasterService` — пишущий владелец
+    `masters` (`30df7c17`).
+  - **Кэш-метки:** 8 посторонних `mark_changed("masters"/"users")` в `services/staff.py`
+    исчезли — критерий запинов тестом.
+  - **Канон (T5):** правило 10 `docs/domain-rules/service-layer.md` — исключение «операции
+    сотрудников» снято (rev7, `41c0072a`, +2/−2).
+  - **Behavioral delta: NONE** — контракты эндпоинтов / поведение / событийные сетки без
+    изменений; контрактные тесты зелёные без правок контрактов; `frontend/` не тронут.
+  - **Tests:** pytest полный **2511 passed / 15 skipped / 0 failed**; ruff — 0 новых
+    замечаний на изменённых файлах (базлайн ~363–366 pre-existing, ratchet не тронут);
+    mypy — 0 новых ошибок на 6 файлах #326 (44 vs 46 базлайна — чистое уменьшение);
+    e2e `staff-*.spec.ts` идут на PR CI без правок.
+  - Status: `docs/status/2026-09-26-staff-scenarios-326.md`
+
 ## [Unreleased] — 2026-09-22
 
 ### Changed

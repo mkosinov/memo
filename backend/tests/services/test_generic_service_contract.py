@@ -125,12 +125,19 @@ def make_entity(request, db_session):
         create_data = dict(cfg.create_data)
         for field, fixture_name in cfg.fk_map.items():
             factory = request.getfixturevalue(fixture_name)
-            created = factory()  # factory-callable → dict с "id"
-            create_data[field] = created["id"]
+            seeded = factory()  # factory-callable → dict с "id"
+            create_data[field] = seeded["id"]
         create_data.update(overrides)
         service = cfg.service_factory()
         input_schema = cfg.create_schema(**create_data)
-        created_resp = await service.create(db_session, input_schema)
+        # GH #326 Task 3: composite-card entities (staff) seed through
+        # their scenario — the generic service.create cannot dump the
+        # composite schema into the ORM.
+        created_resp = (
+            await cfg.create_via(db_session, input_schema)
+            if cfg.create_via is not None
+            else await service.create(db_session, input_schema)
+        )
         if with_input:
             return service, created_resp, input_schema
         return service, created_resp
@@ -155,7 +162,13 @@ def seed_rows(request, db_session):
             data: dict[str, Any] = {**base_data, **fk_ids}
             if cfg.unique_row_field:
                 data[cfg.unique_row_field] = f"{base_data[cfg.unique_row_field]}-{i}"
-            created.append(await service.create(db_session, cfg.create_schema(**data)))
+            input_schema = cfg.create_schema(**data)
+            # GH #326 Task 3: composite-card seeding via the scenario hook.
+            created.append(
+                await cfg.create_via(db_session, input_schema)
+                if cfg.create_via is not None
+                else await service.create(db_session, input_schema)
+            )
         return service, created
 
     return _seed

@@ -44,6 +44,21 @@ from src.schemas.staff import (
     StaffUpdate,
 )
 from src.services.staff import StaffService, get_staff_service
+from src.usecases.staff import (
+    archive_staff as archive_staff_scenario,
+)
+from src.usecases.staff import (
+    create_staff as create_staff_scenario,
+)
+from src.usecases.staff import (
+    delete_staff as delete_staff_scenario,
+)
+from src.usecases.staff import (
+    patch_staff as patch_staff_scenario,
+)
+from src.usecases.staff import (
+    update_staff as update_staff_scenario,
+)
 
 router = APIRouter(tags=["staff"])
 
@@ -238,9 +253,20 @@ async def create_staff(
     staff_positions links + the optional user account are written
     atomically. Domain validation errors (missing specialty/color,
     unknown position, password policy) → 422 with their codes.
+
+    Corridor 2 (GH #326 Task 3): the composite chain lives in the
+    usecases layer — the route stays transport-only. Leading ``None`` =
+    the @transactional wrapper's unused self slot (selfless-function
+    convention).
     """
     try:
-        return await service.create(db_session=session, data=data)
+        # Selfless-scenario convention (usecases/records.py): the leading
+        # None fills the @transactional wrapper's unused ``self`` slot.
+        return await create_staff_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
+            db_session=session,
+            data=data,
+        )
     except _SECTION_ERRORS as exc:
         raise _map_domain_error(exc) from exc
 
@@ -256,9 +282,19 @@ async def update_staff(
 
     ``master: null`` removes the section (blocked while activities exist,
     D7). ``position_ids`` is a full replace. One transaction.
+
+    Corridor 2 (GH #326 Task 3): the chain lives in the usecases layer
+    (selfless scenario, keyword args — the records-route convention).
     """
     try:
-        staff = await service.update(db_session=session, id=staff_id, data=data)
+        # Selfless-scenario convention (usecases/records.py): the leading
+        # None fills the @transactional wrapper's unused ``self`` slot.
+        staff = await update_staff_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
+            db_session=session,
+            id=staff_id,
+            data=data,
+        )
     except _SECTION_ERRORS as exc:
         raise _map_domain_error(exc) from exc
     except ResolutionError as exc:
@@ -285,9 +321,17 @@ async def patch_staff(
 
     ``master`` is three-state: absent = keep; ``null`` = remove (D7 block);
     payload = upsert. ``position_ids`` replaces the set when sent.
+
+    Corridor 2 (GH #326 Task 3): same convention as PUT above.
     """
     try:
-        staff = await service.patch(db_session=session, id=staff_id, data=data)
+        # Selfless-scenario convention — see POST above.
+        staff = await patch_staff_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
+            db_session=session,
+            id=staff_id,
+            data=data,
+        )
     except _SECTION_ERRORS as exc:
         raise _map_domain_error(exc) from exc
     except ResolutionError as exc:
@@ -319,11 +363,21 @@ async def delete_staff(
 
     Deletion matrix (domain-rules/staff.md): activities BLOCK; the masters
     extension row, users, master_tags and staff_positions auto-cascade.
+
+    Corridor 2 (GH #326 Task 4): the commit branch lives in the
+    ``delete_staff`` scenario (usecases) — it owns the transaction, the
+    own-entity mark, and the call of the transactionless
+    ``_resolve_delete_core`` core; the route keeps transport: the preview
+    branch (409 tree) and the 404/422 mapping. The #207 contract is
+    unchanged (no ``dry_run`` / ``expected`` — those belong to records).
     """
     if resolutions is not None:
         try:
-            ok = await service.resolve_delete(
-                db_session=session, id=staff_id, resolutions=resolutions
+            ok = await delete_staff_scenario(  # type: ignore[misc]
+                None,  # type: ignore[arg-type]
+                db_session=session,
+                id=staff_id,
+                resolutions=resolutions,
             )
         except ResolutionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -370,8 +424,12 @@ async def archive_staff(
     preselected dialog state). Checkboxes apply ONLY to existing ACTIVE
     links; an unchecked link keeps its flag (D3 — no hidden cascades).
     Returns 200 with the re-fetched card (``archived: true``).
+
+    Corridor 2 (GH #326 Task 3): the dismissal chain lives in the
+    ``archive_staff`` scenario (usecases).
     """
-    ok = await service.archive(
+    ok = await archive_staff_scenario(  # type: ignore[misc]
+        None,  # type: ignore[arg-type]
         db_session=session,
         id=staff_id,
         archive_master=(checkboxes.archive_master if checkboxes else True),

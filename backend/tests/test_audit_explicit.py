@@ -188,11 +188,11 @@ class TestStaffArchiveAudit:
     async def test_archive_marks_staff_row_only(
         self, db_session, actor, audit_rows
     ) -> None:
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import archive_staff
         from tests.conftest import query_db
 
         _insert_staff_card("staff-arch", "Иван", "Иванов")
-        ok = await get_staff_service().archive(db_session, "staff-arch")
+        ok = await archive_staff(None, db_session=db_session, id="staff-arch")
         assert ok is True
         rows = audit_rows()
         # ONE row for the person; the D6 checkbox cascades (masters/users
@@ -217,11 +217,11 @@ class TestStaffArchiveAudit:
     async def test_rearchive_of_archived_staff_writes_nothing(
         self, db_session, actor, audit_rows
     ) -> None:
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import archive_staff
 
         _insert_staff_card("staff-noop", "Пётр", "Петров")
-        await get_staff_service().archive(db_session, "staff-noop")
-        ok = await get_staff_service().archive(db_session, "staff-noop")
+        await archive_staff(None, db_session=db_session, id="staff-noop")
+        ok = await archive_staff(None, db_session=db_session, id="staff-noop")
         assert ok is True
         rows = audit_rows()
         assert len(rows) == 1
@@ -232,8 +232,10 @@ class TestStaffArchiveAudit:
     ) -> None:
         from src.services.staff import get_staff_service
 
+        from src.usecases.staff import archive_staff
+
         _insert_staff_card("staff-res", "Сидор", "Сидоров")
-        await get_staff_service().archive(db_session, "staff-res")
+        await archive_staff(None, db_session=db_session, id="staff-res")
         ok = await get_staff_service().restore(db_session, "staff-res")
         assert ok is True
         rows = audit_rows()
@@ -673,10 +675,11 @@ class TestStaffCompositeAudit:
         self, db_session, actor, audit_rows
     ) -> None:
         from src.schemas.staff import StaffCreate
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import create_staff
 
-        card = await get_staff_service().create(
-            db_session, StaffCreate(first_name="Иван", last_name="Иванов"),
+        card = await create_staff(
+            None, db_session=db_session,
+            data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         rows = audit_rows()
         # ONE row for the card; masters/users/staff_positions children
@@ -701,11 +704,12 @@ class TestStaffCompositeAudit:
             MasterSection,
             StaffCreate,
         )
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import create_staff
 
-        card = await get_staff_service().create(
-            db_session,
-            StaffCreate(
+        card = await create_staff(
+            None,
+            db_session=db_session,
+            data=StaffCreate(
                 first_name="Пётр",
                 last_name="Петров",
                 master=MasterSection(specialty="живопись", color="#000000"),
@@ -725,16 +729,18 @@ class TestStaffCompositeAudit:
         self, db_session, actor, audit_rows
     ) -> None:
         from src.schemas.staff import StaffCreate, StaffUpdate
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import create_staff, update_staff
 
-        card = await get_staff_service().create(
-            db_session, StaffCreate(first_name="Иван", last_name="Иванов"),
+        card = await create_staff(
+            None, db_session=db_session,
+            data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
-        updated = await get_staff_service().update(
-            db_session,
-            card.id,
-            StaffUpdate(first_name="Ян", last_name="Иванов"),
+        updated = await update_staff(
+            None,
+            db_session=db_session,
+            id=card.id,
+            data=StaffUpdate(first_name="Ян", last_name="Иванов"),
         )
         assert updated is not None
         rows = audit_rows()[before:]
@@ -749,14 +755,16 @@ class TestStaffCompositeAudit:
         self, db_session, actor, audit_rows
     ) -> None:
         from src.schemas.staff import StaffCreate, StaffPatch
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import create_staff, patch_staff
 
-        card = await get_staff_service().create(
-            db_session, StaffCreate(first_name="Иван", last_name="Иванов"),
+        card = await create_staff(
+            None, db_session=db_session,
+            data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
-        patched = await get_staff_service().patch(
-            db_session, card.id, StaffPatch(first_name="Иоанн"),
+        patched = await patch_staff(
+            None, db_session=db_session, id=card.id,
+            data=StaffPatch(first_name="Иоанн"),
         )
         assert patched is not None
         rows = audit_rows()[before:]
@@ -768,14 +776,15 @@ class TestStaffCompositeAudit:
         self, db_session, actor, audit_rows
     ) -> None:
         from src.schemas.staff import StaffCreate, StaffPatch
-        from src.services.staff import get_staff_service
+        from src.usecases.staff import create_staff, patch_staff
 
-        card = await get_staff_service().create(
-            db_session, StaffCreate(first_name="Иван", last_name="Иванов"),
+        card = await create_staff(
+            None, db_session=db_session,
+            data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
-        patched = await get_staff_service().patch(
-            db_session, card.id, StaffPatch(),
+        patched = await patch_staff(
+            None, db_session=db_session, id=card.id, data=StaffPatch(),
         )
         assert patched is not None
         assert audit_rows()[before:] == []

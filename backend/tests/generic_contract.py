@@ -182,6 +182,25 @@ class EntityConfig(NamedTuple):
     # declared state (``{"expected": {}}``). None → bare DELETE stays valid
     # (the no-body preview contract of the 5 archive entities).
     delete_body: dict | None = None
+    # GH #326 Task 3: optional SCENARIO-based seeding. ``StaffService.create``
+    # is demolished (the composite lives in ``usecases.staff.create_staff``),
+    # so the generic ``service.create(db_session, schema)`` harness path
+    # cannot seed a staff row — the composite schema (master/position_ids/
+    # create_user) is not ORM-dumpable. When set, ``make_entity``/``seed_rows``
+    # call ``create_via(db_session, input_schema)`` instead. None → the
+    # generic service.create path (every other entity).
+    create_via: Any = None
+
+
+async def _create_staff_via_scenario(db_session: Any, input_schema: Any) -> Any:
+    """GH #326 Task 3: seed a staff card through the ``create_staff``
+    scenario (the composite create chain left ``StaffService``). Returns
+    the composite ``StaffResponse`` — the harness reads only ``.id``.
+    Selfless call with the leading ``None`` + keyword args (the
+    usecases convention)."""
+    from src.usecases.staff import create_staff
+
+    return await create_staff(None, db_session=db_session, data=input_schema)
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────
@@ -275,6 +294,11 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
     # round-trip (its bare-card path: no master ext, no user → only the
     # staff row's is_active flips — D6 checkboxes have their own dedicated
     # tests in tests/services/test_staff_service.py).
+    # GH #326 Task 3: the composite ``create`` is demolished — seeding goes
+    # through the ``create_staff`` scenario (``create_via`` below); the
+    # archive/restore round-trip keeps working because BOTH sides now run
+    # the inherited single-table ``ArchiveService`` surface (the D6
+    # checkbox archive lives in the ``archive_staff`` scenario).
     StaffService: EntityConfig(
         service_factory=get_staff_service,
         model=Staff,
@@ -302,6 +326,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         # dedicated per-field matrix test.
         search_override={"first_name": "Живописец", "last_name": "Живописный"},
         search_query="живопис",
+        # GH #326 Task 3: scenario-based seeding (see the EntityConfig note)
+        # — the composite create chain lives in usecases.staff.
+        create_via=_create_staff_via_scenario,
     ),
     MaterialService: EntityConfig(
         service_factory=get_material_service,

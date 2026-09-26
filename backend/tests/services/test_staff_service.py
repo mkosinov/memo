@@ -1,36 +1,31 @@
-"""StaffService tests — GH #266 Task 3 (composite card operations).
+"""StaffService tests — the narrowed owner (GH #326 Task 3).
 
-Covers the composite contract (spec D5/D6/D8, domain-rules/staff.md
-«Сценарные операции»):
+The composite create/update/patch/archive chains moved to the
+``usecases.staff`` scenarios (Corridor 2) and are pinned there by
+``tests/usecases/test_staff_create.py`` / ``test_staff_update_patch.py``
+/ ``test_staff_archive.py`` (branch grids, step order, atomicity, null
+stripping). This file covers what REMAINS on the service:
 
-* ``create``/``update`` — ONE transaction per call: staff card +
-  masters-extension upsert/remove + staff_positions replace + user create
-  (create only). Failure anywhere → nothing persists.
-* ``archive(id, {archive_master, archive_user})`` — D6 checkboxes applied
-  ONLY to existing ACTIVE links; unchecked links keep their flags (three
-  independent flags, D3 — no hidden cascades).
-* ``restore`` — returns the PERSON only; master/user flags are restored by
-  their own explicit toggles.
-* deletion resolutions — inherited executor over the Staff matrix
-  (activities block; users/masters/master_tags/staff_positions cascade).
+* ``restore`` — the Corridor-1 decorated method: returns the PERSON
+  only; master/user flags are restored by their own explicit toggles;
+* ``resolve_delete`` — the inherited matrix executor (activities block;
+  users/masters/master_tags/staff_positions cascade);
+* ``list`` — composite response assembly (master section + position ids
+  per row);
+* the MASTER_NOT_ACTIVE TOCTOU guard (activity side, spec «Валидация»).
 """
 
 from __future__ import annotations
 
 import uuid as _uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from src.auth.passwords import PasswordPolicyError, verify_password
 from src.domain.deletion import BlockingDepsError
-from src.domain.errors import (
-    ColorRequiredError,
-    PositionNotFoundError,
-    SpecialtyRequiredError,
-)
 from src.models.activity import Activity
 from src.models.location import Location
 from src.models.master import Master
@@ -38,9 +33,7 @@ from src.models.position import Position, staff_positions
 from src.models.service import Service
 from src.models.staff import Staff
 from src.models.user import User
-from src.models.user_settings import UserSettings
 from src.schemas.activity import ActivityCreate
-from src.schemas.staff import StaffCreate, StaffPatch, StaffUpdate
 from src.services.activity import get_activity_service
 from src.services.staff import get_staff_service
 
@@ -50,14 +43,14 @@ pytestmark = pytest.mark.asyncio
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 
-async def _add_position(db_session, **kwargs) -> Position:
+async def _add_position(db_session: Any, **kwargs: Any) -> Position:
     position = Position(**kwargs) if kwargs else Position(title="СММ")
     db_session.add(position)
     await db_session.flush()
     return position
 
 
-async def _add_staff(db_session, **kwargs) -> Staff:
+async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
     kwargs.setdefault("first_name", "А")
     kwargs.setdefault("last_name", "Б")
     staff = Staff(**kwargs)
@@ -66,8 +59,8 @@ async def _add_staff(db_session, **kwargs) -> Staff:
     return staff
 
 
-async def _add_master_ext(db_session, staff_id: str, **kwargs) -> Master:
-    defaults = {"specialty": "живопись", "color": "#5B8C7A"}
+async def _add_master_ext(db_session: Any, staff_id: str, **kwargs: Any) -> Master:
+    defaults: dict[str, Any] = {"specialty": "живопись", "color": "#5B8C7A"}
     defaults.update(kwargs)
     ext = Master(staff_id=staff_id, **defaults)
     db_session.add(ext)
@@ -75,8 +68,8 @@ async def _add_master_ext(db_session, staff_id: str, **kwargs) -> Master:
     return ext
 
 
-async def _add_user(db_session, staff_id: str, **kwargs) -> User:
-    defaults = {
+async def _add_user(db_session: Any, staff_id: str, **kwargs: Any) -> User:
+    defaults: dict[str, Any] = {
         "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         "password_hash": "x",
         "role": "admin",
@@ -88,7 +81,9 @@ async def _add_user(db_session, staff_id: str, **kwargs) -> User:
     return user
 
 
-async def _staff_flags(db_session, staff_id: str) -> tuple[bool, bool | None, bool | None]:
+async def _staff_flags(
+    db_session: Any, staff_id: str
+) -> tuple[bool, bool | None, bool | None]:
     """(staff.is_active, masters.is_active, users.is_active) via one DB read
     each — fresh column scalars, immune to identity-map staleness."""
     staff_active = (await db_session.execute(
@@ -103,454 +98,30 @@ async def _staff_flags(db_session, staff_id: str) -> tuple[bool, bool | None, bo
     return staff_active, master_active, user_active
 
 
-def _create_payload(**overrides) -> StaffCreate:
-    return StaffCreate(
-        first_name="Ольга", last_name="Иванова", **overrides
-    )
-
-
-# ─── create: card only / + master section / + positions / + user ────────────
-
-
-async def test_create_without_master_block(db_session) -> None:
-    """Plain card (SMM person, S1): staff row only — no masters row, no
-    user, no positions; response echoes master=None / position_ids=[]."""
-    created = await get_staff_service().create(db_session, _create_payload())
-
-    assert created.first_name == "Ольга"
-    assert created.master is None
-    assert created.position_ids == []
-    assert created.archived is False
-    staff_id = created.id
-    assert await db_session.get(Staff, staff_id) is not None
-    assert (await db_session.execute(
-        select(Master).where(Master.staff_id == staff_id)
-    )).scalar_one_or_none() is None
-    assert (await db_session.execute(
-        select(User).where(User.staff_id == staff_id)
-    )).scalar_one_or_none() is None
-
-
-async def test_create_with_master_block(db_session) -> None:
-    """Card + master section (S7): masters row lands ACTIVE with the sent
-    specialty/color; response echoes the section."""
-    created = await get_staff_service().create(db_session, _create_payload(
-        master={"specialty": "керамика", "color": "#FF0000"},
-    ))
-
-    assert created.master is not None
-    assert created.master.specialty == "керамика"
-    assert created.master.color == "#FF0000"
-    ext = (await db_session.execute(
-        select(Master).where(Master.staff_id == created.id)
-    )).scalar_one()
-    assert ext.is_active is True
-
-
-async def test_create_with_positions_links_staff_positions(db_session) -> None:
-    """Card + position_ids: M2M rows land; response echoes the ids."""
-    p1 = await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    p2 = await _add_position(db_session)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=[p1.id, p2.id],
-    ))
-
-    assert sorted(created.position_ids) == sorted([p1.id, p2.id])
-    linked = (await db_session.execute(
-        select(staff_positions.c.position_id)
-        .where(staff_positions.c.staff_id == created.id)
-    )).scalars().all()
-    assert sorted(linked) == sorted([p1.id, p2.id])
-
-
-async def test_create_with_duplicate_position_ids_dedupes(db_session) -> None:
-    """Repeating an id in position_ids is a set-semantics no-op, not an
-    IntegrityError on the composite PK (quality review GH #266)."""
-    position = await _add_position(db_session, id="master", title="Мастер", is_system=True)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=[position.id, position.id],
-    ))
-
-    assert created.position_ids == [position.id]
-    linked = (await db_session.execute(
-        select(staff_positions.c.position_id)
-        .where(staff_positions.c.staff_id == created.id)
-    )).scalars().all()
-    assert linked == [position.id]  # exactly ONE link row
-
-
-async def test_create_with_unknown_position_raises(db_session) -> None:
-    """position_ids referencing a missing dictionary row → PositionNotFoundError."""
-    with pytest.raises(PositionNotFoundError):
-        await get_staff_service().create(
-            db_session, _create_payload(position_ids=["ghost-id"])
-        )
-
-
-# ─── create: master-section validation (D5 required fields) ────────────────
-
-
-async def test_create_master_block_without_specialty_raises(db_session) -> None:
-    with pytest.raises(SpecialtyRequiredError):
-        await get_staff_service().create(db_session, _create_payload(
-            master={"color": "#FF0000"},
-        ))
-
-
-async def test_create_master_block_without_color_raises(db_session) -> None:
-    with pytest.raises(ColorRequiredError):
-        await get_staff_service().create(db_session, _create_payload(
-            master={"specialty": "керамика"},
-        ))
-
-
-async def test_create_master_block_blank_specialty_raises(db_session) -> None:
-    """Empty/whitespace specialty is 'missing' too (presence, not just key)."""
-    with pytest.raises(SpecialtyRequiredError):
-        await get_staff_service().create(db_session, _create_payload(
-            master={"specialty": "   ", "color": "#FF0000"},
-        ))
-
-
-# ─── create: user checkbox (D6) ─────────────────────────────────────────────
-
-
-async def test_create_with_user_creates_linked_account(db_session) -> None:
-    """create_user {phone, password}: user row lands linked to the card with
-    a verifiable Argon2 hash; master-section card → role "master"."""
-    created = await get_staff_service().create(db_session, _create_payload(
-        master={"specialty": "живопись", "color": "#5B8C7A"},
-        create_user={"phone": "+79995556677", "password": "secret12345"},
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.phone == "+79995556677"
-    assert user.is_active is True
-    assert user.role == "master"
-    assert verify_password("secret12345", user.password_hash)
-
-
-async def test_create_with_user_guarantees_settings_row(db_session) -> None:
-    """GH #319 invariant: the «Учётка» creation path lands the UserSettings
-    row in the SAME transaction as the account insert (transitional period —
-    the structural move to scenarios is #326)."""
-    created = await get_staff_service().create(db_session, _create_payload(
-        create_user={"phone": "+79995556684", "password": "secret12345"},
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    settings = (await db_session.execute(
-        select(UserSettings).where(UserSettings.user_id == user.id)
-    )).scalar_one_or_none()
-    assert settings is not None, (
-        "GH #319 invariant broken: «Учётка» created the account without "
-        "a user_settings row"
-    )
-
-
-async def test_create_with_user_without_master_gets_admin_role(db_session) -> None:
-    """No master section → created account gets the "admin" role."""
-    created = await get_staff_service().create(db_session, _create_payload(
-        create_user={"phone": "+79995556678", "password": "secret12345"},
-    ))
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.role == "admin"
-
-
-async def test_create_with_user_short_password_raises(db_session) -> None:
-    """Password policy (GH #247 §3.2) applies to card-created accounts."""
-    with pytest.raises(PasswordPolicyError):
-        await get_staff_service().create(db_session, _create_payload(
-            create_user={"phone": "+79995556679", "password": "short"},
-        ))
-
-
-# ─── create: atomicity — ONE transaction, all-or-nothing ───────────────────
-
-
-async def test_create_rolls_back_everything_on_failure(db_session) -> None:
-    """Bad position_id late in the composite → NO staff/masters/user rows
-    persist (single transaction, spec «API (после)»: три таблицы атомарно)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff_count_before = len(
-        (await db_session.execute(select(Staff))).scalars().all()
-    )
-
-    with pytest.raises(PositionNotFoundError):
-        await get_staff_service().create(db_session, _create_payload(
-            master={"specialty": "живопись", "color": "#5B8C7A"},
-            position_ids=["master", "ghost"],
-            create_user={"phone": "+79995556680", "password": "secret12345"},
-        ))
-
-    await db_session.rollback()
-    staff_rows = (await db_session.execute(select(Staff))).scalars().all()
-    assert len(staff_rows) == staff_count_before
-    assert (await db_session.execute(select(Master))).scalars().all() == []
-    assert (await db_session.execute(select(User))).scalars().all() == []
-
-
-# ─── update: composite one-transaction semantics ────────────────────────────
-
-
-async def test_update_replaces_positions_set(db_session) -> None:
-    """PUT position_ids = full replace (old links die, new land)."""
-    keep = await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    drop = await _add_position(db_session)
-    staff = await _add_staff(db_session)
-    await db_session.execute(
-        staff_positions.insert().values(
-            staff_id=staff.id, position_id=keep.id
-        )
-    )
-    await db_session.execute(
-        staff_positions.insert().values(
-            staff_id=staff.id, position_id=drop.id
-        )
-    )
-    await db_session.flush()
-
-    updated = await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", position_ids=[keep.id]),
-    )
-    assert updated is not None and updated.position_ids == [keep.id]
-    linked = (await db_session.execute(
-        select(staff_positions.c.position_id)
-        .where(staff_positions.c.staff_id == staff.id)
-    )).scalars().all()
-    assert linked == [keep.id]
-
-
-async def test_update_with_duplicate_position_ids_dedupes(db_session) -> None:
-    """Same set-semantics on replace: duplicates collapse to one link row
-    instead of dying on the composite PK (quality review GH #266)."""
-    position = await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff = await _add_staff(db_session)
-
-    updated = await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б",
-                    position_ids=[position.id, position.id]),
-    )
-    assert updated is not None
-    assert updated.position_ids == [position.id]
-    linked = (await db_session.execute(
-        select(staff_positions.c.position_id)
-        .where(staff_positions.c.staff_id == staff.id)
-    )).scalars().all()
-    assert linked == [position.id]  # exactly ONE link row
-
-
-async def test_update_master_section_upsert(db_session) -> None:
-    """Adding a section to a bare card creates the masters row; sending the
-    section again updates fields in place (upsert, S2)."""
-    staff = await _add_staff(db_session)
-    service = get_staff_service()
-
-    added = await service.update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б",
-                    master={"specialty": "живопись", "color": "#111111"}),
-    )
-    assert added is not None and added.master is not None
-    assert added.master.specialty == "живопись"
-
-    changed = await service.update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б",
-                    master={"specialty": "керамика, живопись", "color": "#222222"}),
-    )
-    assert changed is not None and changed.master is not None
-    assert changed.master.specialty == "керамика, живопись"
-    assert changed.master.color == "#222222"
-    exts = (await db_session.execute(
-        select(Master).where(Master.staff_id == staff.id)
-    )).scalars().all()
-    assert len(exts) == 1  # upsert, not a second row
-
-
-async def test_update_master_null_removes_section(db_session) -> None:
-    """master: null on a card without activities → the masters row dies."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-
-    updated = await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", master=None),
-    )
-    assert updated is not None and updated.master is None
-    assert (await db_session.execute(
-        select(Master).where(Master.staff_id == staff.id)
-    )).scalar_one_or_none() is None
-
-
-async def test_update_master_null_blocked_by_activities(db_session) -> None:
-    """master: null with activities → BlockingDepsError (D7: удаление
-    masters-строки заблокировано занятиями), section survives."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-    service_ = Service(
-        title="S", description="d", image_url="i", specialty="живопись",
-        min_age=6, duration=90, record_info="r",
-    )
-    location = Location(title="L", capacity=10)
-    db_session.add_all([service_, location])
-    await db_session.flush()
-    db_session.add(Activity(
-        master_id=staff.id, service_id=service_.id, location_id=location.id,
-        start=datetime.now(UTC) + timedelta(days=1), duration=90,
-        capacity=10, is_private=False,
-    ))
-    await db_session.commit()  # persist setup — rollback below must only
-    staff_id = staff.id        # undo the failed update, not the fixture
-
-    with pytest.raises(BlockingDepsError):
-        await get_staff_service().update(
-            db_session, staff_id,
-            StaffUpdate(first_name="А", last_name="Б", master=None),
-        )
-    await db_session.rollback()
-    assert (await db_session.execute(
-        select(Master).where(Master.staff_id == staff_id)
-    )).scalar_one_or_none() is not None
-
-
-async def test_update_missing_staff_returns_none(db_session) -> None:
-    updated = await get_staff_service().update(
-        db_session, "ghost", StaffUpdate(first_name="А", last_name="Б"),
-    )
-    assert updated is None
-
-
-async def test_patch_absent_master_keeps_section(db_session) -> None:
-    """PATCH without the master key leaves the section untouched."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-
-    patched = await get_staff_service().patch(
-        db_session, staff.id, StaffPatch(first_name="В"),
-    )
-    assert patched is not None
-    assert patched.first_name == "В"
-    assert patched.master is not None
-    assert patched.master.specialty == "живопись"
-
-
-async def test_patch_null_master_removes_section(db_session) -> None:
-    """PATCH master=null (explicit) removes the section."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-
-    patched = await get_staff_service().patch(
-        db_session, staff.id, StaffPatch(master=None),
-    )
-    assert patched is not None and patched.master is None
-    assert (await db_session.execute(
-        select(Master).where(Master.staff_id == staff.id)
-    )).scalar_one_or_none() is None
-
-
-# ─── archive: D6 checkboxes — no hidden cascades (D3) ──────────────────────
-
-
-async def test_archive_defaults_archive_master_and_user(db_session) -> None:
-    """No body = consent to the preselected checkboxes: person + active
-    master + active user all archive in ONE call."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-    await _add_user(db_session, staff.id)
-
-    ok = await get_staff_service().archive(db_session, staff.id)
-    assert ok is True
-
-    staff_active, master_active, user_active = await _staff_flags(
-        db_session, staff.id
-    )
-    assert staff_active is False
-    assert master_active is False
-    assert user_active is False
-
-
-async def test_archive_unchecked_master_stays_active(db_session) -> None:
-    """S6: archive_master=False — the fired person keeps the schedule link
-    (штатное состояние D3); user checkbox still applies."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-    await _add_user(db_session, staff.id)
-
-    ok = await get_staff_service().archive(
-        db_session, staff.id, archive_master=False, archive_user=True,
-    )
-    assert ok is True
-    staff_active, master_active, user_active = await _staff_flags(
-        db_session, staff.id
-    )
-    assert staff_active is False
-    assert master_active is True
-    assert user_active is False
-
-
-async def test_archive_unchecked_user_stays_active(db_session) -> None:
-    """S6: archive_user=False — login stays allowed; master still archives."""
-    staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id)
-    await _add_user(db_session, staff.id)
-
-    ok = await get_staff_service().archive(
-        db_session, staff.id, archive_master=True, archive_user=False,
-    )
-    assert ok is True
-    _, master_active, user_active = await _staff_flags(
-        db_session, staff.id
-    )
-    assert master_active is False
-    assert user_active is True
-
-
-async def test_archive_skips_missing_and_already_archived_links(db_session) -> None:
-    """Checkboxes apply ONLY to existing ACTIVE links (spec «API (после)»):
-    no masters row → no-op; an already-archived master stays archived (an
-    archive call never silently RESTORES anything)."""
-    staff = await _add_staff(db_session)  # no master ext, no user
-
-    ok = await get_staff_service().archive(db_session, staff.id)
-    assert ok is True  # bare card archives fine
-
-    await _add_master_ext(db_session, staff.id, is_active=False)
-    ok = await get_staff_service().archive(db_session, staff.id)
-    assert ok is True
-    ext = (await db_session.execute(
-        select(Master).where(Master.staff_id == staff.id)
-    )).scalar_one()
-    assert ext.is_active is False  # untouched, not resurrected
-
-
-async def test_archive_missing_staff_returns_false(db_session) -> None:
-    assert await get_staff_service().archive(db_session, "ghost") is False
-
+# ─── restore: the person only (Corridor 1 — stays decorated) ───────────────
 
 async def test_restore_returns_person_only(db_session) -> None:
     """Restore returns the PERSON; master/user keep their own flags
-    (domain-rules: «учётка/мастер возвращаются своими флагами явно»)."""
+    (domain-rules: «учётка/мастер возвращаются своими флагами явно»).
+
+    Setup archives everything through the ``archive_staff`` scenario
+    (the D6-default dismissal), then restore flips the person back."""
+    from src.usecases.staff import archive_staff
+
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
     await _add_user(db_session, staff.id)
-    service = get_staff_service()
-    await service.archive(db_session, staff.id)  # everything archived
+    staff_id = staff.id
+    ok = await archive_staff(
+        None, db_session=db_session, id=staff_id,
+        archive_master=True, archive_user=True,
+    )
+    assert ok is True
 
-    ok = await service.restore(db_session, staff.id)
+    ok = await get_staff_service().restore(db_session, staff_id)
     assert ok is True
     staff_active, master_active, user_active = await _staff_flags(
-        db_session, staff.id
+        db_session, staff_id
     )
     assert staff_active is True
     assert master_active is False  # stays archived until its own toggle
@@ -559,6 +130,14 @@ async def test_restore_returns_person_only(db_session) -> None:
 
 async def test_restore_missing_staff_returns_false(db_session) -> None:
     assert await get_staff_service().restore(db_session, "ghost") is False
+
+
+async def test_restore_is_decorated(db_session) -> None:
+    """US-5: restore stays a Corridor-1 ``@transactional`` method (it is
+    NOT part of the Task 3 demolition)."""
+    from src.services.decorators import _TRANSACTIONAL_MARKER
+
+    assert hasattr(get_staff_service().restore, _TRANSACTIONAL_MARKER)
 
 
 # ─── deletion resolutions (matrix inherited from T2) ───────────────────────
@@ -642,230 +221,6 @@ async def test_list_returns_cards_with_master_and_positions(db_session) -> None:
     assert by_id[with_master.id].position_ids == []
     assert by_id[bare.id].master is None
     assert by_id[bare.id].position_ids == [position.id]
-
-
-# ─── role template from positions (GH #263 D10) ────────────────────────────
-
-
-async def test_create_user_with_master_position_gets_master_role(db_session) -> None:
-    """D10 template: card created with the fixed-id «мастер» position + the
-    account checkbox → the account lands with role=master (anchor by
-    position ID, not title)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=["master"],
-        create_user={"phone": "+79995556681", "password": "secret12345"},
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.role == "master"
-
-
-async def test_create_user_with_admin_position_gets_admin_role(db_session) -> None:
-    """D10: the «админ» position anchors role=admin."""
-    await _add_position(db_session, id="admin", title="Админ", is_system=True)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=["admin"],
-        create_user={"phone": "+79995556682", "password": "secret12345"},
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.role == "admin"
-
-
-async def test_create_user_several_positions_senior_wins(db_session) -> None:
-    """D10: several anchored positions → the SENIOR one wins (admin > master)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    await _add_position(db_session, id="admin", title="Админ", is_system=True)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=["master", "admin"],
-        create_user={"phone": "+79995556683", "password": "secret12345"},
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.role == "admin"
-
-
-async def test_create_user_explicit_role_beats_template(db_session) -> None:
-    """Manual override stays possible: an explicit role in create_user beats
-    the position template (СММ-подобный случай — должность «мастер», но
-    роль руками выбрана admin)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-
-    created = await get_staff_service().create(db_session, _create_payload(
-        position_ids=["master"],
-        create_user={
-            "phone": "+79995556684", "password": "secret12345", "role": "admin",
-        },
-    ))
-
-    user = (await db_session.execute(
-        select(User).where(User.staff_id == created.id)
-    )).scalar_one()
-    assert user.role == "admin"
-
-
-async def test_update_position_set_to_master_upgrades_role(db_session) -> None:
-    """D10 on position-set change (S8): a linked account gets role=master
-    when the new set contains the «мастер» position."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff = await _add_staff(db_session)
-    await _add_user(db_session, staff.id, role="admin")
-
-    await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
-    )
-
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "master"
-
-
-async def test_update_position_set_master_to_admin_upgrades_role(db_session) -> None:
-    """S8 «Назначение должности «админ» поверх — роль стала admin»."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    await _add_position(db_session, id="admin", title="Админ", is_system=True)
-    staff = await _add_staff(db_session)
-    await _add_user(db_session, staff.id, role="master")
-
-    await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", position_ids=["master", "admin"]),
-    )
-
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "admin"
-
-
-async def test_update_position_set_non_anchored_keeps_role(db_session) -> None:
-    """D10: positions without master/admin anchors (e.g. СММ) never touch
-    the role — even when the set LOSES the anchors (was master position,
-    removed → role stays as the admin set it manually)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    smm = await _add_position(db_session, title="СММ")
-    staff = await _add_staff(db_session)
-    await db_session.execute(
-        staff_positions.insert().values(staff_id=staff.id, position_id="master")
-    )
-    await db_session.flush()
-    await _add_user(db_session, staff.id, role="master")
-
-    await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", position_ids=[smm.id]),
-    )
-
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "master"
-
-
-async def test_patch_position_set_applies_role_template(db_session) -> None:
-    """PATCH with position_ids follows the same D10 template."""
-    await _add_position(db_session, id="admin", title="Админ", is_system=True)
-    staff = await _add_staff(db_session)
-    await _add_user(db_session, staff.id, role="master")
-
-    patched = await get_staff_service().patch(
-        db_session, staff.id, StaffPatch(position_ids=["admin"]),
-    )
-
-    assert patched is not None
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "admin"
-
-
-async def test_patch_explicit_role_without_positions_applies(db_session) -> None:
-    """PATCH role-only branch: an explicit role with NO position-set change
-    still applies (ручная правка роли остаётся) — the template is not fired
-    (no anchors sent, none consulted)."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff = await _add_staff(db_session)
-    await db_session.execute(
-        staff_positions.insert().values(staff_id=staff.id, position_id="master")
-    )
-    await db_session.flush()
-    await _add_user(db_session, staff.id, role="admin")
-
-    patched = await get_staff_service().patch(
-        db_session, staff.id, StaffPatch(role="master"),
-    )
-
-    assert patched is not None
-    # Positions untouched by the role-only PATCH...
-    linked = (await db_session.execute(
-        select(staff_positions.c.position_id)
-        .where(staff_positions.c.staff_id == staff.id)
-    )).scalars().all()
-    assert linked == ["master"]
-    # ...and the explicit role applied.
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "master"
-
-
-async def test_patch_without_role_keys_keeps_role(db_session) -> None:
-    """PATCH without role and without positions → role untouched."""
-    staff = await _add_staff(db_session)
-    await _add_user(db_session, staff.id, role="admin")
-
-    patched = await get_staff_service().patch(
-        db_session, staff.id, StaffPatch(first_name="В"),
-    )
-
-    assert patched is not None
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "admin"
-
-
-async def test_update_explicit_role_beats_template(db_session) -> None:
-    """An explicit role in the body beats the position template."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff = await _add_staff(db_session)
-    await _add_user(db_session, staff.id, role="admin")
-
-    await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б",
-                    position_ids=["master"], role="admin"),
-    )
-
-    role = (await db_session.execute(
-        select(User.role).where(User.staff_id == staff.id)
-    )).scalar_one()
-    assert role == "admin"
-
-
-async def test_update_without_user_role_template_is_noop(db_session) -> None:
-    """No linked account → the position template has nothing to apply to;
-    the update succeeds."""
-    await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    staff = await _add_staff(db_session)
-
-    updated = await get_staff_service().update(
-        db_session, staff.id,
-        StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
-    )
-    assert updated is not None
 
 
 # ─── MASTER_NOT_ACTIVE: activity-side TOCTOU guard (spec «Валидация») ──────

@@ -1,22 +1,31 @@
-"""Composite staff-card service — GH #266 Task 3 (spec D5/D6/D8).
+"""Staff card service — reads, row blocks, and the own positions bundle.
 
-One card spans four tables: ``staff`` (the person), the 1:0..1 ``masters``
-extension (schedule side), the ``staff_positions`` M2M, and — on create —
-a linked ``users`` account. :class:`StaffService` composes the existing
-generic machinery (``ArchiveService`` reads/hard-delete + ``resolve_delete``
-over the Staff FK matrix) instead of duplicating it:
+GH #326 Task 3 — the composite write flows (create / update / patch /
+archive chains) live in the ``usecases.staff`` scenarios (Corridor 2 —
+canon docs/domain-rules/service-layer.md rule 2); this service is the
+narrow owner of the ``staff`` table plus its OWN ``staff_positions``
+bundle (rule 1 — child rows without a lifecycle of their own stay with
+the parent, the ``record_tags`` precedent):
 
-* ``create``/``update``/``patch`` — ONE transaction per call: card fields +
-  masters-row upsert/remove + positions replace + user create, atomically
-  (spec «API (после)»: три таблицы атомарно). Any failure → nothing
-  persists (the ``@transactional`` decorator skips its commit on raise).
-* ``archive(id, archive_master, archive_user)`` — D6 checkboxes applied
-  ONLY to existing ACTIVE links; unchecked links keep their flags (three
-  independent flags, D3 — no hidden cascades, nothing silently restores).
-* ``restore`` — returns the PERSON only; master/user flags are owned by
-  their own explicit toggles (domain-rules/staff.md).
-* ``delete``/``resolve_delete`` — inherited matrix executor (activities
-  block; users/masters/master_tags/staff_positions auto-cascade).
+* reads — ``get`` / ``list`` / ``list_all`` / ``list_join_masters``
+  (composite response assembly via the module helpers; NO
+  ``@transactional`` — a read inside a scenario publishes nothing);
+* row blocks — ``create_card`` / ``update_card`` / ``patch_card`` /
+  ``archive_card`` / ``patch_payload``: scenario building blocks (rule
+  3), no decorator, flush only; the scenario owns the transaction;
+* ``replace_positions`` — the own M2M bundle replace (validated set,
+  deduped, marks ``staff_positions`` — the card's own edge);
+* ``restore`` — Corridor 1 (one table, own endpoint), stays a
+  decorated method;
+* ``delete``/``resolve_delete`` — inherited matrix executor
+  (activities block; users/masters/master_tags/staff_positions
+  auto-cascade).
+
+The masters extension is written through ``MasterService`` (GH #326
+Task 2), the account/role through ``UserService`` (Task 1) — this
+module no longer imports their models for writes. The foreign entity
+marks live in the owner modules; their absence HERE is pinned by
+``tests/test_events_emit.py::TestCascadeSourceAudit``.
 """
 
 from __future__ import annotations
@@ -25,18 +34,10 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, not_, select, update
+from sqlalchemy import func, not_, select
 
-from src.auth.passwords import hash_password, validate_password
-from src.domain.deletion import BlockingDepsError
-from src.domain.errors import (
-    ColorRequiredError,
-    PositionNotFoundError,
-    SpecialtyRequiredError,
-)
+from src.domain.errors import PositionNotFoundError
 from src.events.emitter import mark_changed
-from src.models.activity import Activity
-from src.models.enums import UserRole
 from src.models.master import Master
 from src.models.position import Position, staff_positions
 from src.models.staff import Staff
@@ -45,19 +46,17 @@ from src.repositories.generic import get_archive_repository
 from src.repositories.search import SearchField
 from src.schemas.common import PaginatedResponse
 from src.schemas.staff import (
-    MasterSection,
     StaffCreate,
-    StaffPatch,
     StaffResponse,
     StaffUpdate,
 )
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService
-from src.services.user_settings import UserSettingsService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pydantic import BaseModel
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.models.enums import ArchiveStatus
@@ -109,83 +108,9 @@ async def _user_presence(
     return {staff_id: True for (staff_id,) in rows.all()}
 
 
-# GH #263 D10 — role template anchored on the FIXED system position ids
-# (never on title, D4 #266: titles are freely editable). Seniority:
-# admin > master — several anchored positions collapse to the senior one.
-_POSITION_ROLE_TEMPLATE: dict[str, UserRole] = {
-    "admin": UserRole.ADMIN,
-    "master": UserRole.MASTER,
-}
-
-
-def _template_role(position_ids: Sequence[str]) -> UserRole | None:
-    """Highest template role among *position_ids* (admin > master).
-
-    ``None`` = none of the anchored positions present — «прочие должности
-    роль не трогают». Deliberate edge (D10): a set that LOSES master/admin
-    also yields ``None`` → the linked account keeps its current role
-    (removal is not a downgrade; roles are manual outside the template).
-    """
-    roles = [
-        _POSITION_ROLE_TEMPLATE[pid]
-        for pid in dict.fromkeys(position_ids)
-        if pid in _POSITION_ROLE_TEMPLATE
-    ]
-    if UserRole.ADMIN in roles:
-        return UserRole.ADMIN
-    if roles:
-        return UserRole.MASTER
-    return None
-
-
-def _require_section_fields(section: MasterSection | None) -> None:
-    """D5: a present master section must carry a non-blank specialty + color.
-
-    Pydantic already rejects absent keys / empty strings / bad hex; the
-    blank-whitespace case (``"   "``) is domain-level, checked here.
-    """
-    if section is None:
-        return
-    if not section.specialty.strip():
-        raise SpecialtyRequiredError()
-    if not section.color.strip():
-        raise ColorRequiredError()
-
-
-# GH #344: journaled card fields for an explicit staff mark (§5.1) — the
-# ENTITY_SIGNATURES snapshot set plus ``avatar_url`` (a real user-facing
-# card column); sort_order is dictionary bookkeeping.
-_STAFF_MARK_FIELDS = ("first_name", "last_name", "avatar_url")
-
-
-def _mark_staff_audit(staff: Staff, action: str, old: dict | None = None) -> None:
-    """Stage ONE journal row for a composite card write (spec §4.3).
-
-    ``old=None`` → create mark (after-snapshot pairs; ``None``-valued
-    fields — a fresh card has no avatar — are skipped, the
-    ``snapshot_pairs_after`` convention §5.1); otherwise update pairs
-    over the fields that actually changed (§5.1). The cross-table
-    children (masters/users/staff_positions) are cascade writes — never
-    journaled (§4.2). LAZY audit import — cycle discipline.
-    """
-    from src.events.audit import diff_pairs, mark_audit
-
-    if old is None:
-        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
-        # with ``None`` values skipped — the create-snapshot shape.
-        changes: dict | None = diff_pairs(_STAFF_MARK_FIELDS, {}, staff) or None
-    else:
-        changes = diff_pairs(_STAFF_MARK_FIELDS, old, staff)
-    mark_audit(
-        entity="staff",
-        action=action,
-        entity_id=staff.id,
-        changes=changes,
-    )
-
 
 class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
-    """Composite service over staff + masters + staff_positions + users."""
+    """Owner of the staff card: reads + row blocks + own positions bundle."""
 
     NOT_NULL_FIELDS = {"first_name", "last_name", "sort_order"}
 
@@ -364,215 +289,112 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             items=items, total=total, page=page, per_page=per_page,
         )
 
-    # ─── composite writes — ONE transaction each ─────────────────────────
+    # ─── card row blocks — scenario building blocks, no decorator ────────
 
-    @transactional
-    async def create(
-        self, db_session: AsyncSession, data: StaffCreate
-    ) -> StaffResponse:
-        # 1. Person card.
+    async def get_card(self, db_session: AsyncSession, id: str) -> Staff | None:
+        """Read ONE staff card row (ORM object or None) — NO decorator.
+
+        A pure read block for the scenarios (GH #344 §4.2): the audit
+        "before" snapshot of the card fields is fixed by the scenario
+        BEFORE the first in-session mutation. The repository's identity
+        map returns the SAME object the following card block mutates —
+        no second query, no staleness.
+        """
+        return await self._repository.get(db_session, self._model, id)
+
+    async def create_card(
+        self,
+        db_session: AsyncSession,
+        *,
+        first_name: str,
+        last_name: str,
+        avatar_url: str | None = None,
+        sort_order: int = 0,
+    ) -> Staff:
+        """Insert ONE staff card row — WITHOUT committing (rule 3).
+
+        The ``create_staff`` scenario owns the transaction boundary and
+        the composite chain (section / positions / account). Value-typed
+        parameters only; flush so the caller gets a populated ``id``.
+        """
         staff = Staff(
-            first_name=data.first_name,
-            last_name=data.last_name,
-            avatar_url=data.avatar_url,
-            sort_order=data.sort_order,
+            first_name=first_name,
+            last_name=last_name,
+            avatar_url=avatar_url,
+            sort_order=sort_order,
         )
         db_session.add(staff)
         await db_session.flush()
+        return staff
 
-        # 2. Master section (optional). ``archived`` (Gap A): set → the
-        # section is born with is_active = not archived; None → default True.
-        _require_section_fields(data.master)
-        if data.master is not None:
-            db_session.add(
-                Master(
-                    staff_id=staff.id,
-                    specialty=data.master.specialty.strip(),
-                    color=data.master.color.strip(),
-                    **(
-                        {"is_active": not data.master.archived}
-                        if data.master.archived is not None
-                        else {}
-                    ),
-                )
-            )
-
-        # 3. Positions replace (fresh card → plain insert, validated set).
-        # Dedupe first: a repeated id is set-semantics noise, not an
-        # IntegrityError on the composite PK (staff_id, position_id).
-        await self._validate_position_ids(db_session, data.position_ids)
-        for position_id in dict.fromkeys(data.position_ids):
-            await db_session.execute(
-                staff_positions.insert().values(
-                    staff_id=staff.id, position_id=position_id
-                )
-            )
-
-        # 4. Account checkbox (D6, create-only). Role (GH #263 D10):
-        # explicit role in the body wins (ручная правка); otherwise the
-        # position template (master → master, admin → admin, senior
-        # admin > master); no anchored position → the legacy #247 fallback
-        # (master section → master, else admin) keeps bare cards sensible.
-        if data.create_user:
-            password = validate_password(data.create_user.password)
-            template = _template_role(data.position_ids)
-            if data.create_user.role is not None:
-                role: UserRole = data.create_user.role
-            elif template is not None:
-                role = template
-            else:
-                role = (
-                    UserRole.MASTER
-                    if data.master is not None
-                    else UserRole.ADMIN
-                )
-            user = User(
-                phone=data.create_user.phone,
-                password_hash=hash_password(password),
-                role=role.value,
-                staff_id=staff.id,
-            )
-            db_session.add(user)
-            await db_session.flush()
-            # GH #319: guaranteed child record — the UserSettings defaults
-            # row in the SAME transaction (silent core: no separate
-            # bus-invalidation event; the structural move of staff ops to
-            # scenarios is #326).
-            await UserSettingsService.insert_defaults(db_session, user.id)
-        # Cross-table writes — surface the touched entities (§3.3); the
-        # decorator's accumulator already carries the own "staff" entity.
-        if data.master is not None:
-            mark_changed("masters")
-        if data.position_ids:
-            mark_changed("staff_positions")
-        if data.create_user:
-            mark_changed("users")
-
-        await db_session.flush()
-        ext = (
-            (await _master_extensions(db_session, [staff.id])).get(staff.id)
-            if data.master is not None
-            else None
-        )
-        links = await _position_ids(db_session, [staff.id])
-        has_user = (await _user_presence(db_session, [staff.id])).get(
-            staff.id, False
-        )
-        # GH #344 (§4.3): ONE explicit row for the card; the cross-table
-        # children (masters/users/join rows) never journal.
-        _mark_staff_audit(staff, "create")
-        return self._to_response(
-            staff, ext, links.get(staff.id, []), has_user
-        )
-
-    @transactional
-    async def update(
-        self, db_session: AsyncSession, id: str, data: StaffUpdate
-    ) -> StaffResponse | None:
-        staff = await self._repository.get(db_session, self._model, id)
-        if staff is None:
-            return None
-
-        # 1. Card fields. GH #344 (§4.2): the "before" half of the diff
-        #    is fixed BEFORE the first in-session mutation.
-        _old = {f: getattr(staff, f) for f in _STAFF_MARK_FIELDS}
-        staff.first_name = data.first_name
-        staff.last_name = data.last_name
-        staff.avatar_url = data.avatar_url
-        staff.sort_order = data.sort_order
-
-        # 2. Master section upsert/remove.
-        await self._apply_master_section(db_session, id, data.master)
-
-        # 3. Positions full replace.
-        await self._replace_positions(db_session, id, data.position_ids)
-
-        # 4. Role template (GH #263 D10): position set is part of the PUT
-        # contract → the linked account follows the template unless the
-        # body carries an explicit role.
-        await self._apply_role_template(
-            db_session, id, data.position_ids, explicit_role=data.role
-        )
-
-        await db_session.flush()
-        # GH #344 (§4.3): ONE explicit row — the card was rewritten (PUT
-        # semantics); pairs carry the changed card fields.
-        _mark_staff_audit(staff, "update", _old)
-        return await self.get(db_session, id)
-
-    async def patch(
-        self, db_session: AsyncSession, id: str, data: StaffPatch
-    ) -> StaffResponse | None:
-        """PATCH — only sent keys apply (three-state ``master``)."""
-        payload = self._patch_payload(data)
-        master_sent = "master" in payload
-        # The ORIGINAL model object, not the payload dump: the dict form
-        # loses attribute access in ``_apply_master_section``.
-        master_section = data.master if master_sent else None
-        positions_sent = "position_ids" in payload
-        position_ids = payload.pop("position_ids", None)
-        payload.pop("master", None)
-        # Role (GH #263 D10): absent or null body value = no override →
-        # the template decides when the set changes; a sent value wins.
-        # ``explicit_role is not None`` below already implies the key was
-        # sent with a value.
-        payload.pop("role", None)
-        return await self._patch_composite(
-            db_session, id, payload,
-            master_sent=master_sent,
-            master_section=master_section,
-            positions_sent=positions_sent,
-            position_ids=cast("list[str] | None", position_ids),
-            explicit_role=data.role,
-        )
-
-    @transactional
-    async def _patch_composite(
+    async def update_card(
         self,
         db_session: AsyncSession,
         id: str,
-        card_payload: dict,
         *,
-        master_sent: bool,
-        master_section: MasterSection | None,
-        positions_sent: bool,
-        position_ids: list[str] | None,
-        explicit_role: UserRole | None = None,
-    ) -> StaffResponse | None:
+        first_name: str,
+        last_name: str,
+        avatar_url: str | None,
+        sort_order: int,
+    ) -> Staff | None:
+        """Apply the PUT card-field writes — WITHOUT committing.
+
+        Missing id → ``None`` (the route maps that to 404). ``updated_at``
+        stamps via the model's ``onupdate``. The section/positions/role
+        parts of the former ``StaffService.update`` live in the
+        ``update_staff`` scenario.
+        """
         staff = await self._repository.get(db_session, self._model, id)
         if staff is None:
             return None
-
-        # GH #344 (§4.2): "before" half fixed before the first mutation;
-        # nothing sent → full no-op → no journal row (§5.1).
-        _old = {f: getattr(staff, f) for f in _STAFF_MARK_FIELDS}
-        for key, value in card_payload.items():
-            setattr(staff, key, value)
-        if master_sent:
-            await self._apply_master_section(
-                db_session, id, cast("MasterSection | None", master_section)
-            )
-        if positions_sent and position_ids is not None:
-            await self._replace_positions(db_session, id, position_ids)
-            await self._apply_role_template(
-                db_session, id, position_ids, explicit_role=explicit_role
-            )
-        elif explicit_role is not None:
-            # Role sent WITHOUT a position-set change — manual override only
-            # (ручная правка роли остаётся: the body beats the template).
-            # Empty position ids → template yields None → explicit applies.
-            await self._apply_role_template(
-                db_session, id, [], explicit_role=explicit_role
-            )
-
+        staff.first_name = first_name
+        staff.last_name = last_name
+        staff.avatar_url = avatar_url
+        staff.sort_order = sort_order
         await db_session.flush()
-        # GH #344 (§4.3): mark only when the request actually carried a
-        # card/section/positions field (an empty PATCH is a no-op row).
-        if card_payload or master_sent or (positions_sent and position_ids is not None):
-            _mark_staff_audit(staff, "update", _old)
-        return await self.get(db_session, id)
+        return staff
 
-    # ─── section/link plumbing (flushed inside the caller's transaction) ──
+    async def patch_card(
+        self, db_session: AsyncSession, id: str, fields: dict
+    ) -> Staff | None:
+        """Apply the SENT card fields of a PATCH — WITHOUT committing.
+
+        ``fields`` is the caller's prepared payload (``patch_payload`` —
+        ``exclude_unset`` dump with NOT NULL nulls stripped); only the
+        card scalar keys remain in it. Missing id → ``None``.
+        """
+        staff = await self._repository.get(db_session, self._model, id)
+        if staff is None:
+            return None
+        for key, value in fields.items():
+            setattr(staff, key, value)
+        await db_session.flush()
+        return staff
+
+    def patch_payload(self, data: BaseModel) -> dict:
+        """PATCH prep for the scenario: ``exclude_unset`` dump with ``None``
+        values for ``NOT_NULL_FIELDS`` stripped (client intent is "don't
+        change", not "set to null") — the generic ``_patch_payload``
+        semantics, exposed for the ``patch_staff`` scenario.
+        """
+        return self._patch_payload(data)
+
+    async def archive_card(self, db_session: AsyncSession, id: str) -> bool:
+        """Flip the person flag (``staff.is_active = False``) — WITHOUT
+        committing.
+
+        The D6 checkboxes (masters/users) are applied by the
+        ``archive_staff`` scenario through their owners. Missing id →
+        ``False`` (the route maps that to 404).
+        """
+        staff = await self._repository.get(db_session, self._model, id)
+        if staff is None:
+            return False
+        staff.is_active = False
+        await db_session.flush()
+        return True
+
+    # ─── positions bundle (own M2M edge) ──────────────────────────────────
 
     async def _validate_position_ids(
         self, db_session: AsyncSession, position_ids: Sequence[str]
@@ -588,13 +410,15 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         for missing in sorted(unique_ids - found):
             raise PositionNotFoundError(missing)
 
-    async def _replace_positions(
+    async def replace_positions(
         self, db_session: AsyncSession, staff_id: str, position_ids: Sequence[str]
     ) -> None:
         """Full replace of the M2M set (delete-all + insert, same flush).
 
         Duplicates in *position_ids* collapse to one row (set semantics)
-        instead of dying on the composite PK.
+        instead of dying on the composite PK. A replace is a fact → marks
+        ``"staff_positions"`` unconditionally (the card's OWN bundle —
+        the pre-refactor grid, pinned by the usecases tests).
         """
         await self._validate_position_ids(db_session, position_ids)
         await db_session.execute(
@@ -608,154 +432,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             )
         mark_changed("staff_positions")
 
-    async def _apply_master_section(
-        self, db_session: AsyncSession, staff_id: str, section: MasterSection | None
-    ) -> None:
-        """Upsert (payload) / remove (None) the masters extension row.
-
-        ``section.archived`` (T8 Gap A): ``None`` = don't touch the
-        schedule flag; set → ``masters.is_active = not archived`` on the
-        upserted row. Archiving NEVER deletes the row (D7 — history keeps
-        specialty/color; removal stays the explicit ``master: null`` path).
-        """
-        _require_section_fields(section)
-        ext = (await _master_extensions(db_session, [staff_id])).get(staff_id)
-        if section is None:
-            if ext is not None:
-                # D7: удаление masters-строки заблокировано занятиями —
-                # same block rule as the card hard-delete (activities block).
-                await self._assert_section_removable(db_session, staff_id)
-                await db_session.execute(
-                    sa_delete(Master).where(Master.staff_id == staff_id)
-                )
-                mark_changed("masters")
-            return
-        if ext is None:
-            db_session.add(
-                Master(
-                    staff_id=staff_id,
-                    specialty=section.specialty.strip(),
-                    color=section.color.strip(),
-                    **(
-                        {"is_active": not section.archived}
-                        if section.archived is not None
-                        else {}
-                    ),
-                )
-            )
-        else:
-            ext.specialty = section.specialty.strip()
-            ext.color = section.color.strip()
-            if section.archived is not None:
-                ext.is_active = not section.archived
-        mark_changed("masters")
-
-    async def _apply_role_template(
-        self,
-        db_session: AsyncSession,
-        staff_id: str,
-        position_ids: Sequence[str],
-        *,
-        explicit_role: UserRole | None = None,
-    ) -> None:
-        """GH #263 D10 — the position set templates the linked account role.
-
-        Applied when the position set changes (PUT always carries the set;
-        PATCH only when ``position_ids`` was sent). Template = highest
-        anchor (admin > master); explicit ``role`` in the request body
-        beats the template (ручная правка роли остаётся). No anchored
-        position → the role is NOT touched (СММ и пользовательские
-        должности не влияют; losing master/admin is not a downgrade).
-
-        No linked account → nothing to template (no-op).
-        """
-        role = explicit_role if explicit_role is not None else _template_role(position_ids)
-        if role is None:
-            return
-        result = await db_session.execute(
-            update(User)
-            .where(User.staff_id == staff_id)
-            .values(role=role.value)
-        )
-        if result.rowcount:
-            mark_changed("users")
-
-    async def _assert_section_removable(
-        self, db_session: AsyncSession, staff_id: str
-    ) -> None:
-        """A masters row with activities cannot be removed (D7)."""
-        count = (
-            await db_session.execute(
-                select(func.count())
-                .select_from(Activity)
-                .where(Activity.master_id == staff_id)
-            )
-        ).scalar_one()
-        if count:
-            raise BlockingDepsError(
-                "Master section has activities — archive it instead"
-            )
-
-    # ─── archive/restore: D6 checkboxes, no hidden cascades ───────────────
-
-    @transactional
-    async def archive(
-        self,
-        db_session: AsyncSession,
-        id: str,
-        archive_master: bool = True,
-        archive_user: bool = True,
-    ) -> bool:
-        """Archive the person + the CHECKED existing ACTIVE links (D6).
-
-        One transaction: ``staff.is_active=False`` always; the master
-        extension / linked user flip only when their checkbox is set AND
-        the link exists AND is currently active (an archive call never
-        silently restores an already-archived link).
-
-        GH #344 (spec §4.2): the person's archive is journaled
-        EXPLICITLY — action ``archive``, no snapshot — displacing the
-        auto-collected ``update`` row for the ``is_active`` flip. The D6
-        checkbox cascades (masters/users) are child writes, never
-        journaled (§4.2 "one action — one row"). No-op guard: re-archiving
-        an already-archived card writes no journal row (§4.6).
-        """
-        staff = await self._repository.get(db_session, self._model, id)
-        if staff is None:
-            return False
-        if staff.is_active:
-            # LAZY import — the audit module is off-limits at services
-            # top level (cycle hazard, src/events/entities.py WARNING).
-            from src.events.audit import derive_row_label, mark_audit
-
-            mark_audit(
-                entity="staff",
-                action="archive",
-                entity_id=id,
-                entity_label=derive_row_label("staff", staff),
-                changes=None,
-            )
-        staff.is_active = False
-
-        if archive_master:
-            result = await db_session.execute(
-                update(Master)
-                .where(Master.staff_id == id, Master.is_active)
-                .values(is_active=False)
-            )
-            if result.rowcount:
-                mark_changed("masters")
-        if archive_user:
-            result = await db_session.execute(
-                update(User)
-                .where(User.staff_id == id, User.is_active)
-                .values(is_active=False)
-            )
-            if result.rowcount:
-                mark_changed("users")
-        await db_session.flush()
-        return True
-
+    # ─── restore: Corridor 1, stays decorated ─────────────────────────────
     @transactional
     async def restore(
         self, db_session: AsyncSession, id: str

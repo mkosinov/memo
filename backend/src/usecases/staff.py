@@ -1,0 +1,522 @@
+"""Staff scenarios — multi-entity business actions around a staff card.
+
+GH #326 Task 3 — the ``usecases`` layer, Corridor 2 of the service canon
+(docs/domain-rules/service-layer.md rule 2): each scenario is a public
+function named after the business action, decorated ``@transactional``
+(ONE transaction + ONE event batch per action), composing the
+non-transactional building blocks of the OWNERS only — no runtime
+ORM-model imports (``UserRole`` is a dictionary enum, not an ORM model):
+
+* card row + own ``staff_positions`` bundle — :class:`StaffService`
+  blocks (``create_card`` / ``update_card`` / ``patch_card`` /
+  ``archive_card`` / ``replace_positions`` — the record_tags precedent:
+  own child rows without a lifecycle of their own stay with the parent);
+* masters extension — :class:`MasterService` (GH #326 Task 2);
+* account/role — :class:`UserService` + :func:`resolve_account_role`
+  (GH #326 Task 1).
+
+Behavior-preserving extraction of the former ``StaffService.create`` /
+``update`` / ``patch`` / ``archive`` chains (step order and semantics
+are byte-identical to the pre-refactor flow; spec §Behavioral Delta:
+до = после). ``restore`` stays a decorated ``StaffService`` method
+(Corridor 1 — one table, own endpoint).
+
+CALLING CONVENTION: the ``@transactional`` wrapper's signature is
+``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
+MUST be called with an explicit leading ``None`` (the unused ``self``
+slot) and keyword arguments::
+
+    card = await create_staff(None, db_session=session, data=data)
+
+A bare positional call would bind the session to the wrapper's ``self``
+slot and shift every argument — that misdirection fails loudly
+(TypeError), never silently. The selfless path opens the accumulator
+EMPTY — no auto entity-mark — so every scenario marks its OWN entity
+explicitly (``mark_changed("staff")``), keeping the published event
+grid byte-identical to the former method-based flows (the decorated
+``StaffService`` methods auto-marked "staff").
+
+EVENT GRID (GH #239) — "staff" ALWAYS; conditional marks fire by FACT
+OF CHANGE inside the owner blocks (row written / rowcount > 0), pinned
+as the pre-refactor oracle by ``tests/usecases/test_staff_*.py``:
+
+- ``create_staff`` — {staff} + masters (section sent) +
+  staff_positions (non-empty set) + users (account checkbox);
+- ``update_staff`` / ``patch_staff`` — {staff} + the same conditionals
+  for the parts actually written;
+- ``archive_staff`` — {staff} + masters/users per checkbox AND a real
+  rowcount (an already-archived link adds nothing);
+- ``delete_staff`` — {staff} + the core's cascade marks: the matrix
+  dispatch runs EVERY handler regardless of dep count (spec §2.7), so
+  BOTH branches (bare-clean and resolved) publish
+  {staff, users, masters, master_tags, staff_positions} — byte-parity
+  with the former decorated ``resolve_delete``;
+- every failure branch publishes nothing (rollback silence).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from src.events.emitter import mark_changed
+from src.services.decorators import transactional
+from src.services.master import get_master_service
+from src.services.staff import get_staff_service
+from src.services.user import get_user_service, resolve_account_role
+from src.services.user_settings import UserSettingsService
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.models.enums import UserRole
+    from src.models.staff import Staff
+    from src.schemas.staff import (
+        CreateUserSection,
+        MasterSection,
+        StaffCreate,
+        StaffPatch,
+        StaffResponse,
+        StaffUpdate,
+    )
+
+
+def _account_section(data: StaffCreate) -> CreateUserSection | None:
+    """The D6 account checkbox, or ``None`` when unchecked."""
+    return data.create_user if data.create_user else None
+
+
+# GH #344: journaled card fields for an explicit staff mark (§5.1) — the
+# ENTITY_SIGNATURES snapshot set plus ``avatar_url`` (a real user-facing
+# card column); sort_order is dictionary bookkeeping.
+_STAFF_MARK_FIELDS = ("first_name", "last_name", "avatar_url")
+
+
+def _mark_staff_audit(
+    staff: Staff, action: str, old: dict[str, Any] | None = None
+) -> None:
+    """Stage ONE journal row for a composite card write (spec §4.3).
+
+    ``old=None`` → create mark (after-snapshot pairs; ``None``-valued
+    fields — a fresh card has no avatar — are skipped, the
+    ``snapshot_pairs_after`` convention §5.1); otherwise update pairs
+    over the fields that actually changed (§5.1). The cross-table
+    children (masters/users/staff_positions) are cascade writes — never
+    journaled (§4.2). LAZY audit import — cycle discipline.
+
+    Moved from the former ``StaffService`` composite methods together
+    with the scenarios (GH #326 Task 3 + #344 integration): the scenario
+    OWNS the composite card write, so it owns its journal row.
+    """
+    from src.events.audit import diff_pairs, mark_audit
+
+    if old is None:
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict[str, Any] | None = (
+            diff_pairs(_STAFF_MARK_FIELDS, {}, staff) or None
+        )
+    else:
+        changes = diff_pairs(_STAFF_MARK_FIELDS, old, staff)
+    mark_audit(
+        entity="staff",
+        action=action,
+        entity_id=staff.id,
+        changes=changes,
+    )
+
+
+async def _write_section(
+    db_session: AsyncSession,
+    staff_id: str,
+    section: MasterSection | None,
+) -> None:
+    """Upsert (payload) / remove (``None``) the masters extension row."""
+    if section is None:
+        await get_master_service().remove_extension(db_session, staff_id)
+        return
+    await get_master_service().upsert_extension(
+        db_session,
+        staff_id,
+        section.specialty,
+        section.color,
+        archived=section.archived,
+    )
+
+
+async def _apply_role_template(
+    db_session: AsyncSession,
+    staff_id: str,
+    position_ids: list[str],
+    *,
+    explicit_role: UserRole | None = None,
+) -> None:
+    """GH #263 D10 — the position set templates the linked account role.
+
+    Applied when the position set changes (PUT always carries the set;
+    PATCH only when ``position_ids`` was sent). Template = highest
+    anchor (admin > master); an explicit ``role`` in the request body
+    beats the template (manual role editing stays). No anchored position
+    and no explicit role → the role is NOT touched (custom positions
+    never influence it; losing master/admin is not a downgrade). No
+    linked account → nothing to template (no-op).
+    """
+    from src.services.user import _template_role
+
+    role = explicit_role if explicit_role is not None else _template_role(position_ids)
+    if role is None:
+        return
+    await get_user_service().set_role_by_staff(db_session, staff_id, role)
+
+
+@transactional
+async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResponse:
+    """Create a staff card — the whole composite chain in ONE transaction.
+
+    Formerly ``StaffService.create`` (behavior-for-behavior move). Step
+    order is identical to the pre-refactor flow:
+
+    0. mark the own entity ("staff") — parity with the auto-mark the
+       decorated method used to seed;
+    1. person card row (``StaffService.create_card``);
+    2. master section, optional (``MasterService.upsert_extension`` —
+       the D5 blank-field domain check fires inside the owner);
+    3. positions replace on the fresh card — validated set, deduped
+       (``StaffService.replace_positions``; marks "staff_positions"
+       only on a non-empty set);
+    4. account checkbox (create-only, D6): role from
+       :func:`resolve_account_role` (explicit → position template → the
+       #247 master-section fallback); ``UserService.create_staff_account``
+       validates + hashes the password INSIDE, then the GH #319
+       UserSettings defaults row lands in the SAME transaction
+       (``UserSettingsService.insert_defaults`` — composed HERE: the
+       users row owner writes no foreign tables, canon rule 1).
+
+    NOTE: call as ``create_staff(None, db_session=..., data=...)`` — see
+    the module docstring for why.
+    """
+    # Own-entity mark — the selfless @transactional path seeds an EMPTY
+    # accumulator (no auto-mark), so publish parity with the former
+    # decorated StaffService.create requires this here.
+    mark_changed("staff")
+
+    # ── 1. Person card ──────────────────────────────────────────────
+    staff = await get_staff_service().create_card(
+        db_session,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        avatar_url=data.avatar_url,
+        sort_order=data.sort_order,
+    )
+
+    # ── 2. Master section (optional) ─────────────────────────────────
+    if data.master is not None:
+        await _write_section(db_session, staff.id, data.master)
+
+    # ── 3. Positions (own M2M bundle; validated, deduped) ────────────
+    if data.position_ids:
+        await get_staff_service().replace_positions(
+            db_session, staff.id, data.position_ids
+        )
+
+    # ── 4. Account checkbox (create-only, D6) ────────────────────────
+    account = _account_section(data)
+    if account is not None:
+        role = resolve_account_role(
+            account.role,
+            data.position_ids,
+            has_master_section=data.master is not None,
+        )
+        user = await get_user_service().create_staff_account(
+            db_session,
+            staff_id=staff.id,
+            phone=account.phone,
+            password=account.password,
+            role=role,
+        )
+        # GH #319: guaranteed child record — the UserSettings defaults
+        # row in the SAME transaction (composition lives HERE in the
+        # scenario: the users row owner writes no foreign tables — canon
+        # rule 1; same pattern as the ``create_user`` scenario). Silent
+        # core: no separate bus-invalidation event (``insert_defaults``
+        # publishes nothing).
+        await UserSettingsService.insert_defaults(db_session, user.id)
+
+    # ── Response assembly (readers — no second publication) ──────────
+    await db_session.flush()
+    response = await get_staff_service().get(db_session, staff.id)
+    assert response is not None, "just-created card must read back"
+    # GH #344 (§4.3): ONE explicit row for the card; the cross-table
+    # children (masters/users/join rows) never journal.
+    _mark_staff_audit(staff, "create")
+    return response
+
+
+@transactional
+async def update_staff(
+    db_session: AsyncSession,
+    id: str,
+    data: StaffUpdate,
+) -> StaffResponse | None:
+    """Full-update a staff card (PUT semantics).
+
+    Formerly ``StaffService.update``. Step order is identical to the
+    pre-refactor flow:
+
+    0. mark the own entity ("staff");
+    1. card fields (``StaffService.update_card``; missing id → None —
+       the route maps that to 404);
+    2. master section upsert/remove (``MasterService`` — the D7
+       activities block fires inside ``remove_extension``);
+    3. positions full replace (own bundle);
+    4. role template (PUT always carries the position set → the linked
+       account follows the D10 template unless the body carries an
+       explicit role).
+
+    NOTE: call as ``update_staff(None, db_session=..., id=..., data=...)``.
+    """
+    mark_changed("staff")
+
+    # ── 1. Card fields (missing id → None) ───────────────────────────
+    # GH #344 (§4.2): the "before" half of the diff is fixed BEFORE the
+    # first in-session mutation — the read happens inside ``update_card``
+    # after the existence probe, the first mutation follows it. The
+    # snapshot needs the card row, so the probe is split out here.
+    staff_service = get_staff_service()
+    card = await staff_service.get_card(db_session, id)
+    if card is None:
+        return None
+    _old = {f: getattr(card, f) for f in _STAFF_MARK_FIELDS}
+    staff = await staff_service.update_card(
+        db_session,
+        id,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        avatar_url=data.avatar_url,
+        sort_order=data.sort_order,
+    )
+    if staff is None:
+        return None
+
+    # ── 2. Master section upsert/remove ──────────────────────────────
+    await _write_section(db_session, id, data.master)
+
+    # ── 3. Positions full replace ────────────────────────────────────
+    await staff_service.replace_positions(db_session, id, data.position_ids)
+
+    # ── 4. Role template ─────────────────────────────────────────────
+    await _apply_role_template(
+        db_session, id, data.position_ids, explicit_role=data.role
+    )
+
+    await db_session.flush()
+    # GH #344 (§4.3): ONE explicit row — the card was rewritten (PUT
+    # semantics); pairs carry the changed card fields.
+    _mark_staff_audit(staff, "update", _old)
+    return await staff_service.get(db_session, id)
+
+
+@transactional
+async def patch_staff(
+    db_session: AsyncSession,
+    id: str,
+    data: StaffPatch,
+) -> StaffResponse | None:
+    """Partial-update a staff card — only sent keys apply.
+
+    Formerly ``StaffService.patch`` + ``_patch_composite``. The PATCH
+    preparation (three-state ``master``, sent-sets, null-stripping over
+    ``NOT_NULL_FIELDS``) is unchanged, now living here:
+
+    0. mark the own entity ("staff");
+    1. PATCH payload build — ``model_dump(exclude_unset=True)`` with
+       ``None`` values for NOT NULL fields (first_name / last_name /
+       sort_order) stripped ("don't change", not "set to null");
+       ``master`` / ``position_ids`` / ``role`` are pulled out of the
+       card payload and handled as sent-sets below;
+    2. sent card fields (``StaffService.patch_card``; missing id → None);
+    3. ``master`` sent (three-state): payload = upsert, ``null`` =
+       remove (D7 block inside the owner), absent = keep;
+    4. ``position_ids`` sent: full replace + role template; role sent
+       WITHOUT the set → manual override only;
+    5. response assembly.
+
+    NOTE: call as ``patch_staff(None, db_session=..., id=..., data=...)``.
+    """
+    mark_changed("staff")
+
+    service = get_staff_service()
+    payload = service.patch_payload(data)
+    master_sent = "master" in payload
+    # The ORIGINAL schema object, not the payload dump: the owner block
+    # needs the section object (specialty/color/archived), and the dict
+    # form loses attribute access.
+    master_section = data.master if master_sent else None
+    positions_sent = "position_ids" in payload
+    position_ids = payload.pop("position_ids", None)
+    payload.pop("master", None)
+    # Role (GH #263 D10): absent or null body value = no override → the
+    # template decides when the set changes; a sent value wins.
+    payload.pop("role", None)
+
+    # ── Sent card fields (missing id → None) ─────────────────────────
+    # GH #344 (§4.2): "before" half fixed before the first mutation;
+    # nothing sent → full no-op → no journal row (§5.1). The snapshot
+    # needs the card row, so the probe is split out before ``patch_card``.
+    card = await service.get_card(db_session, id)
+    if card is None:
+        return None
+    _old = {f: getattr(card, f) for f in _STAFF_MARK_FIELDS}
+    staff = await service.patch_card(db_session, id, payload)
+    if staff is None:
+        return None
+
+    # ── Three-state master section ───────────────────────────────────
+    if master_sent:
+        await _write_section(db_session, id, master_section)
+
+    # ── Position set + role template ─────────────────────────────────
+    if positions_sent and position_ids is not None:
+        await service.replace_positions(db_session, id, position_ids)
+        await _apply_role_template(
+            db_session, id, position_ids, explicit_role=data.role
+        )
+    elif data.role is not None:
+        # Role sent WITHOUT a position-set change — manual override only
+        # (the body beats the template). Empty position ids → template
+        # yields None → the explicit role applies.
+        await _apply_role_template(db_session, id, [], explicit_role=data.role)
+
+    await db_session.flush()
+    # GH #344 (§4.3): mark only when the request actually carried a
+    # card/section/positions field (an empty PATCH is a no-op row).
+    if payload or master_sent or (positions_sent and position_ids is not None):
+        _mark_staff_audit(staff, "update", _old)
+    return await service.get(db_session, id)
+
+
+@transactional
+async def archive_staff(
+    db_session: AsyncSession,
+    id: str,
+    archive_master: bool = True,
+    archive_user: bool = True,
+) -> bool:
+    """Archive the person + apply the CHECKED existing ACTIVE links (D6).
+
+    Formerly ``StaffService.archive``. Step order is identical to the
+    pre-refactor flow:
+
+    0. mark the own entity ("staff");
+    1. existence probe + person flag (``StaffService.archive_card``;
+       missing id → ``False`` — the route maps that to 404);
+    2. ``archive_master`` checkbox → ``MasterService
+       .archive_active_extension`` (rowcount over ACTIVE rows only — an
+       already-archived section is untouched, never resurrected);
+    3. ``archive_user`` checkbox → ``UserService
+       .deactivate_active_by_staff`` (same rowcount semantics).
+
+    Unchecked links keep their flags (D3 — no hidden cascades, nothing
+    silently restores). Grid: {staff} + masters/users by real rowcount.
+
+    GH #344 (spec §4.2): the person's archive is journaled EXPLICITLY —
+    action ``archive``, no snapshot. The D6 checkbox cascades
+    (masters/users) are child writes, never journaled (§4.2 "one action
+    — one row"). No-op guard: re-archiving an already-archived card
+    writes no journal row (§4.6).
+
+    NOTE: call as ``archive_staff(None, db_session=..., id=...,
+    archive_master=..., archive_user=...)``.
+    """
+    mark_changed("staff")
+
+    # ── Existence probe + person flag ────────────────────────────────
+    service = get_staff_service()
+    card = await service.get_card(db_session, id)
+    if card is None:
+        return False
+    if card.is_active:
+        # LAZY import — the audit module is off-limits at services
+        # top level (cycle hazard, src/events/entities.py WARNING).
+        from src.events.audit import derive_row_label, mark_audit
+
+        mark_audit(
+            entity="staff",
+            action="archive",
+            entity_id=id,
+            entity_label=derive_row_label("staff", card),
+            changes=None,
+        )
+    found = await service.archive_card(db_session, id)
+    if not found:
+        return False
+
+    # ── D6 checkboxes — existing ACTIVE links only ───────────────────
+    if archive_master:
+        await get_master_service().archive_active_extension(db_session, id)
+    if archive_user:
+        await get_user_service().deactivate_active_by_staff(db_session, id)
+    await db_session.flush()
+    return True
+
+
+@transactional
+async def delete_staff(
+    db_session: AsyncSession,
+    id: str,
+    resolutions: dict[str, str],
+) -> bool:
+    """Hard-delete a staff card — the whole resolution cascade in ONE
+    transaction (GH #326 Task 4).
+
+    The COMMIT branch of the former route → ``StaffService.resolve_delete``
+    chain. The executing body now lives in the non-decorated core
+    ``GenericService._resolve_delete_core`` (canon rule 3 — thin decorated
+    method over a shared transactionless core); the scenario owns the
+    transaction + the own-entity mark and calls the CORE on the staff
+    service instance (an UNdecorated call — canon rule 5 forbids only
+    nested decorated ones). The FK matrix (domain/deletion.py) is
+    untouched: activities block; users / masters / master_tags /
+    staff_positions auto-cascade.
+
+    The ROUTE keeps transport (contract #207 — NOT the records shape: no
+    ``dry_run`` / ``expected``): the preview branch
+    (``collect_dependencies`` → 409 + tree, no body) stays in the route;
+    this scenario runs only on the commit branch (with a body). Step
+    order is identical to the pre-refactor flow:
+
+    0. mark the own entity ("staff") — selfless @transactional parity
+       with the auto-mark the decorated ``resolve_delete`` used to seed
+       via ``StaffService``;
+    1. the core: existence probe (missing id → ``False`` — the route
+       maps that to 404) → collect deps → blocking check
+       (``BlockingDepsError`` — route → 422) → resolutions validation
+       (``InvalidResolutionError`` — route → 422) → cascade dispatch
+       (nullify → cascade, per-dep ``mark_changed(dep.entity)`` sown by
+       the core) → hard delete of the card row.
+
+    BOTH execution branches run here: a bare-clean card (no deps → just
+    the row delete) and a resolved one (the auto-cascade executes —
+    user-sent actions for auto deps are silently accepted, §16). The
+    grid is byte-identical on both branches — the core dispatches EVERY
+    matrix handler regardless of dep count (spec §2.7) and sows
+    ``mark_changed(dep.entity)`` per dispatched handler:
+    ``{staff, users, masters, master_tags, staff_positions}`` (the
+    scenario's explicit "staff" mark + the core's cascade marks).
+    Failure branches raise BEFORE any write — the decorator aborts
+    without publishing.
+
+    NOTE: call as ``delete_staff(None, db_session=..., id=...,
+    resolutions=...)`` — see the module docstring for why.
+    """
+    # Own-entity mark — selfless @transactional parity: the decorated
+    # resolve_delete auto-marked "staff" via resolve_entity_name; the
+    # module-level scenario opens the accumulator EMPTY, so the mark is
+    # explicit here (grid byte-parity with the pre-refactor executor).
+    mark_changed("staff")
+
+    # The transactionless core on the staff service instance — the
+    # scenario owns the ONE outer transaction (canon rule 5).
+    return await get_staff_service()._resolve_delete_core(
+        db_session, id, resolutions
+    )
+

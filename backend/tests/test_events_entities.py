@@ -27,10 +27,10 @@ pytestmark = pytest.mark.pure_unit
 # Canonical entity names (backend side of the mirror; frontend pairs in
 # frontend/admin — spec §4.1 drift guard). GH #266: `staff` (StaffService is
 # transactional over the staff table) + `positions` (PositionService) join
-# the canonical set; `masters` stays via the cascade-only Master entry;
-# #326 Task 1: `users` gains a WRITING owner (UserService — scenario
-# building blocks only, no @transactional methods), so its map entry is an
-# explicit owner pair, not cascade-only.
+# the canonical set; #326 Task 1: `users` gains a WRITING owner (UserService
+# — scenario building blocks only, no @transactional methods); #326 Task 2:
+# `masters` likewise (MasterService) — both map entries are explicit owner
+# pairs, not cascade-only.
 # Join tables (staff_positions/master_tags) are deliberately NOT canonical —
 # they are emitted as-is and skipped by consumers (see entities.py docstring).
 CANONICAL_ENTITIES = {
@@ -146,16 +146,21 @@ class TestDriftMirror:
         """Backend-side drift mirror — pairs with the frontend mirror (§4.1)."""
         assert set(MODEL_ENTITY.values()) == CANONICAL_ENTITIES
 
-    def test_master_is_cascade_only_entry(self) -> None:
-        """GH #266: masters has NO service of its own (the masters view
-        reads are module-level free functions — not a GenericService)
-        since GH #217 Task 2 disbanded MasterViewService — the walk cannot
-        derive it; the explicit cascade-only entry must map Master →
-        "masters" so StaffService's mark_changed("masters") stays
-        mirror-guarded."""
+    def test_master_is_owner_entry(self) -> None:
+        """GH #326 Task 2: masters HAS a writing owner — MasterService (a
+        standalone service whose methods are scenario building blocks, NO
+        ``@transactional``) — so ``Master → "masters"`` moved from the
+        cascade-only dict to an EXPLICIT pair like Visit/UserSettings.
+        The completeness counter does NOT grow: MasterService has no
+        ``@transactional`` methods, so the marker walk never yields it."""
         from src.models.master import Master
+        from src.services.master import MasterService, get_master_service
 
+        assert getattr(MasterService, "entity_name", None) == "masters"
+        assert resolve_entity_name(MasterService) == "masters"
         assert MODEL_ENTITY[Master] == "masters"
+        # The factory follows the standalone convention (cached singleton).
+        assert get_master_service() is get_master_service()
 
     def test_user_is_explicit_owner_entry(self) -> None:
         """GH #326 Task 1: users HAS a writing owner — UserService (a

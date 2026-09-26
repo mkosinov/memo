@@ -49,7 +49,13 @@ export interface DatePairPreset {
 export interface ArrayOfPreset {
   kind: 'arrayOf';
   maxItems: number;
-  defaultValue: string[];
+  /**
+   * Only the empty array is a valid default (the sole "absent" state):
+   * serialize strips empty arrays to nothing, so a non-empty default could
+   * never round-trip through the URL. Non-empty defaults are intentionally
+   * unsupported (YAGNI — no consumer needs one).
+   */
+  defaultValue: readonly [];
   /** Per-element validation; invalid elements are dropped. */
   validate?: (value: string) => boolean;
 }
@@ -158,6 +164,7 @@ function isDefaultPresetValue(preset: TableUrlPreset, value: unknown): boolean {
     case 'string':
       return value === preset.defaultValue;
     case 'arrayOf':
+      // Type-guaranteed default is [] — an empty array IS the default state.
       return (value as string[]).length === 0;
     case 'datePair': {
       const range = value as DateRange;
@@ -235,7 +242,8 @@ function serialize(
       }
       case 'arrayOf': {
         const items = value as string[];
-        if (items.length === 0) break; // empty array → param absent
+        // The only default is [] (type-enforced) → empty array → param absent.
+        if (items.length === 0) break;
         for (const item of normalizeArray(items, preset)) params.append(key, item);
         break;
       }
@@ -282,6 +290,8 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
   /**
    * Params of the last write, kept until the router state catches up.
    * Sequential writes build on it instead of the stale render snapshot.
+   * Scope: one hook instance per URL (per-table-per-page); two instances
+   * on one URL would clobber each other's writes.
    */
   const latestParamsRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingUpdate | null>(null);
@@ -291,6 +301,10 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
 
   // A committed navigation re-renders with fresh searchParams — adopt them
   // as the new base (a stale ref from before the navigation must not win).
+  // Idempotent and StrictMode-safe (assigning the same value twice is a
+  // no-op). Known limitation: a discarded concurrent render could
+  // prematurely clear the write base — theoretical only, admin tables use
+  // no transitions.
   const searchParamsKey = searchParams.toString();
   if (latestParamsRef.current !== null && latestParamsRef.current !== searchParamsKey) {
     latestParamsRef.current = null;
@@ -319,8 +333,15 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
     }
 
     const params = serialize(cfg, next, baseParams);
-    latestParamsRef.current = params.toString();
     const query = params.toString();
+    // No-op guard: patch serializes to the URL already in the address bar →
+    // skip the router call entirely (a redundant push would create a
+    // duplicate history entry for a zero-change interaction).
+    if (query === base) {
+      latestParamsRef.current = query;
+      return;
+    }
+    latestParamsRef.current = query;
     const url = query ? `${pathnameRef.current}?${query}` : pathnameRef.current;
     if (pending.history === 'replace') {
       routerRef.current.replace(url, { scroll: false });
@@ -333,13 +354,15 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
     (patch: Partial<TableUrlState<C>>, options?: UpdateOptions) => {
       const pending = pendingRef.current ?? { patch: {}, history: 'push' as const };
       pending.patch = { ...pending.patch, ...patch };
-      pending.history = options?.history ?? 'push';
+      // History precedence within a coalesced batch: `replace` wins over
+      // `push` — a service correction must not mutate into a history step
+      // (extra back-button entry) just because it races a user write.
+      if (pending.history !== 'replace') {
+        pending.history = options?.history ?? 'push';
+      }
       pendingRef.current = pending;
       if (timerRef.current === null) {
-        timerRef.current = setTimeout(() => {
-          timerRef.current = null;
-          flush();
-        }, COALESCE_MS);
+        timerRef.current = setTimeout(flush, COALESCE_MS);
       }
     },
     [flush],

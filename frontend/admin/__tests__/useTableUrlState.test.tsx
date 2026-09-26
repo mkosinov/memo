@@ -391,6 +391,19 @@ describe('useTableUrlState — atomic batch', () => {
     expect(params.get('page')).toBe('3');
     expect(params.get('search')).toBe('анна');
   });
+
+  it('filter change with config lacking `page` → no auto-reset, no crash', async () => {
+    // per-page configs that don't manage pagination (journal without page)
+    // must not break on the architect-approved page-reset rule.
+    const config: TableUrlConfig = {
+      status: { kind: 'enum', values: ['all', 'confirmed'], defaultValue: 'all' },
+    };
+    const { result } = renderWithParams('?status=all', config);
+    act(() => result.current.update({ status: 'confirmed' }));
+    await flushFrame();
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(writtenParams(mockPush).get('status')).toBe('confirmed');
+  });
 });
 
 describe('useTableUrlState — coalescing', () => {
@@ -416,6 +429,56 @@ describe('useTableUrlState — coalescing', () => {
     await flushFrame();
     expect(mockPush).toHaveBeenCalledTimes(1);
     expect(writtenParams(mockPush).get('search')).toBe('b');
+  });
+
+  it('coalesced batch: replace wins over push (service correction must not become a history step)', async () => {
+    // Same frame: a service correction ({history:'replace'}) races with a
+    // user push. The rule: replace wins — the correction must never mutate
+    // into a push (an extra history entry) just because of the race.
+    const { result } = renderWithParams('?page=7&search=анна');
+    act(() => {
+      result.current.update({ page: 3 }, { history: 'replace' });
+      result.current.update({ status: 'confirmed' });
+    });
+    await flushFrame();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    const params = writtenParams(mockReplace);
+    expect(params.get('page')).toBe('3');
+    expect(params.get('search')).toBe('анна');
+    expect(params.get('status')).toBe('confirmed');
+  });
+
+  it('coalesced batch: push after push stays push', async () => {
+    const { result } = renderWithParams('');
+    act(() => {
+      result.current.update({ search: 'a' });
+      result.current.update({ status: 'confirmed' });
+    });
+    await flushFrame();
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('no-op update (patch serializes to the identical URL) skips navigation entirely', async () => {
+    // Re-applying the very values already in the URL: the serialized result
+    // equals the current base → no router call, no redundant history entry.
+    const { result } = renderWithParams('?status=confirmed&search=анна&page=3');
+    act(() => result.current.update({ status: 'confirmed', search: 'анна', page: 3 }));
+    await flushFrame();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('no-op detection uses the full managed state, not the patch keys', async () => {
+    // URL has page=7; patch touches only search with a value equal to the
+    // current one → auto page-reset would change page → NOT a no-op.
+    const { result } = renderWithParams('?search=анна&page=7');
+    act(() => result.current.update({ search: 'анна' }));
+    await flushFrame();
+    // auto-reset lowers page 7→1 → the URL changes → navigation happens
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(writtenParams(mockPush).has('page')).toBe(false);
   });
 
   it('writes outside the coalescing window navigate separately', async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -233,10 +233,21 @@ describe('patchPosition', () => {
 });
 
 describe('deletePosition', () => {
-  it('calls DELETE /api/v1/positions/:id with no body (system ones 422 server-side)', async () => {
+  it('defaults the body to the leaf-clean snapshot {expected: {}} (T6 pattern)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
     await deletePosition('p-1');
     expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
       method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes an explicit expected payload through', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePosition('p-1', { expected: { staff_positions: ['st-1'] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { staff_positions: ['st-1'] } }),
     });
   });
 });
@@ -1882,6 +1893,157 @@ describe('resolveDeleteTag', () => {
       body: JSON.stringify({
         expected: { records: ['uuid-1', 'uuid-2'] },
         resolutions: { records: 'nullify' },
+      }),
+    });
+  });
+});
+
+// ─── Photos delete: dry-run + resolve (GH #324, mirror of tags GH #318) ─────
+// Photo = dependent subject: photo_tags join → 409 tree (node «Тег», items
+// with tag ids/titles); clean photo → 204 → commit {expected: {}}.
+
+describe('deletePhoto', () => {
+  it('defaults the body to the leaf-clean snapshot {expected: {}} (T6 pattern)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePhoto('p-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes an explicit expected payload through', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePhoto('p-1', { expected: { photo_tags: ['t-1'] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { photo_tags: ['t-1'] } }),
+    });
+  });
+});
+
+describe('dryRunDeletePhoto', () => {
+  it('calls DELETE /api/v1/photos/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeletePhoto('p-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/photos/p-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with the photo_tags dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'photo_tags', auto: false, relation: 'Тег', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-tag-1', label: 'Гуашь' },
+          { id: 'uuid-tag-2', label: 'Акварель' },
+        ],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeletePhoto('p-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeletePhoto', () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePhoto('p-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('tagged path: sends both expected (photo_tags id-set) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePhoto('p-1', {
+      resolutions: { photo_tags: 'cascade' },
+      expected: { photo_tags: ['uuid-tag-1', 'uuid-tag-2'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { photo_tags: ['uuid-tag-1', 'uuid-tag-2'] },
+        resolutions: { photo_tags: 'cascade' },
+      }),
+    });
+  });
+});
+
+// ─── Positions delete: dry-run + resolve (GH #324, mirror of tags GH #318) ──
+// Position = dependent subject: staff_positions join → 409 tree (node
+// «Сотрудник», items with staff ids/names); system position → 422
+// POSITION_IS_SYSTEM before the fork (server-side guard, client passes through).
+
+describe('dryRunDeletePosition', () => {
+  it('calls DELETE /api/v1/positions/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeletePosition('smm');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/positions/smm?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with the staff_positions dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'staff_positions', auto: false, relation: 'Сотрудник', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-staff-1', label: 'Анна Иванова' },
+          { id: 'uuid-staff-2', label: 'Мария Петрова' },
+        ],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeletePosition('smm');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeletePosition', () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePosition('smm', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/smm', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('busy path: sends both expected (staff_positions id-set) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePosition('smm', {
+      resolutions: { staff_positions: 'cascade' },
+      expected: { staff_positions: ['uuid-staff-1', 'uuid-staff-2'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/smm', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { staff_positions: ['uuid-staff-1', 'uuid-staff-2'] },
+        resolutions: { staff_positions: 'cascade' },
       }),
     });
   });

@@ -19,7 +19,11 @@ const { shared, MODAL_PAYLOAD } = vi.hoisted(() => ({
   shared: {
     createMut: { mutateAsync: vi.fn() },
     updateMut: { mutateAsync: vi.fn() },
-    deleteMut: { mutateAsync: vi.fn() },
+    // #324: the deferred-delete hook pair (the instant mutateAsync path is gone).
+    deleteHook: {
+      removePhoto: vi.fn().mockResolvedValue(undefined),
+      removePhotoResolved: vi.fn().mockResolvedValue(undefined),
+    },
     toastStore: { showToast: vi.fn() },
   },
   MODAL_PAYLOAD: {
@@ -40,7 +44,7 @@ vi.mock('@/contexts/UIContext', () => ({
 vi.mock('@/hooks/usePhotosMutations', () => ({
   useCreatePhoto: () => shared.createMut,
   useUpdatePhoto: () => shared.updateMut,
-  useDeletePhoto: () => shared.deleteMut,
+  useDeletePhoto: () => shared.deleteHook,
 }));
 
 // Stub modal that captures the handler under test: clicking the stub button

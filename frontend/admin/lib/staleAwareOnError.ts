@@ -30,9 +30,44 @@ import type { useUI } from '@/contexts/UIContext';
 /** Toast shower type derived from the UI context (type-only — no runtime dep). */
 type ShowToast = ReturnType<typeof useUI>['showToast'];
 
+/**
+ * #324: positions has NO INVALIDATION_MAP entry (deliberately — drift guard
+ * __tests__/invalidate.test.ts pins the absence; the frontend SSE mirror has
+ * no positions family), yet its deferred delete needs the same honest-error
+ * surface. Overload for entities OUTSIDE the map: the family prefix is
+ * passed explicitly and invalidated directly (same «Обновить» action).
+ */
 export function staleAwareOnError(
   qc: QueryClient,
   entity: EntityName,
+  undo: () => void,
+  showToast: ShowToast,
+): (err: unknown) => void;
+export function staleAwareOnError(
+  qc: QueryClient,
+  family: readonly unknown[],
+  undo: () => void,
+  showToast: ShowToast,
+): (err: unknown) => void;
+export function staleAwareOnError(
+  qc: QueryClient,
+  entityOrFamily: EntityName | readonly unknown[],
+  undo: () => void,
+  showToast: ShowToast,
+): (err: unknown) => void {
+  const invalidate = (): void => {
+    if (typeof entityOrFamily === 'string') {
+      invalidateEntities(qc, [entityOrFamily]);
+    } else {
+      void qc.invalidateQueries({ queryKey: entityOrFamily });
+    }
+  };
+  return buildHandler(invalidate, undo, showToast);
+}
+
+/** Branch logic shared by both overloads (map-backed vs explicit prefix). */
+function buildHandler(
+  invalidate: () => void,
   undo: () => void,
   showToast: ShowToast,
 ): (err: unknown) => void {
@@ -48,7 +83,7 @@ export function staleAwareOnError(
         undefined,
         {
           label: 'Обновить',
-          onAction: () => invalidateEntities(qc, [entity]),
+          onAction: invalidate,
         },
       );
       return;

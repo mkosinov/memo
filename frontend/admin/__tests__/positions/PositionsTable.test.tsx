@@ -25,7 +25,14 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>();
   return {
     ...actual,
-    useQueryClient: vi.fn(() => ({ invalidateQueries: mockInvalidateQueries })),
+    // #324: the deferred-delete hook also walks the caches
+    // (getQueriesData/setQueriesData — snapshot capture/remove) on top of
+    // the invalidation spy shared with the mutation hooks.
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: mockInvalidateQueries,
+      getQueriesData: vi.fn(() => []),
+      setQueriesData: vi.fn(),
+    })),
   };
 });
 
@@ -40,9 +47,17 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     getPositions: vi.fn(),
     createPosition: vi.fn(),
     updatePosition: vi.fn(),
-    deletePosition: vi.fn(),
+    dryRunDeletePosition: vi.fn(),
+    resolveDeletePosition: vi.fn(),
   };
 });
+
+// The deferred-delete hook (useDeletePosition) consumes PendingActions —
+// stubbed so nothing enqueues in these unit tests (the FULL pipeline runs in
+// PositionsTableDeleteFlow.test.tsx).
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+}));
 
 vi.mock('@/app/components/shared/ColumnPicker', () => ({
   ColumnPicker: () => null,
@@ -54,7 +69,7 @@ import {
   getPositions,
   createPosition,
   updatePosition,
-  deletePosition,
+  dryRunDeletePosition,
   ApiError,
 } from '@memo/api-client';
 import { PositionsTable } from '@/app/(main)/positions/components/PositionsTable';
@@ -63,7 +78,7 @@ import { PositionsProvider } from '@/contexts/PositionsContext';
 const mockGetPositions = vi.mocked(getPositions);
 const mockCreatePosition = vi.mocked(createPosition);
 const mockUpdatePosition = vi.mocked(updatePosition);
-const mockDeletePosition = vi.mocked(deletePosition);
+const mockDryRunDeletePosition = vi.mocked(dryRunDeletePosition);
 
 function setupEnvelope(overrides: Partial<PaginatedResponse<PositionResponse>> = {}) {
   mockGetPositions.mockResolvedValue({
@@ -107,7 +122,11 @@ beforeEach(() => {
   setupEnvelope();
   mockCreatePosition.mockResolvedValue(createMockPositionResponse({ id: 'new-1' }));
   mockUpdatePosition.mockResolvedValue({ ...mockPositionMaster, title: 'Ведущий мастер' });
-  mockDeletePosition.mockResolvedValue(undefined);
+  // #324: the delete flow dry-runs first — 404 drives the generic error
+  // toast cases in this file; POSITION_IS_SYSTEM cases override per-test.
+  mockDryRunDeletePosition.mockRejectedValue(
+    new ApiError(404, 'Должность не найдена', 'POSITION_NOT_FOUND'),
+  );
 });
 
 afterEach(() => {
@@ -368,38 +387,24 @@ describe('PositionsTable — rename (title freely editable, D4)', () => {
   });
 });
 
-describe('PositionsTable — delete (D4: built-ins refused server-side)', () => {
-  it('deletes a user-defined position after the confirm dialog', async () => {
+describe('PositionsTable — delete (D4 + #324 deferred pipeline)', () => {
+  it('«Удалить» drives the deferred hook — NO window.confirm, no instant DELETE', async () => {
     await renderLoaded();
 
     openRowMenu('smm');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
 
+    // The instant confirm path is GONE (#324): the deferred hook owns the flow.
+    expect(window.confirm).not.toHaveBeenCalled();
+    // The hook WAS invoked — the dry-run 404 surfaces through the toast.
     await waitFor(() => {
-      expect(mockDeletePosition).toHaveBeenCalledWith('smm');
+      expect(mockShowToast).toHaveBeenCalledWith('Не найдено', 'error');
     });
-    expect(window.confirm).toHaveBeenCalled();
-    expect(mockShowToast).toHaveBeenCalledWith('Должность удалена');
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['positions'] });
-  });
-
-  it('does NOT call delete when the confirm dialog is dismissed', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-    await renderLoaded();
-
-    openRowMenu('smm');
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Удалить' }));
-
-    await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalled();
-    });
-    expect(mockDeletePosition).not.toHaveBeenCalled();
-    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it('surfaces the POSITION_IS_SYSTEM explanation as an error toast for a built-in', async () => {
-    // The backend enforces D4: 422 + POSITION_IS_SYSTEM.
-    mockDeletePosition.mockRejectedValue(
+    // The backend enforces D4 from the DRY-RUN itself: 422 POSITION_IS_SYSTEM.
+    mockDryRunDeletePosition.mockRejectedValue(
       new ApiError(422, 'Встроенная должность не удаляется', 'POSITION_IS_SYSTEM'),
     );
     await renderLoaded();
@@ -413,8 +418,9 @@ describe('PositionsTable — delete (D4: built-ins refused server-side)', () => 
         'error',
       );
     });
-    // The row stays — the dictionary was not touched, nothing invalidated.
+    // The row stays — nothing was enqueued or deleted, no dialog opened.
     expect(screen.getByTestId('position-row-master')).toBeInTheDocument();
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
     expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
 
@@ -427,14 +433,7 @@ describe('PositionsTable — delete (D4: built-ins refused server-side)', () => 
     expect(screen.getByRole('menuitem', { name: 'Переименовать' })).toBeInTheDocument();
   });
 
-  it('shows the mapped message when DELETE fails for another reason', async () => {
-    mockDeletePosition.mockRejectedValue(
-      new ApiError(404, 'Должность не найдена', 'POSITION_NOT_FOUND'),
-    );
-    setupEnvelope({
-      items: [mockPositionSmm, mockPositionMaster, mockPositionAdmin],
-      total: 3,
-    });
+  it('shows the mapped message when the dry-run fails for another reason', async () => {
     await renderLoaded();
 
     openRowMenu('smm');

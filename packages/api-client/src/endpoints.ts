@@ -250,9 +250,44 @@ export async function patchPosition(
   });
 }
 
-// Built-ins (is_system) are rejected server-side with POSITION_IS_SYSTEM.
-export async function deletePosition(id: string): Promise<void> {
-  await api(`/api/v1/positions/${id}`, z.any(), { method: 'DELETE' });
+// Execute a hard delete (GH #324 family contract). The commit body carries
+// the MANDATORY {expected} snapshot — the payload param defaults to the
+// leaf-clean {expected: {}} (the T6 deletePayment/deleteVisit pattern),
+// preserving the existing one-arg in-repo call sites. Built-ins (is_system)
+// are rejected server-side with 422 POSITION_IS_SYSTEM BEFORE the fork —
+// the client never second-guesses which rows are protected.
+export interface DeletePositionPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deletePosition(id: string, payload: DeletePositionPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/positions/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
+}
+
+// Dry-run preview (GH #324, mirror of tags GH #318): DELETE ?dry_run=true
+// without body. 204 No Content → unheld position; 409 → ApiError with
+// .dependencies tree (the single staff_positions node «Сотрудник» carries
+// items: [{id, label}] = staff ids/names snapshotted for the `expected`
+// commit). System positions never reach here (422 before the fork).
+export async function dryRunDeletePosition(id: string): Promise<void> {
+  await api(`/api/v1/positions/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #324) — body contract mirrors tags:
+// {expected, resolutions?}. `expected` is MANDATORY; busy position carries
+// {staff_positions: [staff ids]}, unheld {expected: {}}.
+export interface ResolveDeletePositionPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeletePosition(id: string, payload: ResolveDeletePositionPayload): Promise<void> {
+  const body: ResolveDeletePositionPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/positions/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
 }
 
 // ─── Locations ─────────────────────────────────────────────────────────────
@@ -314,8 +349,42 @@ export async function updatePhoto(id: string, data: PhotoUpdate): Promise<PhotoR
   });
 }
 
-export async function deletePhoto(id: string): Promise<void> {
-  await api(`/api/v1/photos/${id}`, z.any(), { method: 'DELETE' });
+// Execute a hard delete (GH #324 family contract). The commit body carries
+// the MANDATORY {expected} snapshot — the payload param defaults to the
+// leaf-clean {expected: {}} (the T6 deletePayment/deleteVisit pattern),
+// preserving the existing one-arg in-repo call sites; the admin UI uses the
+// dry-run/resolve pair below for the deferred flow.
+export interface DeletePhotoPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deletePhoto(id: string, payload: DeletePhotoPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/photos/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
+}
+
+// Dry-run preview (GH #324, mirror of tags GH #318): DELETE ?dry_run=true
+// without body. 204 No Content → clean photo; 409 → ApiError with
+// .dependencies tree (the single photo_tags node «Тег» carries items:
+// [{id, label}] = tag ids/titles snapshotted for the `expected` commit).
+export async function dryRunDeletePhoto(id: string): Promise<void> {
+  await api(`/api/v1/photos/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #324) — body contract mirrors tags:
+// {expected, resolutions?}. `expected` is MANDATORY; tagged photo carries
+// {photo_tags: [tag ids]}, clean photo {expected: {}}.
+export interface ResolveDeletePhotoPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeletePhoto(id: string, payload: ResolveDeletePhotoPayload): Promise<void> {
+  const body: ResolveDeletePhotoPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/photos/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
 }
 
 // ─── Services ──────────────────────────────────────────────────────────────

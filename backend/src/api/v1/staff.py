@@ -51,6 +51,9 @@ from src.usecases.staff import (
     create_staff as create_staff_scenario,
 )
 from src.usecases.staff import (
+    delete_staff as delete_staff_scenario,
+)
+from src.usecases.staff import (
     patch_staff as patch_staff_scenario,
 )
 from src.usecases.staff import (
@@ -360,11 +363,21 @@ async def delete_staff(
 
     Deletion matrix (domain-rules/staff.md): activities BLOCK; the masters
     extension row, users, master_tags and staff_positions auto-cascade.
+
+    Corridor 2 (GH #326 Task 4): the commit branch lives in the
+    ``delete_staff`` scenario (usecases) — it owns the transaction, the
+    own-entity mark, and the call of the transactionless
+    ``_resolve_delete_core`` core; the route keeps transport: the preview
+    branch (409 tree) and the 404/422 mapping. The #207 contract is
+    unchanged (no ``dry_run`` / ``expected`` — those belong to records).
     """
     if resolutions is not None:
         try:
-            ok = await service.resolve_delete(
-                db_session=session, id=staff_id, resolutions=resolutions
+            ok = await delete_staff_scenario(  # type: ignore[misc]
+                None,  # type: ignore[arg-type]
+                db_session=session,
+                id=staff_id,
+                resolutions=resolutions,
             )
         except ResolutionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

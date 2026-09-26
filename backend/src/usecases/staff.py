@@ -46,6 +46,11 @@ as the pre-refactor oracle by ``tests/usecases/test_staff_*.py``:
   for the parts actually written;
 - ``archive_staff`` — {staff} + masters/users per checkbox AND a real
   rowcount (an already-archived link adds nothing);
+- ``delete_staff`` — {staff} + the core's cascade marks: the matrix
+  dispatch runs EVERY handler regardless of dep count (spec §2.7), so
+  BOTH branches (bare-clean and resolved) publish
+  {staff, users, masters, master_tags, staff_positions} — byte-parity
+  with the former decorated ``resolve_delete``;
 - every failure branch publishes nothing (rollback silence).
 """
 
@@ -352,3 +357,66 @@ async def archive_staff(
         await get_user_service().deactivate_active_by_staff(db_session, id)
     await db_session.flush()
     return True
+
+
+@transactional
+async def delete_staff(
+    db_session: AsyncSession,
+    id: str,
+    resolutions: dict[str, str],
+) -> bool:
+    """Hard-delete a staff card — the whole resolution cascade in ONE
+    transaction (GH #326 Task 4).
+
+    The COMMIT branch of the former route → ``StaffService.resolve_delete``
+    chain. The executing body now lives in the non-decorated core
+    ``GenericService._resolve_delete_core`` (canon rule 3 — thin decorated
+    method over a shared transactionless core); the scenario owns the
+    transaction + the own-entity mark and calls the CORE on the staff
+    service instance (an UNdecorated call — canon rule 5 forbids only
+    nested decorated ones). The FK matrix (domain/deletion.py) is
+    untouched: activities block; users / masters / master_tags /
+    staff_positions auto-cascade.
+
+    The ROUTE keeps transport (contract #207 — NOT the records shape: no
+    ``dry_run`` / ``expected``): the preview branch
+    (``collect_dependencies`` → 409 + tree, no body) stays in the route;
+    this scenario runs only on the commit branch (with a body). Step
+    order is identical to the pre-refactor flow:
+
+    0. mark the own entity ("staff") — selfless @transactional parity
+       with the auto-mark the decorated ``resolve_delete`` used to seed
+       via ``StaffService``;
+    1. the core: existence probe (missing id → ``False`` — the route
+       maps that to 404) → collect deps → blocking check
+       (``BlockingDepsError`` — route → 422) → resolutions validation
+       (``InvalidResolutionError`` — route → 422) → cascade dispatch
+       (nullify → cascade, per-dep ``mark_changed(dep.entity)`` sown by
+       the core) → hard delete of the card row.
+
+    BOTH execution branches run here: a bare-clean card (no deps → just
+    the row delete) and a resolved one (the auto-cascade executes —
+    user-sent actions for auto deps are silently accepted, §16). The
+    grid is byte-identical on both branches — the core dispatches EVERY
+    matrix handler regardless of dep count (spec §2.7) and sows
+    ``mark_changed(dep.entity)`` per dispatched handler:
+    ``{staff, users, masters, master_tags, staff_positions}`` (the
+    scenario's explicit "staff" mark + the core's cascade marks).
+    Failure branches raise BEFORE any write — the decorator aborts
+    without publishing.
+
+    NOTE: call as ``delete_staff(None, db_session=..., id=...,
+    resolutions=...)`` — see the module docstring for why.
+    """
+    # Own-entity mark — selfless @transactional parity: the decorated
+    # resolve_delete auto-marked "staff" via resolve_entity_name; the
+    # module-level scenario opens the accumulator EMPTY, so the mark is
+    # explicit here (grid byte-parity with the pre-refactor executor).
+    mark_changed("staff")
+
+    # The transactionless core on the staff service instance — the
+    # scenario owns the ONE outer transaction (canon rule 5).
+    return await get_staff_service()._resolve_delete_core(
+        db_session, id, resolutions
+    )
+

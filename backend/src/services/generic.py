@@ -259,15 +259,39 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     ) -> bool:
         """Execute the unified DELETE-with-body resolution transaction (Task 10).
 
+        Thin decorated wrapper over the non-decorated ``_resolve_delete_core``
+        (canon rule 3 — «декорированный тонкий метод поверх общего ядра без
+        транзакции», the ``VisitorService._delete_cascade`` precedent, GH #326
+        Task 4): all heirs (Tag/Client/Activity/…) call THIS method from their
+        routes — behavior unchanged. The ``delete_staff`` scenario (usecases)
+        calls the CORE directly inside its own outer transaction.
+
+        See ``_resolve_delete_core`` for the flow and contract.
+        """
+        return await self._resolve_delete_core(db_session, id, resolutions)
+
+    async def _resolve_delete_core(
+        self,
+        db_session: AsyncSession,
+        id: str,
+        resolutions: dict[str, str],
+    ) -> bool:
+        """The executing body of the DELETE-with-body resolution — WITHOUT
+        ``@transactional`` (GH #326 Task 4).
+
+        The CALLER owns the transaction boundary: either the decorated thin
+        ``resolve_delete`` (other heirs' routes) or a Corridor-2 scenario
+        (``delete_staff``) that shares ONE outer transaction for the whole
+        composite action. All writes land on the GIVEN session; commits
+        happen only at the caller's boundary (§8 — NO per-dep commits).
+
         Lives on the BASE ``GenericService`` (GH #318 D8: the method is not
         tied to soft-delete semantics — it works from ``self._model`` and
         the domain registries; non-archive entities like Tag get it by
         inheritance, without inheriting archive/restore).
 
-        Spec §6 (rules) + §8 (atomicity — ONE outer ``@transactional``; NO
-        per-dep commits): all nullify/cascade writes land on this session and
-        commit once at the outer boundary; any exception → rollback via
-        ``get_db_session`` (the decorator skips commit on raise).
+        Spec §6 (rules) + §8 (atomicity): any exception → the caller's
+        decorator skips commit and rolls back via ``get_db_session``.
 
         Flow:
           1. Existence check — ``False`` if entity missing (route maps to 404).

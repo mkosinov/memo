@@ -35,9 +35,13 @@ status move) still clears the label as before.
 The pending-ask marker lives in the single-select field "gate" (options:
 concept, spec, plan, blocked — created manually 2026-09-20): a design
 session stamps it at a gate stop, an IMPL manager stamps "blocked" when a
-blocker awaits the user; it is emptied at the user's answer and
-automatically when the card leaves In IMPL/In Design. It replaced the
-gate:* issue labels.
+blocker awaits the user; it is emptied at the user's answer (given in the
+opencode session) and automatically when the card leaves In IMPL/In
+Design — except the crash release: reconcile re-stamps "blocked" on the
+returned Ready card (2026-09-26 user decision — a card awaiting the user
+must stay visible), and pick-next skips gate=blocked cards, so a blocked
+card gets no auto-retry; the user's answer clears the gate and the card
+re-enters the pipeline. It replaced the gate:* issue labels.
 The script is part of the host/container seam and travels via git.
 Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
 and .opencode/scripts/ (container); when editing, change both (or edit
@@ -275,7 +279,9 @@ def cmd_pick_next(host_arg: str | None = None):
     """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
     Candidates: OPEN issues with board status "Ready to IMPL".
     Order: Next Up position ascending (99 = unset), then board order.
-    Skipped: cards whose auto-impl log comment's LAST entry is a fresh
+    Skipped: cards with gate=blocked (awaiting the user's answer —
+    2026-09-26 decision, no auto-retry against a user decision), cards
+    whose auto-impl log comment's LAST entry is a fresh
     (<= CLAIM_TTL_HOURS) CLAIM/BLOCKED (legacy claims + blocked rest),
     cards with legacy standalone claim/blocked comments that fresh, and
     cards whose body declares `depends-on: #N` with N still OPEN.
@@ -305,6 +311,10 @@ def cmd_pick_next(host_arg: str | None = None):
         # label belongs to that machine's unfinished session — only that host
         # may re-claim it; the user clears/reassigns the label manually
         if it["host"] and host and it["host"] != host:
+            continue
+        # gate=blocked (2026-09-26): the card awaits the USER's answer — the
+        # pipeline never re-takes it (no auto-retry against a decision)
+        if (it["gate"] or "").lower() == "blocked":
             continue
         _, log_body = _auto_impl_log(it["number"])
         if log_body:
@@ -549,6 +559,12 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
          resumes its own session; foreign hosts skip the card; the user clears
          the label (host N -) to release the progress. The BLOCKED entry
          carries the diagnostics (silent minutes, crash number).
+         gate=blocked is PRESERVED across the release (2026-09-26 user
+         decision): the silence may be the card waiting for the USER, not a
+         dead run — the marker must not hide, pick-next skips such cards (no
+         auto-retry) and the user's in-session answer clears the gate,
+         returning the card to the pipeline; the log entry then says the
+         card awaits the user, not "auto-retry".
     Liveness = session-store freshness (the opencode run CLI is a mere attach
     client and dies while the session keeps working — run processes only fill
     the "no session rows yet" window); run this from the container, where the
@@ -610,6 +626,7 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
         if fresh:
             continue
         card_host = it["host"] or ""
+        was_blocked = (it["gate"] or "").lower() == "blocked"
         crash_no = _blocked_count(n) + 1
         why = (f"сессии молчат {idle_min} мин" if idle_min is not None
                else "сессии так и не стартовали")
@@ -618,16 +635,27 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
                   f"юзера: python3 .opencode/scripts/gh_board.py host {n} -)"
                   if card_host else "")
         desc = (f"#{n}: In IMPL stuck (crash #{crash_no}) → BLOCKED auto-log entry "
-                f"+ Ready to IMPL" + (f", host kept: {card_host}" if card_host else ""))
+                f"+ Ready to IMPL" + (f", host kept: {card_host}" if card_host else "")
+                + (", gate kept: blocked (awaits the user)" if was_blocked else ""))
         if dry_run:
             print(f"would: {desc}")
             continue
         # auto-log FIRST: pick-next must never see the card ready without the
         # resting marker (a crash-loop of dead dispatches follows otherwise)
         try:
-            cmd_auto_log(n, f"BLOCKED reconciler: прогон завис — {why}, сбой №{crash_no} "
-                            f"по счёту; карточка возвращена в Ready to IMPL, "
-                            f"авто-повтор после отдыха" + sticky)
+            if was_blocked:
+                # the silence is the card WAITING for the user, not a dead run
+                # (2026-09-26): no auto-retry promise — the unblock is the
+                # user's answer in the session
+                cmd_auto_log(n, f"BLOCKED: карточка ждёт решения пользователя "
+                                f"(прогон молчит: {why}); метка blocked сохранена на "
+                                f"Ready-карточке, авто-повтора не будет — конвейер её "
+                                f"не трогает; ответ на блокер в сессии opencode снимет "
+                                f"метку и вернёт карточку в работу" + sticky)
+            else:
+                cmd_auto_log(n, f"BLOCKED reconciler: прогон завис — {why}, сбой №{crash_no} "
+                                f"по счёту; карточка возвращена в Ready to IMPL, "
+                                f"авто-повтор после отдыха" + sticky)
         except SystemExit as e:
             print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
         try:
@@ -641,6 +669,12 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
             # session; the USER clears it (host N -), accepting the loss
             set_field(it["item_id"], _host_field_id, _host_field_opts[card_host])
             print(f"#{n}: host kept → {card_host}")
+        if was_blocked and _gate_field_id and "blocked" in _gate_field_opts:
+            # the awaiting-user marker survives the crash release (2026-09-26):
+            # cmd_status cleared it with the flip — re-stamp so the blocked
+            # state stays visible on the Ready card until the user answers
+            set_field(it["item_id"], _gate_field_id, _gate_field_opts["blocked"])
+            print(f"#{n}: gate kept → blocked")
         print(desc)
 
 
@@ -705,7 +739,10 @@ def cmd_status(number: int, status: str, host: str | None = None):
     Exception (2026-09-21): PR (G7) keeps the host — the card is still owned
     by its machine while on CI (and returns to it if CI is red) — but it
     occupies no IMPL slot (the budget counts only In IMPL status). Leaving
-    PR (G7) clears the label."""
+    PR (G7) clears the label. Exception (2026-09-26): the reconcile crash
+    release re-stamps a preserved gate=blocked after the flip — the
+    awaiting-user marker survives the release (cmd_status itself always
+    clears)."""
     load_status_field()
     if status not in _status_opts:
         sys.exit(f"Unknown status '{status}'. Available: {', '.join(_status_opts)}")

@@ -6,7 +6,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import TypeVar
 
-from sqlalchemy import ColumnElement, func, not_, select
+from sqlalchemy import ColumnElement, delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.scope import mask_phone
@@ -17,7 +17,7 @@ from src.models.client import Client
 from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
-from src.repositories.generic import ArchiveRepository, get_archive_repository
+from src.repositories.client import ClientRepository, get_client_repository
 from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.client import (
     ClientCreate,
@@ -28,7 +28,6 @@ from src.schemas.client import (
 )
 from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
-from src.services.visitor import VisitorService, get_visitor_service
 
 ResponseT = TypeVar("ResponseT", bound=ClientResponse)
 
@@ -67,34 +66,34 @@ def _mask_client_contacts(item: ResponseT) -> ResponseT:
 
 
 class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
-    """Client service — standard ``ArchiveService`` PLUS the Client→visitors cascade.
+    """Client service — the standard ``ArchiveService`` shape (GH #327).
 
-    The unified DELETE executor (``ArchiveService.resolve_delete``) dispatches
-    on ``(self._model, dep.entity)`` via :data:`CASCADE_HANDLERS` in
-    ``src.domain.deletion``. The Client→visitors handler
-    (``_h_cascade_client_visitors``) is the ONLY dep in the §4 matrix that
-    needs an external-service reference — it loops the non-decorated
-    ``VisitorService._delete_cascade`` per visitor on the SHARED outer
-    session (atomic with the Client resolve_delete transaction — spec §8
-    BLOCKER-class: NO per-visitor commit).
-
-    To keep the executor free of ``if model is Client`` branches, the handler
-    is injected via the service instance: ``self._visitor_service``. The base
-    ``ArchiveService`` has no such attr; ``ClientService`` is the ONLY subclass
-    that adds one (via the DI factory below). Other services (Master/Location/
-    Service/Material) dispatch through the matrix's free-function handlers —
-    no service injection needed there.
+    The unified DELETE execute branch no longer lives here: the
+    ``usecases.clients.delete_client`` scenario owns the resolution
+    cascade (nullify dispatch over ``NULLIFY_HANDLERS`` + the visitors
+    cascade + this service's own-edge ``delete_row_with_tags``). The
+    former ``_visitor_service`` DI existed ONLY for the dismantled
+    ``_h_cascade_client_visitors`` handler and is gone with it — the
+    scenario resolves the ``get_visitor_service()`` singleton itself,
+    so tests that monkeypatch ``VisitorService._delete_cascade`` on
+    the singleton still intercept (the patch point is unchanged).
     """
 
     def __init__(
         self,
-        repository: ArchiveRepository,
+        repository: ClientRepository,
         model: type[Client],
         response_schema: type[ClientResponse],
-        visitor_service: VisitorService,
     ) -> None:
         super().__init__(repository, model, response_schema)
-        self._visitor_service = visitor_service
+        # GH #327 Task 3: narrow the attribute type to the owner repo — the
+        # own-edge bulk command (``delete_tags_by_client_id``) executes
+        # through ``ClientRepository``, and the declared type lets mypy see
+        # it without casts (precedent: PaymentService.__init__, GH #171 T1).
+        # The repository stays stateless — the switch from the generic
+        # ``ArchiveRepository`` singleton to the specialized one is
+        # behavior-neutral for every inherited path.
+        self._repository: ClientRepository = repository
 
     # GH #212 search matrix (spec §5.2): substring over name/phone/email,
     # exact id equality when q parses as a full UUID (deep-link #216).
@@ -226,20 +225,52 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
             mark_changed("clients")
         return client
 
+    # ── GH #327 Task 3 — own-edge delete building block (no transaction) ──
+
+    async def delete_row_with_tags(self, db_session: AsyncSession, client_id: str) -> None:
+        """Remove the client's OWN tag bundle + the client row — WITHOUT
+        committing.
+
+        GH #327 Task 3 scenario building block (no transaction; canon
+        docs/domain-rules/service-layer.md rules 1, 3-4): the caller's
+        scenario owns the transaction boundary and the commit. The
+        ``client_tags`` join rows are the client's OWN child links without
+        a lifecycle of their own (rule 1), so their bulk delete lives in
+        the owner repository (``ClientRepository.delete_tags_by_client_id``
+        — ONE set-based statement) and runs BEFORE the row (the join's
+        FKs carry no ondelete action — #194). The row goes by a bulk
+        ``DELETE ... WHERE id`` statement (no instance-delete switch);
+        the whole cascade is orchestrated by the future
+        ``usecases.clients.delete_client`` scenario (GH #327 Task 4).
+        No event marks here — "clients"/"client_tags" are the scenario's
+        own-entity and edge marks. Precedent:
+        ``RecordService.delete_row_with_tags``.
+        """
+        await self._repository.delete_tags_by_client_id(db_session, client_id)
+        await db_session.execute(delete(Client).where(Client.id == client_id))
+
 
 @lru_cache
 def get_client_service() -> ClientService:
-    """Singleton ClientService — injects the VisitorService singleton.
+    """Singleton ClientService over the specialized owner repository.
 
-    Both singletons are ``@lru_cache``d, so tests that monkey-patch
-    ``VisitorService._delete_cascade`` (the atomicity test) patch the SAME
-    instance the ClientService holds — the executor sees the patched method.
+    GH #327: the ``_visitor_service`` DI injection is GONE — the client
+    delete cascade lives in the ``usecases.clients.delete_client``
+    scenario, which resolves the ``get_visitor_service()`` singleton
+    itself on every call. Tests that monkeypatch
+    ``VisitorService._delete_cascade`` patch that SAME singleton — the
+    scenario sees the patched method (the atomicity test's point).
+
+    GH #327 Task 3: the service sits on the specialized owner repository
+    (``ClientRepository``) — the generic archive singleton gave way to the
+    first own table command (``delete_tags_by_client_id``); every inherited
+    path is behavior-neutral (the specialized repo adds commands, changes
+    none).
     """
     return ClientService(
-        get_archive_repository(),
+        get_client_repository(),
         Client,
         ClientResponse,
-        get_visitor_service(),
     )
 
 

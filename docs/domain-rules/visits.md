@@ -30,6 +30,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 ### Backend
 - **price >= 0** (only Pydantic field-level constraint)
 - **Cascade to parent Record:** Visit create / update / patch / delete recompute the parent Record's seats + status (Phase 1: `domain/record_visits.py` → `recompute_record_seats` + `recompute_record_status`)
+- **Batch block (GH #324):** `VisitService.delete_visits_by_visitor` removes ALL visits of one visitor (single bulk DELETE) and recomputes EVERY affected record (seats + status — the same `recompute_record_*` hooks as the single path; invariant «визит удалён → запись пересчитана»). Consumers: the Visitor executor (`(Visitor, "visits")` cascade handler), `VisitorService._delete_cascade` (the client cascade inherits the recompute through this common path) and the future `delete_client` scenario (#327). Empty visitor → full no-op (no idle recompute). SSE markers: `visits` + `records`.
 - Filtered by record_id on list
 - **PATCH** merges only provided fields. Null-policy: `null` on NOT NULL fields (`price`, `status`) is ignored ("don't change"); `null` on nullable fields (`visitor_id`, `tariff_id`, `custom_price`) is applied and clears the field. Empty body (no fields set) → full no-op (`updated_at` unchanged, no Record cascade).
 

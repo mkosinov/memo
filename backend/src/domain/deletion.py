@@ -2054,6 +2054,28 @@ async def _h_cascade_photo_photo_tags(
     await session.execute(delete(photo_tags).where(photo_tags.c.photo_id == entity_id))
 
 
+async def _h_cascade_visitor_visits(
+    self: GenericService,
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Visitor → visits USER-CHOICE cascade — the GH #324 §5 batch block:
+    bulk-delete the visitor's visits AND recompute every affected record's
+    seats/status (the same ``recompute_record_*`` domain hooks the single
+    visit delete path uses). Anonymous visits (``visitor_id IS NULL``) are
+    nobody's dependency and never match. The executor's Core-bulk row
+    delete of the visitor happens after the handlers, so this runs inside
+    the same outer ``resolve_delete`` transaction — one commit.
+
+    ``self`` is the ``VisitorService`` instance — it carries
+    ``self._visit_service`` (the #324 §5 delegation), mirroring how
+    ``_h_cascade_client_visitors`` reaches the visitor service through the
+    ``ClientService`` instance (the domain layer imports no services).
+    """
+    visit_service = self._visit_service  # type: ignore[attr-defined]
+    await visit_service.delete_visits_by_visitor(session, entity_id)
+
+
 async def _h_cascade_visitor_visitor_tags(
     _self: GenericService,
     session: AsyncSession,
@@ -2113,9 +2135,10 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Tag, "record_tags"): _h_cascade_tag_record_tags,
     (Tag, "photo_tags"): _h_cascade_tag_photo_tags,
     # GH #324: the owner side of the same edges (key includes the model —
-    # the two sides of one edge coexist by design, never merged). NB
-    # (Visitor, "visits") gets its batch handler (record recompute) in a
-    # later #324 task — the matrix row exists already.
+    # the two sides of one edge coexist by design, never merged).
+    # (Visitor, "visits") — the Task-2 batch handler (bulk delete + record
+    # recompute, spec §5) — now wired.
+    (Visitor, "visits"): _h_cascade_visitor_visits,
     (Photo, "photo_tags"): _h_cascade_photo_photo_tags,
     (Visitor, "visitor_tags"): _h_cascade_visitor_visitor_tags,
     (Position, "staff_positions"): _h_cascade_position_staff_positions,

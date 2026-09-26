@@ -718,14 +718,15 @@ class TestStaleExpectedEntitiesFamily:
 
 class TestFamilyResolveDelete:
     def test_all_new_pairs_have_cascade_handlers(self) -> None:
-        """Guard: every cascade dep of the new subjects (with a Task-1
-        executor) is wired in CASCADE_HANDLERS — Core bulk, deterministic
-        under any PRAGMA. NB ``(Visitor, "visits")`` gets its batch handler
-        (with record recompute) in a later #324 task — deliberately absent
-        here."""
+        """Guard: every cascade dep of the new subjects is wired in
+        CASCADE_HANDLERS — Core bulk, deterministic under any PRAGMA.
+        ``(Visitor, "visits")`` — the #324 Task-2 batch handler (bulk
+        delete + record recompute via the VisitService block) — is asserted
+        by its own suite (tests/services/test_delete_visits_by_visitor.py)."""
         wired = {
             (Photo, "photo_tags"),
             (Visitor, "visitor_tags"),
+            (Visitor, "visits"),
             (Position, "staff_positions"),
         }
         assert wired <= set(CASCADE_HANDLERS)

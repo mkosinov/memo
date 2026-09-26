@@ -67,13 +67,15 @@ for A in "${AGENTS[@]}"; do
 done
 wait
 
-# 4. Summary (one line per agent; rc=0 + non-empty report = ok, 124 = timeout).
+# 4. Summary (one line per agent; rc=0 + report >= 300 bytes = ok,
+#    124 = timeout; a tiny report = the model collapsed — treat as failure).
 FAIL=0
 while IFS= read -r line; do
   R="${line%% *}"
-  [ -s "$OUT/$R.md" ] && OK=ok || OK=EMPTY
+  SZ=$(wc -c < "$OUT/$R.md" 2>/dev/null || echo 0)
+  [ "$SZ" -ge 300 ] && OK=ok || OK=EMPTY
   echo "$line report=$OK file=$OUT/$R.md"
-  echo "$line" | grep -q "rc=0" || FAIL=1
+  { echo "$line" | grep -q "rc=0"; } && [ "$OK" = ok ] || FAIL=1
 done < "$OUT/_summary.txt"
 rm -f "$OUT/_summary.txt"
 exit $FAIL

@@ -22,7 +22,7 @@ import uuid as _uuid
 
 import pytest
 
-from tests.conftest import query_db, query_db_params
+from tests.conftest import delete_settings_row, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
@@ -209,7 +209,15 @@ class TestUserSettingsDeleteContract:
     (spec §4.2) before the fork."""
 
     def _make(self, api_client) -> dict:
+        """The session user's settings row.
+
+        GH #319/#377 guarantee: every live user already HAS a row — POST
+        would hit the unique constraint. Drop the guaranteed row first
+        (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
+        POST is a clean 201 again.
+        """
         me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        delete_settings_row(me)
         resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text
         return resp.json()
@@ -236,7 +244,11 @@ class TestUserSettingsDeleteContract:
             json={"expected": {}},
         )
         assert resp.status_code == 204, resp.text
-        assert api_client.get("/api/v1/user-settings").status_code == 404
+        # GH #319/#377: GET is get-or-create — the committed row is gone
+        # and a fresh defaults row comes back (a NEW id, never 404).
+        recreated = api_client.get("/api/v1/user-settings")
+        assert recreated.status_code == 200
+        assert recreated.json()["id"] != settings["id"]
 
     def test_foreign_row_403_in_both_branches(self, api_client, login_as) -> None:
         """Own-only: another user's settings row → 403 AUTH_FORBIDDEN,

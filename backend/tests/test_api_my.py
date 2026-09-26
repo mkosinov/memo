@@ -27,7 +27,7 @@ import pytest
 
 from src.auth.passwords import hash_password
 from src.events.hub import hub
-from tests.conftest import insert_user, query_db
+from tests.conftest import delete_settings_row, insert_user, query_db
 
 pytestmark = pytest.mark.api
 
@@ -596,8 +596,15 @@ class TestUserSettingsDeleteFamilyShortSet:
 
     @staticmethod
     def _own_row(api_client) -> dict:
-        """The api_client (admin) session user's settings row."""
+        """The api_client (admin) session user's settings row.
+
+        GH #319/#377 guarantee: every live user already HAS a row — POST
+        would hit the unique constraint. Drop the guaranteed row first
+        (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
+        POST is a clean 201 again.
+        """
         me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        delete_settings_row(me)
         resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text
         return resp.json()
@@ -634,7 +641,12 @@ class TestUserSettingsDeleteFamilyShortSet:
         assert resp.status_code == 404, resp.text
 
     def test_commit_expected_empty_204_row_gone(self, api_client) -> None:
-        """§4.5: the leaf commit ``{expected: {}}`` → 204, row gone."""
+        """§4.5: the leaf commit ``{expected: {}}`` → 204, row gone.
+
+        GH #319/#377: GET is get-or-create — «gone» means the committed
+        id is replaced by a fresh defaults row (a NEW id), never a 404
+        (the ``test_get_recreates_defaults_after_delete`` semantics).
+        """
         settings = self._own_row(api_client)
 
         resp = api_client.request(
@@ -643,7 +655,9 @@ class TestUserSettingsDeleteFamilyShortSet:
         )
 
         assert resp.status_code == 204, resp.text
-        assert api_client.get("/api/v1/user-settings").status_code == 404
+        recreated = api_client.get("/api/v1/user-settings")
+        assert recreated.status_code == 200
+        assert recreated.json()["id"] != settings["id"]
 
     def test_own_only_foreign_row_403_both_branches_row_alive(
         self, api_client, login_as, _my_hash,

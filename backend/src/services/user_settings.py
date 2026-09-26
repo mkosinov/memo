@@ -88,7 +88,14 @@ class UserSettingsService:
         )
         await session.execute(stmt)
 
-    @transactional
+    # GH #319: commits MANUALLY, NOT @transactional — the decorator is the
+    # single post-commit publish point (it always marks + publishes the
+    # service's own entity), so a decorated get-or-create would publish a
+    # ``user_settings`` invalidation event on EVERY GET (the #319 e2e
+    # regression). The settings row is personal, no foreign caches — spec
+    # §5.1: no separate bus event. Same silent-commit pattern as
+    # AuthService.resolve/logout: undecorated method, ``await session.commit()``
+    # in the body (the row DOES land in the DB), no hub publish.
     async def get_or_create_by_user_id(
         self, session: AsyncSession, user_id: str
     ) -> UserSettingsResponse:
@@ -96,9 +103,12 @@ class UserSettingsService:
         the defaults row when missing.
 
         Atomic corridor: ``insert_defaults`` (ON CONFLICT DO NOTHING) +
-        SELECT. A second concurrent caller simply reads the winner's row.
-        If the SELECT still finds nothing, that is an honest failure —
-        raise (no interception, no silent defaults response).
+        SELECT + manual commit. A second concurrent caller simply reads
+        the winner's row. If the SELECT still finds nothing, that is an
+        honest failure — raise (no interception, no silent defaults
+        response). The commit persists the insert (spec §5.3: «запись
+        именно в базу») but publishes NO invalidation event — silent by
+        design (spec §5.1).
         """
         await self.insert_defaults(session, user_id)
         stmt = select(UserSettings).where(UserSettings.user_id == user_id)
@@ -110,7 +120,12 @@ class UserSettingsService:
                 f"ON CONFLICT DO NOTHING insert — database is unavailable "
                 f"or the row was concurrently deleted"
             )
-        return _to_response(orm)
+        # Snapshot BEFORE commit: the response is a plain Pydantic value,
+        # independent of post-commit session state (expire_on_commit is
+        # False in both factories, but this keeps the read explicit).
+        response = _to_response(orm)
+        await session.commit()
+        return response
 
     async def get_by_id(
         self, session: AsyncSession, id: str

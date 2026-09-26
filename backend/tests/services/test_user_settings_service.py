@@ -1,25 +1,50 @@
 """UserSettingsService.get_or_create_by_user_id — GH #319 core.
 
-The decorated get-or-create corridor: ``insert_defaults`` (atomic Core
-``INSERT ... ON CONFLICT(user_id) DO NOTHING``) + SELECT. Pins:
+The get-or-create corridor: ``insert_defaults`` (atomic Core
+``INSERT ... ON CONFLICT(user_id) DO NOTHING``) + SELECT + manual commit.
+Pins:
 
 * defaults materialize on first call and are WRITTEN to the DB;
 * a SECOND call returns the SAME row (conflict → no-op, no IntegrityError);
 * an existing customized row survives a get-or-create untouched;
+* the corridor is SILENT: no invalidation bus event on either path
+  (create or pure read) — the row is personal, no foreign caches
+  (spec §5.1);
 * contract hygiene: ``insert_defaults`` is NOT transactional (callers own
-  the transaction), ``get_or_create_by_user_id`` IS (corridor 1).
+  the transaction), ``get_or_create_by_user_id`` commits MANUALLY without
+  the decorator's post-commit publish (the auth-service silent pattern).
 """
 
 from __future__ import annotations
 
 import pytest
 
+from src.events.hub import hub
 from src.models.user_settings import UserSettings
 from src.schemas.user_settings import UserSettingsCreate
 from src.services.user_settings import (
     UserSettingsService,
     get_user_settings_service,
 )
+
+
+@pytest.fixture
+def subscriber():
+    """Subscribe to the invalidation hub for ONE test; unsubscribe on exit
+    (the test_events_emit.py pattern — no cross-test bleed)."""
+    q = hub.subscribe()
+    try:
+        yield q
+    finally:
+        hub.unsubscribe(q)
+
+
+def _drain(q) -> list:
+    """Collect everything currently sitting in the subscriber queue."""
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    return events
 
 
 @pytest.fixture
@@ -39,6 +64,58 @@ async def settings_user(db_session):
     # fixture yields a usable key, not a pending None).
     await db_session.flush()
     return user
+
+
+class TestGetOrCreateBusSilence:
+    """GH #319 regression: get-or-create on GET must NOT publish an
+    invalidation bus event — neither on the create path nor on the
+    pure-read path. The settings row is personal, no foreign caches
+    (spec §5.1: «строка персональная, чужих кэшей у неё нет»); a GET that
+    publishes made the frontend react as a data refresh (extra toast /
+    mid-interaction refetch — #319 e2e regressions)."""
+
+    async def test_create_path_publishes_nothing(
+        self, db_session, settings_user, subscriber
+    ) -> None:
+        """Row absent → created (and committed to the DB) with NO event."""
+        service = get_user_settings_service()
+
+        result = await service.get_or_create_by_user_id(
+            db_session, settings_user.id
+        )
+
+        assert result.user_id == settings_user.id
+        # The insert DID land in the DB — silence is not "nothing happened"
+        from sqlalchemy import select
+
+        rows = (
+            (await db_session.execute(select(UserSettings)))
+            .scalars()
+            .all()
+        )
+        own = [r for r in rows if r.user_id == settings_user.id]
+        assert len(own) == 1, "defaults row must be committed to the DB"
+        # ...but the bus stayed silent
+        assert _drain(subscriber) == [], (
+            "get-or-create create path must not publish an invalidation event"
+        )
+
+    async def test_pure_read_path_publishes_nothing(
+        self, db_session, settings_user, subscriber
+    ) -> None:
+        """Row present → plain read, NO event (the old main behavior)."""
+        service = get_user_settings_service()
+        await service.get_or_create_by_user_id(db_session, settings_user.id)
+        assert _drain(subscriber) == [], "setup must not have published"
+
+        second = await service.get_or_create_by_user_id(
+            db_session, settings_user.id
+        )
+
+        assert second.user_id == settings_user.id
+        assert _drain(subscriber) == [], (
+            "get-or-create pure-read path must not publish an invalidation event"
+        )
 
 
 class TestGetOrCreate:
@@ -142,13 +219,17 @@ class TestDecoratorsContract:
             False,
         ) is False
 
-    def test_get_or_create_by_user_id_is_transactional(self) -> None:
-        """Corridor 1: the get-or-create commits (defaults persist)."""
+    def test_get_or_create_by_user_id_is_not_transactional(self) -> None:
+        """The corridor commits MANUALLY — undecorated, so NO post-commit
+        bus publish (the auth-service silent-commit pattern). The
+        decorator is the single publish point: a decorated get-or-create
+        would mark ``user_settings`` changed on EVERY GET (the #319
+        regression). Committing still happens — inside the method."""
         assert getattr(
             UserSettingsService.get_or_create_by_user_id,
             "__memo_transactional__",
             False,
-        ) is True
+        ) is False
 
 
 class TestDeleteByUserIds:

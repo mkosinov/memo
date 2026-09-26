@@ -580,32 +580,41 @@ async def _insert_record_direct(activity_id: str) -> None:
         await session.commit()
 
 
-class TestDeleteUsesHandwrittenService:
-    """GH #286 D1 preview-only lock: DELETE /activities/{id} must keep
-    going through the handwritten ``ActivityService.delete`` cascade —
-    the generic resolver (``ArchiveService.resolve_delete``) must never
-    run for activities (FK_MATRIX[Activity] entries are preview-only:
-    consumed by collect, no handlers wired)."""
+class TestDeleteUsesScenario:
+    """GH #286 D1 preview-only lock + GH #325 Task 4: DELETE
+    /activities/{id} must go through the ``usecases.activities.
+    delete_activity`` scenario (the former handwritten
+    ``ActivityService.delete`` cascade, now demolished) — the generic
+    resolver (``ArchiveService.resolve_delete``) must never run for
+    activities (FK_MATRIX[Activity] entries are preview-only: consumed
+    by collect, no handlers wired)."""
 
-    def test_delete_goes_through_handwritten_service(
+    def test_delete_goes_through_scenario(
         self, api_client, create_activity, monkeypatch,
     ) -> None:
-        from src.services.activity import ActivityService
+        import src.api.v1.activities as activities_api
         from src.services.generic import ArchiveService
 
         activity = create_activity()
         calls: list[str] = []
-        original_delete = ActivityService.delete
 
-        async def spy_delete(self, db_session, id):
-            calls.append(f"handwritten:{id}")
-            return await original_delete(self, db_session, id)
+        async def spy_scenario(self, db_session, id):
+            calls.append(f"scenario:{id}")
+            return True
 
         async def forbidden_resolver(*args, **kwargs):
             calls.append("generic_resolver")
             return True
 
-        monkeypatch.setattr(ActivityService, "delete", spy_delete)
+        # The route imports the scenario under its module alias
+        # (``delete_activity_scenario``) — the spy patches THAT binding.
+        # ``raising=False``: pre-#325-Task-4 the attribute does not exist
+        # yet, which is exactly the RED condition — the route then never
+        # reaches the scenario and ``calls`` stays empty.
+        monkeypatch.setattr(
+            activities_api, "delete_activity_scenario", spy_scenario,
+            raising=False,
+        )
         monkeypatch.setattr(ArchiveService, "resolve_delete", forbidden_resolver)
 
         # The unified contract (#286 D2): the commit of the deferred delete
@@ -617,7 +626,7 @@ class TestDeleteUsesHandwrittenService:
         )
 
         assert resp.status_code == 204, resp.text
-        assert calls == [f"handwritten:{activity['id']}"]
+        assert calls == [f"scenario:{activity['id']}"]
 
 
 def _link_activity_tag(api_client, activity_id: str, tag_name: str | None = None) -> str:
@@ -649,9 +658,9 @@ class TestDeleteDeferredContract:
       * Body ``{"expected": {records, visits, payments}}`` — the commit:
         probe → collect (recursive two-level subtree) → per-entity subset
         check (auto-excluded; an id of ANY node missing from expected →
-        409 ``stale_dependencies`` + tree) → handwritten
-        ``ActivityService.delete``. Fail-closed: a stale commit deletes
-        nothing (no partial cascade).
+        409 ``stale_dependencies`` + tree) → the
+        ``usecases.activities.delete_activity`` scenario (GH #325).
+        Fail-closed: a stale commit deletes nothing (no partial cascade).
     """
 
     # ── 422 branches (shape checks BEFORE any DB access) ──────────────────

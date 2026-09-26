@@ -14,8 +14,11 @@ Cascade contract (#194 Task 5, updated by #211, GH #171 Task 6):
     ``usecases.records.delete_record`` SCENARIO (tests rebound in
     tests/services/test_record_service.py — Task 6); the service keeps
     reads and record-row operations only
-  * ActivityService.delete     → delete activity + its records (+ their visits/payments)
-                                  + unlink photos (activity_id := NULL)
+  * ActivityService.delete     → the ``usecases.activities.delete_activity``
+                                  SCENARIO (GH #325 Task 4): delete activity
+                                  + its records (+ their visits/payments)
+                                  + unlink photos (activity_id := NULL);
+                                  the service method is demolished
   * VisitorService.delete      → delete visitor + its visits
                                   (photos are NEVER visitor-owned since #211)
   * Client/Location hard-delete (unified DELETE route) → unlink photos
@@ -43,8 +46,8 @@ from src.models.staff import Staff
 from src.models.tag import Tag, activity_tags, record_tags, visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
-from src.services.activity import get_activity_service
 from src.services.visitor import get_visitor_service
+from src.usecases.activities import delete_activity
 
 pytestmark = pytest.mark.asyncio
 
@@ -154,11 +157,12 @@ async def _await_all(db_session, stmt):
     return (await db_session.execute(stmt)).scalars().all()
 
 
-# ─── ActivityService.delete ─────────────────────────────────────────────────────
+# ─── usecases delete_activity scenario (GH #325 Task 4) ────────────────────────
 
 async def test_activity_delete_cascades_to_records_visits_payments_and_nullifies_photos(db_session):
-    """ActivityService.delete removes the activity, all its records (with their
-    visits/payments); linked photos survive with activity_id IS NULL.
+    """The delete_activity scenario removes the activity, all its records
+    (with their visits/payments); linked photos survive with activity_id
+    IS NULL.
     """
     activity = await _insert_activity(db_session)
     client = await _insert_client(db_session)
@@ -167,8 +171,7 @@ async def test_activity_delete_cascades_to_records_visits_payments_and_nullifies
     photo = await _insert_photo(db_session, activity_id=activity.id)
     record_ids = {r1.id, r2.id}
 
-    service = get_activity_service()
-    result = await service.delete(db_session=db_session, id=activity.id)
+    result = await delete_activity(None, db_session=db_session, id=activity.id)
 
     assert result is True
     # Activity gone
@@ -195,8 +198,7 @@ async def test_activity_delete_with_no_records_or_photos_succeeds(db_session):
     """An activity with no records and no photos deletes cleanly."""
     activity = await _insert_activity(db_session)
 
-    service = get_activity_service()
-    result = await service.delete(db_session=db_session, id=activity.id)
+    result = await delete_activity(None, db_session=db_session, id=activity.id)
 
     assert result is True
     assert await _await_scalar(db_session, select(Activity).where(Activity.id == activity.id)) is None
@@ -248,17 +250,18 @@ async def test_visitor_delete_cascades_to_visits(db_session):
 # ─── Atomicity ──────────────────────────────────────────────────────────────────
 
 async def test_activity_delete_is_atomic_on_partial_failure(db_session, monkeypatch):
-    """If a mid-cascade statement raises, NOTHING persists.
+    """If a mid-cascade step raises, NOTHING persists.
 
-    The whole cascade runs inside ONE ``@transactional`` transaction: the
-    decorator only commits after the method returns successfully, so a
-    mid-cascade raise propagates WITHOUT committing. We make the
-    payments-table ``delete()`` statement raise at construction time — it
-    is the 2nd cascade delete (after the visits delete has already executed
-    in the open, uncommitted transaction, but before the records/activity
-    deletes) — by monkeypatching the ``delete`` symbol in the activity
-    service module. The raise happens synchronously (no greenlet) inside
-    the service body.
+    The whole cascade runs inside ONE ``@transactional`` transaction (the
+    ``delete_activity`` scenario, GH #325 Task 4): the decorator only
+    commits after the scenario returns successfully, so a mid-cascade
+    raise propagates WITHOUT committing. We make the payments step raise
+    — ``PaymentRepository.delete_by_record_ids``, the 2nd cascade step
+    (after the visits bulk delete has already executed in the open,
+    uncommitted transaction, but before the records/activity deletes) —
+    by monkeypatching the repository method on the class (the scenario
+    reaches it through the ``get_payment_service()`` singleton). The
+    raise happens synchronously (no greenlet) inside the scenario body.
 
     After the raise we explicitly roll back the open transaction (undoing
     the uncommitted visits delete and releasing the write lock) and read
@@ -278,23 +281,18 @@ async def test_activity_delete_is_atomic_on_partial_failure(db_session, monkeypa
     n_payments = len(await _await_all(db_session, select(Payment)))
     assert n_records == 2 and n_visits == 2 and n_payments == 2
 
-    service = get_activity_service()
+    # Make the payments bulk delete raise. The scenario's cascade calls
+    # ``delete_visits_by_record_ids`` (runs), then the payments step
+    # (raises here), so the records + activity deletes never run.
+    from src.repositories.payment import PaymentRepository
 
-    # Make ``delete(Payment)`` raise at construction time. The cascade calls
-    # ``delete(Visit)`` (runs), then ``delete(Payment)`` (raises here, before
-    # ``.where`` / ``execute``), so the records + activity deletes never run.
-    import src.services.activity as activity_module
-    real_delete = activity_module.delete
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated payments-delete failure")
 
-    def patched_delete(target, *args, **kwargs):
-        if target is Payment:
-            raise RuntimeError("simulated payments-delete failure")
-        return real_delete(target, *args, **kwargs)
-
-    monkeypatch.setattr(activity_module, "delete", patched_delete)
+    monkeypatch.setattr(PaymentRepository, "delete_by_record_ids", boom)
 
     with pytest.raises(RuntimeError, match="simulated payments-delete failure"):
-        await service.delete(db_session=db_session, id=activity.id)
+        await delete_activity(None, db_session=db_session, id=activity.id)
 
     # @transactional did NOT commit (exception propagated). Roll back the open
     # transaction so the uncommitted in-progress visits delete is undone and
@@ -345,8 +343,7 @@ async def test_activity_delete_cleans_activity_tags_and_record_tags_join_rows(db
     )
     await db_session.commit()
 
-    service = get_activity_service()
-    result = await service.delete(db_session=db_session, id=activity.id)
+    result = await delete_activity(None, db_session=db_session, id=activity.id)
 
     assert result is True
     from tests.conftest import query_db

@@ -25,9 +25,10 @@ These tests pin the new shape:
   unconditional; the "activities" mark is explicit — the selfless
   wrapper starts with an EMPTY accumulator).
 
-The deferred-delete commit's audit row (GH #344 §4.5) stays pinned by
-``tests/test_audit_explicit.py`` via ``ActivityService.delete`` until
-the route re-wiring (GH #325 Task 4) moves that pin to the scenario.
+The deferred-delete commit's audit row (GH #344 §4.5) is pinned in
+``tests/test_audit_explicit.py`` via this scenario (GH #325 Task 4 —
+the former ``ActivityService.delete`` pin moved here with the method's
+demolition; the ROUTE now calls this scenario too).
 """
 
 from __future__ import annotations

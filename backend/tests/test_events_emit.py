@@ -340,9 +340,30 @@ class TestCascadeSourceAudit:
         src = self._source("src/services/generic.py")
         assert "mark_changed(dep.entity)" in src
 
-    def test_staff_archive_marks_users(self) -> None:
-        src = self._source("src/services/staff.py")
-        assert 'mark_changed("users")' in src
+    def test_staff_dismissal_marks_live_in_owners(self) -> None:
+        """GH #326 Task 3: the dismissal cascade marks live in the OWNERS —
+        ``UserService`` (user.py) deactivates the linked account;
+        ``MasterService`` (master.py) archives the active extension. The
+        narrowed ``staff.py`` must carry NO marks for either: its
+        composite archive moved to the ``archive_staff`` scenario
+        (usecases), so a re-appearing mark here is cascade drift."""
+        user_src = self._source("src/services/user.py")
+        assert 'mark_changed("users")' in user_src, (
+            "user.py lost mark_changed('users') — the archive_staff "
+            "scenario relies on it for the dismissal cascade mark"
+        )
+        master_src = self._source("src/services/master.py")
+        assert 'mark_changed("masters")' in master_src, (
+            "master.py lost mark_changed('masters') — the archive_staff "
+            "scenario relies on it for the dismissal cascade mark"
+        )
+        staff_src = self._source("src/services/staff.py")
+        for entity in ("masters", "users"):
+            assert f'mark_changed("{entity}")' not in staff_src, (
+                f"staff.py re-acquired mark_changed({entity!r}) — the "
+                "dismissal cascade lives in the usecases scenario + "
+                "owner services (GH #326 Task 3)"
+            )
 
     def test_emitter_accumulator_semantics(self) -> None:
         """Contextvar accumulator: token set/reset; mark outside = no-op

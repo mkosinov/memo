@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
@@ -26,6 +26,9 @@ from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.generic import GenericService
 from src.services.decorators import transactional
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]):

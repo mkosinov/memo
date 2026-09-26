@@ -6,6 +6,7 @@
 from src.auth.session import Session  # noqa: F401 — bare registration import
 from src.models.abstract import AbstractModel, AbstractModelSoftDelete
 from src.models.activity import Activity
+from src.models.audit_log import AuditLog
 from src.models.client import Client
 from src.models.enums import ArchiveStatus, Channel, RecordStatus, UserRole
 from src.models.location import Location
@@ -40,6 +41,7 @@ __all__ = [
     "AbstractModelSoftDelete",
     "Activity",
     "ArchiveStatus",
+    "AuditLog",
     "Channel",
     "Client",
     "Location",

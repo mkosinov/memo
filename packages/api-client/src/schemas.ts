@@ -809,6 +809,43 @@ export interface DependencyNode {
   items?: { id: string; label: string }[];
 }
 
+// ─── Audit log reading API (GH #344, spec §6) ──────────────────────────────
+// Read-only shapes mirroring backend src/schemas/audit_log.py: rows are
+// written exclusively by the backend accumulator — these describe ONLY the
+// two admin GET endpoints. `changes` is the row's canonical
+// `{field: [before, after]}` snapshot: string scalars (phone/email already
+// masked server-side), bools/numbers/nulls/lists — `unknown` keeps every
+// JSON kind the canonical serializer can emit.
+
+export const AuditLogUserRefSchema = z.object({
+  id: z.string().nullable(),
+  label: z.string().nullable(),
+});
+export type AuditLogUserRef = z.infer<typeof AuditLogUserRefSchema>;
+
+export const AuditLogResponseSchema = z.object({
+  id: z.string(),
+  created_at: z.string(), // ISO datetime string
+  user: AuditLogUserRefSchema.nullable(),
+  // ROLE SNAPSHOT from the journal row — the role at the moment of the
+  // action, never the live users.role.
+  user_role: z.string(),
+  action: z.string(),
+  entity: z.string(),
+  entity_id: z.string().nullable(),
+  entity_label: z.string(),
+  changes: z.record(z.string(), z.unknown()).nullable(),
+});
+export type AuditLogResponse = z.infer<typeof AuditLogResponseSchema>;
+
+export const AuditLogListResponseSchema = paginatedSchema(AuditLogResponseSchema);
+
+export const AuditLogAuthorResponseSchema = z.object({
+  user_id: z.string(),
+  label: z.string().nullable(),
+});
+export type AuditLogAuthorResponse = z.infer<typeof AuditLogAuthorResponseSchema>;
+
 // ─── Paginated list envelopes ────────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {

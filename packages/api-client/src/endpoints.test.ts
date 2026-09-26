@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -2000,5 +2000,48 @@ describe('ActivityResponseSchema service_title (GH #212)', () => {
   it('parses when service_title is absent (backward-compatible)', () => {
     const result = ActivityResponseSchema.parse(baseActivity);
     expect(result.service_title).toBeUndefined();
+  });
+});
+
+// ─── Audit log reading API (GH #344, spec §6 — admin-only reads) ───────────
+
+describe('getAuditLogs', () => {
+  const emptyPage = { items: [], total: 0, page: 1, per_page: 20 };
+
+  it('calls /api/v1/audit-logs without params', async () => {
+    vi.mocked(api).mockResolvedValue(emptyPage);
+    await getAuditLogs();
+    expect(api).toHaveBeenCalledWith('/api/v1/audit-logs', expect.anything());
+  });
+
+  it('sends pagination + all conjunctive filters', async () => {
+    vi.mocked(api).mockResolvedValue(emptyPage);
+    await getAuditLogs({
+      page: 2,
+      per_page: 50,
+      user_id: 'u-1',
+      action: 'update',
+      entity: 'clients',
+      date_from: '2026-09-01',
+      date_to: '2026-09-20',
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/audit-logs?page=2&per_page=50&user_id=u-1&action=update&entity=clients&date_from=2026-09-01&date_to=2026-09-20',
+      expect.anything(),
+    );
+  });
+
+  it('omits unset filters entirely', async () => {
+    vi.mocked(api).mockResolvedValue(emptyPage);
+    await getAuditLogs({ page: 1 });
+    expect(api).toHaveBeenCalledWith('/api/v1/audit-logs?page=1', expect.anything());
+  });
+});
+
+describe('getAuditLogAuthors', () => {
+  it('calls /api/v1/audit-logs/authors', async () => {
+    vi.mocked(api).mockResolvedValue([]);
+    await getAuditLogAuthors();
+    expect(api).toHaveBeenCalledWith('/api/v1/audit-logs/authors', expect.anything());
   });
 });

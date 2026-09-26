@@ -197,7 +197,28 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         commits exactly as before — existing callers are unaffected.
         ``ClientService`` reuses ``_delete_cascade`` directly on a shared outer
         session (Task 10) keeping the Client→visitors cascade atomic.
+
+        GH #344 (§4.3): the standalone delete journals ONE ``delete`` row
+        with the deleted visitor's label + before-snapshot (§9 scenario 6)
+        staged BEFORE the row disappears — the raw-SQL cascade bypasses
+        the repository, so this explicit mark is the row's only journal
+        source. The Client→visitors cascade keeps using the bare
+        ``_delete_cascade`` (cascade children never journal, §8).
         """
+        # LAZY import + pre-read: the mark needs the label BEFORE the row
+        # dies; a miss writes nothing (§4.1 — no row, no journal entry).
+        from src.events.audit import derive_row_label, mark_audit, snapshot_pairs_before
+
+        visitor = await self._repository.get(db_session, Visitor, id)
+        if visitor is None:
+            return False
+        mark_audit(
+            entity="visitors",
+            action="delete",
+            entity_id=id,
+            entity_label=derive_row_label("visitors", visitor),
+            changes=snapshot_pairs_before("visitors", visitor),
+        )
         return await self._delete_cascade(db_session, id)
 
     # ── GH #171 Task 2 — scenario building block (no transaction) ───────

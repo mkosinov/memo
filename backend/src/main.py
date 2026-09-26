@@ -14,6 +14,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.admin.setup import setup_admin
 from src.api.v1.activities import router as activities_router
+from src.api.v1.audit_logs import router as audit_logs_router
 from src.api.v1.clients import router as clients_router
 from src.api.v1.locations import router as locations_router
 from src.api.v1.masters import router as masters_router
@@ -233,6 +234,8 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #344 — audit journal reading (admin-only, spec §6).
+    app.include_router(audit_logs_router, prefix="/api/v1/audit-logs")
     # GH #262 — own-data profile (session-guarded, no permission token).
     app.include_router(my_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")

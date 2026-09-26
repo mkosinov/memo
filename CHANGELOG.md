@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-25
+
+### Added
+- **GH #344 — Журнал действий пользователей (audit log)** — branch
+  `feat/audit-log-344` (17 commits `6615d3cc..68661244` + merge `65c45b1b` origin/main,
+  base `5aa0ad4f`; 49 файлов; спека `docs/specs/2026-09-20-audit-log-344-design.md` rev2
+  и план `docs/plans/2026-09-21-audit-log-344-plan.md` (7/7) — оба на main, unchanged by IMPL):
+  - **Механика записи (зеркалит #239, контракт не менялся):** request-аккумулятор аудита
+    на contextvar в `backend/src/events/audit.py` — `mark_audit` с токеном владения,
+    канонический сериализатор значений, маскирование `phone`/`phone_digits`/`email`,
+    потолок строковых скаляров `changes` 500 символов, словарь подписей `ENTITY_SIGNATURES`
+    + `derive_entity_label` с автоподстановкой; actor-contextvar ставится общим ядром
+    `resolve_authed` (строгий guard и мягкий резолвер покрыты разом); вставка накопленных
+    строк — в `@transactional` после метода до коммита, только обёрткой-владельцем:
+    ошибка метода откатывает действие и журнал вместе, вложенные декорированные уровни
+    дают одну вставку. Инвариант #239 доказан — событийные тесты зелёные без правок
+    (ветка не трогала `test_events_*.py`), e2e server-push 5/5.
+  - **Автосбор:** `BaseRepository.create/update/patch/delete/reorder` пишут сырые записи
+    `{entity, action, entity_id, before, after}`; правило целевой сущности (каскадные
+    дочерние строки молчат — «одно действие — одна строка»), старшинство явной
+    `mark_audit` над авто-строкой, `reorder` — одна строка «N объектов», no-op без строки.
+  - **Явные пометки:** archive/restore (`ArchiveService` + собственные `StaffService`,
+    сверка `is_active` против no-op), сценарии записей (вкл. отложенное удаление рядом
+    с `mark_changed("records")` до финального DELETE), автономные визиты, фото, композитные
+    сотрудники, профиль, настройки пользователя, `resolve_delete`, `ActivityService.delete`;
+    закрыты два пробела охвата §8 — услуги (create/update/patch пишут мимо репозитория:
+    снимок через `snapshot_pairs_after`, no-op PUT/PATCH без строки) и удаление посетителя
+    (подпись и before-снимок до удаления строки).
+  - **Чтение:** `GET /api/v1/audit-logs` (+`/authors`) — пагинация/фильтры
+    (автор/действие/сущность/период)/`created_at DESC`, `user: {id, label}` из join
+    users → staff одним запросом (без N+1), `require_admin`, границы дня по канону
+    `dates.py` (#263-allowlist).
+  - **Фронт:** раздел «Журнал» `/audit` — `DataTable` (Когда / Кто / Действие / Над чем /
+    Изменения, бейдж роли, рендер снимка «было → стало»), фильтры по образцу клиентов,
+    словарь русских подписей `auditLabels` (`ACTION_OPTIONS` из `ACTION_LABELS`),
+    api-client `getAuditLogs`/`getAuditLogAuthors` + zod-схемы.
+  - **Tests:** pytest **2595p/15s/0f** (6 новых семейств аудита), admin vitest **2522/2522**
+    (156 файлов), api-client **416/416**, tsc ok, eslint 0 errors (оба пакета),
+    e2e `audit-log` **6/6** (С1–С6: таблица, двухконтекстный платёж 500→700, сужающий
+    фильтр автора, запрет мастеру 403, маскированный телефон, удаление посетителя).
+  - Follow-up кандидаты (не поданы): дедуп before-read SELECT (visitor/records), подключение
+    bulk-photos правила при появлении массовых эндпоинтов, наблюдение за С1-таймаутом
+    под нагрузкой (класс #271).
+  - Status: `docs/status/2026-09-25-audit-log-344.md`
+
 ## [Unreleased] — 2026-09-22
 
 ### Changed

@@ -14,6 +14,21 @@ import {
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 /**
+ * Saved payment ROW locator (scenario 15b). The naive
+ * `[data-testid^="payment-"]:not([data-testid="payment-new"])` prefix also
+ * matches NON-row nodes — each row's nested × button
+ * (`payment-{id}-delete`) and the transient empty-state stub
+ * (`payment-list-empty`) — so ONE saved payment counted as 2, and the
+ * reopening wait satisfied itself instantly on the stub (its testid fits
+ * the prefix) while the remount refetch was still in flight; `.count()`
+ * then snapshotted a stub-only frame (1) and failed `1 >= 2`.
+ */
+const savedPaymentRows = (page: import('@playwright/test').Page) =>
+  page.locator(
+    '[data-testid^="payment-"]:not([data-testid="payment-new"]):not([data-testid="payment-new-delete"]):not([data-testid="payment-list-empty"]):not([data-testid$="-delete"])',
+  );
+
+/**
  * Open modal and switch to the first client/record tab.
  * Verifies both visits and payments tables are visible.
  *
@@ -708,6 +723,15 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const activity = await createTestActivity(request);
     const record = await createTestRecord(request, activity.id, client.id);
 
+    // Row-scoped locator — see savedPaymentRows(): the bare prefix counts the
+    // row's nested × button too (1 saved payment counted as 2), and the
+    // reopening gate satisfied itself on the transient `payment-list-empty`
+    // stub while the remount refetch was still in flight, so `.count()`
+    // snapshotted a stub-only frame (1) and failed `>= 2`.
+    const paymentRows = page.locator(
+      '[data-testid^="payment-"]:not([data-testid="payment-new"]):not([data-testid="payment-new-delete"]):not([data-testid="payment-list-empty"]):not([data-testid$="-delete"])',
+    );
+
     try {
       await page.goto('/schedule');
       await waitForScheduleReady(page);
@@ -726,9 +750,8 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
 
       // Verify a saved payment row appeared
-      const savedPayments = page.locator('[data-testid^="payment-"]:not([data-testid="payment-new"])');
-      await expect(savedPayments.first()).toBeVisible({ timeout: 5_000 });
-      const savedCount = await savedPayments.count();
+      await expect(paymentRows.first()).toBeVisible({ timeout: 5_000 });
+      const savedCount = await paymentRows.count();
 
       // 3. Close the modal
       await page.locator('[data-testid="modal-close-btn"]').click();
@@ -737,10 +760,10 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       // 4. Reopen the modal
       await openClientRecordTab(page, { recordId: record.id });
 
-      // 5. ASSERT — payment row is still visible
-      const reopenedPayments = page.locator('[data-testid^="payment-"]:not([data-testid="payment-new"])');
-      await expect(reopenedPayments.first()).toBeVisible({ timeout: 5_000 });
-      expect(await reopenedPayments.count()).toBeGreaterThanOrEqual(savedCount);
+      // 5. ASSERT — payment row is still visible (row locator excludes the
+      // empty stub, so this gate waits out the remount refetch)
+      await expect(paymentRows.first()).toBeVisible({ timeout: 5_000 });
+      expect(await paymentRows.count()).toBeGreaterThanOrEqual(savedCount);
     } finally {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);

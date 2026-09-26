@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from sqlalchemy import func, select
 
@@ -30,6 +30,23 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.schemas.record import VisitItem
+
+# GH #344: journal snapshot carriers for a visit row (§5.1) — the
+# ENTITY_SIGNATURES set minus ``record_id`` (context, not payload).
+_VISIT_SNAPSHOT_FIELDS = ("visitor_id", "tariff_id", "price", "custom_price", "status")
+
+
+def _visit_snapshot(visit: Visit) -> dict[str, Any]:
+    """Current values of the visit's journaled fields (§4.2: read BEFORE
+    the first in-session mutation)."""
+    return {f: getattr(visit, f) for f in _VISIT_SNAPSHOT_FIELDS}
+
+
+def _visit_pairs(old: dict[str, Any], visit: Visit) -> dict[str, Any]:
+    """``{field: [before, after]}`` for the fields that actually changed."""
+    from src.events.audit import diff_pairs
+
+    return diff_pairs(_VISIT_SNAPSHOT_FIELDS, old, visit)
 
 # ``list`` is shadowed by ``VisitService.list`` inside the class body, so a
 # bare ``list[...]`` annotation there is invalid for mypy ("function not
@@ -164,6 +181,10 @@ class VisitService:
 
         Returns None if the parent record doesn't exist.
         Raises HTTPException 409 + ErrorCode.ACTIVITY_AT_CAPACITY if activity is at capacity.
+
+        GH #344 (§4.3): the standalone service (no repository CRUD) marks
+        its own journal row explicitly; the recompute hooks' parent-record
+        rewrites are cascade writes — never journaled.
         """
         # 1. Verify parent record exists
         record = await db_session.get(Record, data.record_id)
@@ -182,16 +203,32 @@ class VisitService:
         await db_session.refresh(visit)
         # GH #239 §3.3: the parent record is rewritten by the recompute hooks
         mark_changed("records")
+        # GH #344 (§4.3): explicit own-entity journal row (LAZY audit
+        # import — cycle discipline, src/events/entities.py WARNING).
+        from src.events.audit import mark_audit, snapshot_pairs_after
+
+        mark_audit(
+            entity="visits",
+            action="create",
+            entity_id=visit.id,
+            changes=snapshot_pairs_after("visits", visit),
+        )
         return visit
 
     @transactional
     async def update(
         self, db_session: AsyncSession, visit_id: str, data: VisitUpdate,
     ) -> Visit | None:
-        """Full-replace update. Cascade only status (seats unchanged — is_active not in VisitUpdate)."""
+        """Full-replace update. Cascade only status (seats unchanged — is_active not in VisitUpdate).
+
+        GH #344 (§4.3): explicit own-entity journal row — field diff over
+        the snapshot carriers; the status-cascade parent rewrite is not
+        journaled.
+        """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return None
+        _old = _visit_snapshot(visit)  # §4.2: before the first mutation
         for field, value in data.model_dump().items():
             setattr(visit, field, value)
         visit.updated_at = datetime.now(UTC)
@@ -202,6 +239,15 @@ class VisitService:
         await db_session.refresh(visit)
         # GH #239 §3.3: the parent record is rewritten by the recompute hook
         mark_changed("records")
+        # GH #344 (§4.3).
+        from src.events.audit import mark_audit
+
+        mark_audit(
+            entity="visits",
+            action="update",
+            entity_id=visit.id,
+            changes=_visit_pairs(_old, visit) or {},
+        )
         return visit
 
     @transactional
@@ -217,6 +263,10 @@ class VisitService:
         bump, no status cascade, no ``mark_changed``.
 
         Cascade only status (seats unchanged — is_active not in VisitPatch).
+
+        GH #344 (§4.3/§5.1): explicit own-entity journal row — but ONLY
+        when a field actually changed (empty body is a full no-op: no
+        journal row).
         """
         visit = await self.get(db_session, visit_id)
         if not visit:
@@ -234,6 +284,7 @@ class VisitService:
         if not update_data:
             return visit
 
+        _old = _visit_snapshot(visit)  # §4.2: before the first mutation
         for field, value in update_data.items():
             setattr(visit, field, value)
         visit.updated_at = datetime.now(UTC)
@@ -244,15 +295,37 @@ class VisitService:
         await db_session.refresh(visit)
         # GH #239 §3.3: the parent record is rewritten by the recompute hook
         mark_changed("records")
+        # GH #344 (§4.3).
+        from src.events.audit import mark_audit
+
+        mark_audit(
+            entity="visits",
+            action="update",
+            entity_id=visit.id,
+            changes=_visit_pairs(_old, visit) or {},
+        )
         return visit
 
     @transactional
     async def delete(self, db_session: AsyncSession, visit_id: str) -> bool:
-        """Hard-delete the visit and cascade: derive record.status + record.seats."""
+        """Hard-delete the visit and cascade: derive record.status + record.seats.
+
+        GH #344 (§4.3): explicit own-entity journal row with the delete
+        snapshot (§5.1) staged BEFORE the row disappears.
+        """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return False
         record_id = visit.record_id
+        # GH #344: snapshot staged before the row mutation/deletion (§4.2).
+        from src.events.audit import mark_audit, snapshot_pairs_before
+
+        mark_audit(
+            entity="visits",
+            action="delete",
+            entity_id=visit.id,
+            changes=snapshot_pairs_before("visits", visit),
+        )
         await db_session.delete(visit)
         await db_session.flush()
         # Cascade via domain functions
@@ -267,10 +340,15 @@ class VisitService:
     async def update_status(
         self, db_session: AsyncSession, visit_id: str, status: str,
     ) -> Visit | None:
-        """Update a visit's status and re-derive the parent record's status."""
+        """Update a visit's status and re-derive the parent record's status.
+
+        GH #344 (§4.3): explicit own-entity journal row (status diff; a
+        no-op re-set of the same status writes nothing).
+        """
         visit = await self.get(db_session, visit_id)
         if not visit:
             return None
+        _old_status = visit.status
         visit.status = status
         visit.updated_at = datetime.now(UTC)
         # Use the domain function instead of inlined logic
@@ -279,6 +357,16 @@ class VisitService:
         await db_session.refresh(visit)
         # GH #239 §3.3: the parent record is rewritten by the recompute hook
         mark_changed("records")
+        # GH #344 (§4.3).
+        if _old_status != visit.status:
+            from src.events.audit import mark_audit
+
+            mark_audit(
+                entity="visits",
+                action="update",
+                entity_id=visit.id,
+                changes={"status": [_old_status, visit.status]},
+            )
         return visit
 
     # ── GH #171 Task 2 — scenario building blocks (no transaction) ──────

@@ -46,7 +46,7 @@ collection was actually (re)populated:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from src.domain.deletion import (
     BlockingDepsError,
@@ -77,6 +77,56 @@ if TYPE_CHECKING:
 
     from src.models.record import Record
     from src.schemas.record import RecordCreate, RecordPatch, RecordUpdate
+
+
+# ─── GH #344 — explicit journal marks for the record scenarios (§4.3) ─────────
+
+# Update-diff carriers: the scenario's own scalar writes + the recompute
+# fields (seats/status). ``comment`` participates in CHANGE DETECTION (a
+# comment-only edit is a real action) but never enters the journaled
+# pairs (free text, §5.1); ``updated_at`` is bookkeeping, never journaled.
+_RECORD_DIFF_FIELDS = (
+    "activity_id", "client_id", "custom_price", "seats", "status", "comment",
+)
+
+
+def _mark_record_audit(
+    record: Record,
+    action: str,
+    changes: dict[str, Any] | None = None,
+) -> None:
+    """Stage the record's own journal row (spec §4.3).
+
+    LAZY audit import — cycle discipline (usecases sit inside the
+    services walk graph, see ``src/events/entities.py`` WARNING). The
+    cascade visits/payments are never journaled (§4.2 "one action — one
+    row"); the deferred-delete commit marks here, next to
+    ``mark_changed("records")``, BEFORE the record row disappears (§4.5).
+    """
+    from src.events.audit import mark_audit
+
+    mark_audit(
+        entity="records",
+        action=action,
+        entity_id=record.id,
+        changes=changes,
+    )
+
+
+def _record_diff(
+    old: dict[str, Any], record: Record
+) -> tuple[dict[str, Any], bool]:
+    """``(journaled pairs, anything-changed)`` for the tracked fields.
+
+    ``anything-changed`` covers comment too (a comment-only edit is an
+    action); the journaled pairs EXCLUDE comment (§5.1 free text) and may
+    be empty while the action still journals with ``changes={}``.
+    """
+    from src.events.audit import diff_pairs
+
+    raw = diff_pairs(_RECORD_DIFF_FIELDS, old, record)
+    pairs = {f: v for f, v in raw.items() if f != "comment"}
+    return pairs, bool(raw)
 
 
 @transactional
@@ -174,6 +224,12 @@ async def create_record(
     await recompute_record_seats(db_session, record.id)
     await recompute_record_status(db_session, record.id)
     await db_session.refresh(record)
+    # GH #344 (§4.3): the scenario journals its own row explicitly — AFTER
+    # the recompute flushes so the create snapshot carries the derived
+    # seats/status, not the pre-recompute placeholders.
+    from src.events.audit import snapshot_pairs_after
+
+    _mark_record_audit(record, "create", snapshot_pairs_after("records", record))
     return record
 
 
@@ -216,7 +272,15 @@ async def update_record(
     mark_changed("records")
 
     # ── Scalar writes (own-entity row op; missing id → None) ────────
-    record = await get_record_service().update_row(
+    # GH #344 (§4.2 invariant): the "before" half of the update diff is
+    # fixed BEFORE the first in-session mutation — read the tracked
+    # fields off the current row, then let update_row write.
+    record_service = get_record_service()
+    existing = await record_service.get(db_session, id)
+    if not existing:
+        return None
+    _old = {f: getattr(existing, f) for f in _RECORD_DIFF_FIELDS}
+    record = await record_service.update_row(
         db_session,
         id,
         activity_id=data.activity_id,
@@ -253,6 +317,12 @@ async def update_record(
     await recompute_record_seats(db_session, record.id)
     await recompute_record_status(db_session, record.id)
     await db_session.refresh(record)
+    # GH #344 (§4.3): explicit journal row — the scenario rewrote the
+    # record (PUT semantics: the action happened); the snapshot carries
+    # only the tracked fields that actually changed (comment is free
+    # text and never enters, §5.1 — the row still records the action).
+    _pairs, _changed = _record_diff(_old, record)
+    _mark_record_audit(record, "update", _pairs or {})
     return record
 
 
@@ -296,7 +366,14 @@ async def patch_record(
     }
 
     # ── Scalar writes (own-entity row op; missing id → None) ────────
-    record = await get_record_service().patch_row(db_session, id, scalar_fields)
+    # GH #344 (§4.2 invariant): the "before" half of the diff is fixed
+    # BEFORE the first in-session mutation (see update_record).
+    record_service = get_record_service()
+    existing = await record_service.get(db_session, id)
+    if not existing:
+        return None
+    _old = {f: getattr(existing, f) for f in _RECORD_DIFF_FIELDS}
+    record = await record_service.patch_row(db_session, id, scalar_fields)
     if not record:
         return None
 
@@ -330,6 +407,11 @@ async def patch_record(
     await recompute_record_seats(db_session, record.id)
     await recompute_record_status(db_session, record.id)
     await db_session.refresh(record)
+    # GH #344 (§4.3): explicit journal row — only when something actually
+    # changed (empty-body PATCH is a no-op action → no row, §5.1).
+    _pairs, _changed = _record_diff(_old, record)
+    if _changed:
+        _mark_record_audit(record, "update", _pairs or {})
     return record
 
 
@@ -421,8 +503,15 @@ async def delete_record(
         raise InvalidResolutionError(msg)
 
     # ── All checks passed — mark the own entity (selfless @transactional
-    #    parity; see the step-5 note above) and run the cascade. ──────
+    #    parity; see the step-5 note above) and run the cascade. ─────
     mark_changed("records")
+    # GH #344 (§4.3/§4.5): the deferred-delete COMMIT journals the final
+    # DELETE here — next to mark_changed, BEFORE the record row (and its
+    # cascade visits/payments) disappears; the cascade children are
+    # never journaled (§4.2).
+    from src.events.audit import snapshot_pairs_before
+
+    _mark_record_audit(record, "delete", snapshot_pairs_before("records", record))
     await get_visit_service().delete_visits_by_record(db_session, id)
     await get_payment_service().delete_by_record(db_session, id)
     await get_record_service().delete_row_with_tags(db_session, id)

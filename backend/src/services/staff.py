@@ -152,6 +152,38 @@ def _require_section_fields(section: MasterSection | None) -> None:
         raise ColorRequiredError()
 
 
+# GH #344: journaled card fields for an explicit staff mark (§5.1) — the
+# ENTITY_SIGNATURES snapshot set plus ``avatar_url`` (a real user-facing
+# card column); sort_order is dictionary bookkeeping.
+_STAFF_MARK_FIELDS = ("first_name", "last_name", "avatar_url")
+
+
+def _mark_staff_audit(staff: Staff, action: str, old: dict | None = None) -> None:
+    """Stage ONE journal row for a composite card write (spec §4.3).
+
+    ``old=None`` → create mark (after-snapshot pairs; ``None``-valued
+    fields — a fresh card has no avatar — are skipped, the
+    ``snapshot_pairs_after`` convention §5.1); otherwise update pairs
+    over the fields that actually changed (§5.1). The cross-table
+    children (masters/users/staff_positions) are cascade writes — never
+    journaled (§4.2). LAZY audit import — cycle discipline.
+    """
+    from src.events.audit import diff_pairs, mark_audit
+
+    if old is None:
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict | None = diff_pairs(_STAFF_MARK_FIELDS, {}, staff) or None
+    else:
+        changes = diff_pairs(_STAFF_MARK_FIELDS, old, staff)
+    mark_audit(
+        entity="staff",
+        action=action,
+        entity_id=staff.id,
+        changes=changes,
+    )
+
+
 class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     """Composite service over staff + masters + staff_positions + users."""
 
@@ -426,6 +458,9 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         has_user = (await _user_presence(db_session, [staff.id])).get(
             staff.id, False
         )
+        # GH #344 (§4.3): ONE explicit row for the card; the cross-table
+        # children (masters/users/join rows) never journal.
+        _mark_staff_audit(staff, "create")
         return self._to_response(
             staff, ext, links.get(staff.id, []), has_user
         )
@@ -438,7 +473,9 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         if staff is None:
             return None
 
-        # 1. Card fields.
+        # 1. Card fields. GH #344 (§4.2): the "before" half of the diff
+        #    is fixed BEFORE the first in-session mutation.
+        _old = {f: getattr(staff, f) for f in _STAFF_MARK_FIELDS}
         staff.first_name = data.first_name
         staff.last_name = data.last_name
         staff.avatar_url = data.avatar_url
@@ -458,6 +495,9 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         )
 
         await db_session.flush()
+        # GH #344 (§4.3): ONE explicit row — the card was rewritten (PUT
+        # semantics); pairs carry the changed card fields.
+        _mark_staff_audit(staff, "update", _old)
         return await self.get(db_session, id)
 
     async def patch(
@@ -503,6 +543,9 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         if staff is None:
             return None
 
+        # GH #344 (§4.2): "before" half fixed before the first mutation;
+        # nothing sent → full no-op → no journal row (§5.1).
+        _old = {f: getattr(staff, f) for f in _STAFF_MARK_FIELDS}
         for key, value in card_payload.items():
             setattr(staff, key, value)
         if master_sent:
@@ -523,6 +566,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             )
 
         await db_session.flush()
+        # GH #344 (§4.3): mark only when the request actually carried a
+        # card/section/positions field (an empty PATCH is a no-op row).
+        if card_payload or master_sent or (positions_sent and position_ids is not None):
+            _mark_staff_audit(staff, "update", _old)
         return await self.get(db_session, id)
 
     # ─── section/link plumbing (flushed inside the caller's transaction) ──
@@ -665,10 +712,29 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         extension / linked user flip only when their checkbox is set AND
         the link exists AND is currently active (an archive call never
         silently restores an already-archived link).
+
+        GH #344 (spec §4.2): the person's archive is journaled
+        EXPLICITLY — action ``archive``, no snapshot — displacing the
+        auto-collected ``update`` row for the ``is_active`` flip. The D6
+        checkbox cascades (masters/users) are child writes, never
+        journaled (§4.2 "one action — one row"). No-op guard: re-archiving
+        an already-archived card writes no journal row (§4.6).
         """
         staff = await self._repository.get(db_session, self._model, id)
         if staff is None:
             return False
+        if staff.is_active:
+            # LAZY import — the audit module is off-limits at services
+            # top level (cycle hazard, src/events/entities.py WARNING).
+            from src.events.audit import derive_row_label, mark_audit
+
+            mark_audit(
+                entity="staff",
+                action="archive",
+                entity_id=id,
+                entity_label=derive_row_label("staff", staff),
+                changes=None,
+            )
         staff.is_active = False
 
         if archive_master:
@@ -694,10 +760,24 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def restore(
         self, db_session: AsyncSession, id: str
     ) -> bool:
-        """Restore the PERSON only (master/user flags are explicit toggles)."""
+        """Restore the PERSON only (master/user flags are explicit toggles).
+
+        GH #344 (spec §4.6): mirrored EXPLICIT ``restore`` journal row;
+        restoring an already-ACTIVE card is a no-op and writes nothing.
+        """
         staff = await self._repository.get(db_session, self._model, id)
         if staff is None:
             return False
+        if not staff.is_active:
+            from src.events.audit import derive_row_label, mark_audit
+
+            mark_audit(
+                entity="staff",
+                action="restore",
+                entity_id=id,
+                entity_label=derive_row_label("staff", staff),
+                changes=None,
+            )
         staff.is_active = True
         await db_session.flush()
         return True

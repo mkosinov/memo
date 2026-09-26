@@ -94,6 +94,10 @@ import {
   type PhotoListResponse,
   type PaginatedResponse,
   AuthMeSchema,
+  AuditLogListResponseSchema,
+  type AuditLogResponse,
+  type AuditLogAuthorResponse,
+  AuditLogAuthorResponseSchema,
   type AuthMe,
   MyProfileSchema,
   type MyProfile,
@@ -992,6 +996,39 @@ export async function getAllMaterials(params?: AllParams): Promise<MaterialRespo
 export async function getAllTags(): Promise<TagResponse[]> {
   return api('/api/v1/tags/all', TagAllResponseSchema);
 }
+
+// ─── Audit log (GH #344 spec §6 — admin-only reading surface) ──────────────
+
+/** Conjunctive filters of GET /api/v1/audit-logs (spec §6); sort is fixed
+ *  server-side (created_at DESC) — no sort params exist in v1. */
+export interface AuditLogListParams {
+  page?: number;
+  per_page?: number;
+  user_id?: string;
+  action?: string;
+  entity?: string;
+  entity_id?: string;
+  date_from?: string; // YYYY-MM-DD, 00:00:00 inclusive
+  date_to?: string; // YYYY-MM-DD, through the end of the day
+}
+
+export async function getAuditLogs(
+  params?: AuditLogListParams,
+): Promise<PaginatedResponse<AuditLogResponse>> {
+  const search = new URLSearchParams();
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') search.set(k, String(v));
+    }
+  }
+  const qs = search.toString();
+  return api(`/api/v1/audit-logs${qs ? `?${qs}` : ''}`, AuditLogListResponseSchema);
+}
+
+export async function getAuditLogAuthors(): Promise<AuditLogAuthorResponse[]> {
+  return api('/api/v1/audit-logs/authors', z.array(AuditLogAuthorResponseSchema));
+}
+
 
 // ─── Auth (GH #247 spec §3.6/§4.1) ────────────────────────────────────────
 

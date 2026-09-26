@@ -212,6 +212,28 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
                 del data_dict[field]
         return data_dict
 
+    def _audit_entity(self) -> str:
+        """Canonical entity name of this service's model (journal key).
+
+        Lazy import — the dictionary module walks every service at import
+        time (cycle hazard, see ``src/events/entities.py`` WARNING); the
+        service package is part of that walk. The ``@transactional``
+        wrapper already resolved the same name for its own accumulator —
+        an unmapped model cannot reach this point (explicit
+        ``if``-raise, not an ``assert``: control flow must survive
+        ``python -O``, precedent — the ``_compose_pairs`` fix c941d289).
+        """
+        from src.events.entities import MODEL_ENTITY
+
+        entity = MODEL_ENTITY.get(self._model)
+        if entity is None:
+            raise RuntimeError(
+                f"@transactional already resolved an entity for "
+                f"{type(self).__qualname__} — the audit mark cannot be "
+                f"behind an unmapped model"
+            )
+        return entity
+
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
         """Delete a record (soft or hard depending on the model's repository).
@@ -314,6 +336,20 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             # block deps never reach here (step 3 raised BlockingDepsError).
 
         # 6. Hard-delete the entity row.
+        # GH #344 (§4.5): the deferred-delete COMMIT journals the final
+        # DELETE — staged next to the row's disappearance, with the
+        # before-snapshot (§5.1); the nullify/cascade child writes above
+        # are never journaled. LAZY audit import — cycle discipline.
+        from src.events.audit import derive_row_label, mark_audit, snapshot_pairs_before
+
+        _audit_entity = self._audit_entity()
+        mark_audit(
+            entity=_audit_entity,
+            action="delete",
+            entity_id=id,
+            entity_label=derive_row_label(_audit_entity, entity),
+            changes=snapshot_pairs_before(_audit_entity, entity),
+        )
         await db_session.execute(
             delete(self._model).where(self._model.id == id)
         )
@@ -413,7 +449,28 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         Honors the bool service contract (spec §3.4): ``ArchiveRepository.patch``
         returns the ORM instance (found) or ``None`` (not found), so the
         result is coerced to a real ``bool`` to match the declared return type.
+
+        GH #344 (spec §4.2/§4.6): archive is journaled EXPLICITLY — action
+        ``archive``, no field snapshot — displacing the auto-collected
+        ``update`` row for the ``is_active`` flip (seniority). No-op guard:
+        re-archiving an already-archived row changes nothing and writes no
+        journal row.
         """
+        row = await self._repository.get(db_session, self._model, id)
+        if row is None or not row.is_active:
+            return row is not None
+        # LAZY import — the audit module is off-limits at services top
+        # level (cycle hazard, see src/events/entities.py WARNING).
+        from src.events.audit import derive_row_label, mark_audit
+
+        entity = self._audit_entity()
+        mark_audit(
+            entity=entity,
+            action="archive",
+            entity_id=id,
+            entity_label=derive_row_label(entity, row),
+            changes=None,
+        )
         return await self._repository.patch(
             db_session, self._model, id, {"is_active": False}
         ) is not None
@@ -424,7 +481,26 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
 
         Returns True if the row was restored, False if not found.
         See archive for the bool-coercion rationale.
+
+        GH #344: mirrored explicit ``restore`` journal row (spec §4.6) —
+        restoring an ACTIVE row is a no-op and writes nothing.
         """
+        row = await self._repository.get(db_session, self._model, id)
+        if row is None or row.is_active:
+            return row is not None
+        # LAZY import — cycle hazard (see archive).
+        from src.events.audit import derive_row_label, mark_audit
+
+        entity = self._audit_entity()
+        mark_audit(
+            entity=entity,
+            action="restore",
+            entity_id=id,
+            entity_label=derive_row_label(entity, row),
+            changes=None,
+        )
         return await self._repository.patch(
             db_session, self._model, id, {"is_active": True}
         ) is not None
+
+    # ``_audit_entity`` is inherited from GenericService (model-keyed).

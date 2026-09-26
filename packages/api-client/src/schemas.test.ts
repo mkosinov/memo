@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
+  AuditLogResponseSchema,
+  AuditLogListResponseSchema,
+  AuditLogAuthorResponseSchema,
   StaffResponseSchema,
   type StaffResponse,
   StaffCreateSchema,
@@ -1948,6 +1951,94 @@ describe('ChangePasswordSchema (GH #262)', () => {
     });
     expect(parsed.current_password).toBe('old123');
     expect(parsed.new_password).toBe('new456');
+  });
+});
+
+// ─── Audit log reading API (GH #344, spec §6) ──────────────────────────────
+
+describe('AuditLogResponseSchema (GH #344)', () => {
+  const baseRow = {
+    id: 'al-1',
+    created_at: '2026-09-20T12:00:00Z',
+    user: { id: 'u-1', label: 'Иванов Иван' },
+    user_role: 'admin',
+    action: 'update',
+    entity: 'clients',
+    entity_id: 'c-1',
+    entity_label: 'Иванов Иван, +7 (9**) ***-45-67',
+    changes: { name: ['Иванов Иван', 'Иванов И.'], phone: ['+7 (9**) ***-45-67', '+7 (9**) ***-45-99'] },
+  };
+
+  it('parses a full journal row (masked strings pass through verbatim)', () => {
+    const parsed = AuditLogResponseSchema.parse(baseRow);
+    expect(parsed.id).toBe('al-1');
+    expect(parsed.user).toEqual({ id: 'u-1', label: 'Иванов Иван' });
+    expect(parsed.user_role).toBe('admin');
+    expect(parsed.action).toBe('update');
+    expect(parsed.entity).toBe('clients');
+    expect(parsed.changes).toEqual(baseRow.changes);
+  });
+
+  it('parses a null user (hard-deleted author keeps the row)', () => {
+    const parsed = AuditLogResponseSchema.parse({ ...baseRow, user: null });
+    expect(parsed.user).toBeNull();
+  });
+
+  it('parses null changes (reorder/create rows may carry no snapshot)', () => {
+    const parsed = AuditLogResponseSchema.parse({ ...baseRow, changes: null });
+    expect(parsed.changes).toBeNull();
+  });
+
+  it('parses scalar change values of every JSON kind (bool/number/null/list)', () => {
+    const parsed = AuditLogResponseSchema.parse({
+      ...baseRow,
+      changes: { is_active: [true, false], seats: [2, 3], comment_free: [null, null], tag_ids: [['t1'], ['t1', 't2']] },
+    });
+    expect(parsed.changes).toEqual({
+      is_active: [true, false],
+      seats: [2, 3],
+      comment_free: [null, null],
+      tag_ids: [['t1'], ['t1', 't2']],
+    });
+  });
+
+  it('parses a null entity_id (user_settings rows)', () => {
+    const parsed = AuditLogResponseSchema.parse({ ...baseRow, entity_id: null });
+    expect(parsed.entity_id).toBeNull();
+  });
+});
+
+describe('AuditLogListResponseSchema (GH #344)', () => {
+  it('parses the paginated envelope around journal rows', () => {
+    const parsed = AuditLogListResponseSchema.parse({
+      items: [
+        {
+          id: 'al-1',
+          created_at: '2026-09-20T12:00:00Z',
+          user: { id: 'u-1', label: 'Иванов Иван' },
+          user_role: 'master',
+          action: 'reorder',
+          entity: 'locations',
+          entity_id: 'l-1',
+          entity_label: 'Занятие Студия',
+          changes: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      per_page: 20,
+    });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+  });
+});
+
+describe('AuditLogAuthorResponseSchema (GH #344)', () => {
+  it('parses {user_id, label} with a nullable label', () => {
+    const withLabel = AuditLogAuthorResponseSchema.parse({ user_id: 'u-1', label: 'Иванов Иван' });
+    expect(withLabel.label).toBe('Иванов Иван');
+    const noLabel = AuditLogAuthorResponseSchema.parse({ user_id: 'u-2', label: null });
+    expect(noLabel.label).toBeNull();
   });
 });
 

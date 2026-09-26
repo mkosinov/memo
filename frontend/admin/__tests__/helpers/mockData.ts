@@ -19,6 +19,8 @@ import type {
   TariffResponse,
   PositionResponse,
   MyProfile,
+  AuditLogResponse,
+  AuditLogAuthorResponse,
 } from '@memo/api-client';
 
 // ─── Domain types ─────────────────────────────────────────────────────────
@@ -486,4 +488,87 @@ export function createMockMyProfile(
     ...mockMyProfileMaster,
     ...overrides,
   };
+}
+
+// ─── Audit log (GH #344 §7 — «Журнал» fixtures) ─────────────────────────────
+
+/** An update row with a masked phone pair — the canonical «Изменения» case. */
+export const mockAuditLogUpdate: AuditLogResponse = {
+  id: 'al-1',
+  created_at: '2026-09-20T14:30:00',
+  user: { id: 'u-1', label: 'Иванов Иван' },
+  user_role: 'admin',
+  action: 'update',
+  entity: 'clients',
+  entity_id: 'c-1',
+  entity_label: 'Иванов Иван, +7 (9**) ***-45-67',
+  changes: {
+    name: ['Иванов Иван', 'Иванов И. И.'],
+    phone: ['+7 (9**) ***-45-67', '+7 (9**) ***-45-99'],
+  },
+};
+
+/** A reorder row — no snapshot (changes: null), titled label. */
+export const mockAuditLogReorder: AuditLogResponse = {
+  id: 'al-2',
+  created_at: '2026-09-20T12:00:00',
+  user: { id: 'u-2', label: 'Середа Ольга' },
+  user_role: 'master',
+  action: 'reorder',
+  entity: 'locations',
+  entity_id: 'l-1',
+  entity_label: 'Студия',
+  changes: null,
+};
+
+/** A create row: after-only pairs ([null, value]) incl. bool/list scalars. */
+export const mockAuditLogCreate: AuditLogResponse = {
+  id: 'al-3',
+  created_at: '2026-09-19T09:00:00',
+  user: { id: 'u-1', label: 'Иванов Иван' },
+  user_role: 'admin',
+  action: 'create',
+  entity: 'services',
+  entity_id: 's-9',
+  entity_label: 'Гончарный круг, керамика',
+  changes: {
+    title: [null, 'Гончарный круг'],
+    duration: [null, 90],
+    is_active: [null, true],
+    tag_ids: [null, ['t1', 't2']],
+  },
+};
+
+/** A delete row from a hard-deleted author — user: null keeps the row. */
+export const mockAuditLogOrphan: AuditLogResponse = {
+  id: 'al-4',
+  created_at: '2026-09-18T18:45:00',
+  user: null,
+  user_role: 'master',
+  action: 'delete',
+  entity: 'materials',
+  entity_id: 'm-3',
+  entity_label: 'Акварель',
+  changes: { title: ['Акварель', null] },
+};
+
+/** The whole journal page — one row per vocabulary branch. */
+export const mockAuditLogs: AuditLogResponse[] = [
+  mockAuditLogUpdate,
+  mockAuditLogReorder,
+  mockAuditLogCreate,
+  mockAuditLogOrphan,
+];
+
+/** Authors dropdown entries (GET /audit-logs/authors shape). */
+export const mockAuditLogAuthors: AuditLogAuthorResponse[] = [
+  { user_id: 'u-1', label: 'Иванов Иван' },
+  { user_id: 'u-2', label: 'Середа Ольга' },
+];
+
+/** Factory for creating AuditLogResponse objects with overrides. */
+export function createMockAuditLog(
+  overrides: Partial<AuditLogResponse> = {},
+): AuditLogResponse {
+  return { ...mockAuditLogUpdate, ...overrides };
 }

@@ -131,7 +131,7 @@ describe('(main)/layout master access guard (GH #263 T9)', () => {
     );
   }
 
-  it.each(['/clients', '/locations', '/tags', '/staff', '/positions'])(
+  it.each(['/clients', '/locations', '/tags', '/staff', '/positions', '/audit'])(
     'shows NoAccessScreen for %s and withholds children (URL kept)',
     (section) => {
       window.history.replaceState(null, '', section);

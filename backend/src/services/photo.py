@@ -41,6 +41,39 @@ _SORT_COLUMNS = {
     "created_at": Photo.created_at,
 }
 
+# GH #344: journaled field set for an explicit photo mark (§5.1) — the
+# scalar columns a user action can change; owner FK columns are context,
+# not payload; tag links live in a join table and are not scalar fields.
+_PHOTO_MARK_FIELDS = ("filename", "is_public")
+
+
+def _photo_mark(
+    orm: Photo, action: str, old: dict | None = None
+) -> None:
+    """Stage ONE journal row for a direct photo write (spec §4.3).
+
+    ``old=None`` → the create mark (after-snapshot pairs; ``None``-valued
+    fields carry no information and are skipped — the
+    ``snapshot_pairs_after`` convention, §5.1); otherwise the update mark
+    carries ``{field: [before, after]}`` pairs for the fields that
+    actually changed (§5.1 — no-op fields never journal). LAZY audit
+    import — cycle discipline (src/events/entities.py WARNING).
+    """
+    from src.events.audit import diff_pairs, mark_audit
+
+    if old is None:
+        # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
+        # with ``None`` values skipped — the create-snapshot shape.
+        changes: dict | None = diff_pairs(_PHOTO_MARK_FIELDS, {}, orm) or None
+    else:
+        changes = diff_pairs(_PHOTO_MARK_FIELDS, old, orm)
+    mark_audit(
+        entity="photos",
+        action=action,
+        entity_id=orm.id,
+        changes=changes,
+    )
+
 
 def _merged_owner_conflict(existing: Photo, changes: dict) -> str | None:
     """Merged-set owner guard (GH #211 §6.2).
@@ -184,6 +217,8 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             )
         await db_session.flush()
 
+        # GH #344 (§4.3): single-photo create — standard explicit mark.
+        _photo_mark(orm, "create")
         # Reload with tags
         return await self.get(db_session, orm.id)
 
@@ -214,6 +249,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
                 detail=f"photo may have at most one owner; got: {conflict}",
             )
 
+        # GH #344 (§4.2): the "before" half of the diff is fixed BEFORE
+        # the first in-session mutation.
+        _old = {f: getattr(orm, f) for f in _PHOTO_MARK_FIELDS}
         for key, value in update_data.items():
             setattr(orm, key, value)
 
@@ -228,6 +266,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
                 )
 
         await db_session.flush()
+        # GH #344 (§4.3): explicit mark — the user action rewrote the row
+        # (PUT semantics); pairs carry only the changed scalar fields.
+        _photo_mark(orm, "update", _old)
         # Reload with tags eagerly loaded
         return await self.get(db_session, id)
 
@@ -268,6 +309,11 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
                 detail=f"photo may have at most one owner; got: {conflict}",
             )
 
+        # GH #344 (§4.2): "before" half fixed before the first mutation;
+        # an empty PATCH (nothing sent) is a no-op — no journal row.
+        _old = {f: getattr(orm, f) for f in _PHOTO_MARK_FIELDS}
+        _touched = bool(data_dict)
+
         # Apply scalar fields
         for key, value in data_dict.items():
             setattr(orm, key, value)
@@ -283,6 +329,11 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
                 )
 
         await db_session.flush()
+        # GH #344 (§4.3): explicit mark — only when the request actually
+        # carried a scalar field (a tag_ids-only patch still marks the
+        # action with the changed-scalar diff, possibly empty).
+        if _touched:
+            _photo_mark(orm, "update", _old)
         # Reload with tags eagerly loaded
         return await self.get(db_session, id)
 

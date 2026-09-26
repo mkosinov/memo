@@ -12,6 +12,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  History,
   Image as ImageIcon,
 } from 'lucide-react';
 import { useUI } from '@/contexts/UIContext';
@@ -62,6 +63,9 @@ export const ADMIN_ONLY_SECTIONS = [
   '/tags',
   '/staff',
   '/positions',
+  // GH #344 §7: the audit journal — admin-only reading surface (the
+  // backend pair GET /audit-logs(+/authors) is require_admin).
+  '/audit',
 ] as const;
 
 const DIRECTORY_ITEMS = [
@@ -84,6 +88,11 @@ const isAdminOnly = (href: string): boolean =>
   );
 
 const PHOTO_ITEM = { label: 'Фото', Icon: ImageIcon, href: '/photos' } as const;
+
+// GH #344 §7: «Журнал» — standalone admin-only item placed AFTER the
+// «Справочники» collapsible. Like PHOTO_ITEM it is a const single link;
+// the isAdminOnly('/audit') filter below drops it for masters.
+const AUDIT_ITEM = { label: 'Журнал', Icon: History, href: '/audit' } as const;
 
 // ─── MiniCalendar ─────────────────────────────────────────────────────────
 // #138 T4 (spec §2.3): the calendar is a NAVIGATOR + period indicator, not an
@@ -585,6 +594,29 @@ export function Menubar() {
                 );
               })}
             </div>
+          )}
+
+          {/* Журнал — standalone (GH #344 §7, admin-only, after Справочников) */}
+          {isAdmin && (
+            (() => {
+              const active = isActive(AUDIT_ITEM.href);
+              return (
+                <Link
+                  href={AUDIT_ITEM.href}
+                  className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150
+                    ${active
+                    ? 'bg-brand text-white font-medium'
+                    : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+                  }
+                    ${sidebarCollapsed ? 'justify-center px-1' : ''}`}
+                  aria-label={AUDIT_ITEM.label}
+                  title={sidebarCollapsed ? AUDIT_ITEM.label : undefined}
+                >
+                  <History size={18} strokeWidth={2} className={active ? 'text-white' : 'text-white/60'} />
+                  {!sidebarCollapsed && <span>{AUDIT_ITEM.label}</span>}
+                </Link>
+              );
+            })()
           )}
 
           {/* Фото — standalone */}

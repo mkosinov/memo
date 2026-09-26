@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import delete
 
+from src.models.record import Record
 from src.models.tag import record_tags
 from src.repositories.generic import BaseRepository
 
@@ -36,6 +37,39 @@ class RecordRepository(BaseRepository):
         caller's transaction owns the commit boundary.
         """
         await session.execute(delete(record_tags).where(record_tags.c.record_id == record_id))
+
+    async def delete_tags_by_record_ids(
+        self, session: AsyncSession, record_ids: list[str]
+    ) -> None:
+        """Remove ALL record_tags links of the given records in a single DELETE.
+
+        Set-based bulk command (canon rule 4, GH #325): one
+        ``DELETE FROM record_tags WHERE record_id IN (:ids)`` — no
+        per-row loop. The join table's FKs carry NO ondelete action, so the
+        links must go BEFORE the record rows (#194). An EMPTY id set is a
+        no-op — no query is issued at all. Does NOT commit — the caller's
+        transaction owns the commit boundary.
+        """
+        if not record_ids:
+            return
+        await session.execute(
+            delete(record_tags).where(record_tags.c.record_id.in_(record_ids))
+        )
+
+    async def delete_rows_by_ids(
+        self, session: AsyncSession, record_ids: list[str]
+    ) -> None:
+        """Remove the given record ROWS in a single DELETE.
+
+        Set-based bulk command (canon rule 4, GH #325): one
+        ``DELETE FROM records WHERE id IN (:ids)`` — no per-row loop and no
+        instance-delete switch. An EMPTY id set is a no-op — no query is
+        issued at all. Does NOT commit — the caller's transaction owns the
+        commit boundary.
+        """
+        if not record_ids:
+            return
+        await session.execute(delete(Record).where(Record.id.in_(record_ids)))
 
 
 @lru_cache

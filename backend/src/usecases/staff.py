@@ -63,6 +63,7 @@ from src.services.decorators import transactional
 from src.services.master import get_master_service
 from src.services.staff import get_staff_service
 from src.services.user import get_user_service, resolve_account_role
+from src.services.user_settings import UserSettingsService
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -185,7 +186,10 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
     4. account checkbox (create-only, D6): role from
        :func:`resolve_account_role` (explicit → position template → the
        #247 master-section fallback); ``UserService.create_staff_account``
-       validates + hashes the password INSIDE.
+       validates + hashes the password INSIDE, then the GH #319
+       UserSettings defaults row lands in the SAME transaction
+       (``UserSettingsService.insert_defaults`` — composed HERE: the
+       users row owner writes no foreign tables, canon rule 1).
 
     NOTE: call as ``create_staff(None, db_session=..., data=...)`` — see
     the module docstring for why.
@@ -222,13 +226,20 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
             data.position_ids,
             has_master_section=data.master is not None,
         )
-        await get_user_service().create_staff_account(
+        user = await get_user_service().create_staff_account(
             db_session,
             staff_id=staff.id,
             phone=account.phone,
             password=account.password,
             role=role,
         )
+        # GH #319: guaranteed child record — the UserSettings defaults
+        # row in the SAME transaction (composition lives HERE in the
+        # scenario: the users row owner writes no foreign tables — canon
+        # rule 1; same pattern as the ``create_user`` scenario). Silent
+        # core: no separate bus-invalidation event (``insert_defaults``
+        # publishes nothing).
+        await UserSettingsService.insert_defaults(db_session, user.id)
 
     # ── Response assembly (readers — no second publication) ──────────
     await db_session.flush()

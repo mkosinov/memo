@@ -265,6 +265,38 @@ class TestCreateStaffAccount:
             "owns the transaction boundary (canon rule 3)"
         )
 
+    async def test_writes_no_foreign_tables(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Canon rule 1 («сам UserService чужие таблицы не пишет»):
+        ``create_staff_account`` touches ONLY the ``users`` table. The GH
+        #319 UserSettings guarantee is the COMPOSING scenario's job
+        (``usecases/staff.py::create_staff`` — same pattern as
+        ``usecases/user.py::create_user``), never the row owner's."""
+        from src.models.enums import UserRole
+        from src.services.user import get_user_service
+
+        staff = await _add_staff(db_session)
+
+        user = await get_user_service().create_staff_account(
+            db_session,
+            staff_id=staff.id,
+            phone="+79995550005",
+            password="secret12345",
+            role=UserRole.ADMIN,
+        )
+
+        from src.models.user_settings import UserSettings
+
+        settings = (await db_session.execute(
+            select(UserSettings).where(UserSettings.user_id == user.id)
+        )).scalar_one_or_none()
+        assert settings is None, (
+            "create_staff_account wrote a user_settings row — a foreign "
+            "table (canon rule 1). The #319 guarantee belongs to the "
+            "create_staff scenario, not the users row owner"
+        )
+
 
 # ─── set_role_by_staff — rowcount semantics ─────────────────────────────────
 

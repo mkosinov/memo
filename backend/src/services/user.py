@@ -37,7 +37,6 @@ from src.events.emitter import mark_changed
 from src.models.enums import UserRole
 from src.models.user import User
 from src.repositories.generic import BaseRepository, get_base_repository
-from src.services.user_settings import UserSettingsService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -155,11 +154,11 @@ class UserService:
         ``password_hash`` is stored. Flush, no commit; the created row is
         a fact → ``mark_changed("users")`` unconditionally.
 
-        GH #319 (guarantee, merged from main's ``StaffService.create``):
-        the UserSettings defaults row lands in the SAME transaction,
-        right after the account row's flush — ONE point covers every
-        account-creation path (silent core: no separate bus-invalidation
-        event; ``insert_defaults`` publishes nothing).
+        ONLY the ``users`` row (canon rule 1 — the row owner never
+        writes foreign tables). The GH #319 UserSettings guarantee is
+        composed by the ``create_staff`` scenario (``usecases/staff.py``)
+        right after this block — the same pattern as the ``create_user``
+        scenario (``usecases/user.py``).
         """
         user = User(
             phone=phone,
@@ -169,7 +168,6 @@ class UserService:
         )
         db_session.add(user)
         await db_session.flush()
-        await UserSettingsService.insert_defaults(db_session, user.id)
         mark_changed("users")
         return user
 

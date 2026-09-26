@@ -1,8 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import type { ClientWithStats, ClientUpdate, VisitorResponse } from '@memo/api-client';
-import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
+import type { ClientWithStats, ClientUpdate, DependencyNode, VisitorResponse } from '@memo/api-client';
+import { ApiError, getClientVisitors, createVisitor } from '@memo/api-client';
+import { useDeleteVisitor } from '@/hooks/useVisitorsMutations';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
+import { parseApiError } from '@/app/lib/api/parseApiError';
+import { useUI } from '@/contexts/UIContext';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 
 const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
@@ -95,12 +99,41 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setVisitors(updated);
   }, [newVisitorName, newVisitorAge, client]);
 
-  const handleDeleteVisitor = useCallback(async (visitorId: string) => {
-    if (!client) return;
-    await deleteVisitor(visitorId);
-    const updated = await getClientVisitors(client.id);
-    setVisitors(updated);
-  }, [client]);
+  // ── #324 Task 8: visitor delete on the deferred conveyor ──────────────
+  // The × button goes through removeVisitor (dry-run first): a visit-less
+  // visitor → 204 → optimistic row removal + 5s undo ring; with visits →
+  // 409 rejection here → park the tree + open DeleteDialog «Посещения: N
+  // будут удалены». NO instant delete path remains (bare DELETE → 422).
+  const { removeVisitor, removeVisitorResolved } = useDeleteVisitor();
+  const { showToast } = useUI();
+  const [deleteTarget, setDeleteTarget] = useState<{ visitor: VisitorResponse; deps: DependencyNode[] } | null>(null);
+
+  const handleDeleteVisitor = useCallback(async (visitor: VisitorResponse) => {
+    try {
+      await removeVisitor(visitor);
+      // Mirror the optimistic cache removal in this LOCAL list state (the
+      // fetch above populated it outside react-query) — the × user sees the
+      // same picture the ring promises; undo converges via the commit's
+      // family invalidation + the effect refetch on the next client change.
+      setVisitors((prev) => prev.filter((v) => v.id !== visitor.id));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ visitor, deps: err.dependencies });
+        return;
+      }
+      // Non-409 dry-run errors keep their error-toast surface.
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [removeVisitor, showToast]);
+
+  const handleDeleteVisitorResolved = useCallback(
+    (visitor: VisitorResponse, resolutions: Record<string, string>, deps: DependencyNode[]) => {
+      // Enqueue is synchronous — drop the row locally, dialog closes at once.
+      void removeVisitorResolved(visitor, resolutions, deps);
+      setVisitors((prev) => prev.filter((v) => v.id !== visitor.id));
+    },
+    [removeVisitorResolved],
+  );
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -221,7 +254,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
                   {visitor.age != null ? ` (${visitor.age} лет)` : ' (взр.)'}
                 </span>
                 <button
-                  onClick={() => handleDeleteVisitor(visitor.id)}
+                  onClick={() => handleDeleteVisitor(visitor)}
                   className="text-red-400 hover:text-red-500 text-xs"
                   aria-label="Удалить посетителя"
                 >
@@ -288,6 +321,28 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
           )}
         </div>
       </div>
+      )}
+
+      {/* Visitor delete dialog — GH #324 Task 8 (spec §9.3): opened on the
+          dry-run 409; the confirm enqueues the cascade deferred delete
+          (enqueue is synchronous — BOTH expected groups travel in the
+          commit) and the dialog closes immediately via onDone. Visitors
+          never hit Mode B — the visits tree's only allowed action is
+          cascade. */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.visitor.name}
+          entityType="visitor"
+          entityId={deleteTarget.visitor.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            handleDeleteVisitorResolved(deleteTarget.visitor, resolutions, deleteTarget.deps);
+          }}
+          onArchive={async () => { /* visitors have no archive flow — never Mode B */ }}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

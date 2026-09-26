@@ -33,7 +33,7 @@ export type DeleteDialogEntityType =
   | 'staff' | 'master' | 'location' | 'service' | 'material' | 'client'
   | 'record' | 'activity' | 'tag'
   // GH #324 — dependent subjects on the deferred pipeline.
-  | 'photo' | 'position';
+  | 'photo' | 'position' | 'visitor';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -136,6 +136,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   tag: 'тега', // #318: deferred tag delete (tags directory)
   photo: 'фото', // #324: deferred photo delete (photos directory)
   position: 'должности', // #324: deferred position delete (positions directory)
+  visitor: 'посетителя', // #324 Task 8: deferred visitor delete (client card / record tab)
 };
 
 // #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are

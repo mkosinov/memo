@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1147,15 +1147,94 @@ describe('patchVisitor', () => {
   });
 });
 
+// ─── Visitors delete: optional body + dry-run/resolve (GH #324 Task 8,
+// mirror of photos/positions) — the bare instant DELETE is GONE (server
+// answers 422 expected_state_required); every in-repo commit carries {expected}.
+
 describe('deleteVisitor', () => {
-  it('calls DELETE /api/v1/visitors/:id', async () => {
+  it('one-arg call sends the leaf-clean body {"expected":{}}', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
     await deleteVisitor('v-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('payload overload: expected id-sets travel verbatim (visits + visitor_tags)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisitor('v-1', {
+      expected: { visits: ['visit-1'], visitor_tags: ['tag-1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { visits: ['visit-1'], visitor_tags: ['tag-1'] } }),
+    });
+  });
+});
+
+describe('dryRunDeleteVisitor', () => {
+  it('calls DELETE /api/v1/visitors/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteVisitor('v-1');
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/visitors/v-1',
+      '/api/v1/visitors/v-1?dry_run=true',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      { method: 'DELETE' },
     );
+  });
+
+  it('propagates 409 ApiError with the visits/visitor_tags dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'visits', auto: false, relation: 'Посещение', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-visit-1', label: 'Гуашь, 3500 ₽' },
+          { id: 'uuid-visit-2', label: 'Акварель, 2500 ₽' },
+        ],
+      },
+      {
+        entity: 'visitor_tags', auto: true, relation: 'Тег', count: 1,
+        allowed_actions: ['cascade'],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteVisitor('v-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeleteVisitor', () => {
+  it('pure path: body is {"expected":{}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteVisitor('v-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('with-visits path: sends both expected groups (visits + visitor_tags) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteVisitor('v-1', {
+      resolutions: { visits: 'cascade' },
+      expected: { visits: ['uuid-visit-1', 'uuid-visit-2'], visitor_tags: ['uuid-tag-1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { visits: ['uuid-visit-1', 'uuid-visit-2'], visitor_tags: ['uuid-tag-1'] },
+        resolutions: { visits: 'cascade' },
+      }),
+    });
   });
 });
 

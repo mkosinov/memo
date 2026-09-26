@@ -16,7 +16,7 @@ type ArchiveFn = (id: string) => Promise<unknown>;
 
 function renderDialog(props: {
   entityName: string;
-  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag' | 'photo' | 'position' | 'staff';
+  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag' | 'photo' | 'position' | 'visitor' | 'staff';
   entityId: string;
   dependencies: DependencyNode[];
   onDone: () => void;
@@ -1004,5 +1004,100 @@ describe('DeleteDialog — #324 position (busy)', () => {
     });
 
     expect(screen.getByTestId('dep-staff_positions')).toHaveTextContent('→ Должности: 1 (удалён)');
+  });
+});
+
+describe('DeleteDialog — #324 visitor (with visits)', () => {
+  // The 409 tree of a visitor with 2 visits + 1 own tag: the «Посещение»
+  // node (NON-auto, items = visit one-liners «{service}, {price}») AND the
+  // visitor_tags AUTO node «Тег» (join rows die with the visitor).
+  const VISITOR_WITH_VISITS: DependencyNode[] = [
+    {
+      entity: 'visits', auto: false,
+      relation: 'Посещение',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'visit-1', label: 'Гуашь, 3500' },
+        { id: 'visit-2', label: 'Гуашь, 3500' },
+      ],
+    },
+    {
+      entity: 'visitor_tags', auto: true,
+      relation: 'Тег',
+      count: 1,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [{ id: 'tag-1', label: 'Гуашь' }],
+    },
+  ];
+
+  it('visitor title: «Удаление «посетителя Маша»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «посетителя Маша»/)).toBeInTheDocument();
+  });
+
+  it('visits group header says «Посещения — будут удалены:» + one line per visit (spec §9.3)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // The visits die WITH the visitor (cascade, user decision 21.09) — the
+    // default «будут удалены» wording is correct for entityType 'visitor'.
+    expect(screen.getByTestId('dep-visits')).toHaveTextContent('Посещения — будут удалены:');
+    expect(screen.getAllByText('Гуашь, 3500').length).toBe(2);
+  });
+
+  it('auto visitor_tags node renders as the generic items group (join rows die with the visitor)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // The node carries items (deletion.py _items_v_visitor_tags — «the tree
+    // is complete; the client filters by auto, not by items presence»), so
+    // DepRow renders the group: the default «будут удалены» tail — the
+    // visitor's OWN tag links die with him (auto cascade).
+    expect(screen.getByTestId('dep-visitor_tags')).toHaveTextContent('Теги — будут удалены:');
+    expect(screen.getByText('Гуашь', { selector: 'li' })).toBeInTheDocument();
+  });
+
+  it('confirm is checkbox-gated; onResolve carries {visits: cascade} (auto group excluded)', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn()).toBeDisabled();
+    toggleConfirm();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('vis1', { visits: 'cascade' }),
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 });

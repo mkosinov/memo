@@ -593,42 +593,27 @@ describe('useRecordMutations', () => {
     });
   });
 
-  describe('deleteVisitor', () => {
-    it('calls deleteVisitor API and patches record with remaining visits', async () => {
+  describe('deleteVisitor — removed from the hook (#324 Task 8)', () => {
+    it('is no longer exposed by the hook — callers use useDeleteVisitor (entity-level conveyor)', () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+      expect(result.current).not.toHaveProperty('deleteVisitor');
+    });
+
+    it('the convertAnonymousVisit rollback still runs and carries the {expected:{}} body (bare DELETE → 422)', async () => {
+      mockPatchVisit.mockRejectedValue(new Error('patch failed') as never);
       const { wrapper } = createQueryClientWrapper();
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
-      const currentVisits = [
-        { visitor_id: 'vis1', price: 3500 },
-        { visitor_id: 'vis2', price: 2500 },
-      ];
+      await expect(
+        act(async () => {
+          await result.current.convertAnonymousVisit('visit-anon', 'Новый гость', null);
+        }),
+      ).rejects.toThrow('patch failed');
 
-      await act(async () => {
-        await result.current.deleteVisitor('vis1', currentVisits);
-      });
-
-      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis1');
-      expect(mockPatchRecord).toHaveBeenCalledWith(recordId, {
-        visits: [{ visitor_id: 'vis2', price: 2500 }],
-      });
-    });
-
-    it('invalidates record and records queries on success (no 5-key blanket)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
-
-      await act(async () => {
-        await result.current.deleteVisitor('vis1', [{ visitor_id: 'vis1', price: 3500 }]);
-      });
-
-      // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-      // No blanket 5-key invalidation
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['activities'] });
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['clients'] });
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['payments'] });
+      // The orphan rollback target is visit-less (a leaf) — the family body
+      // is the leaf-clean snapshot; without it the server answers 422.
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new', { expected: {} });
     });
   });
 
@@ -1641,7 +1626,7 @@ describe('useRecordMutations', () => {
       ).rejects.toThrow('patch failed');
 
       // Rollback: the freshly created visitor must not survive the failure
-      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new');
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new', { expected: {} });
     });
 
     it('PATCH failure → also invalidates [visitors, clientId] (rollback path)', async () => {
@@ -1675,7 +1660,7 @@ describe('useRecordMutations', () => {
 
       // The rollback was attempted but its failure must not mask the original
       // error, and the visitors invalidation must NOT be skipped.
-      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new');
+      expect(mockDeleteVisitor).toHaveBeenCalledWith('vis-new', { expected: {} });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
     });
 

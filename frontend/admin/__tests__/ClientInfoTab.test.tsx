@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ClientInfoTab } from '../app/(main)/clients/components/ClientInfoTab';
 import type { ClientInfoTabHandle } from '../app/(main)/clients/components/ClientInfoTab';
 import { mockClientWithStats, mockVisitor } from './helpers/mockData';
@@ -14,10 +15,31 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     getClientVisitors: vi.fn(),
     createVisitor: vi.fn(),
     deleteVisitor: vi.fn(),
+    dryRunDeleteVisitor: vi.fn(),
+    resolveDeleteVisitor: vi.fn(),
   };
 });
 
-import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
+import {
+  getClientVisitors,
+  createVisitor,
+  deleteVisitor,
+  dryRunDeleteVisitor,
+  resolveDeleteVisitor,
+  ApiError,
+} from '@memo/api-client';
+import type { DependencyNode } from '@memo/api-client';
+
+// #324 Task 8: the conveyor pieces — the hook's enqueue is controlled here
+// (same pattern as ClientRecordTab.api.test.tsx); the hook's toast shower
+// is a plain vi.fn (useUI mock — the component itself never showed toasts).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: vi.fn() }),
+}));
 
 // Global ref holder for tests that need to call save()/cancel()
 let testRefHandle: ClientInfoTabHandle | null = null;
@@ -31,6 +53,16 @@ function RefCapture({ children }: { children: (ref: React.Ref<ClientInfoTabHandl
 
 type RenderResult = ReturnType<typeof render>;
 
+/** #324 Task 8: the conveyor hook consumes useQueryClient — every render
+ *  wraps in a fresh QueryClientProvider (retry:false keeps errors fast). */
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return ({ children }: { children: React.ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
 function renderClientInfoTab(overrides?: {
   client?: ClientWithStats;
   onSave?: (data: Partial<ClientWithStats>) => Promise<void>;
@@ -40,7 +72,8 @@ function renderClientInfoTab(overrides?: {
   const onSave = overrides?.onSave ?? vi.fn().mockResolvedValue(undefined);
   const onHasChanges = overrides?.onHasChanges;
   return render(
-    <ClientInfoTab client={client} onSave={onSave} onHasChanges={onHasChanges} />
+    <ClientInfoTab client={client} onSave={onSave} onHasChanges={onHasChanges} />,
+    { wrapper: createWrapper() },
   );
 }
 
@@ -58,7 +91,8 @@ function renderClientInfoTabWithRef(overrides?: {
       {(ref) => (
         <ClientInfoTab client={client} onSave={onSave} onHasChanges={onHasChanges} ref={ref} />
       )}
-    </RefCapture>
+    </RefCapture>,
+    { wrapper: createWrapper() },
   );
   return { client, onSave, getRef: () => testRefHandle };
 }
@@ -329,6 +363,10 @@ describe('ClientInfoTab', () => {
     ];
 
     beforeEach(() => {
+      // #324 Task 8: call-history reset — the file's afterEach restoreAllMocks
+      // does not clear module-mock vi.fn() histories, and the new conveyor
+      // tests assert enqueue call counts.
+      vi.clearAllMocks();
       vi.mocked(getClientVisitors).mockResolvedValue(mockVisitors);
       vi.mocked(createVisitor).mockResolvedValue({
         ...mockVisitor,
@@ -336,7 +374,9 @@ describe('ClientInfoTab', () => {
         name: 'Новый Гость',
         age: null,
       });
-      vi.mocked(deleteVisitor).mockResolvedValue(undefined);
+      vi.mocked(dryRunDeleteVisitor).mockResolvedValue(undefined);
+      vi.mocked(resolveDeleteVisitor).mockResolvedValue(undefined);
+      mockEnqueuePendingAction.mockClear();
     });
 
     it('renders visitors section heading', async () => {
@@ -441,6 +481,91 @@ describe('ClientInfoTab', () => {
 
       // After creation, getClientVisitors should be called again for refetch
       expect(getClientVisitors).toHaveBeenCalled();
+    });
+
+    // ─── #324 Task 8: visitor delete on the deferred conveyor ────────────
+    //
+    // The former INSTANT `await deleteVisitor(visitorId)` is GONE — the ×
+    // button now goes through useDeleteVisitor.removeVisitor: clean visitor
+    // → dry-run 204 → optimistic row removal + 5s undo ring (enqueue, no
+    // instant commit); with visits → dry-run 409 → DeleteDialog
+    // «Посещения: N будут удалены» → confirm enqueues the cascade.
+
+    /** The 409 tree of vis1 (Анна) with 2 visits + 1 own tag. */
+    const VISITOR_DEPS: DependencyNode[] = [
+      {
+        entity: 'visits', auto: false, relation: 'Посещение', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'visit-1', label: 'Гуашь, 3500' },
+          { id: 'visit-2', label: 'Гуашь, 3500' },
+        ],
+      },
+      {
+        entity: 'visitor_tags', auto: true, relation: 'Тег', count: 1,
+        allowed_actions: ['cascade'],
+        items: [{ id: 'tag-1', label: 'Гуашь' }],
+      },
+    ];
+
+    it('× click on a visit-less visitor: dry-run → ring (enqueue); NO instant resolveDeleteVisitor call', async () => {
+      renderClientInfoTab();
+      const delBtn = await screen.findAllByRole('button', { name: 'Удалить посетителя' });
+      fireEvent.click(delBtn[0]);
+
+      await waitFor(() => {
+        expect(dryRunDeleteVisitor).toHaveBeenCalledWith('vis1');
+      });
+      // The deferred action is enqueued (5s ring) — the real DELETE lives
+      // in the commit, never at click time.
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      expect(resolveDeleteVisitor).not.toHaveBeenCalled();
+      // The instant import is no longer used by the component at all.
+      expect(deleteVisitor).not.toHaveBeenCalled();
+    });
+
+    it('dry-run 409 → DeleteDialog opens with «Посещения — будут удалены:» and the row stays', async () => {
+      vi.mocked(dryRunDeleteVisitor).mockRejectedValue(
+        new ApiError(409, 'has_dependencies', undefined, VISITOR_DEPS),
+      );
+      renderClientInfoTab();
+      const delBtn = await screen.findAllByRole('button', { name: 'Удалить посетителя' });
+      fireEvent.click(delBtn[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('delete-dialog-title')).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Удаление «посетителя Анна/)).toBeInTheDocument();
+      expect(screen.getByTestId('dep-visits')).toHaveTextContent('Посещения — будут удалены:');
+      // Nothing enqueued before confirmation; the row stays visible (the
+      // dialog title itself carries the name — check the row testid).
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(await screen.findAllByTestId('visitor-row')).toHaveLength(2);
+    });
+
+    it('dialog confirm → cascade enqueued (removeVisitorResolved), dialog closes', async () => {
+      vi.mocked(dryRunDeleteVisitor).mockRejectedValue(
+        new ApiError(409, 'has_dependencies', undefined, VISITOR_DEPS),
+      );
+      renderClientInfoTab();
+      const delBtn = await screen.findAllByRole('button', { name: 'Удалить посетителя' });
+      fireEvent.click(delBtn[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('delete-dialog-title')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
+      fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
+
+      await waitFor(() => {
+        expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
+      });
+      // Enqueue is synchronous — the dialog closed immediately; the commit
+      // (resolveDeleteVisitor with BOTH expected groups) runs after 5s.
+      await waitFor(() => {
+        expect(screen.queryByTestId('delete-dialog-title')).not.toBeInTheDocument();
+      });
+      expect(resolveDeleteVisitor).not.toHaveBeenCalled();
     });
   });
 });

@@ -257,16 +257,12 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     [],
   );
 
-  const deleteVisitor = useCallback(
-    async (visitorId: string, currentVisits: VisitData[]) => {
-      await apiDeleteVisitor(visitorId);
-      const remaining = currentVisits.filter((v) => v.visitor_id !== visitorId);
-      await patchRecord(recordId, { visits: remaining });
-      // Reader: RecordModal (['record',id]) + ScheduleActivityCard (['records',df,dt])
-      invalidateRecordAndLists();
-    },
-    [recordId, invalidateRecordAndLists],
-  );
+  // #324 Task 8: the instant deleteVisitor is REMOVED — visitor deletes go
+  // through the entity-level deferred conveyor (hooks/useVisitorsMutations.ts
+  // → useDeleteVisitor): dry-run → 409 dialog «Посещения: N будут удалены»
+  // → ring; undo = item-level snapshot; invalidation ['records','clients'].
+  // The visits-array rewrite below silently cascade-deleted the visits
+  // WITHOUT the record recompute — the conveyor's executor now owns that.
 
   // ── Payment mutations (fine-grained — use cacheSync helpers) ─────────
 
@@ -440,7 +436,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
             return freshVisit;
           }
           // Visit still anonymous (or gone) → the visitor is a safe orphan.
-          await apiDeleteVisitor(visitor.id);
+          // #324 family contract: the rollback DELETE carries the mandatory
+          // {expected} body — the just-created visitor is visit-less (a
+          // leaf), so the body is the leaf-clean snapshot.
+          await apiDeleteVisitor(visitor.id, { expected: {} });
         } catch {
           // Swallow rollback failures — the original error below is what the
           // caller must see.
@@ -576,7 +575,6 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     saveRecord,
     updateRecord,
     addVisitor,
-    deleteVisitor,
     addPayment,
     addVisitorToRecord,
     updateVisitStatus,

@@ -793,8 +793,47 @@ export async function patchVisitor(id: string, data: VisitorUpdate): Promise<Vis
   });
 }
 
-export async function deleteVisitor(id: string): Promise<void> {
-  await api(`/api/v1/visitors/${id}`, z.any(), { method: 'DELETE' });
+// Execute a hard delete (GH #324 family contract, Task 8). The commit body
+// carries the MANDATORY {expected} snapshot — the payload param defaults to
+// the leaf-clean {expected: {}} (the T6 deletePayment/deleteVisit pattern),
+// preserving the existing one-arg in-repo call sites (the anonymous-visit
+// conversion rollback deletes a just-created, visit-less visitor). With
+// visits the deferred pipeline sends BOTH groups {visits, visitor_tags}
+// via resolveDeleteVisitor below.
+export interface DeleteVisitorPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deleteVisitor(id: string, payload: DeleteVisitorPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/visitors/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
+}
+
+// Dry-run preview (GH #324 Task 8, mirror of photos/positions): DELETE
+// ?dry_run=true without body. 204 No Content → visit-less visitor; 409 →
+// ApiError with .dependencies tree — the «Посещение» node (NON-auto,
+// allowed_actions: ["cascade"], items: [{id, label}] = visit ids/labels
+// snapshotted for the `expected` commit) AND the visitor_tags auto node
+// (join rows die with the visitor).
+export async function dryRunDeleteVisitor(id: string): Promise<void> {
+  await api(`/api/v1/visitors/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #324 Task 8) — body contract mirrors the family:
+// {expected, resolutions?}. `expected` is MANDATORY and carries BOTH groups'
+// id-sets built from the dialog tree's items (visits + visitor_tags — the
+// executor deletes both); a visit-less visitor commits as {expected: {}}.
+export interface ResolveDeleteVisitorPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeleteVisitor(id: string, payload: ResolveDeleteVisitorPayload): Promise<void> {
+  const body: ResolveDeleteVisitorPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/visitors/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
 }
 
 // ─── Client Phone Lookup (GH #212: /clients/search → /clients/get) ──────────

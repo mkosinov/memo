@@ -93,6 +93,7 @@ from src.models.user import User
 from src.models.user_profile import UserProfile
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.services.user_settings import UserSettingsService
 
 if TYPE_CHECKING:
     from src.db.base import Base
@@ -1496,13 +1497,22 @@ async def _h_cascade_master_users(
     service-level delete keeps the executor deterministic regardless of
     PRAGMA state — same belt-and-suspenders as the masters extension).
 
-    NB: ``user_settings.user_id`` (NOT NULL, no ``ondelete``) FK-references
-    ``users.id`` — if a settings row exists for the linked user, this DELETE will
-    FK-violate. Spec §4.1 scopes this to a User with NO downstream rows; the
-    #207 test scenarios use the bare ``_user`` fixture which inserts no settings.
-    A future spec revision would have to extend this handler (e.g., delete
-    user_settings first) — out of scope for #207.
+    GH #319: the linked users' ``user_settings`` rows die with their
+    accounts — deleted FIRST via the bulk command
+    (``UserSettingsService.delete_by_user_ids``, canon bulk rule: filter by
+    own column ``user_id``). The FK also carries no ``ondelete``, so the
+    service-level delete keeps the executor deterministic regardless of
+    PRAGMA state.
     """
+    # Collect user_ids first (needed for the bulk settings delete).
+    user_ids_result = await session.execute(
+        select(User.id).where(User.staff_id == entity_id)
+    )
+    user_ids = list(user_ids_result.scalars().all())
+
+    # GH #319: delete settings rows FIRST (FK on user_settings.user_id).
+    await UserSettingsService.delete_by_user_ids(session, user_ids)
+
     await session.execute(
         delete(UserProfile).where(
             UserProfile.user_id.in_(

@@ -9,6 +9,8 @@ the api_client's session user is the addressed user.
 
 import pytest
 
+from tests.conftest import delete_settings_row
+
 pytestmark = pytest.mark.api
 
 
@@ -25,6 +27,7 @@ class TestUserSettingsPatchArchivedVisibility:
 
     def test_patch_show_archived_masters_false(self, api_client, me) -> None:
         """PATCH show_archived_masters=false flips it; other fields unchanged."""
+        delete_settings_row(me)  # §5.5 anomaly pattern
         api_client.post("/api/v1/user-settings", json={"user_id": me})
 
         response = api_client.patch(
@@ -37,6 +40,7 @@ class TestUserSettingsPatchArchivedVisibility:
 
     def test_patch_show_archived_locations_true(self, api_client, me) -> None:
         """PATCH show_archived_locations=true flips it; other fields unchanged."""
+        delete_settings_row(me)
         api_client.post("/api/v1/user-settings", json={"user_id": me})
 
         response = api_client.patch(
@@ -49,6 +53,7 @@ class TestUserSettingsPatchArchivedVisibility:
 
     def test_patch_without_toggles_noop(self, api_client, me) -> None:
         """PATCH without the toggle fields leaves both defaults intact."""
+        delete_settings_row(me)
         api_client.post("/api/v1/user-settings", json={"user_id": me})
 
         response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})

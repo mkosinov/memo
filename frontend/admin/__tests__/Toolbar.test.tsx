@@ -33,7 +33,6 @@ vi.mock('@memo/api-client', () => {
     column_order_staff: [], column_order_locations: [],
     show_archived_masters: true, show_archived_locations: false,
   }),
-  createUserSettings: vi.fn(),
   patchUserSettings: vi.fn().mockResolvedValue({}),
   });
 });

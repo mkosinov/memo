@@ -231,21 +231,30 @@ async def seed_staff_users(session) -> None:
     linked to the first seeded staff card (by ``sort_order`` — m1). Guarded
     by ``ENV != production`` at the call site in :func:`seed_data`; the
     obviously-fake passwords are deliberate (public repo).
+
+    GH #319 §5.5: both accounts also get their ``UserSettings`` defaults
+    rows («база закрыта с рождения») via the shared creation core
+    (``UserSettingsService.insert_defaults`` — the same path as the
+    user-creation scenario and the test factory; no second path).
     """
+    from src.services.user_settings import UserSettingsService
+
     first_staff = (
         await session.execute(
             select(Staff).order_by(Staff.sort_order, Staff.id).limit(1)
         )
     ).scalar_one()
-    session.add(
-        User(phone="+79990000001", role="admin",
-             password_hash=_STAFF_PASSWORDS_HASHED["admin12345"])
-    )
-    session.add(
-        User(phone="+79990000002", role="master",
-             staff_id=first_staff.id,
-             password_hash=_STAFF_PASSWORDS_HASHED["master12345"])
-    )
+    admin = User(phone="+79990000001", role="admin",
+                 password_hash=_STAFF_PASSWORDS_HASHED["admin12345"])
+    master = User(phone="+79990000002", role="master",
+                  staff_id=first_staff.id,
+                  password_hash=_STAFF_PASSWORDS_HASHED["master12345"])
+    session.add(admin)
+    session.add(master)
+    # Flush so the client-side uuid4 default materializes the user ids.
+    await session.flush()
+    await UserSettingsService.insert_defaults(session, admin.id)
+    await UserSettingsService.insert_defaults(session, master.id)
 
 
 # GH #266: former single masters seed is split into staff cards (people) +

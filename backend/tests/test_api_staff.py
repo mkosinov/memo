@@ -1264,3 +1264,113 @@ class TestMastersListIdFilter:
             [m1["id"], m2["id"]]
         )
         assert body["total"] == 2
+
+
+class TestDeleteCascadesUserSettings:
+    """GH #319 Task 3: «Каскад смерти» — настройки сносятся вместе с учёткой.
+
+    Deleting a staff card with a linked account removes BOTH the ``User``
+    row AND its ``UserSettings`` row (cascade death). Archive/dismissal
+    does NOT touch settings (archive is not death).
+    """
+
+    def test_execute_mode_removes_user_and_settings(self, api_client) -> None:
+        """Execute-mode (DELETE with body): staff card + user + settings →
+        DB has NEITHER User NOR UserSettings after the delete."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+        user_id = str(_uuid.uuid4())
+        settings_id = str(_uuid.uuid4())
+        query_db(
+            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{user_id}', '+7999{_uuid.uuid4().int % 10**10:010d}', 'x', 'master', "
+            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
+        query_db(
+            f"INSERT INTO user_settings (id, user_id, theme, language, "
+            f"column_order_staff, column_order_locations, show_archived_masters, "
+            f"show_archived_locations, created_at, updated_at) "
+            f"VALUES ('{settings_id}', '{user_id}', 'dark', 'en', '[]', '[]', "
+            f"1, 0, datetime('now'), datetime('now'))"
+        )
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"resolutions": {}}
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert query_db(f"SELECT * FROM users WHERE id='{user_id}'") == []
+        assert query_db(
+            f"SELECT * FROM user_settings WHERE id='{settings_id}'"
+        ) == []
+
+    def test_dry_run_shows_users_dep_unchanged(self, api_client) -> None:
+        """Dry-run (no-body DELETE): the dependency tree still lists
+        ``users`` (UserSettings is part of the users cascade, NOT a separate
+        matrix entry). Shape unchanged."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+        user_id = str(_uuid.uuid4())
+        query_db(
+            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{user_id}', '+7999{_uuid.uuid4().int % 10**10:010d}', 'x', 'master', "
+            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
+        query_db(
+            f"INSERT INTO user_settings (id, user_id, theme, language, "
+            f"column_order_staff, column_order_locations, show_archived_masters, "
+            f"show_archived_locations, created_at, updated_at) "
+            f"VALUES ('{str(_uuid.uuid4())}', '{user_id}', 'light', 'ru', '[]', '[]', "
+            f"1, 0, datetime('now'), datetime('now'))"
+        )
+
+        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        # users dep is present with count=1
+        assert "users" in deps
+        assert deps["users"]["count"] == 1
+        assert deps["users"]["auto"] is True
+        # UserSettings is NOT a separate dep (it rides the users cascade)
+        assert "user_settings" not in deps
+
+    def test_archive_does_not_touch_settings(self, api_client) -> None:
+        """Archive/dismissal («увольнение-архив») does NOT touch settings —
+        archive is not death."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload()
+        ).json()
+        user_id = str(_uuid.uuid4())
+        settings_id = str(_uuid.uuid4())
+        query_db(
+            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
+            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
+            f"VALUES ('{user_id}', '+7999{_uuid.uuid4().int % 10**10:010d}', 'x', 'master', "
+            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+        )
+        query_db(
+            f"INSERT INTO user_settings (id, user_id, theme, language, "
+            f"column_order_staff, column_order_locations, show_archived_masters, "
+            f"show_archived_locations, created_at, updated_at) "
+            f"VALUES ('{settings_id}', '{user_id}', 'dark', 'en', '[]', '[]', "
+            f"1, 0, datetime('now'), datetime('now'))"
+        )
+
+        resp = api_client.post(
+            f"/api/v1/staff/{created['id']}/archive", json={}
+        )
+
+        assert resp.status_code == 200, resp.text
+        # Settings row SURVIVES archive
+        rows = query_db(
+            f"SELECT * FROM user_settings WHERE id='{settings_id}'"
+        )
+        assert len(rows) == 1
+        assert rows[0]["user_id"] == user_id

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated
+import uuid
+from datetime import datetime
 
-from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import SessionDep
 from src.models.user_settings import UserSettings
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.schemas.user_settings import (
@@ -56,6 +56,76 @@ class UserSettingsService:
         if orm is None:
             return None
         return _to_response(orm)
+
+    # GH #319: the defaults core — NOT @transactional (callers own the
+    # transaction). Reused by get_or_create_by_user_id, the user-creation
+    # scenario and the «учётка» flow.
+    @staticmethod
+    async def insert_defaults(session: AsyncSession, user_id: str) -> None:
+        """Atomically insert a defaults row for ``user_id`` if absent.
+
+        SQLite ``INSERT ... ON CONFLICT(user_id) DO NOTHING`` — concurrent
+        callers race safely (exactly one row lands, losers are silent
+        no-ops). NO exception interception: a lock/unavailability failure
+        propagates honestly (→ 500). Values are explicit literals —
+        a mirror of the model defaults; change them together.
+        """
+        stmt = (
+            sqlite_insert(UserSettings)
+            .values(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                theme="light",
+                language="ru",
+                column_order_staff="[]",
+                column_order_locations="[]",
+                show_archived_masters=True,
+                show_archived_locations=False,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
+        await session.execute(stmt)
+
+    # GH #319: commits MANUALLY, NOT @transactional — the decorator is the
+    # single post-commit publish point (it always marks + publishes the
+    # service's own entity), so a decorated get-or-create would publish a
+    # ``user_settings`` invalidation event on EVERY GET (the #319 e2e
+    # regression). The settings row is personal, no foreign caches — spec
+    # §5.1: no separate bus event. Same silent-commit pattern as
+    # AuthService.resolve/logout: undecorated method, ``await session.commit()``
+    # in the body (the row DOES land in the DB), no hub publish.
+    async def get_or_create_by_user_id(
+        self, session: AsyncSession, user_id: str
+    ) -> UserSettingsResponse:
+        """GH #319 get-or-create: return the user's settings row, creating
+        the defaults row when missing.
+
+        Atomic corridor: ``insert_defaults`` (ON CONFLICT DO NOTHING) +
+        SELECT + manual commit. A second concurrent caller simply reads
+        the winner's row. If the SELECT still finds nothing, that is an
+        honest failure — raise (no interception, no silent defaults
+        response). The commit persists the insert (spec §5.3: «запись
+        именно в базу») but publishes NO invalidation event — silent by
+        design (spec §5.1).
+        """
+        await self.insert_defaults(session, user_id)
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        result = await session.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if orm is None:
+            raise RuntimeError(
+                f"user_settings row for user {user_id!r} vanished after "
+                f"ON CONFLICT DO NOTHING insert — database is unavailable "
+                f"or the row was concurrently deleted"
+            )
+        # Snapshot BEFORE commit: the response is a plain Pydantic value,
+        # independent of post-commit session state (expire_on_commit is
+        # False in both factories, but this keeps the read explicit).
+        response = _to_response(orm)
+        await session.commit()
+        return response
 
     async def get_by_id(
         self, session: AsyncSession, id: str
@@ -124,6 +194,24 @@ class UserSettingsService:
         await session.flush()
         await session.refresh(orm)
         return _to_response(orm)
+
+    @staticmethod
+    async def delete_by_user_ids(
+        session: AsyncSession, user_ids: list[str]
+    ) -> None:
+        """Bulk-delete settings rows for the given user_ids.
+
+        Set-based bulk command (canon rule 4): one
+        ``DELETE FROM user_settings WHERE user_id IN (...)`` — filter by the
+        entity's OWN column (``user_settings.user_id``). No per-row loop.
+        Does NOT commit — the caller's transaction owns the commit boundary.
+        GH #319: cascade death — settings die with their accounts.
+        """
+        if not user_ids:
+            return
+        await session.execute(
+            delete(UserSettings).where(UserSettings.user_id.in_(user_ids))
+        )
 
     @transactional
     async def delete(self, session: AsyncSession, id: str) -> bool:

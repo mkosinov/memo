@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider, useMutationState } from '@tanstack/re
 import { Topbar } from '../app/components/layout/Topbar';
 import { UIProvider } from '../contexts/UIContext';
 import { UserSettingsProvider } from '../contexts/UserSettingsContext';
-import { getUserSettings, createUserSettings, patchUserSettings } from '@memo/api-client';
+import { getUserSettings, patchUserSettings } from '@memo/api-client';
 import {
   createMockScheduleData,
   createMockUseScheduleView,
@@ -30,7 +30,6 @@ vi.mock('@memo/api-client', () => {
   createActivity: vi.fn(),
   updateActivity: vi.fn(),
   getUserSettings: vi.fn(),
-  createUserSettings: vi.fn(),
   patchUserSettings: vi.fn(),
   });
 });
@@ -128,7 +127,6 @@ describe('Topbar — Cell Height Zoom Control', () => {
       show_archived_masters: true,
       show_archived_locations: false,
     } as never);
-    vi.mocked(createUserSettings).mockRejectedValue(new Error('not needed'));
     vi.mocked(patchUserSettings).mockResolvedValue({} as never);
   });
 

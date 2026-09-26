@@ -6,7 +6,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import TypeVar
 
-from sqlalchemy import ColumnElement, func, not_, select
+from sqlalchemy import ColumnElement, delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.scope import mask_phone
@@ -17,7 +17,7 @@ from src.models.client import Client
 from src.models.enums import ArchiveStatus
 from src.models.payment import Payment
 from src.models.record import Record
-from src.repositories.generic import ArchiveRepository, get_archive_repository
+from src.repositories.client import ClientRepository, get_client_repository
 from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.client import (
     ClientCreate,
@@ -88,12 +88,20 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
 
     def __init__(
         self,
-        repository: ArchiveRepository,
+        repository: ClientRepository,
         model: type[Client],
         response_schema: type[ClientResponse],
         visitor_service: VisitorService,
     ) -> None:
         super().__init__(repository, model, response_schema)
+        # GH #327 Task 3: narrow the attribute type to the owner repo — the
+        # own-edge bulk command (``delete_tags_by_client_id``) executes
+        # through ``ClientRepository``, and the declared type lets mypy see
+        # it without casts (precedent: PaymentService.__init__, GH #171 T1).
+        # The repository stays stateless — the switch from the generic
+        # ``ArchiveRepository`` singleton to the specialized one is
+        # behavior-neutral for every inherited path.
+        self._repository: ClientRepository = repository
         self._visitor_service = visitor_service
 
     # GH #212 search matrix (spec §5.2): substring over name/phone/email,
@@ -226,6 +234,30 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
             mark_changed("clients")
         return client
 
+    # ── GH #327 Task 3 — own-edge delete building block (no transaction) ──
+
+    async def delete_row_with_tags(self, db_session: AsyncSession, client_id: str) -> None:
+        """Remove the client's OWN tag bundle + the client row — WITHOUT
+        committing.
+
+        GH #327 Task 3 scenario building block (no transaction; canon
+        docs/domain-rules/service-layer.md rules 1, 3-4): the caller's
+        scenario owns the transaction boundary and the commit. The
+        ``client_tags`` join rows are the client's OWN child links without
+        a lifecycle of their own (rule 1), so their bulk delete lives in
+        the owner repository (``ClientRepository.delete_tags_by_client_id``
+        — ONE set-based statement) and runs BEFORE the row (the join's
+        FKs carry no ondelete action — #194). The row goes by a bulk
+        ``DELETE ... WHERE id`` statement (no instance-delete switch);
+        the whole cascade is orchestrated by the future
+        ``usecases.clients.delete_client`` scenario (GH #327 Task 4).
+        No event marks here — "clients"/"client_tags" are the scenario's
+        own-entity and edge marks. Precedent:
+        ``RecordService.delete_row_with_tags``.
+        """
+        await self._repository.delete_tags_by_client_id(db_session, client_id)
+        await db_session.execute(delete(Client).where(Client.id == client_id))
+
 
 @lru_cache
 def get_client_service() -> ClientService:
@@ -234,9 +266,15 @@ def get_client_service() -> ClientService:
     Both singletons are ``@lru_cache``d, so tests that monkey-patch
     ``VisitorService._delete_cascade`` (the atomicity test) patch the SAME
     instance the ClientService holds — the executor sees the patched method.
+
+    GH #327 Task 3: the service sits on the specialized owner repository
+    (``ClientRepository``) — the generic archive singleton gave way to the
+    first own table command (``delete_tags_by_client_id``); every inherited
+    path is behavior-neutral (the specialized repo adds commands, changes
+    none).
     """
     return ClientService(
-        get_archive_repository(),
+        get_client_repository(),
         Client,
         ClientResponse,
         get_visitor_service(),

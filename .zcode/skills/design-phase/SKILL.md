@@ -7,7 +7,7 @@ description: DESIGN phase on the host (zcode) in the host/container split topolo
 
 ## 0. Topology and role
 
-DESIGN (gates A/B/C — restructured 2026-09-18; board: `In Design` → `Ready to IMPL` + the gate field, §2) is this interactive zcode host session. IMPL (G3–G7) is the opencode container (@manager/@architect) — we do not go there. The session merges the manager+architect roles for DESIGN: talks to the user at the gates and dispatches subagents **one level deep** (panel, plan reviewer) — nested dispatch is unnecessary and unavailable (depth limit).
+DESIGN (gates A/B/C — restructured 2026-09-18; board: `In Design` → `Ready to IMPL` + the gate field, §2) is this interactive zcode host session. IMPL (G3–G7) is the opencode container (@manager/@architect) — we do not go there. The session merges the manager+architect roles for DESIGN: talks to the user at the gates and dispatches subagents **one level deep** (the scout; the spec panel and the plan reviewer run in the container through the panel runner, §4/§5).
 
 Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/dev/superagents/docs/workflow/design-phase.md` (this phase) + `impl-phase.md`; migration plan: `~/dev/superagents/docs/plans/2026-09-05-host-design-container-impl-split-plan.md`.
 
@@ -93,19 +93,27 @@ superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
   - no placeholders ("TBD", "add validation" — that is a plan failure).
 - Domain rules changed → `docs/domain-rules/` is committed together with the spec.
 
-## 4. Panel (host port — body from `.opencode/skills/panel-spec-review`)
+## 4. Panel (container runner — zen free models, D-flow since 2026-09-26)
 
-1. Dispatch: **6 agents in parallel**, in a single Agent-tool message:
-   `spec-panel-completeness`, `spec-panel-consistency`, `spec-panel-feasibility`, `spec-panel-simplicity`, `spec-panel-best-practices`, `spec-panel-security` (files in the repo's `.zcode/agents/`, models `omniroute/panel-*`).
-2. Each prompt: the **spec path** (+ the previous spec revision's path, if there was one). No `gh issue view`, no network — except best-practices, whose design includes WebSearch/WebFetch.
-3. Aggregation: collect the 6 reports → dedupe identical findings → rank **BLOCKER > MAJOR > MINOR** → one consolidated report to the user for the fix decision.
-4. **Availability policy (host adaptation, no subagent audit):** a panelist did not return / crashed → **one** rerun; second failure → mark it `skipped` in the consolidated report, verdict on the rest.
-5. best-practices returned `Verdict: FAILED` (web research unavailable) → note it in the report and exclude it from the verdict — that is its designed refusal, not a crash.
-6. The agent registry is seeded only at session start: `Agent tool: not found` while `.zcode/agents/` files exist → restart the session.
+1. Stage the inputs on the host and copy them into the container:
+   ```bash
+   mkdir -p /tmp/panel-<N>        # spec.md (+ prev-spec.md if a revision exists)
+   docker exec opencode mkdir -p /root/workspace/panel-in
+   docker cp /tmp/panel-<N> opencode:/root/workspace/panel-in/<run-id>
+   ```
+2. One dispatch runs the whole panel (run it in the background — a full panel takes up to ~25 min):
+   `docker exec opencode bash /root/workspace/memo/.opencode/scripts/panel_review.sh <run-id> /root/workspace/panel-in/<run-id> spec-panel-completeness spec-panel-consistency spec-panel-feasibility spec-panel-simplicity spec-panel-best-practices spec-panel-security`
+   The script syncs the dedicated clean clone `/root/workspace/panel-memo` (never the IMPL clone), copies the inputs to `.panel-review/`, and launches the agents in parallel — each with its own ephemeral opencode server (fresh agent definitions; the long-running :4096 server is not involved and is never restarted). Models are zen free, baked in the repo's `.opencode/agents/spec-panel-*.md` (`mode: all`); per-agent timeout 25 min. The script prints one summary line per agent (rc / seconds / report path).
+3. Fetch the reports: `docker cp opencode:/root/workspace/panel-out/<run-id> /tmp/panel-out-<run-id>` → read the `<agent>.md` files (per-agent stderr sits next to them).
+4. Aggregation: dedupe identical findings → rank **BLOCKER > MAJOR > MINOR** → one consolidated report to the user for the fix decision. Before trusting a finding, verify it against the code — the panelists read the clean clone and err in paths (the #287 lesson).
+5. Availability policy: a summary line `rc!=0` (124 = timeout, rate limit) or an empty report → **one** rerun of that agent alone (same script, only that agent as the argument); second failure → mark it `skipped` in the consolidated report, verdict on the rest.
+6. best-practices returned `Verdict: FAILED` (web research unavailable) → note it in the report and exclude it from the verdict — that is its designed refusal, not a crash.
+7. The panel sees the repo at origin/main only (the script syncs the clean clone); uncommitted host-side state is invisible to it — keep the spec self-contained (§3).
+8. Fallback: container unreachable → dispatch the host agents `.zcode/agents/spec-panel-*.md` (omniroute combos) the pre-D-flow way; aggregation unchanged.
 
-## 5. Gate C — plan review
+## 5. Gate C — plan review (container runner)
 
-Dispatch `plan-reviewer` (verifies the plan faithfully and completely expands the approved spec): the prompt carries the spec path + plan path. No spec-changing findings → Gate C auto-OK: fold the fixes into the plan text, commit + push, board → `Ready to IMPL` — no user stop. The closing report lists the plan's tasks, one line each, plus the spec/plan paths. Findings that change the spec (from the reviewer or from writing the plan itself) → STOP: `gate N plan`; what was found, why the spec changes, the proposed fix — the user decides; this is the last point where the discussion can still return to Gate A.
+Dispatch `plan-reviewer` through the same panel runner (§4): stage the plan + the spec it expands into an input dir (`plan.md`, `spec.md`), docker cp, then `docker exec opencode bash /root/workspace/memo/.opencode/scripts/panel_review.sh <run-id> /root/workspace/panel-in/<run-id> plan-reviewer`; fetch the report from `/root/workspace/panel-out/<run-id>/plan-reviewer.md`. Model: zen free big-pickle (baked in `.opencode/agents/plan-reviewer.md`). No spec-changing findings → Gate C auto-OK: fold the fixes into the plan text, commit + push, board → `Ready to IMPL` — no user stop. The closing report lists the plan's tasks, one line each, plus the spec/plan paths. Findings that change the spec (from the reviewer or from writing the plan itself) → STOP: `gate N plan`; what was found, why the spec changes, the proposed fix — the user decides; this is the last point where the discussion can still return to Gate A.
 
 ## 6. DESIGN session DoD (the seam contract)
 

@@ -47,7 +47,6 @@ vi.mock('@/contexts/UIContext', () => ({
 import {
   useCreateService,
   useUpdateService,
-  usePatchService,
   useDeleteService,
   useArchiveService,
   useRestoreService,
@@ -198,35 +197,6 @@ describe('useServicesMutations', () => {
     });
   });
 
-  describe('usePatchService', () => {
-    it('calls patchService with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchService.mockResolvedValue({ ...serviceResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchService(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchService).toHaveBeenCalledWith('s1', { title: 'Patched' });
-      expect(mockUpdateService).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the services query cache on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchService.mockResolvedValue({ ...serviceResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchService(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's1', data: { title: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });
-    });
-  });
 
   describe('useDeleteService — hook surface (deferred conveyor)', () => {
     it('removeService always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {

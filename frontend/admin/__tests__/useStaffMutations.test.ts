@@ -47,7 +47,6 @@ vi.mock('@/contexts/UIContext', () => ({
 import {
   useCreateStaff,
   useUpdateStaff,
-  usePatchStaff,
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
@@ -170,35 +169,6 @@ describe('useStaffMutations', () => {
     });
   });
 
-  describe('usePatchStaff', () => {
-    it('calls patchStaff with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchStaff.mockResolvedValue(staffResponse);
-
-      const { result } = renderHook(() => usePatchStaff(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's-1', data: { first_name: 'Пётр' } });
-      });
-
-      expect(mockPatchStaff).toHaveBeenCalledWith('s-1', { first_name: 'Пётр' });
-      expect(mockUpdateStaff).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the staff family on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchStaff.mockResolvedValue(staffResponse);
-
-      const { result } = renderHook(() => usePatchStaff(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's-1', data: { first_name: 'Пётр' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
-    });
-  });
 
   describe('useDeleteStaff — hook surface (deferred conveyor)', () => {
     it('removeStaff always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {

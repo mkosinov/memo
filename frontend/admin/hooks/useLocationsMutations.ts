@@ -6,7 +6,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   createLocation,
   updateLocation,
-  patchLocation,
   archiveLocation,
   restoreLocation,
   dryRunDeleteLocation,
@@ -48,14 +47,6 @@ export function useUpdateLocation() {
   });
 }
 
-export function usePatchLocation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<LocationUpdate> }) =>
-      patchLocation(id, data),
-    onSuccess: () => invalidateEntities(queryClient, ['locations']),
-  });
-}
 
 // ── #345 Task 7: deferred location delete — the useDeleteTag (#318) /
 // useDeleteRecord (#285) / useDeleteStaff (Task 6) conveyor ─────────────────

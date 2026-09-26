@@ -61,10 +61,6 @@ vi.mock('@/hooks/useLocationsMutations', () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
-  usePatchLocation: vi.fn(() => ({
-    mutateAsync: vi.fn().mockResolvedValue({}),
-    isPending: false,
-  })),
   useDeleteLocation: vi.fn(() => ({
     removeLocation: vi.fn().mockResolvedValue(undefined),
     removeLocationResolved: vi.fn().mockResolvedValue(undefined),
@@ -100,7 +96,6 @@ import { LocationsTable } from '@/app/(main)/locations/components/LocationsTable
 import { LocationsProvider } from '@/contexts/LocationsContext';
 import {
   useUpdateLocation,
-  usePatchLocation,
   useDeleteLocation,
   useArchiveLocation,
   useRestoreLocation,
@@ -108,7 +103,6 @@ import {
 import { getLocations, ApiError } from '@memo/api-client';
 
 const mockUseUpdateLocation = vi.mocked(useUpdateLocation);
-const mockUsePatchLocation = vi.mocked(usePatchLocation);
 const mockUseDeleteLocation = vi.mocked(useDeleteLocation);
 const mockUseArchiveLocation = vi.mocked(useArchiveLocation);
 const mockUseRestoreLocation = vi.mocked(useRestoreLocation);
@@ -603,9 +597,7 @@ describe('LocationsTable', () => {
 
   it('calls archiveLocation when "В архив" clicked on an active location', async () => {
     const archiveMutateAsync = vi.fn().mockResolvedValue(createMockLocationResponse({ id: 'loc-1', archived: true }));
-    const patchMutateAsync = vi.fn();
     mockUseArchiveLocation.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
-    mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
     setupEnvelope();
     await renderLoaded();
 
@@ -613,14 +605,11 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('loc-1'));
-    expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
   it('calls restoreLocation when "Восстановить" clicked on an archived location', async () => {
     const restoreMutateAsync = vi.fn().mockResolvedValue(createMockLocationResponse({ id: 'loc-2', archived: false }));
-    const patchMutateAsync = vi.fn();
     mockUseRestoreLocation.mockReturnValue({ mutateAsync: restoreMutateAsync, isPending: false } as never);
-    mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
     setupEnvelope();
     await renderLoaded();
 
@@ -629,7 +618,6 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('loc-2'));
-    expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
   // ─── Column picker ──────────────────────────────────────────────────────

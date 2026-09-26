@@ -6,7 +6,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   createService,
   updateService,
-  patchService,
   archiveService,
   restoreService,
   dryRunDeleteService,
@@ -59,14 +58,6 @@ export function useUpdateService() {
   });
 }
 
-export function usePatchService() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<ServiceUpdate> }) =>
-      patchService(id, data),
-    onSuccess: () => invalidateEntities(queryClient, ['services']),
-  });
-}
 
 // ── #345 Task 7: deferred service delete — the useDeleteTag (#318) /
 // useDeleteRecord (#285) / useDeleteStaff (Task 6) conveyor ─────────────────

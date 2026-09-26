@@ -248,14 +248,6 @@ export const mockServiceResponse: ServiceResponse = {
 };
 
 /** Factory for creating ServiceResponse objects with overrides. */
-export function createMockServiceResponse(
-  overrides: Partial<ServiceResponse> = {},
-): ServiceResponse {
-  return {
-    ...mockServiceResponse,
-    ...overrides,
-  };
-}
 
 // ─── MasterViewResponse (read-only /masters view, GH #266) ────────────────
 // The view returns ACTING masters only (masters.is_active = true), so there is
@@ -307,14 +299,6 @@ export const mockMasterResponseArchived: MasterViewResponse = {
 };
 
 /** Factory for creating MasterViewResponse objects with overrides. */
-export function createMockMasterResponse(
-  overrides: Partial<MasterViewResponse> = {},
-): MasterViewResponse {
-  return {
-    ...mockMasterResponse,
-    ...overrides,
-  };
-}
 
 // ─── StaffResponse (composite staff card, GH #266 «Сотрудники» screen) ────
 // `archived` = the PERSON flag (staff.is_active inverted); `master.archived` =

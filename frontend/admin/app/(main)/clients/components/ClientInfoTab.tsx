@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ClientWithStats, ClientUpdate, DependencyNode, VisitorResponse } from '@memo/api-client';
 import { ApiError, getClientVisitors, createVisitor } from '@memo/api-client';
 import { useDeleteVisitor } from '@/hooks/useVisitorsMutations';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 import { useUI } from '@/contexts/UIContext';
+import { qk } from '@/lib/queryKeys';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 
 const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
@@ -36,9 +38,20 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   const [channel, setChannel] = useState(client?.channel && isKnownChannel(client.channel) ? client.channel : '');
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Visitors state
-  const [visitors, setVisitors] = useState<VisitorResponse[]>([]);
-  const [visitorsLoading, setVisitorsLoading] = useState(false);
+  // ── Visitors render source — #324 Task 8 review fix ───────────────────
+  // The list now renders FROM REACT-QUERY (the ['visitors', clientId] family
+  // — the same key the deferred-delete hook snapshots/restores), replacing
+  // the former effect-driven local fetch: for a deferred delete the card and
+  // the conveyor must share ONE state — the optimistic removal, the undo
+  // restore and the commit invalidation then converge the visible rows by
+  // construction (mirrors the tags/photos surfaces whose tables render from
+  // their query families).
+  const queryClient = useQueryClient();
+  const { data: visitors = [], isLoading: visitorsLoading } = useQuery({
+    queryKey: qk.visitors(client?.id ?? ''),
+    queryFn: () => getClientVisitors(client!.id),
+    enabled: mode === 'view' && !!client,
+  });
   const [showVisitorForm, setShowVisitorForm] = useState(false);
   const [newVisitorName, setNewVisitorName] = useState('');
   const [newVisitorAge, setNewVisitorAge] = useState('');
@@ -51,15 +64,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setHasChanges(false);
   }, [client]);
 
-  // Fetch visitors when client changes (view mode only)
-  useEffect(() => {
-    if (mode !== 'view' || !client) return;
-    setVisitorsLoading(true);
-    getClientVisitors(client.id)
-      .then(setVisitors)
-      .catch(() => setVisitors([]))
-      .finally(() => setVisitorsLoading(false));
-  }, [client, mode]);
+  // (Visitors need no reset effect — the query key swap refetches on its own.)
 
   const handleChange = useCallback(() => setHasChanges(true), []);
 
@@ -94,28 +99,29 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setNewVisitorName('');
     setNewVisitorAge('');
     setShowVisitorForm(false);
-    // Refetch visitors
-    const updated = await getClientVisitors(client.id);
-    setVisitors(updated);
-  }, [newVisitorName, newVisitorAge, client]);
+    // Refresh the visitors query — the render source (#324 review fix:
+    // the local setVisitors mirror is gone; invalidate the SAME family the
+    // deferred-delete conveyor snapshots).
+    await queryClient.invalidateQueries({ queryKey: qk.visitors(client.id) });
+  }, [newVisitorName, newVisitorAge, client, queryClient]);
 
   // ── #324 Task 8: visitor delete on the deferred conveyor ──────────────
   // The × button goes through removeVisitor (dry-run first): a visit-less
   // visitor → 204 → optimistic row removal + 5s undo ring; with visits →
   // 409 rejection here → park the tree + open DeleteDialog «Посещения: N
   // будут удалены». NO instant delete path remains (bare DELETE → 422).
+  // Review fix: the card renders from the ['visitors', clientId] query —
+  // the hook's optimistic remove, UNDO RESTORE and commit invalidation all
+  // converge the visible rows (no local list mirror to drift out of sync).
   const { removeVisitor, removeVisitorResolved } = useDeleteVisitor();
   const { showToast } = useUI();
   const [deleteTarget, setDeleteTarget] = useState<{ visitor: VisitorResponse; deps: DependencyNode[] } | null>(null);
 
   const handleDeleteVisitor = useCallback(async (visitor: VisitorResponse) => {
     try {
+      // 204 → the hook removed the row from the query caches — the card's
+      // useQuery observer re-renders it away at once (the ring's promise).
       await removeVisitor(visitor);
-      // Mirror the optimistic cache removal in this LOCAL list state (the
-      // fetch above populated it outside react-query) — the × user sees the
-      // same picture the ring promises; undo converges via the commit's
-      // family invalidation + the effect refetch on the next client change.
-      setVisitors((prev) => prev.filter((v) => v.id !== visitor.id));
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
         setDeleteTarget({ visitor, deps: err.dependencies });
@@ -128,9 +134,9 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
 
   const handleDeleteVisitorResolved = useCallback(
     (visitor: VisitorResponse, resolutions: Record<string, string>, deps: DependencyNode[]) => {
-      // Enqueue is synchronous — drop the row locally, dialog closes at once.
+      // Enqueue is synchronous — the hook's optimistic removal re-renders
+      // the card, the dialog closes at once.
       void removeVisitorResolved(visitor, resolutions, deps);
-      setVisitors((prev) => prev.filter((v) => v.id !== visitor.id));
     },
     [removeVisitorResolved],
   );

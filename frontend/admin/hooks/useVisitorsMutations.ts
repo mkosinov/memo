@@ -171,9 +171,11 @@ interface PendingActionShape {
 
 /**
  * Deferred visitor delete (#324 Task 8, spec §6/§9.3/§9.4). Entity-level
- * (not record-scoped): consumed by BOTH surfaces — ClientRecordTab (the
- * record modal) and ClientInfoTab (the client card) — the two former
- * instant `deleteVisitor` call sites.
+ * (not record-scoped): the ONE production call site is ClientInfoTab (the
+ * client card's visitors section — spec §9.3 «в карточке клиента»).
+ * ClientRecordTab lost its visitor-level UI in #127 (its × deletes VISITS
+ * via the T6 ring); the former hook-surface `deleteVisitor` is gone and
+ * guarded by a not-exposed test.
  */
 export function useDeleteVisitor() {
   const queryClient = useQueryClient();

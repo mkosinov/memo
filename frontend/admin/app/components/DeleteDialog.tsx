@@ -136,7 +136,7 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   tag: 'тега', // #318: deferred tag delete (tags directory)
   photo: 'фото', // #324: deferred photo delete (photos directory)
   position: 'должности', // #324: deferred position delete (positions directory)
-  visitor: 'посетителя', // #324 Task 8: deferred visitor delete (client card / record tab)
+  visitor: 'посетителя', // #324 Task 8: deferred visitor delete (client card)
 };
 
 // #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are

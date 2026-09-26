@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ClientInfoTab } from '../app/(main)/clients/components/ClientInfoTab';
@@ -389,8 +389,9 @@ describe('ClientInfoTab', () => {
       await waitFor(() => {
         expect(getClientVisitors).toHaveBeenCalledWith('c1');
       });
-      expect(screen.getByText(/Анна/)).toBeInTheDocument();
-      expect(screen.getByText(/Маша/)).toBeInTheDocument();
+      // The list renders from the query — await the observer's re-render.
+      expect(await screen.findByText(/Анна/)).toBeInTheDocument();
+      expect(await screen.findByText(/Маша/)).toBeInTheDocument();
     });
 
     it('shows add visitor button', () => {
@@ -522,6 +523,38 @@ describe('ClientInfoTab', () => {
       expect(resolveDeleteVisitor).not.toHaveBeenCalled();
       // The instant import is no longer used by the component at all.
       expect(deleteVisitor).not.toHaveBeenCalled();
+    });
+
+    it('undo restores the VISIBLE row (query render source) — ring #94 semantics', async () => {
+      renderClientInfoTab();
+      expect(await screen.findAllByTestId('visitor-row')).toHaveLength(2);
+
+      const delBtn = await screen.findAllByRole('button', { name: 'Удалить посетителя' });
+      fireEvent.click(delBtn[0]);
+
+      // Optimistic removal — the row disappears from the card immediately.
+      await waitFor(() => {
+        expect(screen.getAllByTestId('visitor-row')).toHaveLength(1);
+      });
+
+      // «Отменить» from the ring: the enqueued action's undo runs (the
+      // PendingActions provider calls it when the toast is clicked) — the
+      // row must VISIBLY return. The card renders from the
+      // ['visitors', clientId] query, so the hook's cache restore IS the
+      // visual restore (react-query notifies observers on a microtask —
+      // hence waitFor, not a sync assert).
+      const action = mockEnqueuePendingAction.mock.calls.at(-1)![0] as {
+        undo: () => void;
+      };
+      act(() => {
+        action.undo();
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('visitor-row')).toHaveLength(2);
+      });
+      // No server calls on the undo path (dry-run preview guarantee).
+      expect(resolveDeleteVisitor).not.toHaveBeenCalled();
     });
 
     it('dry-run 409 → DeleteDialog opens with «Посещения — будут удалены:» and the row stays', async () => {

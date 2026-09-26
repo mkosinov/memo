@@ -14,17 +14,20 @@ service CLASS cannot be resolved through it directly — the walk therefore also
 records ``_SERVICE_ENTITY: service class → entity name`` as the class-level
 fallback used by :func:`resolve_entity_name`.
 
-Two deviations from a pure walk, both spec-mandated (§3.3/§3.4):
+Two deviations from a pure walk, spec-mandated (§3.3/§3.4):
 
-* ``users`` has NO service of its own — it is written only by the
-  ``StaffService.archive`` D6 user-cascade — but the canonical
-  vocabulary binds it, so ``User → "users"`` is declared here explicitly
-  (cascade-only entry).
-* the standalone pair (``VisitService``/``UserSettingsService``) declare
-  ``entity_name`` explicitly (no ``_model`` — spec §1 trap); their models are
-  still mapped here so the map stays uniformly model-keyed.
+* the standalone services (``VisitService``/``UserSettingsService``/
+  ``UserService``) declare ``entity_name`` explicitly (no ``_model`` —
+  spec §1 trap); their models are still mapped here so the map stays
+  uniformly model-keyed. GH #326 Task 1: ``users`` HAS a writing owner
+  now — ``UserService`` (scenario building blocks only, no
+  ``@transactional`` methods) — so ``User → "users"`` moved from the
+  cascade-only dict to an EXPLICIT pair; the walk still cannot derive
+  it (no ``@transactional`` methods → no marker, and no
+  ``GenericService`` base → skipped by the ``isinstance`` filter), the
+  explicit entry is the owner declaration.
 
-GH #266 additions, same cascade-only pattern as ``User``:
+GH #266 additions, cascade-only:
 
 * ``masters`` — the old masters CRUD service collapsed into read-only
   module-level view functions (``list_masters_view`` /
@@ -32,7 +35,7 @@ GH #266 additions, same cascade-only pattern as ``User``:
   GenericService, not transactional); the extension table is written
   only by ``StaffService`` cascades, which call
   ``mark_changed("masters")`` explicitly — so ``Master → "masters"`` is
-  declared here (cascade-only entry, same shape as ``User``).
+  declared here (cascade-only entry; a writing owner arrives in #326).
 
 Join tables are DELIBERATELY non-canonical (GH #266 decision): the M2M
 tables ``staff_positions`` and ``master_tags`` have no Table entry in
@@ -76,7 +79,10 @@ from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.services.generic import GenericService
 
-# Standalone transactional services — not GenericService subclasses, no _model.
+# Standalone services (explicit entity_name) — not GenericService
+# subclasses, no _model. VisitService/UserSettingsService carry
+# @transactional methods; UserService (#326 T1) is scenario-blocks-only.
+from src.services.user import UserService
 from src.services.user_settings import UserSettingsService
 from src.services.visit import VisitService
 
@@ -85,12 +91,11 @@ if TYPE_CHECKING:
 
 # Cascade-only entities (spec §3.3 — written by other services' cascades,
 # no own transactional service; the walk cannot derive them):
-# * User  — StaffService.archive D6 user-cascade → users.
 # * Master — GH #266: masters CRUD collapsed into StaffService; the masters
 #   extension table is written only via StaffService cascades that call
-#   mark_changed("masters") explicitly.
+#   mark_changed("masters") explicitly. (``User`` left this dict in #326
+#   Task 1 — it now has a writing owner, UserService.)
 _CASCADE_ONLY_MODEL_ENTITY: dict[type, str] = {
-    User: "users",
     Master: "masters",
 }
 
@@ -138,15 +143,19 @@ def _build_maps() -> tuple[dict[type, str], dict[type, str]]:
                 name = str(cast("Any", model).__tablename__)
                 model_entity[model] = name
                 service_entity[type(instance)] = name
-    # Standalone pair: no _model — their models mapped explicitly so the map
-    # stays uniformly model-keyed; the services themselves resolve via their
+    # Standalone services: no _model — their models mapped explicitly so the
+    # map stays uniformly model-keyed; the services themselves resolve via their
     # entity_name ClassVar. Names are DERIVED from the canonical sources
     # (service ``entity_name`` / model ``__tablename__``), not string literals
-    # — the triplication cannot drift.
+    # — the triplication cannot drift. GH #326 Task 1: UserService joins the
+    # explicit-pair club (value "users" unchanged; no @transactional methods,
+    # so the completeness marker walk does not grow).
     model_entity[Visit] = cast("Any", Visit).__tablename__
     model_entity[UserSettings] = cast("Any", UserSettings).__tablename__
+    model_entity[User] = cast("Any", User).__tablename__
     service_entity[VisitService] = VisitService.entity_name
     service_entity[UserSettingsService] = UserSettingsService.entity_name
+    service_entity[UserService] = UserService.entity_name
     # Cascade-only entities (spec §3.3): written by other services' cascades,
     # no own service — merge last.
     model_entity.update(_CASCADE_ONLY_MODEL_ENTITY)

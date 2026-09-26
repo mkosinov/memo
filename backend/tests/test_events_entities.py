@@ -27,7 +27,10 @@ pytestmark = pytest.mark.pure_unit
 # Canonical entity names (backend side of the mirror; frontend pairs in
 # frontend/admin — spec §4.1 drift guard). GH #266: `staff` (StaffService is
 # transactional over the staff table) + `positions` (PositionService) join
-# the canonical set; `masters` stays via the cascade-only Master entry.
+# the canonical set; `masters` stays via the cascade-only Master entry;
+# #326 Task 1: `users` gains a WRITING owner (UserService — scenario
+# building blocks only, no @transactional methods), so its map entry is an
+# explicit owner pair, not cascade-only.
 # Join tables (staff_positions/master_tags) are deliberately NOT canonical —
 # they are emitted as-is and skipped by consumers (see entities.py docstring).
 CANONICAL_ENTITIES = {
@@ -153,6 +156,22 @@ class TestDriftMirror:
         from src.models.master import Master
 
         assert MODEL_ENTITY[Master] == "masters"
+
+    def test_user_is_explicit_owner_entry(self) -> None:
+        """GH #326 Task 1: users HAS a writing owner — UserService (a
+        standalone service whose methods are scenario building blocks, NO
+        ``@transactional``) — so ``User → "users"`` is declared as an
+        EXPLICIT pair like Visit/UserSettings, not a cascade-only entry.
+        The completeness counter does NOT grow: UserService has no
+        ``@transactional`` methods, so the marker walk never yields it."""
+        from src.models.user import User
+        from src.services.user import UserService, get_user_service
+
+        assert getattr(UserService, "entity_name", None) == "users"
+        assert resolve_entity_name(UserService) == "users"
+        assert MODEL_ENTITY[User] == "users"
+        # The factory follows the standalone convention (cached singleton).
+        assert get_user_service() is get_user_service()
 
     def test_join_tables_are_not_canonical(self) -> None:
         """GH #266: staff_positions/master_tags are join tables — emitted

@@ -884,7 +884,12 @@ class TestUserSettingsAudit:
     ) -> None:
         from src.schemas.user_settings import UserSettingsCreate
         from src.services.user_settings import get_user_settings_service
+        from tests.conftest import delete_settings_row
 
+        # GH #319: every user gets a settings defaults row at creation —
+        # drop it so the explicit POST create path (the audit subject)
+        # starts from «user without a row».
+        delete_settings_row(actor["id"])
         created = await get_user_settings_service().create(
             db_session,
             UserSettingsCreate(user_id=actor["id"]),
@@ -921,7 +926,9 @@ class TestUserSettingsAudit:
             UserSettingsUpdate,
         )
         from src.services.user_settings import get_user_settings_service
+        from tests.conftest import delete_settings_row
 
+        delete_settings_row(actor["id"])  # GH #319 defaults row
         created = await get_user_settings_service().create(
             db_session,
             UserSettingsCreate(user_id=actor["id"]),
@@ -947,7 +954,9 @@ class TestUserSettingsAudit:
             UserSettingsUpdate,
         )
         from src.services.user_settings import get_user_settings_service
+        from tests.conftest import delete_settings_row
 
+        delete_settings_row(actor["id"])  # GH #319 defaults row
         await get_user_settings_service().create(
             db_session,
             UserSettingsCreate(user_id=actor["id"]),

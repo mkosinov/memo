@@ -8,6 +8,8 @@ GH #263 T4 (D5): у оплаты нет своей колонки мастера
 делает счёт/сортировку/пагинацию.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from functools import lru_cache
 
@@ -188,6 +190,27 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
         a no-op.
         """
         await self._repository.delete_by_record_id(db_session, record_id)
+        mark_changed("payments")
+
+    async def delete_by_record_ids(
+        self, db_session: AsyncSession, record_ids: list[str],
+    ) -> None:
+        """Remove ALL payments of the given records — WITHOUT committing.
+
+        Non-transactional service method for the usecases layer (canon
+        docs/domain-rules/service-layer.md rules 3-4, GH #325): the
+        caller's scenario owns the transaction boundary and the commit.
+        Value-typed input (``record_ids``), the set-based DELETE itself
+        lives in the owner repository (``PaymentRepository.delete_by_record_ids``
+        — ONE ``IN``-statement, no per-row loop); no recalculation
+        happens here. An empty id set is a no-op (no query issued).
+        Marks the helper's OWN entity ("payments") so the scenario
+        publishes one consistent event batch; outside an active
+        transaction the mark is a no-op.
+        """
+        if not record_ids:
+            return
+        await self._repository.delete_by_record_ids(db_session, record_ids)
         mark_changed("payments")
 
 

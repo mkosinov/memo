@@ -392,6 +392,26 @@ class VisitService:
         if mark_visits:
             mark_changed("visits")
 
+    async def delete_visits_by_record_ids(
+        self, db_session: AsyncSession, record_ids: list[str],
+    ) -> None:
+        """Remove ALL visits of the given records — WITHOUT committing, no recalc.
+
+        Non-transactional service method for the usecases layer (canon
+        docs/domain-rules/service-layer.md rules 3-4, GH #325): the
+        caller's scenario owns the transaction boundary AND the
+        recalculation timing — nothing is recomputed here. Value-typed
+        input (``record_ids``); the set-based DELETE lives in the owner
+        repository (``VisitRepository.delete_by_record_ids`` — ONE
+        ``IN``-statement, no per-row loop). An empty id set is a no-op
+        (no query issued). Marks the helper's OWN entity ("visits");
+        outside an active transaction the mark is a no-op.
+        """
+        if not record_ids:
+            return
+        await self._repository.delete_by_record_ids(db_session, record_ids)
+        mark_changed("visits")
+
     async def create_visits_bulk(
         self, db_session: AsyncSession, record_id: str, items: VisitItemList,
         *, mark_visits: bool = True,

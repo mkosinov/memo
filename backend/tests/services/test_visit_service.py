@@ -284,3 +284,85 @@ async def test_delete_visits_by_record_does_not_commit(db_session, sample_visits
         "delete_visits_by_record must NOT commit — the scenario layer owns "
         "the transaction boundary (canon rule 3)"
     )
+
+
+# ── GH #325 — bulk delete by record ID set (activity-delete scenario) ──────
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_record_ids_is_not_transactional():
+    """The scenario-helper must NOT be wrapped by @transactional."""
+    from src.services.decorators import _TRANSACTIONAL_MARKER
+    from src.services.visit import VisitService
+
+    assert not hasattr(VisitService.delete_visits_by_record_ids, _TRANSACTIONAL_MARKER), (
+        "delete_visits_by_record_ids is a scenario building block — it must NOT "
+        "commit; the usecases layer owns the transaction boundary"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_record_ids_removes_visits_of_records(
+    db_session, api_client, create_record
+):
+    """ONE set-based delete: visits of ALL listed records gone, others stay."""
+    from sqlalchemy import select
+
+    from src.models.visit import Visit
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    record_a = create_record()
+    record_b = create_record()
+    record_c = create_record()  # not in the set — must stay untouched
+    target_ids = [record_a["id"], record_b["id"]]
+
+    service = VisitService(get_visit_repository())
+    await service.delete_visits_by_record_ids(db_session, target_ids)
+
+    gone = (await db_session.execute(
+        select(Visit).where(Visit.record_id.in_(target_ids))
+    )).scalars().all()
+    assert gone == []
+    kept = (await db_session.execute(
+        select(Visit).where(Visit.record_id == record_c["id"])
+    )).scalars().all()
+    assert len(kept) == len(record_c["visits"])  # чужие visits untouched
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_record_ids_empty_set_is_noop(db_session, sample_visits):
+    """An empty ID set issues NO query at all."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    service = VisitService(get_visit_repository())
+
+    with patch.object(db_session, "execute", new_callable=AsyncMock) as exec_spy:
+        await service.delete_visits_by_record_ids(db_session, [])
+    exec_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_record_ids_does_not_commit(
+    db_session, api_client, create_record
+):
+    """No-commit property: rollback after the bulk delete restores visits."""
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+    from tests.conftest import query_db
+
+    record = create_record()
+    service = VisitService(get_visit_repository())
+
+    await service.delete_visits_by_record_ids(db_session, [record["id"]])
+    await db_session.rollback()
+
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM visits WHERE record_id='{record['id']}'"
+    )[0]["c"] == len(record["visits"]), (
+        "delete_visits_by_record_ids must NOT commit — the scenario layer "
+        "owns the transaction boundary (canon rule 3)"
+    )

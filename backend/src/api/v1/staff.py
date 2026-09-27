@@ -16,7 +16,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import asc, nullslast
+from sqlalchemy import asc
 
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import require_permission, verify_fetch_metadata
@@ -29,6 +29,7 @@ from src.domain.errors import (
     PositionNotFoundError,
     SpecialtyRequiredError,
 )
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -79,43 +80,21 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("staff:read"))]
 
-# Sort whitelist map: UI key → ORM columns (domain-rules/staff.md «List
-# contract»). ``position`` is EXCLUDED (M2M, ambiguous). specialty/color
-# live on the masters extension → NULLs LAST in BOTH directions (a card
-# without the master section always sorts after sectioned ones).
-_STAFF_SORT_MAP: dict[str, list] = {
-    "name": [Staff.first_name, Staff.last_name],
-    "specialty": [Master.specialty],
-    "color": [Master.color],
-    "avatar": [Staff.avatar_url],
-    "status": [Staff.is_active],
+# Sort whitelist map: UI key → spec (GH #367 Task 5, domain-rules/staff.md
+# «List contract»). ``position`` is EXCLUDED (M2M, ambiguous). specialty/color
+# live on the masters extension (a LEFT JOIN in the list query supplies
+# them) → policy ``always_nulls_last``: a card without the master section
+# sorts after sectioned ones in BOTH directions (#266 — «пустые — в
+# конце»). All other keys are canonical (asc → nullsfirst / desc →
+# nullslast). The ``sort_by=None`` fallback stays in the route (spec §4.3:
+# entity default, never passed to the resolver).
+_STAFF_SORT_KEYS: SortKeyMap = {
+    "name": SortKeySpec([Staff.first_name, Staff.last_name]),
+    "specialty": SortKeySpec([Master.specialty], policy="always_nulls_last"),
+    "color": SortKeySpec([Master.color], policy="always_nulls_last"),
+    "avatar": SortKeySpec([Staff.avatar_url]),
+    "status": SortKeySpec([Staff.is_active]),
 }
-
-
-def _staff_order_by(sort_by: StaffSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/staff.
-
-    * ``sort_by=None`` → default: ``sort_order ASC, first_name ASC, id ASC``.
-    * ``name``/``avatar``/``status`` → staff columns (records idiom:
-      nulls-first asc / nulls-last desc, ``id ASC`` tiebreak).
-    * ``specialty``/``color`` → masters-extension columns; a LEFT JOIN in
-      the list query supplies them. NULLs (no master section) go LAST in
-      BOTH directions (spec: «пустые — в конце»).
-    """
-    if sort_by is None:
-        return [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
-    cols = _STAFF_SORT_MAP[sort_by]
-    if sort_by in ("specialty", "color"):
-        ordered = [
-            c.desc().nullslast() if sort_order == "desc" else nullslast(c.asc())
-            for c in cols
-        ]
-    else:
-        ordered = [
-            c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-            for c in cols
-        ]
-    return [*ordered, asc(Staff.id)]
 
 
 def _section_error(code: ErrorCode, message: str) -> HTTPException:
@@ -177,7 +156,12 @@ async def list_staff(
     ``q`` (GH #212): substring on first_name/last_name (each separately)
     or exact id on a full UUID.
     """
-    order_by = _staff_order_by(sort_by, sort_order)
+    if sort_by is None:
+        # Spec §4.3: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by (as before).
+        order_by = [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
+    else:
+        order_by = apply_sort(_STAFF_SORT_KEYS, sort_by, sort_order, Staff.id)
     if sort_by in ("specialty", "color"):
         # Extension sort needs the join so NULL cards (no master section)
         # stay in the result set while sorting after sectioned ones.

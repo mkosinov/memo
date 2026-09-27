@@ -54,7 +54,10 @@ async def test_photo_list_rides_list_custom_core(db_session, monkeypatch) -> Non
     assert not stmt._order_by_clauses, "stmt must reach the core unordered"
     order_by = kwargs.get("order_by")
     assert order_by, "ordering must be passed through the order_by= parameter"
-    assert str(order_by[0]) == str(Photo.filename.asc())
+    # GH #367: the shared resolver applies the canonical nulls policy
+    # (asc → nullsfirst) — semantically inert for the NOT NULL filename
+    # column, but the expression's string form carries the wrapper.
+    assert str(order_by[0]) == str(Photo.filename.asc().nullsfirst())
     # honest multi-page envelope + ordering preserved through the parameter
     assert total == 5
     assert [item.filename for item in items] == ["p3.jpg", "p4.jpg"]

@@ -1302,3 +1302,152 @@ class TestClientListIdFilter:
         assert row["email"] is None
         assert "•" in row["phone"]
         assert row["phone"].endswith("6677")  # last 4 digits stay visible
+
+
+# ─── Sort contract (GH #367 Task 2 — check-point §4.1: generic brick + query) ──
+
+
+class TestClientSortContract:
+    """Hard 422 contract for clients `sort_by`/`sort_order` (#367 §3).
+
+    The schema-level `ClientSortBy` Literal (7 columns) must reject garbage
+    BEFORE the service sees it — via the ``Annotated[ClientListParams,
+    Query()]`` injection. This is the check-point smoke test for the
+    generic-``SortParams`` + query combination (spec §4.1).
+    """
+
+    SORT_BY_ENUM = [
+        "name", "records_count", "last_record", "total_paid",
+        "missed_records", "created_at", "updated_at",
+    ]
+
+    def test_garbage_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "banana"})
+        assert resp.status_code == 422, resp.text
+
+    def test_empty_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": ""})
+        assert resp.status_code == 422, resp.text
+
+    def test_wrong_case_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "Name"})
+        assert resp.status_code == 422, resp.text
+
+    def test_garbage_sort_order_returns_422(self, api_client) -> None:
+        resp = api_client.get(
+            "/api/v1/clients", params={"sort_order": "sideways"}
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_openapi_sort_by_is_enum_of_seven(self, api_client) -> None:
+        """OpenAPI guard of the generic brick (spec §4.1/§6): the clients
+        list `sort_by` param must render as an enum of the 7 columns —
+        nested generic models are FastAPI's unpaved road, this pins it."""
+        schema = api_client.get("/openapi.json").json()
+        params = schema["paths"]["/api/v1/clients"]["get"]["parameters"]
+        sort_by = next(p for p in params if p["name"] == "sort_by")
+        assert sort_by["schema"]["enum"] == self.SORT_BY_ENUM
+
+
+class TestClientSortApplication:
+    """GH #367 Task 3 — С1/С3: real ordering through the shared resolver.
+
+    ``list_clients_view`` routes ``sort_by``/``sort_order`` through
+    ``domain/sorting.apply_sort`` (canonical nulls policy: asc →
+    nullsfirst, desc → nullslast — byte-for-byte today's inline behavior)
+    and appends the NEW deterministic ``Client.id.asc()`` tie-break: rows
+    with equal sort values get a stable order across page boundaries
+    (spec §3 delta table; pattern: test_api_records.py paging sorts).
+    """
+
+    @staticmethod
+    def _ids(api_client, **params) -> list[str]:
+        resp = api_client.get("/api/v1/clients", params=params)
+        assert resp.status_code == 200, resp.text
+        return [c["id"] for c in resp.json()["items"]]
+
+    def test_sort_by_name_asc_desc(self, api_client, create_client) -> None:
+        first = create_client(name="Аида")
+        last = create_client(name="Яна")
+        asc = self._ids(api_client, sort_by="name", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="name", sort_order="desc", per_page=100)
+        assert asc.index(first["id"]) < asc.index(last["id"])
+        assert desc.index(last["id"]) < desc.index(first["id"])
+
+    def test_default_sort_is_name_asc(self, api_client, create_client) -> None:
+        """С3: no sort params → default ``name asc`` — same full order as
+        the explicit request (defaults fixed in the params model)."""
+        first = create_client(name="Аида")
+        last = create_client(name="Яна")
+        default = self._ids(api_client, per_page=100)
+        explicit = self._ids(api_client, sort_by="name", sort_order="asc", per_page=100)
+        assert default == [first["id"], last["id"]]
+        assert default == explicit
+
+    def test_sort_by_total_paid_asc_desc(self, api_client, create_record) -> None:
+        """С1: «Потрачено» column — full ordering chain zero → poor → rich
+        in both directions (record without payments keeps total_paid 0)."""
+        zero = create_record()["client_id"]
+        r_poor = create_record()
+        r_rich = create_record()
+        for record_id, amount in ((r_poor["id"], 100), (r_rich["id"], 9000)):
+            resp = api_client.post(
+                "/api/v1/payments",
+                json={"record_id": record_id, "amount": amount, "method": "card"},
+            )
+            assert resp.status_code == 201, resp.text
+        poor, rich = r_poor["client_id"], r_rich["client_id"]
+        asc = self._ids(api_client, sort_by="total_paid", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="total_paid", sort_order="desc", per_page=100)
+        assert asc.index(zero) < asc.index(poor) < asc.index(rich)
+        assert desc.index(rich) < desc.index(poor) < desc.index(zero)
+
+    def test_equal_total_paid_stable_across_pages(
+        self, api_client, create_client, create_record
+    ) -> None:
+        """С1 (core of #367): six clients with equal ``total_paid`` (three
+        with records, three bare — all 0) cut by a ``per_page=3``
+        boundary: pages concatenated == the full deterministic order
+        (``Client.id.asc()`` tie-break), pages disjoint, and a repeated
+        request returns the exact same page. Pattern:
+        ``test_api_records.py`` paging sorts (test_sort_pages_disjoint),
+        strengthened to a full order + repeat-stability pin."""
+        created = [create_record()["client_id"] for _ in range(3)]
+        created += [create_client()["id"] for _ in range(3)]
+        assert len(created) == 6  # data suffices to cut the page boundary
+        page = dict(sort_by="total_paid", sort_order="asc", per_page=3)
+        p1 = self._ids(api_client, page=1, **page)
+        p2 = self._ids(api_client, page=2, **page)
+        assert p1 + p2 == sorted(created)
+        assert not set(p1) & set(p2)
+        assert self._ids(api_client, page=1, **page) == p1
+
+    def test_last_record_nulls_as_today(
+        self, api_client, create_client, create_activity
+    ) -> None:
+        """``last_record`` NULLs — as today (canonical policy): asc →
+        nullsfirst (a client without records on top), desc → nullslast
+        (at the bottom), and the non-null tail orders by recency."""
+        from datetime import UTC, datetime, timedelta
+
+        bare = create_client(name="Безвизитный")
+        earlier = create_client(name="Ранний")
+        later = create_client(name="Поздний")
+        now = datetime.now(UTC)
+        for client, start in (
+            (earlier, now + timedelta(days=1)),
+            (later, now + timedelta(days=2)),
+        ):
+            resp = api_client.post("/api/v1/records", json={
+                "activity_id": create_activity(start=start)["id"],
+                "client_id": client["id"],
+                "visits": [{"name": "Гость", "price": 1000, "status": "waiting"}],
+            })
+            assert resp.status_code == 201, resp.text
+        asc = self._ids(api_client, sort_by="last_record", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="last_record", sort_order="desc", per_page=100)
+        assert asc[0] == bare["id"]
+        assert asc.index(earlier["id"]) < asc.index(later["id"])
+        assert desc[-1] == bare["id"]
+        assert desc.index(later["id"]) < desc.index(earlier["id"])
+

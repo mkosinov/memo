@@ -11,6 +11,7 @@ from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.material import Material
@@ -47,32 +48,17 @@ _WRITE_GUARD = [
     Depends(verify_fetch_metadata),
 ]
 
-# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5).
-# ``archived`` → is_active (asc = is_active ASC = archived-first).
-_MATERIAL_SORT_MAP: dict[str, list] = {
-    "title": [Material.title],
-    "description": [Material.description],
-    "archived": [Material.is_active],
-    "created_at": [Material.created_at],
+# Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; GH #367
+# Task 5: SortKeyMap + shared resolver). ``archived`` → is_active
+# (asc = is_active ASC = archived-first). All keys are canonical
+# (asc → nullsfirst / desc → nullslast); the ``sort_by=None`` fallback
+# stays in the route (spec §4.3).
+_MATERIAL_SORT_KEYS: SortKeyMap = {
+    "title": SortKeySpec([Material.title]),
+    "description": SortKeySpec([Material.description]),
+    "archived": SortKeySpec([Material.is_active]),
+    "created_at": SortKeySpec([Material.created_at]),
 }
-
-
-def _material_order_by(sort_by: MaterialSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/materials.
-
-    * ``sort_by=None`` → spec §4.4 default: ``title ASC, id ASC`` (NEW —
-      materials had no order_by before #205).
-    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
-      then ``id ASC`` tiebreak (records idiom).
-    """
-    if sort_by is None:
-        return [asc(Material.title), asc(Material.id)]
-    cols = _MATERIAL_SORT_MAP[sort_by]
-    ordered = [
-        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-        for c in cols
-    ]
-    return [*ordered, asc(Material.id)]
 
 
 @router.get("", response_model=PaginatedResponse[MaterialResponse])
@@ -100,12 +86,18 @@ async def list_materials(
     ``description`` OR exact id equality for a full UUID; ``total``
     reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
     """
+    if sort_by is None:
+        # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by.
+        order_by = [asc(Material.title), asc(Material.id)]
+    else:
+        order_by = apply_sort(_MATERIAL_SORT_KEYS, sort_by, sort_order, Material.id)
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         status=status,
-        order_by=_material_order_by(sort_by, sort_order),
+        order_by=order_by,
         q=q,
     )
 

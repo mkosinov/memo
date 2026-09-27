@@ -12,6 +12,7 @@ from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
@@ -40,42 +41,27 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("services:read"))]
 
-# Sort whitelist map: UI key → list of ORM columns / subqueries (#205 Task 3,
-# spec §4.5). ``age`` → min_age; ``archived`` → is_active; ``tariffs`` →
-# correlated COUNT subquery (records idiom for aggregate sort keys).
-# ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
-_SERVICE_SORT_MAP: dict[str, list] = {
-    "title": [Service.title],
-    "duration": [Service.duration],
-    "age": [Service.min_age],
-    "tariffs": [
+# Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; GH #367
+# Task 5: SortKeyMap + shared resolver). ``age`` → min_age; ``archived``
+# → is_active; ``tariffs`` → correlated COUNT subquery (records idiom
+# for aggregate sort keys — #213 pin: content moves AS-IS, ``.correlate()``
+# preserved). ``material_hint`` removed by GH #223 Task 13 (spec §10).
+# All keys are canonical (asc → nullsfirst / desc → nullslast); the
+# ``sort_by=None`` fallback stays in the route (spec §4.3).
+_SERVICE_SORT_KEYS: SortKeyMap = {
+    "title": SortKeySpec([Service.title]),
+    "duration": SortKeySpec([Service.duration]),
+    "age": SortKeySpec([Service.min_age]),
+    "tariffs": SortKeySpec([
         select(func.count(Tariff.id))
         .where(Tariff.service_id == Service.id)
         .correlate(Service)
         .scalar_subquery()
-    ],
-    "specialty": [Service.specialty],
-    "archived": [Service.is_active],
-    "created_at": [Service.created_at],
+    ]),
+    "specialty": SortKeySpec([Service.specialty]),
+    "archived": SortKeySpec([Service.is_active]),
+    "created_at": SortKeySpec([Service.created_at]),
 }
-
-
-def _service_order_by(sort_by: ServiceSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/services.
-
-    * ``sort_by=None`` → spec §4.4 default: ``title ASC, id ASC`` (NEW —
-      services had no order_by before #205).
-    * User sort → mapped columns/subqueries with nulls-first (asc) /
-      nulls-last (desc), then ``id ASC`` tiebreak (records idiom).
-    """
-    if sort_by is None:
-        return [asc(Service.title), asc(Service.id)]
-    cols = _SERVICE_SORT_MAP[sort_by]
-    ordered = [
-        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-        for c in cols
-    ]
-    return [*ordered, asc(Service.id)]
 
 
 @router.get("", response_model=PaginatedResponse[ServiceResponse])
@@ -109,12 +95,18 @@ async def list_services(
     validation); valid-but-unknown → 200 with an empty page (filter
     semantics — the same shape as a ``q`` no-match).
     """
+    if sort_by is None:
+        # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by.
+        order_by = [asc(Service.title), asc(Service.id)]
+    else:
+        order_by = apply_sort(_SERVICE_SORT_KEYS, sort_by, sort_order, Service.id)
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         status=status,
-        order_by=_service_order_by(sort_by, sort_order),
+        order_by=order_by,
         q=q,
         material_id=str(material_id) if material_id is not None else None,
     )

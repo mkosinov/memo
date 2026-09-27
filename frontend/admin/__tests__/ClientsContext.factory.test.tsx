@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, render, act, waitFor } from '@testing-library/react';
+import { render, renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PaginatedResponse, ClientWithStats } from '@memo/api-client';
 
 // Mock only the wire fetcher — the factory + context config stay REAL, so this
 // pins the actual ClientsContext fetcher params (GH #140 Task 4 config).
+// #349 Task 4: q/status are canonical factory members (serverSearch +
+// withStatus); the structured filters bag lost `search`/`status`.
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return { ...actual, getClientsWithStats: vi.fn() };
@@ -13,7 +15,6 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 
 import { getClientsWithStats } from '@memo/api-client';
 import { ClientsProvider, useClientsTable, defaultFilters } from '../contexts/ClientsContext';
-import type { ClientFilters } from '../contexts/ClientsContext';
 
 const mockGetClientsWithStats = vi.mocked(getClientsWithStats);
 
@@ -51,7 +52,7 @@ describe('ClientsContext factory config (GH #140)', () => {
     vi.restoreAllMocks();
   });
 
-  it('initial fetch sends the configured defaults (page 1, per_page 20, sort name/asc, status active)', async () => {
+  it('initial fetch sends the configured defaults (page 1, per_page 20, no sort, status active)', async () => {
     const { Wrapper } = setup();
     const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
 
@@ -60,26 +61,16 @@ describe('ClientsContext factory config (GH #140)', () => {
     const params = lastWireParams();
     expect(params.page).toBe(1);
     expect(params.per_page).toBe(20);
-    // defaultSort { sortBy: 'name', sortOrder: 'asc' } is sent on the FIRST fetch
-    expect(params.sort_by).toBe('name');
-    expect(params.sort_order).toBe('asc');
-    // status lives inside the 12-field filters (withStatus: false → no separate slot)
+    // #349 spec §2: sort default = NO sort — sort params reach the server
+    // only after a user pick (the pre-#349 name/asc seed is gone).
+    expect(params.sort_by).toBeUndefined();
+    expect(params.sort_order).toBeUndefined();
+    // Canonical status member (withStatus: true) — 'active' by default.
     expect(params.status).toBe('active');
     expect(result.current.perPage).toBe(20);
   });
 
-  it('suppresses the raw `search` field (renamed to q server-side, #212)', async () => {
-    const { Wrapper } = setup();
-    renderHook(() => useClientsTable(), { wrapper: Wrapper });
-
-    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalled());
-
-    // The fetcher always sets `search: undefined` AFTER spreading filters, so
-    // the raw field never reaches the wire even when a search is active.
-    expect(lastWireParams()).toHaveProperty('search', undefined);
-  });
-
-  it('sends q once filters.search reaches ≥2 chars, and never the raw search', async () => {
+  it('sends q once search reaches ≥2 chars (serverSearch clamp), never the raw search', async () => {
     const { Wrapper } = setup();
     const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
 
@@ -88,31 +79,50 @@ describe('ClientsContext factory config (GH #140)', () => {
     expect(lastWireParams().q).toBeUndefined();
 
     act(() => {
-      result.current.setFilters({ search: 'иван' });
+      result.current.setSearch('иван');
     });
 
     await waitFor(() => {
       expect(lastWireParams().q).toBe('иван');
     });
-    // Raw search stays suppressed even with an active q.
-    expect(lastWireParams()).toHaveProperty('search', undefined);
-    // setFilters resets to page 1 (merge-patch contract).
+    // The structured filters bag has no `search` field at all (#349) — the
+    // key is absent from the wire params entirely.
+    expect(lastWireParams()).not.toHaveProperty('search');
+    // setSearch resets to page 1 (serverSearch contract).
     expect(lastWireParams().page).toBe(1);
   });
 
-  it('does NOT send q for a 1-char search (≥2 clamp)', async () => {
+  it('does NOT send q for a 1-char search (≥2 clamp) — and no idle refetch', async () => {
     const { Wrapper } = setup();
     const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
 
     await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
 
     act(() => {
-      result.current.setFilters({ search: 'и' });
+      result.current.setSearch('и');
     });
 
-    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(2));
-    expect(lastWireParams().q).toBeUndefined();
-    expect(lastWireParams()).toHaveProperty('search', undefined);
+    // #349: a sub-clamp value does not join the query key (q slot stays '')
+    // → NO second wire call at all — the page keeps showing the full page.
+    await act(async () => {});
+    expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1);
+    expect(result.current.search).toBe('и');
+  });
+
+  it('setStatus reaches the wire as the canonical status (page resets to 1)', async () => {
+    const { Wrapper } = setup();
+    const { result } = renderHook(() => useClientsTable(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      result.current.setStatus('archived');
+    });
+
+    await waitFor(() => {
+      expect(lastWireParams().status).toBe('archived');
+    });
+    expect(lastWireParams().page).toBe(1);
   });
 });
 
@@ -135,7 +145,7 @@ describe('ClientsContext clientIds machine field (#232)', () => {
     function Wrapper({ children }: { children: React.ReactNode }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <ClientsProvider initialFilters={{ clientIds: ['id-a', 'id-b'], status: 'all' }}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a', 'id-b'] }}>
             {children}
           </ClientsProvider>
         </QueryClientProvider>
@@ -149,12 +159,13 @@ describe('ClientsContext clientIds machine field (#232)', () => {
     // Machine field reaches the fetcher as `ids` (api-client serializes it as
     // repeated `id` query keys — explicit keys, no filters spread). The raw
     // machine field never reaches the wire (suppressed after the spread, same
-    // pattern as `search`).
+    // pattern as the old `search`).
     expect(lastWireParams().ids).toEqual(['id-a', 'id-b']);
     expect(lastWireParams()).toHaveProperty('clientIds', undefined);
     expect(result.current.filters.clientIds).toEqual(['id-a', 'id-b']);
-    // Deep-link status stays 'all' (archived reachable, #216 behavior).
-    expect(result.current.filters.status).toBe('all');
+    // #349: the deep-link status=all overlay lives in the PAGE adapter now
+    // (effectiveStatus) — the bare factory stays at its own status default.
+    expect(result.current.status).toBe('active');
   });
 
   it('ids absent when clientIds is null (default filters)', async () => {
@@ -190,7 +201,7 @@ describe('ClientsContext clientIds machine field (#232)', () => {
     function Wrapper({ children }: { children: React.ReactNode }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <ClientsProvider initialFilters={{ clientIds: ['id-a'], status: 'all' }}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a'] }}>
             {children}
           </ClientsProvider>
         </QueryClientProvider>
@@ -218,7 +229,7 @@ describe('ClientsContext clientIds machine field (#232)', () => {
     function Wrapper({ children }: { children: React.ReactNode }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <ClientsProvider initialFilters={{ clientIds: ['id-a'], status: 'all' }}>
+          <ClientsProvider initialFilters={{ clientIds: ['id-a'] }}>
             {children}
           </ClientsProvider>
         </QueryClientProvider>
@@ -239,7 +250,9 @@ describe('ClientsContext clientIds machine field (#232)', () => {
   });
 });
 
-// ─── #231 T1: initialFilters seed-at-mount (deep-link single request) ───
+// ─── #231 seed-era factory contract (structured fields, still supported) ───
+// #349: the PAGE no longer uses initialFilters (managed mode owns the seed),
+// but the factory prop remains for uncontrolled consumers until the wave.
 
 describe('ClientsContext factory initialFilters seed (#231)', () => {
   beforeEach(() => {
@@ -258,9 +271,7 @@ describe('ClientsContext factory initialFilters seed (#231)', () => {
     function Wrapper({ children }: { children: React.ReactNode }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <ClientsProvider initialFilters={{ search: 'uuid-1', status: 'all' }}>
-            {children}
-          </ClientsProvider>
+          <ClientsProvider initialFilters={{ min_records: 3 }}>{children}</ClientsProvider>
         </QueryClientProvider>
       );
     }
@@ -269,11 +280,10 @@ describe('ClientsContext factory initialFilters seed (#231)', () => {
 
     await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
 
-    // Seed overrides the two seeded fields; the other 10 keep config defaults
-    expect(result.current.filters).toEqual({ ...defaultFilters, search: 'uuid-1', status: 'all' });
+    // Seed overrides the seeded field; the other fields keep config defaults
+    expect(result.current.filters).toEqual({ ...defaultFilters, min_records: 3 });
     // The very first fetch is already narrowed (one request, not two)
-    expect(lastWireParams().q).toBe('uuid-1');
-    expect(lastWireParams().status).toBe('all');
+    expect(lastWireParams().min_records).toBe(3);
   });
 
   it('without initialFilters the state equals config defaults', async () => {
@@ -290,12 +300,12 @@ describe('ClientsContext factory initialFilters seed (#231)', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    let filtersNow: ClientFilters | undefined;
+    let filtersNow: ReturnType<typeof useClientsTable>['filters'] | undefined;
     function Probe() {
       filtersNow = useClientsTable().filters;
       return null;
     }
-    const ui = (seed: Partial<ClientFilters> | undefined) => (
+    const ui = (seed: Partial<ReturnType<typeof useClientsTable>['filters']> | undefined) => (
       <QueryClientProvider client={queryClient}>
         <ClientsProvider initialFilters={seed}>
           <Probe />
@@ -303,16 +313,16 @@ describe('ClientsContext factory initialFilters seed (#231)', () => {
       </QueryClientProvider>
     );
 
-    const { rerender } = render(ui({ search: 'uuid-1' }));
+    const { rerender } = render(ui({ min_records: 1 }));
 
     await waitFor(() => expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1));
-    expect(filtersNow).toEqual({ ...defaultFilters, search: 'uuid-1' });
+    expect(filtersNow).toEqual({ ...defaultFilters, min_records: 1 });
 
     // Same tree position → Provider re-renders with the new prop, NOT remounts
-    rerender(ui({ search: 'uuid-2' }));
+    rerender(ui({ min_records: 2 }));
 
     await act(async () => {});
-    expect(filtersNow).toEqual({ ...defaultFilters, search: 'uuid-1' });
+    expect(filtersNow).toEqual({ ...defaultFilters, min_records: 1 });
     // No extra fetch — the late prop value never reaches the query
     expect(mockGetClientsWithStats).toHaveBeenCalledTimes(1);
   });
@@ -324,9 +334,7 @@ describe('ClientsContext factory initialFilters seed (#231)', () => {
     function Wrapper({ children }: { children: React.ReactNode }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <ClientsProvider initialFilters={{ search: 'uuid-1', status: 'all' }}>
-            {children}
-          </ClientsProvider>
+          <ClientsProvider initialFilters={{ min_records: 3 }}>{children}</ClientsProvider>
         </QueryClientProvider>
       );
     }

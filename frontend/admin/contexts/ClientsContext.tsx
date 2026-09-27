@@ -5,9 +5,14 @@ import { getClientsWithStats } from '@memo/api-client';
 import type { ClientWithStats } from '@memo/api-client';
 import { qk } from '@/lib/queryKeys';
 
+/**
+ * #349 Task 4 — structured (machine-side) clients filters. The canonical
+ * table params (q/status/sort_by/sort_order/page/per_page) moved to the URL
+ * via useClientsUrlState (spec §4); only the structured filters below stay
+ * context-side. #232 §3.3 machine narrowing field `clientIds` stays: the URL
+ * (?clientId=) is its single writer, exposed read-only by the page adapter.
+ */
 export interface ClientFilters {
-  search: string;
-  status: 'active' | 'all' | 'archived';
   created_from: string;
   created_to: string;
   updated_from: string;
@@ -29,8 +34,6 @@ export interface ClientFilters {
 
 /** Exported for the test fixture (createMockClientsTableState) — single source. */
 export const defaultFilters: ClientFilters = {
-  search: '',
-  status: 'active',
   created_from: '',
   created_to: '',
   updated_from: '',
@@ -44,9 +47,12 @@ export const defaultFilters: ClientFilters = {
 };
 
 // GH #140 — the hand-rolled context dissolved into the shared factory
-// (#205). Query key slot order matches the pre-#140 key exactly:
-// ['clients', page, perPage, filters, sortBy, sortOrder]. Mutations moved to
-// hooks/useClientsMutations (each consumer owns its hook instance).
+// (#205). #349 Task 4: managed mode — q/status are the factory's canonical
+// members (serverSearch + withStatus), the structured filters bag carries the
+// machine-side fields, and the deep-link status=all overlay is fed by the
+// page adapter as `effectiveStatus`. Query key slot order matches the
+// pre-#349 key minus the inlined search/status: ['clients', page, perPage,
+// filters, status, sortBy, sortOrder, q].
 const { Provider, usePagedList } = createPagedListContext<ClientWithStats, ClientFilters>({
   queryKeyPrefix: qk.clients[0],
   fetcher: (p) =>
@@ -54,19 +60,22 @@ const { Provider, usePagedList } = createPagedListContext<ClientWithStats, Clien
       page: p.page,
       per_page: p.per_page,
       ...(p.sort_by ? { sort_by: p.sort_by, sort_order: p.sort_order } : {}),
+      ...(p.status ? { status: p.status } : {}),
+      // serverSearch ≥2-char clamp lives in the factory (#212 §5.5)
+      ...(p.q ? { q: p.q } : {}),
       ...p.filters,
-      // search→q rename (#212): ≥2 chars sends q; raw `search` suppressed after spread
-      q: p.filters.search.length >= 2 ? p.filters.search : undefined,
-      search: undefined,
       // #232: machine narrowing ids — the api-client serializes `ids` as
       // repeated `id` query keys (explicit keys, no filters-bag spread);
       // the raw machine field itself is suppressed after the spread.
       ids: p.filters.clientIds ?? undefined,
       clientIds: undefined,
+      // #349: adapter-only overlay keys never reach the wire (the effective
+      // status above already carries the overlay value).
+      effectiveStatus: undefined,
     }),
-  withStatus: false, // status lives inside the 12-field filters
+  withStatus: true, // #349: canonical status (URL-managed + effective overlay)
+  serverSearch: true, // #349: canonical q with the factory's ≥2-char clamp
   filters: { defaults: defaultFilters },
-  defaultSort: { sortBy: 'name', sortOrder: 'asc' },
   defaultPerPage: 20,
 });
 

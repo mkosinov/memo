@@ -13,28 +13,19 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
   };
 });
 
-// #232 §3.5 — resetFilters also cleans the address of `clientId`: the mock
-// supplies the URL the real hook would read.
-const mockRouter = { push: vi.fn(), replace: vi.fn() };
-let mockSearchParams = new URLSearchParams();
-
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => mockSearchParams,
-  useRouter: () => mockRouter,
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => '/clients',
 }));
 
 import { useClientsTable } from '@/contexts/ClientsContext';
-import type { ClientFilters } from '@/contexts/ClientsContext';
 import { ClientsFilters } from '../app/(main)/clients/components/ClientsFilters';
 
 const mockUseClientsTable = vi.mocked(useClientsTable);
 
 beforeEach(() => {
   mockUseClientsTable.mockReturnValue(createMockClientsTableState());
-  mockSearchParams = new URLSearchParams();
-  mockRouter.push.mockClear();
-  mockRouter.replace.mockClear();
 });
 
 afterEach(() => {
@@ -50,7 +41,7 @@ describe('ClientsFilters', () => {
   it('renders status filter select', () => {
     render(<ClientsFilters />);
     expect(screen.getByText('Статус')).toBeInTheDocument();
-    // Default is «Активные» (filters.status === 'active')
+    // Default is «Активные» (canonical ctx.status === 'active')
     expect(screen.getByDisplayValue('Активные')).toBeInTheDocument();
   });
 
@@ -91,35 +82,37 @@ describe('ClientsFilters', () => {
     expect(resetFilters).toHaveBeenCalledTimes(1);
   });
 
-  it('selecting «Неактивные» sets status to archived', () => {
-    const setFilters = vi.fn();
-    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+  // #349 Task 4: the status select binds to the CANONICAL status member
+  // (URL-backed) — the setter is setStatus, not setFilters.
+  it('selecting «Неактивные» calls setStatus(archived)', () => {
+    const setStatus = vi.fn();
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setStatus }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
     fireEvent.change(select, { target: { value: 'archived' } });
-    expect(setFilters).toHaveBeenCalledWith({ status: 'archived' });
+    expect(setStatus).toHaveBeenCalledWith('archived');
   });
 
-  it('selecting «Все» sets status to all', () => {
-    const setFilters = vi.fn();
-    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+  it('selecting «Все» calls setStatus(all)', () => {
+    const setStatus = vi.fn();
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setStatus }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
-    // Switch away from default first, then back to «Все»
+    // Switch away from default first, then to «Все»
     fireEvent.change(select, { target: { value: 'archived' } });
     fireEvent.change(select, { target: { value: 'all' } });
-    expect(setFilters).toHaveBeenLastCalledWith({ status: 'all' });
+    expect(setStatus).toHaveBeenLastCalledWith('all');
   });
 
-  it('selecting «Активные» sets status to active', () => {
-    const setFilters = vi.fn();
-    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+  it('selecting «Активные» calls setStatus(active)', () => {
+    const setStatus = vi.fn();
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setStatus }));
     render(<ClientsFilters />);
     const select = screen.getByDisplayValue('Активные');
     // Switch to another option then back to «Активные»
     fireEvent.change(select, { target: { value: 'all' } });
     fireEvent.change(select, { target: { value: 'active' } });
-    expect(setFilters).toHaveBeenLastCalledWith({ status: 'active' });
+    expect(setStatus).toHaveBeenLastCalledWith('active');
   });
 
   it('calls setFilters when min visits input changes', () => {
@@ -161,22 +154,22 @@ describe('ClientsFilters', () => {
       vi.useRealTimers();
     });
 
-    it('does not call setFilters immediately on search input', () => {
-      const setFilters = vi.fn();
-      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+    it('does not call setSearch immediately on search input', () => {
+      const setSearch = vi.fn();
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setSearch }));
       render(<ClientsFilters />);
 
       fireEvent.change(screen.getByPlaceholderText(/Поиск по имени или телефону/), {
         target: { value: 'Иванов' },
       });
 
-      // setFilters should NOT be called synchronously
-      expect(setFilters).not.toHaveBeenCalled();
+      // setSearch should NOT be called synchronously
+      expect(setSearch).not.toHaveBeenCalled();
     });
 
-    it('calls setFilters after debounce delay (300ms)', () => {
-      const setFilters = vi.fn();
-      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+    it('calls setSearch after debounce delay (300ms)', () => {
+      const setSearch = vi.fn();
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setSearch }));
       render(<ClientsFilters />);
 
       fireEvent.change(screen.getByPlaceholderText(/Поиск по имени или телефону/), {
@@ -188,12 +181,12 @@ describe('ClientsFilters', () => {
         vi.advanceTimersByTime(350);
       });
 
-      expect(setFilters).toHaveBeenCalledWith({ search: 'Иванов' });
+      expect(setSearch).toHaveBeenCalledWith('Иванов');
     });
 
     it('debounce resets on rapid typing — only last value is sent', () => {
-      const setFilters = vi.fn();
-      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setFilters }));
+      const setSearch = vi.fn();
+      mockUseClientsTable.mockReturnValue(createMockClientsTableState({ setSearch }));
       render(<ClientsFilters />);
 
       const searchInput = screen.getByPlaceholderText(/Поиск по имени или телефону/);
@@ -209,8 +202,8 @@ describe('ClientsFilters', () => {
       act(() => { vi.advanceTimersByTime(350); });
 
       // Only the final value should be sent (the first two timers were cleared)
-      expect(setFilters).toHaveBeenCalledTimes(1);
-      expect(setFilters).toHaveBeenCalledWith({ search: 'Иванов' });
+      expect(setSearch).toHaveBeenCalledTimes(1);
+      expect(setSearch).toHaveBeenCalledWith('Иванов');
     });
   });
 
@@ -300,14 +293,12 @@ describe('ClientsFilters', () => {
   });
 });
 
-describe('ClientsFilters — controlled search input (GH #216)', () => {
-  function mockFiltersContext(overrides: Partial<Pick<ClientFilters, 'search' | 'status'>> = {}) {
+describe('ClientsFilters — controlled search input (GH #216 / #349 canonical q)', () => {
+  /** ctx.search / ctx.status override against the shared fixture. */
+  function mockCtx(overrides: { search?: string; status?: string } = {}) {
     const ctx = createMockClientsTableState({
-      filters: {
-        ...createMockClientsTableState().filters,
-        search: overrides.search ?? '',
-        status: overrides.status ?? 'active',
-      },
+      search: overrides.search ?? '',
+      status: (overrides.status ?? 'active') as ReturnType<typeof createMockClientsTableState>['status'],
     });
     mockUseClientsTable.mockReturnValue(ctx);
     return ctx;
@@ -323,111 +314,73 @@ describe('ClientsFilters — controlled search input (GH #216)', () => {
 
   const searchInput = () => screen.getByPlaceholderText(/Поиск по имени или телефону/);
 
-  it('displays an externally committed search value (deep-link UUID pre-fill)', () => {
-    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
+  it('displays an externally committed search value (URL ?q=)', () => {
+    mockCtx({ search: 'анна' });
     render(<ClientsFilters />);
-    expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
+    expect(searchInput()).toHaveValue('анна');
   });
 
   it('typing updates the draft immediately and commits once after 300ms', () => {
-    const ctx = mockFiltersContext();
+    const ctx = mockCtx();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'иван' } });
     expect(searchInput()).toHaveValue('иван');
-    expect(ctx.setFilters).not.toHaveBeenCalled();
+    expect(ctx.setSearch).not.toHaveBeenCalled();
     act(() => { vi.advanceTimersByTime(300); });
-    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'иван' });
+    expect(ctx.setSearch).toHaveBeenCalledWith('иван');
   });
 
   it('each keystroke restarts the timer (debounce), single commit with final value', () => {
-    const ctx = mockFiltersContext();
+    const ctx = mockCtx();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'ив' } });
     act(() => { vi.advanceTimersByTime(250); });
     fireEvent.change(searchInput(), { target: { value: 'иван' } });
     act(() => { vi.advanceTimersByTime(100); });
-    expect(ctx.setFilters).not.toHaveBeenCalled();
+    expect(ctx.setSearch).not.toHaveBeenCalled();
     act(() => { vi.advanceTimersByTime(250); });
-    expect(ctx.setFilters).toHaveBeenCalledTimes(1);
-    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'иван' });
+    expect(ctx.setSearch).toHaveBeenCalledTimes(1);
+    expect(ctx.setSearch).toHaveBeenCalledWith('иван');
   });
 
   it('type → «Сбросить фильтры» within 300ms: reset wins, timer cancelled, box cleared', () => {
-    const ctx = mockFiltersContext();
+    const ctx = mockCtx();
     render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'а' } });
     fireEvent.click(screen.getByText('Сбросить фильтры'));
     expect(ctx.resetFilters).toHaveBeenCalled();
     expect(searchInput()).toHaveValue('');
     act(() => { vi.advanceTimersByTime(400); });
-    expect(ctx.setFilters).not.toHaveBeenCalledWith({ search: 'а' });
+    expect(ctx.setSearch).not.toHaveBeenCalledWith('а');
   });
 
   it('mid-life external commit syncs the box when not dirty, nothing resurrects', () => {
-    const ctx = mockFiltersContext();
+    const ctx = mockCtx();
     const { rerender } = render(<ClientsFilters />);
-    // no typing → not dirty; an external commit lands post-mount (e.g. deep-link effect)
-    mockFiltersContext({ search: '11111111-2222-3333-4444-555555555555' });
+    // no typing → not dirty; an external commit lands post-mount (back/forward)
+    mockCtx({ search: 'мария' });
     rerender(<ClientsFilters />);
-    expect(searchInput()).toHaveValue('11111111-2222-3333-4444-555555555555');
+    expect(searchInput()).toHaveValue('мария');
     // the sync branch cancelled any armed timer — nothing may resurrect the old value
     act(() => { vi.advanceTimersByTime(400); });
-    expect(ctx.setFilters).not.toHaveBeenCalled();
+    expect(ctx.setSearch).not.toHaveBeenCalled();
   });
 
   it('external commit while user typed ahead keeps the draft (no clobber)', () => {
-    const ctx = mockFiltersContext();
+    const ctx = mockCtx();
     const { rerender } = render(<ClientsFilters />);
     fireEvent.change(searchInput(), { target: { value: 'ив' } });
     // an older commit lands (e.g. previous debounce fired) — draft must survive
-    mockFiltersContext({ search: 'чужое' });
+    mockCtx({ search: 'чужое' });
     rerender(<ClientsFilters />);
     expect(searchInput()).toHaveValue('ив');
     act(() => { vi.advanceTimersByTime(300); });
-    expect(ctx.setFilters).toHaveBeenCalledWith({ search: 'ив' });
+    expect(ctx.setSearch).toHaveBeenCalledWith('ив');
   });
 
-  it('status select is controlled by filters.status', () => {
-    mockFiltersContext({ status: 'all' });
+  it('status select is controlled by the canonical ctx.status', () => {
+    mockCtx({ status: 'all' });
     render(<ClientsFilters />);
     expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
-  });
-});
-
-describe('ClientsFilters — reset cleans the address of clientId (#232 §3.5)', () => {
-  const U1 = '11111111-1111-4111-8111-111111111111';
-  const U2 = '22222222-2222-4222-8222-222222222222';
-
-  // The reset path lives in the clients domain (not the shared paged-list
-  // factory): «Сбросить фильтры» = context resetFilters + the documented
-  // responsibility to drop the narrowing param from the address.
-  it('reset with clientId in the address removes it (replace, scroll: false)', () => {
-    const resetFilters = vi.fn();
-    mockUseClientsTable.mockReturnValue(createMockClientsTableState({ resetFilters }));
-    mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    render(<ClientsFilters />);
-    fireEvent.click(screen.getByText('Сбросить фильтры'));
-    expect(resetFilters).toHaveBeenCalledTimes(1);
-    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
-    expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false });
-    expect(mockRouter.push).not.toHaveBeenCalled();
-  });
-
-  it('reset keeps the other query params, drops ALL clientId occurrences', () => {
-    mockSearchParams = new URLSearchParams([
-      ['clientId', U1],
-      ['clientId', U2],
-      ['page', '3'],
-    ]);
-    render(<ClientsFilters />);
-    fireEvent.click(screen.getByText('Сбросить фильтры'));
-    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=3', { scroll: false });
-  });
-
-  it('reset without clientId in the address does not navigate', () => {
-    mockSearchParams = new URLSearchParams([['page', '3']]);
-    render(<ClientsFilters />);
-    fireEvent.click(screen.getByText('Сбросить фильтры'));
-    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 });

@@ -28,12 +28,11 @@ vi.mock('@/contexts/schedule/ScheduleProvider', () => ({
   },
 }));
 
-// #231 seed-era: the ClientsProvider mock records the props of every render
-// so the deep-link tests can assert on `initialFilters` (replaces the
-// effect-era setFilters assertions). vi.hoisted keeps the capture array
-// available to the hoisted vi.mock factory.
+// #349 Task 4 — managed mode: the page passes the useClientsUrlState adapter
+// into the provider as `urlState`. The mock records the props of every
+// provider render so tests can assert on the integration.
 const { clientsProviderMounts } = vi.hoisted(() => ({
-  clientsProviderMounts: [] as Array<{ initialFilters?: unknown }>,
+  clientsProviderMounts: [] as Array<{ urlState?: unknown; initialFilters?: unknown }>,
 }));
 
 // importOriginal keeps the real `defaultFilters` export available — the
@@ -43,12 +42,23 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
   return {
     ...actual,
     useClientsTable: vi.fn(),
-    ClientsProvider: ({ children, initialFilters }: { children: React.ReactNode; initialFilters?: unknown }) => {
-      clientsProviderMounts.push({ initialFilters });
+    ClientsProvider: ({
+      children,
+      urlState,
+      initialFilters,
+    }: {
+      children: React.ReactNode;
+      urlState?: unknown;
+      initialFilters?: unknown;
+    }) => {
+      clientsProviderMounts.push({ urlState, initialFilters });
       return <div>{children}</div>;
     },
   };
 });
+
+// The REAL page-scoped adapter stays in play — it reads the mocked URL.
+import { useClientsUrlState } from '../app/(main)/clients/useClientsUrlState';
 
 const mockRouter = { push: vi.fn(), replace: vi.fn() };
 let mockSearchParams = new URLSearchParams();
@@ -283,6 +293,27 @@ describe('ClientsPage', () => {
     expect(screen.queryByTestId('client-card-modal')).not.toBeInTheDocument();
   });
 
+  // ─── #349 managed-mode integration seam ────────────────────────────────
+
+  it('passes the URL adapter to the provider as urlState (managed mode)', async () => {
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(clientsProviderMounts.length).toBeGreaterThan(0);
+    expect(clientsProviderMounts[0].urlState).toBeDefined();
+    expect(clientsProviderMounts[0].initialFilters).toBeUndefined();
+    // The adapter exposes the canonical keys read by the factory.
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.page).toBe(1);
+    expect(state.per_page).toBe(20);
+    expect(state.status).toBe('active');
+    expect(state.q).toBe('');
+  });
+
   // ─── Pagination edge cases (#139 T6 — DataTable owns pagination) ─────
 
   describe('pagination edge cases', () => {
@@ -337,7 +368,7 @@ describe('ClientsPage', () => {
   });
 });
 
-describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => {
+describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => {
   // Real-shaped UUIDs — the parser drops anything else (#232 §3.3).
   const U1 = '11111111-1111-4111-8111-111111111111';
   const U2 = '22222222-2222-4222-8222-222222222222';
@@ -354,7 +385,7 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     vi.restoreAllMocks();
   });
 
-  it('seeds the provider: initialFilters={clientIds, status: all} for one valid id', async () => {
+  it('exposes the URL ids through the adapter state (clientIds) from the first render', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1]]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
@@ -366,14 +397,15 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(clientsProviderMounts.length).toBeGreaterThan(0);
-    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
-    expect(seedMount).toBeDefined();
-    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.clientIds).toEqual([U1]);
+    // #349 §3 effective status rule: clientId present, no explicit status → 'all'
+    expect(state.effectiveStatus).toBe('all');
+    expect(state.status).toBe('active'); // the URL value itself stays default
   });
 
-  it('seeds the provider with all valid ids when the param repeats', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
+  it('exposes an explicit URL status over the clientId overlay', async () => {
+    mockSearchParams = new URLSearchParams([['clientId', U1], ['status', 'archived']]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
@@ -384,12 +416,12 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
-    expect(seedMount).toBeDefined();
-    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1, U2], status: 'all' });
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.status).toBe('archived');
+    expect(state.effectiveStatus).toBe('archived');
   });
 
-  it('garbage param: no seed, default filters (all components invalid)', async () => {
+  it('garbage param: adapter clientIds null, no chip', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'abc'], ['clientId', '  ']]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
 
@@ -401,10 +433,13 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(clientsProviderMounts.every(m => m.initialFilters === undefined)).toBe(true);
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.clientIds).toBeNull();
+    expect(state.effectiveStatus).toBe('active');
+    expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
   });
 
-  it('mixed garbage and valid: only valid ids seed the provider', async () => {
+  it('mixed garbage and valid: only valid ids reach the adapter', async () => {
     mockSearchParams = new URLSearchParams([['clientId', 'abc'], ['clientId', U1], ['clientId', '']]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
@@ -416,12 +451,11 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
-    expect(seedMount).toBeDefined();
-    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.clientIds).toEqual([U1]);
   });
 
-  it('repeated identical id dedups to a single-element seed', async () => {
+  it('repeated identical id dedups to a single-element adapter value', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U1.toUpperCase()]]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
@@ -433,24 +467,8 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    const seedMount = clientsProviderMounts.find(m => m.initialFilters !== undefined);
-    expect(seedMount).toBeDefined();
-    expect(seedMount!.initialFilters).toEqual({ clientIds: [U1], status: 'all' });
-  });
-
-  it('no param: initialFilters prop not passed (undefined)', async () => {
-    mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
-
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(clientsProviderMounts.length).toBeGreaterThan(0);
-    expect(clientsProviderMounts.every(m => m.initialFilters === undefined)).toBe(true);
+    const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
+    expect(state.clientIds).toEqual([U1]);
   });
 
   // ─── Auto-open rule (#232 §3.3/§3.4) ────────────────────────────────────
@@ -613,85 +631,6 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     });
   });
 
-  // ─── Live sync: URL → clientIds machine field (#232 §3.3) ───────────────
-
-  it('sync effect converges the machine field when the state lacks the URL ids', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    const state = createMockClientsTableState({ items: [] });
-    mockUseClients.mockReturnValue(state);
-
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => {
-      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1] });
-    });
-  });
-
-  it('URL change (back/forward/edit) updates the machine field', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    const state = createMockClientsTableState({ items: [] });
-    mockUseClients.mockReturnValue(state);
-
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    // Fresh JSX per rerender — reusing one element reference makes React bail
-    // out of reconciliation (same-element bailout gotcha).
-    const ui = () => (
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>
-    );
-    const { rerender } = render(ui());
-
-    await waitFor(() => {
-      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1] });
-    });
-    // Emulate the real merge-patch landing (vi.fn does not update state).
-    state.filters = { ...state.filters, clientIds: [U1] };
-    vi.mocked(state.setFilters).mockClear();
-
-    // Back/forward or manual edit lands on two ids.
-    mockSearchParams = new URLSearchParams([['clientId', U1], ['clientId', U2]]);
-    rerender(ui());
-    await waitFor(() => {
-      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: [U1, U2] });
-    });
-    state.filters = { ...state.filters, clientIds: [U1, U2] };
-    vi.mocked(state.setFilters).mockClear();
-
-    // Narrowing removed from the address. (undefined ≈ null in the page's
-    // sameIds normalization, so the write only fires once the state actually
-    // holds a narrowing.)
-    mockSearchParams = new URLSearchParams();
-    rerender(ui());
-    await waitFor(() => {
-      expect(state.setFilters).toHaveBeenCalledWith({ clientIds: null });
-    });
-  });
-
-  it('no redundant sync write when the state already matches the URL ids', async () => {
-    mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    const state = createMockClientsTableState({
-      items: [],
-      filters: { ...defaultFilters, clientIds: [U1], status: 'all' },
-    });
-    mockUseClients.mockReturnValue(state);
-
-    const ClientsPage = (await import('../app/(main)/clients/page')).default;
-    render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ClientsPage />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(state.setFilters).not.toHaveBeenCalled();
-  });
-
   // ─── Narrowing chip (#232 §3.5) ─────────────────────────────────────────
 
   it('renders the chip between filters and table when the URL narrows (single id)', async () => {
@@ -744,14 +683,9 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
   });
 
-  it('chip ✕ clears only the address — no setFilters from the click (#232 §3.5)', async () => {
+  it('chip ✕ clears only the address (clientId occurrences), other params survive', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1], ['page', '2']]);
-    const state = createMockClientsTableState({
-      // user-set filters live ON TOP of the narrowing (AND semantics, §3.3)
-      filters: { ...defaultFilters, clientIds: [U1], status: 'all', search: 'анна' },
-      items: [],
-    });
-    mockUseClients.mockReturnValue(state);
+    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -767,10 +701,5 @@ describe('ClientsPage — ?clientId= deep-link (#232 machine field era)', () => 
     expect(mockRouter.replace).toHaveBeenCalledTimes(1);
     expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=2', { scroll: false });
     expect(mockRouter.push).not.toHaveBeenCalled();
-    // NO setFilters from the click — the Task 4 sync effect owns convergence.
-    // (The mount-time sync effect may fire for state/URL mismatch; clear the
-    // history first, then assert the click itself added no filter writes.)
-    vi.mocked(state.setFilters).mockClear();
-    expect(state.setFilters).not.toHaveBeenCalled();
   });
 });

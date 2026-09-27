@@ -1,10 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { buildUrlWithoutClientId } from '@/lib/client-id-param';
 import { useClientsTable } from '@/contexts/ClientsContext';
-import type { ClientFilters } from '@/contexts/ClientsContext';
+import type { ArchiveFilter } from '@/contexts/createPagedListContext';
 
 function useDebouncedCallback(
   callback: (value: string) => void,
@@ -38,40 +36,40 @@ function useDebouncedCallback(
   return { debounced, cancel };
 }
 
+/**
+ * Clients filters bar. #349 Task 4: the search input and the status select
+ * bind to the CANONICAL context members (ctx.search / ctx.status — URL-backed
+ * in managed mode via useClientsUrlState); the structured number/date filters
+ * stay machine-side (ctx.filters). Reset delegates to the factory's
+ * resetFilters, which routes to the page adapter's reset (one push to the
+ * clean /clients, clientId included, #232 §3.5) — no router surgery here.
+ */
 export function ClientsFilters() {
-  const { filters, setFilters, resetFilters } = useClientsTable();
-  // #232 §3.5 — resetFilters' documented extra responsibility in the clients
-  // domain: the full reset also drops the narrowing param from the address
-  // (other query params preserved). The URL change then converges the
-  // clientIds machine field via the Task 4 sync effect — no setFilters here.
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { search, status, filters, setSearch, setStatus, setFilters, resetFilters } =
+    useClientsTable();
   // dirtyRef is declared BEFORE the debounce hook that closes over it
   const dirtyRef = useRef(false);
   const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(
     (value: string) => {
       dirtyRef.current = false; // our send fired — the landing commit is expected
-      setFilters({ search: value });
+      setSearch(value);
     },
     300,
   );
 
   // GH #216: controlled search input. Render-adjust pattern (react.dev
   // "adjust state during render", no effect): when the committed search
-  // changes externally (deep-link ?clientId= pre-fill, reset) and the user
-  // has NOT typed since our last send, sync the draft and cancel any armed
-  // timer. If the user typed ahead (dirty), the armed send is authoritative.
-  // Purity caveat: cancelSearch() during render is safe ONLY under the
-  // "timer armed ⟺ dirty" invariant (keep the invariant if touching
-  // onChange ordering).
-  const [prevCommitted, setPrevCommitted] = useState(filters.search);
-  const [draft, setDraft] = useState(filters.search);
+  // changes externally (deep-link ?clientId= era, URL ?q=, reset) and the
+  // user has NOT typed since our last send, sync the draft and cancel any
+  // armed timer. If the user typed ahead (dirty), the armed send is
+  // authoritative.
+  const [prevCommitted, setPrevCommitted] = useState(search);
+  const [draft, setDraft] = useState(search);
 
-  if (filters.search !== prevCommitted) {
-    setPrevCommitted(filters.search);
+  if (search !== prevCommitted) {
+    setPrevCommitted(search);
     if (!dirtyRef.current) {
-      setDraft(filters.search);
+      setDraft(search);
       cancelSearch();
     }
   }
@@ -81,13 +79,7 @@ export function ClientsFilters() {
     dirtyRef.current = false;
     setDraft('');
     resetFilters();
-    // #232 §3.5 — the same point also cleans the address of the narrowing
-    // param (only when present; other query params survive). replace, not
-    // push: a reset is not a navigation milestone, and scroll stays put.
-    if (searchParams.has('clientId')) {
-      router.replace(buildUrlWithoutClientId(searchParams, pathname), { scroll: false });
-    }
-  }, [cancelSearch, resetFilters, router, pathname, searchParams]);
+  }, [cancelSearch, resetFilters]);
 
   const inputClass = 'rounded-lg border px-2 py-1.5 text-xs';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -113,8 +105,8 @@ export function ClientsFilters() {
           <select
             className={inputClass}
             style={inputStyle}
-            value={filters.status}
-            onChange={(e) => setFilters({ status: e.target.value as ClientFilters['status'] })}
+            value={status}
+            onChange={(e) => setStatus(e.target.value as ArchiveFilter)}
           >
             <option value="all">Все</option>
             <option value="active">Активные</option>

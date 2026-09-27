@@ -105,10 +105,19 @@ export interface PagedListFiltersState<F> {
  * `sort_order`, `q`, `status`, …); every other key is a structured filter.
  * `update` is the single writer (atomic batch; a filter-only patch
  * auto-resets `page`→1 in the same navigation — the hook enforces it).
+ * `state.effectiveStatus` — #349 clients overlay: a page-level rule
+ * (`status ?? clientId→'all' : default`) feeding the wire WITHOUT writing
+ * the URL (spec §3). `reset` — #349 clients: the factory's controlled
+ * resetFilters routes here when present (defaults = URL without filter
+ * params; #232 §3.5 clients reset also drops `clientId`).
  */
 export interface PagedListUrlState {
   state: Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
+  /** Optional (clients-only today): see interface doc. */
+  effectiveStatus?: ArchiveFilter;
+  /** Optional (clients-only today): see interface doc. */
+  reset?: () => void;
 }
 
 /**
@@ -190,7 +199,9 @@ export function createPagedListContext<T, F extends object>(
       ? ((urlState.state.sort_order as SortOrder | undefined) ?? 'asc')
       : undefined;
     const urlStatus = urlState
-      ? ((urlState.state.status as ArchiveFilter | undefined) ?? 'active')
+      ? ((urlState.state.effectiveStatus as ArchiveFilter | undefined) ??
+        (urlState.state.status as ArchiveFilter | undefined) ??
+        'active')
       : undefined;
     const urlSearch = urlState ? String(urlState.state.q ?? '') : undefined;
 
@@ -332,6 +343,14 @@ export function createPagedListContext<T, F extends object>(
 
     const resetFilters = useCallback(() => {
       if (urlState) {
+        // #349 clients adapter exposes `reset` (defaults = URL without
+        // filter params; the clients variant also drops `clientId`, #232
+        // §3.5) — prefer it over the defaults patch, which cannot strip
+        // unmanaged params like clientId.
+        if (urlState.reset) {
+          urlState.reset();
+          return;
+        }
         // Defaults as the patch: the hook strips values equal to presets'
         // defaults during serialization → params disappear in one batch (page
         // auto-resets via the implicit rule — no explicit page key needed).

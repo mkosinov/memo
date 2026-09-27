@@ -175,8 +175,11 @@ test.describe('GH #319 С3 — DELETE resets settings to defaults', () => {
       const settingsId = String(darkRow!.id);
 
       // 3. ACTION — DELETE the row via the API (page.request shares the
-      //    logged-in user's session → own row → 204).
-      const del = await page.request.delete(`${BACKEND}/api/v1/user-settings/${settingsId}`);
+      //    logged-in user's session → own row → 204; #324 delete-family
+      //    contract: a leaf commit carries {expected: {}}).
+      const del = await page.request.delete(`${BACKEND}/api/v1/user-settings/${settingsId}`, {
+        data: { expected: {} },
+      });
       expect(del.status()).toBe(204);
       expect(queryDBRow(`SELECT id FROM user_settings WHERE user_id='${userId}'`)).toBeNull();
 

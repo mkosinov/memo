@@ -82,11 +82,33 @@ export type WithFiltersConfig<T, F extends object> = Omit<PagedListConfig<T>, 'f
   fetcher: (params: PagedListFetcherParams & { filters: F }) => Promise<PaginatedResponse<T>>;
 };
 
+/** Canonical names the factory maps itself (#349); everything else → filters. */
+const CANONICAL_URL_KEYS = new Set([
+  'page',
+  'per_page',
+  'sort_by',
+  'sort_order',
+  'q',
+  'status',
+]);
+
 /** Extra context members exposed only by the with-filters overload (#140 T3). */
 export interface PagedListFiltersState<F> {
   filters: F;
   setFilters: (patch: Partial<F>) => void;
   resetFilters: () => void;
+}
+
+/**
+ * #349 controlled-mode integration contract — the return of `useTableUrlState`.
+ * `state` uses canonical URL names (`page`, `per_page`, `sort_by`,
+ * `sort_order`, `q`, `status`, …); every other key is a structured filter.
+ * `update` is the single writer (atomic batch; a filter-only patch
+ * auto-resets `page`→1 in the same navigation — the hook enforces it).
+ */
+export interface PagedListUrlState {
+  state: Record<string, unknown>;
+  update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
 }
 
 /**
@@ -118,11 +140,13 @@ type PagedListImplConfig<T, F extends object> = Omit<PagedListConfig<T>, 'fetche
  * difference.
  */
 export function createPagedListContext<T, F extends object>(config: WithFiltersConfig<T, F>): {
-  Provider: React.ComponentType<{ children: React.ReactNode; initialFilters?: Partial<F> }>;
+  Provider: React.ComponentType<
+    { children: React.ReactNode; initialFilters?: Partial<F> } & { urlState?: PagedListUrlState }
+  >;
   usePagedList: () => PagedListContextValue<T> & PagedListFiltersState<F>;
 };
 export function createPagedListContext<T>(config: PagedListConfig<T>): {
-  Provider: React.ComponentType<{ children: React.ReactNode }>;
+  Provider: React.ComponentType<{ children: React.ReactNode } & { urlState?: PagedListUrlState }>;
   usePagedList: () => PagedListContextValue<T>;
 };
 export function createPagedListContext<T, F extends object>(
@@ -143,16 +167,46 @@ export function createPagedListContext<T, F extends object>(
   function Provider({
     children,
     initialFilters,
+    urlState,
   }: {
     children: React.ReactNode;
     initialFilters?: Partial<F>;
+    urlState?: PagedListUrlState;
   }) {
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPageState] = useState(defaultPerPage);
-    const [sortBy, setSortBy] = useState<string | null>(defaultSort?.sortBy ?? null);
-    const [sortOrder, setSortOrder] = useState<SortOrder>(defaultSort?.sortOrder ?? 'asc');
-    const [status, setStatusState] = useState<ArchiveFilter>('active');
-    const [search, setSearch] = useState('');
+    // #349 controlled mode: page/perPage/sort/status/search/filters are
+    // derived from `urlState.state` (canonical URL names); the setters below
+    // become single-batch `urlState.update` calls. Uncontrolled (no urlState)
+    // keeps the classic useState implementation byte-identical.
+    const urlPage = urlState ? Number(urlState.state.page ?? 1) || 1 : undefined;
+    const urlPerPage = urlState
+      ? Number(urlState.state.per_page ?? defaultPerPage) || defaultPerPage
+      : undefined;
+    const urlSortBy = urlState
+      ? urlState.state.sort_by
+        ? String(urlState.state.sort_by)
+        : null
+      : undefined;
+    const urlSortOrder = urlState
+      ? ((urlState.state.sort_order as SortOrder | undefined) ?? 'asc')
+      : undefined;
+    const urlStatus = urlState
+      ? ((urlState.state.status as ArchiveFilter | undefined) ?? 'active')
+      : undefined;
+    const urlSearch = urlState ? String(urlState.state.q ?? '') : undefined;
+
+    const [pageState, setPage] = useState(1);
+    const [perPageState, setPerPageState] = useState(defaultPerPage);
+    const [sortByState, setSortBy] = useState<string | null>(defaultSort?.sortBy ?? null);
+    const [sortOrderState, setSortOrder] = useState<SortOrder>(defaultSort?.sortOrder ?? 'asc');
+    const [statusState, setStatusState] = useState<ArchiveFilter>('active');
+    const [searchState, setSearch] = useState('');
+
+    const page = urlPage ?? pageState;
+    const perPage = urlPerPage ?? perPageState;
+    const sortBy = urlSortBy !== undefined ? urlSortBy : sortByState;
+    const sortOrder = urlSortOrder ?? sortOrderState;
+    const status = urlStatus ?? statusState;
+    const search = urlSearch ?? searchState;
     // #231 §5.1 — mount-time seed: the lazy initializer runs ONCE per provider
     // mount; later changes of the initialFilters prop are deliberately ignored
     // (seed, not live sync — a param arriving after mount is not picked up).
@@ -164,6 +218,19 @@ export function createPagedListContext<T, F extends object>(
         ? ({ ...filtersDefaults, ...initialFilters } as F)
         : filtersDefaults,
     );
+    // #349: in controlled mode every state key OTHER than the canonical
+    // page/per_page/sort_by/sort_order/q/status names is a structured filter
+    // (read-only view over urlState.state; setters go through update()).
+    const urlFilters = urlState
+      ? (() => {
+          const rest: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(urlState.state)) {
+            if (!CANONICAL_URL_KEYS.has(k)) rest[k] = v;
+          }
+          return rest as unknown as F;
+        })()
+      : undefined;
+    const effectiveFilters = urlState ? urlFilters : filters;
 
     // #212 §5.5 pt 2 — serverSearch: the ≥2-char clamp lives here (one place,
     // covers DataTable withSearch inputs AND *Filters bars). Shorter values are
@@ -174,7 +241,7 @@ export function createPagedListContext<T, F extends object>(
     // sortBy, sortOrder, [q]. Classic consumers get arrays identical to the
     // pre-#140 ternary — pinned by the factory test suite.
     const queryKey: unknown[] = [queryKeyPrefix, page, perPage];
-    if (filters !== undefined) queryKey.push(filters);
+    if (effectiveFilters !== undefined) queryKey.push(effectiveFilters);
     if (withStatus) queryKey.push(status);
     queryKey.push(sortBy, sortOrder);
     // q (or its absence) distinguishes cache entries → pages never collide
@@ -190,46 +257,105 @@ export function createPagedListContext<T, F extends object>(
           ...(sortBy ? { sort_by: sortBy, sort_order: sortOrder } : {}),
           ...(withStatus ? { status } : {}),
           ...(q ? { q } : {}),
-          ...(filters !== undefined ? { filters } : {}),
+          ...(effectiveFilters !== undefined ? { filters: effectiveFilters } : {}),
         }),
       placeholderData: keepPreviousData,
     });
 
-    const setPerPage = useCallback((n: number) => {
-      setPerPageState(n);
-      setPage(1);
-    }, []);
+    const setPageUrl = useCallback(
+      (n: number) => {
+        if (urlState) {
+          urlState.update({ page: n });
+          return;
+        }
+        setPage(n);
+      },
+      [urlState],
+    );
+    const setPageExposed = urlState ? setPageUrl : setPage;
 
-    const setSort = useCallback((field: string, order: SortOrder) => {
-      setSortBy(field);
-      setSortOrder(order);
-      setPage(1);
-    }, []);
+    const setPerPage = useCallback(
+      (n: number) => {
+        if (urlState) {
+          // Explicit page: survives the per-page change in the same entry.
+          urlState.update({ per_page: n, page: 1 });
+          return;
+        }
+        setPerPageState(n);
+        setPage(1);
+      },
+      [urlState],
+    );
 
-    const setStatus = useCallback((s: ArchiveFilter) => {
-      setStatusState(s);
-      setPage(1);
-    }, []);
+    const setSort = useCallback(
+      (field: string, order: SortOrder) => {
+        if (urlState) {
+          // One atomic batch; a cleared sort (field '') leaves a possible
+          // orphan sort_order — the hook's `requires` linkage ignores it.
+          urlState.update({ sort_by: field, sort_order: order });
+          return;
+        }
+        setSortBy(field);
+        setSortOrder(order);
+        setPage(1);
+      },
+      [urlState],
+    );
+
+    const setStatus = useCallback(
+      (s: ArchiveFilter) => {
+        if (urlState) {
+          urlState.update({ status: s });
+          return;
+        }
+        setStatusState(s);
+        setPage(1);
+      },
+      [urlState],
+    );
 
     // #140 T3 — with-filters only: merge-patch semantics mirroring the
     // hand-rolled ClientsContext precedent; a new filter set means a new
-    // result set → restart at page 1.
-    const setFilters = useCallback((patch: Partial<F>) => {
-      setFiltersState((prev) => (prev !== undefined ? { ...prev, ...patch } : prev));
-      setPage(1);
-    }, []);
+    // result set → restart at page 1. #349 controlled mode: ONE update()
+    // batch — the hook's implicit page reset covers the restart-at-1 rule.
+    const setFilters = useCallback(
+      (patch: Partial<F>) => {
+        if (urlState) {
+          urlState.update(patch as Record<string, unknown>);
+          return;
+        }
+        setFiltersState((prev) => (prev !== undefined ? { ...prev, ...patch } : prev));
+        setPage(1);
+      },
+      [urlState],
+    );
 
     const resetFilters = useCallback(() => {
+      if (urlState) {
+        // Defaults as the patch: the hook strips values equal to presets'
+        // defaults during serialization → params disappear in one batch (page
+        // auto-resets via the implicit rule — no explicit page key needed).
+        urlState.update({ ...(filtersDefaults as object) });
+        return;
+      }
       setFiltersState(filtersDefaults);
       setPage(1);
-    }, []);
+    }, [urlState]);
 
     // serverSearch: a new q means a new result set → restart at page 1
     // (consistent with the setSort/setPerPage/setStatus reset contract).
-    const setSearchWithReset = useCallback((s: string) => {
-      setSearch(s);
-      if (serverSearch) setPage(1);
-    }, []);
+    // #349 controlled mode: q joins the same atomic update.
+    const setSearchWithReset = useCallback(
+      (s: string) => {
+        if (urlState) {
+          urlState.update({ q: s });
+          return;
+        }
+        setSearch(s);
+        if (serverSearch) setPage(1);
+      },
+      [urlState],
+    );
 
     const items = data?.items ?? [];
 
@@ -246,9 +372,19 @@ export function createPagedListContext<T, F extends object>(
     // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
     // page (e.g. last row of page N deleted), step back. `!isFetching` guards
     // against mid-refetch races with keepPreviousData.
+    // #349 controlled mode: single service correction — total>0 →
+    // ceil(total/per_page) (may equal the current page), total=0 → default 1;
+    // served via history: 'replace'. Uncontrolled keeps the classic decrement.
+    const total = data?.total ?? 0;
     useEffect(() => {
-      if (!isPending && !isFetching && items.length === 0 && page > 1) setPage(page - 1);
-    }, [isPending, isFetching, items.length, page]);
+      if (isPending || isFetching || items.length !== 0 || page <= 1) return;
+      if (urlState) {
+        const corrected = total > 0 ? Math.ceil(total / perPage) : 1;
+        if (corrected < page) urlState.update({ page: corrected }, { history: 'replace' });
+        return;
+      }
+      setPage(page - 1);
+    }, [isPending, isFetching, items.length, page, perPage, total, urlState]);
 
     // #140 T3 — value built exactly as the classic shape PLUS a conditional
     // filters spread: classic consumers see no new members (bit-identical),
@@ -257,7 +393,7 @@ export function createPagedListContext<T, F extends object>(
     const value: PagedListContextValue<T> & Partial<PagedListFiltersState<F>> = {
       items,
       visibleItems,
-      total: data?.total ?? 0,
+      total,
       page,
       perPage,
       sortBy,
@@ -268,13 +404,15 @@ export function createPagedListContext<T, F extends object>(
       isFetching,
       error: (error as Error) ?? null,
       search,
-      setPage,
+      setPage: setPageExposed,
       setPerPage,
       setSort,
       setStatus,
       setSearch: setSearchWithReset,
       refetch,
-      ...(filters !== undefined ? { filters, setFilters, resetFilters } : {}),
+      ...(effectiveFilters !== undefined
+        ? { filters: effectiveFilters, setFilters, resetFilters }
+        : {}),
     };
     return <Context.Provider value={value}>{children}</Context.Provider>;
   }

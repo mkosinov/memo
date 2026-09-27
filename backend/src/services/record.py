@@ -33,6 +33,7 @@ from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.orm import selectinload
 
 from src.domain.dates import day_range
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -194,10 +195,18 @@ def _build_list_stmt(
     return stmt
 
 def _sort_columns(params: RecordListParams) -> list:
-    """Whitelist sort map → ORDER BY expressions (#191, mirrors the deleted
-    client-side comparator; collation note: SQLite BINARY ≠ localeCompare).
-    Module level since GH #217 Task 1 — shared brick of ``RecordService.list``
-    and the ``list_records_view`` free function.
+    """Sort map → ORDER BY expressions via the shared resolver (#191,
+    mirrors the deleted client-side comparator; collation note: SQLite
+    BINARY ≠ localeCompare). Module level since GH #217 Task 1 — shared
+    brick of ``RecordService.list`` and the ``list_records_view`` free
+    function.
+
+    GH #367 Task 4: the map is a ``SortKeyMap`` (entity content stays
+    here) and the direction/nulls/tail application routes through the
+    shared resolver ``apply_sort`` (spec §4.2/§4.3) with the
+    ``Record.id`` tie-break. Nulls policy is ``canonical`` for ALL keys
+    — exactly the pre-#367 inline behavior (asc → nullsfirst / desc →
+    nullslast), byte-identical application.
 
     The Client/Service name subqueries carry explicit ``correlate()``:
     when ``q`` outerjoins those tables into the enclosing query,
@@ -260,23 +269,20 @@ def _sort_columns(params: RecordListParams) -> list:
         .where(Visit.record_id == Record.id, Visit.visitor_id.is_not(None))
         .correlate(Record).scalar_subquery()
     )
-    sort_map: dict[str, list] = {
-        "date": [Activity.start],
-        "client": [client_name],
-        "service": [service_title],
-        "master": [master_last, master_first],
-        "location": [location_name],
-        "guests": [named_visits_count],
-        "status": [Record.status],
-        "total": [total_price],
-        "payment": [payment_bucket],
+    sort_map: SortKeyMap = {
+        "date": SortKeySpec([Activity.start]),
+        "client": SortKeySpec([client_name]),
+        "service": SortKeySpec([service_title]),
+        "master": SortKeySpec([master_last, master_first]),
+        "location": SortKeySpec([location_name]),
+        "guests": SortKeySpec([named_visits_count]),
+        "status": SortKeySpec([Record.status]),
+        "total": SortKeySpec([total_price]),
+        "payment": SortKeySpec([payment_bucket]),
     }
-    columns = sort_map[params.sort_by]  # Literal-validated upstream; KeyError impossible
-    if params.sort_order == "desc":
-        ordered = [c.desc().nullslast() for c in columns]
-    else:
-        ordered = [c.asc().nullsfirst() for c in columns]
-    return [*ordered, Record.id.asc()]  # deterministic tiebreak — cross-page stability
+    # Literal-validated upstream (RecordSortBy → 422); the resolver's
+    # UnknownSortKeyError is the direct-call safety net.
+    return apply_sort(sort_map, params.sort_by, params.sort_order, Record.id)
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):

@@ -16,6 +16,7 @@ from sqlalchemy import ColumnElement, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -36,10 +37,15 @@ from src.services.generic import GenericService
 
 # Sort whitelist (GH #211 §6.8): filename | is_public | created_at.
 # FK columns and the denormalized client_name are NOT sortable.
-_SORT_COLUMNS = {
-    "filename": Photo.filename,
-    "is_public": Photo.is_public,
-    "created_at": Photo.created_at,
+# GH #367 Task 4: the map is a ``SortKeyMap`` — the application (direction,
+# nulls, tie-break) routes through the shared resolver at the call site.
+# All three columns are NOT NULL, so the ``canonical`` nulls policy
+# (default) is semantically inert — the wrapping nullsfirst/nullslast
+# can never fire; the effective order is unchanged.
+_SORT_COLUMNS: SortKeyMap = {
+    "filename": SortKeySpec([Photo.filename]),
+    "is_public": SortKeySpec([Photo.is_public]),
+    "created_at": SortKeySpec([Photo.created_at]),
 }
 
 # GH #344: journaled field set for an explicit photo mark (§5.1) — the
@@ -428,11 +434,15 @@ async def list_photos_view(
     if conds:
         stmt = stmt.where(*conds)
 
-    col = _SORT_COLUMNS[params.sort_by]
-    order_exprs = [
-        col.desc() if params.sort_order == "desc" else col.asc(),
-        Photo.id.asc(),
-    ]
+    # GH #367 Task 4: direction/nulls/tie-break application via the
+    # shared resolver (spec §4.2/§4.3). NOT NULL columns — the canonical
+    # nulls wrapping is inert, the effective order is byte-identical;
+    # ``Photo.id asc`` tail keeps the cross-page stability. The
+    # ``PhotoSortBy`` Literal (schema, 422) guarantees a valid key;
+    # ``UnknownSortKeyError`` is the direct-call safety net.
+    order_exprs = apply_sort(
+        _SORT_COLUMNS, params.sort_by, params.sort_order, Photo.id
+    )
     rows, total = await get_base_repository().list_custom(
         db_session,
         stmt,

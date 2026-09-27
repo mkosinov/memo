@@ -47,6 +47,20 @@ const nextConfig = {
   images: {
     remotePatterns: avatarRemotePatterns(),
   },
+  // GH #384: never report the page address to third parties (Referer) —
+  // table-filter text lands in URLs (#349), and per-link rel="noreferrer"
+  // only covers those specific anchors. A page-level policy covers links,
+  // subresources, fetch and forms regardless of markup discipline.
+  // Docs: headers are checked before the filesystem, so /public files and
+  // (non-Cache-Control headers on) /_next/static are covered too.
+  headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

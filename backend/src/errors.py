@@ -46,6 +46,10 @@ class ErrorCode(str, Enum):
     # 422 — password policy violation (GH #247 auth, spec §5)
     PASSWORD_POLICY = "PASSWORD_POLICY"
 
+    # 422 — user accounts (GH #348, spec §5)
+    ACCOUNT_DEACTIVATED = "ACCOUNT_DEACTIVATED"            # issue link for an archived account
+    PASSWORD_LINK_INVALID = "PASSWORD_LINK_INVALID"        # public setup: unknown/expired/used/inactive — one answer
+
     # 404 / 422 — staff restructuring (GH #266 «Контракты ошибок»)
     STAFF_NOT_FOUND = "STAFF_NOT_FOUND"          # 404 — /staff/{id} отсутствует
     MASTER_NOT_ACTIVE = "MASTER_NOT_ACTIVE"      # 422 — занятие на неактивного мастера (TOCTOU-защита)
@@ -110,6 +114,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
     ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
     ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
+    ErrorCode.ACCOUNT_DEACTIVATED: "Учётка деактивирована",
+    ErrorCode.PASSWORD_LINK_INVALID: "Ссылка недействительна или истекла",
     ErrorCode.STAFF_NOT_FOUND: "Сотрудник не найден",
     ErrorCode.MASTER_NOT_ACTIVE: "Мастер недоступен для расписания",
     ErrorCode.POSITION_NOT_FOUND: "Должность не найдена",

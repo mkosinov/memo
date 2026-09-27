@@ -50,7 +50,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
@@ -290,6 +290,23 @@ class AuthService:
         """Delete the session row — instant revocation. Idempotent."""
         await db_session.execute(sa_delete(Session).where(Session.token == token))
         await db_session.commit()
+
+    # ─── session revocation by user (#348) ─────────────────────────────────
+
+    @staticmethod
+    async def revoke_user_sessions(
+        db_session: AsyncSession, user_id: str
+    ) -> int:
+        """Delete EVERY session row of the user — flush, no commit.
+
+        The #348 set-password-by-link block (S8): the scenario owns the
+        transaction, this owner method only executes the bulk delete.
+        Returns the rowcount (0 = nothing revoked — not an error).
+        """
+        result = await db_session.execute(
+            sa_delete(Session).where(Session.user_id == user_id)
+        )
+        return int(cast("Any", result).rowcount)
 
     # ─── change password (#262, spec §4 + D6) ─────────────────────────────
 

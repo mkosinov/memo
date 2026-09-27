@@ -36,8 +36,9 @@ class AuditLog(Base):
     # Role snapshot at the moment of the action (later promotions do not
     # rewrite history).
     user_role: Mapped[str] = mapped_column(String(20))
-    # create / update / delete / archive / restore / reorder (spec §5).
-    action: Mapped[str] = mapped_column(String(16), index=True)
+    # create / update / delete / archive / restore / reorder (spec §5) +
+    # password_link_issued (#348 spec §8 — widened 16 → 24 to fit it).
+    action: Mapped[str] = mapped_column(String(24), index=True)
     # Canonical entity name (#239): records, payments, clients, ...
     entity: Mapped[str] = mapped_column(String(32))
     entity_id: Mapped[str | None] = mapped_column(

@@ -21,12 +21,23 @@ src/auth/session.py): the digest IS the identity — no surrogate UUID, no
 never edited). Issue/consume logic is Task 2 (use-cases), not the model.
 """
 
+import hashlib
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+
+
+def token_digest(raw_token: str) -> str:
+    """SHA-256 hex digest of a raw setup token — the stored PK form (#348).
+
+    The one shared derivation: issue computes it before INSERT, the public
+    consume/validate paths compute it before the PK lookup. The raw token
+    itself is never stored.
+    """
+    return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
 class PasswordSetupToken(Base):

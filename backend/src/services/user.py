@@ -119,6 +119,41 @@ class UserService:
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id(
+        self, session: AsyncSession, user_id: str
+    ) -> User | None:
+        """Fetch a users row by PK (ORM row or None).
+
+        Pure row read — NO mark_changed (publication belongs to the
+        calling scenario's accumulator). #348 read block for the
+        password-link scenarios (existence + is_active probe).
+        """
+        return await session.get(User, user_id)
+
+    async def apply_password_reset(
+        self,
+        db_session: AsyncSession,
+        user: User,
+        password_hash: str,
+    ) -> None:
+        """#348 set-by-link block: new hash + the WHOLE ladder reset.
+
+        Writes the pre-hashed password (the scenario hashed BEFORE the
+        transaction — Argon2 is slow, the write tx must be short) and
+        resets the entire login lockout ladder
+        (``failed_login_attempts = 0``, ``lock_level = 0``,
+        ``locked_until = NULL``) — including the hard level-3 lock that
+        previously only sqladmin could clear (spec §4, canon auth.md).
+        Row written = fact of change → ``mark_changed("users")``. Flush,
+        no commit — the calling scenario owns the transaction.
+        """
+        user.password_hash = password_hash
+        user.failed_login_attempts = 0
+        user.lock_level = 0
+        user.locked_until = None
+        await db_session.flush()
+        mark_changed("users")
+
     async def create_row(
         self,
         session: AsyncSession,

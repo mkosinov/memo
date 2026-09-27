@@ -217,6 +217,11 @@ The `Expected?` column marks the relations whose ids a **deferred** commit carri
       | Locations | `title`, `short_title`, `address`, `description` | `id` (uuid); `yandex_map_url`, `review_url`, `image_url` (exact) | URL fields exact-only (no ilike). |
       | Visitors | `name` | `id` (uuid) | Single substring field. |
       | Activities | `service.title` (INNER join, added only when q present) | `id` (uuid) | Service join is INNER only when `q` is present; without `q` the default query plan is unchanged. `?service_id=` filter param intersects with `q`. |
+9. **Сортировка списков (GH #367):** единый механизм параметров и применения сортировки.
+    - **Параметры:** списочные модели наследуют `SortParams` (`schemas/common.py`, Generic по per-entity Literal). Фиксированные дефолты переопределяются в подклассе — records `"date"/"asc"`, photos `"created_at"/"desc"`, clients `"name"/"asc"` (кирпень задаёт форму, дефолты — у сущности). Скалярные роуты справочников (staff/services/materials/locations/tags) — `sort_by: XSortBy | None = Query(None)` + общий `SortOrder` (model-миксин там невозможен, см. `schemas/pagination.py`).
+    - **Жёсткий контракт:** `sort_by`/`sort_order` вне белого списка сущности → **422 VALIDATION_ERROR**; молчаливые откаты запрещены (последний мягкий контракт — клиенты — переведён #367). CI-страж: множество значений Literal == множество ключей карты резолва.
+    - **Применение — только общий резолвер** `domain/sorting.py`: канон `asc → nullsfirst / desc → nullslast`; per-key политика `always_nulls_last` для колонок с правилом «пустые — в конце» в обоих направлениях (LEFT JOIN-вычислимые, напр. staff `specialty`/`color`); тайбрейк `id asc` последним выражением у всех сущностей (PK — вне nulls-политики). Локальные `_X_order_by`/inline-резолвы в роутах и сервисах запрещены.
+    - **Fallback при `sort_by=None`** (скалярные роуты) — дефолтный порядок сущности (`title asc, id asc` и т.п.), остаётся у сущности и резолверу не передаётся.
 
 ## PATCH Contract
 

@@ -80,6 +80,16 @@ export function DataTable<T>({
   // No stale setSearch after unmount.
   useEffect(() => () => cancelTimer(), [cancelTimer]);
 
+  // External q change (back/forward, opening a link) resyncs the draft (US-2).
+  // Dep is the PRIMITIVE string — a new tableState object with the same q must
+  // not clobber an in-progress draft; a real change also drops any pending
+  // debounce so a stale commit can't overwrite the navigated-to value.
+  const externalSearch = tableState.search ?? '';
+  useEffect(() => {
+    cancelTimer();
+    setDraft(externalSearch);
+  }, [externalSearch, cancelTimer]);
+
   const handleSearchChange = (value: string) => {
     setDraft(value);
     cancelTimer();

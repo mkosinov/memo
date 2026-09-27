@@ -387,6 +387,102 @@ describe('DataTable search', () => {
   });
 });
 
+// ─── Search draft resync (URL q changes: back/forward, link open) ────────
+
+describe('DataTable search draft resync', () => {
+  /** Rerender with a NEW tableState object carrying the next external q. */
+  function rerenderWithSearch(
+    view: ReturnType<typeof render>,
+    nextSearch: string,
+    setSearch: (s: string) => void,
+  ) {
+    view.rerender(
+      <DataTable<Tag>
+        storageKey="test-columns"
+        columns={COLUMNS}
+        tableState={makeTableState<Tag>({ items: TAGS, search: nextSearch, setSearch })}
+        actions={makeActions()}
+        rowKey={(t) => t.id}
+        withSearch
+        searchPlaceholder="Поиск..."
+      />,
+    );
+  }
+
+  it('resyncs the draft field when the external search value changes (US-2)', () => {
+    const setSearch = vi.fn();
+    const { view } = renderTable(
+      { setSearch, search: '' },
+      { withSearch: true, searchPlaceholder: 'Поиск...' },
+    );
+
+    const input = screen.getByPlaceholderText('Поиск...') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'жив' } });
+    expect(input.value).toBe('жив');
+
+    // Back/forward: URL q becomes «гончар» — the field follows synchronously
+    rerenderWithSearch(view, 'гончар', setSearch);
+    expect(input.value).toBe('гончар');
+  });
+
+  it('does not clobber an in-progress draft when only the tableState object changes (effect on primitive)', () => {
+    const setSearch = vi.fn();
+    const { view } = renderTable(
+      { setSearch, search: '' },
+      { withSearch: true, searchPlaceholder: 'Поиск...' },
+    );
+
+    const input = screen.getByPlaceholderText('Поиск...') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'жив' } }); // debounce pending
+
+    // New object reference, SAME q value — draft must survive
+    rerenderWithSearch(view, '', setSearch);
+    expect(input.value).toBe('жив');
+  });
+
+  it('external search change cancels the pending debounce (no stale write)', () => {
+    vi.useFakeTimers();
+    const setSearch = vi.fn();
+    const { view } = renderTable(
+      { setSearch, search: '' },
+      { withSearch: true, searchPlaceholder: 'Поиск...' },
+    );
+
+    const input = screen.getByPlaceholderText('Поиск...');
+    fireEvent.change(input, { target: { value: 'жив' } }); // timer pending
+
+    rerenderWithSearch(view, 'гончар', setSearch); // back navigation wins
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(setSearch).not.toHaveBeenCalled();
+  });
+
+  it('debounce commit stays a single write — resync effect never writes back', () => {
+    vi.useFakeTimers();
+    const setSearch = vi.fn();
+    const { view } = renderTable(
+      { setSearch, search: '' },
+      { withSearch: true, searchPlaceholder: 'Поиск...' },
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Поиск...'), { target: { value: 'жив' } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(setSearch).toHaveBeenCalledTimes(1);
+    expect(setSearch).toHaveBeenCalledWith('жив');
+
+    // URL/context echo the committed q back — no feedback write, no field loss
+    rerenderWithSearch(view, 'жив', setSearch);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(setSearch).toHaveBeenCalledTimes(1);
+    expect((screen.getByPlaceholderText('Поиск...') as HTMLInputElement).value).toBe('жив');
+  });
+});
+
 // ─── Action dropdown (APG menu button) ───────────────────────────────────
 
 describe('DataTable action dropdown', () => {

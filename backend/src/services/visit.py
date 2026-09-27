@@ -415,23 +415,43 @@ class VisitService:
     async def delete_visits_by_visitor(
         self, db_session: AsyncSession, visitor_id: str, *, mark_visits: bool = True,
     ) -> None:
-        """Remove ALL visits of one visitor — WITHOUT committing, no recalc.
+        """Remove ALL visits of one visitor in a batch + recompute the
+        affected records — WITHOUT committing.
 
-        Non-transactional scenario building block (canon rules 3-4,
-        GH #327 Task 1), mirror of ``delete_visits_by_record``: the
-        caller's scenario owns the transaction boundary AND the event
-        grid. Value-typed input (``visitor_id``); the set-based DELETE
-        lives in the owner repository
-        (``VisitRepository.delete_by_visitor_id`` — one statement, no
-        per-row loop). Marks the helper's OWN entity ("visits") — unless
-        ``mark_visits=False`` (the caller publishes the entity itself or
-        folds the change into its own batch — both current callers pass
-        ``False`` for grid parity); outside an active transaction the
-        mark is a no-op.
+        Non-transactional scenario building block (canon rules 3-4, GH #327
+        Task 1; recompute added by GH #324 §5 — «единый строительный блок»):
+        collect the affected ``record_id``s → ONE bulk delete of the
+        visitor's visits (``VisitRepository.delete_by_visitor_id``, canon
+        rule 1) → for each affected record ``recompute_record_seats`` +
+        ``recompute_record_status`` (the same domain functions the
+        single-visit delete path uses), so the invariant «визит удалён →
+        запись пересчитана» holds for the batch too. Consumers: the
+        Visitor executor (``(Visitor, "visits")`` handler), the standalone
+        ``VisitorService.delete`` and the ``usecases.clients.delete_client``
+        scenario (GH #327). Value-typed input (``visitor_id``).
+
+        Marks SSE ``visits`` (unless ``mark_visits=False`` — the caller
+        owns the grid) + ``records`` (the recomputed parents, like the
+        single path); outside an active transaction the marks are a no-op.
+
+        Empty visitor (no visits) → full no-op: no DELETE, no recompute,
+        no marks (the early exit on the empty ``record_id`` set — no idle
+        recompute calls).
         """
+        result = await db_session.execute(
+            select(Visit.record_id).where(Visit.visitor_id == visitor_id).distinct()
+        )
+        record_ids = list(result.scalars().all())
+        if not record_ids:
+            return  # empty visitor — nothing affected, nothing to recompute.
+
         await self._repository.delete_by_visitor_id(db_session, visitor_id)
+        for record_id in record_ids:
+            await recompute_record_seats(db_session, record_id)
+            await recompute_record_status(db_session, record_id)
         if mark_visits:
             mark_changed("visits")
+        mark_changed("records")
 
     async def create_visits_bulk(
         self, db_session: AsyncSession, record_id: str, items: VisitItemList,

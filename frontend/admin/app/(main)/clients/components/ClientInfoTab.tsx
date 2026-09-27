@@ -1,8 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import type { ClientWithStats, ClientUpdate, VisitorResponse } from '@memo/api-client';
-import { getClientVisitors, createVisitor, deleteVisitor } from '@memo/api-client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ClientWithStats, ClientUpdate, DependencyNode, VisitorResponse } from '@memo/api-client';
+import { ApiError, getClientVisitors, createVisitor } from '@memo/api-client';
+import { useDeleteVisitor } from '@/hooks/useVisitorsMutations';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
+import { parseApiError } from '@/app/lib/api/parseApiError';
+import { useUI } from '@/contexts/UIContext';
+import { qk } from '@/lib/queryKeys';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
 
 const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
@@ -32,9 +38,20 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   const [channel, setChannel] = useState(client?.channel && isKnownChannel(client.channel) ? client.channel : '');
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Visitors state
-  const [visitors, setVisitors] = useState<VisitorResponse[]>([]);
-  const [visitorsLoading, setVisitorsLoading] = useState(false);
+  // ── Visitors render source — #324 Task 8 review fix ───────────────────
+  // The list now renders FROM REACT-QUERY (the ['visitors', clientId] family
+  // — the same key the deferred-delete hook snapshots/restores), replacing
+  // the former effect-driven local fetch: for a deferred delete the card and
+  // the conveyor must share ONE state — the optimistic removal, the undo
+  // restore and the commit invalidation then converge the visible rows by
+  // construction (mirrors the tags/photos surfaces whose tables render from
+  // their query families).
+  const queryClient = useQueryClient();
+  const { data: visitors = [], isLoading: visitorsLoading } = useQuery({
+    queryKey: qk.visitors(client?.id ?? ''),
+    queryFn: () => getClientVisitors(client!.id),
+    enabled: mode === 'view' && !!client,
+  });
   const [showVisitorForm, setShowVisitorForm] = useState(false);
   const [newVisitorName, setNewVisitorName] = useState('');
   const [newVisitorAge, setNewVisitorAge] = useState('');
@@ -47,15 +64,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setHasChanges(false);
   }, [client]);
 
-  // Fetch visitors when client changes (view mode only)
-  useEffect(() => {
-    if (mode !== 'view' || !client) return;
-    setVisitorsLoading(true);
-    getClientVisitors(client.id)
-      .then(setVisitors)
-      .catch(() => setVisitors([]))
-      .finally(() => setVisitorsLoading(false));
-  }, [client, mode]);
+  // (Visitors need no reset effect — the query key swap refetches on its own.)
 
   const handleChange = useCallback(() => setHasChanges(true), []);
 
@@ -90,17 +99,47 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setNewVisitorName('');
     setNewVisitorAge('');
     setShowVisitorForm(false);
-    // Refetch visitors
-    const updated = await getClientVisitors(client.id);
-    setVisitors(updated);
-  }, [newVisitorName, newVisitorAge, client]);
+    // Refresh the visitors query — the render source (#324 review fix:
+    // the local setVisitors mirror is gone; invalidate the SAME family the
+    // deferred-delete conveyor snapshots).
+    await queryClient.invalidateQueries({ queryKey: qk.visitors(client.id) });
+  }, [newVisitorName, newVisitorAge, client, queryClient]);
 
-  const handleDeleteVisitor = useCallback(async (visitorId: string) => {
-    if (!client) return;
-    await deleteVisitor(visitorId);
-    const updated = await getClientVisitors(client.id);
-    setVisitors(updated);
-  }, [client]);
+  // ── #324 Task 8: visitor delete on the deferred conveyor ──────────────
+  // The × button goes through removeVisitor (dry-run first): a visit-less
+  // visitor → 204 → optimistic row removal + 5s undo ring; with visits →
+  // 409 rejection here → park the tree + open DeleteDialog «Посещения: N
+  // будут удалены». NO instant delete path remains (bare DELETE → 422).
+  // Review fix: the card renders from the ['visitors', clientId] query —
+  // the hook's optimistic remove, UNDO RESTORE and commit invalidation all
+  // converge the visible rows (no local list mirror to drift out of sync).
+  const { removeVisitor, removeVisitorResolved } = useDeleteVisitor();
+  const { showToast } = useUI();
+  const [deleteTarget, setDeleteTarget] = useState<{ visitor: VisitorResponse; deps: DependencyNode[] } | null>(null);
+
+  const handleDeleteVisitor = useCallback(async (visitor: VisitorResponse) => {
+    try {
+      // 204 → the hook removed the row from the query caches — the card's
+      // useQuery observer re-renders it away at once (the ring's promise).
+      await removeVisitor(visitor);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ visitor, deps: err.dependencies });
+        return;
+      }
+      // Non-409 dry-run errors keep their error-toast surface.
+      showToast(parseApiError(err).message, 'error');
+    }
+  }, [removeVisitor, showToast]);
+
+  const handleDeleteVisitorResolved = useCallback(
+    (visitor: VisitorResponse, resolutions: Record<string, string>, deps: DependencyNode[]) => {
+      // Enqueue is synchronous — the hook's optimistic removal re-renders
+      // the card, the dialog closes at once.
+      void removeVisitorResolved(visitor, resolutions, deps);
+    },
+    [removeVisitorResolved],
+  );
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -221,7 +260,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
                   {visitor.age != null ? ` (${visitor.age} лет)` : ' (взр.)'}
                 </span>
                 <button
-                  onClick={() => handleDeleteVisitor(visitor.id)}
+                  onClick={() => handleDeleteVisitor(visitor)}
                   className="text-red-400 hover:text-red-500 text-xs"
                   aria-label="Удалить посетителя"
                 >
@@ -288,6 +327,28 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
           )}
         </div>
       </div>
+      )}
+
+      {/* Visitor delete dialog — GH #324 Task 8 (spec §9.3): opened on the
+          dry-run 409; the confirm enqueues the cascade deferred delete
+          (enqueue is synchronous — BOTH expected groups travel in the
+          commit) and the dialog closes immediately via onDone. Visitors
+          never hit Mode B — the visits tree's only allowed action is
+          cascade. */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.visitor.name}
+          entityType="visitor"
+          entityId={deleteTarget.visitor.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            handleDeleteVisitorResolved(deleteTarget.visitor, resolutions, deleteTarget.deps);
+          }}
+          onArchive={async () => { /* visitors have no archive flow — never Mode B */ }}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

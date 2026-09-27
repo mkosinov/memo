@@ -263,14 +263,18 @@ class TestPaymentScope:
     def test_own_delete_204(self, two_payments) -> None:
         mc = two_payments["master"]["client"]
         pay = two_payments["own"]["payment"]
-        resp = mc.delete(f"/api/v1/payments/{pay['id']}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/payments/{pay['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 204
         assert not query_db(f"SELECT id FROM payments WHERE id='{pay['id']}'")
 
     def test_foreign_delete_404(self, two_payments) -> None:
         mc = two_payments["master"]["client"]
         pay = two_payments["foreign"]["payment"]
-        resp = mc.delete(f"/api/v1/payments/{pay['id']}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/payments/{pay['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 404
         assert query_db(f"SELECT id FROM payments WHERE id='{pay['id']}'")
 

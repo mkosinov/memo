@@ -11,20 +11,30 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     ...actual,
     createPosition: vi.fn(),
     updatePosition: vi.fn(),
-    deletePosition: vi.fn(),
+    dryRunDeletePosition: vi.fn(),
+    resolveDeletePosition: vi.fn(),
   };
 });
+
+// The deferred-delete hook consumes these contexts (useDeleteTag pattern).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: vi.fn() }),
+}));
 
 import {
   useCreatePosition,
   useUpdatePosition,
   useDeletePosition,
 } from '../hooks/usePositionsMutations';
-import { createPosition, updatePosition, deletePosition } from '@memo/api-client';
+import { createPosition, updatePosition, dryRunDeletePosition } from '@memo/api-client';
 
 const mockCreatePosition = vi.mocked(createPosition);
 const mockUpdatePosition = vi.mocked(updatePosition);
-const mockDeletePosition = vi.mocked(deletePosition);
+const mockDryRun = vi.mocked(dryRunDeletePosition);
 
 function createQueryClientWrapper() {
   const queryClient = new QueryClient({
@@ -38,7 +48,9 @@ function createQueryClientWrapper() {
 }
 
 /**
- * GH #266 D4 — positions dictionary mutations.
+ * GH #266 D4 — positions dictionary mutations (create/update; delete moved
+ * to the #324 deferred pipeline — full coverage in
+ * useDeletePosition.test.ts, this file pins the mutation basics).
  *
  * `positions` is deliberately NOT in lib/invalidate.ts INVALIDATION_MAP (the
  * backend emits the entity, but the frontend SSE mirror skips it — spec
@@ -48,7 +60,10 @@ function createQueryClientWrapper() {
  * (['positions', page, perPage, sortBy, sortOrder] — PositionsContext).
  */
 describe('usePositionsMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreatePosition', () => {
@@ -115,48 +130,15 @@ describe('usePositionsMutations', () => {
   });
 
   describe('useDeletePosition', () => {
-    it('calls deletePosition with the id', async () => {
+    it('exposes the deferred pair (removePosition/removePositionResolved) — no mutation', () => {
       const { wrapper } = createQueryClientWrapper();
-      mockDeletePosition.mockResolvedValue(undefined);
 
       const { result } = renderHook(() => useDeletePosition(), { wrapper });
 
-      await act(async () => {
-        await result.current.mutateAsync('smm');
-      });
-
-      expect(mockDeletePosition).toHaveBeenCalledWith('smm');
-    });
-
-    it('invalidates the positions prefix on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeletePosition.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useDeletePosition(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync('smm');
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['positions'] });
-    });
-
-    it('rejects (and does not invalidate) when the backend refuses a built-in', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeletePosition.mockRejectedValue(
-        new Error('Встроенная должность не удаляется'),
-      );
-
-      const { result } = renderHook(() => useDeletePosition(), { wrapper });
-
-      await expect(
-        act(async () => {
-          await result.current.mutateAsync('master');
-        }),
-      ).rejects.toThrow('Встроенная должность не удаляется');
-      expect(invalidateSpy).not.toHaveBeenCalled();
+      // #324: the hook returns the deferred-delete entry points; the instant
+      // useMutation path is gone (useDeletePosition.test.ts owns the flow).
+      expect(typeof result.current.removePosition).toBe('function');
+      expect(typeof result.current.removePositionResolved).toBe('function');
     });
   });
 });

@@ -823,7 +823,9 @@ class TestPositionsCrud:
         created = api_client.post(
             "/api/v1/positions", json={"title": "Временная"}
         ).json()
-        resp = api_client.delete(f"/api/v1/positions/{created['id']}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/positions/{created['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 204
         assert (
             api_client.get(f"/api/v1/positions/{created['id']}").status_code
@@ -835,7 +837,9 @@ class TestPositionsCrud:
             "INSERT INTO positions (id, title, is_system, created_at, updated_at) "
             "VALUES ('master', 'Мастер', 1, datetime('now'), datetime('now'))"
         )
-        resp = api_client.delete("/api/v1/positions/master")
+        resp = api_client.request(
+            "DELETE", "/api/v1/positions/master", json={"expected": {}}
+        )
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "POSITION_IS_SYSTEM"
         # row survives

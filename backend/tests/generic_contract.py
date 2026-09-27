@@ -373,6 +373,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/payments",
         not_found_code="PAYMENT_NOT_FOUND",
         response_schema=PaymentResponse,
+        # GH #324 — deferred-delete leaf: bare DELETE → 422; the
+        # harness's clean-row deletes carry the empty expected snapshot.
+        delete_body={"expected": {}},
     ),
     # #207 Task 12: ServiceService is in GENERIC_CONTRACT_EXCEPTIONS (it
     # overrides update/patch for nested tariffs/tag_ids), but it shares the
@@ -473,6 +476,9 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/visitors",
         not_found_code="VISITOR_NOT_FOUND",
         response_schema=VisitorResponse,
+        # GH #324 — deferred-delete subject: bare DELETE → 422; clean
+        # rows carry the empty expected snapshot.
+        delete_body={"expected": {}},
         # GH #212 search matrix probe (spec §5.2/§5.4 M5): uppercase Cyrillic
         # stored value found by a lowercase substring query (name only).
         search_override={"name": "Серафима"},

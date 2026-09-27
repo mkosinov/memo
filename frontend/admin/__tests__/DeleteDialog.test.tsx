@@ -16,7 +16,7 @@ type ArchiveFn = (id: string) => Promise<unknown>;
 
 function renderDialog(props: {
   entityName: string;
-  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag';
+  entityType: 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag' | 'photo' | 'position' | 'visitor' | 'staff';
   entityId: string;
   dependencies: DependencyNode[];
   onDone: () => void;
@@ -814,5 +814,290 @@ describe('DeleteDialog — tag-side labels (GH #318 D9)', () => {
     });
 
     expect(screen.getByText(/→ Теги: 3 \(удалены\)/)).toBeInTheDocument();
+  });
+});
+
+// ─── GH #324 — photo/position dependent subjects ────────────────────────────
+// Photo → photo_tags node «Тег» (non-auto cascade, items = tag ids/titles):
+// the tags SURVIVE (stay in the dictionary) — the wording is «отвязаны»
+// (spec §8/§9.2: «Теги: N будут отвязаны»), never «удалены».
+// Position → staff_positions node «Сотрудник» (non-auto cascade, items =
+// staff ids/names): the staff cards SURVIVE — «потеряют должность»
+// (spec §9.5). The staff-side auto dep keeps its «Должности» label via the
+// side-aware relation plural (#318 D9 pattern).
+
+describe('DeleteDialog — #324 photo (tagged)', () => {
+  const PHOTO_TAGGED: DependencyNode[] = [
+    {
+      entity: 'photo_tags', auto: false,
+      relation: 'Тег',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 't-1', label: 'Гуашь' },
+        { id: 't-2', label: 'Акварель' },
+      ],
+    },
+  ];
+
+  it('photo title: «Удаление «фото test.jpg»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'test.jpg',
+      entityType: 'photo',
+      entityId: 'p1',
+      dependencies: PHOTO_TAGGED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «фото test\.jpg»/)).toBeInTheDocument();
+  });
+
+  it('group header says «Теги — будут отвязаны:» (parents survive, spec §9.2)', () => {
+    renderDialog({
+      entityName: 'test.jpg',
+      entityType: 'photo',
+      entityId: 'p1',
+      dependencies: PHOTO_TAGGED,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-photo_tags')).toHaveTextContent('Теги — будут отвязаны:');
+    expect(screen.getByTestId('dep-photo_tags')).not.toContainHTML('будут удалены');
+    expect(screen.getByText('Гуашь')).toBeInTheDocument();
+    expect(screen.getByText('Акварель')).toBeInTheDocument();
+  });
+
+  it('counter-line fallback (no items) keeps the «отвязаны» suffix', () => {
+    renderDialog({
+      entityName: 'test.jpg',
+      entityType: 'photo',
+      entityId: 'p1',
+      dependencies: [
+        { entity: 'photo_tags', auto: false, relation: 'Тег', count: 2, allowed_actions: ['cascade'], message: null },
+      ],
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-photo_tags')).toHaveTextContent('→ Теги: 2 (отвязаны)');
+  });
+
+  it('confirm is checkbox-gated; onResolve carries {photo_tags: cascade}', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'test.jpg',
+      entityType: 'photo',
+      entityId: 'p1',
+      dependencies: PHOTO_TAGGED,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn()).toBeDisabled();
+    toggleConfirm();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('p1', { photo_tags: 'cascade' }),
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DeleteDialog — #324 position (busy)', () => {
+  const POSITION_BUSY: DependencyNode[] = [
+    {
+      entity: 'staff_positions', auto: false,
+      relation: 'Сотрудник',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'st-1', label: 'Анна Иванова' },
+        { id: 'st-2', label: 'Мария Петрова' },
+      ],
+    },
+  ];
+
+  it('position title: «Удаление «должности СММ»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'СММ',
+      entityType: 'position',
+      entityId: 'smm',
+      dependencies: POSITION_BUSY,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «должности СММ»/)).toBeInTheDocument();
+  });
+
+  it('group header says «Сотрудники — потеряют должность:» (cards survive, spec §9.5)', () => {
+    renderDialog({
+      entityName: 'СММ',
+      entityType: 'position',
+      entityId: 'smm',
+      dependencies: POSITION_BUSY,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-staff_positions')).toHaveTextContent(
+      'Сотрудники — потеряют должность:',
+    );
+    expect(screen.getByTestId('dep-staff_positions')).not.toContainHTML('будут удалены');
+    expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    expect(screen.getByText('Мария Петрова')).toBeInTheDocument();
+  });
+
+  it('counter-line fallback (no items) keeps the «потеряют должность» suffix', () => {
+    renderDialog({
+      entityName: 'СММ',
+      entityType: 'position',
+      entityId: 'smm',
+      dependencies: [
+        { entity: 'staff_positions', auto: false, relation: 'Сотрудник', count: 2, allowed_actions: ['cascade'], message: null },
+      ],
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-staff_positions')).toHaveTextContent(
+      '→ Сотрудники: 2 (потеряют должность)',
+    );
+  });
+
+  it('confirm is checkbox-gated; onResolve carries {staff_positions: cascade}', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'СММ',
+      entityType: 'position',
+      entityId: 'smm',
+      dependencies: POSITION_BUSY,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn()).toBeDisabled();
+    toggleConfirm();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('smm', { staff_positions: 'cascade' }),
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('STAFF side stays side-aware: auto staff_positions dep renders «→ Должности: 1 (удалён)»', () => {
+    renderDialog({
+      entityName: 'Анна',
+      entityType: 'staff',
+      entityId: 'st-1',
+      dependencies: [
+        { entity: 'staff_positions', auto: true, relation: 'Должность', count: 1, allowed_actions: ['cascade'], message: null },
+      ],
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByTestId('dep-staff_positions')).toHaveTextContent('→ Должности: 1 (удалён)');
+  });
+});
+
+describe('DeleteDialog — #324 visitor (with visits)', () => {
+  // The 409 tree of a visitor with 2 visits + 1 own tag: the «Посещение»
+  // node (NON-auto, items = visit one-liners «{service}, {price}») AND the
+  // visitor_tags AUTO node «Тег» (join rows die with the visitor).
+  const VISITOR_WITH_VISITS: DependencyNode[] = [
+    {
+      entity: 'visits', auto: false,
+      relation: 'Посещение',
+      count: 2,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [
+        { id: 'visit-1', label: 'Гуашь, 3500' },
+        { id: 'visit-2', label: 'Гуашь, 3500' },
+      ],
+    },
+    {
+      entity: 'visitor_tags', auto: true,
+      relation: 'Тег',
+      count: 1,
+      allowed_actions: ['cascade'],
+      message: null,
+      items: [{ id: 'tag-1', label: 'Гуашь' }],
+    },
+  ];
+
+  it('visitor title: «Удаление «посетителя Маша»» (TITLE_BY_TYPE genitive)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(screen.getByText(/Удаление «посетителя Маша»/)).toBeInTheDocument();
+  });
+
+  it('visits group header says «Посещения — будут удалены:» + one line per visit (spec §9.3)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // The visits die WITH the visitor (cascade, user decision 21.09) — the
+    // default «будут удалены» wording is correct for entityType 'visitor'.
+    expect(screen.getByTestId('dep-visits')).toHaveTextContent('Посещения — будут удалены:');
+    expect(screen.getAllByText('Гуашь, 3500').length).toBe(2);
+  });
+
+  it('auto visitor_tags node renders as the generic items group (join rows die with the visitor)', () => {
+    renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // The node carries items (deletion.py _items_v_visitor_tags — «the tree
+    // is complete; the client filters by auto, not by items presence»), so
+    // DepRow renders the group: the default «будут удалены» tail — the
+    // visitor's OWN tag links die with him (auto cascade).
+    expect(screen.getByTestId('dep-visitor_tags')).toHaveTextContent('Теги — будут удалены:');
+    expect(screen.getByText('Гуашь', { selector: 'li' })).toBeInTheDocument();
+  });
+
+  it('confirm is checkbox-gated; onResolve carries {visits: cascade} (auto group excluded)', async () => {
+    const onDone = vi.fn();
+    const { onResolve } = renderDialog({
+      entityName: 'Маша',
+      entityType: 'visitor',
+      entityId: 'vis1',
+      dependencies: VISITOR_WITH_VISITS,
+      onDone,
+      onCancel: vi.fn(),
+    });
+
+    expect(confirmBtn()).toBeDisabled();
+    toggleConfirm();
+    fireEvent.click(confirmBtn());
+
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith('vis1', { visits: 'cascade' }),
+    );
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 });

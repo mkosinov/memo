@@ -1,17 +1,23 @@
 """Tests for ErrorCode enum, ErrorDetail schema, and ERROR_MESSAGES registry.
 
 Spec: docs/specs/2026-06-20-error-flow-design.md §5
+GH #324 Task 5 (spec §4.1): the delete-family FORM 422s live here — the
+one suite that runs them for ALL six routes at once.
 """
+
+import uuid as _uuid
 
 import pytest
 
 from src.errors import ERROR_MESSAGES, ErrorCode, ErrorDetail
 
-pytestmark = pytest.mark.pure_unit
-
-
+# GH #324 Task 5: this file now mixes a pure_unit registry suite and an
+# api-level DELETE-form suite — the marks live on the classes (a module
+# pure_unit mark would skip reset_db for the api tests and break the
+# per-test admin INSERT).
 # ─── ErrorCode Enum ───────────────────────────────────────────────────────────
 
+@pytest.mark.pure_unit
 class TestErrorCodeEnum:
     """Verify ErrorCode has all 36 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week + 2 GH #286 deferred-delete)."""
 
@@ -87,6 +93,7 @@ class TestErrorCodeEnum:
 
 # ─── ErrorDetail Schema ───────────────────────────────────────────────────────
 
+@pytest.mark.pure_unit
 class TestErrorDetail:
     """Verify ErrorDetail Pydantic model serializes correctly."""
 
@@ -122,6 +129,7 @@ class TestErrorDetail:
 
 # ─── ERROR_MESSAGES Registry ──────────────────────────────────────────────────
 
+@pytest.mark.pure_unit
 class TestErrorMessages:
     """Verify ERROR_MESSAGES has an entry for every ErrorCode."""
 
@@ -156,3 +164,123 @@ class TestErrorMessages:
             ERROR_MESSAGES[ErrorCode.INTEGRITY_VIOLATION]
             == "Нарушение целостности данных"
         )
+
+
+# ─── GH #324 §4.1: the delete-family FORM 422s (all six routes) ──────────────
+
+
+@pytest.mark.api
+class TestDeleteFamilyForm422:
+    """The FORM transport of the six #324 DELETE routes — checked BEFORE
+    any DB access (spec §4.1: «форма ничего не сообщает о существовании»).
+
+    Parametrized over the six routes on CANNOT-EXIST ids: the form check
+    must fire before the existence probe, so a never-existing id still
+    gets the 422 — pinning the order for every subject at once (the
+    per-entity files carry the busy-subject depth; the four guarded
+    routes' scope-404s are pinned there, on existing foreign rows).
+
+    Cases (the full §4.1 form matrix):
+
+    * bare DELETE (no flag, no body) → 422 ``expected_state_required``;
+    * resolutions-only body → 422 ``expected_state_required`` (the
+      rejected legacy shape);
+    * ``?dry_run=true`` + resolutions body → 422
+      ``dry_run_with_resolutions_forbidden`` (also on a never-existing
+      id — the combo check precedes the probe);
+    * ``?dry_run=true`` + expected-only body → legal shape, silently
+      ignored (no resolutions to forbid): a leaf route previews 204;
+      the dependent routes' 409 preview is pinned per-entity.
+    """
+
+    MISSING = "00000000-0000-0000-0000-000000000000"
+
+    ROUTES = (
+        "/api/v1/visits",
+        "/api/v1/payments",
+        "/api/v1/photos",
+        "/api/v1/user-settings",
+        "/api/v1/visitors",
+        "/api/v1/positions",
+    )
+
+    @pytest.mark.parametrize("prefix", ROUTES)
+    def test_bare_delete_returns_422_before_probe(self, api_client, prefix) -> None:
+        """§4.1: no flag, no body → 422 expected_state_required — even on
+        a cannot-exist id (the form precedes the existence probe)."""
+        resp = api_client.delete(f"{prefix}/{self.MISSING}")
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"] == "expected_state_required"
+
+    @pytest.mark.parametrize("prefix", ROUTES)
+    def test_resolutions_without_expected_returns_422(
+        self, api_client, prefix,
+    ) -> None:
+        """§4.1: resolutions-only body is the rejected legacy shape → 422
+        expected_state_required (form check, not an existence probe)."""
+        resp = api_client.request(
+            "DELETE", f"{prefix}/{self.MISSING}",
+            json={"resolutions": {"photo_tags": "cascade"}},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"] == "expected_state_required"
+
+    @pytest.mark.parametrize("prefix", ROUTES)
+    def test_dry_run_with_resolutions_returns_422_before_probe(
+        self, api_client, prefix,
+    ) -> None:
+        """§4.1: dry_run + resolutions → 422
+        dry_run_with_resolutions_forbidden — a pure preview never carries
+        execution choices; the combo check runs before the probe."""
+        for path in (
+            f"{prefix}/{self.MISSING}",
+            f"{prefix}/no-such-{_uuid.uuid4().hex[:6]}",
+        ):
+            resp = api_client.request(
+                "DELETE", path,
+                params={"dry_run": "true"},
+                json={"resolutions": {"visits": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{path}: {resp.text}"
+            assert (
+                resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+            )
+
+    @pytest.mark.parametrize(
+        "prefix", ["/api/v1/visits", "/api/v1/payments", "/api/v1/user-settings"],
+    )
+    def test_dry_run_with_expected_only_body_ignored_leaf_204(
+        self, api_client, prefix, create_record,
+    ) -> None:
+        """§4.1 combinatorics: dry_run + expected-only body → legal shape,
+        silently ignored — a leaf's empty preview answers 204 (the
+        dependent routes' 409 on this shape is pinned per-entity)."""
+        url = self._existing_leaf_url(api_client, prefix, create_record)
+        resp = api_client.request(
+            "DELETE", url, params={"dry_run": "true"}, json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
+
+    @staticmethod
+    def _existing_leaf_url(api_client, prefix: str, create_record) -> str:
+        """An existing leaf row URL for the expected-only case (the form
+        is proven already — this only steers past the 404 probe)."""
+        if prefix == "/api/v1/visits":
+            record = create_record()
+            return f"/api/v1/visits/{record['visits'][0]['id']}"
+        if prefix == "/api/v1/payments":
+            record = create_record()
+            payment = api_client.post("/api/v1/payments", json={
+                "record_id": record["id"], "amount": 500, "method": "cash",
+            })
+            assert payment.status_code == 201, payment.text
+            return f"/api/v1/payments/{payment.json()['id']}"
+        # user-settings: GET resolves the session user's own row (none
+        # in a fresh world) → create one.
+        if api_client.get("/api/v1/user-settings").status_code == 404:
+            me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+            resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+            assert resp.status_code == 201, resp.text
+            return f"/api/v1/user-settings/{resp.json()['id']}"
+        row = api_client.get("/api/v1/user-settings").json()
+        return f"/api/v1/user-settings/{row['id']}"

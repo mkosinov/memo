@@ -429,7 +429,9 @@ class TestVisitScope:
     def test_foreign_delete_404(self, two_visits) -> None:
         mc = two_visits["master"]["client"]
         vid = two_visits["foreign"]["visit"]["id"]
-        resp = mc.delete(f"/api/v1/visits/{vid}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/visits/{vid}", json={"expected": {}}
+        )
         assert resp.status_code == 404
         assert query_db(f"SELECT id FROM visits WHERE id='{vid}'")
 
@@ -564,7 +566,9 @@ class TestVisitorScope:
     def test_foreign_delete_404(self, two_visitors) -> None:
         mc = two_visitors["master"]["client"]
         vid = two_visitors["foreign"]["visitor_id"]
-        resp = mc.delete(f"/api/v1/visitors/{vid}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/visitors/{vid}", json={"expected": {}}
+        )
         assert resp.status_code == 404
         assert query_db(f"SELECT id FROM visitors WHERE id='{vid}'")
 

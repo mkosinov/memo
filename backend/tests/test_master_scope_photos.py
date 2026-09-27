@@ -327,14 +327,18 @@ class TestPhotoDeleteScope:
     def test_own_delete_204(self, photo_scope_world) -> None:
         mc = photo_scope_world["master"]["client"]
         photo = photo_scope_world["own"]["photo"]
-        resp = mc.delete(f"/api/v1/photos/{photo['id']}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/photos/{photo['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 204
         assert not query_db(f"SELECT id FROM photos WHERE id='{photo['id']}'")
 
     def test_foreign_delete_404(self, photo_scope_world) -> None:
         mc = photo_scope_world["master"]["client"]
         photo = photo_scope_world["foreign"]["photo"]
-        resp = mc.delete(f"/api/v1/photos/{photo['id']}")
+        resp = mc.request(
+            "DELETE", f"/api/v1/photos/{photo['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 404
         assert query_db(f"SELECT id FROM photos WHERE id='{photo['id']}'")
 

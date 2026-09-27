@@ -66,6 +66,17 @@ Staff — карточка каждого сотрудника студии (м�
 
 **`/api/v1/positions`** — CRUD словаря должностей: встроенные (`is_system`) не удаляются, title редактируем.
 
+### Удаление должностей (#324 — семейный контракт, этап 3 #346)
+
+`DELETE /api/v1/positions/{id}` — единый флоу удалений (см. `deletion.md`), зеркало тегового роута #318:
+
+- **Порядок проверок (security pin):** форма → probe (404) → **системная охрана** → развилка dry_run/commit. `is_system`-строка → 422 `POSITION_IS_SYSTEM` **до** развилки — встроенная не превьюируется и не удаляется ни в какой форме.
+- **Голый DELETE** (без флага и тела) → 422 `expected_state_required`; `?dry_run=true` + тело `resolutions` → 422. Чистое превью — только `?dry_run=true`.
+- **Занятая должность** (`staff_positions` — видимая, не-auto зависимость): dry_run → 409 `has_dependencies` с деревом — узел **«Сотрудник: N»** (count + items); коммит `{resolutions: {staff_positions: "cascade"}, expected: {staff_positions: [...]}}` — subset-сверка (держатель, появившийся за окно → 409 `stale_dependencies`), затем отвязка у сотрудников (карточки переживают) и hard delete строки → 204.
+- **Свободная должность** ведёт себя как лист: dry_run → 204, коммит `{expected: {}}`.
+- **Скоуп:** per-row scope-модели у должностей сознательно нет (справочник студии) — доступ = роль `positions:write` (`_WRITE_GUARD`), дерево «Сотрудник» видит держатель роли.
+- **Фронт:** `PositionsTable` идёт через deferred-конвейер (кольцо 5 с; занятая — диалог «Сотрудники: N потеряют должность»; undo возвращает строку) — `window.confirm` больше не используется.
+
 ## List contract (GH #205 — переезжает с /masters на /staff)
 
 - Paginated `GET /api/v1/staff`: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `name, specialty, color, avatar, status`; position исключена — M2M), `sort_order` (asc|desc). Default order: `sort_order ASC, first_name ASC, id ASC`.

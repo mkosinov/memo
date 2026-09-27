@@ -1000,7 +1000,9 @@ class TestDeleteDeferredContract:
         activity_id = record["activity_id"]
         visit_ids = [v["id"] for v in record["visits"]]
         # The race, disappearing side: one visit is deleted before commit.
-        del_resp = api_client.delete(f"/api/v1/visits/{visit_ids[1]}")
+        del_resp = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_ids[1]}", json={"expected": {}}
+        )
         assert del_resp.status_code == 204, del_resp.text
 
         resp = api_client.request(

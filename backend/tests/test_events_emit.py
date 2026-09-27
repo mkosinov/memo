@@ -217,7 +217,11 @@ class TestResolveDeleteExecutor:
         # marks dep.entity for EVERY dispatched handler regardless of count
         # (extra invalidations are cheap/correct, spec §2.7). Join-table
         # names ("client_tags") are published as-is — unknown names are
-        # skipped silently by consumers (spec §5).
+        # skipped silently by consumers (spec §5). NB (rebase #324/#327):
+        # the route executes the ``delete_client`` scenario, which runs the
+        # visits brick with ``mark_visits=False`` — the recompute-inside
+        # brick re-marks "records" (already in the set), "visits" stays
+        # suppressed (spec §8 parity).
         assert events == [({"clients", "records", "visitors", "client_tags", "photos"}, None)]
 
 

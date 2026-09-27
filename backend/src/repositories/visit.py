@@ -35,6 +35,21 @@ class VisitRepository(BaseRepository):
         """
         await session.execute(delete(Visit).where(Visit.record_id == record_id))
 
+    async def delete_by_record_ids(
+        self, session: AsyncSession, record_ids: list[str]
+    ) -> None:
+        """Remove ALL visits of the given records in a single DELETE.
+
+        Set-based bulk command (canon rule 4, GH #325): one
+        ``DELETE FROM visits WHERE record_id IN (:ids)`` — no per-row
+        loop. An EMPTY id set is a no-op — no query is issued at all.
+        Does NOT commit — the caller's transaction owns the commit
+        boundary.
+        """
+        if not record_ids:
+            return
+        await session.execute(delete(Visit).where(Visit.record_id.in_(record_ids)))
+
     async def delete_by_visitor_id(self, session: AsyncSession, visitor_id: str) -> None:
         """Remove ALL visits of one visitor in a single DELETE statement.
 

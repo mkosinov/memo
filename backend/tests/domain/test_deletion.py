@@ -410,7 +410,8 @@ class TestFKMatrixActivity:
 
     PREVIEW-ONLY entries: consumed by ``collect_dependencies`` (dialog
     tree / expected ids) — execution of DELETE /activities/{id} stays
-    with the handwritten ``ActivityService.delete`` (no handlers below).
+    with the ``usecases.activities.delete_activity`` scenario (GH #325;
+    no handlers below).
     """
 
     def test_has_exactly_three_deps(self) -> None:

@@ -34,6 +34,9 @@ from src.services.activity import (
     get_activity_service,
     sum_active_seats_bulk,
 )
+from src.usecases.activities import (
+    delete_activity as delete_activity_scenario,
+)
 
 router = APIRouter(tags=["activities"])
 
@@ -273,9 +276,10 @@ async def delete_activity(
       (a mid-window record AND a visit/payment inside an
       already-confirmed record); auto deps (photos/activity_tags) are
       exempt. Mismatch → 409 ``stale_dependencies`` + current tree.
-      Only on a match → the handwritten ``ActivityService.delete``
-      (the ``@transactional`` records cascade + photo SET NULL + join
-      rows) → 204; missing id → 404. Fail-closed: the check runs BEFORE
+      Only on a match → the ``usecases.activities.delete_activity``
+      scenario (GH #325: the ``@transactional`` records cascade + photo
+      SET NULL + join rows, the former handwritten service method) →
+      204; missing id → 404. Fail-closed: the check runs BEFORE
       execution — a stale commit deletes nothing.
 
     Every branch inherits ``_WRITE_GUARD`` (activities:write + fetch
@@ -326,19 +330,22 @@ async def delete_activity(
         deps = await collect_dependencies(session, Activity, activity_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no service.delete, no SSE marks.
+        return  # 204 — preview only: no delete scenario, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
-    # the handwritten cascade could partially execute.
+    # the scenario's cascade could partially execute.
     deps = await collect_dependencies(session, Activity, activity_id)
     now_ids = await collect_dependency_ids(session, Activity, activity_id)
     if stale_expected_entities(Activity, now_ids, expected or {}):
         return _dependencies_response(deps, detail="stale_dependencies")
 
-    # Match → execution by the handwritten service (records cascade,
-    # photo SET NULL, join rows — untouched by #286).
-    deleted = await service.delete(db_session=session, id=activity_id)
+    # Match → execution by the usecases scenario (GH #325 Task 4): the
+    # records cascade, photo SET NULL, join rows — the selfless call
+    # convention, the ``api/v1/records.py`` precedent.
+    deleted = await delete_activity_scenario(
+        None, db_session=session, id=activity_id,
+    )
     if not deleted:
         raise HTTPException(
             status_code=404,

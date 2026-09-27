@@ -12,10 +12,11 @@ from __future__ import annotations
 from functools import lru_cache
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, delete, exists, or_, select
+from sqlalchemy import ColumnElement, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.photo import Photo, photo_tags
@@ -336,6 +337,28 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
             _photo_mark(orm, "update", _old)
         # Reload with tags eagerly loaded
         return await self.get(db_session, id)
+
+    async def unlink_from_activity(
+        self, db_session: AsyncSession, activity_id: str
+    ) -> None:
+        """Detach ALL photos of one activity — WITHOUT committing.
+
+        Non-transactional scenario building block for the activity-delete
+        scenario (GH #325; canon docs/domain-rules/service-layer.md rules
+        1, 3-4): a photo SURVIVES the activity that produced it — the FK
+        goes NULL instead of a delete (docs/domain-rules/deletion.md,
+        #194 G1b). ONE set-based ``UPDATE photos SET activity_id = NULL``
+        over the owner column; UNCONDITIONAL — it runs whether or not the
+        activity had records (photos may exist regardless, GH #239 §3.3).
+        Does NOT commit — the caller's scenario owns the transaction
+        boundary. Marks the helper's OWN entity ("photos"); outside an
+        active transaction the mark is a no-op.
+        """
+        await db_session.execute(
+            update(Photo).where(Photo.activity_id == activity_id)
+            .values(activity_id=None)
+        )
+        mark_changed("photos")
 
 
 @lru_cache

@@ -106,3 +106,88 @@ async def test_delete_by_record_does_not_commit(db_session, api_client, create_r
         "delete_by_record must NOT commit — the scenario layer owns the "
         "transaction boundary (canon rule 3)"
     )
+
+
+# ── GH #325 — bulk delete by record ID set (activity-delete scenario) ──────
+
+
+@pytest.mark.asyncio
+async def test_delete_by_record_ids_is_not_transactional():
+    """The scenario-helper must NOT be wrapped by @transactional."""
+    assert not hasattr(PaymentService.delete_by_record_ids, _TRANSACTIONAL_MARKER), (
+        "delete_by_record_ids is a scenario building block — it must NOT "
+        "commit; the usecases layer owns the transaction boundary"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_by_record_ids_removes_payments_of_records(
+    db_session, api_client, create_record
+):
+    """ONE set-based delete: payments of ALL listed records gone, others stay."""
+    from sqlalchemy import select
+
+    from src.models.payment import Payment
+
+    record_a = create_record()
+    record_b = create_record()
+    record_c = create_record()  # not in the set — must stay untouched
+    for record_id in (record_a["id"], record_b["id"], record_c["id"]):
+        resp = api_client.post("/api/v1/payments", json={
+            "record_id": record_id, "amount": 1000, "method": "cash",
+        })
+        assert resp.status_code == 201, resp.text
+    target_ids = [record_a["id"], record_b["id"]]
+
+    from src.services.payment import get_payment_service
+    service = get_payment_service()
+    await service.delete_by_record_ids(db_session, target_ids)
+
+    gone = (await db_session.execute(
+        select(Payment).where(Payment.record_id.in_(target_ids))
+    )).scalars().all()
+    assert gone == []
+    kept = (await db_session.execute(
+        select(Payment).where(Payment.record_id == record_c["id"])
+    )).scalars().all()
+    assert len(kept) == 1  # чужой record's payments untouched
+
+
+@pytest.mark.asyncio
+async def test_delete_by_record_ids_empty_set_is_noop(db_session):
+    """An empty ID set issues NO query at all."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.services.payment import get_payment_service
+
+    service = get_payment_service()
+
+    with patch.object(db_session, "execute", new_callable=AsyncMock) as exec_spy:
+        await service.delete_by_record_ids(db_session, [])
+    exec_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_by_record_ids_does_not_commit(
+    db_session, api_client, create_record
+):
+    """No-commit property: rollback after the bulk delete restores payments."""
+    from tests.conftest import query_db
+
+    record = create_record()
+    resp = api_client.post("/api/v1/payments", json={
+        "record_id": record["id"], "amount": 500, "method": "cash",
+    })
+    assert resp.status_code == 201, resp.text
+
+    from src.services.payment import get_payment_service
+    service = get_payment_service()
+    await service.delete_by_record_ids(db_session, [record["id"]])
+    await db_session.rollback()
+
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM payments WHERE record_id='{record['id']}'"
+    )[0]["c"] == 1, (
+        "delete_by_record_ids must NOT commit — the scenario layer owns the "
+        "transaction boundary (canon rule 3)"
+    )

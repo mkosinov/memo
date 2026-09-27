@@ -117,7 +117,8 @@ class TestActivityDeleteCascade:
 
         # Execute mode: the unified DELETE route requires the commit body
         # (the expected id-sets confirmed at dry-run — #286 D2);
-        # ActivityService.delete is the executor and marks the full set.
+        # the delete_activity scenario is the executor and marks the
+        # full set (GH #325).
         resp = api_client.request(
             "DELETE",
             f"/api/v1/activities/{record['activity_id']}",
@@ -288,9 +289,54 @@ class TestCascadeSourceAudit:
         assert 'mark_changed("records")' in src
 
     def test_activity_delete_marks_full_set(self) -> None:
-        src = self._source("src/services/activity.py")
-        for entity in ("records", "visits", "payments", "photos", "tags"):
-            assert f'mark_changed("{entity}")' in src, f"activity.py lost mark_changed({entity!r})"
+        """GH #325 Task 4: the activity-delete cascade marks live in the
+        owner helpers + the scenario — ``delete_visits_by_record_ids``
+        marks "visits" (visit.py), ``delete_by_record_ids`` marks
+        "payments" (payment.py), ``delete_rows_with_tags_bulk`` marks
+        "records"+"tags" (record.py), ``unlink_from_activity`` marks
+        "photos" (photo.py), ``delete_row_with_activity_tags`` marks
+        "tags" (activity.py), and the ``delete_activity`` scenario marks
+        "activities" explicitly. The narrowed ``activity.py`` must carry
+        NO cascade marks besides its own activity_tags one: the delete
+        body moved to the usecases scenario, so a re-appearing mark here
+        is cascade drift (the #171 Task 6 pattern)."""
+        scenario_src = self._source("src/usecases/activities.py")
+        assert 'mark_changed("activities")' in scenario_src, (
+            "the delete_activity scenario lost its explicit own-entity "
+            "mark — the selfless wrapper seeds an EMPTY accumulator"
+        )
+        visit_src = self._source("src/services/visit.py")
+        assert 'mark_changed("visits")' in visit_src, (
+            "visit.py lost mark_changed('visits') — the delete_activity "
+            "scenario relies on it for the visits cascade mark"
+        )
+        payment_src = self._source("src/services/payment.py")
+        assert 'mark_changed("payments")' in payment_src, (
+            "payment.py lost mark_changed('payments') — the delete_activity "
+            "scenario relies on it for the payments cascade mark"
+        )
+        record_src = self._source("src/services/record.py")
+        assert 'mark_changed("records")' in record_src, (
+            "record.py lost mark_changed('records') — the delete_activity "
+            "scenario relies on it for the records cascade mark"
+        )
+        photo_src = self._source("src/services/photo.py")
+        assert 'mark_changed("photos")' in photo_src, (
+            "photo.py lost mark_changed('photos') — the delete_activity "
+            "scenario relies on it for the photo-unlink mark"
+        )
+        activity_src = self._source("src/services/activity.py")
+        assert 'mark_changed("tags")' in activity_src, (
+            "activity.py lost mark_changed('tags') — the "
+            "delete_row_with_activity_tags helper relies on it for the "
+            "activity_tags join-rows mark"
+        )
+        for entity in ("records", "visits", "payments", "photos", "activities"):
+            assert f'mark_changed("{entity}")' not in activity_src, (
+                f"activity.py re-acquired mark_changed({entity!r}) — the "
+                "delete cascade lives in the usecases scenario + owner "
+                "helpers (GH #325)"
+            )
 
     def test_record_delete_marks_visits_payments(self) -> None:
         """GH #171 Task 6: the record-delete cascade marks live in the

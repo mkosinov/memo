@@ -35,8 +35,9 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
     (join, auto). PREVIEW-ONLY entry — consumed by
     :func:`collect_dependencies` (dialog tree, two levels deep via
     ``_RECURSIVE_CHILDREN``); execution of DELETE /activities/{id}
-    stays with the handwritten ``ActivityService.delete`` — NO
-    handlers are wired for Activity in the dispatch tables below.
+    stays with the ``usecases.activities.delete_activity`` scenario
+    (GH #325) — NO handlers are wired for Activity in the dispatch
+    tables below.
   * ``Visitor.client_id`` — NOT NULL → Client cascade (user choice).
   * join tables ``master_tags``/``location_tags``/``service_tags``/
     ``client_tags``/``service_materials`` — NOT-NULL PK → cascade (auto)

@@ -21,8 +21,8 @@ Covered families:
   row (§9 scenario 6); the Client→visitors cascade reuses the bare
   ``_delete_cascade`` core and stays silent (§8);
 * ``resolve_delete`` (deferred-delete commit for clients/services/staff/
-  tags) and ``ActivityService.delete`` — the deferred-delete commit path
-  (§4.5);
+  tags) and the ``delete_activity`` scenario (usecases, #325) — the
+  deferred-delete commit path (§4.5);
 * payments single CRUD — auto-collection representative (§8 row 1).
 
 Service-level tests call real decorated services with a staged actor and
@@ -1325,18 +1325,18 @@ def _insert_tag(tag_id: str, title: str) -> None:
     )
 
 
-# ─── §4.5: ActivityService.delete — the deferred-delete commit (#286) ─────────
+# ─── §4.5: delete_activity scenario — the deferred-delete commit (#325) ───────
 
 
 class TestActivityDeleteAudit:
     async def test_delete_activity_journals_delete_row(
         self, db_session, actor, audit_rows
     ) -> None:
-        from src.services.activity import get_activity_service
+        from src.usecases.activities import delete_activity
 
         _seed_record_chain()
         before = len(audit_rows())
-        ok = await get_activity_service().delete(db_session, "act-aud")
+        ok = await delete_activity(None, db_session=db_session, id="act-aud")
         assert ok is True
         rows = audit_rows()[before:]
         # ONE activity delete row; the cascaded records/visits/payments/
@@ -1348,9 +1348,9 @@ class TestActivityDeleteAudit:
     async def test_delete_missing_activity_writes_nothing(
         self, db_session, actor, audit_rows
     ) -> None:
-        from src.services.activity import get_activity_service
+        from src.usecases.activities import delete_activity
 
-        ok = await get_activity_service().delete(db_session, "act-none")
+        ok = await delete_activity(None, db_session=db_session, id="act-none")
         assert ok is False
         assert audit_rows() == []
 

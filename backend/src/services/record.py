@@ -22,16 +22,18 @@ No cache marks and no foreign-ORM writes here: visits/payments/clients/
 visitors are handled by their owner services behind the scenarios.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter
 from sqlalchemy import Select, case, delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.domain.dates import day_range
+from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -53,6 +55,9 @@ from src.schemas.record import (
     VisitResponse,
 )
 from src.services.generic import GenericService
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
 # (pydantic emits ``Z`` for UTC-aware values where bare ``isoformat()``
@@ -365,6 +370,31 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         """
         await self._repository.delete_tags_by_record_id(db_session, record_id)
         await db_session.execute(delete(Record).where(Record.id == record_id))
+
+    async def delete_rows_with_tags_bulk(
+        self, db_session: AsyncSession, record_ids: list[str],
+    ) -> None:
+        """Remove the given records' OWN tag bundles + rows — WITHOUT committing.
+
+        Bulk sibling of ``delete_row_with_tags`` for the activity-delete
+        scenario (GH #325; canon docs/domain-rules/service-layer.md rules
+        1, 3-4): the caller's scenario owns the transaction boundary and
+        the commit. TWO set-based commands, both bulk over the id set and
+        both living in the owner repository: the ``record_tags`` links go
+        FIRST (``RecordRepository.delete_tags_by_record_ids`` — the join's
+        FKs carry no ondelete action, #194), then the rows
+        (``RecordRepository.delete_rows_by_ids``). An empty id set is a
+        no-op (no query issued). Marks "records" (own rows) AND "tags"
+        (the record_tags join rows) so the scenario publishes one
+        consistent event batch; outside an active transaction the marks
+        are a no-op.
+        """
+        if not record_ids:
+            return
+        await self._repository.delete_tags_by_record_ids(db_session, record_ids)
+        await self._repository.delete_rows_by_ids(db_session, record_ids)
+        mark_changed("records")
+        mark_changed("tags")  # record_tags join rows
 
     async def create_row(
         self,

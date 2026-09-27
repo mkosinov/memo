@@ -17,7 +17,6 @@ afterEach(() => {
 });
 
 const defaultProps = {
-  value: null as string | null,
   onChange: vi.fn(),
   onSearch: mockSearch,
   label: 'Посетитель',

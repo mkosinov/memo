@@ -3,16 +3,29 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1._delete_family import (
+    DryRunParam,
+    dependencies_response,
+    form_rejection,
+)
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
+from src.domain.deletion import collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
-from src.schemas.common import PaginatedResponse
+from src.models.payment import Payment
+from src.schemas.common import DeleteBody, PaginatedResponse
 from src.schemas.pagination import PaginationParams
-from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentTotalsResponse, PaymentUpdate
+from src.schemas.payment import (
+    PaymentCreate,
+    PaymentPatch,
+    PaymentResponse,
+    PaymentTotalsResponse,
+    PaymentUpdate,
+)
 from src.services.payment import PaymentService, get_payment_service, get_payment_totals
 
 router = APIRouter(
@@ -214,10 +227,41 @@ async def delete_payment(
     payment_id: str,
     service: _ServiceDep,
     session: SessionDep,
+    body: Annotated[DeleteBody | None, Body()] = None,
+    dry_run: DryRunParam = None,
     scope: ScopeContext = Depends(get_scope),  # noqa: B008
 ) -> None:
-    """Hard-delete a payment (physically remove the row)."""
+    """Unified delete contract — dry-run flag / commit body (#324 §4,
+    leaf subject — mirror of the records/tags routes #285/#318).
+
+    * ``?dry_run=true`` — PURE preview: a payment is a LEAF (empty
+      FK_MATRIX row) → always 204 WITHOUT deleting; never modifies rows.
+    * No body, no flag → 422 ``expected_state_required`` — rejected
+      before any DB access (same for a resolutions-only body).
+    * Body ``{expected}`` (leaf: ``{}``) — the deferred-delete commit:
+      scope probe → ``PaymentService.delete`` → 204; missing or foreign
+      id → 404 (the probe runs FIRST in both branches). NO recompute —
+      a payment is not part of the record status (spec §4).
+
+    Check order (security pin, §4.1-4.2): form → probe → fork.
+    """
+    rejection = form_rejection(body, dry_run)
+    if rejection is not None:
+        return rejection
+
+    # Scope-existence probe — first line of BOTH branches (§4.2).
     await _payment_scoped_or_404(service, session, payment_id, scope)
+
+    if dry_run:
+        # Leaf: the matrix row is empty — the preview is always a bare
+        # 204 without deleting, no SSE marks.
+        deps = await collect_dependencies(session, Payment, payment_id)
+        if deps:  # defensive — a leaf has no counters wired
+            return dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only.
+
+    # Body branch: the deferred-delete commit (expected verification is
+    # a no-op for a leaf — the body contract still demands ``{}``).
     deleted = await service.delete(db_session=session, id=payment_id)
     if not deleted:
         raise HTTPException(

@@ -610,7 +610,9 @@ class TestDataIntegrity:
         v2_id = v2_resp.json()["id"]
 
         # Delete v2
-        api_client.delete(f"/api/v1/visitors/{v2_id}")
+        api_client.request(
+            "DELETE", f"/api/v1/visitors/{v2_id}", json={"expected": {}}
+        )
 
         # List client visitors — should only include v1
         response = api_client.get(f"/api/v1/clients/{client['id']}/visitors")

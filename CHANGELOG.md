@@ -130,6 +130,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Follow-ups: #375, #378 — стартуют после мержа.
   - Status: `docs/status/2026-09-26-delete-client-scenario-327.md`
 
+## [Unreleased] — 2026-09-26
+
+### Added
+- **GH #324 — Остаток семьи удалений «навсегда»: визиты, оплаты, фото, настройки, посетители,
+  должности на единый семейный контракт + тест-страж «схема ↔ матрица» (этапы 2+3 из #346)** —
+  branch `324-delete-family-remaining` (10 commits `cfb0ec95..c55ef3ef`, base `20b710f7`; 70 файлов,
+  +9051/−574; спека `docs/specs/2026-09-21-delete-family-remaining-324-design.md` rev3 (canon,
+  на main) и план `docs/plans/2026-09-21-delete-family-remaining-324-plan.md` (9 задач) — оба
+  на main; канон пер-сущностных секций пришёл спека-коммитом `5fdeac5b`, доспех фаз — этим
+  docs-коммитом):
+  - **Домен — шесть субъектов в семейной матрице (T1, `cfb0ec95`):** `FK_MATRIX` + полный
+    комплект реестров (счётчики / id-коллекторы / item-коллекторы / каскад-хендлеры) для
+    Visit, Payment, UserSettings (листья), Photo (`photo_tags` — видимая), Visitor
+    (`visits` — видимая + `visitor_tags` auto), Position (`staff_positions` — видимая);
+    `tests/domain/test_deletion_family.py`.
+  - **Пачка визитов посетителя (T2, `ac12e909`):** `VisitService.delete_visits_by_visitor` —
+    один bulk-DELETE + пересчёт статуса/мест каждой затронутой записи теми же хуками, что
+    одиночный путь; SSE-метки `visits`+`records`; `VisitorService._delete_cascade` делегирует
+    (клиент-каскад наследует пересчёт), исполнитель `(Visitor, "visits")`.
+  - **Единый контракт шести DELETE-рутов (T3, `42d63d6f`):** форма → probe → guard → развилка;
+    общий транспорт `_delete_family.py` + `DeleteBody` в `schemas/common.py`; голый DELETE
+    всех шести → 422 `expected_state_required`, превью — только `?dry_run=true`; системная
+    охрана должности — до развилки; 14 тест-файлов переведены на commit-body.
+  - **Тест-страж «схема ↔ матрица» (T4, `d7a0a09d`):** `test_delete_matrix_guard.py` —
+    входящие FK-рёбра схемы и все DELETE-руты сверяются с `FK_MATRIX`; новый undeclared
+    FK/рут краснеет в том же PR.
+  - **Бэкенд-тесты (T5, `8f83bfcf`):** 108 новых — mixin `delete_family_full_contract.py`
+    (полный флейвор: dry_run 204/409-дерево, голый 422, subset-сверка, stale 409, 404,
+    allowed_actions) + 7 пер-сущностных файлов.
+  - **api-client (T6, `8cc18290`):** `deleteVisit`/`deletePayment` получили optional body —
+    deferred-хуки шлют `{expected: {}}`; мок-обвязка синхронизирована.
+  - **Фронт: фото и должности на конвейер (T7, `1b9020d0`):** `usePhotosMutations`/
+    `usePositionsMutations` по образцу тегов (кольцо; тегированное фото/занятая должность —
+    диалог; undo — item-снапшот), `DeleteDialog` — типы узлов, `staleAwareOnError` — overload,
+    `Photo/PositionsTable` проводка (`window.confirm` должностей удалён).
+  - **Фронт: посетители на конвейер (T8, `71ba19f1`+`b5058241`):** `useVisitorsMutations`;
+    мгновенный `deleteVisitor` удалён — единственный оставшийся прод-вызов
+    (`ClientInfoTab`) переведён на конвейер + useQuery-рендер — undo визуально возвращает
+    строку; rollback DELETE несёт обязательное `{expected:{}}`.
+  - **e2e (T9, `c55ef3ef`):** сценарии §9.1–§9.6 — 3 новых спеки (`photos-deferred-delete`,
+    `visitors-deferred-delete`, `positions-deferred-delete`) + factories cleanup + миграция
+    `staff-s5`.
+  - **Tests:** backend полный `uv run pytest tests/` → **2609 passed / 15 skipped / 0 failed**
+    (до T6–T9; бэкенд дальше не трогался); admin vitest **2521/2521** (157 файлов);
+    api-client **424/424**; e2e — **6/6** §9-сценариев (изолированный стек :8021/:3022) +
+    collateral (`staff-s5` 6/6, `photos-crud` 19/19, `clients` 18/19 → флейк, реран зелёный);
+    tsc/lint/build чисты.
+  - Status: `docs/status/2026-09-26-delete-family-remaining-324.md`
+
 ## [Unreleased] — 2026-09-22
 
 ### Changed

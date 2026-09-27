@@ -19,6 +19,7 @@ from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 from src.services.decorators import transactional
 from src.services.generic import GenericService
+from src.services.visit import get_visit_service
 
 
 class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
@@ -34,6 +35,12 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         self, repository: BaseRepository, model: type[Visitor]
     ) -> None:
         super().__init__(repository, model, response_schema=VisitorResponse)
+        # GH #324 §5: the ``(Visitor, "visits")`` cascade handler reaches
+        # the batch block ``delete_visits_by_visitor`` (bulk delete +
+        # recompute of the affected records) through this attribute (the
+        # ``_h_cascade_client_visitors`` DI precedent). The standalone
+        # ``delete`` composes the brick itself (lazy factory call).
+        self._visit_service = get_visit_service()
 
     @staticmethod
     def _visibility_predicate(
@@ -175,6 +182,11 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         monkeypatch point ride on this method (spec §3, §8). The name no
         longer reflects the full cascade shape — that price is
         documented in spec §8; the role lives in this docstring.
+
+        GH #324 §5 (rebase): the brick now RECOMPUTES the affected
+        records (seats/status) — every brick caller inherits the
+        recompute through the shared ``delete_visits_by_visitor`` path;
+        THIS core still touches only the own edge (tags + row).
 
         The visitor_tags join table has FKs with NO ondelete action, so
         its rows are removed BEFORE the visitor row — otherwise the DB

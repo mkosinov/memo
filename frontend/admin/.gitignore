@@ -20,6 +20,7 @@
 # next.js
 /.next/
 /.next-shard-*/
+/.next-tester*/
 /out/
 
 # production

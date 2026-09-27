@@ -49,8 +49,9 @@ export const positionColumns = (): ColumnDef<PositionResponse>[] => [
  * Action config factory (§6.3). «Переименовать» is offered for BOTH built-ins
  * and user-defined rows (D4: the title is freely editable); «Удалить» is
  * offered for both too — the server, not the client, decides whether the row is
- * protected (built-in → 422 POSITION_IS_SYSTEM, surfaced as the explanation
- * toast). The parent wrapper implements onDelete (window.confirm + toast).
+ * protected (built-in → 422 POSITION_IS_SYSTEM from the dry-run, surfaced as
+ * the explanation toast). The parent wrapper implements onDelete (the #324
+ * deferred pipeline: clean → ring; busy → DeleteDialog; system → toast).
  */
 export const positionActions = (cbs: {
   onEdit: (p: PositionResponse) => void;

@@ -436,6 +436,18 @@ describe('ClientRecordTab — API interactions', () => {
       );
     });
     expect(apiDeleteVisit).not.toHaveBeenCalled();
+
+    // #324 family contract: the COMMIT carries the mandatory {expected} body —
+    // visits are leaves → the clean snapshot {expected: {}} (bare DELETE → 422
+    // expected_state_required server-side).
+    const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+      commit: () => Promise<void>;
+    };
+    await act(async () => {
+      await action.commit();
+    });
+    expect(apiDeleteVisit).toHaveBeenCalledTimes(1);
+    expect(apiDeleteVisit).toHaveBeenCalledWith('v1', { expected: {} });
   });
 
   it('anonymous stepper «+» creates the visit with the resolver default tariff (first adult, GH #284)', async () => {
@@ -520,6 +532,18 @@ describe('ClientRecordTab — API interactions', () => {
       );
     });
     expect(deletePayment).not.toHaveBeenCalled();
+
+    // #324 family contract: the COMMIT carries the mandatory {expected} body —
+    // payments are leaves → the clean snapshot {expected: {}} (bare DELETE →
+    // 422 expected_state_required server-side).
+    const action = mockEnqueuePendingAction.mock.calls[0][0] as {
+      commit: () => Promise<void>;
+    };
+    await act(async () => {
+      await action.commit();
+    });
+    expect(deletePayment).toHaveBeenCalledTimes(1);
+    expect(deletePayment).toHaveBeenCalledWith('p1', { expected: {} });
   });
 
   it('record-level Save calls patchRecord with custom_price+comment (no visits field)', async () => {

@@ -65,8 +65,10 @@ class TestVisitList:
         """Soft-deleted visits should not appear in list."""
         record = create_record()
         visit_id = record["visits"][0]["id"]
-        # Delete the visit
-        api_client.delete(f"/api/v1/visits/{visit_id}")
+        # Delete the visit (deferred-delete commit, #324)
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}}
+        )
         # List should not include it
         response = api_client.get(f"/api/v1/visits?record_id={record['id']}")
         assert response.status_code == 200
@@ -258,7 +260,9 @@ class TestVisitDelete:
         """Scenario 12: DELETE /api/v1/visits/{id} soft-deletes and returns 204."""
         record = create_record()
         visit = record["visits"][0]
-        response = api_client.delete(f"/api/v1/visits/{visit['id']}")
+        response = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit['id']}", json={"expected": {}}
+        )
         assert response.status_code == 204
 
     def test_delete_visit_cascades_seats(self, api_client, create_record) -> None:
@@ -266,20 +270,26 @@ class TestVisitDelete:
         record = create_record()
         initial_seats = record["seats"]
         visit = record["visits"][0]
-        api_client.delete(f"/api/v1/visits/{visit['id']}")
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit['id']}", json={"expected": {}}
+        )
         updated_record = api_client.get(f"/api/v1/records/{record['id']}").json()
         assert updated_record["seats"] == initial_seats - 1
 
     def test_delete_visit_not_found_404(self, api_client) -> None:
         """DELETE /api/v1/visits/{nonexistent} returns 404."""
-        response = api_client.delete("/api/v1/visits/nonexistent-id")
+        response = api_client.request(
+            "DELETE", "/api/v1/visits/nonexistent-id", json={"expected": {}}
+        )
         assert response.status_code == 404
 
     def test_delete_visit_hard_deletes_row(self, api_client, create_record) -> None:
         """After DELETE, row is absent from DB."""
         record = create_record()
         visit_id = record["visits"][0]["id"]
-        api_client.delete(f"/api/v1/visits/{visit_id}")
+        api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}}
+        )
         rows = query_db(f"SELECT * FROM visits WHERE id='{visit_id}'")
         assert len(rows) == 0
 
@@ -291,3 +301,98 @@ class TestVisitGet:
         """Scenario 13: GET /api/v1/visits/{nonexistent} returns 404."""
         response = api_client.get("/api/v1/visits/nonexistent-id")
         assert response.status_code == 404
+
+
+# ─── GH #324 Task 5: the leaf SHORT set + parent recompute (spec §4/§10) ──────
+
+
+class TestVisitDeleteFamilyShortSet:
+    """DELETE /api/v1/visits/{id} — the leaf SHORT-form contract (GH #324
+    §10: bare 422, dry_run 204, commit ``{expected: {}}``, 404 of both
+    kinds — scope-helper foreign AND nonexistent, no need to tell them
+    apart) + the leaf's per-entity extra: the parent record recompute.
+
+    The smoke level (form 422s, dry_run 204/404, commit 204) lives in
+    ``test_api_delete_family_routes.py``; the four FORM 422s on
+    cannot-exist ids — in ``test_errors.py``. What this class adds:
+
+    * BOTH 404 kinds in the COMMIT branch too (smoke pinned dry_run
+      foreign + commit foreign; the unknown-id-with-body commit 404 and
+      the code shape land here);
+    * the recompute HALF beyond seats: the record STATUS is recomputed
+      on commit (``recompute_record_status``, spec §4 — «пересчёт
+      статуса/мест родительской записи»);
+    * resolutions sent to a leaf are silently ignored (unknown body
+      keys — family semantics §16): ``{expected: {}}`` is the leaf
+      body; extra keys never 422.
+    """
+
+    def test_commit_unknown_id_with_body_returns_404_code(self, api_client) -> None:
+        """§4.2: cannot-exist id WITH body → 404 VISIT_NOT_FOUND (probe
+        after the form — this is the commit branch's unknown-id 404)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/visits/00000000-0000-0000-0000-000000000000",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == "VISIT_NOT_FOUND"
+
+    def test_commit_recomputes_parent_status_not_only_seats(
+        self, api_client, create_record,
+    ) -> None:
+        """§4: the leaf's per-entity extra — the commit keeps the FULL
+        recompute. Deleting the only VISITED visit flips the record
+        status back to ``waiting`` (0 visits → waiting, the pure
+        domain rule), while the smoke test pinned only seats."""
+        record = create_record(visits=[{"name": "Гость", "price": 100, "status": "visited"}])
+        visit_id = record["visits"][0]["id"]
+        assert api_client.get(f"/api/v1/records/{record['id']}").json()["status"] == "visited"
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        updated = api_client.get(f"/api/v1/records/{record['id']}").json()
+        assert updated["seats"] == 0
+        assert updated["status"] == "waiting"  # 0 visits → waiting
+
+    def test_commit_with_extra_body_keys_silently_ignored(
+        self, api_client, create_record,
+    ) -> None:
+        """§16: unknown body keys ignored — a leaf commit carrying
+        ``resolutions`` (no deps to resolve) still executes → 204."""
+        record = create_record()
+        visit_id = record["visits"][0]["id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/visits/{visit_id}",
+            json={"expected": {}, "resolutions": {"visits": "cascade"}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/visits/{visit_id}").status_code == 404
+
+    def test_scope_helper_foreign_id_404_both_kinds(
+        self, api_client, create_record, make_master,
+    ) -> None:
+        """§4.2: the existence probe runs through ``_visit_scoped_or_404``
+        — a scoped master's view of an admin-owned visit is the SAME
+        404 as a nonexistent id, in BOTH branches (dry_run AND commit).
+        The four guarded routes' scope-404: visits pinned here,
+        payments/photos/visitors in their files."""
+        visit_id = create_record()["visits"][0]["id"]
+        master = make_master()
+
+        for resp in (
+            master["client"].request(
+                "DELETE", f"/api/v1/visits/{visit_id}", params={"dry_run": "true"},
+            ),
+            master["client"].request(
+                "DELETE", f"/api/v1/visits/{visit_id}", json={"expected": {}},
+            ),
+        ):
+            assert resp.status_code == 404, resp.text
+            assert resp.json()["detail"]["code"] == "VISIT_NOT_FOUND"
+        # The row survives the foreign attempts.
+        assert api_client.get(f"/api/v1/visits/{visit_id}").status_code == 200

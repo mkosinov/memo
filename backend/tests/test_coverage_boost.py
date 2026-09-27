@@ -463,7 +463,9 @@ class TestVisitorServiceListByClient:
         }).json()
 
         # Delete v2
-        api_client.delete(f"/api/v1/visitors/{v2['id']}")
+        api_client.request(
+            "DELETE", f"/api/v1/visitors/{v2['id']}", json={"expected": {}}
+        )
 
         resp = api_client.get(f"/api/v1/clients/{client['id']}/visitors")
         assert resp.status_code == 200

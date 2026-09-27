@@ -962,8 +962,11 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const totalPaidBefore = clientBefore?.total_paid ?? 0;
       expect(totalPaidBefore).toBeGreaterThanOrEqual(3000);
 
-      // 2. ACTION — DELETE the payment via API (hard delete)
-      const deleteResp = await request.delete(`${BACKEND}/api/v1/payments/${payment.id}`);
+      // 2. ACTION — DELETE the payment via API (hard delete; #324
+      //    delete-family contract: a leaf commit carries {expected: {}})
+      const deleteResp = await request.delete(`${BACKEND}/api/v1/payments/${payment.id}`, {
+        data: { expected: {} },
+      });
       expect(deleteResp.status()).toBe(204);
 
       // 3. ASSERT — GET payment by id → 404

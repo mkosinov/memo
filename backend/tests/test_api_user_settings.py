@@ -115,7 +115,10 @@ class TestGetUserSettings:
         assert create_resp.status_code == 201
         settings_id = create_resp.json()["id"]
 
-        api_client.delete(f"/api/v1/user-settings/{settings_id}")
+        api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            json={"expected": {}},
+        )
 
         # Get-or-create: defaults come back (a NEW row, not the deleted one)
         resp = api_client.get("/api/v1/user-settings")
@@ -326,7 +329,10 @@ class TestDeleteUserSettings:
         create_resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
         settings_id = create_resp.json()["id"]
 
-        resp = api_client.delete(f"/api/v1/user-settings/{settings_id}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            json={"expected": {}},
+        )
         assert resp.status_code == 204
 
     def test_delete_removes_row(self, api_client, me) -> None:
@@ -334,7 +340,10 @@ class TestDeleteUserSettings:
         create_resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
         settings_id = create_resp.json()["id"]
 
-        api_client.delete(f"/api/v1/user-settings/{settings_id}")
+        api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            json={"expected": {}},
+        )
 
         # Hard-delete: row is physically removed from the database
         from tests.conftest import query_db
@@ -342,5 +351,8 @@ class TestDeleteUserSettings:
         assert rows == []
 
     def test_delete_returns_404_for_nonexistent(self, api_client) -> None:
-        resp = api_client.delete("/api/v1/user-settings/nonexistent-id")
+        resp = api_client.request(
+            "DELETE", "/api/v1/user-settings/nonexistent-id",
+            json={"expected": {}},
+        )
         assert resp.status_code == 404

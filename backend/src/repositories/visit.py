@@ -53,11 +53,14 @@ class VisitRepository(BaseRepository):
     async def delete_by_visitor_id(self, session: AsyncSession, visitor_id: str) -> None:
         """Remove ALL visits of one visitor in a single DELETE statement.
 
-        Set-based bulk command (canon rule 4), full analogue of
-        ``delete_by_record_id`` on the entity's other OWN reference
-        column: one ``DELETE FROM visits WHERE visitor_id = :visitor_id``
-        — no per-row loop. Does NOT commit — the caller's transaction
-        owns the commit boundary.
+        Set-based bulk command (canon rule 4, GH #327 Task 1 / GH #324 §5),
+        full analogue of ``delete_by_record_id`` on the entity's other OWN
+        reference column: one ``DELETE FROM visits WHERE visitor_id =
+        :visitor_id`` — no per-row loop. Anonymous visits
+        (``visitor_id IS NULL``) are nobody's dependency and never match.
+        Does NOT commit — the caller's transaction owns the commit
+        boundary; record recomputation is the service block's job
+        (``delete_visits_by_visitor``), not the repo's.
         """
         await session.execute(delete(Visit).where(Visit.visitor_id == visitor_id))
 

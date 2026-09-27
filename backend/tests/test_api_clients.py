@@ -1302,3 +1302,48 @@ class TestClientListIdFilter:
         assert row["email"] is None
         assert "•" in row["phone"]
         assert row["phone"].endswith("6677")  # last 4 digits stay visible
+
+
+# ─── Sort contract (GH #367 Task 2 — check-point §4.1: generic brick + query) ──
+
+
+class TestClientSortContract:
+    """Hard 422 contract for clients `sort_by`/`sort_order` (#367 §3).
+
+    The schema-level `ClientSortBy` Literal (7 columns) must reject garbage
+    BEFORE the service sees it — via the ``Annotated[ClientListParams,
+    Query()]`` injection. This is the check-point smoke test for the
+    generic-``SortParams`` + query combination (spec §4.1).
+    """
+
+    SORT_BY_ENUM = [
+        "name", "records_count", "last_record", "total_paid",
+        "missed_records", "created_at", "updated_at",
+    ]
+
+    def test_garbage_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "banana"})
+        assert resp.status_code == 422, resp.text
+
+    def test_empty_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": ""})
+        assert resp.status_code == 422, resp.text
+
+    def test_wrong_case_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "Name"})
+        assert resp.status_code == 422, resp.text
+
+    def test_garbage_sort_order_returns_422(self, api_client) -> None:
+        resp = api_client.get(
+            "/api/v1/clients", params={"sort_order": "sideways"}
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_openapi_sort_by_is_enum_of_seven(self, api_client) -> None:
+        """OpenAPI guard of the generic brick (spec §4.1/§6): the clients
+        list `sort_by` param must render as an enum of the 7 columns —
+        nested generic models are FastAPI's unpaved road, this pins it."""
+        schema = api_client.get("/openapi.json").json()
+        params = schema["paths"]["/api/v1/clients"]["get"]["parameters"]
+        sort_by = next(p for p in params if p["name"] == "sort_by")
+        assert sort_by["schema"]["enum"] == self.SORT_BY_ENUM

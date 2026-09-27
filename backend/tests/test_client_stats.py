@@ -1038,28 +1038,14 @@ class TestClientListSortExtended:
         assert len(relevant) == 2
         assert relevant[0]["updated_at"] <= relevant[1]["updated_at"]
 
-    def test_invalid_sort_by_falls_back_to_name(
-        self, api_client, create_activity, create_client
-    ) -> None:
-        """Invalid sort_by field falls back to name sorting."""
-        _create_client_with_record(
-            api_client, create_activity, create_client,
-            client={"name": "Zebra", "phone": "+79998000050"},
-        )
-        _create_client_with_record(
-            api_client, create_activity, create_client,
-            client={"name": "Apple", "phone": "+79998000051"},
-        )
-
+    def test_invalid_sort_by_returns_422(self, api_client) -> None:
+        """GH #367: clients are on the hard contract — a garbage sort_by is
+        rejected by the ClientSortBy Literal (422), no silent name-fallback.
+        Replaces test_invalid_sort_by_falls_back_to_name (soft contract)."""
         resp = api_client.get("/api/v1/clients", params={
             "sort_by": "nonexistent_field", "sort_order": "asc", "per_page": 100,
         })
-        items = resp.json()["items"]
-        relevant = [c for c in items if c["name"] in ("Zebra", "Apple")]
-        assert len(relevant) == 2
-        # Should fall back to name asc
-        assert relevant[0]["name"] == "Apple"
-        assert relevant[1]["name"] == "Zebra"
+        assert resp.status_code == 422, resp.text
 
     def test_default_sort_is_name_asc(
         self, api_client, create_activity, create_client

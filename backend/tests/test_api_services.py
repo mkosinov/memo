@@ -303,8 +303,14 @@ class TestServicesCrud:
         assert response.json()["archived"] is False
 
     def test_delete_nonexistent_service_returns_404(self, api_client) -> None:
-        """DELETE /api/services/{fake_id} returns 404."""
-        response = api_client.delete("/api/v1/services/nonexistent-id")
+        """DELETE /api/services/{fake_id} with the commit body → 404.
+
+        GH #345 §4.1: the bare no-body DELETE is abolished — the 404 probe
+        only runs for a well-formed commit (``expected`` present).
+        """
+        response = api_client.request(
+            "DELETE", "/api/v1/services/nonexistent-id", json={"expected": {}},
+        )
         assert response.status_code == 404
 
 
@@ -552,151 +558,293 @@ class TestServiceListStatusFilter:
 
 
 class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/services/{id} — unified dry-run (no body) + execute (with body).
+    """DELETE /api/v1/services/{id} — unified delete contract (GH #345,
+    one-to-one mirror of ``tags.py:216-300`` / #318 D2).
 
-    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
-      * §2  — Change 1: body presence distinguishes dry-run vs execute.
-      * §4  — Service FK deps: activities=block, tariffs=auto-cascade,
-              photos=auto-nullify, service_tags=auto-cascade.
-      * §5  — 409 Conflict response (counters + sums only).
-      * §6  — DELETE with resolutions body (executor = Task 10).
-      * §14 — acceptance criteria.
+    Modes (spec §4.1):
+      * ``?dry_run=true`` — PURE preview: existence probe → missing → 404;
+        ``collect_dependencies`` → empty → 204 WITHOUT deleting; non-empty
+        → 409 + dependency tree. Never modifies rows; combined with a
+        ``resolutions`` body → 422 ``dry_run_with_resolutions_forbidden``
+        (checked before the probe).
+      * No body, no flag → 422 ``expected_state_required`` — bare DELETE
+        is abolished (the legacy execute-if-clean path is gone, S6).
+      * Body ``{resolutions?, expected}`` — the deferred-delete commit:
+        existence probe → ``collect_dependencies`` → expected id-set
+        verification (subset semantics; Service non-auto deps: activities
+        only) → resolutions validation → ``resolve_delete`` → 204;
+        missing id → 404.
+
+    Domain matrix (spec §4.4): ``activities`` is the ONLY non-auto dep —
+    blocked (``allowed_actions: []``) → a successful commit with
+    ``resolutions`` is unreachable (blocked at any body → 422; a clean or
+    all-auto service commits with ``{expected: {}}``).
     """
 
-    def test_delete_service_with_activities_no_body_returns_409(
-        self, api_client, create_activity
+    # ── bare DELETE (no flag, no body) → 422 expected_state_required ─────
+
+    def test_bare_delete_blocked_service_returns_422_row_alive(
+        self, api_client, create_activity,
     ) -> None:
-        """No body + blocking dep (activities) → 409 + dependency tree (spec §5)."""
-        activity = create_activity()
-        service_id = activity["service_id"]
+        """S6: bare DELETE on a service with activities → 422, row alive."""
+        service_id = create_activity()["service_id"]
 
         resp = api_client.delete(f"/api/v1/services/{service_id}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_bare_delete_clean_service_returns_422(
+        self, api_client, create_service,
+    ) -> None:
+        """S6: bare DELETE executes nowhere — even a clean service refuses."""
+        service = create_service(title="svc-clean-bare")
+
+        resp = api_client.delete(f"/api/v1/services/{service['id']}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    def test_bare_delete_unknown_id_returns_422_before_404(
+        self, api_client,
+    ) -> None:
+        """S6: form check precedes the existence probe — 422, not 404."""
+        resp = api_client.delete("/api/v1/services/nonexistent-service-id")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+
+    def test_delete_resolutions_body_without_expected_returns_422(
+        self, api_client, create_service,
+    ) -> None:
+        """S6: resolutions-only body is the rejected legacy shape."""
+        service = create_service(title="svc-res-only")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}",
+            json={"resolutions": {}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    def test_delete_unknown_keys_body_without_expected_returns_422(
+        self, api_client, create_service,
+    ) -> None:
+        """S6: unknown-keys-only body has no ``expected`` — same 422."""
+        service = create_service(title="svc-unknown-keys")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}",
+            json={"bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_blocked_service_returns_409_tree_row_alive(
+        self, api_client, create_activity,
+    ) -> None:
+        """S6: dry-run on a service with activities → 409 has_dependencies.
+
+        ``activities`` is a blocked non-auto node: counters only, NO items
+        (spec §4.3 fixed boundary — blocked nodes are never confirmed, no
+        item collectors for activities from the parent side).
+        """
+        service_id = create_activity()["service_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
-        assert "activities" in deps
         assert deps["activities"]["count"] == 1
         assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["auto"] is False
         assert deps["activities"]["message"] is not None
+        # §4.3: no items for the activities node (exclude_none omits it).
+        assert "items" not in deps["activities"]
         # Row untouched.
         assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
 
-    def test_delete_service_with_auto_deps_no_body_returns_409(
-        self, api_client, create_service
+    def test_dry_run_all_auto_service_returns_409_tree_row_alive(
+        self, api_client, create_service,
     ) -> None:
-        """No body + all-auto deps (tariffs+photos+service_tags, NO activities)
-        → 409 + dependency tree (spec §5).
-
-        All Service non-block deps are AUTO (tariffs cascade, photos nullify,
-        service_tags cascade). The dry-run still surfaces them for informed
-        consent — the user's ``resolutions`` body would be ``{}`` to execute.
-        """
+        """S2(б): dry-run on an all-auto service (tariffs+photos+
+        service_tags+service_materials, NO activities) → 409 for informed
+        consent; nothing is modified."""
         tag_id = _create_tag(api_client)
+        material_id = api_client.post(
+            "/api/v1/materials", json={"title": "Сухая пастель", "description": "мелки"},
+        ).json()["id"]
         service = create_service(
-            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+            title="svc-all-auto", tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id],
+            materials=[{"material_id": material_id}],
         )
         service_id = service["id"]
-        # Add a photo linked to this service (auto-nullify dep).
-        photo_resp = api_client.post(
+        photo_id = api_client.post(
             "/api/v1/photos",
-            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
-        )
-        assert photo_resp.status_code == 201
-        photo_id = photo_resp.json()["id"]
+            json={"filename": f"dry-{service_id[:8]}.jpg", "service_id": service_id},
+        ).json()["id"]
 
-        resp = api_client.delete(f"/api/v1/services/{service_id}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
-        # All non-auto deps are absent from tree (zero-count filters):
-        # activities (count 0) is skipped.
-        assert "activities" not in deps
-        # tariffs (auto cascade) — shown for consent.
+        assert "activities" not in deps  # zero-count dep is skipped
         assert deps["tariffs"]["count"] == 1
         assert deps["tariffs"]["allowed_actions"] == ["cascade"]
-        # photos (auto nullify) — shown for consent.
         assert deps["photos"]["count"] == 1
         assert deps["photos"]["allowed_actions"] == ["nullify"]
-        # service_tags (auto cascade) — shown for consent.
         assert deps["service_tags"]["count"] == 1
-        assert deps["service_tags"]["allowed_actions"] == ["cascade"]
-        # Row + photo + tariff + tag join untouched (dry-run).
+        assert deps["service_materials"]["count"] == 1
+        # Nothing modified: row + tariff + join + photo link alive.
         assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
-        assert query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")[0][
-            "service_id"
-        ] == service_id
+        assert query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")[
+            0
+        ]["service_id"] == service_id
+        assert query_db(f"SELECT * FROM tariffs WHERE service_id='{service_id}'")
 
-    def test_delete_bare_service_no_body_returns_204_and_row_gone(
-        self, api_client, create_service
+    def test_dry_run_clean_service_returns_204_and_row_alive(
+        self, api_client, create_service,
     ) -> None:
-        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
-        service = create_service()
+        """S2(а): dry-run on a clean service → 204 WITHOUT deleting."""
+        service = create_service(title="svc-preview-only")
 
-        resp = api_client.delete(f"/api/v1/services/{service['id']}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    def test_dry_run_unknown_service_returns_404(self, api_client) -> None:
+        """S6: dry-run probes existence — missing service → 404."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/services/nonexistent-service-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client, create_service,
+    ) -> None:
+        """S6: dry_run + resolutions → 422; combo checked before the probe."""
+        service = create_service(title="svc-combo")
+
+        for service_id in (service["id"], "nonexistent-service-id"):
+            resp = api_client.request(
+                "DELETE", f"/api/v1/services/{service_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"tariffs": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{service_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    def test_dry_run_with_expected_only_body_silently_ignored(
+        self, api_client, create_service,
+    ) -> None:
+        """Combinatorics: dry_run + expected-only body → preview proceeds."""
+        service = create_service(title="svc-expected-only-preview")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}",
+            params={"dry_run": "true"},
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
+
+    # ── body commit: existence + expected id-set verification ─────────────
+
+    def test_commit_unknown_service_with_body_returns_404(
+        self, api_client,
+    ) -> None:
+        """S6: nonexistent id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/services/nonexistent-service-id",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
+
+    def test_commit_clean_service_expected_empty_returns_204(
+        self, api_client, create_service,
+    ) -> None:
+        """S2(а): clean path — ``{expected: {}}`` → 204 hard delete."""
+        service = create_service(title="svc-commit-clean")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}", json={"expected": {}},
+        )
 
         assert resp.status_code == 204
         assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 404
 
-    def test_delete_service_with_activities_with_body_returns_422_blocking(
-        self, api_client, create_activity
+    def test_commit_all_auto_service_expected_empty_executes_204(
+        self, api_client, create_service,
     ) -> None:
-        """With body + blocking dep (activities) → 422 'archive instead' (spec §6.4)."""
-        activity = create_activity()
-        service_id = activity["service_id"]
-
-        resp = api_client.request(
-            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
-        )
-
-        assert resp.status_code == 422
-        # Row untouched.
-        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
-
-    def test_delete_service_with_auto_deps_with_body_executes_204(
-        self, api_client, create_service
-    ) -> None:
-        """With body ``{}`` + all-auto deps → 204 execute.
-
-        EXPECTED RED until Task 10 lands ``ArchiveService.resolve_delete``.
+        """S2(б): all-auto deps + commit ``{expected: {}}`` → 204.
 
         Outcomes (spec §6 execution order nullify → cascade → hard delete):
-        * photos: ``service_id`` SET NULL (photo survives, auto-nullify).
-        * tariffs: hard-deleted (auto-cascade).
-        * service_tags: hard-deleted (auto-cascade).
+        * photos: ``service_id`` SET NULL (photo survives, auto-nullify);
+        * tariffs: hard-deleted (auto-cascade);
+        * service_tags: hard-deleted (auto-cascade);
+        * service_materials: hard-deleted, MATERIAL survives;
         * service: hard-deleted.
         """
         tag_id = _create_tag(api_client)
+        material_id = api_client.post(
+            "/api/v1/materials", json={"title": "Тушь", "description": "пергамент"},
+        ).json()["id"]
         service = create_service(
-            tariffs=[TARIFF_PAYLOAD], tag_ids=[tag_id]
+            title="svc-commit-all-auto", tariffs=[TARIFF_PAYLOAD],
+            tag_ids=[tag_id], materials=[{"material_id": material_id}],
         )
         service_id = service["id"]
-        # Capture tariff + photo IDs before delete.
         tariff_id_before = query_db(
             f"SELECT id FROM tariffs WHERE service_id='{service_id}'"
         )[0]["id"]
-        photo_resp = api_client.post(
+        photo_id = api_client.post(
             "/api/v1/photos",
-            json={"filename": f"svc-{service_id[:8]}.jpg", "service_id": service_id},
-        )
-        photo_id = photo_resp.json()["id"]
+            json={"filename": f"cx-{service_id[:8]}.jpg", "service_id": service_id},
+        ).json()["id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/services/{service_id}", json={"expected": {}},
         )
 
-        assert resp.status_code == 204
-        # Service row gone.
+        assert resp.status_code == 204, resp.text
         assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
         # Tariffs hard-deleted (auto-cascade).
         assert query_db(f"SELECT * FROM tariffs WHERE id='{tariff_id_before}'") == []
-        # service_tags join rows hard-deleted (auto-cascade).
+        # service_tags + service_materials join rows hard-deleted.
+        assert (
+            query_db(f"SELECT * FROM service_tags WHERE service_id='{service_id}'")
+            == []
+        )
         assert (
             query_db(
-                f"SELECT * FROM service_tags WHERE service_id='{service_id}'"
+                f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
             )
             == []
         )
@@ -704,89 +852,193 @@ class TestDeleteUnifiedRoute:
         photo_rows = query_db(f"SELECT service_id FROM photos WHERE id='{photo_id}'")
         assert len(photo_rows) == 1
         assert photo_rows[0]["service_id"] is None
-
-    def test_delete_service_with_material_links_no_body_lists_service_materials(
-        self, api_client, create_service
-    ) -> None:
-        """No body + material links → 409 tree now lists ``service_materials`` (GH #223 §7).
-
-        The join is one more auto-cascade dep next to tariffs/photos/
-        service_tags — the existing dry-run flow surfaces it for consent.
-        """
-        material_resp = api_client.post(
-            "/api/v1/materials",
-            json={"title": "Акварель", "description": "водорастворимые краски"},
-        )
-        assert material_resp.status_code == 201
-        material_id = material_resp.json()["id"]
-        service = create_service(materials=[{"material_id": material_id}])
-        service_id = service["id"]
-
-        resp = api_client.delete(f"/api/v1/services/{service_id}")
-
-        assert resp.status_code == 409
-        body = resp.json()
-        assert body["detail"] == "has_dependencies"
-        deps = {d["entity"]: d for d in body["dependencies"]}
-        assert deps["service_materials"]["count"] == 1
-        assert deps["service_materials"]["allowed_actions"] == ["cascade"]
-        # Dry-run: rows untouched.
-        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
-        assert (
-            len(
-                query_db(
-                    f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
-                )
-            )
-            == 1
-        )
-
-    def test_delete_service_with_material_links_with_body_cascades_204(
-        self, api_client, create_service
-    ) -> None:
-        """Body ``{}`` + material links → 204; links gone, MATERIAL survives (§7)."""
-        material_resp = api_client.post(
-            "/api/v1/materials",
-            json={"title": "Пастель", "description": "сухие мелки"},
-        )
-        assert material_resp.status_code == 201
-        material_id = material_resp.json()["id"]
-        service = create_service(materials=[{"material_id": material_id}])
-        service_id = service["id"]
-
-        resp = api_client.request(
-            "DELETE", f"/api/v1/services/{service_id}", json={"resolutions": {}}
-        )
-
-        assert resp.status_code == 204
-        # Service row gone; join rows gone.
-        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
-        assert (
-            query_db(
-                f"SELECT * FROM service_materials WHERE service_id='{service_id}'"
-            )
-            == []
-        )
-        # Material SURVIVES the service-side cascade.
+        # Material SURVIVES the service-side cascade (GH #223 §7).
         mat = api_client.get(f"/api/v1/materials/{material_id}")
         assert mat.status_code == 200
         assert mat.json()["used_in_services_count"] == 0
 
-    def test_delete_nonexistent_service_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404 (service.delete returns False)."""
-        resp = api_client.delete("/api/v1/services/nonexistent-service-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "SERVICE_NOT_FOUND"
+    def test_commit_appeared_activity_returns_409_stale(
+        self, api_client, create_master, create_location, create_service,
+    ) -> None:
+        """S5: an activity that APPEARED after the (clean) dry-run window
+        → 409 ``stale_dependencies`` — the expected-subset check catches
+        the race BEFORE the blocked-422 could fire."""
+        from datetime import UTC, datetime, timedelta
 
-    def test_delete_nonexistent_service_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (executor returns False).
+        service = create_service(title="svc-race-appeared")
+        service_id = service["id"]
 
-        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
-        """
+        # Mid-window race: an activity appears via the API.
+        api_client.post("/api/v1/activities", json={
+            "master_id": create_master()["id"],
+            "service_id": service_id,
+            "location_id": create_location()["id"],
+            "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        })
+
         resp = api_client.request(
-            "DELETE", "/api/v1/services/nonexistent-service-id", json={"resolutions": {}}
+            "DELETE", f"/api/v1/services/{service_id}", json={"expected": {}},
         )
-        assert resp.status_code == 404
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["activities"]["count"] == 1
+        # Nothing deleted — service AND the racing activity alive.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_commit_disappeared_activity_subset_passes_204(
+        self, api_client, create_activity,
+    ) -> None:
+        """S5: dep removed mid-window → subset semantics → 204 (delete
+        less than confirmed is OK). The confirmed activity disappears via
+        its own commit before the service commit lands."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        # The confirmed activity dies first (its own deferred-delete commit).
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}",
+            json={"expected": {}},
+        )
+        assert act_resp.status_code == 204, act_resp.text
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            json={"expected": {"activities": [activity["id"]]}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 404
+
+    def test_commit_blocked_service_any_body_returns_422(
+        self, api_client, create_activity,
+    ) -> None:
+        """S6: blocked dep (activities) at any body → 422 'archive instead'.
+
+        The expected-check passes (the activity IS confirmed) — the 422
+        comes from the resolutions validation inside ``resolve_delete``.
+        """
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            json={"expected": {"activities": [activity["id"]]}},
+        )
+
+        assert resp.status_code == 422, resp.text
+        # Row untouched.
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_commit_stale_beats_blocked_resolutions_returns_409_not_422(
+        self, api_client, create_activity,
+    ) -> None:
+        """Order pin (#285 D7 mirror): a stale expected → 409 even when
+        the resolutions/blocked branch would also 422."""
+        activity = create_activity()
+        service_id = activity["service_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            json={"expected": {}},  # stale: an activity exists on the server
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_commit_unknown_body_keys_silently_ignored(
+        self, api_client, create_service,
+    ) -> None:
+        """S6: unknown body keys (with ``expected`` present) ignored → 204."""
+        service = create_service(title="svc-unknown-keys-commit")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service['id']}",
+            json={"expected": {}, "bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 404
+
+    def test_commit_swapped_activity_id_returns_409(
+        self, api_client, create_activity,
+    ) -> None:
+        """S5 rev6 mirror: a ghost id at an unchanged counter → 409
+        (id-sets, not counters — the swap is caught)."""
+        from uuid import uuid4
+
+        activity = create_activity()
+        service_id = activity["service_id"]
+        ghost = str(uuid4())
+
+        # Swap: delete the confirmed activity, create another one on the
+        # SAME service — the counter stays 1, the id-set does not match.
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}", json={"expected": {}},
+        )
+        assert act_resp.status_code == 204
+        from datetime import UTC, datetime, timedelta
+
+        swapped = api_client.post("/api/v1/activities", json={
+            "master_id": activity["master_id"],
+            "service_id": service_id,
+            "location_id": activity["location_id"],
+            "start": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        })
+        assert swapped.status_code == 201, swapped.text
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            json={"expected": {"activities": [ghost]}},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
+
+    def test_commit_expected_carries_all_ids_beyond_ten(
+        self, api_client, create_master, create_location, create_service,
+    ) -> None:
+        """>10 items pin (spec §4.2): ``expected`` carries ALL ids of the
+        dependency tree, not the rendered top-10 rows.
+
+        12 activities on one service; a commit confirming only the first
+        10 id-sets → 409 ``stale_dependencies`` (ids 11–12 appeared from
+        the check's point of view — mid-window race semantics).
+        """
+        from datetime import UTC, datetime, timedelta
+
+        service = create_service(title="svc-12-activities")
+        service_id = service["id"]
+        master_id = create_master()["id"]
+        location_id = create_location()["id"]
+        activity_ids = []
+        for i in range(12):
+            resp = api_client.post("/api/v1/activities", json={
+                "master_id": master_id,
+                "service_id": service_id,
+                "location_id": location_id,
+                "start": (
+                    datetime.now(UTC) + timedelta(days=3, hours=i)
+                ).isoformat(),
+                "duration": 60, "capacity": 10, "is_private": False,
+            })
+            assert resp.status_code == 201, resp.text
+            activity_ids.append(resp.json()["id"])
+
+        # Confirm only the first 10 → the remaining 2 are "new" → 409.
+        partial = api_client.request(
+            "DELETE", f"/api/v1/services/{service_id}",
+            json={"expected": {"activities": activity_ids[:10]}},
+        )
+        assert partial.status_code == 409, partial.text
+        assert partial.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/services/{service_id}").status_code == 200
 
 
 class TestArchiveRestoreEndpoints:

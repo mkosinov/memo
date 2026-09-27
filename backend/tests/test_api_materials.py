@@ -94,106 +94,206 @@ class TestMaterialListStatusFilter:
 
 
 class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/materials/{id} — unified dry-run (no body) + execute (with body).
+    """DELETE /api/v1/materials/{id} — unified delete contract (GH #345,
+    one-to-one mirror of ``tags.py:216-300`` / #318 D2).
 
-    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
-      * §2  — Change 1: body presence distinguishes dry-run vs execute.
-      * §5/§14 — Material has ZERO FK deps: no-body DELETE is ALWAYS 204.
-      * §6  — DELETE with resolutions body (executor = Task 10).
+    Modes (spec §4.1): ``?dry_run=true`` pure preview (409 tree / 204
+    clean / 404); bare DELETE and a body without ``expected`` → 422
+    ``expected_state_required`` (the form check precedes the probe); body
+    ``{resolutions?, expected}`` — the deferred-delete commit → 204.
+
+    Domain matrix (spec §4.4): Material has NO non-auto deps (only the
+    auto-cascade ``service_materials`` join) — no blocked state, the
+    expected verification is always satisfied by ``{}``.
     """
 
-    def test_delete_material_no_body_hard_deletes_204(self, api_client) -> None:
-        """No body + zero deps → 204 hard delete; row physically gone (spec §2/§14)."""
-        material = _create_material(api_client, title="To Delete")
+    # ── bare DELETE (no flag, no body) → 422 expected_state_required ─────
+
+    def test_bare_delete_clean_material_returns_422(
+        self, api_client,
+    ) -> None:
+        """S6: bare DELETE executes nowhere — even a clean material refuses."""
+        material = _create_material(api_client, title="mat-clean-bare")
 
         resp = api_client.delete(f"/api/v1/materials/{material['id']}")
 
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 404
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
 
-    def test_delete_material_with_body_executes_204(self, api_client) -> None:
-        """With body ``{}`` + zero deps → 204 execute (Task 10 executor).
-
-        Material has zero FK deps, so ``resolutions={}`` is the trivial case —
-        the executor collects no deps, hard-deletes the row, commits.
-        EXPECTED RED until Task 10 lands ``ArchiveService.resolve_delete``.
-        """
-        material = _create_material(api_client, title="To Delete With Body")
-
-        resp = api_client.request(
-            "DELETE", f"/api/v1/materials/{material['id']}", json={"resolutions": {}}
-        )
-
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 404
-
-    def test_delete_nonexistent_material_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404 (service.delete returns False)."""
-        resp = api_client.delete("/api/v1/materials/nonexistent-material-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "MATERIAL_NOT_FOUND"
-
-    def test_delete_nonexistent_material_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (executor returns False).
-
-        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
-        """
-        resp = api_client.request(
-            "DELETE", "/api/v1/materials/nonexistent-material-id", json={"resolutions": {}}
-        )
-        assert resp.status_code == 404
-
-
-class TestDeleteLinkedMaterial:
-    """DELETE /api/v1/materials/{id} — linked to services via ``service_materials``.
-
-    Spec: docs/specs/2026-09-07-materials-services-link-design.md §7 + domain
-    rules ``materials.md`` FK table. The join is an auto-cascade dep in BOTH
-    directions (Material side here, Service side in test_api_services.py):
-      * linked + no body → 409 + dependency tree (entity ``service_materials``,
-        count, ``allowed_actions: ["cascade"]``), rows untouched;
-      * linked + body ``{"resolutions": {}}`` → one-transaction auto-cascade
-        of the links + hard delete of the material → 204; the SERVICE survives
-        with its materials list emptied;
-      * unlinked → 204 (no body) exactly as before #223.
-    """
-
-    def test_delete_linked_material_no_body_returns_409_with_tree(
-        self, api_client, create_service
+    def test_bare_delete_linked_material_returns_422(
+        self, api_client, create_service,
     ) -> None:
-        """No body + linked → 409; tree carries service_materials count + cascade."""
-        mat = _create_material(api_client, title="Акварель")
+        """S6: bare DELETE on a linked material → 422, rows alive."""
+        mat = _create_material(api_client, title="mat-linked-bare")
         create_service(materials=[{"material_id": mat["id"]}])
 
         resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 200
+
+    def test_bare_delete_unknown_id_returns_422_before_404(
+        self, api_client,
+    ) -> None:
+        """S6: form check precedes the existence probe — 422, not 404."""
+        resp = api_client.delete("/api/v1/materials/nonexistent-material-id")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+
+    def test_delete_resolutions_body_without_expected_returns_422(
+        self, api_client,
+    ) -> None:
+        """S6: resolutions-only body is the rejected legacy shape."""
+        material = _create_material(api_client, title="mat-res-only")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}",
+            json={"resolutions": {"service_materials": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
+
+    def test_delete_unknown_keys_body_without_expected_returns_422(
+        self, api_client,
+    ) -> None:
+        """S6: unknown-keys-only body has no ``expected`` — same 422."""
+        material = _create_material(api_client, title="mat-unknown-keys")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}",
+            json={"bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_clean_material_returns_204_and_row_alive(
+        self, api_client,
+    ) -> None:
+        """S2(а): dry-run on a clean material → 204 WITHOUT deleting."""
+        material = _create_material(api_client, title="mat-preview-only")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
+
+    def test_dry_run_linked_material_returns_409_tree_row_alive(
+        self, api_client, create_service,
+    ) -> None:
+        """S2(б): dry-run on a linked material → 409 with the single
+        auto-cascade node; nothing is modified."""
+        mat = _create_material(api_client, title="mat-dry-linked")
+        service = create_service(materials=[{"material_id": mat["id"]}])
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{mat['id']}",
+            params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
-        assert "service_materials" in deps
         assert deps["service_materials"]["count"] == 1
         assert deps["service_materials"]["allowed_actions"] == ["cascade"]
-        # Dry-run: material + join rows untouched.
+        assert deps["service_materials"]["auto"] is True
+        # Dry-run modifies nothing: material + join rows + service alive.
         assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 200
-        rows = query_db(
-            f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
+        assert (
+            len(query_db(f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"))
+            == 1
         )
-        assert len(rows) == 1
+        assert api_client.get(f"/api/v1/services/{service['id']}").status_code == 200
 
-    def test_delete_linked_material_with_body_cascades_links_204(
-        self, api_client, create_service
+    def test_dry_run_unknown_material_returns_404(self, api_client) -> None:
+        """S6: dry-run probes existence — missing material → 404."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/materials/nonexistent-material-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "MATERIAL_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client,
     ) -> None:
-        """Body ``{"resolutions": {}}`` → links cascade + material gone → 204.
+        """S6: dry_run + resolutions → 422; combo checked before the probe."""
+        material = _create_material(api_client, title="mat-combo")
 
-        The service SURVIVES with its materials list emptied (the join rows
-        are the only casualty — GH #223 §7).
-        """
-        mat = _create_material(api_client, title="Гуашь")
+        for material_id in (material["id"], "nonexistent-material-id"):
+            resp = api_client.request(
+                "DELETE", f"/api/v1/materials/{material_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"service_materials": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{material_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
+
+    def test_dry_run_with_expected_only_body_silently_ignored(
+        self, api_client,
+    ) -> None:
+        """Combinatorics: dry_run + expected-only body → preview proceeds."""
+        material = _create_material(api_client, title="mat-expected-only")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}",
+            params={"dry_run": "true"},
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 200
+
+    # ── body commit: existence + expected id-set verification ─────────────
+
+    def test_commit_unknown_material_with_body_returns_404(
+        self, api_client,
+    ) -> None:
+        """S6: nonexistent id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/materials/nonexistent-material-id",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "MATERIAL_NOT_FOUND"
+
+    def test_commit_clean_material_expected_empty_returns_204(
+        self, api_client,
+    ) -> None:
+        """S2(а): clean path — ``{expected: {}}`` → 204 hard delete."""
+        material = _create_material(api_client, title="mat-commit-clean")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 404
+
+    def test_commit_linked_material_expected_empty_cascades_links_204(
+        self, api_client, create_service,
+    ) -> None:
+        """S2(б): linked material + commit ``{expected: {}}`` → 204; the
+        links cascade, the SERVICE survives with its materials emptied
+        (GH #223 §7 — the join rows are the only casualty)."""
+        mat = _create_material(api_client, title="mat-commit-linked")
         service = create_service(materials=[{"material_id": mat["id"]}])
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/materials/{mat['id']}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/materials/{mat['id']}", json={"expected": {}},
         )
 
         assert resp.status_code == 204
@@ -201,9 +301,7 @@ class TestDeleteLinkedMaterial:
         assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
         # Join rows gone.
         assert (
-            query_db(
-                f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'"
-            )
+            query_db(f"SELECT * FROM service_materials WHERE material_id='{mat['id']}'")
             == []
         )
         # Service survives with materials emptied.
@@ -211,14 +309,39 @@ class TestDeleteLinkedMaterial:
         assert svc.status_code == 200
         assert svc.json()["materials"] == []
 
-    def test_delete_unlinked_material_no_body_still_204(self, api_client) -> None:
-        """Unlinked material → 204 (no body) — the pre-#223 behavior is unchanged."""
-        mat = _create_material(api_client, title="Несвязанный")
+    def test_commit_unknown_body_keys_silently_ignored(
+        self, api_client,
+    ) -> None:
+        """S6: unknown body keys (with ``expected`` present) ignored → 204."""
+        material = _create_material(api_client, title="mat-unknown-keys-commit")
 
-        resp = api_client.delete(f"/api/v1/materials/{mat['id']}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}",
+            json={"expected": {}, "bogus_key": "whatever"},
+        )
 
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/materials/{material['id']}").status_code == 404
+
+
+class TestDeleteExpectedPayloadAllIds:
+    """>10 items pin (spec §4.2): ``expected`` carries ALL ids from the
+    full dependency tree, not just the rendered top-10 rows.
+
+    Material's only dep is the auto-cascade ``service_materials`` join —
+    auto nodes never join the verification, so this pin lives on the
+    Service entity (12 activities → a commit confirming ALL 12 id-sets
+    must pass the subset check; one missing → 409). See
+    ``tests/test_api_services.py::TestDeleteExpectedCarriesAllIds``.
+    """
+
+    def test_material_has_no_non_auto_expected_keys(self, api_client) -> None:
+        """Material commit never needs a non-empty ``expected`` map."""
+        material = _create_material(api_client, title="mat-expected-shape")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/materials/{material['id']}", json={"expected": {}},
+        )
         assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/materials/{mat['id']}").status_code == 404
 
 
 class TestArchiveRestoreEndpoints:

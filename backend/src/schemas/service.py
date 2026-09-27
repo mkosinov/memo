@@ -140,6 +140,30 @@ class ServicePatch(BaseModel):
     materials: list[ServiceMaterialLinkIn] | None = None
 
 
+class ServiceDeleteBody(BaseModel):
+    """DELETE /api/v1/services/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``TagDeleteBody`` / #318 D2).
+
+    * ``expected`` — id-sets per non-auto FK entity. Service's only
+      non-auto dep is ``activities`` (blocked — never confirmed by the
+      user, but its id-set still participates in the race gate: an
+      activity appearing mid-window on a "clean" service must 409, not
+      fall through as a blocked-422); the clean/all-auto path sends
+      ``{}``.
+    * ``resolutions`` — the user's cascade choices; for Service every
+      non-block dep is AUTO, so a successful commit never needs them
+      (the full branch is still honored for API consumers and races).
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
+
+
 class ServiceResponse(ServiceBase):
     """Response schema for a service.
 

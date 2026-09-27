@@ -1892,12 +1892,15 @@ class TestDependencyItemsIn409Tree:
     def test_client_409_tree_has_no_items_and_explicit_auto_false(
         self, api_client, create_record
     ) -> None:
-        """(г) Other entities: the Client 409 tree stays without items.
+        """(г) Other entities: the Client 409 tree node shape.
 
-        rev8: ``items`` is OMITTED (never serialized as ``null``) — the
-        client-side absence filter keys on the missing field, not on a
-        null value. Non-record nodes still carry ``"auto": false``
-        explicitly (bool False survives ``exclude_none``).
+        GH #345 §4.2/§4.3 (Task 1 collectors): the Client dialog nodes
+        now DO carry ``items`` (records = date one-liners, visitors =
+        names) — they are the source of the ``expected`` id-sets. The
+        AUTO node (client_tags, photos) still has NO items (no item
+        collector — never confirmed by the user); ``auto: false`` stays
+        explicit on the non-auto nodes (bool False survives
+        ``exclude_none``).
         """
         record = create_record()
         client_id = record["client_id"]
@@ -1905,11 +1908,15 @@ class TestDependencyItemsIn409Tree:
         resp = api_client.delete(f"/api/v1/clients/{client_id}")
 
         assert resp.status_code == 409
-        deps = resp.json()["dependencies"]
+        deps = {d["entity"]: d for d in resp.json()["dependencies"]}
         assert deps, "client with a record must have deps"
-        for dep in deps:
-            assert "items" not in dep, dep["entity"]
-            assert dep["auto"] is False, dep["entity"]
+        # Non-auto dialog nodes carry items (the expected source, #345).
+        assert deps["records"]["count"] == 1 == len(deps["records"]["items"])
+        assert deps["records"]["auto"] is False
+        # Auto nodes never carry items.
+        for entity, dep in deps.items():
+            if dep["auto"]:
+                assert "items" not in dep, entity
 
 
 class TestDependencyTreeAutoFlags:

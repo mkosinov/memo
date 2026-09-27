@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-27
+
+### Changed
+- **GH #367 — Унификация сортировочных параметров табличных списков** — branch
+  `sort-params-367` (8 commits `ef96f107..ec9c8e3d`, base `945e5e83`; спека
+  `docs/specs/2026-09-27-sort-params-367-design.md` + план
+  `docs/plans/2026-09-27-sort-params-367-plan.md` — 6/6 задач T1–T6):
+  - **Кирпень + резолвер:** `SortParams(BaseModel, Generic[SortByT])` в
+    `backend/src/schemas/common.py` (кирпень задаёт форму, фиксированные дефолты
+    переопределяются в подклассе: records `"date"/"asc"`, photos
+    `"created_at"/"desc"`, clients `"name"/"asc"`); общий резолвер
+    `backend/src/domain/sorting.py` — `SortKeyMap`/`SortKeySpec` + `apply_sort`
+    (канон `asc → nullsfirst / desc → nullslast`, per-key политика
+    `always_nulls_last` для LEFT JOIN-вычислимых staff `specialty`/`color`,
+    детерминированный тайбрейк `id asc` последним выражением у всех списков);
+    скалярные роуты справочников — `sort_by: XSortBy | None = Query(None)`,
+    fallback `sort_by=None` остаётся у сущности.
+  - **8 списков переведены:** клиенты, записи, фото, staff, услуги, материалы,
+    локации, теги — карты сортировки у сущностей (клиенты/записи — на уровне
+    модуля), применение только через резолвер; локальные `_X_order_by`-резолвы
+    и inline `order_by(...nulls...)` в роутах/сервисах удалены (DoD-греп чист).
+  - **Клиенты — жёсткий контракт:** последний мягкий sort-контракт закрыт —
+    `ClientSortBy` Literal из 7 колонок, мусорный `sort_by`/`sort_order` →
+    **422 VALIDATION_ERROR** вместо молчаливого отката к `name` (тест
+    отката переписан в тест 422); страховочный слой `UnknownSortKeyError` →
+    422 через глобальный хендлер.
+  - **CI-стражи:** параметризованный Literal==карта для всех 8 сущностей
+    (`backend/tests/domain/test_sorting.py`, ловит «Literal расширили, карту
+    забыли» в обе стороны); OpenAPI-гард `sort_by` клиентов — enum из 7
+    значений (`test_api_clients.py`, generic-Query-инъекция FastAPI);
+    `RecordSortOrder` (дубль `SortOrder`) удалён.
+
 ## [Unreleased] — 2026-09-25
 
 ### Added

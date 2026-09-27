@@ -1247,6 +1247,62 @@ async def _items_pos_staff_positions(
     ]
 
 
+# ─── GH #345 §4.3: Client dialog label builders ────────────────────────────────
+# Mirror the ready-made builders: records — the date one-liner of
+# ``_items_a_records`` («{service.title}, {date}, {client | Аноним}» —
+# the client component is the deleting client's own name, «Аноним» when
+# NULL/empty); visitors — the name with the «Аноним» fallback (#318 D6
+# style; Visitor.name is NOT NULL but an empty string degrades safely).
+# PII boundary #285 D9: NO phones — names/titles/dates only.
+# Blocked activities nodes of Staff/Location/Service deliberately carry
+# NO items builder (§4.3): a blocked node is never confirmed, expected is
+# never built from it — counters only.
+
+
+async def _items_c_records(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Record label «{service.title}, {start date}, {client | Аноним}» —
+    the ``(Activity, "records")`` one-liner mirrored for the client
+    dialog (Record → Activity → Service, date = ``Activity.start`` date
+    part, ISO ``YYYY-MM-DD``; the client name is the deleting client's)."""
+    r = await s.execute(
+        select(
+            Record.id.label("record_id"),
+            Service.title.label("service_title"),
+            Activity.start.label("start"),
+            Client.name.label("client_name"),
+        )
+        .join(Activity, Record.activity_id == Activity.id)
+        .join(Service, Activity.service_id == Service.id)
+        .outerjoin(Client, Record.client_id == Client.id)
+        .where(Record.client_id == entity_id)
+    )
+    return [
+        DependencyItem(
+            id=row.record_id,
+            label=(
+                f"{row.service_title}, {row.start.date().isoformat()}, "
+                f"{row.client_name if row.client_name else _ANONYMOUS_LABEL}"
+            ),
+        )
+        for row in r.all()
+    ]
+
+
+async def _items_c_visitors(s: AsyncSession, entity_id: str) -> list[DependencyItem]:
+    """Visitor label «{name}» — the #318 D6 name builder mirrored for
+    the client dialog («Аноним» fallback on a falsy name)."""
+    r = await s.execute(
+        select(Visitor.id, Visitor.name).where(Visitor.client_id == entity_id)
+    )
+    return [
+        DependencyItem(
+            id=row.id,
+            label=row.name if row.name else _ANONYMOUS_LABEL,
+        )
+        for row in r.all()
+    ]
+
+
 _ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
     (Record, "visits"): _items_r_visits,
     (Record, "payments"): _items_r_payments,
@@ -1274,6 +1330,12 @@ _ITEM_COLLECTORS: dict[tuple[type[Base], str], _ItemsFn] = {
     (Visitor, "visits"): _items_v_visits,
     (Visitor, "visitor_tags"): _items_v_visitor_tags,
     (Position, "staff_positions"): _items_pos_staff_positions,
+    # GH #345 §4.3: the Client dialog one-liners (records = date one-liner
+    # mirror of _items_a_records; visitors = name with «Аноним» fallback).
+    # Staff/Location/Service activities stay UNWIRED here — blocked nodes
+    # are never confirmed, items are deliberately not introduced.
+    (Client, "records"): _items_c_records,
+    (Client, "visitors"): _items_c_visitors,
 }
 
 
@@ -1545,6 +1607,53 @@ async def _ids_pos_staff_positions(s: AsyncSession, entity_id: str) -> list[str]
     return list(r.scalars().all())
 
 
+# ─── GH #345 §4.3: archivable-family id-collectors ─────────────────────────────
+# Manual pairs (no factory — join paths are heterogeneous): the staff
+# activities reach through the ``masters`` extension string
+# (``masters.staff_id`` is PK AND the FK target, so ``Activity.master_id``
+# equals the staff id — the same direct form as ``_count_m_activities``);
+# location/service/client deps are plain direct FKs. ONLY non-auto deps
+# are wired: the expected-state race gate (S5) needs the activities
+# id-set of Staff/Location/Service and the records/visitors id-sets of
+# Client; the auto deps resolve themselves and carry nothing to confirm.
+
+
+async def _ids_m_activities(s: AsyncSession, entity_id: str) -> list[str]:
+    # Via the masters extension: activities.master_id → masters.staff_id =
+    # staff.id — PK identity makes the direct comparison exact (mirror of
+    # ``_count_m_activities``).
+    r = await s.execute(
+        select(Activity.id).where(Activity.master_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
+async def _ids_l_activities(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(Activity.id).where(Activity.location_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
+async def _ids_s_activities(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(Activity.id).where(Activity.service_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
+async def _ids_c_records(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(select(Record.id).where(Record.client_id == entity_id))
+    return list(r.scalars().all())
+
+
+async def _ids_c_visitors(s: AsyncSession, entity_id: str) -> list[str]:
+    r = await s.execute(
+        select(Visitor.id).where(Visitor.client_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
 _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Record, "visits"): _ids_r_visits,
     (Record, "payments"): _ids_r_payments,
@@ -1566,6 +1675,14 @@ _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Visitor, "visits"): _ids_v_visits,
     (Visitor, "visitor_tags"): _ids_v_visitor_tags,
     (Position, "staff_positions"): _ids_pos_staff_positions,
+    # GH #345 §4.3: the archivable family — non-auto deps only (the S5
+    # race gate: an activity/record/visitor appearing mid-window must be
+    # caught by the expected-subset check, not fall through as blocked).
+    (Staff, "activities"): _ids_m_activities,
+    (Location, "activities"): _ids_l_activities,
+    (Service, "activities"): _ids_s_activities,
+    (Client, "records"): _ids_c_records,
+    (Client, "visitors"): _ids_c_visitors,
 }
 
 

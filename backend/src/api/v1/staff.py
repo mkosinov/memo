@@ -25,6 +25,8 @@ from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import (
     BareListLimitExceededError,
     ColorRequiredError,
+    PhoneInvalidError,
+    PhoneTakenError,
     PositionIsSystemError,
     PositionNotFoundError,
     SpecialtyRequiredError,
@@ -131,6 +133,8 @@ _SECTION_ERRORS: tuple[type[Exception], ...] = (
     PositionNotFoundError,
     PositionIsSystemError,
     PasswordPolicyError,
+    PhoneTakenError,
+    PhoneInvalidError,
 )
 
 
@@ -152,6 +156,10 @@ def _map_domain_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, PasswordPolicyError):
         return _section_error(ErrorCode.PASSWORD_POLICY, str(exc))
+    if isinstance(exc, PhoneTakenError):
+        return _section_error(ErrorCode.PHONE_TAKEN, str(exc))
+    if isinstance(exc, PhoneInvalidError):
+        return _section_error(ErrorCode.PHONE_INVALID, str(exc))
     return _section_error(ErrorCode.VALIDATION_ERROR, str(exc))
 
 

@@ -186,10 +186,12 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
     4. account checkbox (create-only, D6): role from
        :func:`resolve_account_role` (explicit → position template → the
        #247 master-section fallback); ``UserService.create_staff_account``
-       validates + hashes the password INSIDE, then the GH #319
-       UserSettings defaults row lands in the SAME transaction
-       (``UserSettingsService.insert_defaults`` — composed HERE: the
-       users row owner writes no foreign tables, canon rule 1).
+       validates the phone (shared #348 validator) and inserts the row
+       PASSWORDLESS (``password_hash`` NULL — the owner sets it via the
+       one-time link), then the GH #319 UserSettings defaults row lands
+       in the SAME transaction (``UserSettingsService.insert_defaults``
+       — composed HERE: the users row owner writes no foreign tables,
+       canon rule 1).
 
     NOTE: call as ``create_staff(None, db_session=..., data=...)`` — see
     the module docstring for why.
@@ -226,11 +228,13 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
             data.position_ids,
             has_master_section=data.master is not None,
         )
+        # #348 (spec §4): the account lands PASSWORDLESS — the shared
+        # phone validator + the explicit duplicate probe live INSIDE the
+        # owner block.
         user = await get_user_service().create_staff_account(
             db_session,
             staff_id=staff.id,
             phone=account.phone,
-            password=account.password,
             role=role,
         )
         # GH #319: guaranteed child record — the UserSettings defaults

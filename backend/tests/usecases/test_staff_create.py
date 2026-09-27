@@ -33,7 +33,6 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from src.auth.passwords import verify_password
 from src.domain.errors import (
     ColorRequiredError,
     PositionNotFoundError,
@@ -226,15 +225,16 @@ async def test_with_positions_links_and_dedupes(db_session) -> None:
     assert sorted(linked) == sorted([p1.id, p2.id])  # dedupe → exactly 2 rows
 
 
-async def test_with_user_creates_linked_hashed_account(db_session) -> None:
-    """D6 checkbox: account row lands linked to the card, password hashed;
-    master-section card → role "master" (the #247 fallback)."""
+async def test_with_user_creates_linked_passwordless_account(db_session) -> None:
+    """D6 checkbox: account row lands linked to the card, PASSWORDLESS
+    (#348 — the owner sets it via the one-time link); master-section
+    card → role "master" (the #247 fallback)."""
     from src.usecases.staff import create_staff
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         master={"specialty": "живопись", "color": "#5B8C7A"},
-        create_user={"phone": phone, "password": "secret12345"},
+        create_user={"phone": phone},
     ))
 
     assert created.has_user is True
@@ -244,7 +244,7 @@ async def test_with_user_creates_linked_hashed_account(db_session) -> None:
     assert user.phone == phone
     assert user.is_active is True
     assert user.role == "master"
-    assert verify_password("secret12345", user.password_hash)
+    assert user.password_hash is None
 
 
 async def test_with_user_guarantees_settings_row(db_session) -> None:
@@ -257,7 +257,7 @@ async def test_with_user_guarantees_settings_row(db_session) -> None:
 
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         create_user={
-            "phone": f"+7999{_uuid.uuid4().hex[:7]}", "password": "secret12345",
+            "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
     ))
 
@@ -278,7 +278,7 @@ async def test_user_without_section_gets_admin_fallback(db_session) -> None:
 
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         create_user={
-            "phone": f"+7999{_uuid.uuid4().hex[:7]}", "password": "secret12345",
+            "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
     ))
     user = (await db_session.execute(
@@ -299,7 +299,7 @@ async def test_user_position_template_roles(db_session) -> None:
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         position_ids=["master"],
-        create_user={"phone": phone, "password": "secret12345"},
+        create_user={"phone": phone},
     ))
     role = (await db_session.execute(
         select(User.role).where(User.staff_id == created.id)
@@ -309,7 +309,7 @@ async def test_user_position_template_roles(db_session) -> None:
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         position_ids=["admin"],
-        create_user={"phone": phone, "password": "secret12345"},
+        create_user={"phone": phone},
     ))
     role = (await db_session.execute(
         select(User.role).where(User.staff_id == created.id)
@@ -319,7 +319,7 @@ async def test_user_position_template_roles(db_session) -> None:
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         position_ids=["master", "admin"],
-        create_user={"phone": phone, "password": "secret12345"},
+        create_user={"phone": phone},
     ))
     role = (await db_session.execute(
         select(User.role).where(User.staff_id == created.id)
@@ -331,7 +331,7 @@ async def test_user_position_template_roles(db_session) -> None:
     created = await create_staff(None, db_session=db_session, data=_create_payload(
         position_ids=["master"],
         create_user={
-            "phone": phone, "password": "secret12345", "role": "admin",
+            "phone": phone, "role": "admin",
         },
     ))
     role = (await db_session.execute(
@@ -370,15 +370,33 @@ async def test_unknown_position_raises(db_session) -> None:
         ))
 
 
-async def test_short_password_raises_policy_error(db_session) -> None:
-    from src.auth.passwords import PasswordPolicyError
+async def test_duplicate_account_phone_raises_domain_error(db_session) -> None:
+    """#348: the explicit duplicate probe (previously only the global DB
+    IntegrityError handler caught it on the composite path)."""
+    from src.domain.phones import PhoneTakenError
     from src.usecases.staff import create_staff
 
-    with pytest.raises(PasswordPolicyError):
+    phone = f"+7999{_uuid.uuid4().hex[:7]}"
+    await create_staff(None, db_session=db_session, data=_create_payload(
+        create_user={"phone": phone},
+    ))
+
+    with pytest.raises(PhoneTakenError):
         await create_staff(None, db_session=db_session, data=_create_payload(
-            create_user={
-                "phone": f"+7999{_uuid.uuid4().hex[:7]}", "password": "short",
-            },
+            create_user={"phone": phone},
+        ))
+
+
+async def test_invalid_account_phone_raises_domain_error(db_session) -> None:
+    """#348: the shared validator gates the composite path too — a
+    whitespace-only value passes the schema (``min_length=1`` counts
+    spaces) but is blank after trimming."""
+    from src.domain.phones import PhoneInvalidError
+    from src.usecases.staff import create_staff
+
+    with pytest.raises(PhoneInvalidError):
+        await create_staff(None, db_session=db_session, data=_create_payload(
+            create_user={"phone": "   "},
         ))
 
 
@@ -410,7 +428,7 @@ async def test_grid_full_composite(db_session, subscriber) -> None:
         master={"specialty": "живопись", "color": "#5B8C7A"},
         position_ids=["master"],
         create_user={
-            "phone": f"+7999{_uuid.uuid4().hex[:7]}", "password": "secret12345",
+            "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
     ))
     assert created is not None
@@ -491,7 +509,7 @@ async def test_step_order_card_section_positions_user(
         master={"specialty": "живопись", "color": "#5B8C7A"},
         position_ids=["master"],
         create_user={
-            "phone": f"+7999{_uuid.uuid4().hex[:7]}", "password": "secret12345",
+            "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
     ))
 
@@ -537,7 +555,6 @@ async def test_atomicity_user_boom_rolls_back_everything(
                 position_ids=["master"],
                 create_user={
                     "phone": f"+7999{_uuid.uuid4().hex[:7]}",
-                    "password": "secret12345",
                 },
             ),
         )

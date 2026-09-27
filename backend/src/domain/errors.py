@@ -90,6 +90,34 @@ class FileTooLargeError(Exception):
     """
 
 
+class PhoneInvalidError(Exception):
+    """Account phone fails the shared length rule (GH #348, spec §4).
+
+    Blank or over 20 characters after trimming edge whitespace
+    (``User.phone`` is ``String(20)``). The router maps this to 422
+    ``PHONE_INVALID``.
+    """
+
+    def __init__(self, value: str) -> None:
+        super().__init__("Телефон учётки: от 1 до 20 символов")
+        self.value = value
+
+
+class PhoneTakenError(Exception):
+    """Another account already holds this exact phone string (GH #348,
+    spec §4).
+
+    Uniqueness is EXACT-STRING (no normalization — that would break
+    existing accounts' logins); the probe covers archived rows too (the
+    DB unique constraint has no active-filter). The router maps this to
+    422 ``PHONE_TAKEN``.
+    """
+
+    def __init__(self, value: str) -> None:
+        super().__init__("Этот телефон уже занят")
+        self.value = value
+
+
 class FileInvalidTypeError(Exception):
     """Upload magic bytes are not JPEG/PNG/WebP (GH #262 Task 2, §3.4).
 

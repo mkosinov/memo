@@ -3,10 +3,11 @@
 Composite card contract: the person (``staff``) carries an optional master
 section (``master: {specialty, color} | null`` — the 1:0..1 ``masters``
 extension), a list of position ids (M2M ``staff_positions``), and — on
-create only — an account-creation flag (``create_user: {phone, password} |
-false``). ``StaffResponse`` inverts ``is_active`` into ``archived`` like
-every archive-aware entity; the embedded ``master`` view carries its own
-``archived`` (the schedule flag, D3).
+create only — an account-creation flag (``create_user: {phone} | false``
+— passwordless since #348; the password is set by the owner via the
+one-time setup link). ``StaffResponse`` inverts ``is_active`` into
+``archived`` like every archive-aware entity; the embedded ``master``
+view carries its own ``archived`` (the schedule flag, D3).
 """
 
 from __future__ import annotations
@@ -64,7 +65,13 @@ class MasterSectionView(BaseModel):
 
 
 class CreateUserSection(BaseModel):
-    """Account-creation checkbox (D6): phone + password, create-only.
+    """Account-creation checkbox (D6): phone, create-only — #348 breaking.
+
+    The PASSWORD field is REMOVED (#348, spec §5): the admin only enters
+    the phone; the account lands passwordless (``password_hash`` NULL)
+    and the owner sets the password via the one-time setup link the
+    admin hands over. The dev CLI surface (``usecases/user.py::
+    create_user``) keeps direct password entry — not a user flow.
 
     ``role`` (GH #263 D10): the manual role override. ``None`` (absent) →
     the service fills the role from the position template; a sent value
@@ -74,7 +81,6 @@ class CreateUserSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     phone: str = Field(min_length=1, max_length=20)
-    password: str = Field(min_length=1, max_length=64)
     role: UserRole | None = None
 
 

@@ -8,10 +8,11 @@ usecases layer (``create_user``, ``create_staff`` …) owns the
 transaction boundary. ``mark_changed`` fires by fact of change:
 unconditionally on a created row, on rowcount for the set-based updates.
 
-Password policy stays inside the operation: ``validate_password`` →
-``hash_password`` (domain helpers of ``auth/passwords.py`` — the auth
-module itself is untouched); only the hash is stored, the plaintext
-never lands on the row.
+Password policy stays inside the CLI-facing operation's scenario
+(``usecases/user.py::create_user`` — the dev surface keeps direct
+password entry, #348 spec §7); the staff-card account block creates
+rows PASSWORDLESS (``password_hash`` NULL — the owner sets it via the
+one-time link, #348 spec §4).
 
 The role selection (position template D10, GH #263) moved here from
 ``StaffService`` as the pure function :func:`resolve_account_role`.
@@ -32,7 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import select, update
 
-from src.auth.passwords import hash_password, validate_password
+from src.domain.phones import PhoneTakenError, validate_phone
 from src.events.emitter import mark_changed
 from src.models.enums import UserRole
 from src.models.user import User
@@ -179,15 +180,20 @@ class UserService:
         db_session: AsyncSession,
         staff_id: str,
         phone: str,
-        password: str,
         role: UserRole,
     ) -> User:
-        """Insert a login account linked to the staff card.
+        """Insert a PASSWORDLESS login account linked to the staff card.
 
-        The password is validated against the policy and hashed INSIDE
-        (``PasswordPolicyError`` propagates to the 422 mapping); only
-        ``password_hash`` is stored. Flush, no commit; the created row is
-        a fact → ``mark_changed("users")`` unconditionally.
+        #348 (spec §4): the admin never invents or sees the account
+        password — the row lands with ``password_hash`` NULL and the
+        owner sets it later via the one-time setup link (``usecases/
+        password_setup.py``, Task 2). The phone runs through the SHARED
+        domain validator (:func:`src.domain.phones.validate_phone`), and
+        an EXPLICIT exact-string duplicate probe raises
+        :class:`PhoneTakenError` BEFORE any write — the composite path
+        previously surfaced duplicates only through the global DB
+        IntegrityError handler. Flush, no commit; the created row is a
+        fact → ``mark_changed("users")`` unconditionally.
 
         ONLY the ``users`` row (canon rule 1 — the row owner never
         writes foreign tables). The GH #319 UserSettings guarantee is
@@ -195,9 +201,12 @@ class UserService:
         right after this block — the same pattern as the ``create_user``
         scenario (``usecases/user.py``).
         """
+        phone = validate_phone(phone)
+        if await self.get_by_phone(db_session, phone) is not None:
+            raise PhoneTakenError(phone)
         user = User(
             phone=phone,
-            password_hash=hash_password(validate_password(password)),
+            password_hash=None,
             role=role.value,
             staff_id=staff_id,
         )

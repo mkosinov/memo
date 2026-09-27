@@ -266,7 +266,8 @@ async def delete_photo(
     photo = dependent subject — mirror of the tags route #318 D2).
 
     Photo's single dep is ``photo_tags`` (join, cascade, NON-auto): a
-    tagged photo previews the «Тег» node, its commit carries
+    tagged photo previews the tag-relation node (label of the join dep),
+    its commit carries
     ``{resolutions: {photo_tags: cascade}, expected: {photo_tags: [...]}}``
     and unlinks the tags (the tag rows survive); an untagged photo
     behaves as a leaf (``{expected: {}}``).

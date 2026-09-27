@@ -195,14 +195,14 @@ class TestDeleteFamilyForm422:
 
     MISSING = "00000000-0000-0000-0000-000000000000"
 
-    ROUTES = [
+    ROUTES = (
         "/api/v1/visits",
         "/api/v1/payments",
         "/api/v1/photos",
         "/api/v1/user-settings",
         "/api/v1/visitors",
         "/api/v1/positions",
-    ]
+    )
 
     @pytest.mark.parametrize("prefix", ROUTES)
     def test_bare_delete_returns_422_before_probe(self, api_client, prefix) -> None:

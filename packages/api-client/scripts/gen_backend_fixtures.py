@@ -36,7 +36,9 @@ master_section_archived = dict(master_section_active, is_active=False)
 # #348 spec §5: the card's account block. The fixture card has an account
 # with a LIVE setup link (link_expires_at set) — the archived pair keeps the
 # same account (an archived account stays in the block, is_active=False).
+# id = the account's users.id — the addressable key of the users vertical.
 staff_account = dict(
+    id="5f8a1c2d-9001-4000-8000-0000000000a1",
     phone="+79991234567", role="master", is_active=True,
     password_hash=None,  # passwordless (#348) → password_is_set=False
     link_expires_at=UPDATED,

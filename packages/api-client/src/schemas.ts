@@ -16,12 +16,16 @@ export const StaffMasterSectionSchema = z.object({
 });
 export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
 
-// The card's account block (#348 spec §5): {phone, role, password_is_set,
-// is_active, link_expires_at}. null = no account; is_active=false = archived
-// account (the block stays, read-only). link_expires_at = the LIVE setup
-// link's expiry or null (used/expired/none) — the raw token is never here
-// (it surfaces exactly once, in the issue response).
+// The card's account block (#348 spec §5): {id, phone, role,
+// password_is_set, is_active, link_expires_at}. null = no account;
+// is_active=false = archived account (the block stays, read-only).
+// link_expires_at = the LIVE setup link's expiry or null (used/expired/
+// none) — the raw token is never here (it surfaces exactly once, in the
+// issue response). `id` is the account's users.id — the addressable key
+// for PATCH /users/:id and POST /users/:id/password-link (staff.id and
+// users.id are different UUIDs; the block is the only frontend source).
 export const StaffAccountSchema = z.object({
+  id: z.string(),
   phone: z.string(),
   role: z.string(),
   password_is_set: z.boolean(),
@@ -64,11 +68,14 @@ export const MasterSectionInputSchema = z
 export type MasterSectionInput = z.infer<typeof MasterSectionInputSchema>;
 
 // Account-creation checkbox (D6): a section object or literal false —
-// never bare true.
+// never bare true. PASSWORDLESS since #348 (spec §5/§6): the admin only
+// enters the phone; the owner sets the password via the one-time setup
+// link the admin hands over. `.strict()` parity with the backend
+// CreateUserSection (extra="forbid") — a stray password key fails here,
+// loudly, instead of 422-ing at the server.
 export const CreateUserSectionSchema = z
   .object({
     phone: z.string().min(1).max(20),
-    password: z.string().min(1).max(64),
     // GH #263 D10: manual role override — a sent value beats the position
     // template; omitted → the backend template decides (admin > master).
     role: z.enum(['admin', 'master']).nullable().optional(),

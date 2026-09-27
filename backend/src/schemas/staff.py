@@ -150,8 +150,8 @@ class StaffPatch(BaseModel):
 class StaffAccountView(BaseModel):
     """The card's current account block (#348 spec §5).
 
-    ``{phone, role, password_is_set, is_active, link_expires_at}`` — the
-    «Учётка» card block. Built by the staff serializer over the linked
+    ``{id, phone, role, password_is_set, is_active, link_expires_at}`` —
+    the «Учётка» card block. Built by the staff serializer over the linked
     ``users`` row (``staff_id`` UNIQUE ⇒ at most one) LEFT JOINed with
     its LIVE setup token: ``link_expires_at`` is the expiry of the
     live link (``used_at IS NULL`` and unexpired) or ``None`` — a used
@@ -160,10 +160,18 @@ class StaffAccountView(BaseModel):
     read-only). ``password_is_set`` derives from the stored hash
     (NULL = passwordless, #348) via the ``UserAccountResponse``
     computed-field precedent.
+
+    ``id`` is the account's own ``users.id`` — the addressable key the
+    frontend uses for the users-vertical calls (``PATCH /users/{id}``,
+    ``POST /users/{id}/password-link``). ``staff.id`` ≠ ``users.id``
+    (different tables), and the block is the only frontend source: the
+    admin UI must not guess or probe. Additive-only change (#348 Task 7
+    wiring decision, option (a)).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
+    id: str
     phone: str
     role: str
     is_active: bool

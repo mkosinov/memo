@@ -94,7 +94,9 @@ describe('createStaff', () => {
       last_name: 'Иванова',
       master: { specialty: 'живопись', color: '#5B8C7A' },
       position_ids: ['master'],
-      create_user: { phone: '+79991234567', password: 'secret123' },
+      // #348: passwordless create — the password is set by the owner via
+      // the one-time setup link, never entered by the admin.
+      create_user: { phone: '+79991234567' },
     });
     expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything(), {
       method: 'POST',
@@ -103,7 +105,7 @@ describe('createStaff', () => {
         last_name: 'Иванова',
         master: { specialty: 'живопись', color: '#5B8C7A' },
         position_ids: ['master'],
-        create_user: { phone: '+79991234567', password: 'secret123' },
+        create_user: { phone: '+79991234567' },
       }),
     });
   });

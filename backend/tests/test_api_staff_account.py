@@ -84,7 +84,7 @@ class TestStaffAccountBlock:
 
     def test_active_account_full_shape(self, api_client) -> None:
         staff_id = _make_card(api_client)
-        _link_account(staff_id, _PHONE)
+        user_id = _link_account(staff_id, _PHONE)
 
         resp = api_client.get(f"/api/v1/staff/{staff_id}")
 
@@ -92,12 +92,14 @@ class TestStaffAccountBlock:
         account = resp.json()["account"]
         assert account is not None
         assert set(account) == {
+            "id",  # users.id — the users-vertical address key (#348 Task 7)
             "phone",
             "role",
             "password_is_set",
             "is_active",
             "link_expires_at",
         }
+        assert account["id"] == user_id
         assert account["phone"] == _PHONE
         assert account["role"] == "master"
         assert account["password_is_set"] is True  # insert_user hash "x"

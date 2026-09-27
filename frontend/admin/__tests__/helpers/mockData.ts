@@ -359,6 +359,7 @@ export const mockStaffResponseArchived: StaffResponse = {
   has_user: true,
   account: {
     // #348: archived account — the block stays, rendered read-only.
+    id: 'u-m2', // users.id — the users-vertical address key
     phone: '+79991234502',
     role: 'master',
     password_is_set: true,

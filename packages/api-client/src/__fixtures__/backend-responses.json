@@ -18,6 +18,7 @@
       ],
       "has_user": true,
       "account": {
+        "id": "5f8a1c2d-9001-4000-8000-0000000000a1",
         "phone": "+79991234567",
         "role": "master",
         "is_active": true,
@@ -46,6 +47,7 @@
       ],
       "has_user": true,
       "account": {
+        "id": "5f8a1c2d-9001-4000-8000-0000000000a1",
         "phone": "+79991234567",
         "role": "master",
         "is_active": false,

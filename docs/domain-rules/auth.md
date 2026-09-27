@@ -44,6 +44,14 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - On success (204): the **current session stays**, **all other sessions of the user are deleted** (other devices must re-login).
 - Does not feed the login lockout ladder (an authenticated user changing their own password; the ladder guards anonymous login brute-force).
 
+### Одноразовая ссылка установки пароля (#348)
+- Пароль учётки задаёт только владелец — по одноразовой ссылке. Выдаёт ссылку админ (`POST /api/v1/users/{id}/password-link` → `{token, expires_at}`, ссылку админ передаёт сотруднику сам — каналы доставки, issue #398); поглощает ссылку публичный эндпоинт `POST /api/v1/auth/password-setup` (полномочие — сам токен), выбор экрана на странице — по проверке `POST /api/v1/auth/password-setup/validate`.
+- Ссылка **одноразовая**, живёт **24 часа** (параметр сценария выдачи); работает **только последняя выданная** — выдача удаляет все прежние токены пользователя, а «один живой токен на учётку» гарантирует частичный уникальный индекс. В БД хранится **SHA-256 дайджест** токена, сырой токен — только в ссылке, передаваемой **фрагментом** URL (`#token=`).
+- Установка перепроверяет активность учётки; при успехе: новый хэш, **сброс всей лестницы блокировок** (включая жёсткую — раньше снималась только sqladmin'ом), **отзыв всех сессий** пользователя. Все отказные пути отвечают одинаково («Ссылка недействительна или истекла», тайминговая чёткость как при входе) и считаются в счётчик неудач по IP.
+- Аудит: **выдача** (автор — админ) и **смена телефона** журналируются; публичная **установка** — нет («нет автора → нет записи», #344): событие восстанавливается по связке выдача → использование токена.
+- Учётка может существовать **без пароля** (`password_hash` NULL): вход невозможен с обычным «неверные учётные данные» (тайминговая чёткость), пока владелец не задаст пароль по ссылке.
+- Правка телефона учётки (админ, `PATCH /api/v1/users/{id}`) сессии не отзывает (cookie-сессии не завязаны на телефон); уникальность — по точной строке, без нормализации.
+
 ## Per-master data scoping (#263)
 
 Поверх матрицы роль `master` получает **серверный скоуп «только своё»** (спека `docs/specs/2026-09-10-master-role-design.md`). Якорь — `master_key`: masters-строка учётки (`users.staff_id` → `masters.staff_id`, post-#266). Правила:
@@ -65,15 +73,15 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Login throttle — escalation ladder per phone (user decision): **3 failures → 15-min lock; after expiry 3 more → 1-hour lock; 3 more → hard lock until an administrator resets it** (sqladmin: clear `failed_login_attempts` / `lock_level` / `locked_until` on the user). Ladder state lives on the `users` row (survives restarts). Locked accounts get 429 even with the correct password; a successful login resets the ladder (the hard lock only the admin). Secondary: per-IP 20 failures / 15 min (in-memory, anti-spray across accounts).
 
 ## User lifecycle
-- First admin: CLI `python -m src.cli create-user` (no default passwords in the public repo). Production bootstrap: deploy → migrate → CLI → login.
-- Further staff: created in sqladmin (admin-only login; password field hashes on save, blank on edit = unchanged). The lockout reset also lives there: clear the lock fields on the user.
+- First admin: CLI `python -m src.cli create-user` (no default passwords in the public repo). Production bootstrap: deploy → migrate → CLI → login. CLI-сценарий и sqladmin сохраняют прямое задание пароля — служебные поверхности разработчика, не пользовательский флоу (#348).
+- Дальнейшие сотрудники: учётка создаётся из блока «Учётка» карточки сотрудника **без пароля** — телефон (+ роль по шаблону должностей #263 или вручную); затем админ выдаёт одноразовую ссылку установки пароля и передаёт её сотруднику (#348). sqladmin остаётся служебной поверхностью разработчика (там же сброс блокировки вручную).
 - Роль при создании учётки из карточки сотрудника и при смене должностей **авто-подставляется должностью** (шаблоны #263, D10): должность «мастер» → `role=master`, «админ» → `role=admin`; несколько должностей — старшая (admin > master); прочие должности роль не трогают; ручная правка остаётся. Подстановка — UX-удобство: доступ по-прежнему один `users.role` + матрица выше.
 - Dev seed: demo admin + demo master, dev-only.
 - Creating a user always creates its `UserSettings` row (guaranteed child record, GH #319): the `create_user` scenario and the staff-card «Учётка» flow do it in the same transaction; the seed creates both rows directly.
 - `SECRET_KEY` (env): signs the sqladmin session cookie; production fails fast when unset, dev defaults to a fixed dev constant.
 
 ## Error Codes
-`AUTH_UNAUTHORIZED` (401), `AUTH_INVALID_CREDENTIALS` (401), `AUTH_LOCKED_OUT` (429), `AUTH_FORBIDDEN` (403, incl. non-owned user-settings rows), `PASSWORD_POLICY` (422).
+`AUTH_UNAUTHORIZED` (401), `AUTH_INVALID_CREDENTIALS` (401), `AUTH_LOCKED_OUT` (429), `AUTH_FORBIDDEN` (403, incl. non-owned user-settings rows), `PASSWORD_POLICY` (422), `PHONE_TAKEN` (422), `PHONE_INVALID` (422), `ACCOUNT_DEACTIVATED` (422), `PASSWORD_LINK_INVALID` (422) — последние четыре из #348.
 
 ## API Endpoints
 | Method | Path | Access | Description |
@@ -81,6 +89,10 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | POST | /api/v1/auth/login | public | phone + password → user + permissions + Set-Cookie |
 | POST | /api/v1/auth/logout | public | deletes session, clears cookie |
 | GET | /api/v1/auth/me | public (401 when no session) | current user + permissions |
+| POST | /api/v1/auth/password-setup/validate | public | проверка токена ссылки установки пароля (#348) |
+| POST | /api/v1/auth/password-setup | public | установка пароля по одноразовой ссылке (#348) |
+| PATCH | /api/v1/users/{id} | admin | правка телефона учётки (#348) |
+| POST | /api/v1/users/{id}/password-link | admin | выдать одноразовую ссылку установки пароля (#348) |
 
 ## Relationships
 - User → optional 1:1 Staff (`staff_id` FK; бывш. `master_id` — реструктуризация #266: учётка привязывается к карточке сотрудника любой роли).

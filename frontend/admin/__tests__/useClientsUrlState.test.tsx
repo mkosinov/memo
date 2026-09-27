@@ -15,7 +15,7 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 // Real next/navigation shape via the shared stateful mock — the page-scoped
 // hook reads AND writes through it, so pushed URLs must re-render the tree.
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
-import { __resetNavigation, __lastPushedUrl, __currentQuery } from './helpers/nextNavigationMock';
+import { __resetNavigation, __lastPushedUrl } from './helpers/nextNavigationMock';
 
 import { getClientsWithStats } from '@memo/api-client';
 import {

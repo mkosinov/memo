@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTableUrlState } from '@/hooks/useTableUrlState';
 import type { TableUrlConfig } from '@/hooks/useTableUrlState';
 import { parseClientIds } from '@/lib/client-id-param';
 import type { ArchiveFilter, SortOrder } from '@/contexts/createPagedListContext';
+import { defaultFilters as clientsDefaultFilters } from '@/contexts/ClientsContext';
 import type { ClientFilters } from '@/contexts/ClientsContext';
 
 // #349 Task 4 — clients page URL state. The page-scoped hook owns the
@@ -54,9 +55,6 @@ export const clientsUrlConfig = {
   page: { kind: 'int', min: 1, max: 10000, defaultValue: 1 },
   per_page: { kind: 'enum', values: [10, 20, 50, 100] as const, defaultValue: 20 },
 } satisfies TableUrlConfig;
-
-/** Structured-machine default = defaultFilters of ClientsContext. */
-import { defaultFilters as clientsDefaultFilters } from '@/contexts/ClientsContext';
 
 type ClientsUrlAdapterState = {
   q: string;
@@ -114,7 +112,9 @@ export function useClientsUrlState(): ClientsUrlAdapter {
       // The hook's update() can never strip the UNMANAGED clientId param
       // (unmanaged params are preserved by contract), so the reset navigates
       // to the bare pathname itself — same single-navigation guarantee.
-      if (patch.clientIds === null && Object.keys(patch).every((k) => k === 'clientIds')) {
+      const isResetSentinel =
+        Object.keys(patch).length === 1 && 'clientIds' in patch && patch.clientIds === null;
+      if (isResetSentinel) {
         navigate('/clients');
         setStructuredFilters(clientsDefaultFilters);
         return;

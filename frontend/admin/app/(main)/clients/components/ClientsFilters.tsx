@@ -45,8 +45,7 @@ function useDebouncedCallback(
  * clean /clients, clientId included, #232 §3.5) — no router surgery here.
  */
 export function ClientsFilters() {
-  const { search, status, filters, setSearch, setStatus, setFilters, resetFilters } =
-    useClientsTable();
+  const { search, status, setSearch, setStatus, setFilters, resetFilters } = useClientsTable();
   // dirtyRef is declared BEFORE the debounce hook that closes over it
   const dirtyRef = useRef(false);
   const { debounced: debouncedSearch, cancel: cancelSearch } = useDebouncedCallback(

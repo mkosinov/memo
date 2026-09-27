@@ -385,11 +385,6 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
    */
   const navigate = useCallback(
     (url: string, options?: UpdateOptions) => {
-      // Full-query replacement through the single writer. The navigated query
-      // (and its path) becomes the write base: a pending coalesced flush
-      // adopts it instead of building on the stale pre-navigation snapshot
-      // (otherwise a dropped `clientId` would resurrect from an in-flight
-      // debounced write).
       latestParamsRef.current = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
       latestBaseRef.current = url.includes('?') ? url.slice(0, url.indexOf('?')) : url;
       if (options?.history === 'replace') {

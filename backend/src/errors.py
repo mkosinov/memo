@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     VISIT_NOT_FOUND = "VISIT_NOT_FOUND"
     PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND"
     SETTINGS_NOT_FOUND = "SETTINGS_NOT_FOUND"
+    USER_NOT_FOUND = "USER_NOT_FOUND"  # 404 — /users/{id} отсутствует (GH #348)
 
     # 403 — forbidden (GH #247 auth)
     AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
@@ -111,6 +112,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.VISIT_NOT_FOUND: "Визит не найден",
     ErrorCode.PAYMENT_NOT_FOUND: "Платёж не найден",
     ErrorCode.SETTINGS_NOT_FOUND: "Настройки не найдены",
+    ErrorCode.USER_NOT_FOUND: "Учётка не найдена",
     ErrorCode.AUTH_FORBIDDEN: "Недостаточно прав",
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",

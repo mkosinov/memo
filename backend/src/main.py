@@ -29,6 +29,7 @@ from src.api.v1.staff import router as staff_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
 from src.api.v1.user_settings import router as user_settings_router
+from src.api.v1.users import router as users_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.visits import router as visits_router
 from src.auth.router import router as auth_router
@@ -234,6 +235,8 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #348 — users vertical: admin-side phone edit + password-link issue.
+    app.include_router(users_router, prefix="/api/v1/users")
     # GH #344 — audit journal reading (admin-only, spec §6).
     app.include_router(audit_logs_router, prefix="/api/v1/audit-logs")
     # GH #262 — own-data profile (session-guarded, no permission token).

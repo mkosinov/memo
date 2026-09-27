@@ -16,8 +16,8 @@ class TestErrorCodeEnum:
     """Verify ErrorCode has all 38 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week + 2 GH #286 deferred-delete + 2 GH #348 user accounts)."""
 
     def test_total_code_count(self):
-        """All 38 error codes are present (base + auth + staff #266 + files #262 + copy-week #242 + deferred-delete #286 + user-accounts #348)."""
-        assert len(ErrorCode) == 38
+        """All 41 error codes are present (base + auth + staff #266 + files #262 + copy-week #242 + deferred-delete #286 + user-accounts #348)."""
+        assert len(ErrorCode) == 41
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus auth/staff additions) exists."""
@@ -72,6 +72,10 @@ class TestErrorCodeEnum:
             # GH #348 — user accounts (password setup link)
             "ACCOUNT_DEACTIVATED",         # 422 — issue link for an archived account
             "PASSWORD_LINK_INVALID",       # 422 — public setup: unknown/expired/used/inactive — one answer
+            # GH #348 — user accounts (phone edit + users vertical, Tasks 3–4)
+            "PHONE_TAKEN",                 # 422 — create/edit: another account holds the exact string
+            "PHONE_INVALID",               # 422 — create/edit: blank or over 20 chars after trim
+            "USER_NOT_FOUND",              # 404 — /users/{id} отсутствует
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -134,8 +138,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 38 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 38
+        """ERROR_MESSAGES has exactly 41 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 41
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

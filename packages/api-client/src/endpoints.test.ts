@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1750,6 +1750,17 @@ describe('resolveDeleteStaff', () => {
       body: JSON.stringify({ resolutions: {} }),
     });
   });
+
+  // GH #345: staff commit is {expected: {}} (activities are blocked, §4.4) —
+  // pure path sends only expected, no resolutions key.
+  it('GH #345 pure path: body is {"expected": …} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteStaff('st-1', { expected: { activities: [] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { activities: [] } }),
+    });
+  });
 });
 
 describe('archiveLocation', () => {
@@ -1781,6 +1792,16 @@ describe('resolveDeleteLocation', () => {
     expect(api).toHaveBeenCalledWith('/api/v1/locations/l-1', expect.anything(), {
       method: 'DELETE',
       body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+
+  // GH #345: location commit is {expected: {}} — same all-auto shape as staff.
+  it('GH #345 pure path: body is {"expected": …} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteLocation('l-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/locations/l-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
     });
   });
 });
@@ -1816,6 +1837,16 @@ describe('resolveDeleteService', () => {
       body: JSON.stringify({ resolutions: {} }),
     });
   });
+
+  // GH #345: service commit is {expected: {}} — same all-auto shape as staff.
+  it('GH #345 pure path: body is {"expected": …} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteService('s-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/services/s-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
 });
 
 describe('archiveMaterial', () => {
@@ -1847,6 +1878,16 @@ describe('resolveDeleteMaterial', () => {
     expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1', expect.anything(), {
       method: 'DELETE',
       body: JSON.stringify({ resolutions: {} }),
+    });
+  });
+
+  // GH #345: material commit is {expected: {}} — no non-auto deps at all.
+  it('GH #345 pure path: body is {"expected": …} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteMaterial('mat-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
     });
   });
 });
@@ -1881,6 +1922,132 @@ describe('resolveDeleteClient', () => {
       method: 'DELETE',
       body: JSON.stringify({ resolutions: { records: 'nullify', visitors: 'cascade' } }),
     });
+  });
+
+  // GH #345: client is the only entity with a resolvable commit — both
+  // expected and resolutions together, mirroring resolveDeleteTag.
+  it('GH #345 sends both expected and resolutions when provided', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteClient('c-1', {
+      resolutions: { records: 'nullify', visitors: 'cascade' },
+      expected: { records: ['uuid-r1', 'uuid-r2'], visitors: ['uuid-v1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { records: ['uuid-r1', 'uuid-r2'], visitors: ['uuid-v1'] },
+        resolutions: { records: 'nullify', visitors: 'cascade' },
+      }),
+    });
+  });
+
+  it('GH #345 pure path: body is {"expected": …} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteClient('c-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+});
+
+// ─── Dry-run previews for the 5 dictionary/client entities (GH #345,
+// mirror of dryRunDeleteRecord GH #285 rev7 / dryRunDeleteTag GH #318) ──────
+
+// DELETE ?dry_run=true, no body. 204 resolves, 409 dependency tree is thrown
+// by the client as ApiError with .dependencies.
+describe('dryRunDeleteStaff', () => {
+  it('calls DELETE /api/v1/staff/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteStaff('st-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/staff/st-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with dependency tree', async () => {
+    const tree = [
+      { entity: 'activities', auto: false, relation: 'Занятия', count: 3, allowed_actions: [] },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteStaff('st-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('dryRunDeleteClient', () => {
+  it('calls DELETE /api/v1/clients/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteClient('c-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/clients/c-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with dependency tree (incl. node with items)', async () => {
+    const tree = [
+      {
+        entity: 'visitors', auto: false, relation: 'Посетитель', count: 1, allowed_actions: ['cascade'],
+        items: [{ id: 'uuid-visitor-1', label: 'Иван' }],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteClient('c-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies?.[0]?.items?.[0]?.id).toBe('uuid-visitor-1');
+  });
+});
+
+describe('dryRunDeleteService', () => {
+  it('calls DELETE /api/v1/services/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteService('s-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/services/s-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+});
+
+describe('dryRunDeleteLocation', () => {
+  it('calls DELETE /api/v1/locations/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteLocation('l-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/locations/l-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+});
+
+describe('dryRunDeleteMaterial', () => {
+  it('calls DELETE /api/v1/materials/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteMaterial('mat-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/materials/mat-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
   });
 });
 

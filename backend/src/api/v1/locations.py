@@ -11,6 +11,7 @@ from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import ResolutionError, collect_dependencies
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
@@ -45,19 +46,21 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("locations:read"))]
 
-# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5;
-# #172: ``name`` → ``title``).
+# Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; #172:
+# ``name`` → ``title``; GH #367 Task 5: SortKeyMap + shared resolver).
 # ``archived`` → is_active (asc = is_active ASC = archived-first).
-_LOCATION_SORT_MAP: dict[str, list] = {
-    "title": [Location.title],
-    "short_title": [Location.short_title],
-    "capacity": [Location.capacity],
-    "address": [Location.address],
-    "location_hint": [Location.location_hint],
-    "description": [Location.description],
-    "archived": [Location.is_active],
-    "yandex_map_url": [Location.yandex_map_url],
-    "created_at": [Location.created_at],
+# All keys are canonical (asc → nullsfirst / desc → nullslast); the
+# ``sort_by=None`` fallback stays in the route (spec §4.3).
+_LOCATION_SORT_KEYS: SortKeyMap = {
+    "title": SortKeySpec([Location.title]),
+    "short_title": SortKeySpec([Location.short_title]),
+    "capacity": SortKeySpec([Location.capacity]),
+    "address": SortKeySpec([Location.address]),
+    "location_hint": SortKeySpec([Location.location_hint]),
+    "description": SortKeySpec([Location.description]),
+    "archived": SortKeySpec([Location.is_active]),
+    "yandex_map_url": SortKeySpec([Location.yandex_map_url]),
+    "created_at": SortKeySpec([Location.created_at]),
 }
 
 
@@ -68,23 +71,6 @@ _LOCATION_SORT_MAP: dict[str, list] = {
 # with the Depends() pagination model forbid the ``Annotated[Model,
 # Query()]`` form) — only the CONTRACT is shared, not the injection shape.
 IdListQuery = IdQueryParam
-
-
-def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/locations.
-
-    * ``sort_by=None`` → spec §4.4 default: ``sort_order ASC, title ASC, id ASC``.
-    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
-      then ``id ASC`` tiebreak for cross-page stability (records idiom).
-    """
-    if sort_by is None:
-        return [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
-    cols = _LOCATION_SORT_MAP[sort_by]
-    ordered = [
-        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-        for c in cols
-    ]
-    return [*ordered, asc(Location.id)]
 
 
 @router.get("", response_model=PaginatedResponse[LocationResponse])
@@ -129,12 +115,18 @@ async def list_locations(
     (scalar mixing, fastapi #12481, prevents the Annotated[Model, Query()]
     shape here).
     """
+    if sort_by is None:
+        # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by.
+        order_by = [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
+    else:
+        order_by = apply_sort(_LOCATION_SORT_KEYS, sort_by, sort_order, Location.id)
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         status=status,
-        order_by=_location_order_by(sort_by, sort_order),
+        order_by=order_by,
         q=q,
         ids=id,
     )

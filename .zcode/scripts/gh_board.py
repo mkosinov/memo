@@ -4,8 +4,9 @@
 Usage (from repo root):
   python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
-  python3 .zcode/scripts/gh_board.py host N                     — the card's host field value (watcher tiebreak token)
-  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry
+  python3 .zcode/scripts/gh_board.py host N                     — read the card's host field (watcher tiebreak token)
+  python3 .zcode/scripts/gh_board.py host N <label>|-           — set/clear the host label; on a Ready card a host label is the sticky progress marker (crash-released session lives on that machine, other hosts skip it, cleared only by the user accepting the progress loss)
+  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry (host label preserved — sticky progress, user-release only)
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
@@ -23,12 +24,24 @@ Card ownership lives in the single-select field "host" (options: imac,
 macbook, hk, gcp — created manually 2026-09-20): claiming is a field write
 and the race tiebreak re-reads the field. This replaced the CLAIM-comment
 mechanism; the auto-impl log comment remains the BLOCKED channel only.
+Sticky progress marker (2026-09-26, the dead-zai-quota churn incident): when
+reconcile returns a dead run to Ready to IMPL, the host label STAYS on the
+card — it then means "the unfinished session lives on this machine's session
+store" (session resume searches only the local DB, so a foreign host would
+restart from zero). Foreign hosts skip such cards in pick-next; the label is
+cleared only by the user (host N - — accepting the progress loss) or
+reassigned (host N <label>). A clean release (gate-fail return, manual
+status move) still clears the label as before.
 The pending-ask marker lives in the single-select field "gate" (options:
 concept, spec, plan, blocked — created manually 2026-09-20): a design
 session stamps it at a gate stop, an IMPL manager stamps "blocked" when a
-blocker awaits the user; it is emptied at the user's answer and
-automatically when the card leaves In IMPL/In Design. It replaced the
-gate:* issue labels.
+blocker awaits the user; it is emptied at the user's answer (given in the
+opencode session) and automatically when the card leaves In IMPL/In
+Design — except the crash release: reconcile re-stamps "blocked" on the
+returned Ready card (2026-09-26 user decision — a card awaiting the user
+must stay visible), and pick-next skips gate=blocked cards, so a blocked
+card gets no auto-retry; the user's answer clears the gate and the card
+re-enters the pipeline. It replaced the gate:* issue labels.
 The script is part of the host/container seam and travels via git.
 Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
 and .opencode/scripts/ (container); when editing, change both (or edit
@@ -266,7 +279,9 @@ def cmd_pick_next(host_arg: str | None = None):
     """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
     Candidates: OPEN issues with board status "Ready to IMPL".
     Order: Next Up position ascending (99 = unset), then board order.
-    Skipped: cards whose auto-impl log comment's LAST entry is a fresh
+    Skipped: cards with gate=blocked (awaiting the user's answer —
+    2026-09-26 decision, no auto-retry against a user decision), cards
+    whose auto-impl log comment's LAST entry is a fresh
     (<= CLAIM_TTL_HOURS) CLAIM/BLOCKED (legacy claims + blocked rest),
     cards with legacy standalone claim/blocked comments that fresh, and
     cards whose body declares `depends-on: #N` with N still OPEN.
@@ -292,6 +307,15 @@ def cmd_pick_next(host_arg: str | None = None):
     ready = [it for it in items if (it["status"] or "").startswith("Ready to IMPL")]
     ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
     for it in ready:
+        # sticky progress marker (2026-09-26): a Ready card carrying a host
+        # label belongs to that machine's unfinished session — only that host
+        # may re-claim it; the user clears/reassigns the label manually
+        if it["host"] and host and it["host"] != host:
+            continue
+        # gate=blocked (2026-09-26): the card awaits the USER's answer — the
+        # pipeline never re-takes it (no auto-retry against a decision)
+        if (it["gate"] or "").lower() == "blocked":
+            continue
         _, log_body = _auto_impl_log(it["number"])
         if log_body:
             entries = [ln[2:] for ln in log_body.splitlines() if ln.startswith("- ")]
@@ -396,15 +420,31 @@ def cmd_auto_state(number: int):
         print(entries[-1])
 
 
-def cmd_host(number: int):
-    """The card's host field value (token protocol for the watcher tiebreak):
-    prints the option name, or nothing when the card has no host."""
-    for it in items_with_fields():
-        if it["number"] == number:
-            if it["host"]:
-                print(it["host"])
-            return
-    sys.exit(f"#{number} is not on the board")
+def cmd_host(number: int, value: str | None = None):
+    """No value: print the card's host field (token protocol for the watcher
+    tiebreak), or nothing when the card has no host.
+    With value: set ('imac'…) or clear ('-') the label. The setter is the
+    USER's tool for the sticky progress marker (2026-09-26): a crash-released
+    Ready card keeps its host — clearing it (host N -) = the user accepts the
+    progress loss; reassigning (host N <label>) hands the unfinished session
+    to another machine."""
+    load_status_field()
+    it = find_item(number)
+    if value is None:
+        if it["host"]:
+            print(it["host"])
+        return
+    if value == "-":
+        if it["host"]:
+            set_field(it["item_id"], _host_field_id, None)
+            print(f"#{number}: host cleared")
+        else:
+            print(f"#{number}: host already empty")
+        return
+    if value not in _host_field_opts:
+        sys.exit(f"Unknown host '{value}'. Field options: {', '.join(_host_field_opts)}")
+    set_field(it["item_id"], _host_field_id, _host_field_opts[value])
+    print(f"#{number}: host → {value}")
 
 
 def _impl_run_alive(number: int) -> bool | None:
@@ -427,23 +467,25 @@ def _impl_run_alive(number: int) -> bool | None:
     return False
 
 
-def _run_session_fresh(number: int) -> bool | None:
+def _run_session_fresh(number: int) -> tuple[bool | None, int | None]:
     """Is work on this card still alive server-side? The `opencode run` CLI is
     only an attach client — it dies/detaches while the session keeps working
     in the `opencode web` server (the "#232 frozen-log" pattern), so a live
     process is NOT the signal. Liveness = the session store (opencode.db — the
     #285 lesson: parts live in the DB, not in a pid): roots are the manager
     "#N IMPL.%" and the architect "IMPL #N %" sessions plus their whole
-    parent_id subtree (deeper subagents). True = any of them wrote within
-    SESSION_IDLE_LIMIT_S. False = silent longer / no rows (no rows falls back
-    to the run-process check). None = session store absent (a host run) — the
-    caller must not treat the card as dead."""
+    parent_id subtree (deeper subagents). Returns (fresh, idle_minutes):
+    fresh True = something wrote within SESSION_IDLE_LIMIT_S, False = silent
+    longer / no rows (no rows falls back to the run-process check),
+    None = session store absent (a host run) — the caller must not treat the
+    card as dead; idle_minutes = minutes since the last store write (None when
+    unknown — no rows yet or the /proc fallback)."""
     if not SESSION_DB.is_file():
-        return None
+        return None, None
     try:
         con = sqlite3.connect(f"file:{SESSION_DB}?mode=ro", uri=True)
     except sqlite3.Error:
-        return None
+        return None, None
     try:
         row = con.execute(
             """WITH RECURSIVE tree(id) AS (
@@ -455,15 +497,26 @@ def _run_session_fresh(number: int) -> bool | None:
             (f"#{number} IMPL.%", f"IMPL #{number} %"),
         ).fetchone()
     except sqlite3.Error:
-        return None
+        return None, None
     finally:
         con.close()
     if not row or row[0] is None:
         # сессий нет вообще: только что запущенный CLI ещё живёт в /proc,
         # осиротевший захват (карточка заявлена, запуска не было) — нет
-        return _impl_run_alive(number)
+        return _impl_run_alive(number), None
     idle_s = datetime.now(timezone.utc).timestamp() - row[0] / 1000.0
-    return idle_s <= SESSION_IDLE_LIMIT_S
+    return idle_s <= SESSION_IDLE_LIMIT_S, int(idle_s // 60)
+
+
+def _blocked_count(number: int) -> int:
+    """BLOCKED entries recorded in the auto-impl log — the crash counter for
+    BLOCKED diagnostics (user decision 2026-09-26-C). Deliberately NOT a
+    consecutive-run counter: successful claims write no log entries, so "in a
+    row" is not knowable from the log alone."""
+    _, body = _auto_impl_log(number)
+    if not body:
+        return 0
+    return sum(1 for ln in body.splitlines() if re.match(r"- \S+ BLOCKED\b", ln))
 
 
 def _closing_pr(number: int) -> tuple[int, str] | None:
@@ -501,6 +554,17 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
          (e.g. API unreachable at plan-only start, a dead stream): append a
          BLOCKED entry to the auto-impl log (the card then rests for
          CLAIM_TTL_HOURS — crash-loop throttle) and flip back to Ready to IMPL.
+         The host label is PRESERVED on the Ready card (sticky progress marker,
+         2026-09-26 user decision): only the owning machine re-claims and
+         resumes its own session; foreign hosts skip the card; the user clears
+         the label (host N -) to release the progress. The BLOCKED entry
+         carries the diagnostics (silent minutes, crash number).
+         gate=blocked is PRESERVED across the release (2026-09-26 user
+         decision): the silence may be the card waiting for the USER, not a
+         dead run — the marker must not hide, pick-next skips such cards (no
+         auto-retry) and the user's in-session answer clears the gate,
+         returning the card to the pipeline; the log entry then says the
+         card awaits the user, not "auto-retry".
     Liveness = session-store freshness (the opencode run CLI is a mere attach
     client and dies while the session keeps working — run processes only fill
     the "no session rows yet" window); run this from the container, where the
@@ -555,23 +619,43 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
             continue
         if it["host"] and host and it["host"] != host:
             continue
-        fresh = _run_session_fresh(n)
+        fresh, idle_min = _run_session_fresh(n)
         if fresh is None:
             print("warn: session store not found — stuck-run check skipped (run reconcile from the container)", file=sys.stderr)
             continue
         if fresh:
             continue
-        desc = (f"#{n}: In IMPL with sessions silent >{SESSION_IDLE_LIMIT_S // 60}min"
-                f" → BLOCKED auto-log entry + Ready to IMPL")
+        card_host = it["host"] or ""
+        was_blocked = (it["gate"] or "").lower() == "blocked"
+        crash_no = _blocked_count(n) + 1
+        why = (f"сессии молчат {idle_min} мин" if idle_min is not None
+               else "сессии так и не стартовали")
+        sticky = (f"; прогресс хоста {card_host} сохранён (метка host на Ready-карточке: "
+                  f"продолжит только {card_host}, чужие хосты не берут; снять решением "
+                  f"юзера: python3 .opencode/scripts/gh_board.py host {n} -)"
+                  if card_host else "")
+        desc = (f"#{n}: In IMPL stuck (crash #{crash_no}) → BLOCKED auto-log entry "
+                f"+ Ready to IMPL" + (f", host kept: {card_host}" if card_host else "")
+                + (", gate kept: blocked (awaits the user)" if was_blocked else ""))
         if dry_run:
             print(f"would: {desc}")
             continue
         # auto-log FIRST: pick-next must never see the card ready without the
         # resting marker (a crash-loop of dead dispatches follows otherwise)
         try:
-            cmd_auto_log(n, "BLOCKED reconciler: прогон завис — сессии молчат "
-                            "больше часа (или так и не стартовали); карточка "
-                            "возвращена в Ready to IMPL, авто-повтор после отдыха")
+            if was_blocked:
+                # the silence is the card WAITING for the user, not a dead run
+                # (2026-09-26): no auto-retry promise — the unblock is the
+                # user's answer in the session
+                cmd_auto_log(n, f"BLOCKED: карточка ждёт решения пользователя "
+                                f"(прогон молчит: {why}); метка blocked сохранена на "
+                                f"Ready-карточке, авто-повтора не будет — конвейер её "
+                                f"не трогает; ответ на блокер в сессии opencode снимет "
+                                f"метку и вернёт карточку в работу" + sticky)
+            else:
+                cmd_auto_log(n, f"BLOCKED reconciler: прогон завис — {why}, сбой №{crash_no} "
+                                f"по счёту; карточка возвращена в Ready to IMPL, "
+                                f"авто-повтор после отдыха" + sticky)
         except SystemExit as e:
             print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
         try:
@@ -579,6 +663,18 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
         except SystemExit as e:
             print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
             continue
+        if card_host and card_host in _host_field_opts:
+            # sticky progress marker (2026-09-26): the label survives the crash
+            # release so only the owning machine re-claims and resumes its own
+            # session; the USER clears it (host N -), accepting the loss
+            set_field(it["item_id"], _host_field_id, _host_field_opts[card_host])
+            print(f"#{n}: host kept → {card_host}")
+        if was_blocked and _gate_field_id and "blocked" in _gate_field_opts:
+            # the awaiting-user marker survives the crash release (2026-09-26):
+            # cmd_status cleared it with the flip — re-stamp so the blocked
+            # state stays visible on the Ready card until the user answers
+            set_field(it["item_id"], _gate_field_id, _gate_field_opts["blocked"])
+            print(f"#{n}: gate kept → blocked")
         print(desc)
 
 
@@ -643,7 +739,10 @@ def cmd_status(number: int, status: str, host: str | None = None):
     Exception (2026-09-21): PR (G7) keeps the host — the card is still owned
     by its machine while on CI (and returns to it if CI is red) — but it
     occupies no IMPL slot (the budget counts only In IMPL status). Leaving
-    PR (G7) clears the label."""
+    PR (G7) clears the label. Exception (2026-09-26): the reconcile crash
+    release re-stamps a preserved gate=blocked after the flip — the
+    awaiting-user marker survives the release (cmd_status itself always
+    clears)."""
     load_status_field()
     if status not in _status_opts:
         sys.exit(f"Unknown status '{status}'. Available: {', '.join(_status_opts)}")
@@ -772,8 +871,8 @@ if __name__ == "__main__":
         cmd_auto_log(int(args[1]), args[2])
     elif cmd == "auto-state" and len(args) == 2:
         cmd_auto_state(int(args[1]))
-    elif cmd == "host" and len(args) == 2:
-        cmd_host(int(args[1]))
+    elif cmd == "host" and len(args) in (2, 3):
+        cmd_host(int(args[1]), args[2] if len(args) == 3 else None)
     elif cmd == "reconcile":
         flags = [a for a in args[1:] if a.startswith("--")]
         rest = [a for a in args[1:] if not a.startswith("--")]

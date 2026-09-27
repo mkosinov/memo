@@ -1,4 +1,5 @@
-"""Unit tests for ClientService.get_or_create_by_phone (GH #171 Task 2).
+"""Unit tests for ClientService.get_or_create_by_phone (GH #171 Task 2)
+and ClientService.delete_row_with_tags (GH #327 Task 3).
 
 The «find or create client by phone» helper moves BEHAVIOR-FOR-BEHAVIOR from
 ``RecordService._resolve_client_by_phone`` (record.py:588-607) to the owner
@@ -14,14 +15,24 @@ service methods for scenarios). Contract preserved exactly:
   ORM/schema objects;
 - NO ``@transactional`` — the method must not commit (the scenario owns
   the transaction boundary): a rollback after the call undoes a creation.
+
+``delete_row_with_tags`` (GH #327 Task 3) is the client-side own-edge
+brick — the exact analog of ``RecordService.delete_row_with_tags``: the
+client's ``client_tags`` join rows plus the client row, tags BEFORE the
+row (FK with no ondelete), NO commit, NO event marks (the future
+``usecases.clients.delete_client`` scenario owns both the transaction
+boundary and the grid: "clients"/"client_tags" marks are the scenario's).
 """
 
 from __future__ import annotations
+
+import uuid
 
 import pytest
 from sqlalchemy import select
 
 from src.models.client import Client
+from src.models.tag import Tag, client_tags
 from src.services.client import ClientService, get_client_service
 from src.services.decorators import _TRANSACTIONAL_MARKER
 
@@ -89,3 +100,89 @@ async def test_get_or_create_by_phone_does_not_commit(db_session):
         "get_or_create_by_phone must NOT commit — the scenario layer owns "
         "the transaction boundary (canon rule 3)"
     )
+
+
+# ─── ClientService.delete_row_with_tags (GH #327 Task 3) ──────────────────────
+
+
+async def _tagged_client(db_session) -> tuple[Client, Client, Tag]:
+    """Seed two clients sharing one tag; return (c1, c2, tag) flushed."""
+    c1 = Client(name="A", phone=None)
+    c2 = Client(name="B", phone=None)
+    tag = Tag(title=f"client-tag-{uuid.uuid4().hex[:6]}")
+    db_session.add_all([c1, c2, tag])
+    await db_session.flush()
+    await db_session.execute(
+        client_tags.insert(),
+        [
+            {"client_id": c1.id, "tag_id": tag.id},
+            {"client_id": c2.id, "tag_id": tag.id},
+        ],
+    )
+    await db_session.commit()
+    return c1, c2, tag
+
+
+async def test_delete_row_with_tags_is_not_transactional():
+    """The scenario brick must NOT be wrapped by @transactional."""
+    assert not hasattr(ClientService.delete_row_with_tags, _TRANSACTIONAL_MARKER), (
+        "delete_row_with_tags is a scenario building block — it must NOT "
+        "commit; the usecases layer owns the transaction boundary"
+    )
+
+
+async def test_delete_row_with_tags_removes_tags_and_row(db_session):
+    """Tags before row (FK, no ondelete): c1's client_tags links and the c1
+    row go; another client's link and the tag itself survive."""
+    c1, c2, tag = await _tagged_client(db_session)
+
+    await get_client_service().delete_row_with_tags(db_session, c1.id)
+
+    assert await db_session.get(Client, c1.id) is None
+    # c1's join rows gone; c2's link survives
+    links = (
+        await db_session.execute(select(client_tags))
+    ).all()
+    assert len(links) == 1
+    assert links[0].client_id == c2.id  # type: ignore[attr-defined]
+    # the tag row itself survives (independent entity)
+    assert await db_session.get(Tag, tag.id) is not None
+    assert await db_session.get(Client, c2.id) is not None
+
+
+async def test_delete_row_with_tags_does_not_commit(db_session):
+    """No-commit property: a rollback after the brick undoes BOTH the tag
+    links and the client row (mock-free)."""
+    from tests.conftest import query_db
+
+    c1, _, _ = await _tagged_client(db_session)
+    client_id = c1.id  # snapshot: rollback expires the ORM instance
+
+    await get_client_service().delete_row_with_tags(db_session, client_id)
+    await db_session.rollback()
+
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM clients WHERE id='{client_id}'"
+    )[0]["c"] == 1, "the client row must survive a rollback — no commit inside the brick"
+    assert query_db(
+        f"SELECT COUNT(*) AS c FROM client_tags WHERE client_id='{client_id}'"
+    )[0]["c"] == 1, "the client_tags links must survive a rollback — no commit inside the brick"
+
+
+async def test_delete_row_with_tags_sets_no_event_marks(db_session):
+    """No event marks from the brick: inside an OPEN accumulator the set
+    stays EXACTLY the seeded one (the marks — "clients"/"client_tags" —
+    belong to the future delete_client scenario, GH #239 grid parity)."""
+    from src.events import emitter
+
+    c1, _, _ = await _tagged_client(db_session)
+
+    token = emitter.start_accumulation(set())  # empty seed — scenario's own marks come later
+    try:
+        await get_client_service().delete_row_with_tags(db_session, c1.id)
+        assert emitter.accumulated() == set(), (
+            "delete_row_with_tags must not mark entities — the scenario "
+            "owns the event grid"
+        )
+    finally:
+        emitter.reset_accumulation(token)

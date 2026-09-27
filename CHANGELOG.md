@@ -101,6 +101,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Follow-up (не в этом PR): S3 e2e-флейк (5s visibility-wait на compile-heavy роуте) —
     отдельный тикет.
   - Status: `docs/status/2026-09-26-activity-delete-scenario-325.md`
+- **GH #327 — Каскадный долг 3/3: удаление клиента в сценарии delete_client** — branch
+  `327-delete-client-scenario` (5 commits `3604bd4a..ea52de9e`, base `4f08ff74`; 15 файлов
+  +1391/−113; спека `docs/specs/2026-09-26-delete-client-scenario-327-design.md`, план
+  `docs/plans/2026-09-26-delete-client-scenario-327-plan.md` — 5/5 задач T1–T5, оба на main):
+  - **Сценарий (T4):** `usecases/clients.py::delete_client` — selfless `@transactional`,
+    фазы исполнителя (resolve → owner-кирпичи → строка клиента) byte-parity со старым
+    композитом; execute-ветка `DELETE /clients/{id}` на сценарии; клиентские
+    CASCADE_HANDLERS и DI-инъекция `_visitor_service` демонтированы (`f7a4104f`,
+    two-stage review).
+  - **Владельцы (T1–T3):** визиты посетителя сносит пачкой владелец —
+    `VisitRepository.delete_by_visitor_id` (set-based) + `VisitService.delete_visits_by_visitor`
+    (`3604bd4a`); `VisitorService._delete_cascade` стал own-edge (теги + строка посетителя,
+    standalone delete композитит визитный кирпич перед ядром) (`1b7fcd34`); клиент получил
+    собственный `ClientRepository.delete_tags_by_client_id` и own-edge кирпич
+    `ClientService.delete_row_with_tags` (`bc7b8e10`).
+  - **Канон (T5):** правило 10 `docs/domain-rules/service-layer.md` — строка клиентского
+    каскада снята (rev8, `ea52de9e`).
+  - **Gate C:** санкционированная миграция `test_client_cascade_delete_leaves_visitors_silent`
+    (test_audit_explicit.py) на точку входа сценария (инвариант «аудит молчит по каскадным
+    детям» сохранён; RED-якорь T2 на уровне statement легитимен — FK `ON DELETE CASCADE`
+    делает row-level проверку невыполнимой).
+  - **Behavioral delta: NONE** — byte-for-byte паритет: HTTP-контракт, эффекты в БД,
+    SSE-сетка, атомарность; `frontend/` не тронут.
+  - **Tests:** pytest полный **2721 passed / 15 skipped / 0 failed** (detached run EXIT:0);
+    targeted T4-прогоны 730/0, 247/0, 96/0; ruff/mypy — 0 новых замечаний против базлайна;
+    e2e — PR CI без правок.
+  - Follow-ups: #375, #378 — стартуют после мержа.
+  - Status: `docs/status/2026-09-26-delete-client-scenario-327.md`
 
 ## [Unreleased] — 2026-09-22
 

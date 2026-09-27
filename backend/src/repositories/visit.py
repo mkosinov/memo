@@ -50,6 +50,17 @@ class VisitRepository(BaseRepository):
             return
         await session.execute(delete(Visit).where(Visit.record_id.in_(record_ids)))
 
+    async def delete_by_visitor_id(self, session: AsyncSession, visitor_id: str) -> None:
+        """Remove ALL visits of one visitor in a single DELETE statement.
+
+        Set-based bulk command (canon rule 4), full analogue of
+        ``delete_by_record_id`` on the entity's other OWN reference
+        column: one ``DELETE FROM visits WHERE visitor_id = :visitor_id``
+        — no per-row loop. Does NOT commit — the caller's transaction
+        owns the commit boundary.
+        """
+        await session.execute(delete(Visit).where(Visit.visitor_id == visitor_id))
+
     async def create_bulk(self, session: AsyncSession, visits: list[VisitT]) -> None:
         """Insert a BATCH of visits as one bulk INSERT (canon rule 4).
 

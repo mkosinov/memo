@@ -28,6 +28,7 @@ from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorResponse
 from src.services.client import ClientService, get_client_service, list_clients_view
 from src.services.visitor import get_visitor_service
+from src.usecases.clients import delete_client as delete_client_scenario
 
 router = APIRouter(
     tags=["clients"],
@@ -204,13 +205,16 @@ async def delete_client(
       §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
       sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
       shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
-      all-auto deps). ``service.resolve_delete`` runs the resolution
-      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+      all-auto deps). The ``delete_client`` scenario (usecases, GH #327
+      Task 4) runs the resolution transaction → 204; ``ResolutionError`` →
+      422; missing → 404.
     """
     if resolutions is not None:
         try:
-            ok = await service.resolve_delete(
-                db_session=session, id=client_id, resolutions=resolutions
+            # Selfless-scenario call convention: the leading ``None``
+            # occupies the wrapper's ``self`` slot (see usecases/clients.py).
+            ok = await delete_client_scenario(
+                None, db_session=session, id=client_id, resolutions=resolutions
             )
         except ResolutionError as exc:
             raise HTTPException(status_code=422, detail=str(exc))

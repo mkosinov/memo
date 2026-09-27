@@ -366,3 +366,236 @@ async def test_delete_visits_by_record_ids_does_not_commit(
         "delete_visits_by_record_ids must NOT commit — the scenario layer "
         "owns the transaction boundary (canon rule 3)"
     )
+
+# ── GH #327 Task 1 — bulk delete-by-visitor scenario brick ─────────────────
+
+
+async def _seed_visitor_with_visits(db_session):
+    """Direct-ORM seed (test_delete_cascades conventions, committed rows).
+
+    Visitor "Target" owns 3 visits across 2 records of one client. Control
+    rows that must SURVIVE the delete-by-visitor: an anonymous visit in R1
+    (price=10) and another visitor's visit in R2 (price=400).
+
+    Returns the target visitor's id.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.models.activity import Activity
+    from src.models.client import Client
+    from src.models.location import Location
+    from src.models.master import Master
+    from src.models.record import Record
+    from src.models.service import Service
+    from src.models.staff import Staff
+    from src.models.visit import Visit
+    from src.models.visitor import Visitor
+
+    staff = Staff(first_name="Vv", last_name="T")
+    service = Service(
+        title="VvSvc",
+        description="d",
+        image_url="http://x",
+        specialty="s",
+        min_age=5,
+        duration=60,
+        record_info="r",
+    )
+    location = Location(title="VvLoc", capacity=20)
+    db_session.add_all([staff, service, location])
+    await db_session.flush()
+    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    await db_session.flush()
+    activity = Activity(
+        master_id=staff.id,
+        service_id=service.id,
+        location_id=location.id,
+        start=datetime.now(UTC) + timedelta(days=1),
+        duration=90,
+        capacity=10,
+        is_private=False,
+    )
+    db_session.add(activity)
+    client = Client(name="Vv Client", phone=None)
+    db_session.add(client)
+    await db_session.flush()
+    r1 = Record(activity_id=activity.id, client_id=client.id, status="pending", seats=3)
+    r2 = Record(activity_id=activity.id, client_id=client.id, status="pending", seats=2)
+    db_session.add_all([r1, r2])
+    await db_session.flush()
+    target = Visitor(client_id=client.id, name="Vv Target")
+    other = Visitor(client_id=client.id, name="Vv Other")
+    db_session.add_all([target, other])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Visit(
+                record_id=r1.id,
+                visitor_id=target.id,
+                tariff_id=None,
+                price=100,
+                custom_price=None,
+                status="waiting",
+            ),
+            Visit(
+                record_id=r1.id,
+                visitor_id=target.id,
+                tariff_id=None,
+                price=200,
+                custom_price=None,
+                status="waiting",
+            ),
+            Visit(
+                record_id=r1.id,
+                visitor_id=None,
+                tariff_id=None,
+                price=10,
+                custom_price=None,
+                status="waiting",
+            ),  # anonymous ctrl
+            Visit(
+                record_id=r2.id,
+                visitor_id=target.id,
+                tariff_id=None,
+                price=300,
+                custom_price=None,
+                status="waiting",
+            ),
+            Visit(
+                record_id=r2.id,
+                visitor_id=other.id,
+                tariff_id=None,
+                price=400,
+                custom_price=None,
+                status="waiting",
+            ),  # other ctrl
+        ]
+    )
+    await db_session.commit()
+    return target.id
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_is_not_transactional():
+    """The scenario brick must NOT be wrapped by @transactional (mirror of
+    delete_visits_by_record — GH #327 Task 1)."""
+    from src.services.decorators import _TRANSACTIONAL_MARKER
+    from src.services.visit import VisitService
+
+    assert not hasattr(VisitService.delete_visits_by_visitor, _TRANSACTIONAL_MARKER), (
+        "delete_visits_by_visitor is a scenario building block — it must NOT "
+        "commit; the usecases layer owns the transaction boundary"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_removes_only_own_visits(db_session):
+    """Every visit of the visitor (across records) is gone; anonymous and
+    other visitors' visits stay."""
+    from sqlalchemy import select
+
+    from src.models.visit import Visit
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    visitor_id = await _seed_visitor_with_visits(db_session)
+    service = VisitService(get_visit_repository())
+
+    await service.delete_visits_by_visitor(db_session, visitor_id)
+
+    left = (
+        (await db_session.execute(select(Visit).where(Visit.visitor_id == visitor_id)))
+        .scalars()
+        .all()
+    )
+    assert left == []
+    remaining = (await db_session.execute(select(Visit))).scalars().all()
+    assert sorted(v.price for v in remaining) == [10, 400]  # controls untouched
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_is_one_delete_statement(db_session, db_engine):
+    """Set-based command (canon rule 4): exactly ONE DELETE statement for
+    the visitor's 3 visits — a per-row loop would emit N."""
+    from sqlalchemy import event
+
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    visitor_id = await _seed_visitor_with_visits(db_session)
+    service = VisitService(get_visit_repository())
+
+    counter = {"deletes": 0}
+
+    def _before(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("DELETE"):
+            counter["deletes"] += 1
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", _before)
+    try:
+        await service.delete_visits_by_visitor(db_session, visitor_id)
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", _before)
+
+    assert counter["deletes"] == 1, (
+        f"delete_visits_by_visitor emitted {counter['deletes']} DELETEs — "
+        "the bulk delete must be ONE set-based statement (canon rule 4)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_does_not_commit(db_session):
+    """No-commit property: rollback after the bulk delete restores visits."""
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+    from tests.conftest import query_db
+
+    visitor_id = await _seed_visitor_with_visits(db_session)
+    service = VisitService(get_visit_repository())
+
+    await service.delete_visits_by_visitor(db_session, visitor_id)
+    await db_session.rollback()
+
+    assert (
+        query_db(f"SELECT COUNT(*) AS c FROM visits WHERE visitor_id='{visitor_id}'")[0]["c"] == 3
+    ), (
+        "delete_visits_by_visitor must NOT commit — the scenario layer owns "
+        "the transaction boundary (canon rule 3)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_mark_true_sets_visits(db_session):
+    """mark_visits=True marks the helper's OWN entity ("visits")."""
+    from src.events import emitter
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    visitor_id = await _seed_visitor_with_visits(db_session)
+    service = VisitService(get_visit_repository())
+
+    token = emitter.start_accumulation(set())
+    try:
+        await service.delete_visits_by_visitor(db_session, visitor_id, mark_visits=True)
+        assert emitter.accumulated() == {"visits"}
+    finally:
+        emitter.reset_accumulation(token)
+
+
+@pytest.mark.asyncio
+async def test_delete_visits_by_visitor_mark_false_suppresses_mark(db_session):
+    """mark_visits=False → NO "visits" mark (the caller owns the event
+    grid — both current callers pass False for parity)."""
+    from src.events import emitter
+    from src.repositories.visit import get_visit_repository
+    from src.services.visit import VisitService
+
+    visitor_id = await _seed_visitor_with_visits(db_session)
+    service = VisitService(get_visit_repository())
+
+    token = emitter.start_accumulation(set())
+    try:
+        await service.delete_visits_by_visitor(db_session, visitor_id, mark_visits=False)
+        assert emitter.accumulated() == set()
+    finally:
+        emitter.reset_accumulation(token)

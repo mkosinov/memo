@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — completeness perspective. Finds holes, unhandled edge cases, and missing scenarios in spec documents.
-mode: subagent
-model: omniroute/panel-completeness
+mode: all
+model: opencode/big-pickle
 temperature: 0.1
 permission:
   read: allow

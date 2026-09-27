@@ -1237,14 +1237,20 @@ class TestVisitorServiceAudit:
     ) -> None:
         """§8: the Client→visitors USER-CHOICE cascade reuses the bare
         ``_delete_cascade`` core — the visitor rows are cascade children
-        and never journal; only the client's own delete row appears."""
-        from src.services.client import get_client_service
+        and never journal; only the client's own delete row appears.
+
+        GH #327 Task 4: the entry point moved to the
+        ``usecases.clients.delete_client`` scenario (the old executor
+        path was dismantled together with its CASCADE_HANDLERS pair) —
+        intent and assertions unchanged."""
+        from src.usecases.clients import delete_client
 
         _insert_client_for_visitor("cl-casc", "+79990001291")
         _insert_visitor("vis-casc", "cl-casc", "Борис")
         before = len(audit_rows())
-        ok = await get_client_service().resolve_delete(
-            db_session, "cl-casc", {"visitors": "cascade"},
+        ok = await delete_client(
+            None, db_session=db_session, id="cl-casc",
+            resolutions={"visitors": "cascade"},
         )
         assert ok is True
         rows = audit_rows()[before:]

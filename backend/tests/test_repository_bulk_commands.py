@@ -9,6 +9,9 @@ commands live in the persistence layer of the OWNER entity:
   - RecordRepository.delete_tags_by_record_id — one DELETE on record_tags
     (the record's OWN edge — canon rule 1: record_tags belongs to the
     records side)
+  - ClientRepository.delete_tags_by_client_id — one DELETE on client_tags
+    (the client's OWN edge — canon rule 1: client_tags belongs to the
+    clients side, GH #327 Task 3)
 
 No HTTP layer — drives repositories directly via the ``db_session`` fixture.
 """
@@ -22,14 +25,16 @@ import pytest
 from sqlalchemy import func, select
 
 from src.models.activity import Activity
+from src.models.client import Client
 from src.models.location import Location
 from src.models.master import Master
 from src.models.payment import Payment
 from src.models.record import Record
 from src.models.service import Service
 from src.models.staff import Staff
-from src.models.tag import Tag, record_tags
+from src.models.tag import Tag, client_tags, record_tags
 from src.models.visit import Visit
+from src.repositories.client import ClientRepository, get_client_repository
 from src.repositories.payment import PaymentRepository, get_payment_repository
 from src.repositories.record import RecordRepository, get_record_repository
 from src.repositories.visit import VisitRepository, get_visit_repository
@@ -300,4 +305,51 @@ async def test_record_delete_tags_by_record_id_no_match_is_noop(db_session) -> N
     await repo.delete_tags_by_record_id(db_session, "no-such-record")
 
     rows = (await db_session.execute(select(record_tags))).all()
+    assert len(rows) == 1
+
+
+# ─── ClientRepository.delete_tags_by_client_id ─────────────────────────────────
+
+
+async def test_client_delete_tags_by_client_id_removes_only_own(db_session) -> None:
+    """One DELETE on client_tags.client_id removes that client's tag links only
+    (client_tags is the client's OWN edge — canon rule 1, GH #327 Task 3)."""
+    c1 = Client(name="A", phone=None)
+    c2 = Client(name="B", phone=None)
+    db_session.add_all([c1, c2])
+    t1 = Tag(title=f"tag1-{uuid.uuid4().hex[:6]}")
+    t2 = Tag(title=f"tag2-{uuid.uuid4().hex[:6]}")
+    db_session.add_all([t1, t2])
+    await db_session.flush()
+    await db_session.execute(
+        client_tags.insert(),
+        [
+            {"client_id": c1.id, "tag_id": t1.id},
+            {"client_id": c1.id, "tag_id": t2.id},
+            {"client_id": c2.id, "tag_id": t1.id},
+        ],
+    )
+    await db_session.flush()
+
+    repo = get_client_repository()
+    await repo.delete_tags_by_client_id(db_session, c1.id)
+
+    rows = (await db_session.execute(select(client_tags))).all()
+    assert len(rows) == 1
+    assert rows[0].client_id == c2.id  # type: ignore[attr-defined]
+
+
+async def test_client_delete_tags_by_client_id_no_match_is_noop(db_session) -> None:
+    """Deleting tag links of an unknown client_id affects nothing (and no error)."""
+    client = Client(name="C", phone=None)
+    tag = Tag(title=f"tag-{uuid.uuid4().hex[:6]}")
+    db_session.add_all([client, tag])
+    await db_session.flush()
+    await db_session.execute(client_tags.insert().values(client_id=client.id, tag_id=tag.id))
+    await db_session.flush()
+
+    repo = ClientRepository()
+    await repo.delete_tags_by_client_id(db_session, "no-such-client")
+
+    rows = (await db_session.execute(select(client_tags))).all()
     assert len(rows) == 1

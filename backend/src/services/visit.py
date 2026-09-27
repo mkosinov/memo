@@ -412,6 +412,27 @@ class VisitService:
         await self._repository.delete_by_record_ids(db_session, record_ids)
         mark_changed("visits")
 
+    async def delete_visits_by_visitor(
+        self, db_session: AsyncSession, visitor_id: str, *, mark_visits: bool = True,
+    ) -> None:
+        """Remove ALL visits of one visitor — WITHOUT committing, no recalc.
+
+        Non-transactional scenario building block (canon rules 3-4,
+        GH #327 Task 1), mirror of ``delete_visits_by_record``: the
+        caller's scenario owns the transaction boundary AND the event
+        grid. Value-typed input (``visitor_id``); the set-based DELETE
+        lives in the owner repository
+        (``VisitRepository.delete_by_visitor_id`` — one statement, no
+        per-row loop). Marks the helper's OWN entity ("visits") — unless
+        ``mark_visits=False`` (the caller publishes the entity itself or
+        folds the change into its own batch — both current callers pass
+        ``False`` for grid parity); outside an active transaction the
+        mark is a no-op.
+        """
+        await self._repository.delete_by_visitor_id(db_session, visitor_id)
+        if mark_visits:
+            mark_changed("visits")
+
     async def create_visits_bulk(
         self, db_session: AsyncSession, record_id: str, items: VisitItemList,
         *, mark_visits: bool = True,

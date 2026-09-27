@@ -7,7 +7,10 @@ the ``resolve_delete`` executor (Task 10) consumes :data:`FK_MATRIX`,
 :func:`has_blocking_deps`, :func:`validate_resolutions` and the exceptions.
 The #285 deferred-delete commit additionally reads
 :func:`collect_dependency_ids` + :func:`stale_expected_entities` — the
-``expected`` id-set verification of the record DELETE body (spec rev5/rev6).
+``expected`` id-set verification of the record DELETE body (spec rev5/rev6);
+GH #345 §4.3 wires the same registries for the 5 archivable entities
+(id-collectors for the non-auto deps of Staff/Location/Service/Client +
+Client dialog item builders).
 
 Spec: ``docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md``
   * §4  — FK matrix (the full per-entity table).
@@ -939,11 +942,12 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
 
 # ─── #285 D9б/в: per-row label builders → 409 ``items`` ────────────────────────
 # Mirror of ``_COUNTERS``/``_ID_COLLECTORS`` dispatch: each collector selects the
-# dependent rows WITH their human label. Wired ONLY for Record deps
-# (``visits``/``payments``/``record_tags``) — other entities keep the bare tree
-# (items=None; §5 boundary). Item ids match ``_ID_COLLECTORS`` exactly (the
-# ``expected`` commit is built from these same ids: visit.id / payment.id /
-# record_tags.tag_id).
+# dependent rows WITH their human label. Wired for Record deps
+# (``visits``/``payments``/``record_tags``), the Activity ``records`` dialog
+# (#286 D1), the tag-side parents (#318 D6) and the Client dialog (#345 §4.3)
+# — everything else keeps the bare tree (items=None; §5 boundary). Item ids
+# match ``_ID_COLLECTORS`` exactly (the ``expected`` commit is built from
+# these same ids: visit.id / payment.id / record_tags.tag_id).
 
 type _ItemsFn = Callable[[AsyncSession, str], Awaitable[list[DependencyItem]]]
 
@@ -1414,8 +1418,9 @@ async def collect_dependencies(
     Returns the 409 ``dependencies`` array. Zero-count deps are skipped (§5).
     Each node carries: ``entity``, ``relation``, ``count``, ``allowed_actions``,
     ``message``; Client → visitors additionally carries
-    ``cascade_preview`` = ``{"visits": N}`` (NO payments per §5); Record
-    deps (#285 D9б/в) additionally carry ``items`` = one ``{id, label}``
+    ``cascade_preview`` = ``{"visits": N}`` (NO payments per §5); Record deps
+    (#285 D9б/в), the Activity dialog, the tag-side parents (#318 D6) and the
+    Client dialog (#345 §4.3) additionally carry ``items`` = one ``{id, label}``
     per dependent row (other entities → ``items=None``, §5 boundary).
     Every node also carries ``auto`` = the matrix's ``FKDependency.auto``
     (rev8: server-resolved deps like record_tags are flagged so the

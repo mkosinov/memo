@@ -16,6 +16,20 @@ export const StaffMasterSectionSchema = z.object({
 });
 export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
 
+// The card's account block (#348 spec §5): {phone, role, password_is_set,
+// is_active, link_expires_at}. null = no account; is_active=false = archived
+// account (the block stays, read-only). link_expires_at = the LIVE setup
+// link's expiry or null (used/expired/none) — the raw token is never here
+// (it surfaces exactly once, in the issue response).
+export const StaffAccountSchema = z.object({
+  phone: z.string(),
+  role: z.string(),
+  password_is_set: z.boolean(),
+  is_active: z.boolean(),
+  link_expires_at: z.string().nullable(),
+});
+export type StaffAccount = z.infer<typeof StaffAccountSchema>;
+
 export const StaffResponseSchema = z.object({
   id: z.string(),
   first_name: z.string(),
@@ -27,6 +41,8 @@ export const StaffResponseSchema = z.object({
   // T8 Gap B (D6): a linked users row exists — ANY is_active. Drives the
   // visibility of the «Архивировать учётку» dismissal checkbox.
   has_user: z.boolean(),
+  // #348: the linked account projection (null = no account on the card).
+  account: StaffAccountSchema.nullable(),
   archived: z.boolean(), // person archive (staff.is_active inverted, #207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -788,6 +804,41 @@ export const ChangePasswordSchema = z.object({
   new_password: z.string().min(1),
 });
 export type ChangePassword = z.input<typeof ChangePasswordSchema>;
+
+// ─── Users vertical (#348 spec §5 — admin-side account operations) ─────────
+// Mirrors backend src/schemas/user.py. Errors: 404 USER_NOT_FOUND; the phone
+// edit answers domain codes PHONE_TAKEN / PHONE_INVALID; link issue refuses a
+// deactivated account with ACCOUNT_DEACTIVATED (all 422).
+
+// PATCH /api/v1/users/{id} body — strictly {phone}; extra keys → 422
+// (backend extra="forbid" parity).
+export const UserPhonePatchSchema = z
+  .object({
+    phone: z.string(),
+  })
+  .strict();
+export type UserPhonePatch = z.input<typeof UserPhonePatchSchema>;
+
+// PATCH /api/v1/users/{id} 200 body — the account projection.
+export const UserResponseSchema = z.object({
+  id: z.string(),
+  phone: z.string(),
+  role: z.string(),
+  staff_id: z.string().nullable(), // null = a pure admin (no card)
+  password_is_set: z.boolean(), // false = passwordless (#348)
+  is_active: z.boolean(),
+});
+export type UserResponse = z.infer<typeof UserResponseSchema>;
+
+// POST /api/v1/users/{id}/password-link 200 body — the RAW token surfaces
+// exactly once, here (#348 spec §5); only its SHA-256 digest is stored, so
+// no later response can carry it. The frontend assembles the handover URL
+// from the page origin ({origin}/password-setup#token=…).
+export const PasswordLinkResponseSchema = z.object({
+  token: z.string(),
+  expires_at: z.string(), // ISO datetime
+});
+export type PasswordLinkResponse = z.infer<typeof PasswordLinkResponseSchema>;
 
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,

@@ -17,6 +17,13 @@
         "master"
       ],
       "has_user": true,
+      "account": {
+        "phone": "+79991234567",
+        "role": "master",
+        "is_active": true,
+        "link_expires_at": "2024-06-01T12:00:00",
+        "password_is_set": false
+      },
       "created_at": "2024-01-15T10:00:00",
       "updated_at": "2024-06-01T12:00:00",
       "archived": false
@@ -38,6 +45,13 @@
         "master"
       ],
       "has_user": true,
+      "account": {
+        "phone": "+79991234567",
+        "role": "master",
+        "is_active": false,
+        "link_expires_at": "2024-06-01T12:00:00",
+        "password_is_set": false
+      },
       "created_at": "2024-01-15T10:00:00",
       "updated_at": "2024-06-01T12:00:00",
       "archived": true
@@ -97,9 +111,9 @@
           "title": "Взрослый",
           "description": "",
           "price": 2500,
+          "audience": "all",
           "id": "tariff-1",
-          "service_id": "service-1",
-          "audience": "all"
+          "service_id": "service-1"
         }
       ],
       "tags": [
@@ -135,9 +149,9 @@
           "title": "Взрослый",
           "description": "",
           "price": 2500,
+          "audience": "all",
           "id": "tariff-1",
-          "service_id": "service-1",
-          "audience": "all"
+          "service_id": "service-1"
         }
       ],
       "tags": [

@@ -54,6 +54,7 @@ const mockRestoreStaff = vi.mocked(restoreStaff);
 const staffResponse = {
   id: 's-1', first_name: 'Иван', last_name: 'Иванов', avatar_url: null,
   sort_order: 0, master: null, position_ids: [], has_user: false,
+  account: null, // #348: no linked account on this card
   archived: false, created_at: '', updated_at: '',
 };
 

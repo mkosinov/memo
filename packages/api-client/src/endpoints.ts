@@ -71,6 +71,12 @@ import {
   UserSettingsResponseSchema,
   type UserSettingsResponse,
   type UserSettingsUpdate,
+  UserPhonePatchSchema,
+  type UserPhonePatch,
+  UserResponseSchema,
+  type UserResponse,
+  PasswordLinkResponseSchema,
+  type PasswordLinkResponse,
   StaffListResponseSchema,
   PositionListResponseSchema,
   MasterViewListResponseSchema,
@@ -1122,4 +1128,28 @@ export async function patchUserSettings(
       body: JSON.stringify(data),
     },
   );
+}
+
+// ─── Users vertical (#348 spec §5 — admin-side account ops) ────────────────
+
+// Admin-side phone edit of an account (S5): body is STRICTLY {phone}
+// (backend extra="forbid"); 404 unknown account, 422 PHONE_TAKEN /
+// PHONE_INVALID. Returns the account shape {id, phone, role, staff_id,
+// password_is_set, is_active} — the same block the staff card carries.
+export async function patchUser(id: string, data: UserPhonePatch): Promise<UserResponse> {
+  return api(`/api/v1/users/${id}`, UserResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(UserPhonePatchSchema.parse(data)),
+  });
+}
+
+// Issue a one-time password-setup link (S3/S7): the RAW token is returned
+// EXACTLY ONCE — the frontend assembles the handover URL from the page
+// origin ({origin}/password-setup#token=…) and shows it in the dialog;
+// repeat viewing is impossible by construction (only the SHA-256 digest is
+// stored). Errors: 404 unknown account, 422 ACCOUNT_DEACTIVATED.
+export async function issuePasswordLink(id: string): Promise<PasswordLinkResponse> {
+  return api(`/api/v1/users/${id}/password-link`, PasswordLinkResponseSchema, {
+    method: 'POST',
+  });
 }

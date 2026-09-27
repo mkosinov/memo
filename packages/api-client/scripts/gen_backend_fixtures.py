@@ -33,26 +33,37 @@ master_section_active = dict(
 )
 master_section_archived = dict(master_section_active, is_active=False)
 
+# #348 spec §5: the card's account block. The fixture card has an account
+# with a LIVE setup link (link_expires_at set) — the archived pair keeps the
+# same account (an archived account stays in the block, is_active=False).
+staff_account = dict(
+    phone="+79991234567", role="master", is_active=True,
+    password_hash=None,  # passwordless (#348) → password_is_set=False
+    link_expires_at=UPDATED,
+)
+staff_account_archived = dict(staff_account, is_active=False)
+
 staff_active = dict(
     first_name="Анна", last_name="Иванова", avatar_url=None, sort_order=0,
     master=master_section_active, position_ids=["master"], has_user=True,
+    account=staff_account,
     created_at=CREATED, updated_at=UPDATED,
 )
-staff_archived = dict(staff_active, master=master_section_archived)
+staff_archived = dict(
+    staff_active, master=master_section_archived, account=staff_account_archived,
+)
 
-location = dict(
-    name="Студия на Невском", short_title=None, address="Невский пр. 28",
-    description="Уютная студия", capacity=10, yandex_map_url=None, review_url=None,
-    record_info="Запись по телефону", image_url=None, location_hint=None, sort_order=0,
-    created_at=CREATED, updated_at=UPDATED,
-)
+location = dict(title="Студия на Невском", short_title=None, address="Невский пр. 28",
+                description="Уютная студия", capacity=10, yandex_map_url=None, review_url=None,
+                record_info="Запись по телефону", image_url=None, location_hint=None, sort_order=0,
+                created_at=CREATED, updated_at=UPDATED)
 service = dict(
     title="Мастер-класс по керамике", description="Лепим кружку", image_url="",
     specialty="керамика", min_age=6, max_age=None, duration=120, record_info="",
     created_at=CREATED, updated_at=UPDATED,
     tariffs=[{"id": "tariff-1", "service_id": "service-1", "title": "Взрослый",
               "description": "", "price": 2500}],
-    tags=[{"id": "tag-1", "tag": "керамика"}],
+    tags=[{"id": "tag-1", "title": "керамика"}],
     # GH #223: nested ServiceMaterialItem — the linked material's description
     # travels with the link; note is per-link (NULL when unset).
     materials=[{"id": "5f8a1c2d-0004-4000-8000-000000000004", "title": "Глина",

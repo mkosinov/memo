@@ -249,6 +249,11 @@ else
 fi
 ```
 
+On either failure path the report to @manager must NAME the failed checks / the merge error —
+@manager records the blocker on the board (`auto-impl blocked: …` + `gate N blocked`, 2026-09-27:
+a card awaiting the user is never silent — the gate field is how the user finds it). The user's
+fix/decision clears the gate, then @manager re-dispatches this step.
+
 **On success (all CI green + merged):** proceed to Step 6 — from the **main working copy
 root**: pull main (fast-forward to the merge commit), delete the remote branch, remove the
 worktree, then delete the local branch — then Step 7 (`## Board Update Needed` to @manager;

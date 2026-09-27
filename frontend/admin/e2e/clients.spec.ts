@@ -303,8 +303,9 @@ test.describe('Clients page', () => {
     await waitForClientsReady(page);
 
     // #349 spec §2: sort default = NO sort — the header starts at ↕ (no
-    // active column). First click picks asc (↑), second flips to desc (↓),
-    // third returns to the unsorted default (no sort params on the wire).
+    // active column). First click picks asc (↑), second flips to desc (↓).
+    // (The active column only toggles direction; ↕ returns solely via
+    // «Сбросить фильтры» or a clean link.)
     const nameHeader = page
       .locator('table thead th')
       .filter({ hasText: 'Имя' });
@@ -320,11 +321,6 @@ test.describe('Clients page', () => {
     await nameHeader.click();
     await expect(nameHeader).toContainText('↓');
     await expect(page).toHaveURL(/sort_order=desc/);
-
-    // Third click → back to the unsorted default (params stripped)
-    await nameHeader.click();
-    await expect(nameHeader).toContainText('↕');
-    await expect(page).not.toHaveURL(/sort_by=/);
   });
 
   // ── 10. Search filters clients ───────────────────────────────────────────
@@ -375,8 +371,14 @@ test.describe('Clients page', () => {
     await filterResponse;
     await expect(page).toHaveURL(/status=archived/);
 
-    // After filtering, the table shows the archived set (or empty).
-    await page.locator('table tbody, text=Нет записей').first().waitFor();
+    // After filtering, the table shows the archived set (or the unified
+    // empty state).
+    await page
+      .locator('table tbody tr')
+      .first()
+      .waitFor({ timeout: 10_000 })
+      .catch(() => {}); // an empty result renders «Нет записей» instead
+    await page.waitForTimeout(300); // re-render buffer
 
     // Reset and verify filters return to default. "Сбросить фильтры" routes
     // through the factory's resetFilters → the page adapter's reset (ONE

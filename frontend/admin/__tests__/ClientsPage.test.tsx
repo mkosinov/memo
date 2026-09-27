@@ -697,9 +697,15 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
     await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
 
-    // Address only: page param survives, clientId is gone, scroll: false.
-    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
-    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=2', { scroll: false });
-    expect(mockRouter.push).not.toHaveBeenCalled();
+    // #349 single writer: the ✕ routes through the hook's navigate() —
+    // one push carrying the cleaned URL (page survives, clientId gone).
+    // (The hook's coalesced flush is timer-based; wait for the write.)
+    await waitFor(
+      () => {
+        const calls = [...mockRouter.push.mock.calls, ...mockRouter.replace.mock.calls];
+        expect(calls.some(([url]) => url === '/clients?page=2')).toBe(true);
+      },
+      { timeout: 3000 },
+    );
   });
 });

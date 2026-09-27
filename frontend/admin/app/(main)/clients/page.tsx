@@ -22,7 +22,7 @@ function ClientsPageContent() {
   // `clientIds` narrowing (still read-only from ?clientId=). No sync effect
   // anymore: the provider is fully controlled from the first render, so a
   // deep-link mount still fires exactly ONE narrowed GET (#231 S1).
-  const { state } = useClientsUrlState();
+  const { state, navigate } = useClientsUrlState();
   // Auto-open rule (#232 §3.3): exactly ONE valid id opens the modal
   // automatically; two or more never do (US-3) — cards open by row clicks.
   const deepLinkId = state.clientIds && state.clientIds.length === 1 ? state.clientIds[0] : null;
@@ -81,9 +81,15 @@ function ClientsPageContent() {
 
       {/* #232 §3.5 — narrowing chip: visible affordance for an active
           deep-link narrowing (between the filters block and the table). The
-          ✕ removes the param from the address only; the provider follows the
-          address via the URL-derived state. */}
-      {state.clientIds && <ClientDeepLinkChip clientIds={state.clientIds} />}
+          ✕ removes the param from the address through the hook's navigate()
+          (#349 single writer: a pending coalesced flush must adopt the
+          navigated URL, not resurrect the dropped param). */}
+      {state.clientIds && (
+        <ClientDeepLinkChip
+          clientIds={state.clientIds}
+          onRemove={(url, options) => navigate(url, options)}
+        />
+      )}
 
       {/* Table */}
       <div

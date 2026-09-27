@@ -75,6 +75,8 @@ export interface ClientsUrlAdapter {
   state: ClientsUrlAdapterState & Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
   reset: () => void;
+  /** Full-query replacement through the hook (drops unmanaged params). */
+  navigate: (url: string, options?: { history?: 'push' | 'replace' }) => void;
 }
 
 /**
@@ -84,7 +86,7 @@ export interface ClientsUrlAdapter {
  */
 export function useClientsUrlState(): ClientsUrlAdapter {
   const searchParams = useSearchParams();
-  const { state: urlState, update: urlUpdate } = useTableUrlState(clientsUrlConfig);
+  const { state: urlState, update: urlUpdate, navigate } = useTableUrlState(clientsUrlConfig);
   const [structuredFilters, setStructuredFilters] = useState<ClientFilters>(clientsDefaultFilters);
 
   // Deep-link narrowing — read directly from the params object (stable per
@@ -102,20 +104,12 @@ export function useClientsUrlState(): ClientsUrlAdapter {
     (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => {
       // Reset sentinel from the factory's controlled resetFilters: ONE push to
       // the clean /clients (defaults = URL without filter params, spec §4) —
-      // which also drops clientId (reset's documented extra job, #232 §3.5) —
-      // plus the machine-side structured reset.
+      // which also drops clientId (reset's documented extra job, #232 §3.5).
+      // The hook's update() can never strip the UNMANAGED clientId param
+      // (unmanaged params are preserved by contract), so the reset navigates
+      // to the bare pathname itself — same single-navigation guarantee.
       if (patch.clientIds === null && Object.keys(patch).every((k) => k === 'clientIds')) {
-        urlUpdate(
-          {
-            q: '',
-            status: CLIENTS_URL_DEFAULT_STATUS as (typeof clientsUrlConfig.status)['defaultValue'],
-            sort_by: '',
-            sort_order: 'asc',
-            page: 1,
-            per_page: clientsUrlConfig.per_page.defaultValue,
-          },
-          { history: 'push' },
-        );
+        navigate('/clients');
         setStructuredFilters(clientsDefaultFilters);
         return;
       }
@@ -133,7 +127,7 @@ export function useClientsUrlState(): ClientsUrlAdapter {
         urlUpdate(urlPatch, options);
       }
     },
-    [urlUpdate],
+    [urlUpdate, navigate],
   );
 
   // The adapter object is consumed by the factory Provider per render; the
@@ -162,7 +156,9 @@ export function useClientsUrlState(): ClientsUrlAdapter {
       },
       update,
       reset: () => update({ clientIds: null }),
+      /** Full-query replacement through the single writer (chip ✕). */
+      navigate,
     }),
-    [urlState, effectiveStatus, clientIds, structuredFilters, update],
+    [urlState, effectiveStatus, clientIds, structuredFilters, update, navigate],
   );
 }

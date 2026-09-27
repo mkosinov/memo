@@ -6,18 +6,18 @@ import { ClientDeepLinkChip } from '../app/(main)/clients/components/ClientDeepL
 /**
  * #232 §3.5 — the narrowing chip: visible affordance for an active deep-link
  * narrowing + its removal. The ✕ removes every `clientId` from the address
- * (other query params preserved) via router.replace — the Task 4 sync effect
+ * (other query params preserved) via the injected onRemove (#349: the
+ * page's URL-hook navigate)
  * converges the filter; the handler itself never touches setFilters.
  */
 
-const mockRouter = { push: vi.fn(), replace: vi.fn() };
+const onRemove = vi.fn();
 let mockSearchParams = new URLSearchParams();
 let mockPathname = '/clients';
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   usePathname: () => mockPathname,
-  useRouter: () => mockRouter,
 }));
 
 // If the chip ever grows a context dependency, the unmocked real hook throws
@@ -34,8 +34,7 @@ const U3 = '33333333-3333-4333-8333-333333333333';
 beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockPathname = '/clients';
-  mockRouter.push.mockClear();
-  mockRouter.replace.mockClear();
+  onRemove.mockClear();
 });
 
 afterEach(() => {
@@ -45,25 +44,25 @@ afterEach(() => {
 describe('ClientDeepLinkChip — render (#232 §3.5)', () => {
   it('one id → «Открыт по ссылке» (no UUID in text)', () => {
     mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     expect(screen.getByText('Открыт по ссылке')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(U1);
   });
 
   it('two ids → «Открыто по ссылке: 2» (no UUIDs in text)', () => {
-    render(<ClientDeepLinkChip clientIds={[U1, U2]} />);
+    render(<ClientDeepLinkChip clientIds={[U1, U2]} onRemove={onRemove} />);
     expect(screen.getByText('Открыто по ссылке: 2')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(U1);
     expect(document.body.textContent).not.toContain(U2);
   });
 
   it('three ids → «Открыто по ссылке: 3»', () => {
-    render(<ClientDeepLinkChip clientIds={[U1, U2, U3]} />);
+    render(<ClientDeepLinkChip clientIds={[U1, U2, U3]} onRemove={onRemove} />);
     expect(screen.getByText('Открыто по ссылке: 3')).toBeInTheDocument();
   });
 
   it('✕ is an accessible button with aria-label «Снять сужение»', () => {
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     const close = screen.getByRole('button', { name: 'Снять сужение' });
     expect(close).toBeInTheDocument();
     // keyboard-focusable: a real button in the tab order, not a div with onClick
@@ -78,10 +77,10 @@ describe('ClientDeepLinkChip — ✕ removal (#232 §3.5)', () => {
       ['page', '2'],
       ['status', 'all'],
     ]);
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
-    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
-    expect(mockRouter.replace).toHaveBeenCalledWith('/clients?page=2&status=all', { scroll: false });
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(onRemove).toHaveBeenCalledWith('/clients?page=2&status=all');
   });
 
   it('removes ALL occurrences (multi-id narrowing)', () => {
@@ -90,25 +89,22 @@ describe('ClientDeepLinkChip — ✕ removal (#232 §3.5)', () => {
       ['clientId', U2],
       ['q', 'анна'],
     ]);
-    render(<ClientDeepLinkChip clientIds={[U1, U2]} />);
+    render(<ClientDeepLinkChip clientIds={[U1, U2]} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
-    expect(mockRouter.replace).toHaveBeenCalledWith(
-      '/clients?q=%D0%B0%D0%BD%D0%BD%D0%B0',
-      { scroll: false },
-    );
+    expect(onRemove).toHaveBeenCalledWith('/clients?q=%D0%B0%D0%BD%D0%BD%D0%B0');
   });
 
   it('falls back to the bare pathname when nothing else is left', () => {
     mockSearchParams = new URLSearchParams([['clientId', U1]]);
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
-    expect(mockRouter.replace).toHaveBeenCalledWith('/clients', { scroll: false });
+    expect(onRemove).toHaveBeenCalledWith('/clients');
   });
 
-  it('never pushes (replace-only — no history spam)', () => {
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+  it('passes options through when provided (history hint)', () => {
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
-    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(onRemove).toHaveBeenCalledWith('/clients');
   });
 
   it('the handler does not write filters — the chip is not a context consumer', async () => {
@@ -117,9 +113,9 @@ describe('ClientDeepLinkChip — ✕ removal (#232 §3.5)', () => {
     // change. Importing the module graph bare (no provider anywhere in this
     // suite) proves no context hook runs during render or click.
     const { useClientsTable } = await import('@/contexts/ClientsContext');
-    render(<ClientDeepLinkChip clientIds={[U1]} />);
+    render(<ClientDeepLinkChip clientIds={[U1]} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
     expect(useClientsTable).not.toHaveBeenCalled();
-    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });

@@ -36,9 +36,10 @@ test.describe('#349 — clients URL filters', () => {
     request,
   }) => {
     const ts = uid();
-    // Enough rows for a stable multi-page view under per_page=10.
+    // Enough rows for a stable two-page view under per_page=10 (11 rows →
+    // page 2 shows 1 row; the seed adds 5 more clients to the total).
     const created: string[] = [];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 11; i++) {
       const c = await createTestClient(request, { name: `US1-${ts}-${i}` });
       created.push(c.id);
     }
@@ -56,11 +57,11 @@ test.describe('#349 — clients URL filters', () => {
       const pageSize = page.getByTestId('page-size-select');
       await expect(pageSize).toHaveValue('10');
 
-      // Rows present on the requested page and the pager reflects them.
-      await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByText('2', { exact: true })).toBeVisible();
-      // The 14 factory rows exist (page 2 of per_page=10 shows 4 of them).
-      await expect(page.locator('table tbody tr')).toHaveCount(4, { timeout: 10_000 });
+      // Rows present on the requested page (page 2 = the 11th row) and the
+      // pager highlights page 2.
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      const page2Btn = page.getByRole('button', { name: '2', exact: true });
+      await expect(page2Btn).toHaveAttribute('aria-current', 'page');
 
       // Observation window: rows visible, then a short late-stray buffer.
       await page.waitForTimeout(500);

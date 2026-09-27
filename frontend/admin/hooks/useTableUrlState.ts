@@ -265,12 +265,16 @@ interface PendingUpdate {
  * — the only writer: applies the patch atomically (one navigation), strips
  * values equal to defaults, preserves unmanaged params, resets `page` to 1
  * when a filter changes in the same batch, and coalesces rapid calls into
- * a single router.push within one ~16ms frame. Consumed inside a Suspense
- * boundary (useSearchParams).
+ * a single router.push within one ~16ms frame. `navigate(url)` — full-query
+ * replacement THROUGH the hook (the single-writer escape hatch for dropping
+ * unmanaged params, e.g. the #232 chip ✕): adopts the URL as the write base
+ * so a pending coalesced flush builds on it instead of resurrecting dropped
+ * params. Consumed inside a Suspense boundary (useSearchParams).
  */
 export function useTableUrlState<C extends TableUrlConfig>(config: C): {
   state: TableUrlState<C>;
   update: (patch: Partial<TableUrlState<C>>, options?: UpdateOptions) => void;
+  navigate: (url: string, options?: UpdateOptions) => void;
 } {
   const router = useRouter();
   const pathname = usePathname();
@@ -294,6 +298,8 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
    * on one URL would clobber each other's writes.
    */
   const latestParamsRef = useRef<string | null>(null);
+  /** Base path of the last navigate() — the flush must target the same page. */
+  const latestBaseRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingUpdate | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -308,6 +314,7 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
   const searchParamsKey = searchParams.toString();
   if (latestParamsRef.current !== null && latestParamsRef.current !== searchParamsKey) {
     latestParamsRef.current = null;
+    latestBaseRef.current = null;
   }
 
   const flush = useCallback(() => {
@@ -342,7 +349,8 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
       return;
     }
     latestParamsRef.current = query;
-    const url = query ? `${pathnameRef.current}?${query}` : pathnameRef.current;
+    const basePath = latestBaseRef.current ?? pathnameRef.current;
+    const url = query ? `${basePath}?${query}` : basePath;
     if (pending.history === 'replace') {
       routerRef.current.replace(url, { scroll: false });
     } else {
@@ -368,6 +376,31 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
     [flush],
   );
 
+  /**
+   * Full-query replacement through the hook (single-writer escape hatch for
+   * dropping UNMANAGED params — `update()` preserves them by contract). The
+   * navigated query becomes the write base: a pending coalesced flush adopts
+   * it instead of building on the stale pre-navigation snapshot (otherwise a
+   * dropped `clientId` would resurrect from an in-flight debounced write).
+   */
+  const navigate = useCallback(
+    (url: string, options?: UpdateOptions) => {
+      // Full-query replacement through the single writer. The navigated query
+      // (and its path) becomes the write base: a pending coalesced flush
+      // adopts it instead of building on the stale pre-navigation snapshot
+      // (otherwise a dropped `clientId` would resurrect from an in-flight
+      // debounced write).
+      latestParamsRef.current = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+      latestBaseRef.current = url.includes('?') ? url.slice(0, url.indexOf('?')) : url;
+      if (options?.history === 'replace') {
+        routerRef.current.replace(url, { scroll: false });
+      } else {
+        routerRef.current.push(url, { scroll: false });
+      }
+    },
+    [],
+  );
+
   // A cancelled frame must not navigate after unmount.
   useEffect(
     () => () => {
@@ -377,5 +410,5 @@ export function useTableUrlState<C extends TableUrlConfig>(config: C): {
     [],
   );
 
-  return { state, update };
+  return { state, update, navigate };
 }

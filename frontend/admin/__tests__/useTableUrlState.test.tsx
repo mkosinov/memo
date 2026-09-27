@@ -344,6 +344,29 @@ describe('useTableUrlState — atomic batch', () => {
     expect(params.get('page')).toBe('3');
   });
 
+  // #349 single-writer: navigate() replaces the whole query (e.g. the chip ✕
+  // dropping the unmanaged clientId) THROUGH the hook, so a pending coalesced
+  // update() flush must adopt the navigated URL as its base instead of
+  // resurrecting the dropped param from a stale snapshot.
+  it('navigate() wins over a pending flush — dropped unmanaged params stay dropped', async () => {
+    const { result } = renderWithParams('?clientId=11111111-1111-4111-8111-111111111111');
+    // A debounced q write is scheduled but NOT flushed yet…
+    act(() => result.current.update({ search: 'анна' }));
+    // …then the chip ✕ navigates through the hook first (same frame).
+    act(() => result.current.navigate('/clients'));
+    await flushFrame();
+
+    // The flushed q write built on the NAVIGATED base — clientId stays gone.
+    expect(lastUrl(mockPush)).toBe('/clients?search=%D0%B0%D0%BD%D0%BD%D0%B0');
+  });
+
+  it('navigate() without pending updates pushes the URL verbatim', async () => {
+    const { result } = renderWithParams('?clientId=x&page=2');
+    act(() => result.current.navigate('/clients?q=%D0%BC%D0%B0'));
+    await flushFrame();
+    expect(lastUrl(mockPush)).toBe('/clients?q=%D0%BC%D0%B0');
+  });
+
   it('filter change resets page to 1 in the same navigation', async () => {
     const { result } = renderWithParams('?page=7&status=confirmed');
     act(() => result.current.update({ search: 'анна' }));

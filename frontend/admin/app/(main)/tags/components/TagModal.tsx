@@ -5,7 +5,6 @@ import { TAG_FIELDS, type TagFieldConfig } from './tagFields';
 import { Modal } from '@/app/components/shared/modal/Modal';
 
 export interface TagModalProps {
-  mode: 'create' | 'edit';
   tag: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
@@ -74,7 +73,6 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── TagModal ───────────────────────────────────────────────────── */
 
 export function TagModal({
-  mode: _mode,
   tag,
   onSubmit,
   onClose,

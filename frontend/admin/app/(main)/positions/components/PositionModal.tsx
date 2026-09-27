@@ -5,7 +5,6 @@ import { POSITION_FIELDS, type PositionFieldConfig } from './positionFields';
 import { Modal } from '@/app/components/shared/modal/Modal';
 
 export interface PositionModalProps {
-  mode: 'create' | 'edit';
   /** The row being edited (null in create mode). */
   position: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
@@ -70,7 +69,6 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── PositionModal ────────────────────────────────────────────────── */
 
 export function PositionModal({
-  mode: _mode,
   position,
   onSubmit,
   onClose,

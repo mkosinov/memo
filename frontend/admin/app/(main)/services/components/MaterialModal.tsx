@@ -29,7 +29,6 @@ const MATERIAL_FIELDS: MaterialFieldConfig[] = [
 ];
 
 export interface MaterialModalProps {
-  mode: 'create' | 'edit';
   material: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
@@ -127,7 +126,6 @@ function FieldRenderer({
 /* ── MaterialModal ────────────────────────────────────────────────── */
 
 export function MaterialModal({
-  mode: _mode,
   material,
   onSubmit,
   onClose,

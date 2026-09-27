@@ -12,7 +12,6 @@ import { getTags } from '@memo/api-client';
 import type { ServiceMaterialLink } from '@memo/api-client';
 
 export interface ServiceModalProps {
-  mode: 'create' | 'edit';
   service: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
@@ -472,7 +471,6 @@ function errorsFrom(
 }
 
 export function ServiceModal({
-  mode: _mode,
   service,
   onSubmit,
   onClose,

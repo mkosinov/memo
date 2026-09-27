@@ -10,6 +10,7 @@ from sqlalchemy import ColumnElement, delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.scope import mask_phone
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.domain.visit_status import VisitStatus
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
@@ -454,21 +455,29 @@ async def list_clients_view(
     total_result = await db_session.execute(count_query)
     total = total_result.scalar() or 0
 
-    # 7. Apply sorting
-    sort_column_map = {
-        "name": Client.name,
-        "records_count": records_count_sq,
-        "last_record": last_record_sq,
-        "total_paid": total_paid_sq,
-        "missed_records": missed_records_sq,
-        "created_at": Client.created_at,
-        "updated_at": Client.updated_at,
+    # 7. Apply sorting (GH #367 Task 3: map as ``SortKeyMap`` + shared
+    #    resolver with the ``Client.id`` tie-break, spec §4.2/§4.3).
+    #    Direct map indexing — the ``ClientSortBy`` Literal (schema, 422)
+    #    guarantees a valid key; ``apply_sort``'s ``UnknownSortKeyError``
+    #    is the safety net for direct service calls. Nulls policy is
+    #    ``canonical`` for ALL keys (asc → nullsfirst / desc →
+    #    nullslast — exactly the pre-#367 inline behavior; ``last_record``
+    #    is the only nullable key and keeps clients without records on
+    #    top at asc). The tie-break is the ONLY behavior delta: equal
+    #    values now order by ``id asc`` — deterministic across pages
+    #    (spec §2 scenario 1, «стабилен через границу страниц»).
+    sort_key_map: SortKeyMap = {
+        "name": SortKeySpec([Client.name]),
+        "records_count": SortKeySpec([records_count_sq]),
+        "last_record": SortKeySpec([last_record_sq]),
+        "total_paid": SortKeySpec([total_paid_sq]),
+        "missed_records": SortKeySpec([missed_records_sq]),
+        "created_at": SortKeySpec([Client.created_at]),
+        "updated_at": SortKeySpec([Client.updated_at]),
     }
-    sort_col = sort_column_map.get(params.sort_by, Client.name)
-    if params.sort_order == "desc":
-        query = query.order_by(sort_col.desc().nullslast())
-    else:
-        query = query.order_by(sort_col.asc().nullsfirst())
+    query = query.order_by(
+        *apply_sort(sort_key_map, params.sort_by, params.sort_order, Client.id)
+    )
 
     # 8. Apply pagination
     offset = (params.page - 1) * params.per_page

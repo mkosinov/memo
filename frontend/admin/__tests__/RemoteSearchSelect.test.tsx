@@ -337,6 +337,73 @@ describe('RemoteSearchSelect', () => {
     });
   });
 
+  // GH #368: the select is honestly uncontrolled — `value` is gone from the
+  // contract and `onChange` is optional (tag pickers react via onSelectItem).
+  // Picking / clearing must not crash when no onChange is provided.
+  it('selects an item without crashing when onChange is not provided', async () => {
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
+
+    render(
+      <RemoteSearchSelect
+        onSearch={mockSearch}
+        label="Клиент"
+        displayField="name"
+      />,
+    );
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Ан' } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    const dropdownItem = screen
+      .getAllByText('Анна Иванова')
+      .find((el) => el.tagName === 'LI' || el.closest('li'));
+    fireEvent.click(dropdownItem!);
+
+    expect(screen.getByDisplayValue('Анна Иванова')).toBeInTheDocument();
+  });
+
+  it('clears a selection without crashing when onChange is not provided', async () => {
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
+
+    render(
+      <RemoteSearchSelect
+        onSearch={mockSearch}
+        label="Клиент"
+        displayField="name"
+      />,
+    );
+    const input = screen.getByRole('textbox');
+
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Ан' } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    const dropdownItem = screen
+      .getAllByText('Анна Иванова')
+      .find((el) => el.tagName === 'LI' || el.closest('li'));
+    fireEvent.click(dropdownItem!);
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+
+    expect(screen.getByDisplayValue('')).toBeInTheDocument();
+  });
+
   it('builds request params via buildParams and passes them to onSearch', async () => {
     mockSearch.mockResolvedValue([{ id: 'c1', name: 'Анна' }]);
     const buildParams = vi.fn((input: string) => ({ phone: input }));

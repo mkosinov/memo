@@ -84,7 +84,6 @@ export function PhotosFilters() {
       <div className="w-56">
         <RemoteSearchSelect
           key={`client-${resetKey}`}
-          value={filters.client_id ?? null}
           onChange={(uuid) => setFilters({ client_id: uuid ?? undefined })}
           onSearch={(q) =>
             getClientsPaged({ q, per_page: 10, status: 'active' }).then((r) =>
@@ -102,7 +101,6 @@ export function PhotosFilters() {
       <div className="w-56">
         <RemoteSearchSelect
           key={`activity-${resetKey}`}
-          value={filters.activity_id ?? null}
           onChange={(uuid) => setFilters({ activity_id: uuid ?? undefined })}
           onSearch={(q) =>
             getActivities({ q, per_page: 10 }).then((r) =>
@@ -169,8 +167,6 @@ export function PhotosFilters() {
           </div>
         )}
         <RemoteSearchSelect
-          value={null}
-          onChange={() => {}}
           onSelectItem={(item) => addTag(item.id)}
           onSearch={async (q) => {
             const lower = q.toLowerCase();

@@ -90,7 +90,7 @@ export default function PhoneInput({
   onSearch,
   onPick,
   onClear,
-  picked = null,
+  picked: _picked,
   onInputValueChange,
   label = 'Телефон',
   placeholder = '+7 (___) ___-__-__',
@@ -108,7 +108,6 @@ export default function PhoneInput({
 
   return (
     <RemoteSearchSelect<{ phone: string; per_page: number }>
-      value={picked?.id ?? null}
       onChange={(id) => {
         if (id === null) onClear?.();
       }}

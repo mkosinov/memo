@@ -204,8 +204,6 @@ function FieldRenderer({ field, value, onChange, error, selectAriaLabel }: Field
             ))}
           </div>
           <RemoteSearchSelect
-            value={null}
-            onChange={() => {}}
             onSelectItem={(item) => {
               if (!selectedTags.some((t) => t.id === item.id)) {
                 onChange(field.key, [...selectedTags, { id: item.id, title: item.title }]);

@@ -275,6 +275,79 @@ def get_client_service() -> ClientService:
     )
 
 
+# ─── GH #367 Task 6: module-level stat subquery builders + sort map ──────────
+#
+# Correlated scalar subqueries — one per stat, each reads ONE relation
+# (no join-then-aggregate → cartesian product is structurally impossible).
+# Module-level BUILDERS since Task 6: ``list_clients_view``'s labeled
+# projection, the stats filters, and the sort map need INDEPENDENT
+# subquery instances per clause position (one ``scalar_subquery()``
+# object must not be planted into several clauses of one statement);
+# builders give each consumer a fresh, content-identical object. The
+# sort map below composes the same builders, making it importable at
+# module level for the CI drift guard (tests/domain/test_sorting.py —
+# Literal == map).
+def _records_count_sq():
+    return (
+        select(func.count(Record.id))
+        .where(Record.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+
+
+def _last_record_sq():
+    return (
+        select(func.max(Activity.start))
+        .select_from(Record)
+        .join(Activity, Record.activity_id == Activity.id)
+        .where(Record.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+
+
+def _missed_records_sq():
+    return (
+        select(func.count(Record.id))
+        .where(
+            Record.client_id == Client.id,
+            Record.status == VisitStatus.MISSED,
+        )
+        .correlate(Client)
+        .scalar_subquery()
+    )
+
+
+def _total_paid_sq():
+    return (
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .select_from(Payment)
+        .join(Record, Payment.record_id == Record.id)
+        .where(Record.client_id == Client.id)
+        .correlate(Client)
+        .scalar_subquery()
+    )
+
+
+# Sort map (GH #367 Task 3; hoisted module-level in Task 6 for the drift
+# guard). Direct map indexing — the ``ClientSortBy`` Literal (schema, 422)
+# guarantees a valid key; ``apply_sort``'s ``UnknownSortKeyError`` is the
+# safety net for direct service calls. Nulls policy is ``canonical`` for
+# ALL keys (asc → nullsfirst / desc → nullslast — exactly the pre-#367
+# inline behavior; ``last_record`` is the only nullable key and keeps
+# clients without records on top at asc).
+_CLIENT_SORT_KEYS: SortKeyMap = {
+    "name": SortKeySpec([Client.name]),
+    "records_count": SortKeySpec([_records_count_sq()]),
+    "last_record": SortKeySpec([_last_record_sq()]),
+    "total_paid": SortKeySpec([_total_paid_sq()]),
+    "missed_records": SortKeySpec([_missed_records_sq()]),
+    "created_at": SortKeySpec([Client.created_at]),
+    "updated_at": SortKeySpec([Client.updated_at]),
+}
+
+
 async def list_clients_view(
     db_session: AsyncSession,
     params: ClientListParams,
@@ -302,37 +375,13 @@ async def list_clients_view(
 
     # 1. Correlated scalar subqueries — one per stat, each reads ONE relation
     #    (no join-then-aggregate → cartesian product is structurally impossible).
-    records_count_sq = (
-        select(func.count(Record.id))
-        .where(Record.client_id == Client.id)
-        .correlate(Client)
-        .scalar_subquery()
-    )
-    last_record_sq = (
-        select(func.max(Activity.start))
-        .select_from(Record)
-        .join(Activity, Record.activity_id == Activity.id)
-        .where(Record.client_id == Client.id)
-        .correlate(Client)
-        .scalar_subquery()
-    )
-    missed_records_sq = (
-        select(func.count(Record.id))
-        .where(
-            Record.client_id == Client.id,
-            Record.status == VisitStatus.MISSED,
-        )
-        .correlate(Client)
-        .scalar_subquery()
-    )
-    total_paid_sq = (
-        select(func.coalesce(func.sum(Payment.amount), 0))
-        .select_from(Payment)
-        .join(Record, Payment.record_id == Record.id)
-        .where(Record.client_id == Client.id)
-        .correlate(Client)
-        .scalar_subquery()
-    )
+    #    GH #367 Task 6: built by the module-level builders (shared with
+    #    ``_CLIENT_SORT_KEYS``, see above); fresh instances per call for the
+    #    labeled projection and the stats filters below.
+    records_count_sq = _records_count_sq()
+    last_record_sq = _last_record_sq()
+    missed_records_sq = _missed_records_sq()
+    total_paid_sq = _total_paid_sq()
 
     records_count_col = records_count_sq.label("records_count")
     last_record_col = last_record_sq.label("last_record")
@@ -456,27 +505,12 @@ async def list_clients_view(
     total = total_result.scalar() or 0
 
     # 7. Apply sorting (GH #367 Task 3: map as ``SortKeyMap`` + shared
-    #    resolver with the ``Client.id`` tie-break, spec §4.2/§4.3).
-    #    Direct map indexing — the ``ClientSortBy`` Literal (schema, 422)
-    #    guarantees a valid key; ``apply_sort``'s ``UnknownSortKeyError``
-    #    is the safety net for direct service calls. Nulls policy is
-    #    ``canonical`` for ALL keys (asc → nullsfirst / desc →
-    #    nullslast — exactly the pre-#367 inline behavior; ``last_record``
-    #    is the only nullable key and keeps clients without records on
-    #    top at asc). The tie-break is the ONLY behavior delta: equal
-    #    values now order by ``id asc`` — deterministic across pages
-    #    (spec §2 scenario 1, «стабилен через границу страниц»).
-    sort_key_map: SortKeyMap = {
-        "name": SortKeySpec([Client.name]),
-        "records_count": SortKeySpec([records_count_sq]),
-        "last_record": SortKeySpec([last_record_sq]),
-        "total_paid": SortKeySpec([total_paid_sq]),
-        "missed_records": SortKeySpec([missed_records_sq]),
-        "created_at": SortKeySpec([Client.created_at]),
-        "updated_at": SortKeySpec([Client.updated_at]),
-    }
+    #    resolver with the ``Client.id`` tie-break, spec §4.2/§4.3; Task 6
+    #    hoisted the map to module level — ``_CLIENT_SORT_KEYS``, the CI
+    #    drift-guard import point). Nulls policy and tie-break notes live
+    #    with the map.
     query = query.order_by(
-        *apply_sort(sort_key_map, params.sort_by, params.sort_order, Client.id)
+        *apply_sort(_CLIENT_SORT_KEYS, params.sort_by, params.sort_order, Client.id)
     )
 
     # 8. Apply pagination

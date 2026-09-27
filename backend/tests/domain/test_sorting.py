@@ -10,7 +10,10 @@ shared by all 8 sortable list entities:
   policy (PK is NOT NULL);
 * unknown key → ``UnknownSortKeyError`` (safety net behind Literal validation);
 * the global handler maps ``UnknownSortKeyError`` → 422 VALIDATION_ERROR
-  (spec scenario С2).
+  (spec scenario С2);
+* drift guard (Task 6, spec §4.2 protection layer 2): for each of the 8
+  sortable entities the ``XSortBy`` Literal args equal the entity sort-map
+  keys — catches «Literal расширили, карту забыли» (and vice versa).
 
 Pure unit — no DB, no app lifespan: the resolver is called directly on
 plain SQLAlchemy ``Column`` objects and only the STRUCTURE of the returned
@@ -23,12 +26,17 @@ Dialect note under test: ``nullsfirst/nullslast`` compile to SQL
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Column, Integer
 
+from src.api.v1.locations import _LOCATION_SORT_KEYS
+from src.api.v1.materials import _MATERIAL_SORT_KEYS
+from src.api.v1.services import _SERVICE_SORT_KEYS
+from src.api.v1.staff import _STAFF_SORT_KEYS
+from src.api.v1.tags import _TAG_SORT_KEYS
 from src.domain.errors import UnknownSortKeyError
 from src.domain.sorting import (
     SortKeySpec,
@@ -36,6 +44,17 @@ from src.domain.sorting import (
 )
 from src.errors import ErrorCode
 from src.main import create_app
+from src.schemas.client import ClientSortBy
+from src.schemas.location import LocationSortBy
+from src.schemas.material import MaterialSortBy
+from src.schemas.photo import PhotoSortBy
+from src.schemas.record import RecordSortBy
+from src.schemas.service import ServiceSortBy
+from src.schemas.staff import StaffSortBy
+from src.schemas.tag import TagSortBy
+from src.services.client import _CLIENT_SORT_KEYS
+from src.services.photo import _SORT_COLUMNS as _PHOTO_SORT_KEYS
+from src.services.record import _RECORD_SORT_KEYS
 
 pytestmark = pytest.mark.pure_unit
 
@@ -172,3 +191,43 @@ class TestUnknownSortKeyErrorHandler:
         detail = resp.json()["detail"]
         assert detail["code"] == ErrorCode.VALIDATION_ERROR.value
         assert detail["message"]
+
+
+# ─── CI drift guard: Literal == map, per entity (Task 6, spec §4.2) ──────────
+
+
+class TestSortContractGuard:
+    """Layer 2 of the unknown-key protection (spec §4.2): keep each
+    entity's ``XSortBy`` Literal and its sort map in sync.
+
+    The Literal is the user-facing 422 line; the map is what the resolver
+    reads. A key added to one but not the other drifts the contract:
+    Literal-without-map → ``UnknownSortKeyError`` 500-safety-net territory
+    (422 only via the handler); map-without-Literal → dead, unsortable
+    key. This parametrized guard fails on BOTH directions of drift.
+    """
+
+    CASES: ClassVar[list[tuple[str, object, dict]]] = [
+        ("clients", ClientSortBy, _CLIENT_SORT_KEYS),
+        ("records", RecordSortBy, _RECORD_SORT_KEYS),
+        ("photos", PhotoSortBy, _PHOTO_SORT_KEYS),
+        ("staff", StaffSortBy, _STAFF_SORT_KEYS),
+        ("services", ServiceSortBy, _SERVICE_SORT_KEYS),
+        ("materials", MaterialSortBy, _MATERIAL_SORT_KEYS),
+        ("locations", LocationSortBy, _LOCATION_SORT_KEYS),
+        ("tags", TagSortBy, _TAG_SORT_KEYS),
+    ]
+
+    @pytest.mark.parametrize(
+        ("entity", "literal", "sort_map"),
+        CASES,
+        ids=[case[0] for case in CASES],
+    )
+    def test_literal_args_equal_map_keys(
+        self, entity: str, literal: object, sort_map: dict
+    ) -> None:
+        assert set(get_args(literal)) == set(sort_map), (
+            f"{entity}: XSortBy Literal and sort map have drifted — "
+            f"Literal only: {set(get_args(literal)) - set(sort_map)}, "
+            f"map only: {set(sort_map) - set(get_args(literal))}"
+        )

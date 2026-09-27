@@ -194,6 +194,122 @@ def _build_list_stmt(
         )
     return stmt
 
+# ─── GH #367 Task 6: module-level sort-map builders ──────────────────────────
+#
+# Per-key correlated scalar subqueries, hoisted from ``_sort_columns`` as
+# module-level builders: the ``_RECORD_SORT_KEYS`` map (below) must be
+# importable at module level for the CI drift guard
+# (tests/domain/test_sorting.py — Literal == map). Builders return FRESH
+# instances per call: one scalar_subquery object must not be planted into
+# several clauses of one statement, and ``list_records_view`` adds its own
+# display copies of the same shapes.
+def _client_name_sq():
+    return (
+        select(Client.name)
+        .where(Record.client_id == Client.id)
+        .correlate(Record)
+        .scalar_subquery()
+    )
+
+
+def _service_title_sq():
+    return (
+        select(Service.title)
+        .where(Activity.service_id == Service.id)
+        .correlate(Activity)
+        .scalar_subquery()
+    )
+
+
+# GH #266: master name sorts resolve through the extension → card
+# join (names live on Staff; Master keeps only staff_id PK).
+def _master_last_sq():
+    return (
+        select(Staff.last_name)
+        .join(Master, Master.staff_id == Staff.id)
+        .where(Activity.master_id == Master.staff_id)
+        .scalar_subquery()
+    )
+
+
+def _master_first_sq():
+    return (
+        select(Staff.first_name)
+        .join(Master, Master.staff_id == Staff.id)
+        .where(Activity.master_id == Master.staff_id)
+        .scalar_subquery()
+    )
+
+
+def _location_name_sq():
+    return (
+        select(Location.title)
+        .where(Location.id == Activity.location_id)
+        .scalar_subquery()
+    )
+
+
+def _total_price_sq():
+    return (
+        select(func.coalesce(func.sum(Visit.price), 0))
+        .where(Visit.record_id == Record.id)
+        .scalar_subquery()
+    )
+
+
+def _paid_sum_sq():
+    return (
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.record_id == Record.id)
+        .scalar_subquery()
+    )
+
+
+def _payment_bucket():
+    paid_sum = _paid_sum_sq()
+    total_price = _total_price_sq()
+    return case(
+        (paid_sum >= total_price, 0),
+        (paid_sum > 0, 1),
+        else_=2,
+    )
+
+
+# Named (non-anonymous) visit count as a correlated subquery — the
+# list is paginated, so guests-sorting must live in SQL. Under the
+# unified model (#257) this is the exact continuation of the old
+# ``seats - anonym_visits`` (== live visits count): ALL named visits
+# count as "guests" regardless of status; anonymous visits
+# (visitor_id IS NULL) don't.
+def _named_visits_count_sq():
+    return (
+        select(func.count())
+        .select_from(Visit)
+        .where(Visit.record_id == Record.id, Visit.visitor_id.is_not(None))
+        .correlate(Record)
+        .scalar_subquery()
+    )
+
+
+# The records sort map (entity content, GH #367 §4.2): all keys canonical
+# (asc → nullsfirst / desc → nullslast — exactly the pre-#367 inline
+# behavior). ``RecordSortBy`` Literal (schema, 422) guarantees a valid
+# key; ``apply_sort``'s ``UnknownSortKeyError`` is the direct-call safety
+# net. The map's subquery instances appear ONCE per statement (ORDER BY
+# only) — the view's display columns are separate builder calls.
+_RECORD_SORT_KEYS: SortKeyMap = {
+    "date": SortKeySpec([Activity.start]),
+    "client": SortKeySpec([_client_name_sq()]),
+    "service": SortKeySpec([_service_title_sq()]),
+    "master": SortKeySpec([_master_last_sq(), _master_first_sq()]),
+    "location": SortKeySpec([_location_name_sq()]),
+    "guests": SortKeySpec([_named_visits_count_sq()]),
+    "status": SortKeySpec([Record.status]),
+    "total": SortKeySpec([_total_price_sq()]),
+    "payment": SortKeySpec([_payment_bucket()]),
+}
+
+
 def _sort_columns(params: RecordListParams) -> list:
     """Sort map → ORDER BY expressions via the shared resolver (#191,
     mirrors the deleted client-side comparator; collation note: SQLite
@@ -206,7 +322,9 @@ def _sort_columns(params: RecordListParams) -> list:
     shared resolver ``apply_sort`` (spec §4.2/§4.3) with the
     ``Record.id`` tie-break. Nulls policy is ``canonical`` for ALL keys
     — exactly the pre-#367 inline behavior (asc → nullsfirst / desc →
-    nullslast), byte-identical application.
+    nullslast), byte-identical application. Task 6 hoisted the map to
+    module level (``_RECORD_SORT_KEYS``) for the CI drift guard
+    (Literal == map, tests/domain/test_sorting.py).
 
     The Client/Service name subqueries carry explicit ``correlate()``:
     when ``q`` outerjoins those tables into the enclosing query,
@@ -214,75 +332,7 @@ def _sort_columns(params: RecordListParams) -> list:
     left → InvalidRequestError (500) on ``q`` + client/service sorts
     (GH #213 regression pin — same treatment as the view display
     columns)."""
-    client_name = (
-        select(Client.name)
-        .where(Client.id == Record.client_id)
-        .correlate(Record)
-        .scalar_subquery()
-    )
-    service_title = (
-        select(Service.title)
-        .where(Service.id == Activity.service_id)
-        .correlate(Activity)
-        .scalar_subquery()
-    )
-    # GH #266: master name sorts resolve through the extension → card
-    # join (names live on Staff; Master keeps only staff_id PK).
-    master_last = (
-        select(Staff.last_name)
-        .join(Master, Master.staff_id == Staff.id)
-        .where(Activity.master_id == Master.staff_id)
-        .scalar_subquery()
-    )
-    master_first = (
-        select(Staff.first_name)
-        .join(Master, Master.staff_id == Staff.id)
-        .where(Activity.master_id == Master.staff_id)
-        .scalar_subquery()
-    )
-    location_name = (
-        select(Location.title).where(Location.id == Activity.location_id).scalar_subquery()
-    )
-    total_price = (
-        select(func.coalesce(func.sum(Visit.price), 0))
-        .where(Visit.record_id == Record.id)
-        .scalar_subquery()
-    )
-    paid_sum = (
-        select(func.coalesce(func.sum(Payment.amount), 0))
-        .where(Payment.record_id == Record.id)
-        .scalar_subquery()
-    )
-    payment_bucket = case(
-        (paid_sum >= total_price, 0),
-        (paid_sum > 0, 1),
-        else_=2,
-    )
-    # Named (non-anonymous) visit count as a correlated subquery — the
-    # list is paginated, so guests-sorting must live in SQL. Under the
-    # unified model (#257) this is the exact continuation of the old
-    # ``seats - anonym_visits`` (== live visits count): ALL named visits
-    # count as "guests" regardless of status; anonymous visits
-    # (visitor_id IS NULL) don't.
-    named_visits_count = (
-        select(func.count()).select_from(Visit)
-        .where(Visit.record_id == Record.id, Visit.visitor_id.is_not(None))
-        .correlate(Record).scalar_subquery()
-    )
-    sort_map: SortKeyMap = {
-        "date": SortKeySpec([Activity.start]),
-        "client": SortKeySpec([client_name]),
-        "service": SortKeySpec([service_title]),
-        "master": SortKeySpec([master_last, master_first]),
-        "location": SortKeySpec([location_name]),
-        "guests": SortKeySpec([named_visits_count]),
-        "status": SortKeySpec([Record.status]),
-        "total": SortKeySpec([total_price]),
-        "payment": SortKeySpec([payment_bucket]),
-    }
-    # Literal-validated upstream (RecordSortBy → 422); the resolver's
-    # UnknownSortKeyError is the direct-call safety net.
-    return apply_sort(sort_map, params.sort_by, params.sort_order, Record.id)
+    return apply_sort(_RECORD_SORT_KEYS, params.sort_by, params.sort_order, Record.id)
 
 
 class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):

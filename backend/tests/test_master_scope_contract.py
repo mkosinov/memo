@@ -129,6 +129,10 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/logout"): "auth surface (own session teardown)",
     ("GET", "/api/v1/auth/me"): "auth surface (returns own principal + permissions)",
     ("POST", "/api/v1/auth/change-password"): "auth surface (own password, require_session)",
+    # ── Public password setup (#348 §5/§7): anonymous by design — the
+    #    authority is the one-time token; no session, no master scope. ──
+    ("POST", "/api/v1/auth/password-setup/validate"): "public token probe (#348 §7) — token authority",
+    ("POST", "/api/v1/auth/password-setup"): "public one-time consume (#348 §7) — token authority",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",

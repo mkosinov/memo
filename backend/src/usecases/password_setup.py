@@ -74,6 +74,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import select as sa_select
 from sqlalchemy import update as sa_update
 
 from src.auth.password_setup import PasswordSetupToken, token_digest
@@ -142,9 +143,7 @@ async def issue_password_link(
     # ONE transaction: sweep ALL former tokens (live AND consumed —
     # the table never grows per account) …
     await db_session.execute(
-        sa_delete(PasswordSetupToken).where(
-            PasswordSetupToken.user_id == user_id
-        )
+        sa_delete(PasswordSetupToken).where(PasswordSetupToken.user_id == user_id)
     )
     # … and insert the new live one (PK = SHA-256 digest; the raw
     # token never persists).
@@ -227,3 +226,32 @@ async def set_password_by_link(
     await get_user_service().apply_password_reset(db_session, user, password_hash)
     await get_auth_service().revoke_user_sessions(db_session, user_id)
     await db_session.flush()
+
+
+async def validate_password_link(db_session: AsyncSession, raw_token: str) -> bool:
+    """Probe a setup link WITHOUT consuming it — the public screen
+    chooser (#348 Task 5, spec §5).
+
+    True iff the token row exists, is unused, unexpired AND its account
+    is active — the exact live-conditions of ``set_password_by_link``'s
+    conditional consume. Every other outcome answers False and the route
+    maps that to the single 422 ``PASSWORD_LINK_INVALID`` (one answer for
+    unknown / expired / used / inactive — no token enumeration). A pure
+    read: no write, no transaction needed (deliberately NOT
+    ``@transactional`` — nothing to commit).
+    """
+    digest = token_digest(raw_token)
+    row = (
+        await db_session.execute(
+            sa_select(PasswordSetupToken).where(
+                PasswordSetupToken.token == digest,
+                PasswordSetupToken.used_at.is_(None),
+                PasswordSetupToken.expires_at > datetime.utcnow(),
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return False
+
+    user = await get_user_service().get_by_id(db_session, row.user_id)
+    return user is not None and bool(user.is_active)

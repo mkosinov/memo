@@ -332,7 +332,7 @@ class TestDeleteExpectedPayloadAllIds:
     auto nodes never join the verification, so this pin lives on the
     Service entity (12 activities → a commit confirming ALL 12 id-sets
     must pass the subset check; one missing → 409). See
-    ``tests/test_api_services.py::TestDeleteExpectedCarriesAllIds``.
+    ``tests/test_api_services.py::TestDeleteUnifiedRoute::test_commit_expected_carries_all_ids_beyond_ten``.
     """
 
     def test_material_has_no_non_auto_expected_keys(self, api_client) -> None:

@@ -1889,7 +1889,7 @@ class TestDependencyItemsIn409Tree:
             {"id": payment["id"], "label": "1000, card"},
         ]
 
-    def test_client_409_tree_has_no_items_and_explicit_auto_false(
+    def test_client_409_tree_non_auto_nodes_carry_items_and_auto_flagged(
         self, api_client, create_record
     ) -> None:
         """(г) Other entities: the Client 409 tree node shape.

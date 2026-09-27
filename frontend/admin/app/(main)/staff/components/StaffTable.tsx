@@ -10,12 +10,15 @@ import {
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
+  usePatchUser,
+  useIssuePasswordLink,
 } from '@/hooks/useStaffMutations';
 import { usePositions } from '@/hooks/usePositions';
 import { useUI } from '@/contexts/UIContext';
 import { useStaffTable } from '@/contexts/StaffContext';
 import { displayMasterName } from '@/lib/utils';
 import { StaffModal, type StaffFormData } from './StaffModal';
+import { PasswordLinkDialog, type IssuedPasswordLink } from './PasswordLinkDialog';
 import { StaffFilters } from './StaffFilters';
 import { ArchiveStaffDialog } from './ArchiveStaffDialog';
 import { DataTable } from '@/app/components/shared/DataTable';
@@ -45,6 +48,9 @@ export function StaffTable() {
   const deleteStaff = useDeleteStaff();
   const archiveStaff = useArchiveStaff();
   const restoreStaff = useRestoreStaff();
+  // #348: users-vertical ops for the «Учётка» block (S1/S3/S5).
+  const patchUser = usePatchUser();
+  const issuePasswordLink = useIssuePasswordLink();
   const queryClient = useQueryClient();
   const { showToast } = useUI();
 
@@ -69,6 +75,57 @@ export function StaffTable() {
     [positions],
   );
 
+  // ─── #348: one-time link issuance corridor (S1 post-create / S3 block) ──
+  // The table owns the handover dialog so it stays visible after the create
+  // modal closes; the edit-block button routes through the modal's own
+  // dialog via `issueLinkForModal`.
+  const [linkDialog, setLinkDialog] = useState<{
+    link: IssuedPasswordLink | null;
+    error: string | null;
+    retryUserId: string | null;
+  } | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+
+  const issueFor = async (userId: string): Promise<void> => {
+    setLinkBusy(true);
+    try {
+      const link = await issuePasswordLink.mutateAsync(userId);
+      setLinkDialog({ link, error: null, retryUserId: null });
+    } catch (err) {
+      setLinkDialog({
+        link: null,
+        error: parseApiError(err).message,
+        retryUserId: userId,
+      });
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  // Shared prop for the modals: returns the link for the dialog THEY render
+  // (the edit-block issuance stays inside the modal; its errors surface there).
+  const issueLinkForModal = useCallback(
+    async (userId: string): Promise<IssuedPasswordLink> => {
+      const link = await issuePasswordLink.mutateAsync(userId);
+      return { token: link.token, expires_at: link.expires_at };
+    },
+    [issuePasswordLink],
+  );
+
+  // #348 S5: the modal hands the CHANGED phone here; the typed ApiError
+  // propagates back so the modal renders the PHONE_TAKEN inline error.
+  const handlePatchUserPhone = useCallback(
+    async (userId: string, phone: string): Promise<void> => {
+      try {
+        await patchUser.mutateAsync({ id: userId, data: { phone } });
+        showToast('Телефон учётки обновлён');
+      } catch (err) {
+        throw err instanceof ApiError ? err : new ApiError(0, parseApiError(err).message);
+      }
+    },
+    [patchUser],
+  );
+
   // ─── Create / Edit submit ────────────────────────────────────────────
   // The modal yields a structured StaffFormData; map it onto the typed wire
   // schemas here (tsc fails on a missing/extra field — canonical PUT, GH #178).
@@ -84,16 +141,25 @@ export function StaffTable() {
       sort_order: data.sort_order,
       master: data.master ? { specialty: data.master.specialty, color: data.master.color } : null,
       position_ids: data.position_ids,
-      // D6: create-only account flag ({phone, password, role?} | false);
+      // D6/#348: create-only account flag — passwordless {phone, role?} | false;
       // D10: role — a sent value beats the backend position template.
       create_user: data.create_user,
     };
+    let created: StaffResponse;
     try {
-      await createStaff.mutateAsync(payload);
+      created = await createStaff.mutateAsync(payload);
       showToast('Сотрудник создан');
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
       throw err; // let the modal keep its state open
+    }
+    // #348 S1: the account was just born passwordless — issue its FIRST
+    // setup link right away (a separate request). Failure is NOT a create
+    // failure: the error dialog offers «Повторить», and the account waits
+    // for the block button. Awaiting keeps the modal open until the link
+    // is on screen — the admin must not miss the one-time URL.
+    if (created.account && created.account.is_active) {
+      await issueFor(created.account.id);
     }
   };
 
@@ -228,6 +294,8 @@ export function StaffTable() {
           staff={editStaff}
           positions={positions}
           onSubmit={handleEdit}
+          onPatchPhone={handlePatchUserPhone}
+          onIssueLink={issueLinkForModal}
           onClose={() => setEditStaff(null)}
           title="Редактирование сотрудника"
           subtitle={displayMasterName(editStaff)}
@@ -243,6 +311,20 @@ export function StaffTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreating(false)}
           title="Новый сотрудник"
+        />
+      )}
+
+      {/* #348 S1: post-create one-time link handover (the table owns it so it
+          stays visible after the create modal closes). */}
+      {linkDialog && (
+        <PasswordLinkDialog
+          link={linkDialog.link}
+          error={linkDialog.error}
+          busy={linkBusy}
+          onRetry={() => {
+            if (linkDialog.retryUserId) void issueFor(linkDialog.retryUserId);
+          }}
+          onClose={() => setLinkDialog(null)}
         />
       )}
 

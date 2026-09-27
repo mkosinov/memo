@@ -178,3 +178,27 @@ class StaffArchiveRequest(BaseModel):
 
     archive_master: bool = True
     archive_user: bool = True
+
+
+class StaffDeleteBody(BaseModel):
+    """DELETE /api/v1/staff/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``TagDeleteBody`` / #318 D2).
+
+    * ``expected`` — id-sets per non-auto FK entity. Staff's only
+      non-auto dep is ``activities`` (blocked — never confirmed by the
+      user, but its id-set still participates in the race gate: an
+      activity that appeared mid-window must 409, not 422); the
+      clean/all-auto path sends ``{}``.
+    * ``resolutions`` — the user's cascade choices; every non-block
+      Staff dep is AUTO (users, masters, master_tags, staff_positions),
+      so a successful commit never needs them (the full branch is still
+      honored — contract for API consumers and races, spec §4.4).
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None

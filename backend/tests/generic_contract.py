@@ -323,6 +323,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/staff",
         not_found_code="STAFF_NOT_FOUND",
         response_schema=StaffResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot. The staff transport lives in
+        # the route (forms/preview) while the subset verification runs
+        # inside the ``delete_staff`` scenario transaction (§4.5).
+        delete_body={"expected": {}},
         # §4.4 default order: sort_order ASC, first_name ASC, id ASC. Both
         # rows share sort_order=0 → first_name decides; "!" (0x21) < "A"
         # (0x41) → sentinel sorts BEFORE the default ``first_name="A"``.

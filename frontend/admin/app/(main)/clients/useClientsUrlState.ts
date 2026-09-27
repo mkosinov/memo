@@ -56,21 +56,23 @@ export const clientsUrlConfig = {
 /** Structured-machine default = defaultFilters of ClientsContext. */
 import { defaultFilters as clientsDefaultFilters } from '@/contexts/ClientsContext';
 
-interface ClientsUrlAdapter {
-  state: {
-    q: string;
-    status: ArchiveFilter;
-    sort_by: string;
-    sort_order: SortOrder;
-    page: number;
-    per_page: number;
-    /** Effective status: `status from URL ?? (clientId present → 'all' : 'active')`. */
-    effectiveStatus: ArchiveFilter;
-    /** Deep-link narrowing ids (null = no param) — read-only view over ?clientId=. */
-    clientIds: string[] | null;
-    /** Structured filters (machine-side) — defaults until a user changes them. */
-    filters: ClientFilters;
-  };
+type ClientsUrlAdapterState = {
+  q: string;
+  status: ArchiveFilter;
+  sort_by: string;
+  sort_order: SortOrder;
+  page: number;
+  per_page: number;
+  /** Effective status: `status from URL ?? (clientId present → 'all' : 'active')`. */
+  effectiveStatus: ArchiveFilter;
+  /** Deep-link narrowing ids (null = no param) — read-only view over ?clientId=. */
+  clientIds: string[] | null;
+} & ClientFilters;
+
+export interface ClientsUrlAdapter {
+  // Record-compatible: the factory's PagedListUrlState consumes the state as
+  // a plain bag of canonical + structured-filter keys.
+  state: ClientsUrlAdapterState & Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
   reset: () => void;
 }

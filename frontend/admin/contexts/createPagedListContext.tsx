@@ -106,16 +106,15 @@ export interface PagedListFiltersState<F> {
  * `update` is the single writer (atomic batch; a filter-only patch
  * auto-resets `page`→1 in the same navigation — the hook enforces it).
  * `state.effectiveStatus` — #349 clients overlay: a page-level rule
- * (`status ?? clientId→'all' : default`) feeding the wire WITHOUT writing
- * the URL (spec §3). `reset` — #349 clients: the factory's controlled
- * resetFilters routes here when present (defaults = URL without filter
- * params; #232 §3.5 clients reset also drops `clientId`).
+ * (`status ?? clientId→'all' : default`) feeding the wire WITHOUT writing the
+ * URL (spec §3). It is declared ON the state (where the Provider reads it),
+ * not on the integration root. `reset` — #349 clients: the factory's
+ * controlled resetFilters routes here when present (defaults = URL without
+ * filter params; #232 §3.5 clients reset also drops `clientId`).
  */
 export interface PagedListUrlState {
   state: Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
-  /** Optional (clients-only today): see interface doc. */
-  effectiveStatus?: ArchiveFilter;
   /** Optional (clients-only today): see interface doc. */
   reset?: () => void;
 }

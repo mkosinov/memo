@@ -21,6 +21,7 @@ import { getClientsWithStats } from '@memo/api-client';
 import {
   useClientsUrlState,
   clientsUrlConfig,
+  CLIENTS_SORT_FIELDS,
   CLIENTS_URL_DEFAULT_STATUS,
 } from '../app/(main)/clients/useClientsUrlState';
 import { ClientsProvider, useClientsTable } from '../contexts/ClientsContext';
@@ -62,7 +63,12 @@ describe('useClientsUrlState — config (#349 Task 4)', () => {
       defaultValue: 'active',
     });
     // Sort default = no sort (spec §2: «дефолт каждой страницы — сортировки нет»)
-    expect(clientsUrlConfig.sort_by).toEqual({ kind: 'string', maxLength: 200, defaultValue: '' });
+    // sort_by is an ENUM over the whitelist: a dirty value silently falls back.
+    expect(clientsUrlConfig.sort_by).toEqual({
+      kind: 'enum',
+      values: [...CLIENTS_SORT_FIELDS],
+      defaultValue: '',
+    });
     expect(clientsUrlConfig.sort_order).toEqual({
       kind: 'enum',
       values: ['asc', 'desc'],
@@ -76,6 +82,22 @@ describe('useClientsUrlState — config (#349 Task 4)', () => {
       defaultValue: 20,
     });
     expect(CLIENTS_URL_DEFAULT_STATUS).toBe('active');
+  });
+
+  it('dirty ?sort_by=bogus silently falls back to no-sort (whitelist enum)', () => {
+    __resetNavigation('?sort_by=bogus&sort_order=desc', '/clients');
+    const { result } = renderHook(() => useClientsUrlState());
+    expect(result.current.state.sort_by).toBe('');
+    // Orphan sort_order (requirement at its default after the fallback) is ignored.
+    expect(result.current.state.sort_order).toBe('asc');
+    expect(__lastPushedUrl()).toBeNull(); // dirty URL not rewritten
+  });
+
+  it('valid ?sort_by=name&sort_order=desc is honored', () => {
+    __resetNavigation('?sort_by=name&sort_order=desc', '/clients');
+    const { result } = renderHook(() => useClientsUrlState());
+    expect(result.current.state.sort_by).toBe('name');
+    expect(result.current.state.sort_order).toBe('desc');
   });
 
   it('reads ?q=ma — state.q mirrors the URL string', () => {

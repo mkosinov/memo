@@ -33,7 +33,9 @@ export const CLIENTS_URL_DEFAULT_STATUS: ArchiveFilter = 'active';
  * The hook config — page-scoped, memoized forever (one identity per mount).
  * sort default = NO sort (spec §2: «дефолт каждой страницы — сортировки нет»)
  * — sort params reach the server only after a user pick, mirroring the
- * factory's uncontrolled `sortBy: null` seed (§4.4).
+ * factory's uncontrolled `sortBy: null` seed (§4.4). sort_by is an ENUM over
+ * the whitelist (CLIENTS_SORT_FIELDS): a dirty `?sort_by=bogus` silently
+ * falls back to the no-sort default (US-3 dirty-URL contract).
  */
 export const clientsUrlConfig = {
   q: { kind: 'string', maxLength: 200, defaultValue: '' },
@@ -42,7 +44,7 @@ export const clientsUrlConfig = {
     values: ['active', 'all', 'archived'] as const,
     defaultValue: CLIENTS_URL_DEFAULT_STATUS,
   },
-  sort_by: { kind: 'string', maxLength: 200, defaultValue: '' },
+  sort_by: { kind: 'enum', values: CLIENTS_SORT_FIELDS, defaultValue: '' },
   sort_order: {
     kind: 'enum',
     values: ['asc', 'desc'] as const,
@@ -97,6 +99,10 @@ export function useClientsUrlState(): ClientsUrlAdapter {
   // status a present clientId forces 'all' (archived deep links must find the
   // client, #216 behavior preserved) — and the force is NEVER written back to
   // the URL (no user-less navigation).
+  // Edge (architect-accepted, US-3): `?status=xyz&clientId=X` — the status
+  // param IS present but invalid, so the enum already fell it back to the
+  // page default 'active' and the clientId force does NOT apply (presence of
+  // a DIRTY value counts as an explicit status → dirty URL → defaults).
   const hasUrlStatus = searchParams.get('status') !== null;
   const effectiveStatus: ArchiveFilter = hasUrlStatus ? urlState.status : clientIds ? 'all' : urlState.status;
 

@@ -58,6 +58,24 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
 });
 
 // The REAL page-scoped adapter stays in play — it reads the mocked URL.
+// Instance-count instrumentation (#349 follow-up, finding 3): the hook
+// contract allows ONE instance per URL (pending-flush/navigate coalescing is
+// per-instance — two instances would clobber each other's writes and could
+// resurrect a dropped clientId in the 16ms window).
+const { urlStateHook } = vi.hoisted(() => ({ urlStateHook: {} as { real?: unknown; count: number } | any }));
+urlStateHook.count = 0;
+vi.mock('../app/(main)/clients/useClientsUrlState', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../app/(main)/clients/useClientsUrlState')>();
+  urlStateHook.real = actual.useClientsUrlState;
+  return {
+    ...actual,
+    useClientsUrlState: (...args: [] | [unknown]) => {
+      urlStateHook.count += 1;
+      return (urlStateHook.real as (...a: unknown[]) => unknown)(...args);
+    },
+  };
+});
 import { useClientsUrlState } from '../app/(main)/clients/useClientsUrlState';
 
 const mockRouter = { push: vi.fn(), replace: vi.fn() };
@@ -149,7 +167,22 @@ describe('ClientsPage', () => {
     mockRouter.push.mockClear();
     mockRouter.replace.mockClear();
     clientsProviderMounts.length = 0;
+    urlStateHook.count = 0;
     mockUseClients.mockReturnValue(createMockClientsTableState({ total: 25, page: 1, perPage: 20 }));
+  });
+
+  // #349 follow-up, finding 3 — the hook contract allows ONE instance per
+  // URL: a full page mount (Content + Inner) must call useClientsUrlState()
+  // exactly once across re-renders, not once per component.
+  it('instantiates the URL adapter exactly once per mount (single writer)', async () => {
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
+    expect(urlStateHook.count).toBe(1);
   });
 
   afterEach(() => {

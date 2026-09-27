@@ -4,25 +4,33 @@ import { Suspense, useState, useEffect, useRef } from 'react';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
 import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
 import { useClientsUrlState } from './useClientsUrlState';
+import type { ClientsUrlAdapter } from './useClientsUrlState';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
 import { ClientDeepLinkChip } from './components/ClientDeepLinkChip';
 import type { ClientWithStats } from '@memo/api-client';
 
-function ClientsPageContent() {
+/**
+ * #349 single instance: Content consumes the adapter CREATED ONCE in
+ * ClientsPageInner (via props) — never calls useClientsUrlState() itself.
+ * The hook contract allows one instance per URL (pending-flush/navigate
+ * coalescing is per-instance); a second instance would clobber the first's
+ * write base and could resurrect a dropped clientId in the 16ms window.
+ */
+function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
   // GH #140 — page-scoped factory state; lookups by id go through useClient.
   const { items } = useClientsTable();
-  // #349 Task 4 — the page-scoped URL adapter owns the canonical table
-  // params (q/status/sort/page/per_page in the address) and the machine
-  // `clientIds` narrowing (still read-only from ?clientId=). No sync effect
-  // anymore: the provider is fully controlled from the first render, so a
-  // deep-link mount still fires exactly ONE narrowed GET (#231 S1).
-  const { state, navigate } = useClientsUrlState();
+  // #349 Task 4 — the adapter owns the canonical table params
+  // (q/status/sort/page/per_page in the address) and the machine `clientIds`
+  // narrowing (read-only from ?clientId=). No sync effect anymore: the
+  // provider is fully controlled from the first render, so a deep-link mount
+  // still fires exactly ONE narrowed GET (#231 S1).
+  const { state, navigate } = urlState;
   // Auto-open rule (#232 §3.3): exactly ONE valid id opens the modal
   // automatically; two or more never do (US-3) — cards open by row clicks.
   const deepLinkId = state.clientIds && state.clientIds.length === 1 ? state.clientIds[0] : null;
@@ -81,9 +89,10 @@ function ClientsPageContent() {
 
       {/* #232 §3.5 — narrowing chip: visible affordance for an active
           deep-link narrowing (between the filters block and the table). The
-          ✕ removes the param from the address through the hook's navigate()
-          (#349 single writer: a pending coalesced flush must adopt the
-          navigated URL, not resurrect the dropped param). */}
+          ✕ removes the param from the address through the SAME adapter's
+          navigate() (#349 single writer + single instance: a pending
+          coalesced flush must adopt the navigated URL, not resurrect the
+          dropped param). */}
       {state.clientIds && (
         <ClientDeepLinkChip
           clientIds={state.clientIds}
@@ -119,12 +128,12 @@ function ClientsPageContent() {
   );
 }
 
-// #349 Task 4 — managed mode (spec §3): the page-scoped hook lives INSIDE
-// the Suspense boundary (useSearchParams) and is passed to the factory as
-// the urlState integration — no initialFilters seed anymore, the provider is
-// controlled from its first render. Status overlay rule: explicit ?status=
-// wins, else a present ?clientId= forces effective 'all' (never written to
-// the URL — #216 behavior preserved through the adapter's effectiveStatus).
+// #349 Task 4 — managed mode (spec §3): the page-scoped hook is instantiated
+// EXACTLY ONCE, here — inside the Suspense boundary (useSearchParams) — and
+// flows DOWN to the provider and every consumer (Content, chip ✕) as props.
+// Status overlay rule: explicit ?status= wins, else a present ?clientId=
+// forces effective 'all' (never written to the URL — #216 behavior preserved
+// through the adapter's effectiveStatus).
 function ClientsPageInner() {
   const urlState = useClientsUrlState();
   return (
@@ -133,7 +142,7 @@ function ClientsPageInner() {
           ClientRecordTab) — the schedule stack (URL view state + data) is
           schedule-page-only and must not mount here. */}
       <GridSettingsProvider>
-        <ClientsPageContent />
+        <ClientsPageContent urlState={urlState} />
       </GridSettingsProvider>
     </ClientsProvider>
   );

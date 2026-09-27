@@ -12,11 +12,13 @@ from alembic import context
 # Add the project root to sys.path so we can import src.*
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.db.base import Base  # noqa: E402
-
 # Import ALL models so they register with Base.metadata
-from src.auth.session import Session  # noqa: E402, F401 — sessions table (GH #247)
-from src.models import (  # noqa: E402, F401
+from src.auth.password_setup import (
+    PasswordSetupToken,  # noqa: F401 — password_setup_tokens (#348)
+)
+from src.auth.session import Session  # noqa: F401 — sessions table (GH #247)
+from src.db.base import Base
+from src.models import (  # noqa: F401
     Activity,
     Client,
     Location,

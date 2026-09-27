@@ -1,8 +1,10 @@
 """ORM models package — re-exports all entities and join tables."""
 
-# Session lives in src/auth/ (spec §3.1) but must register with Base.metadata:
+# Session and PasswordSetupToken live in src/auth/ (spec §3.1 / #348 §4)
+# but must register with Base.metadata:
 # seed.py builds dev/E2E schema via Base.metadata.create_all on a wiped DB,
 # where run_alembic_upgrade only stamps head (src/db/migrate.py:57-62).
+from src.auth.password_setup import PasswordSetupToken  # noqa: F401 — bare registration import
 from src.auth.session import Session  # noqa: F401 — bare registration import
 from src.models.abstract import AbstractModel, AbstractModelSoftDelete
 from src.models.activity import Activity
@@ -58,8 +60,8 @@ __all__ = [
     "Tag",
     "Tariff",
     "User",
-    "UserRole",
     "UserProfile",
+    "UserRole",
     "UserSettings",
     "Visit",
     "Visitor",

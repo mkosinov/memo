@@ -13,7 +13,10 @@ class User(AbstractModelSoftDelete):
 
     phone: Mapped[str] = mapped_column(String(20), unique=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    # #348: NULL = password not set yet (account created without one; the
+    # owner sets it via the one-time setup link). All pre-#348 rows have
+    # a hash — the migration just drops the NOT NULL.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(20))
     # GH #266: master_id renamed → staff_id; FK → staff directory, one
     # account per employee card (unique), nullable for pure admins.

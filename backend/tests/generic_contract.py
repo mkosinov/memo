@@ -257,6 +257,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/clients",
         not_found_code="CLIENT_NOT_FOUND",
         response_schema=ClientResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot. The client transport lives in
+        # the route (forms/preview) while the subset verification runs
+        # inside the ``delete_client`` scenario transaction (§4.5).
+        delete_body={"expected": {}},
     ),
     LocationService: EntityConfig(
         service_factory=get_location_service,

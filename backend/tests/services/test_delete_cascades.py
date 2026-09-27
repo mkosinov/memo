@@ -402,14 +402,19 @@ async def test_client_hard_delete_nullifies_photos(api_client, db_session):
     client = await _insert_client(db_session)
     photo = await _insert_photo(db_session, client_id=client.id)
 
-    # No-body dry-run → 409 (the photos dep is present in the tree).
-    resp = api_client.delete(f"/api/v1/clients/{client.id}")
+    # GH #345 §4.1: the preview moved behind ?dry_run=true (bare → 422) —
+    # the photos dep (with its ``_count_c_photos`` counter) appears in the
+    # dependency tree.
+    resp = api_client.request(
+        "DELETE", f"/api/v1/clients/{client.id}", params={"dry_run": "true"},
+    )
     assert resp.status_code == 409, resp.text
 
-    # photos is an AUTO dep → resolutions {} suffices → 204.
+    # photos is an AUTO dep → resolutions {} + the empty expected state
+    # suffice → 204.
     resp = api_client.request(
         "DELETE", f"/api/v1/clients/{client.id}",
-        json={"resolutions": {}},
+        json={"resolutions": {}, "expected": {}},
     )
     assert resp.status_code == 204, resp.text
 

@@ -13,11 +13,16 @@ from src.auth.permissions import (
 )
 from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.deletion import (
+    ResolutionError,
+    StaleDependenciesError,
+    collect_dependencies,
+)
 from src.errors import ErrorCode, ErrorDetail
 from src.models.client import Client
 from src.schemas.client import (
     ClientCreate,
+    ClientDeleteBody,
     ClientListParams,
     ClientPatch,
     ClientResponse,
@@ -195,50 +200,78 @@ async def delete_client(
     client_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None, embed=True),
+    body: Annotated[ClientDeleteBody | None, Body()] = None,
+    dry_run: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Non-destructive preview: returns 204 without deleting "
+                "(no deps) or 409 with the dependency tree; never "
+                "modifies rows"
+            )
+        ),
+    ] = None,
 ) -> None:
-    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+    """Unified delete contract — dry-run preview flag / commit body
+    (GH #345 §4.1, one-to-one mirror of the staff/tags/records family;
+    the subset verification runs inside the ``delete_client`` scenario
+    transaction, spec §4.5).
 
-    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
-      non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
-      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
-      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
-      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
-      all-auto deps). The ``delete_client`` scenario (usecases, GH #327
-      Task 4) runs the resolution transaction → 204; ``ResolutionError`` →
-      422; missing → 404.
+    The legacy no-body DELETE (execute-if-clean / silent dry-run) is
+    REMOVED. Client deps per the FK matrix: ``records`` (nullify) +
+    ``visitors`` (cascade) — the two NON-auto nodes carrying ``items``
+    (the ``expected`` source; the visitors node also carries the
+    ``cascade_preview`` visits counter) — plus AUTO deps (client_tags,
+    photos — resolved automatically, exempt from the check). Per the
+    §4.4 matrix Client is the ONLY entity with a resolvable commit.
+
+    * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
+      existence probe → missing → 404; present →
+      ``collect_dependencies`` → empty → 204 WITHOUT deleting;
+      non-empty → 409 + dependency tree. Combined with a
+      ``resolutions`` body → 422
+      ``dry_run_with_resolutions_forbidden`` (checked before the
+      existence probe); an expected-only body is silently ignored.
+    * No body, no flag → 422 ``{"detail": "expected_state_required"}``:
+      every real deletion must declare its state; rejected before any
+      DB access — the form check precedes the probe, so an unknown id
+      still gets 422, not 404. Same for a body whose ``expected`` is
+      absent (``{"resolutions": {...}}`` alone — the rejected legacy
+      shape).
+    * Body ``{resolutions?, expected}`` — the deferred-delete commit.
+      The ROUTE is transport only (spec §4.5): the subset verification
+      AND execution live INSIDE the ``delete_client`` scenario's
+      ``@transactional`` transaction (the ``delete_record``/`
+      ``delete_staff`` mirror); this route maps
+      ``StaleDependenciesError`` → 409 ``stale_dependencies`` +
+      current tree, ``ResolutionError`` → 422, missing id → 404
+      ``CLIENT_NOT_FOUND``, success → 204.
     """
-    if resolutions is not None:
-        try:
-            # Selfless-scenario call convention: the leading ``None``
-            # occupies the wrapper's ``self`` slot (see usecases/clients.py).
-            ok = await delete_client_scenario(
-                None, db_session=session, id=client_id, resolutions=resolutions
-            )
-        except ResolutionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=ErrorDetail(
-                    code=ErrorCode.CLIENT_NOT_FOUND,
-                    message="Client not found",
-                ).model_dump(),
-            )
-        return
+    resolutions = body.resolutions if body is not None else None
+    expected = body.expected if body is not None else None
 
-    deps = await collect_dependencies(session, Client, client_id)
-    if deps:
+    # Rev7 (#285) mirror: bare DELETE without the flag is a contract
+    # violation — reject the request shape before any DB access. Literal
+    # string detail (same flat shape as the 409 preview) → JSONResponse,
+    # not raised: the global HTTPException handler wraps string details
+    # into {code, message} — not the pinned contract.
+    if not dry_run and expected is None:
         return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "has_dependencies",
-                "dependencies": [d.model_dump(exclude_none=True) for d in deps],
-            },
+            status_code=422,
+            content={"detail": "expected_state_required"},
         )
-    deleted = await service.delete(db_session=session, id=client_id)
-    if not deleted:
+    # Pure preview never carries resolutions — forbidden combination.
+    # (An expected-only body IS allowed: silently ignored below.)
+    if dry_run and resolutions is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "dry_run_with_resolutions_forbidden"},
+        )
+
+    # Existence probe. The dry-run branch MUST 404 on a missing id
+    # instead of previewing an empty tree.
+    client = await service.get(db_session=session, id=client_id)
+    if not client:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(
@@ -246,6 +279,66 @@ async def delete_client(
                 message="Client not found",
             ).model_dump(),
         )
+
+    if dry_run:
+        deps = await collect_dependencies(session, Client, client_id)
+        if deps:
+            return _dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only: no delete, no SSE marks.
+
+    # Body branch: the commit of the deferred delete — the business
+    # chain lives in the usecases scenario (spec §4.5): ONE
+    # @transactional transaction owns BOTH the expected subset
+    # verification and the execution (the ``delete_record`` mirror,
+    # unlike the session-request routers of the dictionary entities);
+    # the ROUTE keeps only transport — the 409 stale_dependencies
+    # rendering, the 422 mapping, and 404.
+    try:
+        # Selfless-scenario call convention: the leading ``None``
+        # occupies the wrapper's ``self`` slot (see usecases/clients.py).
+        ok = await delete_client_scenario(
+            None,
+            db_session=session,
+            id=client_id,
+            resolutions=resolutions or {},
+            expected=expected,
+        )
+    except StaleDependenciesError as exc:
+        return _dependencies_response(exc.nodes, detail="stale_dependencies")
+    except ResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.CLIENT_NOT_FOUND,
+                message="Client not found",
+            ).model_dump(),
+        )
+
+
+def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``.
+
+    Mirror of the staff/tags/records/activities routes' builder (#285/
+    #286/#318/#345; same pinned shape). ``detail`` distinguishes the
+    two 409s of the deferred-delete contract (GH #345 §4.1):
+    ``has_dependencies`` (dry-run preview) and ``stale_dependencies``
+    (commit-time expected mismatch — rendered here from the
+    ``StaleDependenciesError`` nodes the scenario raised inside its
+    transaction). The ``dependencies`` array is ``DependencyNode``
+    dumps — optional-None node fields are OMITTED (``exclude_none``);
+    the Client tree carries counters AND items on its two non-auto
+    nodes (records/visitors — the ``expected`` source, §4.3) plus the
+    ``cascade_preview`` visits counter on the visitors node.
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": detail,
+            "dependencies": [d.model_dump(exclude_none=True) for d in deps],
+        },
+    )
 
 
 @router.get("/{client_id}/visitors", response_model=list[VisitorResponse])

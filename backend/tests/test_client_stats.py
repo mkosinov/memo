@@ -1348,7 +1348,11 @@ class TestClientListCombinedFilters:
         """search + status filter together."""
         active = create_client(name="Combined Active", phone="+79999500001")
         inactive = create_client(name="Combined Inactive", phone="+79999500002")
-        api_client.delete(f"/api/v1/clients/{inactive['id']}")
+        # GH #345: the deferred-delete commit (bare DELETE is 422 now).
+        del_resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{inactive['id']}", json={"expected": {}},
+        )
+        assert del_resp.status_code == 204, del_resp.text
 
         resp = api_client.get("/api/v1/clients", params={
             "q": "Combined", "status": "active",

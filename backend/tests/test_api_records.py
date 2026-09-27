@@ -1905,7 +1905,10 @@ class TestDependencyItemsIn409Tree:
         record = create_record()
         client_id = record["client_id"]
 
-        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+        # GH #345 §4.1: the preview moved behind ?dry_run=true (bare → 422).
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client_id}", params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409
         deps = {d["entity"]: d for d in resp.json()["dependencies"]}

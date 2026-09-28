@@ -10,6 +10,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-09-27
 
 ### Changed
+- **GH #345 — Архивируемые сущности (staff, locations, services, materials, clients) на общий
+  флоу удалений «навсегда» (этап 4 трекера #346)** — branch
+  `345-archivable-delete` (12 commits `5255c125..2bbfa16b`, base `e6196ff6` — rebase впитал
+  #324/#367, 3 конфликт-файла разрешены аддитивными объединениями: реестры `deletion.py`,
+  импорт `endpoints.test.ts`, cleanup-routing e2e-factories; 76 файлов, +9111/−1952; спека
+  `docs/specs/2026-09-27-archivable-delete-345-design.md` rev3, план
+  `docs/plans/2026-09-27-archivable-delete-345-plan.md` — 10/10 задач T1–T10; канон
+  `deletion.md`/`_overview.md` обновлён код-коммитами T3/T4/T10):
+  - **Коллекторы (T1, `5255c125`):** фабрика коллекторов — id/items-коллекторы non-auto
+    зависимостей `(Client, "records")`, `(Client, "visitors")` (id+items; посетители —
+    имя, nullable → «Аноним», PII-граница без телефонов) и id-only
+    `(Staff/Location/Service, "activities")` (гейс expected-сверки blocked-узлов);
+    Material — без новых ключей (`service_materials` — auto).
+  - **Корневой контракт 5 DELETE-роутов (T2–T4):** `?dry_run=true` → 204 (чистая, без
+    удаления) / 409 `has_dependencies` (дерево: счётчики + items + cascade_preview) / 404;
+    голый DELETE и тело без `expected` → **422 `expected_state_required`** (форма раньше
+    probe — неизвестный id тоже 422; ветка execute-if-clean #207 упразднена);
+    `?dry_run`+`resolutions` → 422 `dry_run_with_resolutions_forbidden`; commit-тело
+    `{resolutions?, expected}` → probe → subset-сверка `expected` по non-auto узлам
+    (409 `stale_dependencies`; исчезнувшая за окно не блокирует; auto-узлы вне сверки) →
+    валидация `resolutions` (blocked при любом теле → 422) → 204. Владение транзакцией
+    сверки (§4.5): services/locations/materials — сверка в роутере через
+    `GenericService._resolve_delete_core` (зеркало тегов #318); staff/clients — параметр
+    `expected` в сценариях `delete_staff`/`delete_client` (сверка внутри `@transactional`
+    сценария — зеркало `delete_record`) (`829e815f`, `a018014c`, `2c48eb01`).
+  - **api-client (T5/T8):** `dryRunDeleteX` ×5 (зеркало `dryRunDeleteRecord`);
+    `resolveDeleteX` — payload `{resolutions?, expected}` (обязательный `expected`);
+    голые `deleteStaff/Client/Service/Location/Material` удалены вместе с
+    describe-блоками (`2e50b414`, `2ade9787`).
+  - **Фронт на PendingActions (T6/T7):** `useDeleteX` ×5 по образцу `useDeleteTag`/
+    `useDeleteRecord` — первый вызов всегда dry-run (кнопка в loading на время превью,
+    404 → тихая инвалидация без диалога/тостов, сеть/5xx → error-тост без изменений
+    страницы), 204 → optimistic + enqueue с `{expected:{}}`, 409 → `DeleteDialog` →
+    confirm → optimistic + enqueue с `{resolutions, expected}` из полного дерева (общий
+    модуль `expectedFromDependencies` — дубль из `useDeleteRecord`/`useDeleteTag`
+    свёрнут); undo без серверных вызовов; commit-фейлы по D4 #285 — 404 тихо /
+    409 stale → «данные изменились» + «Обновить» / сеть → undo + тост;
+    `delayMs: 5000` (`10931423`, `4ff3ff0b`).
+  - **e2e (T9):** 5 спеков переписаны на поток dry_run → диалог → кольцо → commit —
+    `materials-delete`, `clients-delete-cascade`, `clients-delete-invalid-resolution`,
+    `staff-delete-blocked` (Mode B «Архивировать вместо» сохранён), `staff-delete-auto-cascade`
+    (`0819fdcd`).
+  - **Канон (T10):** `docs/domain-rules/deletion.md` — строка фазы 3 архивируемых закрыта
+    («готово — #345»); матрица `_overview.md` — 5 сущностей на отложенном конвейере
+    (`2bbfa16b`).
+  - **Tests:** backend `-m api` **1168p/0f**; backend domain+usecases **320/0**;
+    admin vitest (TZ=UTC) **2662/0** + tsc clean; api-client vitest **449/0**;
+    e2e **21/0** (5 переписанных delete-спеков + archive-паритет 14 + schedule-sanität 7);
+    pytest-контракты S1–S6 ×5 сущностей + vitest-хуки ×5 + e2e S1–S4/S7 — все критерии
+    приёмки спеки §7 закрыты; generic-контракт зелёный.
+  - Status: `docs/status/2026-09-27-archivable-delete-345.md`
 - **GH #367 — Унификация сортировочных параметров табличных списков** — branch
   `sort-params-367` (8 commits `ef96f107..ec9c8e3d`, base `945e5e83`; спека
   `docs/specs/2026-09-27-sort-params-367-design.md` + план

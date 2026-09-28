@@ -847,6 +847,21 @@ export const PasswordLinkResponseSchema = z.object({
 });
 export type PasswordLinkResponse = z.infer<typeof PasswordLinkResponseSchema>;
 
+// ─── Public password setup (#348 spec §5/§6 — the link token is the
+// authority; both endpoints are anonymous) ───────────────────────────────────
+// Mirrors backend src/schemas/auth.py. The token rides in the URL fragment
+// (#token=…), never in server logs / Referer. Error contract: the single
+// 422 PASSWORD_LINK_INVALID (one answer for unknown / expired / used /
+// inactive — no state enumeration); a weak password answers 422
+// PASSWORD_POLICY (the shared single-source hint string).
+
+// POST /auth/password-setup/validate 200 body — the screen chooser: ok=true
+// → the password form; the 422 above → «Ссылка недействительна или истекла».
+export const PasswordSetupValidateResponseSchema = z.object({
+  ok: z.boolean(),
+});
+export type PasswordSetupValidateResponse = z.infer<typeof PasswordSetupValidateResponseSchema>;
+
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,
 // never individual rows. Mirrors backend `DependencyNode` (src/domain/deletion.py).

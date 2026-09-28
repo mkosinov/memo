@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUI } from '@/contexts/UIContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { AuthCard } from '../components/auth/AuthCard';
 import { parseApiError } from '../lib/api/parseApiError';
 
 /**
@@ -74,25 +75,8 @@ function LoginForm() {
   }
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4"
-      style={{ backgroundColor: 'var(--bg)' }}
-    >
-      <div
-        className="w-full max-w-sm rounded-xl p-8"
-        style={{
-          backgroundColor: 'var(--card-bg)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
-        }}
-      >
-        <h1
-          className="text-xl font-semibold mb-6 text-center"
-          style={{ color: 'var(--ink)' }}
-        >
-          Вход в Memo
-        </h1>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <AuthCard title="Вход в Memo">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="login-phone"
@@ -154,7 +138,6 @@ function LoginForm() {
             {submitting ? 'Вход…' : 'Войти'}
           </button>
         </form>
-      </div>
-    </div>
+    </AuthCard>
   );
 }

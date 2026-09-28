@@ -77,6 +77,8 @@ import {
   type UserResponse,
   PasswordLinkResponseSchema,
   type PasswordLinkResponse,
+  PasswordSetupValidateResponseSchema,
+  type PasswordSetupValidateResponse,
   StaffListResponseSchema,
   PositionListResponseSchema,
   MasterViewListResponseSchema,
@@ -1151,5 +1153,31 @@ export async function patchUser(id: string, data: UserPhonePatch): Promise<UserR
 export async function issuePasswordLink(id: string): Promise<PasswordLinkResponse> {
   return api(`/api/v1/users/${id}/password-link`, PasswordLinkResponseSchema, {
     method: 'POST',
+  });
+}
+
+// ─── Public password setup (#348 spec §5/§6 — anonymous, token is the
+// authority) ────────────────────────────────────────────────────────────────
+
+// Probe a setup link on page open (spec §6 screen chooser): 200 {ok: true} →
+// the password form; the single 422 PASSWORD_LINK_INVALID (one answer for
+// unknown / expired / used / inactive) → «Ссылка недействительна или истекла».
+// The token comes from the URL fragment (#token=…).
+export async function validatePasswordSetup(token: string): Promise<PasswordSetupValidateResponse> {
+  return api('/api/v1/auth/password-setup/validate', PasswordSetupValidateResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+// Consume the one-time link and set the account password → 204 (resolves
+// undefined). A weak password answers 422 PASSWORD_POLICY (inline single
+// message); any invalid-token state answers the single 422
+// PASSWORD_LINK_INVALID. The 204 consumed the token — and the page already
+// stripped the fragment, so a refresh never re-issues the request.
+export async function passwordSetup(token: string, password: string): Promise<void> {
+  await api('/api/v1/auth/password-setup', z.any(), {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
   });
 }

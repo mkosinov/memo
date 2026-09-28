@@ -159,6 +159,11 @@ export function createMockRecordsContext(
     resetFilters: vi.fn(),
     // #138 Task 5: URL period writer — no-op by default, override per-test.
     setPeriod: vi.fn(),
+    // #349 Task 7 — URL-backed period view fields (the adapter's shape).
+    dateFrom: '2026-09-28',
+    dateTo: '2026-10-04',
+    explicitFrom: null,
+    explicitTo: null,
     isLoading: false,
     loading: false,
     isPending: false,

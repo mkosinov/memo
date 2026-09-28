@@ -28,9 +28,11 @@ vi.mock('@memo/api-client', () => ({
   getRecordsView: vi.fn(),
 }));
 
-// #138 Task 5: the period comes from the URL (useRecordsPeriod →
-// useSearchParams), so the old NavigationContext mock is replaced by the
-// shared next-navigation mock. Default: /records with NO params → the
+// #349 Task 7: ALL records page state is URL state — the provider takes the
+// page-scoped adapter (useRecordsUrlState → useTableUrlState) as a prop and
+// derives everything from it; setters navigate (16ms-coalesced push). The
+// shared next-navigation mock commits those navigations, so waitFor() sees
+// the URL-mediated state changes. Default: /records with NO params → the
 // current-week monday..sunday default range.
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
 
@@ -41,9 +43,10 @@ import type {
   VisitResponse,
 } from '@memo/api-client';
 
-import { __resetNavigation } from './helpers/nextNavigationMock';
+import { __resetNavigation, __currentQuery } from './helpers/nextNavigationMock';
 
 import { RecordsProvider, useRecords } from '../contexts/RecordsContext';
+import { useRecordsUrlState } from '../app/(main)/records/useRecordsUrlState';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -121,10 +124,13 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // #349 Task 7: the adapter is created INSIDE the wrapper (hook rules) —
+  // exactly the page's RecordsUrlBoundary shape.
   function Wrapper({ children }: { children: React.ReactNode }) {
+    const urlState = useRecordsUrlState();
     return (
       <QueryClientProvider client={queryClient}>
-        <RecordsProvider>{children}</RecordsProvider>
+        <RecordsProvider urlState={urlState}>{children}</RecordsProvider>
       </QueryClientProvider>
     );
   }
@@ -290,6 +296,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('setFilters resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -320,6 +327,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('date-range change resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -349,6 +357,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('setPerPage resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -368,8 +377,10 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
       result.current.setPerPage(50);
     });
 
-    expect(result.current.page).toBe(1);
-    expect(result.current.perPage).toBe(50);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+      expect(result.current.perPage).toBe(50);
+    });
   });
 
   it('setSort(field, order) applies field and order verbatim (two-arg, §6.4)', async () => {
@@ -383,15 +394,19 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortBy).toBe('status');
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('status');
+      expect(result.current.sortOrder).toBe('desc');
+    });
 
     // Explicit order on another field — applied as given (no asc default).
     act(() => {
       result.current.setSort('total', 'asc');
     });
-    expect(result.current.sortBy).toBe('total');
-    expect(result.current.sortOrder).toBe('asc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('asc');
+    });
 
     // Fetcher receives the two-arg state.
     await waitFor(() => {
@@ -412,18 +427,23 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortOrder).toBe('desc');
+    });
 
     // Same call again — the context applies the given order verbatim;
     // the asc/desc toggle logic lives in DataTable (§6.10.4).
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortBy).toBe('status');
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('status');
+      expect(result.current.sortOrder).toBe('desc');
+    });
   });
 
   it('setSort resets page to 1 (§6.10.2 drift fix)', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -434,12 +454,16 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setPage(5);
     });
-    expect(result.current.page).toBe(5);
+    await waitFor(() => {
+      expect(result.current.page).toBe(5);
+    });
 
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.page).toBe(1);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
   });
 
   it('exposes server total', async () => {
@@ -543,6 +567,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
   });
 
   it('setFilters({ search }) resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -562,7 +587,9 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
       result.current.setFilters({ search: 'тест' });
     });
 
-    expect(result.current.page).toBe(1);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
     await waitFor(() => {
       expect(vi.mocked(getRecordsView)).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1, q: 'тест' }),
@@ -590,12 +617,118 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
       result.current.resetFilters();
     });
 
-    expect(result.current.filters.search).toBe('');
+    await waitFor(() => {
+      expect(result.current.filters.search).toBe('');
+    });
   });
 });
 
-describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', () => {
+// #349 Task 7 — ALL records state is URL state: the provider consumes the
+// page adapter (managed mode). Deep links restore state at mount; every
+// setter is a URL write through the single writer.
+describe('RecordsContext — URL-backed state (#349 Task 7)', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+
+    __resetNavigation('', '/records');
+
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
+  });
+
+  it('a deep link restores page/filters/sort/per_page at mount', async () => {
+    __resetNavigation(
+      '?page=3&per_page=50&status=waiting&q=%D0%B0%D0%BD%D0%BD%D0%B0&location_id=loc-1&sort_by=total&sort_order=desc',
+      '/records',
+    );
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.page).toBe(3);
+      expect(result.current.perPage).toBe(50);
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.filters.search).toBe('анна');
+      expect(result.current.filters.locationId).toBe('loc-1');
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('desc');
+    });
+
+    // The FIRST fetch carries the link's params on the wire.
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          page: 3,
+          per_page: 50,
+          status: 'waiting',
+          q: 'анна',
+          location_id: 'loc-1',
+          sort_by: 'total',
+          sort_order: 'desc',
+        }),
+      );
+    });
+  });
+
+  it('setFilters writes the URL (?status=…, page stripped as default)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ status: 'waiting' });
+    });
+
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?status=waiting');
+    });
+  });
+
+  it('setPage writes ?page=', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(3);
+    });
+
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?page=3');
+    });
+  });
+
+  it('setSort writes sort params; back to date/asc strips them', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setSort('total', 'desc');
+    });
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?sort_by=total&sort_order=desc');
+    });
+
+    act(() => {
+      result.current.setSort('date', 'asc');
+    });
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('');
+    });
+  });
+});
+
+describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', () => {  beforeEach(() => {
     vi.clearAllMocks();
 
     __resetNavigation('', '/records');

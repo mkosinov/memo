@@ -1,11 +1,11 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRecordsView } from '@memo/api-client';
 import type { PaginatedResponse, RecordView } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
-import { useRecordsPeriod } from '@/hooks/useRecordsPeriod';
+import type { RecordsUrlAdapter } from '@/app/(main)/records/useRecordsUrlState';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 import { qk } from '@/lib/queryKeys';
 
@@ -22,8 +22,6 @@ export type RecordSortField =
   | 'date' | 'client' | 'service' | 'master' | 'location'
   | 'guests' | 'status' | 'total' | 'payment';
 export type RecordSortOrder = 'asc' | 'desc';
-
-const DEFAULT_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '', search: '' };
 
 export interface RecordsContextType {
   /** Server-page items — PagedListState.items contract (spec §6.4, #139 T8). */
@@ -48,11 +46,20 @@ export interface RecordsContextType {
   setSort: (field: string, order: SortOrder) => void;
   resetFilters: () => void;
   /**
-   * #138 Task 5 — write the records period to the URL (?from=&to=, replace).
-   * '' removes a param; the committed navigation updates dateFrom/dateTo,
-   * which resets the page to 1 (effect below).
+   * #349 Task 7 — write the records period to the URL (?from=&to=, PUSH —
+   * Gate B: a period change is a history step). '' removes a param; the
+   * committed navigation updates dateFrom/dateTo and resets the page to 1
+   * (the hook's filter-change auto-reset).
    */
   setPeriod: (from: string, to: string) => void;
+  /** #349 Task 7 — effective period (a missing side falls back to its default). */
+  dateFrom: string;
+  /** #349 Task 7 — effective period (a missing side falls back to its default). */
+  dateTo: string;
+  /** The EXPLICIT ?from value, or null when absent/inverted (half-filter). */
+  explicitFrom: string | null;
+  /** The EXPLICIT ?to value, or null when absent/inverted (half-filter). */
+  explicitTo: string | null;
   isLoading: boolean;
   /** Kept alongside `isLoading` for backwards compat with non-table consumers. */
   loading: boolean;
@@ -66,18 +73,33 @@ export interface RecordsContextType {
 
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
-export function RecordsProvider({ children }: { children: React.ReactNode }) {
-  // #138 Task 5: the period is URL state (?from=&to=) — no params means the
-  // current-week monday..sunday, the SAME strings the old NavigationContext
-  // produced, so the query key format at the useQuery below is unchanged.
-  const { dateFrom, dateTo, setPeriod } = useRecordsPeriod();
+export function RecordsProvider({
+  children,
+  urlState,
+}: {
+  children: React.ReactNode;
+  /** #349 Task 7 — the page-scoped URL adapter (managed mode): ALL records
+   * table state is URL state; every setter is a URL write through the
+   * adapter's single useTableUrlState instance. */
+  urlState: RecordsUrlAdapter;
+}) {
   const queryClient = useQueryClient();
-
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPageState] = useState(10);
-  const [filters, setFiltersState] = useState<RecordFilters>(DEFAULT_FILTERS);
-  const [sortBy, setSortBy] = useState<RecordSortField>('date');
-  const [sortOrder, setSortOrder] = useState<RecordSortOrder>('asc');
+  const { state, update, setPeriod } = urlState;
+  // The query-key range format is unchanged: the adapter defaults a missing
+  // period side to the current-week monday..sunday — the same strings the
+  // legacy useRecordsPeriod produced (cache keys byte-identical).
+  const {
+    dateFrom,
+    dateTo,
+    explicitFrom,
+    explicitTo,
+    filters,
+    sortBy: urlSortBy,
+    sortOrder,
+    page,
+    perPage,
+  } = state;
+  const sortBy = urlSortBy as RecordSortField;
 
   const refetch = useCallback(() => {
     void queryClient.refetchQueries({ queryKey: qk.records });
@@ -108,45 +130,49 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
   const records = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
-  const setFilters = useCallback((newFilters: Partial<RecordFilters>) => {
-    setFiltersState((prev) => ({ ...prev, ...newFilters }));
-    setPage(1);
-  }, []);
+  // #349 Task 7 — setters are URL writes through the adapter: the hook's
+  // filter-change rule resets page→1 in the SAME navigation (spec §3),
+  // replacing the manual setPage(1) calls of the local-state era.
+  const setPage = useCallback((p: number) => update({ page: p }), [update]);
 
-  const resetFilters = useCallback(() => {
-    setFiltersState(DEFAULT_FILTERS);
-    setPage(1);
-  }, []);
+  const setFilters = useCallback(
+    (newFilters: Partial<RecordFilters>) => update(newFilters),
+    [update],
+  );
 
-  const setPerPage = useCallback((pp: number) => {
-    setPerPageState(pp);
-    setPage(1);
-  }, []);
+  const resetFilters = useCallback(
+    () =>
+      update({
+        locationId: '',
+        serviceId: '',
+        masterId: '',
+        status: '',
+        search: '',
+      }),
+    [update],
+  );
+
+  const setPerPage = useCallback((pp: number) => update({ perPage: pp }), [update]);
 
   // PagedListState.setSort contract (spec §6.4): field+order applied verbatim
-  // + page reset (§6.10.2). Toggle-on-repeat was REMOVED — DataTable owns it
-  // (§6.10.4). `field` is `string` per the contract; the server whitelist
-  // validates it upstream.
-  const setSort = useCallback((field: string, order: SortOrder) => {
-    setSortBy(field as RecordSortField);
-    setSortOrder(order);
-    setPage(1);
-  }, []);
+  // + page reset (§6.10.2, via the hook's auto-reset). Toggle-on-repeat was
+  // REMOVED — DataTable owns it (§6.10.4). `field` is `string` per the
+  // contract; the URL enum + server whitelist validate it upstream.
+  const setSort = useCallback(
+    (field: string, order: SortOrder) => update({ sortBy: field, sortOrder: order }),
+    [update],
+  );
 
   // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
   // page (e.g. last row of page N deleted), step back. `!isFetching` guards
-  // against mid-refetch races with keepPreviousData.
+  // against mid-refetch races with keepPreviousData. #349: a service
+  // correction — written with history:'replace' (no extra history entry).
   useEffect(() => {
     const items = data?.items || [];
     if (!isPending && !isFetching && items.length === 0 && page > 1) {
-      setPage(page - 1);
+      update({ page: page - 1 }, { history: 'replace' });
     }
-  }, [isPending, isFetching, data, page]);
-
-  // Date-range change (URL ?from=&to=) resets to page 1
-  useEffect(() => {
-    setPage(1);
-  }, [dateFrom, dateTo]);
+  }, [isPending, isFetching, data, page, update]);
 
   // Seed canonical ['record', id] from list responses. Avoids a redundant
   // getRecord() request the first time a record is opened (spec §2.1).
@@ -172,6 +198,10 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       setSort,
       resetFilters,
       setPeriod,
+      dateFrom,
+      dateTo,
+      explicitFrom,
+      explicitTo,
       isLoading: recordsLoading,
       loading: recordsLoading,
       isPending,
@@ -179,7 +209,7 @@ export function RecordsProvider({ children }: { children: React.ReactNode }) {
       error: recordsError ?? null,
       refetch,
     }),
-    [records, total, page, perPage, filters, sortBy, sortOrder, setPerPage, setFilters, setSort, resetFilters, setPeriod, recordsLoading, isPending, isFetching, recordsError, refetch],
+    [records, total, page, perPage, filters, sortBy, sortOrder, setPage, setPerPage, setFilters, setSort, resetFilters, setPeriod, dateFrom, dateTo, explicitFrom, explicitTo, recordsLoading, isPending, isFetching, recordsError, refetch],
   );
 
   return (

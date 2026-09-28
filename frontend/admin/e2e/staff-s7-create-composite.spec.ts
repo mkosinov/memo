@@ -92,6 +92,14 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       const linkField = linkDialog.locator('[data-testid="link-url-field"]');
       await expect(linkField).toHaveValue(`${origin}/password-setup#token=${linkBody.token}`);
       await expect(linkDialog.getByRole('button', { name: 'Скопировать' })).toBeVisible();
+      // The expiry line (spec §2 S1: срок действия) — the same ru-RU short
+      // local-time rendering PasswordLinkDialog.formatLinkExpiry produces.
+      const expiryDisplay = new Date(linkBody.expires_at as string).toLocaleString('ru-RU', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      });
+      await expect(linkDialog.getByText('Действует до', { exact: false }))
+        .toHaveText(`Действует до ${expiryDisplay}`);
       await expect(linkDialog.getByText('Передайте ссылку сотруднику', { exact: false })).toBeVisible();
 
       // Close the handover; the row toast confirms the create.

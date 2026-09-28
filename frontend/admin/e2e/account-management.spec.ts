@@ -13,7 +13,7 @@
  *      error (spec §4 — no passwordless-specific message).
  */
 import { test, expect } from './fixtures/test';
-import { request as apiRequest, type APIRequestContext, type Browser } from '@playwright/test';
+import { request as apiRequest, type APIRequestContext } from '@playwright/test';
 import { cleanup, E2E_PASSWORD } from './fixtures/factories';
 import { waitForStaffReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';

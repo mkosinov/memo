@@ -16,8 +16,11 @@ import { test, expect } from './fixtures/test';
 import { request as apiRequest } from '@playwright/test';
 import crypto from 'node:crypto';
 import { cleanup } from './fixtures/factories';
-import { waitForStaffReady, waitForToast } from './fixtures/helpers';
+import { waitForStaffReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
+// The exported expiry formatter — ONE rendering of the dialog's
+// «Действует до …» line, no hand-copied duplicate in this spec.
+import { formatLinkExpiry } from '../app/(main)/staff/components/PasswordLinkDialog';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -61,8 +64,11 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       await expect(dialog.locator('input[type="password"]')).toHaveCount(0);
 
       // One POST /staff carries the whole composite card; the link issuance
-      // is the SEPARATE follow-up — register BOTH listeners BEFORE the save
-      // click so neither response is ever missed.
+      // is the SEPARATE follow-up — register ALL listeners BEFORE the save
+      // click so no response or toast is ever missed. The create toast is
+      // registered here AND awaited before the dialog round-trip: toasts
+      // auto-dismiss after 4.5s, and the issuance + dialog assertions used
+      // to push the wait past that window (review: flake risk).
       const createPromise = page.waitForResponse((r) =>
         r.url().endsWith('/api/v1/staff') && r.request().method() === 'POST',
       );
@@ -70,12 +76,18 @@ test.describe('S7 — create card with account + master in one scenario', () => 
         (r) => r.url().includes('/password-link') && r.request().method() === 'POST',
         { timeout: 20_000 },
       );
+      const toastReady = page
+        .locator('[data-testid="toast-info"]')
+        .filter({ hasText: 'Сотрудник создан' })
+        .waitFor({ state: 'visible', timeout: 15_000 })
+        .catch(() => {});
       await dialog.getByRole('button', { name: 'Сохранить' }).click();
       const create = await createPromise;
       expect(create.status()).toBe(201);
       const body = await create.json();
       createdId = body.id;
       expect(body.has_user).toBe(true);
+      await toastReady;
 
       // The handover dialog opens on top of the create modal.
       const linkDialog = page.locator('[data-testid="password-link-dialog"]');
@@ -92,19 +104,16 @@ test.describe('S7 — create card with account + master in one scenario', () => 
       const linkField = linkDialog.locator('[data-testid="link-url-field"]');
       await expect(linkField).toHaveValue(`${origin}/password-setup#token=${linkBody.token}`);
       await expect(linkDialog.getByRole('button', { name: 'Скопировать' })).toBeVisible();
-      // The expiry line (spec §2 S1: срок действия) — the same ru-RU short
-      // local-time rendering PasswordLinkDialog.formatLinkExpiry produces.
-      const expiryDisplay = new Date(linkBody.expires_at as string).toLocaleString('ru-RU', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-      });
+      // The expiry line (spec §2 S1: срок действия) — rendered by the
+      // dialog's own exported formatter (the exact same string).
       await expect(linkDialog.getByText('Действует до', { exact: false }))
-        .toHaveText(`Действует до ${expiryDisplay}`);
+        .toHaveText(`Действует до ${formatLinkExpiry(linkBody.expires_at)}`);
       await expect(linkDialog.getByText('Передайте ссылку сотруднику', { exact: false })).toBeVisible();
 
-      // Close the handover; the row toast confirms the create.
+      // Close the handover; the create toast was already asserted above
+      // (before the dialog round-trip), and the row visibility below pins
+      // the persisted card.
       await linkDialog.locator('[data-testid="link-dialog-close-btn"]').click();
-      await waitForToast(page, 'Сотрудник создан');
       await expect(page.locator(`[data-testid="master-row-${createdId}"]`)).toBeVisible({ timeout: 10_000 });
 
       // VERIFY — the composite write touched all four surfaces.

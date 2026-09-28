@@ -67,7 +67,10 @@ async function createAccountWithLink(request: APIRequestContext): Promise<{
 }
 
 /** A cookie-less API context for login probes (never rotates the shared
- *  admin session — the staff-s7 lesson). Dispose in the caller's finally. */
+ *  admin session — the staff-s7 lesson). Dispose in the caller's finally.
+ *  NOTE: account-management.spec.ts carries its own copy of this helper
+ *  (deliberately not extracted into shared fixtures); keep the empty
+ *  storageState + Sec-Fetch-Site contract in sync if this one changes. */
 async function anonLoginContext(): Promise<APIRequestContext> {
   return apiRequest.newContext({
     baseURL: BACKEND,
@@ -132,10 +135,11 @@ test.describe('#348 S2 — install password by link, then log in', () => {
       await page.getByRole('link', { name: 'Войти' }).click();
       await expect(page).toHaveURL(/\/login/);
 
-      // VERIFY DB — hash set, token consumed (used_at NOT NULL).
+      // VERIFY DB — hash set, token CONSUMED (used_at NOT NULL, not just
+      // the row existing: the consume claim needs the timestamp set).
       expect(queryDBRow(`SELECT password_hash FROM users WHERE id='${userId}'`)!.password_hash).not.toBeNull();
       expect(
-        queryDBRow(`SELECT used_at FROM password_setup_tokens WHERE user_id='${userId}'`),
+        queryDBRow(`SELECT used_at FROM password_setup_tokens WHERE user_id='${userId}'`)!.used_at,
       ).not.toBeNull();
 
       // Login with the phone + the new password — the real /login form

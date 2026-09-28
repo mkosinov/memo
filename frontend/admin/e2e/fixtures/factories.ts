@@ -189,6 +189,12 @@ export interface StaffOverrides {
  * (users). Defaults: no master section, no positions, no account — a plain
  * person. Pass `master` to make it an acting schedule master, `positions`
  * to attach dictionary entries, `user` to create a login.
+ *
+ * #348 cleanup note: the passworded-`user` corridor (link + public setup)
+ * leaves a CONSUMED password_setup_tokens row behind (used_at set). The
+ * CLI reset runs with foreign_keys=OFF, so callers' cleanup that deletes
+ * users rows should sweep `password_setup_tokens WHERE user_id = …` too
+ * (the #348 specs do this in their finally blocks).
  */
 export async function createTestStaff(
   api: APIRequestContext,

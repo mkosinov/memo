@@ -129,7 +129,7 @@ export function StaffTable() {
         throw err instanceof ApiError ? err : new ApiError(0, parsed.message);
       }
     },
-    [patchUser],
+    [patchUser, showToast],
   );
 
   // ─── Create / Edit submit ────────────────────────────────────────────

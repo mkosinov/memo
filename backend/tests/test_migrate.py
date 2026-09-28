@@ -103,6 +103,119 @@ def test_run_alembic_upgrade_stamps_when_alembic_version_missing(tmp_path) -> No
     asyncio.run(scenario())
 
 
+def test_run_alembic_upgrade_empty_db_builds_schema_from_base(tmp_path) -> None:
+    """GH #348: an EMPTY db (no tables, no alembic_version) must NOT be
+    stamped hollow — stamping leaves version=head with zero tables, and the
+    NEXT branch's boot then crashes mid-migration on the missing base schema
+    (observed: d7f9b1e3a5c7 NoSuchTableError 'users' after its autocommitted
+    create_table left password_setup_tokens debris). An empty db must build
+    the full schema via command.upgrade from base."""
+    from src.db.database import DBManager
+    from src.db.migrate import run_alembic_upgrade
+
+    test_db = tmp_path / "test_empty.db"
+    test_db.touch()  # exists but completely empty
+    test_url = f"sqlite+aiosqlite:///{test_db}"
+
+    async def scenario():
+        await run_alembic_upgrade(test_url)
+
+        from alembic.script import ScriptDirectory
+
+        mgr = DBManager(test_url, echo_mode=False)
+        async with mgr.engine.connect() as conn:
+            version = (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar()
+            assert version is not None, "alembic_version should exist"
+            heads = ScriptDirectory(
+                str(BACKEND_DIR / "alembic")
+            ).get_heads()
+            assert version in heads, (
+                f"expected head {heads!r}, got {version!r} — db was stamped, not upgraded"
+            )
+            # The base schema must actually exist — the #348 crash was
+            # NoSuchTableError('users') on a hollow db.
+            tables = {
+                row[0]
+                for row in (
+                    await conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                            " AND name NOT LIKE 'sqlite_%'"
+                        )
+                    )
+                )
+            }
+            assert "users" in tables, (
+                f"base tables missing on empty-db bootstrap: {sorted(tables)}"
+            )
+        await mgr.engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_run_alembic_upgrade_version_row_without_tables_rebuilds_from_base(
+    tmp_path,
+) -> None:
+    """GH #348 debris variant: alembic_version row EXISTS but the db has zero
+    real tables (crash debris / hollow stamp from an older head). The version
+    row is meaningless — resuming the chain from it crashes (batch_alter on a
+    missing table). Must reset to base and rebuild the schema."""
+    from alembic import command
+    from alembic.config import Config
+
+    from src.db.database import DBManager
+    from src.db.migrate import run_alembic_upgrade
+
+    test_db = tmp_path / "test_debris.db"
+    test_db.touch()
+    test_url = f"sqlite+aiosqlite:///{test_db}"
+
+    async def scenario():
+        # Simulate hollow debris: stamp an EMPTY db at an old revision
+        # (what the legacy bootstrap did to fresh dbs before the fix).
+        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        cfg.set_main_option(
+            "sqlalchemy.url", test_url.replace("+aiosqlite", "")
+        )
+        cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+        command.stamp(cfg, "a7b8c9d0e1f2")
+
+        await run_alembic_upgrade(test_url)
+
+        mgr = DBManager(test_url, echo_mode=False)
+        async with mgr.engine.connect() as conn:
+            version = (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar()
+            from alembic.script import ScriptDirectory
+
+            heads = ScriptDirectory(
+                str(BACKEND_DIR / "alembic")
+            ).get_heads()
+            assert version in heads, (
+                f"expected head {heads!r}, got {version!r}"
+            )
+            tables = {
+                row[0]
+                for row in (
+                    await conn.execute(
+                        text(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                            " AND name NOT LIKE 'sqlite_%'"
+                        )
+                    )
+                )
+            }
+            assert {"users", "tariffs", "audit_logs"} <= tables, (
+                f"schema not rebuilt from base: {sorted(tables)}"
+            )
+        await mgr.engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_run_alembic_upgrade_fast_path_when_at_head(tmp_path, monkeypatch) -> None:
     """When at head, command.upgrade is NOT called (fast-path)."""
     from alembic import command

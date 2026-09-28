@@ -9,7 +9,7 @@ when ``master`` is null (a master user without a linked profile is valid).
 Spec: docs/specs/2026-09-08-auth-design.md §3.6
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
@@ -60,3 +60,42 @@ class AuthMeResponse(BaseModel):
     user: AuthUser
     permissions: list[str]
     master: MasterSnapshot | None = None
+
+
+class PasswordSetupValidateRequest(BaseModel):
+    """``POST /api/v1/auth/password-setup/validate`` body (#348 spec §5).
+
+    Strict body (extra keys → 422). The token is the urlsafe raw value
+    from the URL fragment — only its SHA-256 digest is ever stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1)
+
+
+class PasswordSetupValidateResponse(BaseModel):
+    """Validate success body — ``{"ok": true}`` (the screen chooser).
+
+    Every non-live outcome is the single 422 ``PASSWORD_LINK_INVALID``
+    (one answer for unknown / expired / used / inactive — the endpoint
+    must not let anyone enumerate link states).
+    """
+
+    ok: bool = True
+
+
+class PasswordSetupRequest(BaseModel):
+    """``POST /api/v1/auth/password-setup`` body (#348 spec §5).
+
+    Strict body (extra keys → 422). ``password`` carries no length
+    constraints here: the SHARED password policy
+    (:func:`src.auth.passwords.validate_password`) owns the rule, so a
+    weak password answers the domain code ``PASSWORD_POLICY`` instead
+    of a generic schema error (the ``UserPhonePatch`` precedent).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=1)

@@ -11,5 +11,5 @@
     }
   },
   // Manager → architect → coder → explore chain requires depth 3.
-  "subagent_depth": 3
+  "subagent_depth": 4
 }

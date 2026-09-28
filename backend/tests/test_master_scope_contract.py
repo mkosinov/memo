@@ -129,6 +129,10 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/logout"): "auth surface (own session teardown)",
     ("GET", "/api/v1/auth/me"): "auth surface (returns own principal + permissions)",
     ("POST", "/api/v1/auth/change-password"): "auth surface (own password, require_session)",
+    # ── Public password setup (#348 §5/§7): anonymous by design — the
+    #    authority is the one-time token; no session, no master scope. ──
+    ("POST", "/api/v1/auth/password-setup/validate"): "public token probe (#348 §7) — token authority",
+    ("POST", "/api/v1/auth/password-setup"): "public one-time consume (#348 §7) — token authority",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",
@@ -172,6 +176,10 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     #    at the guard itself; no master-scope layer exists or is needed. ──
     ("GET", "/api/v1/audit-logs"): "admin-only journal (#344 §6) — require_admin → 403",
     ("GET", "/api/v1/audit-logs/authors"): "admin-only journal (#344 §6) — require_admin → 403",
+    # ── Users vertical (#348 §7): require_admin role gate — masters 403
+    #    at the guard itself; accounts are admin-managed, no master scope. ──
+    ("PATCH", "/api/v1/users/{id}"): "admin-only phone edit (#348 §7) — require_admin → 403",
+    ("POST", "/api/v1/users/{id}/password-link"): "admin-only link issue (#348 §7) — require_admin → 403",
     # ── Dictionary mutations: :write tokens master lacks → 403 ──
     # (masters.py is read-only since #266 D8 — no write routes exist there)
     ("POST", "/api/v1/locations"): "locations:write → 403",

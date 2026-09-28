@@ -176,11 +176,14 @@ class EntityConfig(NamedTuple):
     # TestGenericApiSearchContract until Tasks 5-8 wire its config.
     search_override: dict | None = None  # create_data overrides carrying the Cyrillic probe value (stored UPPERCASE)
     search_query: str | None = None  # lowercase Cyrillic substring matching search_override (M5 pin)
-    # Deferred-delete commit body (GH #285 rev7 / GH #286 D2): entities on the
-    # unified deferred-delete contract reject a bare DELETE with 422
-    # EXPECTED_STATE_REQUIRED — their generic DELETE tests must carry the
-    # declared state (``{"expected": {}}``). None → bare DELETE stays valid
-    # (the no-body preview contract of the 5 archive entities).
+    # Deferred-delete commit body (GH #285 rev7 / GH #286 D2 / GH #345 §4.1):
+    # entities on the unified deferred-delete contract reject a bare DELETE
+    # with 422 EXPECTED_STATE_REQUIRED — their generic DELETE tests must
+    # carry the declared state (``{"expected": {}}``). None → bare DELETE
+    # stays valid (the legacy no-body contract). Post-#345 the 3 dictionary
+    # archive entities (locations/services/materials) carry it too — the
+    # bare-422 rule is pinned by
+    # ``TestGenericApiDeleteContract::test_bare_delete_returns_422_expected_state_required``.
     delete_body: dict | None = None
     # GH #326 Task 3: optional SCENARIO-based seeding. ``StaffService.create``
     # is demolished (the composite lives in ``usecases.staff.create_staff``),
@@ -254,6 +257,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/clients",
         not_found_code="CLIENT_NOT_FOUND",
         response_schema=ClientResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot. The client transport lives in
+        # the route (forms/preview) while the subset verification runs
+        # inside the ``delete_client`` scenario transaction (§4.5).
+        delete_body={"expected": {}},
     ),
     LocationService: EntityConfig(
         service_factory=get_location_service,
@@ -272,6 +281,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/locations",
         not_found_code="LOCATION_NOT_FOUND",
         response_schema=LocationResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot.
+        delete_body={"expected": {}},
         # §4.4 default order: sort_order ASC, title ASC, id ASC. Both rows share
         # sort_order=0 (column default), so ``title`` decides. "!" (0x21) < "L"
         # (0x4C) → sentinel sorts BEFORE the default ``title="Loc"``.
@@ -316,6 +329,12 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/staff",
         not_found_code="STAFF_NOT_FOUND",
         response_schema=StaffResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot. The staff transport lives in
+        # the route (forms/preview) while the subset verification runs
+        # inside the ``delete_staff`` scenario transaction (§4.5).
+        delete_body={"expected": {}},
         # §4.4 default order: sort_order ASC, first_name ASC, id ASC. Both
         # rows share sort_order=0 → first_name decides; "!" (0x21) < "A"
         # (0x41) → sentinel sorts BEFORE the default ``first_name="A"``.
@@ -347,6 +366,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/materials",
         not_found_code="MATERIAL_NOT_FOUND",
         response_schema=MaterialResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot.
+        delete_body={"expected": {}},
         # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
         # sentinel sorts BEFORE the default ``title="T"``.
         earlier_create_data={"title": "!AAA-contract"},
@@ -416,6 +439,10 @@ CONTRACT_CONFIG: dict[type, EntityConfig] = {
         router_prefix="/api/v1/services",
         not_found_code="SERVICE_NOT_FOUND",
         response_schema=ServiceResponse,
+        # GH #345 §4.1 — deferred-delete commit state (mirror of the tags
+        # contract): bare DELETE → 422; the harness's clean-row deletes
+        # carry the empty expected snapshot.
+        delete_body={"expected": {}},
         # §4.4 default order: title ASC, id ASC. "!" (0x21) < "T" (0x54) →
         # sentinel sorts BEFORE the default ``title="T"``.
         earlier_create_data={"title": "!AAA-contract"},

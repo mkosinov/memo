@@ -204,7 +204,9 @@ class TestPublicRoutes:
         # spec §1 "live consumer" list keeps working (frontend/web
         # ``useGallery`` → anonymous ``GET /photos/web``); spec §2.7 wording
         # "(site + gallery)" names exactly this surface.
-        assert PUBLIC_ROUTES == frozenset({
+        # #348 addition: the public password-setup pair (spec §5/§7) —
+        # the authority is the one-time token itself.
+        assert frozenset({
             ("GET", "/api/v1/health"),
             # GH #266 D8: /masters is read-only acting masters; GET /{id}
             # was removed with the mutations (allowlist entry gone too).
@@ -224,7 +226,9 @@ class TestPublicRoutes:
             ("POST", "/api/v1/auth/login"),
             ("POST", "/api/v1/auth/logout"),
             ("GET", "/api/v1/auth/me"),
-        })
+            ("POST", "/api/v1/auth/password-setup/validate"),
+            ("POST", "/api/v1/auth/password-setup"),
+        }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:
         """GET /api/v1/events (GH #239) gets its own guard in T7 — not allowlisted."""

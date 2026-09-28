@@ -714,7 +714,7 @@ class TestStaffCompositeAudit:
                 last_name="Петров",
                 master=MasterSection(specialty="живопись", color="#000000"),
                 create_user=CreateUserSection(
-                    phone="+79990005551", password="long-password-1"
+                    phone="+79990005551"
                 ),
             ),
         )
@@ -1251,6 +1251,7 @@ class TestVisitorServiceAudit:
         ok = await delete_client(
             None, db_session=db_session, id="cl-casc",
             resolutions={"visitors": "cascade"},
+            expected={"visitors": ["vis-casc"]},  # GH #345: confirmed state
         )
         assert ok is True
         rows = audit_rows()[before:]

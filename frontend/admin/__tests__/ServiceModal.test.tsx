@@ -64,7 +64,6 @@ function renderModal(overrides: Partial<ServiceModalProps> = {}) {
   const onClose = vi.fn();
   render(
     <ServiceModal
-      mode="edit"
       service={NULL_AGE_SERVICE}
       onSubmit={onSubmit}
       onClose={onClose}
@@ -110,7 +109,6 @@ function errorTextFor(input: HTMLInputElement): string | null {
 /** Open the create modal and fill everything required except «Возраст до». */
 function renderCreateWithTariff() {
   const rendered = renderModal({
-    mode: 'create',
     service: null,
     title: 'Новая услуга',
   });
@@ -241,7 +239,7 @@ describe('ServiceModal — create with empty max_age (GH #203 §4.4)', () => {
   });
 
   it('create init: «Возраст от» is 0 (0-init preserved, only max_age is empty)', () => {
-    renderModal({ mode: 'create', service: null, title: 'Новая услуга' });
+    renderModal({ service: null, title: 'Новая услуга' });
 
     expect(minAgeInput()).toHaveValue(0);
     expect(maxAgeInput()).toHaveValue(null);
@@ -282,7 +280,7 @@ describe('ServiceModal — required numbers and tariff item fields (GH #203 §4.
   });
 
   it('duration 0 → «Минимум: 15» (range check alive)', () => {
-    const { onSubmit } = renderModal({ mode: 'create', service: null, title: 'Новая услуга' });
+    const { onSubmit } = renderModal({ service: null, title: 'Новая услуга' });
 
     changeValue(inputByLabel(/^Название/), 'Новая услуга');
     clickSave();
@@ -293,7 +291,6 @@ describe('ServiceModal — required numbers and tariff item fields (GH #203 §4.
 
   it('empty tariff title → required error at the tariff title field, no submit', () => {
     const { onSubmit } = renderModal({
-      mode: 'create',
       service: null,
       title: 'Новая услуга',
     });

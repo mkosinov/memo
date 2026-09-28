@@ -2,27 +2,28 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import type { StaffResponse, StaffCreate, StaffUpdate, StaffArchiveRequest, DependencyNode } from '@memo/api-client';
-import { resolveDeleteStaff, ApiError } from '@memo/api-client';
-import { useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '@memo/api-client';
 import {
   useUpdateStaff,
   useCreateStaff,
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
+  usePatchUser,
+  useIssuePasswordLink,
 } from '@/hooks/useStaffMutations';
 import { usePositions } from '@/hooks/usePositions';
 import { useUI } from '@/contexts/UIContext';
 import { useStaffTable } from '@/contexts/StaffContext';
 import { displayMasterName } from '@/lib/utils';
 import { StaffModal, type StaffFormData } from './StaffModal';
+import { PasswordLinkDialog, type IssuedPasswordLink } from './PasswordLinkDialog';
 import { StaffFilters } from './StaffFilters';
 import { ArchiveStaffDialog } from './ArchiveStaffDialog';
 import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { staffColumns, staffActions } from './staffColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { invalidateEntities } from '@/lib/invalidate';
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ import { invalidateEntities } from '@/lib/invalidate';
  * section + position ids + has_user), reads come from GET /api/v1/staff via
  * StaffContext (server pagination/sort/search), writes go through the staff
  * mutation family. The read-only /masters view (schedule filters) is a
- * SEPARATE concern (MastersContext) and is untouched here.
+ * SEPARATE concern (hooks/useMasters) and is untouched here.
  */
 export function StaffTable() {
   // Server pagination/sort/search state (StaffContext, #205 §5.2 + #212).
@@ -42,10 +43,12 @@ export function StaffTable() {
 
   const updateStaff = useUpdateStaff();
   const createStaff = useCreateStaff();
-  const deleteStaff = useDeleteStaff();
+  const { removeStaff, removeStaffResolved } = useDeleteStaff();
   const archiveStaff = useArchiveStaff();
   const restoreStaff = useRestoreStaff();
-  const queryClient = useQueryClient();
+  // #348: users-vertical ops for the «Учётка» block (S1/S3/S5).
+  const patchUser = usePatchUser();
+  const issuePasswordLink = useIssuePasswordLink();
   const { showToast } = useUI();
 
   // ─── Edit modal state ────────────────────────────────────────────────
@@ -69,6 +72,63 @@ export function StaffTable() {
     [positions],
   );
 
+  // ─── #348: one-time link issuance corridor (S1 post-create / S3 block) ──
+  // The table owns the handover dialog so it stays visible after the create
+  // modal closes; the edit-block button routes through the modal's own
+  // dialog via `issueLinkForModal`.
+  const [linkDialog, setLinkDialog] = useState<{
+    link: IssuedPasswordLink | null;
+    error: string | null;
+    retryUserId: string | null;
+  } | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+
+  const issueFor = async (userId: string): Promise<void> => {
+    setLinkBusy(true);
+    try {
+      const link = await issuePasswordLink.mutateAsync(userId);
+      setLinkDialog({ link, error: null, retryUserId: null });
+    } catch (err) {
+      setLinkDialog({
+        link: null,
+        error: parseApiError(err).message,
+        retryUserId: userId,
+      });
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  // Shared prop for the modals: returns the link for the dialog THEY render
+  // (the edit-block issuance stays inside the modal; its errors surface there).
+  const issueLinkForModal = useCallback(
+    async (userId: string): Promise<IssuedPasswordLink> => {
+      const link = await issuePasswordLink.mutateAsync(userId);
+      return { token: link.token, expires_at: link.expires_at };
+    },
+    [issuePasswordLink],
+  );
+
+  // #348 S5: the modal hands the CHANGED phone here; the typed ApiError
+  // propagates back so the modal renders the PHONE_TAKEN inline error.
+  const handlePatchUserPhone = useCallback(
+    async (userId: string, phone: string): Promise<void> => {
+      try {
+        await patchUser.mutateAsync({ id: userId, data: { phone } });
+        showToast('Телефон учётки обновлён');
+      } catch (err) {
+        // The §5 phone-edit domain codes render INLINE in the modal
+        // («Этот телефон уже занят» / «Некорректный номер телефона»);
+        // anything else surfaces as a toast before rethrowing.
+        const parsed = parseApiError(err);
+        const inlineCode = parsed.code === 'PHONE_TAKEN' || parsed.code === 'PHONE_INVALID';
+        if (!inlineCode) showToast(parsed.message, 'error');
+        throw err instanceof ApiError ? err : new ApiError(0, parsed.message);
+      }
+    },
+    [patchUser, showToast],
+  );
+
   // ─── Create / Edit submit ────────────────────────────────────────────
   // The modal yields a structured StaffFormData; map it onto the typed wire
   // schemas here (tsc fails on a missing/extra field — canonical PUT, GH #178).
@@ -84,16 +144,25 @@ export function StaffTable() {
       sort_order: data.sort_order,
       master: data.master ? { specialty: data.master.specialty, color: data.master.color } : null,
       position_ids: data.position_ids,
-      // D6: create-only account flag ({phone, password, role?} | false);
+      // D6/#348: create-only account flag — passwordless {phone, role?} | false;
       // D10: role — a sent value beats the backend position template.
       create_user: data.create_user,
     };
+    let created: StaffResponse;
     try {
-      await createStaff.mutateAsync(payload);
+      created = await createStaff.mutateAsync(payload);
       showToast('Сотрудник создан');
     } catch (err) {
       showToast(parseApiError(err).message, 'error');
       throw err; // let the modal keep its state open
+    }
+    // #348 S1: the account was just born passwordless — issue its FIRST
+    // setup link right away (a separate request). Failure is NOT a create
+    // failure: the error dialog offers «Повторить», and the account waits
+    // for the block button. Awaiting keeps the modal open until the link
+    // is on screen — the admin must not miss the one-time URL.
+    if (created.account && created.account.is_active) {
+      await issueFor(created.account.id);
     }
   };
 
@@ -154,23 +223,27 @@ export function StaffTable() {
     }
   };
 
-  // ─── Delete (GH #207 §7.3 dry-run flow) ──────────────────────────────
-  // no-body DELETE → 204 (instant, no deps) or 409 + dependency tree →
-  // DeleteDialog (Mode A/B). Staff matrix (#266): activities BLOCK; users,
-  // the masters row, master_tags and staff_positions auto-cascade.
+  // ─── Delete (GH #345: deferred conveyor — useDeleteTag/useDeleteRecord
+  // template). removeStaff ALWAYS dry-runs (pure preview): a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window, commit = resolveDeleteStaff); a 409 WITH the dependency tree
+  // rejects here → park the tree + open DeleteDialog (the row stays
+  // visible). The hook swallows 404 (quiet family invalidation) and
+  // network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
 
-  const handleDelete = async (s: StaffResponse) => {
+  const handleDelete = useCallback(async (s: StaffResponse) => {
     try {
-      await deleteStaff.mutateAsync(s.id);
-      showToast('Сотрудник удалён');
+      await removeStaff(s);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
         setDeleteTarget({ staff: s, dependencies: err.dependencies });
-      } else {
-        showToast(parseApiError(err).message, 'error');
+        return;
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  };
+  }, [removeStaff, showToast]);
 
   // §6.15 — memoize the factory outputs.
   const columns = useMemo(() => staffColumns(positionTitle), [positionTitle]);
@@ -228,6 +301,8 @@ export function StaffTable() {
           staff={editStaff}
           positions={positions}
           onSubmit={handleEdit}
+          onPatchPhone={handlePatchUserPhone}
+          onIssueLink={issueLinkForModal}
           onClose={() => setEditStaff(null)}
           title="Редактирование сотрудника"
           subtitle={displayMasterName(editStaff)}
@@ -246,6 +321,20 @@ export function StaffTable() {
         />
       )}
 
+      {/* #348 S1: post-create one-time link handover (the table owns it so it
+          stays visible after the create modal closes). */}
+      {linkDialog && (
+        <PasswordLinkDialog
+          link={linkDialog.link}
+          error={linkDialog.error}
+          busy={linkBusy}
+          onRetry={() => {
+            if (linkDialog.retryUserId) void issueFor(linkDialog.retryUserId);
+          }}
+          onClose={() => setLinkDialog(null)}
+        />
+      )}
+
       {/* Archive (D6) dialog — preselected master/account checkboxes */}
       {archiveTarget && (
         <ArchiveStaffDialog
@@ -255,20 +344,22 @@ export function StaffTable() {
         />
       )}
 
-      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately via onDone. Staff matrix (#266):
+          activities BLOCK (Mode B — archive); users, the masters row,
+          master_tags and staff_positions auto-cascade (Mode A — the
+          all-auto tree confirms immediately, commit {resolutions:{},
+          expected:{}}). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={displayMasterName(deleteTarget.staff)}
           entityType="staff"
           entityId={deleteTarget.staff.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteStaff(id, resolutions);
-            // The resolve call bypasses the hook's onSuccess, so refresh here.
-            // Family rules via the shared map (#239/#266): ['staff'] +
-            // ['masters'] + ['records'].
-            invalidateEntities(queryClient, ['staff']);
-            showToast('Сотрудник удалён');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeStaffResolved(deleteTarget.staff, resolutions, deleteTarget.dependencies);
           }}
           onArchive={async (id) => archiveStaff.mutateAsync({ id, archive_master: true, archive_user: true })}
           onDone={() => setDeleteTarget(null)}

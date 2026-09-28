@@ -197,12 +197,125 @@ async def test_delete_missing_returns_false(db_session, subscriber) -> None:
     await db_session.commit()
     _drain(subscriber)
 
-    ok = await delete_client(None, db_session=db_session, id="ghost", resolutions={})
+    ok = await delete_client(
+        None, db_session=db_session, id="ghost", resolutions={}, expected={},
+    )
 
     assert ok is False
     events = _drain(subscriber)
     assert len(events) == 1, f"ONE batch expected on the 404 branch, got {events}"
     assert events[0][0] == {"clients"}, f"404 grid must be exactly {{'clients'}}: {events}"
+
+
+async def test_delete_missing_returns_false_before_collectors(
+    db_session,
+) -> None:
+    """GH #345 §4.5: the existence probe runs BEFORE the expected check —
+    a ghost id with a stale-looking ``expected`` still answers ``False``
+    (404), never StaleDependenciesError (the ``delete_staff`` mirror)."""
+    from src.usecases.clients import delete_client
+
+    assert await delete_client(
+        None, db_session=db_session, id="ghost", resolutions={},
+        expected={"records": ["some-id"]},
+    ) is False
+
+
+# ─── GH #345 Task 4: the expected subset verification (§4.1/§4.5) ────────────
+
+
+async def test_delete_stale_expected_raises_before_validation(
+    db_session, create_activity,
+) -> None:
+    """GH #345 §4.1/§4.5: an UNCONFIRMED dep (``expected`` misses it) →
+    ``StaleDependenciesError`` INSIDE the scenario transaction — the
+    #285 D7 order pin: the race gate fires BEFORE the resolutions
+    validation could turn the race into a 422 (here ``resolutions`` is
+    even COMPLETE, only ``expected`` is stale). The fresh tree rides
+    the exception (the route renders it as the 409)."""
+    from src.domain.deletion import StaleDependenciesError
+    from src.usecases.clients import delete_client
+
+    activity_id = await _orm_activity(db_session, create_activity)
+    client = await _add_client(db_session)
+    await _add_record(db_session, activity_id, client.id)
+    visitor = await _add_visitor(db_session, client.id)
+    await db_session.commit()
+    # Capture ids NOW: the post-rollback asserts below must not touch ORM
+    # attrs (rollback expires instances touched by the failed transaction).
+    client_id, visitor_id = client.id, visitor.id
+
+    with pytest.raises(StaleDependenciesError) as exc_info:
+        await delete_client(
+            None, db_session=db_session, id=client_id,
+            resolutions={"records": "nullify", "visitors": "cascade"},
+            expected={},  # nothing confirmed — every dep is "new"
+        )
+
+    # The fresh tree carries the two non-auto nodes (records + visitors);
+    # the auto nodes (client_tags/photos) stay absent at zero count.
+    assert sorted(d.entity for d in exc_info.value.nodes) == [
+        "records", "visitors",
+    ]
+    # Nothing was written.
+    await db_session.rollback()
+    assert await db_session.get(Client, client_id) is not None
+    assert await db_session.get(Visitor, visitor_id) is not None
+
+
+async def test_delete_expected_visitor_appeared_blocks(
+    db_session, subscriber,
+) -> None:
+    """S5 race (the visitor side): a visitor that appeared after the
+    window → ``StaleDependenciesError``; no batch publishes."""
+    from src.domain.deletion import StaleDependenciesError
+    from src.usecases.clients import delete_client
+
+    client = await _add_client(db_session)
+    await _add_visitor(db_session, client.id, "Алиса")
+    await db_session.commit()
+    client_id = client.id
+    _drain(subscriber)
+
+    # A second visitor lands mid-window — NOT in the confirmed set.
+    await _add_visitor(db_session, client_id, "Борис")
+    await db_session.commit()
+    confirmed = await _all_ids(
+        db_session, select(Visitor.id).where(Visitor.client_id == client_id)
+    )
+    now_boris = confirmed[-1]
+    await db_session.commit()
+
+    with pytest.raises(StaleDependenciesError):
+        await delete_client(
+            None, db_session=db_session, id=client_id,
+            resolutions={"visitors": "cascade"},
+            expected={"visitors": [now_boris]},  # misses «Алиса»
+        )
+    assert _drain(subscriber) == [], "the stale branch must publish NO batch"
+
+
+async def test_delete_expected_disappeared_dep_does_not_block(
+    db_session,
+) -> None:
+    """S5 reverse race: subset semantics — a confirmed dep that vanished
+    mid-window does NOT block (``set(now) ⊆ set(expected)`` holds when
+    ``expected`` is a superset)."""
+    from src.usecases.clients import delete_client
+
+    client = await _add_client(db_session)
+    visitor = await _add_visitor(db_session, client.id, "Алиса")
+    await db_session.commit()
+    client_id, visitor_id = client.id, visitor.id
+
+    # The confirmed set carries a ghost id PLUS the live one — a superset
+    # of the current id-set (the ghost "disappeared" mid-window).
+    ok = await delete_client(
+        None, db_session=db_session, id=client_id,
+        resolutions={"visitors": "cascade"},
+        expected={"visitors": ["ghost-id", visitor_id]},
+    )
+    assert ok is True
 
 
 async def test_422_wrong_action_publishes_nothing(
@@ -216,7 +329,7 @@ async def test_422_wrong_action_publishes_nothing(
 
     activity_id = await _orm_activity(db_session, create_activity)
     client = await _add_client(db_session)
-    await _add_record(db_session, activity_id, client.id)
+    record = await _add_record(db_session, activity_id, client.id)
     await db_session.commit()
     client_id = client.id
     _drain(subscriber)
@@ -225,6 +338,9 @@ async def test_422_wrong_action_publishes_nothing(
         await delete_client(
             None, db_session=db_session, id=client_id,
             resolutions={"records": "cascade", "visitors": "cascade"},
+            # GH #345: expected confirmed (the stale gate passes) so the
+            # INVALID ACTION branch is what fires (order: stale → validate).
+            expected={"records": [record.id]},
         )
 
     await db_session.rollback()
@@ -241,7 +357,7 @@ async def test_422_missing_visitors_resolution_publishes_nothing(
     from src.usecases.clients import delete_client
 
     client = await _add_client(db_session)
-    await _add_visitor(db_session, client.id)
+    visitor = await _add_visitor(db_session, client.id)
     await db_session.commit()
     client_id = client.id
     _drain(subscriber)
@@ -249,6 +365,7 @@ async def test_422_missing_visitors_resolution_publishes_nothing(
     with pytest.raises(InvalidResolutionError):
         await delete_client(
             None, db_session=db_session, id=client_id, resolutions={},
+            expected={"visitors": [visitor.id]},  # confirmed — validation fires
         )
 
     await db_session.rollback()
@@ -282,6 +399,7 @@ async def test_grid_full_family_byte_for_byte(
     ok = await delete_client(
         None, db_session=db_session, id=client_id,
         resolutions={"records": "nullify", "visitors": "cascade"},
+        expected={"records": [record.id], "visitors": [visitor.id]},
     )
     assert ok is True
 
@@ -308,6 +426,7 @@ async def test_grid_empty_resolutions_on_clean_client(db_session, subscriber) ->
 
     ok = await delete_client(
         None, db_session=db_session, id=client_id, resolutions={},
+        expected={},  # GH #345: the clean commit declares the empty state
     )
     assert ok is True
 
@@ -334,6 +453,7 @@ async def test_grid_no_visits_mark(db_session, create_activity, subscriber) -> N
     ok = await delete_client(
         None, db_session=db_session, id=client.id,
         resolutions={"records": "nullify", "visitors": "cascade"},
+        expected={"records": [record.id], "visitors": [visitor.id]},
     )
     assert ok is True
 
@@ -374,6 +494,7 @@ async def test_full_cascade_effects(db_session, create_activity) -> None:
     ok = await delete_client(
         None, db_session=db_session, id=client_id,
         resolutions={"records": "nullify", "visitors": "cascade"},
+        expected={"records": [record_id], "visitors": [visitor_id]},
     )
     assert ok is True
 
@@ -437,6 +558,10 @@ async def test_atomicity_mid_cascade_failure_rolls_back_everything(
         await delete_client(
             None, db_session=db_session, id=client_id,
             resolutions={"records": "nullify", "visitors": "cascade"},
+            expected={
+                "records": [record_id],
+                "visitors": [first_id, second_id],
+            },
         )
 
     await db_session.rollback()

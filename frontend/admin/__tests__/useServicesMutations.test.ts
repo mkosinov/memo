@@ -3,6 +3,20 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, type ReactNode } from 'react';
 
+/**
+ * useServicesMutations — mutation family + GH #345 Task 7 deferred delete.
+ *
+ * Every create/update/patch/archive/restore mutation calls its api-client
+ * endpoint and invalidates the ['services'] family, which (via
+ * INVALIDATION_MAP) also refreshes ['materials'] (#223: «Где используется»
+ * counters) and ['records'].
+ *
+ * The deferred-delete conveyor (dry-run → dialog → optimistic + enqueue →
+ * commit; PendingActions, 5s ring, undo) is covered by the dedicated
+ * `useDeleteService.test.ts` — here only the hook-surface contract is
+ * asserted (return shape + preview-phase guard).
+ */
+
 vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
@@ -10,16 +24,29 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     createService: vi.fn(),
     updateService: vi.fn(),
     patchService: vi.fn(),
-    deleteService: vi.fn(),
+    dryRunDeleteService: vi.fn(),
+    resolveDeleteService: vi.fn(),
     archiveService: vi.fn(),
     restoreService: vi.fn(),
   };
 });
 
+// The deferred-delete conveyor needs the PendingActions + UI contexts —
+// surface tests mock them (full branch matrix lives in
+// useDeleteService.test.ts).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
+
 import {
   useCreateService,
   useUpdateService,
-  usePatchService,
   useDeleteService,
   useArchiveService,
   useRestoreService,
@@ -28,7 +55,8 @@ import {
   createService,
   updateService,
   patchService,
-  deleteService,
+  dryRunDeleteService,
+  resolveDeleteService,
   archiveService,
   restoreService,
   ApiError,
@@ -38,7 +66,8 @@ import type { ServiceCreate, ServiceUpdate, DependencyNode } from '@memo/api-cli
 const mockCreateService = vi.mocked(createService);
 const mockUpdateService = vi.mocked(updateService);
 const mockPatchService = vi.mocked(patchService);
-const mockDeleteService = vi.mocked(deleteService);
+const mockDryRun = vi.mocked(dryRunDeleteService);
+const mockResolveDeleteService = vi.mocked(resolveDeleteService);
 const mockArchiveService = vi.mocked(archiveService);
 const mockRestoreService = vi.mocked(restoreService);
 
@@ -60,7 +89,11 @@ function createQueryClientWrapper() {
 }
 
 describe('useServicesMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+    mockResolveDeleteService.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateService', () => {
@@ -164,94 +197,42 @@ describe('useServicesMutations', () => {
     });
   });
 
-  describe('usePatchService', () => {
-    it('calls patchService with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchService.mockResolvedValue({ ...serviceResponse, title: 'Patched' });
 
-      const { result } = renderHook(() => usePatchService(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchService).toHaveBeenCalledWith('s1', { title: 'Patched' });
-      expect(mockUpdateService).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the services query cache on success', async () => {
+  describe('useDeleteService — hook surface (deferred conveyor)', () => {
+    it('removeService always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchService.mockResolvedValue({ ...serviceResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchService(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's1', data: { title: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });
-    });
-  });
-
-  describe('useDeleteService', () => {
-    it('calls deleteService with the provided id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockDeleteService.mockResolvedValue(undefined as never);
-
+      queryClient.setQueryData(['services'], [serviceResponse]);
       const { result } = renderHook(() => useDeleteService(), { wrapper });
 
-      await act(async () => {
-        await result.current.mutateAsync('s1');
-      });
-
-      expect(mockDeleteService).toHaveBeenCalledWith('s1');
-    });
-
-    it('invalidates services AND records caches on success (cross-invalidation)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeleteService.mockResolvedValue(undefined as never);
-
-      const { result } = renderHook(() => useDeleteService(), { wrapper });
+      expect(result.current.removeService).toBeTypeOf('function');
+      expect(result.current.removeServiceResolved).toBeTypeOf('function');
+      expect(result.current.isPending).toBe(false);
 
       await act(async () => {
-        await result.current.mutateAsync('s1');
+        await result.current.removeService(serviceResponse);
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['services'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(mockDryRun).toHaveBeenCalledWith('s1');
+      expect(mockResolveDeleteService).not.toHaveBeenCalled();
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
 
-    it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
-      const { wrapper } = createQueryClientWrapper();
+    it('409 + dependency tree rejects upward so the call site opens the dialog', async () => {
       const deps: DependencyNode[] = [
         { entity: 'tariffs', auto: true, relation: 'Тариф', count: 3, allowed_actions: ['cascade'] },
         { entity: 'photos', auto: true, relation: 'Фото', count: 12, allowed_actions: ['nullify'] },
-        { entity: 'service_tags', auto: true, relation: 'Тег', count: 5, allowed_actions: ['cascade'] },
       ];
-      mockDeleteService.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+      mockDryRun.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
-      const { result } = renderHook(() => useDeleteService(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('s1')).rejects.toThrow(ApiError);
-      });
-
-      expect(result.current.dependencies).toEqual(deps);
-    });
-
-    it('keeps dependencies null for non-409 errors', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockDeleteService.mockRejectedValue(new ApiError(404, 'Service not found', 'SERVICE_NOT_FOUND'));
-
       const { result } = renderHook(() => useDeleteService(), { wrapper });
 
       await act(async () => {
-        await expect(result.current.mutateAsync('s1')).rejects.toThrow(ApiError);
+        await expect(result.current.removeService(serviceResponse)).rejects.toThrow(ApiError);
       });
 
-      expect(result.current.dependencies).toBeNull();
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(mockResolveDeleteService).not.toHaveBeenCalled();
     });
   });
 

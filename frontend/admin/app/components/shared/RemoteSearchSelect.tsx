@@ -15,8 +15,7 @@ type SearchQuery = string | Record<string, string | number>;
 export interface RemoteSearchSelectProps<
   Q extends SearchQuery = string,
 > {
-  value: string | null;
-  onChange: (uuid: string | null) => void;
+  onChange?: (uuid: string | null) => void;
   onSelectItem?: (item: SearchItem) => void;
   onSearch: (query: Q) => Promise<SearchItem[]>;
   label: string;
@@ -98,7 +97,6 @@ function getDisplayText(
 export default function RemoteSearchSelect<
   Q extends SearchQuery = string,
 >({
-  value: _value,
   onChange,
   onSelectItem,
   onSearch,
@@ -184,7 +182,7 @@ export default function RemoteSearchSelect<
       setQuery('');
       setIsOpen(false);
       onInputValueChange?.(displayLabel);
-      onChange(item.id);
+      onChange?.(item.id);
       onSelectItem?.(item);
     },
     [displayField, subtitleField, getDisplayLabel, onInputValueChange, onChange, onSelectItem],
@@ -194,7 +192,7 @@ export default function RemoteSearchSelect<
     setSelectedLabel(null);
     setQuery('');
     onInputValueChange?.('');
-    onChange(null);
+    onChange?.(null);
   }, [onChange, onInputValueChange]);
 
   const handleFocus = useCallback(() => {

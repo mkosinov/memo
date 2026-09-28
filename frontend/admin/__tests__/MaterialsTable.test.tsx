@@ -50,12 +50,11 @@ const TEST_MATERIALS: MaterialResponse[] = [
 const mockCreateMutateAsync = vi.fn().mockResolvedValue({});
 const mockUpdateMutateAsync = vi.fn().mockResolvedValue({});
 const mockPatchMutateAsync = vi.fn().mockResolvedValue({});
-const mockDeleteMutateAsync = vi.fn().mockResolvedValue({});
+// GH #345 — useDeleteMaterial returns the deferred-conveyor surface.
+const mockRemoveMaterial = vi.fn().mockResolvedValue(undefined);
+const mockRemoveMaterialResolved = vi.fn().mockResolvedValue(undefined);
 const mockArchiveMutateAsync = vi.fn().mockResolvedValue({});
 const mockRestoreMutateAsync = vi.fn().mockResolvedValue({});
-// The hook's `dependencies` (409 dry-run tree) — mutable per test; read by the
-// factory arrow at render time.
-let mockDeleteDependencies: DependencyNode[] | null = null;
 
 // Shared so tests can assert invalidation (#207: ['materials'] on dialog done).
 const mockInvalidateQueries = vi.fn().mockResolvedValue(undefined);
@@ -87,8 +86,8 @@ vi.mock('@/hooks/useMaterialsMutations', () => ({
   useUpdateMaterial: () => ({ mutateAsync: mockUpdateMutateAsync, isPending: false }),
   usePatchMaterial: () => ({ mutateAsync: mockPatchMutateAsync, isPending: false }),
   useDeleteMaterial: () => ({
-    mutateAsync: mockDeleteMutateAsync,
-    dependencies: mockDeleteDependencies,
+    removeMaterial: mockRemoveMaterial,
+    removeMaterialResolved: mockRemoveMaterialResolved,
     isPending: false,
   }),
   useArchiveMaterial: () => ({ mutateAsync: mockArchiveMutateAsync, isPending: false }),
@@ -482,32 +481,28 @@ describe('MaterialsTable', () => {
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
 
-  it('calls delete dry-run when "Удалить" clicked (204 → instant delete, no dialog)', async () => {
-    mockDeleteMutateAsync.mockResolvedValue(undefined);
-    mockDeleteDependencies = null;
+  it('delete click runs the dry-run preview (204 → optimistic removal, no dialog)', async () => {
     setupEnvelope();
     await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('mat-1'));
+    await waitFor(() => expect(mockRemoveMaterial).toHaveBeenCalledWith(TEST_MATERIALS[0]));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  // ─── Delete → DeleteDialog flow (#207 §7) — defensive 409 branch ────────
-  // Material has ZERO FK deps (§4 matrix: DELETE always 204), so the 409
-  // branch is defensive but keeps the uniform DeleteDialog wiring.
+  // ─── Delete → DeleteDialog flow (#207 §7 / GH #223 §7) — a linked material
+  // returns one auto node → information-only Mode A.
 
-  /** Dry-run rejects with a 409 carrying the given tree; hook exposes it. */
+  /** Preview rejects with a 409 carrying the given tree → dialog opens. */
   function setupDeleteConflict(deps: DependencyNode[]) {
-    mockDeleteDependencies = deps;
-    mockDeleteMutateAsync.mockRejectedValue(
+    mockRemoveMaterial.mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', deps),
     );
   }
 
-  it('opens DeleteDialog when a 409 conflict occurs (defensive)', async () => {
+  it('opens DeleteDialog when a 409 conflict occurs (linked material)', async () => {
     setupDeleteConflict([
       { entity: 'service_materials', auto: true, relation: 'Услуга', count: 1, allowed_actions: ['nullify'], message: null },
     ]);
@@ -534,7 +529,7 @@ describe('MaterialsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
 
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
-    expect(mockDeleteMutateAsync).toHaveBeenCalledTimes(1);
+    expect(mockRemoveMaterial).toHaveBeenCalledTimes(1);
   });
 
   // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────

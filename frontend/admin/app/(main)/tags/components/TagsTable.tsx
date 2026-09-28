@@ -136,7 +136,6 @@ export function TagsTable() {
       {/* Edit modal */}
       {editTag && (
         <TagModal
-          mode="edit"
           tag={editTag}
           onSubmit={handleEdit}
           onClose={() => setEditTag(null)}
@@ -148,7 +147,6 @@ export function TagsTable() {
       {/* Create modal */}
       {creatingTag && (
         <TagModal
-          mode="create"
           tag={null}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingTag(false)}

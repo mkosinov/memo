@@ -6,8 +6,10 @@ role resolver ``resolve_account_role`` (the computation moved out of
 ``StaffService``; ``staff.py`` keeps its working copy until the Task 3
 demolition):
 
-* ``create_staff_account`` — password validated + hashed INSIDE the
-  operation, only the hash stored, unconditional ``mark_changed("users")``;
+* ``create_staff_account`` — #348: PASSWORDLESS insert (``password_hash``
+   NULL — the owner sets it via the one-time link), shared phone
+   validator + explicit duplicate probe; unconditional
+   ``mark_changed("users")``;
 * ``set_role_by_staff`` / ``deactivate_active_by_staff`` — rowcount
   semantics (deactivate touches ONLY active accounts); the mark fires
   only on a real change (rowcount > 0);
@@ -22,7 +24,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy import select
 
-from src.auth.passwords import PasswordPolicyError, verify_password
 from src.models.staff import Staff
 from src.models.user import User
 
@@ -176,7 +177,9 @@ def test_no_method_is_transactional() -> None:
 
 
 class TestCreateStaffAccount:
-    async def test_creates_linked_account_with_hash(self, db_session: AsyncSession) -> None:
+    async def test_creates_linked_passwordless_account(
+        self, db_session: AsyncSession
+    ) -> None:
         from src.models.enums import UserRole
         from src.services.user import get_user_service
 
@@ -185,18 +188,18 @@ class TestCreateStaffAccount:
         user = await get_user_service().create_staff_account(
             db_session,
             staff_id=staff.id,
-            phone="+79995550001",
-            password="secret12345",
+            phone="  +79995550001  ",
             role=UserRole.MASTER,
         )
 
         assert user.staff_id == staff.id
+        # #348: the row lands PASSWORDLESS — the owner sets the password
+        # via the one-time setup link, never the admin.
+        assert user.password_hash is None
+        # The stored phone is the trimmed string (the shared validator).
         assert user.phone == "+79995550001"
         assert user.role == "master"
         assert user.is_active is True
-        # Only the HASH is stored — the plaintext never lands on the row.
-        assert user.password_hash != "secret12345"
-        assert verify_password("secret12345", user.password_hash)
         # Row is persisted (flushed) inside the caller's transaction.
         row = (
             await db_session.execute(
@@ -205,18 +208,43 @@ class TestCreateStaffAccount:
         ).scalar_one()
         assert row.phone == "+79995550001"
 
-    async def test_short_password_raises_policy_error(self, db_session: AsyncSession) -> None:
+    async def test_duplicate_phone_raises(
+        self, db_session: AsyncSession
+    ) -> None:
+        """#348: explicit exact-string probe BEFORE any write — the
+        composite path previously relied on the global DB-integrity
+        handler only."""
+        from src.domain.phones import PhoneTakenError
+        from src.models.enums import UserRole
+        from src.services.user import get_user_service
+
+        staff = await _add_staff(db_session)
+        await _add_user(db_session, staff_id=staff.id, phone="+79995550002")
+
+        with pytest.raises(PhoneTakenError):
+            await get_user_service().create_staff_account(
+                db_session,
+                staff_id=staff.id,
+                phone="+79995550002",
+                role=UserRole.ADMIN,
+            )
+
+    async def test_blank_phone_after_trim_raises(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The shared validator: whitespace passes the schema's
+        ``min_length=1`` but is blank after trimming."""
+        from src.domain.phones import PhoneInvalidError
         from src.models.enums import UserRole
         from src.services.user import get_user_service
 
         staff = await _add_staff(db_session)
 
-        with pytest.raises(PasswordPolicyError):
+        with pytest.raises(PhoneInvalidError):
             await get_user_service().create_staff_account(
                 db_session,
                 staff_id=staff.id,
-                phone="+79995550002",
-                password="short",
+                phone="   ",
                 role=UserRole.ADMIN,
             )
 
@@ -233,7 +261,6 @@ class TestCreateStaffAccount:
                 db_session,
                 staff_id=staff.id,
                 phone="+79995550003",
-                password="secret12345",
                 role=UserRole.ADMIN,
             )
             assert emitter.accumulated() == {"users"}
@@ -253,7 +280,6 @@ class TestCreateStaffAccount:
             db_session,
             staff_id=staff_id,
             phone="+79995550004",
-            password="secret12345",
             role=UserRole.ADMIN,
         )
         await db_session.rollback()
@@ -282,7 +308,6 @@ class TestCreateStaffAccount:
             db_session,
             staff_id=staff.id,
             phone="+79995550005",
-            password="secret12345",
             role=UserRole.ADMIN,
         )
 

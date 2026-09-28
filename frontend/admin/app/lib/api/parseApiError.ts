@@ -39,6 +39,10 @@ const CODE_DEFAULTS: Record<string, string> = {
   AUTH_LOCKED_OUT: 'Слишком много попыток входа — аккаунт временно заблокирован',
   AUTH_UNAUTHORIZED: 'Требуется вход',
   AUTH_FORBIDDEN: 'Недостаточно прав для этого действия',
+  // #348 spec §6 (S5): the «Учётка» block phone edit — 422 domain codes of
+  // PATCH /users/:id; PHONE_TAKEN doubles as the modal's INLINE error text.
+  PHONE_TAKEN: 'Этот телефон уже занят',
+  PHONE_INVALID: 'Некорректный номер телефона',
 };
 
 /**

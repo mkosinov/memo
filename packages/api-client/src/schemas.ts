@@ -16,6 +16,24 @@ export const StaffMasterSectionSchema = z.object({
 });
 export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
 
+// The card's account block (#348 spec §5): {id, phone, role,
+// password_is_set, is_active, link_expires_at}. null = no account;
+// is_active=false = archived account (the block stays, read-only).
+// link_expires_at = the LIVE setup link's expiry or null (used/expired/
+// none) — the raw token is never here (it surfaces exactly once, in the
+// issue response). `id` is the account's users.id — the addressable key
+// for PATCH /users/:id and POST /users/:id/password-link (staff.id and
+// users.id are different UUIDs; the block is the only frontend source).
+export const StaffAccountSchema = z.object({
+  id: z.string(),
+  phone: z.string(),
+  role: z.string(),
+  password_is_set: z.boolean(),
+  is_active: z.boolean(),
+  link_expires_at: z.string().nullable(),
+});
+export type StaffAccount = z.infer<typeof StaffAccountSchema>;
+
 export const StaffResponseSchema = z.object({
   id: z.string(),
   first_name: z.string(),
@@ -27,6 +45,8 @@ export const StaffResponseSchema = z.object({
   // T8 Gap B (D6): a linked users row exists — ANY is_active. Drives the
   // visibility of the «Архивировать учётку» dismissal checkbox.
   has_user: z.boolean(),
+  // #348: the linked account projection (null = no account on the card).
+  account: StaffAccountSchema.nullable(),
   archived: z.boolean(), // person archive (staff.is_active inverted, #207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -48,11 +68,14 @@ export const MasterSectionInputSchema = z
 export type MasterSectionInput = z.infer<typeof MasterSectionInputSchema>;
 
 // Account-creation checkbox (D6): a section object or literal false —
-// never bare true.
+// never bare true. PASSWORDLESS since #348 (spec §5/§6): the admin only
+// enters the phone; the owner sets the password via the one-time setup
+// link the admin hands over. `.strict()` parity with the backend
+// CreateUserSection (extra="forbid") — a stray password key fails here,
+// loudly, instead of 422-ing at the server.
 export const CreateUserSectionSchema = z
   .object({
     phone: z.string().min(1).max(20),
-    password: z.string().min(1).max(64),
     // GH #263 D10: manual role override — a sent value beats the position
     // template; omitted → the backend template decides (admin > master).
     role: z.enum(['admin', 'master']).nullable().optional(),
@@ -788,6 +811,56 @@ export const ChangePasswordSchema = z.object({
   new_password: z.string().min(1),
 });
 export type ChangePassword = z.input<typeof ChangePasswordSchema>;
+
+// ─── Users vertical (#348 spec §5 — admin-side account operations) ─────────
+// Mirrors backend src/schemas/user.py. Errors: 404 USER_NOT_FOUND; the phone
+// edit answers domain codes PHONE_TAKEN / PHONE_INVALID; link issue refuses a
+// deactivated account with ACCOUNT_DEACTIVATED (all 422).
+
+// PATCH /api/v1/users/{id} body — strictly {phone}; extra keys → 422
+// (backend extra="forbid" parity).
+export const UserPhonePatchSchema = z
+  .object({
+    phone: z.string(),
+  })
+  .strict();
+export type UserPhonePatch = z.input<typeof UserPhonePatchSchema>;
+
+// PATCH /api/v1/users/{id} 200 body — the account projection.
+export const UserResponseSchema = z.object({
+  id: z.string(),
+  phone: z.string(),
+  role: z.string(),
+  staff_id: z.string().nullable(), // null = a pure admin (no card)
+  password_is_set: z.boolean(), // false = passwordless (#348)
+  is_active: z.boolean(),
+});
+export type UserResponse = z.infer<typeof UserResponseSchema>;
+
+// POST /api/v1/users/{id}/password-link 200 body — the RAW token surfaces
+// exactly once, here (#348 spec §5); only its SHA-256 digest is stored, so
+// no later response can carry it. The frontend assembles the handover URL
+// from the page origin ({origin}/password-setup#token=…).
+export const PasswordLinkResponseSchema = z.object({
+  token: z.string(),
+  expires_at: z.string(), // ISO datetime
+});
+export type PasswordLinkResponse = z.infer<typeof PasswordLinkResponseSchema>;
+
+// ─── Public password setup (#348 spec §5/§6 — the link token is the
+// authority; both endpoints are anonymous) ───────────────────────────────────
+// Mirrors backend src/schemas/auth.py. The token rides in the URL fragment
+// (#token=…), never in server logs / Referer. Error contract: the single
+// 422 PASSWORD_LINK_INVALID (one answer for unknown / expired / used /
+// inactive — no state enumeration); a weak password answers 422
+// PASSWORD_POLICY (the shared single-source hint string).
+
+// POST /auth/password-setup/validate 200 body — the screen chooser: ok=true
+// → the password form; the 422 above → «Ссылка недействительна или истекла».
+export const PasswordSetupValidateResponseSchema = z.object({
+  ok: z.boolean(),
+});
+export type PasswordSetupValidateResponse = z.infer<typeof PasswordSetupValidateResponseSchema>;
 
 // ─── Delete dry-run dependency tree (§5 — GH #207) ───────────────────────────
 // 409 Conflict body of the unified DELETE (no-body dry-run). Counters + sums only,

@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     VISIT_NOT_FOUND = "VISIT_NOT_FOUND"
     PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND"
     SETTINGS_NOT_FOUND = "SETTINGS_NOT_FOUND"
+    USER_NOT_FOUND = "USER_NOT_FOUND"  # 404 — /users/{id} отсутствует (GH #348)
 
     # 403 — forbidden (GH #247 auth)
     AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
@@ -45,6 +46,12 @@ class ErrorCode(str, Enum):
 
     # 422 — password policy violation (GH #247 auth, spec §5)
     PASSWORD_POLICY = "PASSWORD_POLICY"
+
+    # 422 — user accounts (GH #348, spec §5)
+    ACCOUNT_DEACTIVATED = "ACCOUNT_DEACTIVATED"            # issue link for an archived account
+    PASSWORD_LINK_INVALID = "PASSWORD_LINK_INVALID"        # public setup: unknown/expired/used/inactive — one answer
+    PHONE_TAKEN = "PHONE_TAKEN"                            # create/edit: another account holds the exact string
+    PHONE_INVALID = "PHONE_INVALID"                        # create/edit: blank or over 20 chars after trim
 
     # 404 / 422 — staff restructuring (GH #266 «Контракты ошибок»)
     STAFF_NOT_FOUND = "STAFF_NOT_FOUND"          # 404 — /staff/{id} отсутствует
@@ -105,11 +112,16 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.VISIT_NOT_FOUND: "Визит не найден",
     ErrorCode.PAYMENT_NOT_FOUND: "Платёж не найден",
     ErrorCode.SETTINGS_NOT_FOUND: "Настройки не найдены",
+    ErrorCode.USER_NOT_FOUND: "Учётка не найдена",
     ErrorCode.AUTH_FORBIDDEN: "Недостаточно прав",
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
     ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
     ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
+    ErrorCode.ACCOUNT_DEACTIVATED: "Учётка деактивирована",
+    ErrorCode.PASSWORD_LINK_INVALID: "Ссылка недействительна или истекла",
+    ErrorCode.PHONE_TAKEN: "Этот телефон уже занят",
+    ErrorCode.PHONE_INVALID: "Телефон учётки: от 1 до 20 символов",
     ErrorCode.STAFF_NOT_FOUND: "Сотрудник не найден",
     ErrorCode.MASTER_NOT_ACTIVE: "Мастер недоступен для расписания",
     ErrorCode.POSITION_NOT_FOUND: "Должность не найдена",

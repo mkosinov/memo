@@ -10,16 +10,29 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     createLocation: vi.fn(),
     updateLocation: vi.fn(),
     patchLocation: vi.fn(),
-    deleteLocation: vi.fn(),
+    dryRunDeleteLocation: vi.fn(),
+    resolveDeleteLocation: vi.fn(),
     archiveLocation: vi.fn(),
     restoreLocation: vi.fn(),
   };
 });
 
+// The deferred-delete conveyor needs the PendingActions + UI contexts —
+// surface tests mock them (full branch matrix lives in
+// useDeleteLocation.test.ts).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
+
 import {
   useCreateLocation,
   useUpdateLocation,
-  usePatchLocation,
   useDeleteLocation,
   useArchiveLocation,
   useRestoreLocation,
@@ -28,7 +41,8 @@ import {
   createLocation,
   updateLocation,
   patchLocation,
-  deleteLocation,
+  dryRunDeleteLocation,
+  resolveDeleteLocation,
   archiveLocation,
   restoreLocation,
   ApiError,
@@ -38,7 +52,8 @@ import type { LocationCreate, LocationUpdate, DependencyNode } from '@memo/api-c
 const mockCreateLocation = vi.mocked(createLocation);
 const mockUpdateLocation = vi.mocked(updateLocation);
 const mockPatchLocation = vi.mocked(patchLocation);
-const mockDeleteLocation = vi.mocked(deleteLocation);
+const mockDryRun = vi.mocked(dryRunDeleteLocation);
+const mockResolveDeleteLocation = vi.mocked(resolveDeleteLocation);
 const mockArchiveLocation = vi.mocked(archiveLocation);
 const mockRestoreLocation = vi.mocked(restoreLocation);
 
@@ -66,7 +81,11 @@ function createQueryClientWrapper() {
 }
 
 describe('useLocationsMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+    mockResolveDeleteLocation.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateLocation', () => {
@@ -162,93 +181,42 @@ describe('useLocationsMutations', () => {
     });
   });
 
-  describe('usePatchLocation', () => {
-    it('calls patchLocation with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
 
-      const { result } = renderHook(() => usePatchLocation(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchLocation).toHaveBeenCalledWith('loc-1', { title: 'Patched' });
-      expect(mockUpdateLocation).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the locations query cache on success', async () => {
+  describe('useDeleteLocation — hook surface (deferred conveyor)', () => {
+    it('removeLocation always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchLocation(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });
-    });
-  });
-
-  describe('useDeleteLocation', () => {
-    it('calls deleteLocation with the provided id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockDeleteLocation.mockResolvedValue(undefined as never);
-
+      queryClient.setQueryData(['locations'], [locationResponse]);
       const { result } = renderHook(() => useDeleteLocation(), { wrapper });
 
-      await act(async () => {
-        await result.current.mutateAsync('loc-1');
-      });
-
-      expect(mockDeleteLocation).toHaveBeenCalledWith('loc-1');
-    });
-
-    it('invalidates locations AND records caches on success (cross-invalidation)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeleteLocation.mockResolvedValue(undefined as never);
-
-      const { result } = renderHook(() => useDeleteLocation(), { wrapper });
+      expect(result.current.removeLocation).toBeTypeOf('function');
+      expect(result.current.removeLocationResolved).toBeTypeOf('function');
+      expect(result.current.isPending).toBe(false);
 
       await act(async () => {
-        await result.current.mutateAsync('loc-1');
+        await result.current.removeLocation(locationResponse);
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(mockDryRun).toHaveBeenCalledWith('loc-1');
+      expect(mockResolveDeleteLocation).not.toHaveBeenCalled();
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
 
-    it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
-      const { wrapper } = createQueryClientWrapper();
+    it('409 + dependency tree rejects upward so the call site opens the dialog', async () => {
       const deps: DependencyNode[] = [
         { entity: 'activities', auto: false, relation: 'Активность', count: 3, allowed_actions: [], message: 'Удалите активности вручную или архивируйте' },
         { entity: 'location_tags', auto: true, relation: 'Тег', count: 2, allowed_actions: ['cascade'] },
       ];
-      mockDeleteLocation.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+      mockDryRun.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
-      const { result } = renderHook(() => useDeleteLocation(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('loc-1')).rejects.toThrow(ApiError);
-      });
-
-      expect(result.current.dependencies).toEqual(deps);
-    });
-
-    it('keeps dependencies null for non-409 errors', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockDeleteLocation.mockRejectedValue(new ApiError(404, 'Location not found', 'LOCATION_NOT_FOUND'));
-
       const { result } = renderHook(() => useDeleteLocation(), { wrapper });
 
       await act(async () => {
-        await expect(result.current.mutateAsync('loc-1')).rejects.toThrow(ApiError);
+        await expect(result.current.removeLocation(locationResponse)).rejects.toThrow(ApiError);
       });
 
-      expect(result.current.dependencies).toBeNull();
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(mockResolveDeleteLocation).not.toHaveBeenCalled();
     });
   });
 

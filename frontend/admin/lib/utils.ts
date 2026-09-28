@@ -23,7 +23,6 @@ export const MONTHS_GENITIVE = [
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ] as const;
 
-export const CELL_HEIGHT_MIN = 40;
 export const CELL_HEIGHT_OPTIONS = [
   { value: 40, label: 'Мелкий' },
   { value: 50, label: 'Стандартный' },

@@ -5,8 +5,9 @@ domain-rules/staff.md):
 
 * ``/api/v1/staff`` — full directory CRUD: paginated list (status/q/sort),
   bare ``/all``, get (incl. archived), create (card + master section +
-  positions + account flag), PUT/PATCH (atomic), DELETE (GH #207 contract),
-  archive/restore (D6 checkboxes).
+  positions + account flag), PUT/PATCH (atomic), DELETE (GH #345 unified
+  deferred-delete contract — dry_run preview / commit body with
+  ``expected``), archive/restore (D6 checkboxes).
 * ``/api/v1/positions`` — dictionary CRUD + ``is_system`` guard.
 * ``/api/v1/masters`` — READ-ONLY view over staff+masters (``is_active``
   masters only; ``id`` = staff_id); no mutations, no ``/{id}``.
@@ -123,7 +124,7 @@ class TestStaffCrud:
             "/api/v1/staff",
             json=_create_payload(
                 master=MASTER_SECTION,
-                create_user={"phone": "+79995556677", "password": "pw-master-1"},
+                create_user={"phone": "+79995556677"},
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -141,7 +142,7 @@ class TestStaffCrud:
         resp = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995556678", "password": "pw-admin-1"},
+                create_user={"phone": "+79995556678"},
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -149,6 +150,76 @@ class TestStaffCrud:
             "SELECT role FROM users WHERE phone='+79995556678'"
         )
         assert users[0]["role"] == "admin"
+
+    def test_create_user_account_is_passwordless(self, api_client) -> None:
+        """#348: the composite path lands a passwordless account row."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556679"},
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        users = query_db(
+            "SELECT password_hash FROM users WHERE phone='+79995556679'"
+        )
+        assert users[0]["password_hash"] is None
+
+    def test_create_user_account_duplicate_phone_returns_422_phone_taken(
+        self, api_client
+    ) -> None:
+        """#348: explicit probe on the composite path — the same error
+        contract as the edit (spec §5), not the generic DB-integrity
+        code."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556680"},
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556680"},
+            ),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "PHONE_TAKEN"
+        # The failed create left nothing behind (atomic rollback).
+        staff_rows = query_db(
+            "SELECT COUNT(*) AS c FROM staff "
+            "WHERE first_name='Ольга' AND last_name='Иванова'"
+        )
+        assert staff_rows[0]["c"] == 1, "the rolled-back card must not persist"
+
+    def test_create_user_account_blank_phone_returns_422_phone_invalid(
+        self, api_client
+    ) -> None:
+        """#348: the shared validator gates the composite path (whitespace
+        passes the schema's min_length=1 but is blank after trim)."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "   "},
+            ),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "PHONE_INVALID"
+
+    def test_create_user_account_password_field_rejected(
+        self, api_client
+    ) -> None:
+        """#348 breaking: the password field is GONE from the contract
+        (``extra="forbid"``) — callers must not send it."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556681", "password": "pw-1"},
+            ),
+        )
+        assert resp.status_code == 422
 
     def test_get_includes_archived(self, api_client) -> None:
         created = api_client.post("/api/v1/staff", json=_create_payload()).json()
@@ -553,128 +624,192 @@ class TestStaffArchiveRestore:
         assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
 
 
+def _seed_activity(api_client, master_id: str, service_id: str, location_id: str,
+                   *, hours_from_now: int = 24) -> dict:
+    """Create one activity via the API; return its JSON body."""
+    from datetime import UTC, datetime, timedelta
+
+    resp = api_client.post(
+        "/api/v1/activities",
+        json={
+            "master_id": master_id,
+            "service_id": service_id,
+            "location_id": location_id,
+            "start": (
+                datetime.now(UTC) + timedelta(hours=hours_from_now)
+            ).isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _seed_service_and_location(api_client) -> tuple[str, str]:
+    """The (service_id, location_id) pair an activity needs."""
+    service = api_client.post(
+        "/api/v1/services",
+        json={
+            "title": "S", "description": "D", "image_url": "http://x",
+            "specialty": "s", "min_age": 6, "max_age": 99,
+            "duration": 60, "record_info": "ri",
+        },
+    ).json()
+    location = api_client.post(
+        "/api/v1/locations",
+        json={"title": "L", "address": "a", "capacity": 5},
+    ).json()
+    return service["id"], location["id"]
+
+
 class TestStaffDelete:
-    """DELETE /api/v1/staff/{id} — GH #207 contract on the staff matrix."""
+    """DELETE /api/v1/staff/{id} — the unified deferred-delete contract
+    (GH #345 §4.1, one-to-one mirror of the tags/records family).
 
-    def test_delete_bare_no_body_204(self, api_client) -> None:
+    Modes (spec §4.1):
+      * ``?dry_run=true`` — PURE preview: existence probe → missing → 404;
+        ``collect_dependencies`` → empty → 204 WITHOUT deleting; non-empty
+        → 409 + dependency tree. Never modifies rows; combined with a
+        ``resolutions`` body → 422 ``dry_run_with_resolutions_forbidden``
+        (checked before the probe).
+      * No body, no flag → 422 ``expected_state_required`` — bare DELETE
+        is abolished (the legacy execute-if-clean path is gone, S6).
+      * Body ``{resolutions?, expected}`` — the deferred-delete commit:
+        the ROUTE parses the form and maps 404/422; the subset
+        verification + execution live INSIDE the ``delete_staff``
+        scenario transaction (spec §4.5, mirror of ``delete_record``).
+
+    Domain matrix (spec §4.4): ``activities`` is the ONLY non-auto dep —
+    blocked via the masters extension row (Mode B «архивировать вместо»
+    only; a blocked commit 422s at ANY body); users / masters /
+    master_tags / staff_positions are AUTO (the clean/all-auto commit
+    sends ``{expected: {}}`` → 204 with cascades).
+    """
+
+    # ── bare DELETE (no flag, no body) → 422 expected_state_required ─────
+
+    def test_bare_delete_clean_card_returns_422_row_alive(
+        self, api_client
+    ) -> None:
+        """S6: bare DELETE executes nowhere — even a clean card refuses."""
         created = api_client.post("/api/v1/staff", json=_create_payload()).json()
-        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
-        assert resp.status_code == 204
-        assert (
-            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 404
-        )
-
-    def test_delete_with_activities_no_body_409(self, api_client) -> None:
-        from datetime import UTC, datetime, timedelta
-
-        created = api_client.post(
-            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
-        ).json()
-        service = api_client.post(
-            "/api/v1/services",
-            json={
-                "title": "S", "description": "D", "image_url": "http://x",
-                "specialty": "s", "min_age": 6, "max_age": 99,
-                "duration": 60, "record_info": "ri",
-            },
-        ).json()
-        location = api_client.post(
-            "/api/v1/locations",
-            json={"title": "L", "address": "a", "capacity": 5},
-        ).json()
-
-        api_client.post(
-            "/api/v1/activities",
-            json={
-                "master_id": created["id"],
-                "service_id": service["id"],
-                "location_id": location["id"],
-                "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
-                "duration": 90, "capacity": 10, "is_private": False,
-            },
-        )
 
         resp = api_client.delete(f"/api/v1/staff/{created['id']}")
 
-        assert resp.status_code == 409
-        body = resp.json()
-        assert body["detail"] == "has_dependencies"
-        entities = [d["entity"] for d in body["dependencies"]]
-        assert "activities" in entities
-        # row untouched
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
         assert (
             api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
         )
 
-    def test_delete_with_activities_with_body_422(self, api_client) -> None:
-        from datetime import UTC, datetime, timedelta
-
+    def test_bare_delete_card_with_activities_returns_422_row_alive(
+        self, api_client
+    ) -> None:
+        """S6: bare DELETE on a blocked card → 422 (form check first)."""
         created = api_client.post(
             "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
         ).json()
-        service = api_client.post(
-            "/api/v1/services",
-            json={
-                "title": "S", "description": "D", "image_url": "http://x",
-                "specialty": "s", "min_age": 6, "max_age": 99,
-                "duration": 60, "record_info": "ri",
-            },
-        ).json()
-        location = api_client.post(
-            "/api/v1/locations",
-            json={"title": "L", "address": "a", "capacity": 5},
-        ).json()
-        api_client.post(
-            "/api/v1/activities",
-            json={
-                "master_id": created["id"],
-                "service_id": service["id"],
-                "location_id": location["id"],
-                "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
-                "duration": 90, "capacity": 10, "is_private": False,
-            },
+        service_id, location_id = _seed_service_and_location(api_client)
+        _seed_activity(
+            api_client, created["id"], service_id, location_id
         )
+
+        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_bare_delete_unknown_id_returns_422_before_404(
+        self, api_client
+    ) -> None:
+        """S6: form check precedes the probe — 422, not 404."""
+        resp = api_client.delete("/api/v1/staff/nonexistent-id")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+
+    def test_delete_resolutions_body_without_expected_returns_422(
+        self, api_client
+    ) -> None:
+        """S6: resolutions-only body is the rejected legacy shape."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/staff/{created['id']}",
             json={"resolutions": {}},
         )
-        assert resp.status_code == 422
 
-    def test_delete_with_tags_only_no_body_409_tree_shows_master_tags(
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_delete_unknown_keys_body_without_expected_returns_422(
         self, api_client
     ) -> None:
-        """GH #318 regression: the parent 409-tree surfaces ``master_tags``
-        through the #318 fallback counters (join-dep counters existed
-        pre-#318; items stay None — §5 boundary, no item collector from the
-        parent side). Delete-with-body still resolves (see the cascade
-        test below) — the tree only informs consent."""
+        """S6: unknown-keys-only body has no ``expected`` — same 422."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_blocked_card_returns_409_tree_row_alive(
+        self, api_client
+    ) -> None:
+        """S6: dry-run on a card with activities → 409 has_dependencies.
+
+        ``activities`` is a blocked non-auto node: counters only, NO items
+        (spec §4.3 fixed boundary — blocked nodes are never confirmed, no
+        item collectors for activities from the parent side).
+        """
         created = api_client.post(
             "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
         ).json()
-        tag_id = _link_master_tag(created["id"])
+        service_id, location_id = _seed_service_and_location(api_client)
+        _seed_activity(api_client, created["id"], service_id, location_id)
 
-        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
+        )
 
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
-        dep = deps["master_tags"]
-        assert dep["count"] == 1
-        assert dep["allowed_actions"] == ["cascade"]
-        assert dep["auto"] is True  # parent perspective (#318 D1)
-        assert "items" not in dep or dep["items"] is None  # §5 boundary
-        # Dry-run modifies nothing: card + join row alive.
-        assert api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
-        assert query_db(
-            f"SELECT * FROM master_tags WHERE tag_id='{tag_id}'"
+        assert deps["activities"]["count"] == 1
+        assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["auto"] is False
+        assert deps["activities"]["message"] is not None
+        # §4.3: no items for the activities node (exclude_none omits it).
+        assert "items" not in deps["activities"]
+        # Row untouched.
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
         )
 
-    def test_delete_cascades_user_masters_tags_positions(
+    def test_dry_run_all_auto_card_returns_409_tree_row_alive(
         self, api_client
     ) -> None:
+        """S2(б): dry-run on an all-auto card (masters ext + user +
+        master_tags + staff_positions, NO activities) → 409 for informed
+        consent; nothing is modified."""
         pos_id = _seed_position()
         created = api_client.post(
             "/api/v1/staff",
@@ -682,24 +817,150 @@ class TestStaffDelete:
                 master=MASTER_SECTION, position_ids=[pos_id]
             ),
         ).json()
-        user_id = str(_uuid.uuid4())
-        query_db(
-            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
-            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-            f"VALUES ('{user_id}', '+79997778897', 'x', 'master', "
-            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
-        )
+        _seed_user(created["id"])
         tag_id = _link_master_tag(created["id"])
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/staff/{created['id']}", json={"resolutions": {}}
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert "activities" not in deps  # zero-count dep is skipped
+        assert deps["users"]["count"] == 1
+        assert deps["users"]["auto"] is True
+        assert deps["masters"]["count"] == 1
+        assert deps["master_tags"]["count"] == 1
+        assert deps["staff_positions"]["count"] == 1
+        # Dry-run modifies nothing: card + children alive.
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+        assert query_db(
+            f"SELECT * FROM master_tags WHERE tag_id='{tag_id}'"
+        )
+
+    def test_dry_run_clean_card_returns_204_and_row_alive(
+        self, api_client
+    ) -> None:
+        """S2(а): dry-run on a clean card → 204 WITHOUT deleting."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
         )
 
         assert resp.status_code == 204
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_dry_run_unknown_card_returns_404(self, api_client) -> None:
+        """S6: dry-run probes existence — missing card → 404."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/staff/nonexistent-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client
+    ) -> None:
+        """S6: dry_run + resolutions → 422; combo checked before the probe."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        for staff_id in (created["id"], "nonexistent-id"):
+            resp = api_client.request(
+                "DELETE",
+                f"/api/v1/staff/{staff_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"users": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{staff_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_dry_run_with_expected_only_body_silently_ignored(
+        self, api_client
+    ) -> None:
+        """Combinatorics: dry_run + expected-only body → preview proceeds."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    # ── body commit: existence + expected id-set verification ─────────────
+
+    def test_commit_unknown_card_with_body_returns_404(
+        self, api_client
+    ) -> None:
+        """S6: nonexistent id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/staff/nonexistent-id",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
+
+    def test_commit_clean_card_expected_empty_returns_204(
+        self, api_client
+    ) -> None:
+        """S2(а): clean path — ``{expected: {}}`` → 204 hard delete."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 404
+        )
+
+    def test_commit_all_auto_card_expected_empty_cascades_204(
+        self, api_client
+    ) -> None:
+        """S2(б): all-auto deps + commit ``{expected: {}}`` → 204 with the
+        cascade: users / masters / master_tags / staff_positions die with
+        the card; the tag and position DICTIONARY rows survive."""
+        pos_id = _seed_position()
+        created = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                master=MASTER_SECTION, position_ids=[pos_id]
+            ),
+        ).json()
+        user_id = _seed_user(created["id"])
+        tag_id = _link_master_tag(created["id"])
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
         assert query_db(f"SELECT * FROM staff WHERE id='{created['id']}'") == []
-        assert query_db(
-            f"SELECT * FROM users WHERE id='{user_id}'"
-        ) == []
+        assert query_db(f"SELECT * FROM users WHERE id='{user_id}'") == []
         assert query_db(
             f"SELECT * FROM masters WHERE staff_id='{created['id']}'"
         ) == []
@@ -709,45 +970,241 @@ class TestStaffDelete:
         assert query_db(
             f"SELECT * FROM staff_positions WHERE staff_id='{created['id']}'"
         ) == []
-        # the tag dictionary row itself survives
+        # the tag and position dictionary rows themselves survive
         assert query_db(f"SELECT * FROM tags WHERE id='{tag_id}'")
+        assert query_db(f"SELECT * FROM positions WHERE id='{pos_id}'")
 
-    def test_delete_nonexistent_404(self, api_client) -> None:
-        resp = api_client.delete("/api/v1/staff/nonexistent-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "STAFF_NOT_FOUND"
-
-    def test_delete_cascades_user_profiles(
-        self, api_client
+    def test_commit_appeared_activity_returns_409_stale(
+        self, api_client, create_service, create_location,
     ) -> None:
-        """GH #262: the linked user's private profile row dies with the
-        account in the card hard-delete (FK_MATRIX user_profiles dep)."""
+        """S5 (DoD race): an activity that APPEARED after the (clean)
+        dry-run window → 409 ``stale_dependencies`` — the subset check
+        inside the scenario transaction catches the race BEFORE the
+        blocked-422 could fire (the (Staff,"activities") id-collector is
+        the race gate, spec §4.3).
+
+        "Clean at dialog time": a schedulable card necessarily carries
+        the masters extension (an AUTO dep — informational row, never
+        part of ``expected``), so the preview 409 tree holds only auto
+        nodes and the confirmed state is ``{expected: {}}``.
+        """
         created = api_client.post(
-            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION),
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
         ).json()
-        user_id = str(_uuid.uuid4())
-        profile_id = str(_uuid.uuid4())
-        query_db(
-            f"INSERT INTO users (id, phone, password_hash, role, staff_id, "
-            f"email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at) "
-            f"VALUES ('{user_id}', '+79997778899', 'x', 'master', "
-            f"'{created['id']}', 0, 0, 1, datetime('now'), datetime('now'))"
+
+        # The dialog-time preview: only the AUTO masters row — nothing
+        # the user confirms (auto nodes are exempt from expected).
+        preview = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
         )
-        query_db(
-            f"INSERT INTO user_profiles (id, user_id, patronymic, created_at, updated_at) "
-            f"VALUES ('{profile_id}', '{user_id}', 'Петровна', "
-            f"datetime('now'), datetime('now'))"
+        assert preview.status_code == 409, preview.text
+        preview_deps = {
+            d["entity"] for d in preview.json()["dependencies"]
+        }
+        assert "activities" not in preview_deps
+
+        # Mid-window race: an activity appears via the API.
+        _seed_activity(
+            api_client,
+            created["id"],
+            create_service()["id"],
+            create_location()["id"],
         )
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/staff/{created['id']}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"expected": {}},
         )
 
-        assert resp.status_code == 204
-        assert query_db(f"SELECT * FROM users WHERE id='{user_id}'") == []
-        assert query_db(
-            f"SELECT * FROM user_profiles WHERE user_id='{user_id}'"
-        ) == []
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["activities"]["count"] == 1
+        # Nothing deleted — card AND the racing activity alive.
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_commit_disappeared_activity_subset_passes_204(
+        self, api_client
+    ) -> None:
+        """S5: dep removed mid-window → subset semantics → the confirmed
+        commit proceeds; for staff the surviving path needs the activity
+        gone (blocked otherwise), so the confirmed activity disappears
+        via its own commit before the staff commit lands."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        service_id, location_id = _seed_service_and_location(api_client)
+        activity = _seed_activity(
+            api_client, created["id"], service_id, location_id
+        )
+
+        # The confirmed activity dies first (its own deferred-delete commit).
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}",
+            json={"expected": {}},
+        )
+        assert act_resp.status_code == 204, act_resp.text
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {"activities": [activity["id"]]}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 404
+        )
+
+    def test_commit_blocked_card_any_body_returns_422(
+        self, api_client
+    ) -> None:
+        """S6: blocked dep (activities) at any body → 422 'archive instead'.
+
+        The expected-check passes (the activity IS confirmed) — the 422
+        comes from the resolutions validation inside the scenario's core.
+        """
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        service_id, location_id = _seed_service_and_location(api_client)
+        activity = _seed_activity(
+            api_client, created["id"], service_id, location_id
+        )
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {"activities": [activity["id"]]}},
+        )
+
+        assert resp.status_code == 422, resp.text
+        # Row untouched.
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_commit_stale_beats_blocked_resolutions_returns_409_not_422(
+        self, api_client
+    ) -> None:
+        """Order pin (#285 D7 mirror): a stale expected → 409 even when
+        the resolutions/blocked branch would also 422."""
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        service_id, location_id = _seed_service_and_location(api_client)
+        _seed_activity(api_client, created["id"], service_id, location_id)
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {}},  # stale: an activity exists on the server
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_commit_unknown_body_keys_silently_ignored(
+        self, api_client
+    ) -> None:
+        """S6: unknown body keys (with ``expected`` present) ignored → 204."""
+        created = api_client.post("/api/v1/staff", json=_create_payload()).json()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {}, "bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 404
+        )
+
+    def test_commit_swapped_activity_id_returns_409(
+        self, api_client
+    ) -> None:
+        """S5 rev6 mirror: a ghost id at an unchanged counter → 409
+        (id-sets, not counters — the swap is caught)."""
+        from uuid import uuid4
+
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        service_id, location_id = _seed_service_and_location(api_client)
+        activity = _seed_activity(
+            api_client, created["id"], service_id, location_id
+        )
+        ghost = str(uuid4())
+
+        # Swap: delete the confirmed activity, create another one on the
+        # SAME master — the counter stays 1, the id-set does not match.
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}",
+            json={"expected": {}},
+        )
+        assert act_resp.status_code == 204
+        swapped = _seed_activity(
+            api_client,
+            created["id"],
+            service_id,
+            location_id,
+            hours_from_now=48,
+        )
+        assert swapped["id"] != activity["id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {"activities": [ghost]}},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
+
+    def test_commit_expected_carries_all_ids_beyond_ten(
+        self, api_client
+    ) -> None:
+        """>10 items pin (spec §4.2): ``expected`` carries ALL ids of the
+        dependency tree, not the rendered top-10 rows.
+
+        12 activities on one card; a commit confirming only the first 10
+        id-sets → 409 ``stale_dependencies`` (ids 11–12 appeared from the
+        check's point of view — mid-window race semantics).
+        """
+        created = api_client.post(
+            "/api/v1/staff", json=_create_payload(master=MASTER_SECTION)
+        ).json()
+        service_id, location_id = _seed_service_and_location(api_client)
+        activity_ids = [
+            _seed_activity(
+                api_client, created["id"], service_id, location_id,
+                hours_from_now=24 + i,
+            )["id"]
+            for i in range(12)
+        ]
+
+        # Confirm only the first 10 → the remaining 2 are "new" → 409.
+        partial = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            json={"expected": {"activities": activity_ids[:10]}},
+        )
+        assert partial.status_code == 409, partial.text
+        assert partial.json()["detail"] == "stale_dependencies"
+        assert (
+            api_client.get(f"/api/v1/staff/{created['id']}").status_code == 200
+        )
 
 
 class TestNoStaffReorder:
@@ -1242,7 +1699,7 @@ class TestStaffHasUser:
         created = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995551100", "password": "pw-acc-1"}
+                create_user={"phone": "+79995551100"}
             ),
         ).json()
         resp = api_client.get(f"/api/v1/staff/{created['id']}")
@@ -1266,7 +1723,7 @@ class TestStaffHasUser:
         resp = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995551101", "password": "pw-acc-2"}
+                create_user={"phone": "+79995551101"}
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -1278,7 +1735,7 @@ class TestStaffHasUser:
             json=_create_payload(
                 first_name="С",
                 last_name="Сучёткой",
-                create_user={"phone": "+79995551102", "password": "pw-acc-3"},
+                create_user={"phone": "+79995551102"},
             ),
         ).json()
         api_client.post(
@@ -1368,7 +1825,7 @@ class TestDeleteCascadesUserSettings:
         )
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/staff/{created['id']}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/staff/{created['id']}", json={"expected": {}}
         )
 
         assert resp.status_code == 204, resp.text
@@ -1378,9 +1835,10 @@ class TestDeleteCascadesUserSettings:
         ) == []
 
     def test_dry_run_shows_users_dep_unchanged(self, api_client) -> None:
-        """Dry-run (no-body DELETE): the dependency tree still lists
+        """Dry-run (``?dry_run=true``): the dependency tree still lists
         ``users`` (UserSettings is part of the users cascade, NOT a separate
-        matrix entry). Shape unchanged."""
+        matrix entry). Shape unchanged (#319 pin carried onto the #345
+        preview transport)."""
         created = api_client.post(
             "/api/v1/staff", json=_create_payload()
         ).json()
@@ -1399,7 +1857,11 @@ class TestDeleteCascadesUserSettings:
             f"1, 0, datetime('now'), datetime('now'))"
         )
 
-        resp = api_client.delete(f"/api/v1/staff/{created['id']}")
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/staff/{created['id']}",
+            params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409, resp.text
         body = resp.json()

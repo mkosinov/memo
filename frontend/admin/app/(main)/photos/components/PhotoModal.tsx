@@ -102,8 +102,6 @@ function FieldRenderer({
           ))}
         </div>
         <RemoteSearchSelect
-          value={null}
-          onChange={() => {}}
           onSelectItem={(item) => {
             if (!selectedTagIds.includes(item.id as string)) {
               onChange(field.key, [...selectedTags, { id: item.id, title: item.title }]);
@@ -151,7 +149,6 @@ function FieldRenderer({
       <div className="flex flex-col gap-1">
         <RemoteSearchSelect
           key={remountKey ?? 0}
-          value={(value as string) ?? null}
           onChange={(uuid) => onChange(field.key, uuid)}
           onSearch={searchFn}
           label={field.label}

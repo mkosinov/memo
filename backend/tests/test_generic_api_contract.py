@@ -300,8 +300,8 @@ class TestGenericApiDeleteContract:
         returns False on missing instance).
 
         Replaces the deleted ``test_delete_soft_second_delete_returns_404``
-        (#207 Task 13 Part B3): the soft-delete world's "second delete on an
-        archived row returns False" guard is now redundant because there is no
+        (#207 Task 13 Part B3): the soft-delete world's "second delete on
+        an archived row returns False" guard is now redundant because there is no
         archived state — a hard-delete already 204s the first call, and the
         second call hits a missing row the same way
         ``test_delete_nonexistent_returns_404_with_entity_code`` does. Kept as a
@@ -314,6 +314,46 @@ class TestGenericApiDeleteContract:
         resp = _delete(api_client, f"{cfg.router_prefix}/{created['id']}", cfg.delete_body)
         assert resp.status_code == 404, "second DELETE on a hard-deleted row → 404"
         assert resp.json()["detail"]["code"] == cfg.not_found_code
+
+    @pytest.mark.parametrize("service_cls,cfg", _contract_params())
+    def test_bare_delete_returns_422_expected_state_required(
+        self, service_cls, cfg, api_client, request,
+    ):
+        """GH #345 §4.1: every ``delete_body``-carrying entity rejects a
+        BARE DELETE (no flag, no body) with 422 — the legacy
+        execute-if-clean path is abolished family-wide. The form check
+        precedes the probe (an unknown id gets the same 422) and no row
+        is touched.
+
+        Detail shape is family-specific and pinned per-entity: the
+        #285/#318/#345 family (records/tags/locations/services/materials)
+        answers the flat string ``{"detail": "expected_state_required"}``;
+        the #286 activity family uses the ErrorDetail canon
+        (``EXPECTED_STATE_REQUIRED`` code) — accepted here either way.
+        Entities with ``delete_body=None`` keep the bare DELETE contract
+        and are skipped (their transport differs by design).
+        """
+        assert cfg is not None, f"{service_cls.__name__}: missing CONTRACT_CONFIG entry"
+        if cfg.delete_body is None:
+            pytest.skip("entity keeps the bare-DELETE contract (delete_body unset)")
+        fk_ids = _resolve_fk_ids(request, cfg)
+        created = _create_entity(api_client, cfg, fk_ids)
+
+        resp = api_client.delete(f"{cfg.router_prefix}/{created['id']}")
+
+        assert resp.status_code == 422, (
+            f"bare DELETE must be 422 on the deferred-delete contract, "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        detail = resp.json()["detail"]
+        assert detail == "expected_state_required" or (
+            isinstance(detail, dict) and detail["code"] == "EXPECTED_STATE_REQUIRED"
+        ), f"unexpected bare-422 detail shape: {detail!r}"
+        # The form check precedes the probe — an unknown id gets the same 422.
+        unknown = api_client.delete(f"{cfg.router_prefix}/nonexistent-id")
+        assert unknown.status_code == 422
+        # Nothing was deleted by either call.
+        assert api_client.get(f"{cfg.router_prefix}/{created['id']}").status_code == 200
 
 
 class TestGenericApiPatchWiring:

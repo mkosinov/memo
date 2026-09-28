@@ -303,7 +303,12 @@ class TestClientCascadeInheritsRecompute:
         ``resolve_delete`` no longer carries client CASCADE handlers);
         the scenario's visitor loop calls the SAME
         ``delete_visits_by_visitor`` brick, so the recompute inheritance
-        survives the migration unchanged."""
+        survives the migration unchanged.
+
+        GH #345 Task 4: the scenario carries the mandatory ``expected``
+        subset-verification — pass the fresh id-sets for the non-auto
+        deps (records/visitors; auto deps are exempt), mirroring how
+        ``test_api_clients.py`` builds ``expected`` from the tree."""
         from src.usecases.clients import delete_client
 
         activity = await _world(db_session)
@@ -324,6 +329,13 @@ class TestClientCascadeInheritsRecompute:
             db_session=db_session,
             id=client.id,
             resolutions={"records": "nullify", "visitors": "cascade"},
+            # GH #345 Task 4: fresh snapshot of the non-auto deps —
+            # records/visitors ids as str uuids, mirroring the API tests'
+            # ``_expected_from_tree`` builder (ids are Mapped[str]).
+            expected={
+                "records": [record1.id, record2.id],
+                "visitors": [v1.id, v2.id],
+            },
         )
 
         assert ok is True

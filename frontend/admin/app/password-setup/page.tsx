@@ -50,6 +50,14 @@ export default function PasswordSetupPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    // StrictMode re-entry (dev double-mount): the first run already read
+    // the fragment and STRIPPED it — a naive re-read would see an empty
+    // hash and flip a valid link to «недействительна». The token survives
+    // in tokenRef, and the first run's validate chain below still drives
+    // the screen (deliberately never cancelled between StrictMode runs —
+    // the interim cleanup would swallow its answer and freeze the checker).
+    if (tokenRef.current !== null) return;
+
     const token = readTokenFromHash(window.location.hash);
     // Strip the fragment right after reading (spec §6): the token must not
     // linger in the address bar (refresh / copy-paste of the URL would
@@ -68,20 +76,16 @@ export default function PasswordSetupPage() {
     }
     tokenRef.current = token;
 
-    let cancelled = false;
     validatePasswordSetup(token)
       .then(() => {
-        if (!cancelled) setScreen('form');
+        setScreen('form');
       })
       .catch(() => {
         // The single 422 PASSWORD_LINK_INVALID for every dead-link state —
         // and any transport failure also lands here (dead screen, no
         // enumeration, no retry loop on a link we cannot confirm).
-        if (!cancelled) setScreen('invalid');
+        setScreen('invalid');
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {

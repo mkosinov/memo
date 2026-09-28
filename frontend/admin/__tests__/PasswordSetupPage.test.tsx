@@ -90,6 +90,22 @@ describe('PasswordSetupPage', () => {
       ).toBeInTheDocument();
     });
 
+    it('StrictMode double-mount: the form still appears (hash re-read after strip must not flip to invalid)', async () => {
+      setUrl('/password-setup#token=strict-mode-token');
+      render(
+        <React.StrictMode>
+          <PasswordSetupPage />
+        </React.StrictMode>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Придумайте пароль')).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText('Ссылка недействительна или истекла'),
+      ).not.toBeInTheDocument();
+    });
+
     it('invalid token (422 PASSWORD_LINK_INVALID): the invalid screen, no form', async () => {
       setUrl('/password-setup#token=stale');
       mockValidate.mockRejectedValue(LINK_INVALID_ERROR());

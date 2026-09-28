@@ -77,67 +77,67 @@ function LoginForm() {
   return (
     <AuthCard title="Вход в Memo">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="login-phone"
-              className="text-xs font-medium"
-              style={{ color: 'var(--ink-mid)' }}
-            >
-              Телефон
-            </label>
-            <input
-              id="login-phone"
-              type="tel"
-              autoComplete="tel"
-              required
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-[var(--brand)]"
-              style={{ borderColor: 'var(--line)', color: 'var(--ink)', backgroundColor: 'var(--white)' }}
-              placeholder="+7 900 000-00-00"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="login-password"
-              className="text-xs font-medium"
-              style={{ color: 'var(--ink-mid)' }}
-            >
-              Пароль
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-[var(--brand)]"
-              style={{ borderColor: 'var(--line)', color: 'var(--ink)', backgroundColor: 'var(--white)' }}
-            />
-          </div>
-
-          {error && (
-            <p
-              data-testid="login-error"
-              className="text-xs"
-              style={{ color: 'var(--danger)' }}
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg py-2 text-sm font-medium text-white transition-colors disabled:opacity-60"
-            style={{ backgroundColor: 'var(--brand)' }}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="login-phone"
+            className="text-xs font-medium"
+            style={{ color: 'var(--ink-mid)' }}
           >
-            {submitting ? 'Вход…' : 'Войти'}
-          </button>
-        </form>
+            Телефон
+          </label>
+          <input
+            id="login-phone"
+            type="tel"
+            autoComplete="tel"
+            required
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-[var(--brand)]"
+            style={{ borderColor: 'var(--line)', color: 'var(--ink)', backgroundColor: 'var(--white)' }}
+            placeholder="+7 900 000-00-00"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="login-password"
+            className="text-xs font-medium"
+            style={{ color: 'var(--ink-mid)' }}
+          >
+            Пароль
+          </label>
+          <input
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-[var(--brand)]"
+            style={{ borderColor: 'var(--line)', color: 'var(--ink)', backgroundColor: 'var(--white)' }}
+          />
+        </div>
+
+        {error && (
+          <p
+            data-testid="login-error"
+            className="text-xs"
+            style={{ color: 'var(--danger)' }}
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="rounded-lg py-2 text-sm font-medium text-white transition-colors disabled:opacity-60"
+          style={{ backgroundColor: 'var(--brand)' }}
+        >
+          {submitting ? 'Вход…' : 'Войти'}
+        </button>
+      </form>
     </AuthCard>
   );
 }

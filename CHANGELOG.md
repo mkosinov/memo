@@ -154,6 +154,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     забыли» в обе стороны); OpenAPI-гард `sort_by` клиентов — enum из 7
     значений (`test_api_clients.py`, generic-Query-инъекция FastAPI);
     `RecordSortOrder` (дубль `SortOrder`) удалён.
+## [Unreleased] — 2026-09-27
+
+### Changed
+- **GH #368 — Уборка мёртвых пропсов из контрактов компонентов** — branch
+  `dead-props-368` (3 commits `fff55aa7..919fafcb`, base `3e3d73d0`; поведение
+  UI не менялось — чистка контрактов, все 2587 vitest + tsc + lint + e2e-сабсет
+  зелёные):
+  - Из контракта `RemoteSearchSelect` удалён мёртвый проп `value` (компонент
+    всегда управлялся внутренним состоянием) и мёртвые прокидывания
+    `value`/no-op `onChange` из мест использования (PhotosFilters, PhotoModal,
+    PhoneInput, ServicesTable/MaterialsTable/LocationsTable/PositionsTable/TagsTable);
+    `onChange` стал опциональным (`onChange?`).
+  - Из пяти модалок справочников — `LocationModal`, `PositionModal`,
+    `MaterialModal`, `ServiceModal`, `TagModal` — удалён мёртвый проп `mode`:
+    типы пропсов его не объявляют, тела не читают (grep-верификация пер-компонентно).
+  - Тестовые дефолты подчищены (`RemoteSearchSelect.test.tsx`,
+    `ServiceModal.test.tsx`, `PhoneInput.test.tsx`) — мёртвые `value`/`mode`
+  больше не прокидываются.
 
 ## [Unreleased] — 2026-09-25
 

@@ -200,7 +200,6 @@ export function ServicesTable() {
           click is gated above), so no read-only rendering is needed here. */}
       {editingService && canWriteServices && (
         <ServiceModal
-          mode="edit"
           service={editingService}
           onSubmit={handleEditSubmit}
           onClose={() => setEditingService(null)}
@@ -212,7 +211,6 @@ export function ServicesTable() {
       {/* Create Modal */}
       {creatingService && canWriteServices && (
         <ServiceModal
-          mode="create"
           service={null}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingService(false)}

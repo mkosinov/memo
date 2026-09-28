@@ -143,7 +143,6 @@ export function PositionsTable() {
       {/* Rename modal — built-ins included (D4: title свободен) */}
       {editPosition && (
         <PositionModal
-          mode="edit"
           position={editPosition}
           onSubmit={handleRename}
           onClose={() => setEditPosition(null)}
@@ -155,7 +154,6 @@ export function PositionsTable() {
       {/* Create modal */}
       {creatingPosition && (
         <PositionModal
-          mode="create"
           position={null}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingPosition(false)}

@@ -161,7 +161,6 @@ export function MaterialsTable() {
       {/* Edit Modal */}
       {editingMaterial && (
         <MaterialModal
-          mode="edit"
           material={editingMaterial}
           onSubmit={handleEditSubmit}
           onClose={() => setEditingMaterial(null)}
@@ -173,7 +172,6 @@ export function MaterialsTable() {
       {/* Create Modal */}
       {creatingMaterial && (
         <MaterialModal
-          mode="create"
           material={null}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingMaterial(false)}

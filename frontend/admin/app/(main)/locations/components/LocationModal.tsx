@@ -8,7 +8,6 @@ import {
 import { Modal } from '@/app/components/shared/modal/Modal';
 
 export interface LocationModalProps {
-  mode: 'create' | 'edit';
   location: Record<string, unknown> | null;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
@@ -132,7 +131,6 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
 /* ── LocationModal ───────────────────────────────────────────────── */
 
 export function LocationModal({
-  mode: _mode,
   location,
   onSubmit,
   onClose,

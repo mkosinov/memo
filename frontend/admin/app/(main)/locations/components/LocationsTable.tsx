@@ -201,7 +201,6 @@ export function LocationsTable() {
       {/* Edit modal */}
       {editLocation && (
         <LocationModal
-          mode="edit"
           location={editLocation}
           onSubmit={handleEdit}
           onClose={() => setEditLocation(null)}
@@ -213,7 +212,6 @@ export function LocationsTable() {
       {/* Create modal */}
       {creatingLocation && (
         <LocationModal
-          mode="create"
           location={null}
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingLocation(false)}

@@ -213,7 +213,6 @@ describe('RemoteSearchSelect custom canSearch (GH #221 T4 nit)', () => {
 
     render(
       <RemoteSearchSelect
-        value={null}
         onChange={vi.fn()}
         onSearch={search}
         label="Тест"

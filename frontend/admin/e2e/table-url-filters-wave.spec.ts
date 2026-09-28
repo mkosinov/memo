@@ -89,7 +89,9 @@ const WAVE_PAGES: WavePage[] = [
   },
 ];
 
-/** Registers a list-request counter BEFORE navigation and returns it. */
+/**
+ * Registers a list-request counter BEFORE navigation and returns it.
+ */
 function listCounter(page: import('@playwright/test').Page, listPath: string): string[] {
   const listRequests: string[] = [];
   page.on('request', (req) => {
@@ -224,5 +226,100 @@ test.describe('#349 — wave group 1 URL filters (US-5)', () => {
     // The services table kept its state in the URL (hidden, not wiped).
     await expect(page).toHaveURL(/q=%D0%B0%D0%BA%D0%B2/);
     await expect(page).toHaveURL(/mat_q=%D0%BC%D0%B0%D1%81/);
+  });
+});
+
+// ─── #349 Task 7 — records: period (datePair) + table filters ─────────────
+// Not in WAVE_PAGES: the seed records live in June 2026, so the BARE
+// /records route (default current-week period) renders ZERO rows — the
+// parameterized smoke (rows visible on the bare route) cannot apply. The
+// dedicated cases below cover the wave contract page-specifically.
+
+/** ISO monday..sunday of the CURRENT week — the records default period. */
+function defaultWeekISO(): { monday: string; sunday: string } {
+  const day = new Date();
+  const today = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  const dow = (today.getDay() + 6) % 7; // 0 = Monday
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
+  const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { monday: iso(monday), sunday: iso(sunday) };
+}
+
+test.describe('#349 Task 7 — records: period + filters in one URL', () => {
+  // Seed facts (test_memo_349.db): all records' activities are 2026-06-15..20;
+  // «Анна Иванова» has two visited records at location «grand» — the combined
+  // link below yields exactly those rows deterministically.
+  const RECORDS_LINK =
+    '/records?from=2026-06-01&to=2026-06-30&q=%D0%90%D0%BD%D0%BD%D0%B0&status=visited&location_id=grand&sort_by=client&sort_order=desc&page=1&per_page=50';
+
+  test('US-1/US-5: link restores period in the date inputs + filters, exactly one list request', async ({
+    page,
+  }) => {
+    // The composite view endpoint (getRecordsView → GET /api/v1/records/view).
+    const listRequests = listCounter(page, '/api/v1/records/view');
+    await page.goto(RECORDS_LINK);
+
+    // Period restored in the date inputs; per_page in the page-size select.
+    await expect(page.getByLabel('Фильтр по дате от')).toHaveValue('2026-06-01', {
+      timeout: 20_000,
+    });
+    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue('2026-06-30');
+    await expect(page.getByTestId('page-size-select')).toHaveValue('50');
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 20_000 });
+
+    // Observation window: rows visible, then a short late-stray buffer.
+    await page.waitForTimeout(500);
+
+    // DoD: the link mount fired EXACTLY ONE records list request, carrying
+    // the period (from/to → date_from/date_to on the wire) + filters verbatim.
+    expect(listRequests).toHaveLength(1);
+    const only = new URL(listRequests[0]!);
+    for (const [key, value] of Object.entries({
+      date_from: '2026-06-01',
+      date_to: '2026-06-30',
+      q: 'Анна',
+      status: 'visited',
+      location_id: 'grand',
+      sort_by: 'client',
+      sort_order: 'desc',
+      page: '1',
+      per_page: '50',
+    })) {
+      expect(only.searchParams.get(key), `${key} on the wire`).toBe(value);
+    }
+  });
+
+  test('US-2: «назад» cancels a period change (push = history step, Gate B)', async ({
+    page,
+  }) => {
+    await page.goto('/records');
+    // The default week is empty of seed rows — wait for the bar itself.
+    await expect(page.getByLabel('Фильтр по дате от')).toBeVisible({ timeout: 20_000 });
+
+    // A period change is a HISTORY STEP: editing «Дата от» pushes ?from=.
+    const dateFrom = page.getByLabel('Фильтр по дате от');
+    await dateFrom.fill('2026-06-01');
+    await expect(page).toHaveURL(/from=2026-06-01/, { timeout: 10_000 });
+
+    // «назад» cancels the period change: no params, default week restored.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/records$/, { timeout: 10_000 });
+    const { monday, sunday } = defaultWeekISO();
+    await expect(dateFrom).toHaveValue(monday);
+    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(sunday);
+  });
+
+  test('dirty period (from > to) → default week, URL never rewritten', async ({ page }) => {
+    await page.goto('/records?from=2030-12-31&to=2020-01-01');
+
+    // Both sides fall back to the default current-week monday..sunday…
+    const { monday, sunday } = defaultWeekISO();
+    await expect(page.getByLabel('Фильтр по дате от')).toHaveValue(monday, { timeout: 20_000 });
+    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(sunday);
+
+    // …and the dirty URL stays as-is (silent read, no rewrite).
+    await expect(page).toHaveURL(/from=2030-12-31&to=2020-01-01/);
   });
 });

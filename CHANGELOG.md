@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-28
+
+### Added
+- **GH #397 — Страж ухода на конвейере отложенных удалений** — branch
+  `397-beforeunload-guard` (4 commits `b69a54e6..fb7ead43`, base `0277b7c0`;
+  спека `docs/specs/2026-09-27-beforeunload-guard-397-design.md`):
+  - Подтверждённое удаление либо исполняется, либо отменяется с явного
+    согласия: браузерный `beforeunload`-диалог поднимается, пока в конвейере
+    отложенных удалений есть ожидающие или в полёте отправки
+    (pending/inflight-счётчик + проводка стража).
+  - Принудительный 401-переход на `/login` страж не поднимает
+    (`forcedNavigation`-модуль + wiring на 401).
+
 ## [Unreleased] — 2026-09-27
 
 ### Changed

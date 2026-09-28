@@ -3,6 +3,7 @@ import { render, act, screen } from '@testing-library/react';
 import React from 'react';
 import { ApiError } from '@memo/api-client';
 import { useUI } from '../contexts/UIContext';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import {
   PendingActionsProvider,
   usePendingActions,
@@ -51,6 +52,18 @@ function renderProvider() {
   );
   if (!ref.current) throw new Error('Hook did not initialise');
   return { api: ref.current, ...utils };
+}
+
+/** A commit() mock returning a promise the test resolves manually. */
+function deferredCommit() {
+  let resolve!: () => void;
+  const commit = vi.fn(
+    () =>
+      new Promise<void>((r) => {
+        resolve = r;
+      }),
+  );
+  return { commit, resolve: () => resolve() };
 }
 
 beforeEach(() => {
@@ -547,5 +560,532 @@ describe('PendingActionsContext commit error handling (#285 D4)', () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
     expect(commit2).not.toHaveBeenCalled();
+  });
+});
+
+// ── #397 §5.1–§5.2: pending/inflight counter + beforeunload guard wiring ────
+//
+// The counter itself is provider-internal; its ONLY observable contract is
+// the guard lifecycle: useUnsavedChangesGuard(hasPending) attaches a
+// `beforeunload` listener while pending + inflight > 0 and removes it when
+// both are back to zero. Spy on add/removeEventListener (pattern from
+// __tests__/useUnsavedChangesGuard.test.tsx) and dispatch synthetic
+// cancelable `beforeunload` events for the defaultPrevented assertions.
+describe('PendingActionsContext unload guard counter (#397)', () => {
+  let addSpy: ReturnType<typeof vi.spyOn>;
+  let removeSpy: ReturnType<typeof vi.spyOn>;
+
+  const fireBeforeunload = () => {
+    const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    window.dispatchEvent(event);
+    return event;
+  };
+
+  /** How many `beforeunload` handlers the spies have seen attached. */
+  const addedCount = () =>
+    addSpy.mock.calls.filter(([type]: [string]) => type === 'beforeunload').length;
+
+  /** How many `beforeunload` handlers the spies have seen detached. */
+  const removedCount = () =>
+    removeSpy.mock.calls.filter(([type]: [string]) => type === 'beforeunload').length;
+
+  /** How many `beforeunload` handlers are currently registered. */
+  const guardCount = () => addedCount() - removedCount();
+
+  beforeEach(() => {
+    addSpy = vi.spyOn(window, 'addEventListener');
+    removeSpy = vi.spyOn(window, 'removeEventListener');
+    showToastMock.mockReset();
+    showToastMock.mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('guard is attached on enqueue (pending window) and confirms beforeunload', () => {
+    const { api } = renderProvider();
+    expect(guardCount()).toBe(0);
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+
+    expect(guardCount()).toBe(1);
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+  });
+
+  it('outside the pipeline (no unfinished actions) beforeunload is not confirmed (С7)', () => {
+    renderProvider();
+
+    expect(guardCount()).toBe(0);
+    expect(fireBeforeunload().defaultPrevented).toBe(false);
+  });
+
+  it('С2 «Остаться»: after a rejected leave the guard stays and confirms the next event again', () => {
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+
+    // First leave attempt — the user clicks «Остаться» in the native dialog
+    // (= our handler's confirmation being rejected). The guard's contract is
+    // stateless per event: nothing is consumed or disarmed.
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+    expect(guardCount()).toBe(1);
+
+    // A second leave attempt must be confirmed again — the guard is still
+    // attached and still asks, because the action is still unfinished.
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+    expect(guardCount()).toBe(1);
+  });
+
+  it('guard is removed when the undo button cancels the pending window', () => {
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    const undoCb = showToastMock.mock.calls[0][1] as () => void;
+    act(() => {
+      undoCb();
+    });
+
+    expect(guardCount()).toBe(0);
+    expect(fireBeforeunload().defaultPrevented).toBe(false);
+  });
+
+  it('re-enqueueing the same id is net-zero: guard count stays exactly one (#397 dedup)', () => {
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1', // same id — dedup branch, counter untouched
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+
+    // Net-zero on the counter → still exactly one pending window → exactly
+    // one guard listener (no inflation, no flashing through zero).
+    expect(guardCount()).toBe(1);
+  });
+
+  it('same-id re-enqueue does not drift the counter: guard detaches after the final window settles', async () => {
+    // Spec §5.1: re-enqueue is net-zero — the new window inherits the old
+    // window's count. If each re-enqueue added +1, the cancelled window's
+    // count would never be released and the guard would stick forever (the
+    // ids are stable per entity: delete-record-${id}).
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1', // dedup — the first timer is cancelled
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    // The replacement window expires and its commit settles — with a drifted
+    // counter (pending stuck at 2 → 1) the guard would remain attached.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(guardCount()).toBe(0);
+
+    // Net-zero bookkeeping, exact counts: one attach for the logical action
+    // (the dedup re-enqueue is NOT a second window) and exactly one detach —
+    // no inflated counter, no stray duplicate listener.
+    expect(addedCount()).toBe(1);
+    expect(removedCount()).toBe(1);
+  });
+
+  it('guard holds through the in-flight commit (pending→inflight hand-off) and detaches on success', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    let resolveCommit!: () => void;
+    const commit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCommit = resolve;
+        }),
+    );
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit,
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    // Window expires → one combined transition pending−1/inflight+1: the
+    // guard MUST stay attached across the hand-off (no transient zero).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(guardCount()).toBe(1);
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+
+    // Commit settles → inflight−1 → both counters zero → guard removed.
+    await act(async () => {
+      resolveCommit();
+    });
+    expect(guardCount()).toBe(0);
+    expect(fireBeforeunload().defaultPrevented).toBe(false);
+  });
+
+  it('inflight decrement happens on the 404 quiet-success early return', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockRejectedValue(new ApiError(404, 'not found')),
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // The 404 branch returns early — the finally-decrement must still run,
+    // otherwise the guard would stick forever.
+    expect(guardCount()).toBe(0);
+  });
+
+  it('inflight decrement happens on the consumer onError early return', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockRejectedValue(new ApiError(409, 'stale')),
+        undo: vi.fn(),
+        onError: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(guardCount()).toBe(0);
+  });
+
+  it('inflight decrement happens on the default error path: ApiError → rollback + toast, guard detaches', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    const undo = vi.fn();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockRejectedValue(new ApiError(500, 'boom')),
+        undo,
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // Default handling ran (rollback + error toast) AND the single decrement
+    // point still released the guard — the error outcome is a finished action.
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(showToastMock).toHaveBeenCalledWith(
+      'Не удалось удалить. Изменение отменено',
+      'error',
+    );
+    expect(guardCount()).toBe(0);
+    expect(fireBeforeunload().defaultPrevented).toBe(false);
+  });
+
+  it('inflight decrement happens on a network failure (non-ApiError) — the guard never sticks forever', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    const undo = vi.fn();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        // Spec §5.1 names this exact hazard: a network failure without a
+        // decrement would leave the beforeunload dialog up forever.
+        commit: vi.fn().mockRejectedValue(new TypeError('fetch failed')),
+        undo,
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(showToastMock).toHaveBeenCalledWith(
+      'Не удалось подтвердить удаление',
+      'error',
+    );
+    expect(guardCount()).toBe(0);
+    expect(fireBeforeunload().defaultPrevented).toBe(false);
+  });
+
+  it('late «Отменить» after window expiry (С4а): no decrement leak, guard holds until commit settles', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    let resolveCommit!: () => void;
+    const commit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCommit = resolve;
+        }),
+    );
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit,
+        undo: vi.fn(),
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(commit).toHaveBeenCalledTimes(1);
+
+    // Late undo click: the map entry is gone → early return, NO pending
+    // decrement (would underflow the counter and drop the guard while the
+    // commit is still in flight).
+    const undoCb = showToastMock.mock.calls[0][1] as () => void;
+    act(() => {
+      undoCb();
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      resolveCommit();
+    });
+    expect(guardCount()).toBe(0);
+  });
+
+  it('two concurrent pending actions: guard detaches only after both settle (С6)', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    const resolveCommit1 = deferredCommit();
+    const resolveCommit2 = deferredCommit();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: resolveCommit1.commit,
+        undo: vi.fn(),
+      });
+    });
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-2',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: resolveCommit2.commit,
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    // Both windows expired, both commits parked in flight → still guarded.
+    expect(resolveCommit1.commit).toHaveBeenCalledTimes(1);
+    expect(resolveCommit2.commit).toHaveBeenCalledTimes(1);
+    expect(guardCount()).toBe(1);
+
+    // First commit settles — the second keeps the guard alive.
+    await act(async () => {
+      resolveCommit1.resolve();
+    });
+    expect(guardCount()).toBe(1);
+
+    await act(async () => {
+      resolveCommit2.resolve();
+    });
+    expect(guardCount()).toBe(0);
+  });
+
+  it('mixed С5+С6: one commit in flight and one undo window open — guard holds until the last settles', async () => {
+    vi.useFakeTimers();
+    const { api } = renderProvider();
+    const parked = deferredCommit();
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: parked.commit,
+        undo: vi.fn(),
+      });
+    });
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-2',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 10_000, // second window outlives the first commit
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+    expect(guardCount()).toBe(1);
+
+    // rec-1 expires → its commit parks in flight (С5); rec-2 is still inside
+    // its undo window. Sum = inflight 1 + pending 1 → guarded.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(parked.commit).toHaveBeenCalledTimes(1);
+    expect(guardCount()).toBe(1);
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+
+    // rec-1's commit settles — rec-2's pending window keeps the guard alive.
+    await act(async () => {
+      parked.resolve();
+    });
+    expect(guardCount()).toBe(1);
+
+    // rec-2's window expires and its commit settles → both counters empty.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(guardCount()).toBe(0);
+  });
+
+  it('coexists with a second attached guard (Topbar): both handlers live, no conflict (С1)', () => {
+    /** Stand-in for the app's other guard consumer (e.g. Topbar dirty state). */
+    function SecondGuard() {
+      useUnsavedChangesGuard(true);
+      return null;
+    }
+
+    const { api } = renderProvider();
+    render(<SecondGuard />);
+
+    act(() => {
+      api.enqueuePendingAction({
+        id: 'rec-1',
+        kind: 'delete',
+        message: 'Удалено. Отменить',
+        delayMs: 5000,
+        commit: vi.fn().mockResolvedValue(undefined),
+        undo: vi.fn(),
+      });
+    });
+
+    // Two independent guards, two live handlers — attaching one did not
+    // clobber the other's registration.
+    expect(guardCount()).toBe(2);
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
+
+    // The pipeline action settles → only the pipeline's own handler is
+    // removed (exactly one detach); the second guard keeps confirming.
+    const undoCb = showToastMock.mock.calls[0][1] as () => void;
+    act(() => {
+      undoCb();
+    });
+    expect(guardCount()).toBe(1);
+    expect(removedCount()).toBe(1);
+    expect(fireBeforeunload().defaultPrevented).toBe(true);
   });
 });

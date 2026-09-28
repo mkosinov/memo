@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-09-28
+
+### Added
+- **GH #348 — Управление учётками пользователей: телефон, сброс пароля по одноразовой ссылке,
+  создание учётки без пароля** — branch `348-user-accounts` (18 commits `75d06221..b1a424ed`,
+  base `5a96d01a`; 69 файлов, +6686/−293; спека `docs/specs/2026-09-27-user-accounts-348-design.md`
+  rev2 и план `docs/plans/2026-09-27-user-accounts-348-plan.md` — 9/9 задач T1–T9 — оба на main,
+  unchanged by IMPL; канон `docs/domain-rules/auth.md` обновлён спека-коммитом `73399f2d` на main):
+  - **Модель и миграция (T1, `75d06221`):** таблица `password_setup_tokens` — PK = SHA-256
+    дайджест токена (сырой токен живёт только в ссылке), `user_id` FK каскад + индекс,
+    `expires_at` (UTC), `used_at`, частичный уникальный индекс «один живой токен на учётку»
+    (`user_id` среди `used_at IS NULL`); `users.password_hash` → nullable (NULL = пароль ещё
+    не установлен; существующие строки не тронуты — у всех есть хэш); миграция
+    `d7f9b1e3a5c7`, upgrade/downgrade симметричны.
+  - **Сценарии токенов (T2, `c74c7d56`):** `usecases/password_setup.py` — `issue_password_link`
+    (отказ деактивированной 422 `ACCOUNT_DEACTIVATED`; в одной транзакции удаляет ВСЕ прежние
+    токены пользователя и создаёт новый; срок жизни — параметр, по умолчанию 24 ч; аудит
+    «password_link_issued», автор — админ) и `set_password_by_link` (валидация политики и
+    хэширование до транзакции; условное поглощение токена — 0 строк → отказ; проверка активности
+    учётки; запись хэша; сброс всей лестницы блокировок; отзыв всех сессий; аудита нет —
+    публичный вызов); все отказные пути — одинаковый 422 `PASSWORD_LINK_INVALID` с фиктивной
+    работой в дешёвых ветках (тайминговая чёткость).
+  - **Учётка без пароля + телефон (T3, `aad4c6c4`):** `create_staff_account` строит учётку с
+    NULL-хэшем (гарантия `UserSettings` #319 в той же транзакции сохранена; `CreateUserSection`
+    без поля пароля — breaking; CLI-сценарий `create_user` остался с паролем); единый валидатор
+    телефона (`PHONE_INVALID`, ограничение 20 символов после трима); сценарий `update_user_phone`
+    с аудитом (телефон в снимке маскируется), сессии не отзываются.
+  - **API-вертикаль users (T4, `c38a2aa5` + `2fb44180`):** `PATCH /api/v1/users/{id}` (тело
+    `{phone}`, лишние ключи → 422) и `POST /api/v1/users/{id}/password-link` — обе под
+    `require_admin`; вертикаль в allowlist master-scope контракта.
+  - **Публичные эндпоинты (T5, `1ea6d3d7`):** validate/setup в auth-роутере (анонимный
+    allowlist); null-guard логина — учётка с NULL-хэшем отвечает обычным отказом вместо 500 на
+    аргон-проверке; arch decision — null-guard **401, не 422** (паритет перечисления с обычным
+    отказом).
+  - **Контракт карточки (T6, `541d0079`, `57c08bcc`):** `StaffResponse.account`
+    `{id, phone, role, password_is_set, is_active, link_expires_at | null}` (NULL = нет живого
+    токена); api-client `patchUser`/`issuePasswordLink` + zod-схемы.
+  - **Фронт — блок «Учётка» (T7, `503f414e`, `f11ecddc`, `74689477`, `551c87bb`):** StaffModal —
+    блок «Учётка» (телефон редактируемый с inline-ошибками `PHONE_TAKEN`/`PHONE_INVALID`, роль и
+    флажок архивирования как были; `account.is_active = false` → блок read-only; `account = null`
+    → скрыт), кнопка «Сбросить пароль»/«Выдать ссылку» по `password_is_set`, диалог ссылки
+    («Скопировать», срок, подсказка; неудача выдачи после создания → «Повторить»); ссылка =
+    `window.location.origin` + `/password-setup#token=…`; словарь `auditLabels` — подпись
+    «password_link_issued».
+  - **Публичная страница (T8, `730fb0b4`, `e213358c`):** `/password-setup` вне защищённой группы
+    маршрутов — токен из `#token=`-фрагмента (очищается после чтения), проверка при открытии
+    выбирает форму или экран «Ссылка недействительна или истекла», inline-ошибка политики (422
+    `PASSWORD_POLICY`), успех → `/password-setup/success` (обновление страницы не повторяет
+    запрос); StrictMode-стойкая инициализация.
+  - **e2e (T9, `fd8de883`, `16f15526`, `b1a424ed`):** S1–S6 — `staff-s7-create-composite` (форма
+    без пароля + диалог ссылки), `password-setup-link` (установка и вход, перевыпуск гасит прежнюю
+    ссылку, повторное использование → экран отказа), `account-management` (правка телефона и вход
+    по новому, занятый телефон, состояния блока «Учётка», вход без пароля отказывает).
+  - **Bugfix попутный (`ab0eff00`):** startup migration bootstrap штамповал пустую/полую БД
+    головой, ломая следующую миграцию — починено (кирпич старта), +2 теста в `test_migrate.py`.
+  - **Tests:** backend новые наборы — password_setup_tokens 17, usecases/password_setup 14+7,
+    user_phone 386-строчный набор (23), api_users 18, auth_password_setup_api 25, staff_account 7,
+    migrate +2; api-client 436 pass; admin vitest — 132 точечных (StaffAccountBlock/StaffModal/
+    StaffTable/useStaffMutations/auditLabels/parseApiError) + PasswordSetup pages 21 + полный
+    прогон 2561p/3f (3 — pre-existing TZ-locale артефакты, зелёные при TZ=UTC); e2e #348 — 6
+    спеков S1–S6 зелёные standalone + затронутые 15/15; приёмка спеки §2 — S1–S6 e2e, S7
+    (только админ) API-тестом 403, S8 (аудит/сессии) юнит-тестами; визуальный гейт PASS 22/22
+    autonomous (`/tmp/opencode/vc348/`, эфемерно).
+  - Status: `docs/status/2026-09-28-user-accounts-348.md`
+
 ## [Unreleased] — 2026-09-25
 
 ### Added

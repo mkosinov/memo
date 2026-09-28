@@ -1,13 +1,15 @@
 /**
- * Tests for RecordsContext — #138 Task 5: the records period comes from the
- * URL (?from=&to=) via useRecordsPeriod, NOT NavigationContext.
+ * Tests for RecordsContext — the records period comes from the
+ * URL (?from=&to=) via the page adapter (#349 Task 7:
+ * useRecordsUrlState → useTableUrlState; the legacy useRecordsPeriod is
+ * deleted — Gate B: a period change is a history step, push not replace).
  *
  * Invariants:
  *  - no params → the query key carries monday..sunday of the current week
  *    (SAME 'YYYY-MM-DD' string format as the legacy NavigationContext keys —
  *    cache keys must stay byte-identical)
  *  - explicit ?from&to → the key carries those strings verbatim
- *  - setPeriod writes ?from=&to= via router.replace
+ *  - setPeriod writes ?from=&to= via router.push (Gate B, #349)
  *  - the date-range change resets page to 1 (kept from NavigationContext era)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -60,7 +62,7 @@ beforeEach(() => {
   __resetNavigation('', '/records');
 });
 
-describe('RecordsContext — URL period (?from=&to=, #138 Task 5)', () => {
+describe('RecordsContext — URL period (?from=&to=, #349 Task 7)', () => {
   it('invariant: no params → key range = monday..sunday of the current week', async () => {
     const { queryClient, Wrapper } = createWrapper();
     renderHook(() => useRecords(), { wrapper: Wrapper });

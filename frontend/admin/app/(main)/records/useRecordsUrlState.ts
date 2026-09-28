@@ -223,7 +223,8 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
           search: state.q,
         },
         sortBy: state.sort_by,
-        sortOrder: state.sort_order,
+        // Enum literal widening (the services-adapter cast precedent).
+        sortOrder: state.sort_order as 'asc' | 'desc',
         page: state.page,
         perPage: state.per_page,
       },

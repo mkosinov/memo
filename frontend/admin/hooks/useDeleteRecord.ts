@@ -20,6 +20,7 @@ import {
   type RecordSnapshot,
   type RecordsListCache,
 } from '@/lib/cache/recordCacheSync';
+import { expectedFromDependencies } from '@/lib/expectedFromDependencies';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
 import { invalidateEntities } from '@/lib/invalidate';
@@ -64,19 +65,6 @@ import { qk } from '@/lib/queryKeys';
  * Family rules route through the shared map (#239): invalidateEntities
  * (['records']) = ['records'] + ['visitors']; the point key stays here.
  */
-
-/** expected = id-sets per entity from the dry-run tree's `items` (D9а).
- *  Auto-resolved entities (record_tags) carry no items → skipped. */
-function expectedFromDependencies(
-  dependencies: DependencyNode[],
-): Record<string, string[]> {
-  const expected: Record<string, string[]> = {};
-  for (const node of dependencies) {
-    if (!node.items) continue;
-    expected[node.entity] = node.items.map((item) => item.id);
-  }
-  return expected;
-}
 
 /** Prefix-wide removal from EVERY ['records', ...] cache (shape-agnostic:
  *  envelope lists + per-client/per-activity arrays). Used in commit as the

@@ -43,7 +43,6 @@ vi.mock('@memo/api-client', () => {
 import {
   getClientsWithStats,
   updateClient as apiUpdateClient,
-  deleteClient as apiDeleteClient,
   getRecord,
   patchRecord,
   updateRecord,
@@ -67,10 +66,14 @@ vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
 const createHook = { mutateAsync: vi.fn() };
 const updateHook = { mutateAsync: vi.fn() };
 const patchHook = { mutateAsync: vi.fn() };
-const deleteHook = { mutateAsync: vi.fn(), dependencies: null };
+// GH #345: useDeleteClient returns the deferred-conveyor surface.
+const deleteHook = {
+  removeClient: vi.fn(),
+  removeClientResolved: vi.fn(),
+  isPending: false,
+};
 const archiveHook = { mutateAsync: vi.fn() };
 const restoreHook = { mutateAsync: vi.fn() };
-const resolveDeleteHook = { mutateAsync: vi.fn() };
 
 vi.mock('@/hooks/useClientsMutations', () => ({
   useCreateClient: () => createHook,
@@ -79,7 +82,6 @@ vi.mock('@/hooks/useClientsMutations', () => ({
   useDeleteClient: () => deleteHook,
   useArchiveClient: () => archiveHook,
   useRestoreClient: () => restoreHook,
-  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/PendingActionsContext', () => ({
@@ -183,21 +185,19 @@ function createQueryClient() {
 describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () => {
   const mockInvalidateQueries = vi.fn();
   const mockUpdateClient = vi.fn().mockResolvedValue(undefined);
-  const mockDeleteClient = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     // GH #140: ClientCardModal mutations come from local hooks — park the
     // spies on the mocked hook instances.
     updateHook.mutateAsync = mockUpdateClient;
-    deleteHook.mutateAsync = mockDeleteClient;
-    deleteHook.dependencies = null;
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
+    deleteHook.removeClientResolved = vi.fn().mockResolvedValue(undefined);
+    deleteHook.isPending = false;
     createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
     archiveHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
     restoreHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
-    resolveDeleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
 
     vi.mocked(apiUpdateClient).mockResolvedValue(mockClient);
-    vi.mocked(apiDeleteClient).mockResolvedValue(undefined);
     vi.mocked(getClientVisitors).mockResolvedValue([]);
 
     vi.mocked(useQueryClient).mockReturnValue({
@@ -318,12 +318,12 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     // footer delete (exact text, not the aria-labeled row buttons).
     const deleteBtn = screen.getByRole('button', { name: /^Удалить$/ });
 
-    // #207: window.confirm is gone — clicking runs the no-body DELETE
-    // dry-run; a 204 means the client is already deleted → modal closes.
+    // #345: window.confirm is gone — clicking runs the dry-run preview; a
+    // 204 enqueues the deferred delete → the modal closes.
     fireEvent.click(deleteBtn);
 
     await waitFor(() => {
-      expect(mockDeleteClient).toHaveBeenCalledWith('c1');
+      expect(deleteHook.removeClient).toHaveBeenCalledWith(mockClient);
     });
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
@@ -360,8 +360,9 @@ describe('ClientCardModal ↔ ClientRecordTab integration (real components)', ()
 
   beforeEach(() => {
     updateHook.mutateAsync = mockUpdateClient;
-    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
-    deleteHook.dependencies = null;
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
+    deleteHook.removeClientResolved = vi.fn().mockResolvedValue(undefined);
+    deleteHook.isPending = false;
     createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
@@ -579,8 +580,9 @@ describe('Cross-page integration: create client → view → edit → save', () 
   beforeEach(() => {
     createHook.mutateAsync = vi.fn().mockResolvedValue(mockClient);
     updateHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
-    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
-    deleteHook.dependencies = null;
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
+    deleteHook.removeClientResolved = vi.fn().mockResolvedValue(undefined);
+    deleteHook.isPending = false;
 
     vi.mocked(getRecord).mockResolvedValue(mockRecord);
     vi.mocked(patchRecord).mockResolvedValue(mockRecord);

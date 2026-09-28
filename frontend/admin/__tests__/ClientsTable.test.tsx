@@ -86,18 +86,21 @@ vi.mock('@/contexts/ClientsContext', async (importOriginal) => {
   };
 });
 
-// ─── Mutable mutation hook mocks (GH #140: hooks/useClientsMutations) ───────
+// ─── Mutable mutation hook mocks (GH #140: hooks/useClientsMutations;
+// GH #345 — useDeleteClient returns the deferred-conveyor surface) ──────
 
-const deleteHook = { mutateAsync: vi.fn(), dependencies: null as DependencyNode[] | null };
+const deleteHook = {
+  removeClient: vi.fn(),
+  removeClientResolved: vi.fn(),
+  isPending: false,
+};
 const archiveHook = { mutateAsync: vi.fn() };
 const restoreHook = { mutateAsync: vi.fn() };
-const resolveDeleteHook = { mutateAsync: vi.fn() };
 
 vi.mock('@/hooks/useClientsMutations', () => ({
   useDeleteClient: () => deleteHook,
   useArchiveClient: () => archiveHook,
   useRestoreClient: () => restoreHook,
-  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -110,11 +113,11 @@ describe('ClientsTable', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
-    deleteHook.dependencies = null;
-    deleteHook.mutateAsync.mockResolvedValue(undefined);
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
+    deleteHook.removeClientResolved = vi.fn().mockResolvedValue(undefined);
+    deleteHook.isPending = false;
     archiveHook.mutateAsync.mockResolvedValue({});
     restoreHook.mutateAsync.mockResolvedValue({});
-    resolveDeleteHook.mutateAsync.mockResolvedValue(undefined);
     mockTableState = createMockClientsTableState({
       items: mockClientsWithStats,
       total: 2,
@@ -204,27 +207,25 @@ describe('ClientsTable', () => {
   });
 
   it('clicking "Удалить" runs the delete dry-run; 409 opens the DeleteDialog', async () => {
-    deleteHook.mutateAsync.mockRejectedValue(
+    deleteHook.removeClient = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
-    deleteHook.dependencies = DEPS_CHOICE;
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     // Open the row-1 actions dropdown and click "Удалить"
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
-    // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
+    await waitFor(() => expect(deleteHook.removeClient).toHaveBeenCalledWith(mockClientsWithStats[0]));
+    // window.confirm is gone — the dialog takes over (fetch flow)
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
   });
 
-  it('Mode A confirm sends resolveDelete with the picked resolutions', async () => {
-    deleteHook.mutateAsync.mockRejectedValue(
+  it('Mode A confirm enqueues the cascade deferred delete with the picked resolutions + tree', async () => {
+    deleteHook.removeClient = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
-    deleteHook.dependencies = DEPS_CHOICE;
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
@@ -235,20 +236,23 @@ describe('ClientsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-checkbox'));
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
+    // GH #345: enqueue is synchronous — the dialog closes immediately and
+    // removeClientResolved carries the resolutions + the FULL tree (the
+    // parent hook builds `expected` from it).
     await waitFor(() =>
-      expect(resolveDeleteHook.mutateAsync).toHaveBeenCalledWith({
-        id: 'c1',
-        resolutions: { records: 'nullify', visitors: 'cascade' },
-      }),
+      expect(deleteHook.removeClientResolved).toHaveBeenCalledWith(
+        mockClientsWithStats[0],
+        { records: 'nullify', visitors: 'cascade' },
+        DEPS_CHOICE,
+      ),
     );
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
   it('Mode B (activities present) offers "Архивировать" via the archive hook', async () => {
-    deleteHook.mutateAsync.mockRejectedValue(
+    deleteHook.removeClient = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_BLOCKED),
     );
-    deleteHook.dependencies = DEPS_BLOCKED;
     archiveHook.mutateAsync.mockResolvedValue({ ...mockClientsWithStats[0], archived: true });
     render(<ClientsTable onClientClick={vi.fn()} />);
 
@@ -264,13 +268,13 @@ describe('ClientsTable', () => {
   });
 
   it('204 dry-run success → instant delete, no dialog opens', async () => {
-    deleteHook.mutateAsync.mockResolvedValue(undefined);
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
     render(<ClientsTable onClientClick={vi.fn()} />);
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.removeClient).toHaveBeenCalledWith(mockClientsWithStats[0]));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 

@@ -8,7 +8,6 @@ import {
   useDeleteClient,
   useArchiveClient,
   useRestoreClient,
-  useResolveDeleteClient,
 } from '@/hooks/useClientsMutations';
 import { useClientRecords } from '@/hooks/useClient';
 import { useActivitiesForRecords } from '@/hooks/useActivities';
@@ -35,11 +34,11 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   // GH #140 — mutations are local hook instances (no global ClientsContext).
   const createMutation = useCreateClient();
   const updateMutation = useUpdateClient();
-  const deleteMutation = useDeleteClient();
+  // GH #345 — deferred delete conveyor; the commit invalidation carries
+  // this modal's point key ['client', id] (hooks/useClientsMutations).
+  const { removeClient, removeClientResolved, isPending: isDeletePending } = useDeleteClient();
   const archiveMutation = useArchiveClient();
   const restoreMutation = useRestoreClient();
-  const resolveDeleteMutation = useResolveDeleteClient();
-  const { dependencies } = deleteMutation;
   const { showToast } = useUI();
 
   // ─── Delete dialog state (§7.3: parent owns dry-run + open/close) ────
@@ -60,30 +59,30 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // ─── Delete — §7.3 dry-run flow ───────────────────────────────────────
-  // No-body DELETE → 204 (instant delete → close modal) or 409 + tree →
-  // DeleteDialog (Mode A: resolve / Mode B: archive). window.confirm replaced
-  // per #207.
+  // ─── Delete — GH #345: deferred conveyor (useDeleteTag/useDeleteRecord
+  // template). removeClient ALWAYS dry-runs (pure preview): a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window, commit = resolveDeleteClient carrying this modal's point key);
+  // a 409 WITH the dependency tree rejects here → park the tree + open
+  // DeleteDialog (the card stays open). The hook swallows 404 (quiet
+  // family invalidation — the card closes as the row leaves on refetch)
+  // and network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
   const handleDelete = useCallback(async () => {
     if (!client) return;
     try {
-      await deleteMutation.mutateAsync(client.id);
-      // 204 — already deleted (zero deps): close the modal.
-      showToast('Клиент удалён');
+      await removeClient(client);
+      // 204 — deferred delete enqueued: the row is gone optimistically.
       onClose();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Prefer the tree on the failing 409 response itself (always fresh);
-        // the hook-parked `dependencies` is only a fallback.
-        const deps = err.dependencies ?? dependencies ?? [];
-        if (deps.length > 0) {
-          setDeleteTarget({ client, dependencies: deps });
-          return;
-        }
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ client, dependencies: err.dependencies });
+        return;
       }
       showToast(parseApiError(err).message, 'error');
     }
-  }, [client, deleteMutation, dependencies, onClose, showToast]);
+  }, [client, removeClient, onClose, showToast]);
 
   // ─── Archive / Restore (#198 parity) ─────────────────────────────────
   const handleArchiveToggle = useCallback(async () => {
@@ -150,9 +149,10 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
                   </button>
                   <button
                     onClick={handleDelete}
-                    className="px-4 py-2 text-sm text-red-500 hover:text-red-600 rounded-lg transition-colors"
+                    disabled={isDeletePending}
+                    className="px-4 py-2 text-sm text-red-500 hover:text-red-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Удалить
+                    {isDeletePending ? 'Проверка зависимостей…' : 'Удалить'}
                   </button>
                 </div>
               ) : <div />}
@@ -275,16 +275,20 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
         </div>
       </Modal>
 
-      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately; the modal itself closes on done —
+          the row is already gone optimistically, commit carries this
+          modal's point key ['client', id]. */}
       {deleteTarget && (
         <DeleteDialog
           entityName={deleteTarget.client.name || 'Дорогой гость'}
           entityType="client"
           entityId={deleteTarget.client.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteMutation.mutateAsync({ id, resolutions });
-            showToast('Клиент удалён');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeClientResolved(deleteTarget.client, resolutions, deleteTarget.dependencies);
           }}
           onArchive={(id) => archiveMutation.mutateAsync(id)}
           onDone={() => {

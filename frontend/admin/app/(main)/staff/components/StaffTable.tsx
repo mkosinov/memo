@@ -33,7 +33,7 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
  * section + position ids + has_user), reads come from GET /api/v1/staff via
  * StaffContext (server pagination/sort/search), writes go through the staff
  * mutation family. The read-only /masters view (schedule filters) is a
- * SEPARATE concern (MastersContext) and is untouched here.
+ * SEPARATE concern (hooks/useMasters) and is untouched here.
  */
 export function StaffTable() {
   // Server pagination/sort/search state (StaffContext, #205 §5.2 + #212).

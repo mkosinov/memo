@@ -33,7 +33,6 @@ vi.mock('@/contexts/UIContext', () => ({
 import {
   useCreateMaterial,
   useUpdateMaterial,
-  usePatchMaterial,
   useDeleteMaterial,
   useArchiveMaterial,
   useRestoreMaterial,
@@ -136,35 +135,6 @@ describe('useMaterialsMutations', () => {
     });
   });
 
-  describe('usePatchMaterial', () => {
-    it('calls patchMaterial with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchMaterial(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchMaterial).toHaveBeenCalledWith('mat-1', { title: 'Patched' });
-      expect(mockUpdateMaterial).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the materials query cache on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchMaterial(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
-    });
-  });
 
   describe('useDeleteMaterial — hook surface (deferred conveyor)', () => {
     it('removeMaterial always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {

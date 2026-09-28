@@ -30,7 +30,6 @@ vi.mock('@/contexts/UIContext', () => ({
 import {
   useCreateClient,
   useUpdateClient,
-  usePatchClient,
   useDeleteClient,
   useArchiveClient,
   useRestoreClient,
@@ -149,36 +148,6 @@ describe('useClientsMutations', () => {
     });
   });
 
-  describe('usePatchClient', () => {
-    it('calls patchClient with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchClient.mockResolvedValue({ ...clientResponse, name: 'Patched' });
-
-      const { result } = renderHook(() => usePatchClient(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'c1', data: { name: 'Patched' } });
-      });
-
-      expect(mockPatchClient).toHaveBeenCalledWith('c1', { name: 'Patched' });
-      expect(mockUpdateClient).not.toHaveBeenCalled();
-    });
-
-    it('invalidates BOTH clients AND records caches on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchClient.mockResolvedValue({ ...clientResponse, name: 'Patched' });
-
-      const { result } = renderHook(() => usePatchClient(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'c1', data: { name: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-    });
-  });
 
   describe('useDeleteClient — hook surface (deferred conveyor)', () => {
     it('removeClient always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {

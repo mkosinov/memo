@@ -13,11 +13,9 @@ process.env.TZ = 'Europe/Moscow';
 import { describe, it, expect } from 'vitest';
 import {
   parseLocalISO,
-  dateToLocalISO,
   composeLocalISO,
   toISODate,
   dayIndexToDate,
-  weekDayIndex,
   formatTime,
   hhmmToMinutes,
   getMonday,
@@ -65,40 +63,6 @@ describe('parseLocalISO', () => {
 
 // ─── Round-trips ──────────────────────────────────────────────────────────────
 
-describe('dateToLocalISO / composeLocalISO / parseLocalISO round-trips', () => {
-  it('dateToLocalISO composes the floating-local string from a Date (local getters)', () => {
-    // Month is 0-indexed: 8 = September.
-    expect(dateToLocalISO(new Date(2026, 8, 3, 10, 30, 0))).toBe('2026-09-03T10:30:00');
-    expect(dateToLocalISO(new Date(2026, 0, 5, 0, 5, 0))).toBe('2026-01-05T00:05:00');
-  });
-
-  it('composeLocalISO builds `${date}T${HH}:${MM}:00` from integer minutes', () => {
-    expect(composeLocalISO('2026-09-03', 630)).toBe('2026-09-03T10:30:00');
-    expect(composeLocalISO('2026-09-03', 0)).toBe('2026-09-03T00:00:00');
-    expect(composeLocalISO('2026-09-03', 1439)).toBe('2026-09-03T23:59:00');
-  });
-
-  it('parseLocalISO ∘ composeLocalISO is identity on startMinutes', () => {
-    for (const minutes of [0, 1, 59, 60, 630, 1259, 1439]) {
-      expect(parseLocalISO(composeLocalISO('2026-09-03', minutes)).startMinutes).toBe(minutes);
-    }
-  });
-
-  it('composeLocalISO ∘ parseLocalISO is identity on naive strings', () => {
-    const naive = '2026-09-03T10:30:00';
-    const parsed = parseLocalISO(naive);
-    expect(composeLocalISO(parsed.date, parsed.startMinutes)).toBe(naive);
-  });
-
-  it('parseLocalISO ∘ dateToLocalISO preserves local wall time (no UTC drift)', () => {
-    // 00:30 local in Moscow = 21:30 UTC of the PREVIOUS day — .toISOString()
-    // would drift the date; local getters must not.
-    const d = new Date(2026, 8, 3, 0, 30, 0);
-    const parsed = parseLocalISO(dateToLocalISO(d));
-    expect(parsed.date).toBe('2026-09-03');
-    expect(parsed.startMinutes).toBe(30);
-  });
-});
 
 // ─── toISODate / weekDayIndex / dayIndexToDate ───────────────────────────────
 
@@ -111,13 +75,6 @@ describe('toISODate', () => {
   });
 });
 
-describe('weekDayIndex', () => {
-  it('returns Mon=0 .. Sun=6', () => {
-    expect(weekDayIndex(new Date(2026, 8, 7))).toBe(0); // Monday Sep 7, 2026
-    expect(weekDayIndex(new Date(2026, 8, 13))).toBe(6); // Sunday Sep 13, 2026
-    expect(weekDayIndex(new Date(2026, 8, 10))).toBe(3); // Thursday
-  });
-});
 
 describe('dayIndexToDate', () => {
   const monday = new Date(2026, 8, 7); // Monday Sep 7, 2026

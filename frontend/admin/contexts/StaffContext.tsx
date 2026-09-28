@@ -12,8 +12,8 @@ import { qk } from '@/lib/queryKeys';
  * Mirrors the former MastersContext wiring (#205 §5.2 + #212 serverSearch):
  * status filter (active|archived|all), server sort (whitelist WITHOUT
  * `position` — M2M makes it ambiguous, spec «API»), ?q= name search.
- * MastersContext stays alive as the read-only /masters consumer (schedule
- * filters) — this context owns the directory screen only.
+ * This context owns the directory screen; the schedule reads masters via
+ * hooks/useMasters (lookup).
  */
 const { Provider, usePagedList } = createPagedListContext<StaffResponse>({
   queryKeyPrefix: qk.staff[0],

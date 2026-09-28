@@ -456,17 +456,18 @@ export function linkTag(
 }
 
 /** Link a photo to a tag via the photo_tags join table (GH #211 Task 10). */
-export function linkPhotoTag(photoId: string, tagId: string): void {
-  executeSQL(
-    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
-  );
-}
 
 /** Link a record to a tag via the record_tags join table (GH #318 — the
  *  table has no API writer; backend domain tests insert the same way). */
 export function linkRecordTag(recordId: string, tagId: string): void {
   executeSQL(
     `INSERT INTO record_tags (record_id, tag_id) VALUES (${sqlValue(recordId)}, ${sqlValue(tagId)})`,
+  );
+}
+
+export function linkPhotoTag(photoId: string, tagId: string): void {
+  executeSQL(
+    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
   );
 }
 

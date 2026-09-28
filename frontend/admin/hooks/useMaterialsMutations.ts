@@ -6,7 +6,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   createMaterial,
   updateMaterial,
-  patchMaterial,
   archiveMaterial,
   restoreMaterial,
   dryRunDeleteMaterial,
@@ -48,14 +47,6 @@ export function useUpdateMaterial() {
   });
 }
 
-export function usePatchMaterial() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<MaterialUpdate> }) =>
-      patchMaterial(id, data),
-    onSuccess: () => invalidateEntities(qc, ['materials']),
-  });
-}
 
 // ── #345 Task 7: deferred material delete — the useDeleteTag (#318) /
 // useDeleteRecord (#285) / useDeleteStaff (Task 6) conveyor ─────────────────

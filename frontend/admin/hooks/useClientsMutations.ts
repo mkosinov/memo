@@ -6,7 +6,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   createClient,
   updateClient,
-  patchClient,
   archiveClient,
   restoreClient,
   dryRunDeleteClient,
@@ -64,14 +63,6 @@ export function useUpdateClient() {
   });
 }
 
-export function usePatchClient() {
-  const invalidate = useInvalidateClients();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<ClientUpdate> }) =>
-      patchClient(id, data),
-    onSuccess: invalidate,
-  });
-}
 
 // ── #345 Task 6: deferred client delete — the useDeleteTag (#318) /
 // useDeleteRecord (#285) conveyor ──────────────────────────────────────────

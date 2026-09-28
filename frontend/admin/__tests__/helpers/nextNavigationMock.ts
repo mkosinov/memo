@@ -69,9 +69,6 @@ export function __currentQuery(): string {
 }
 
 /** Read the mocked pathname. */
-export function __currentPathname(): string {
-  return pathname;
-}
 
 export function useSearchParams(): URLSearchParams {
   const [, force] = useReducer((c: number) => c + 1, 0);
@@ -122,6 +119,3 @@ export function usePathname(): string {
   return pathname;
 }
 
-export function useParams(): Record<string, string> {
-  return {};
-}

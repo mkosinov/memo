@@ -6,7 +6,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import {
   createStaff,
   updateStaff,
-  patchStaff,
   archiveStaff,
   restoreStaff,
   patchUser,
@@ -18,7 +17,6 @@ import {
 import type {
   StaffCreate,
   StaffUpdate,
-  StaffPatch,
   StaffArchiveRequest,
   DependencyNode,
   UserPhonePatch,
@@ -60,13 +58,6 @@ export function useUpdateStaff() {
   });
 }
 
-export function usePatchStaff() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: StaffPatch }) => patchStaff(id, data),
-    onSuccess: () => invalidateEntities(queryClient, ['staff']),
-  });
-}
 
 // ── #345 Task 6: deferred staff delete — the useDeleteTag (#318) /
 // useDeleteRecord (#285) conveyor ──────────────────────────────────────────

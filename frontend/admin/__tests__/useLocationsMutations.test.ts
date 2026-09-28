@@ -33,7 +33,6 @@ vi.mock('@/contexts/UIContext', () => ({
 import {
   useCreateLocation,
   useUpdateLocation,
-  usePatchLocation,
   useDeleteLocation,
   useArchiveLocation,
   useRestoreLocation,
@@ -182,35 +181,6 @@ describe('useLocationsMutations', () => {
     });
   });
 
-  describe('usePatchLocation', () => {
-    it('calls patchLocation with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchLocation(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchLocation).toHaveBeenCalledWith('loc-1', { title: 'Patched' });
-      expect(mockUpdateLocation).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the locations query cache on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchLocation.mockResolvedValue({ ...locationResponse, title: 'Patched' });
-
-      const { result } = renderHook(() => usePatchLocation(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'loc-1', data: { title: 'Patched' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['locations'] });
-    });
-  });
 
   describe('useDeleteLocation — hook surface (deferred conveyor)', () => {
     it('removeLocation always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {

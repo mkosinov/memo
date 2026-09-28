@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1406,18 +1406,6 @@ describe('updateService', () => {
   });
 });
 
-describe('deleteService', () => {
-  it('calls DELETE /api/v1/services/:id', async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await deleteService('s-1');
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/services/s-1',
-      expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-  });
-});
-
 // ─── Locations CRUD ────────────────────────────────────────────────────────
 
 describe('createLocation', () => {
@@ -1460,18 +1448,6 @@ describe('updateLocation', () => {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),
-    );
-  });
-});
-
-describe('deleteLocation', () => {
-  it('calls DELETE /api/v1/locations/:id', async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await deleteLocation('l-1');
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/locations/l-1',
-      expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
     );
   });
 });
@@ -1570,6 +1546,19 @@ describe('user-settings removed client methods (GH #319)', () => {
   it('no longer exports deleteUserSettings', () => {
     expect('deleteUserSettings' in endpointsModule).toBe(false);
   });
+});
+
+// GH #345: the bare deleteX methods for staff/client/service/location/material
+// are gone — the server answers 422 expected_state_required to a bare DELETE,
+// so every consumer goes through the dryRunDeleteX/resolveDeleteX conveyor.
+// Server endpoints keep the full contract.
+describe('removed bare deleteX client methods (GH #345)', () => {
+  it.each(['deleteStaff', 'deleteClient', 'deleteService', 'deleteLocation', 'deleteMaterial'])(
+    'no longer exports %s',
+    (name) => {
+      expect(name in endpointsModule).toBe(false);
+    },
+  );
 });
 
 // ─── Auth (GH #247 spec §3.6/§4.1) ───────────────────────────────────────────
@@ -1704,38 +1693,6 @@ describe('getVisitors', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100 });
     await getVisitors({ per_page: 100 });
     expect(api).toHaveBeenCalledWith('/api/v1/visitors?per_page=100', expect.anything());
-  });
-});
-
-// ─── Deletes — staff / materials / clients (GH #207; staff replaces masters, #266) ──
-
-describe('deleteStaff', () => {
-  it('calls DELETE /api/v1/staff/:id with no body (dry-run / instant path)', async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await deleteStaff('st-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/staff/st-1', expect.anything(), {
-      method: 'DELETE',
-    });
-  });
-});
-
-describe('deleteMaterial', () => {
-  it('calls DELETE /api/v1/materials/:id with no body (dry-run / instant path)', async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await deleteMaterial('mat-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/materials/mat-1', expect.anything(), {
-      method: 'DELETE',
-    });
-  });
-});
-
-describe('deleteClient', () => {
-  it('calls DELETE /api/v1/clients/:id with no body (dry-run / instant path)', async () => {
-    vi.mocked(api).mockResolvedValue(undefined);
-    await deleteClient('c-1');
-    expect(api).toHaveBeenCalledWith('/api/v1/clients/c-1', expect.anything(), {
-      method: 'DELETE',
-    });
   });
 });
 

@@ -239,10 +239,6 @@ export async function restoreStaff(id: string): Promise<StaffResponse> {
   return api(`/api/v1/staff/${id}/restore`, StaffResponseSchema, { method: 'POST' });
 }
 
-export async function deleteStaff(id: string): Promise<void> {
-  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE' });
-}
-
 // Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
 // DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
 // with .dependencies tree. Staff with activities is BLOCKED (Mode B archive);
@@ -678,10 +674,6 @@ export async function patchClient(
   });
 }
 
-export async function deleteClient(id: string): Promise<void> {
-  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveClient(id: string): Promise<ClientResponse> {
   return api(`/api/v1/clients/${id}/archive`, ClientResponseSchema, { method: 'POST' });
 }
@@ -1028,10 +1020,6 @@ export async function patchService(
   });
 }
 
-export async function deleteService(id: string): Promise<void> {
-  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveService(id: string): Promise<ServiceResponse> {
   return api(`/api/v1/services/${id}/archive`, ServiceResponseSchema, { method: 'POST' });
 }
@@ -1082,10 +1070,6 @@ export async function patchLocation(
     method: 'PATCH',
     body: JSON.stringify(data),
   });
-}
-
-export async function deleteLocation(id: string): Promise<void> {
-  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
 }
 
 export async function archiveLocation(id: string): Promise<LocationResponse> {
@@ -1149,10 +1133,6 @@ export async function patchMaterial(
     method: 'PATCH',
     body: JSON.stringify(data),
   });
-}
-
-export async function deleteMaterial(id: string): Promise<void> {
-  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE' });
 }
 
 export async function archiveMaterial(id: string): Promise<MaterialResponse> {

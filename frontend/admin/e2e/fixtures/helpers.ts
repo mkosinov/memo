@@ -5,7 +5,7 @@
  * waiting for data, navigating tabs) so test files stay readable.
  */
 
-import { type Locator, type Page, expect } from '@playwright/test';
+import { type Locator, type Page, type Request, expect } from '@playwright/test';
 import { queryDBRow } from './db-query';
 
 /**
@@ -641,6 +641,51 @@ export async function confirmDeleteDialog(page: Page) {
   await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toBeEnabled();
   await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GH #345 — deferred-delete conveyor assertions (the #318 tags family helpers
+// generalized to any entity path). The click's dry-run preview is a
+// `DELETE ?dry_run=true` WITHOUT body (postData() === null); the commit is a
+// DELETE with a JSON body — `postData() !== null` discriminates them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The undo toast that carries the deferred-delete message (#94 ring). */
+export function undoToast(page: Page) {
+  return page.locator('[data-testid="toast-info"]').filter({ hasText: 'Удалено. Отменить' });
+}
+
+/** COMMIT-DELETE listener: the deferred commit carries a JSON body
+ *  (`expected`); the click's dry-run (?dry_run=true) has none —
+ *  postData() === null, so the predicate cannot match the preview. */
+export function commitDeleteWait(page: Page, entityBase: string, entityId: string) {
+  return page.waitForResponse(
+    (r) =>
+      r.url().includes(`${entityBase}/${entityId}`) &&
+      r.url().includes('dry_run') === false &&
+      r.request().method() === 'DELETE' &&
+      r.request().postData() !== null,
+    { timeout: 20_000 },
+  );
+}
+
+/** Tracker of COMMITTING deletes (DELETE with a NON-EMPTY body). The
+ *  dry-run preview (postData() === null) is not counted (#285 S2 pattern). */
+export function trackBodyDeletes(page: Page, entityBase: string, entityId: string) {
+  const bodyDeletes: string[] = [];
+  const onRequest = (req: Request) => {
+    if (
+      req.method() === 'DELETE' &&
+      req.url().includes(`${entityBase}/${entityId}`) &&
+      !req.url().includes('dry_run') &&
+      req.postData() !== null
+    ) {
+      bodyDeletes.push(req.url());
+    }
+  };
+  page.on('request', onRequest);
+  return { bodyDeletes, stop: () => page.off('request', onRequest) };
+}
+
 
 /**
  * Wait for photos page to load with table.

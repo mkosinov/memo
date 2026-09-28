@@ -313,11 +313,14 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
     } finally {
       if (createdId) {
         // Fresh service deps = just its tag links (service_tags, auto).
-        // The bare DELETE is only a dry-run (409 + preview) — execute the
-        // deferred-delete contract with the cascade resolution so the
-        // created service and its link never leak past the run.
+        // GH #345: every real DELETE must carry `expected` — the bare
+        // resolutions-only body is the rejected legacy shape (422
+        // `expected_state_required`). The created service has ONLY the auto
+        // service_tags dep, so the clean commit is `{expected: {}}` (auto
+        // deps resolve server-side, no resolutions needed) — the tag link
+        // cascades with the service, nothing leaks past the run.
         const resp = await request.delete(`${BACKEND}/api/v1/services/${createdId}`, {
-          data: { resolutions: { service_tags: 'cascade' } },
+          data: { expected: {} },
         });
         expect(resp.ok(), `cleanup DELETE /services/${createdId} must succeed`).toBeTruthy();
       }

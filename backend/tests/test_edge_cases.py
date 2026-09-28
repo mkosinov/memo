@@ -215,8 +215,11 @@ class TestClientEdgeCases:
     def test_search_phone_inactive(self, api_client, create_client):
         """Deleted client → 404 on phone lookup."""
         client = create_client(phone="+79991112233")
-        # Soft-delete
-        api_client.delete(f"/api/v1/clients/{client['id']}")
+        # Hard delete via the deferred-delete commit (GH #345: bare → 422).
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client['id']}", json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
 
         response = api_client.get(
             "/api/v1/clients/get",
@@ -560,7 +563,10 @@ class TestDataIntegrity:
         client = create_client()
         client_id = client["id"]
 
-        api_client.delete(f"/api/v1/clients/{client_id}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client_id}", json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
 
         response = api_client.get("/api/v1/clients")
         items = response.json()["items"]

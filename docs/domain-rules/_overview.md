@@ -120,7 +120,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 - **Photo / UserSettings / Visitor / Position (#324 — wired, этапы 2+3 #346):** **Photo** — зависимая: `photo_tags` (видимая, cascade; фото без тегов ведёт себя как лист); **UserSettings** — лист: `{expected: {}}` (own-only роут, UI-удаления нет); **Visitor** — `visits` (видимая, cascade — визиты умирают вместе с посетителем, решение юзера 21.09: без анонимизации) + `visitor_tags` (auto); **Position** — `staff_positions` (видимая, cascade — должность снимается у сотрудников; системная → 422 `POSITION_IS_SYSTEM` до развилки dry_run/commit). Каскадное удаление визитов пересчитывает статус/места затронутых записей теми же функциями, что одиночное удаление визита — включая клиент-каскад через общий путь (решение юзера 21.09). Единый транспорт шести рутов — форма → probe → guard → развилка (`_delete_family.py`, `DeleteBody`); тест-страж «схема ↔ матрица» + «роуты ↔ матрица» закрепляет декларации (`test_delete_matrix_guard.py`, спека #324 §7).
 - **Archive-aware entities (staff/location/service/material/client)** — **deletion goes to the SAME unified flow (user decision 20.09, supersedes the 17.09 #285 §5 exclusion): dry_run + dialog (choices + «archive instead») + 5s ring + `expected`, bare DELETE → 422, execute-if-clean abolished** — wiring lands in a dedicated follow-up issue. **Archiving itself stays OUT of the scheme: reversible via restore, no preview, no ring.**
 
-The `Expected?` column marks the relations whose ids a **deferred** commit carries in `expected` (per-entity id-sets of the confirmed tree); archive-aware entities are never deferred, so their rows are `—`. Deferred entities in this matrix: records, activities, and tags (#318); + visits/payments/photos/user_settings/visitors/positions (#324) — **этапы 2+3 трекера #346 выполнены** (этап 1 = теги #318; остаток — архивируемые, #345).
+The `Expected?` column marks the relations whose ids a **deferred** commit carries in `expected` (per-entity id-sets of the confirmed tree); archive-aware entities are never deferred, so their rows are `—`. Deferred entities in this matrix: records, activities, and tags (#318); + visits/payments/photos/user_settings/visitors/positions (#324); + staff/locations/services/clients (#345 — material is a leaf `{expected: {}}`) — **трекер #346 завершён полностью** (этап 1 = теги #318; этапы 2+3 = #324; этап 4 = архивируемые #345).
 
 | Entity → Relation | Nullable? | Action | Expected? | User choice? |
 |---|---|---|---|---|
@@ -130,20 +130,20 @@ The `Expected?` column marks the relations whose ids a **deferred** commit carri
 | Visitor → **visits** | nullable | **cascade** (non-auto, видимая) | `{visits: [...]}` | нет — единственное (анонимизация отклонена, юзер 21.09) |
 | Visitor → **visitor_tags** (join) | NOT NULL PK | **cascade** (auto) | входит в `expected` | auto |
 | Position → **staff_positions** (join) | NOT NULL PK | **cascade** (non-auto, видимая) | `{staff_positions: [...]}` | нет — единственное; системная → 422 до развилки |
-| Staff → **activities** (через master-строку) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Staff → **activities** (через master-строку) | NOT NULL | **block** | — | N/A — `allowed_actions: []`; blocked-узел items не несёт (счётчик), но id-набор сверки S5 ловит гонку появления |
 | Staff → **masters** (1:0..1) | — | **cascade** (auto, ON DELETE CASCADE) | — | auto — при отсутствии занятий |
 | Staff → **users** (staff_id) | nullable | **cascade** (auto) | — | auto — no choice (§4.1, Change 2) |
 | Staff → **master_tags** (join via masters) | NOT NULL PK | **cascade** (auto) | — | auto |
 | Staff → **staff_positions** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
-| Location → **activities** (location_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Location → **activities** (location_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []`; S5-сверка id-набора (без items) |
 | Location → **location_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
 | Location → **photos** (location_id) | nullable | **nullify** (auto) | — | auto — photo survives, becomes owner-less (GH #211) |
-| Service → **activities** (service_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []` |
+| Service → **activities** (service_id) | NOT NULL | **block** | — | N/A — `allowed_actions: []`; S5-сверка id-набора (без items) |
 | Service → **tariffs** (service_id) | NOT NULL | **cascade** (auto) | — | auto |
 | Service → **photos** (service_id) | nullable | **nullify** (auto) | — | auto |
 | Service → **service_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
-| Client → **records** (client_id) | nullable | **nullify** | — | choice: `["nullify"]` — record survives, becomes anonymous |
-| Client → **visitors** (client_id) | NOT NULL | **cascade** | — | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
+| Client → **records** (client_id) | nullable | **nullify** | `records` id-набор | choice: `["nullify"]` — record survives, becomes anonymous |
+| Client → **visitors** (client_id) | NOT NULL | **cascade** | `visitors` id-набор | choice: `["cascade"]` — via `VisitorService._delete_cascade` (visits → visitor_tags → visitor). Payments are NOT part of the cascade (record-scoped, survive — see cascade_preview rule below). |
 | Client → **client_tags** (join) | NOT NULL PK | **cascade** (auto) | — | auto |
 | Client → **photos** (client_id) | nullable | **nullify** (auto) | — | auto — photo survives, becomes owner-less (GH #211) |
 | Activity → **records** (activity_id, #286) | NOT NULL | **cascade** (NOT auto) | `records` (+ nested `visits`/`payments`) | confirmed as a whole by the deferred dialog/undo window — no per-row choice |

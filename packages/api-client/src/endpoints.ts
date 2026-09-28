@@ -147,6 +147,41 @@ function listQuery(params?: ListParams): string {
   return qs ? `?${qs}` : '';
 }
 
+// ─── GH #345: unified deferred-delete payloads for staff/client/service/
+// location/material (mirrors resolveDeleteTag GH #318 / resolveDeleteRecord
+// GH #285 rev7) ────────────────────────────────────────────────────────────
+
+/** Execute-path body: `expected` (uuid id-sets snapshotted from the dry-run
+ *  tree) is MANDATORY on the new contract (bare DELETE → 422
+ *  expected_state_required); resolutions (nullify/cascade) optional — the
+ *  pure path sends only expected. */
+export interface ResolveDeleteEntityPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+// Type guard splitting the union: legacy callers (Tables/useClientsMutations,
+// migrating in Tasks 6–7) still pass the flat resolutions map; its values are
+// strings, so a non-string `expected` discriminates unambiguously.
+function isEntityPayload(
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): payload is ResolveDeleteEntityPayload {
+  return typeof payload.expected === 'object' && payload.expected !== null;
+}
+
+/** New form → {expected, resolutions?} (no resolutions key on the pure path);
+ *  legacy flat map → {resolutions: map}, wire-identical to the old body. */
+function resolveDeleteBody(
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): ResolveDeleteEntityPayload | { resolutions: Record<string, string> } {
+  if (isEntityPayload(payload)) {
+    const body: ResolveDeleteEntityPayload = { expected: payload.expected };
+    if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+    return body;
+  }
+  return { resolutions: payload };
+}
+
 // ─── Masters (read-only view, GH #266 D8) ─────────────────────────────────
 // /api/v1/masters serves the ACTING masters (masters.is_active = true) for
 // schedule filters and the client site #48. No mutations, no GET /{id}, no
@@ -212,15 +247,22 @@ export async function restoreStaff(id: string): Promise<StaffResponse> {
   return api(`/api/v1/staff/${id}/restore`, StaffResponseSchema, { method: 'POST' });
 }
 
-export async function deleteStaff(id: string): Promise<void> {
-  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE' });
+// Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree. Staff with activities is BLOCKED (Mode B archive);
+// a plain staff member resolves clean.
+export async function dryRunDeleteStaff(id: string): Promise<void> {
+  await api(`/api/v1/staff/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
 }
 
-// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-// Activities BLOCK (422); the masters row, account, master_tags and
-// staff_positions auto-cascade (domain-rules/staff.md).
-export async function resolveDeleteStaff(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Execute a hard delete (GH #345): body {resolutions?, expected} — `expected`
+// is MANDATORY server-side (bare DELETE → 422 expected_state_required).
+// Accepts the legacy flat resolutions map (pre-#345 callers) additively.
+export async function resolveDeleteStaff(
+  id: string,
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): Promise<void> {
+  await api(`/api/v1/staff/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(resolveDeleteBody(payload)) });
 }
 
 // ─── Positions (GH #266 D4 — salary-side dictionary) ──────────────────────
@@ -640,10 +682,6 @@ export async function patchClient(
   });
 }
 
-export async function deleteClient(id: string): Promise<void> {
-  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveClient(id: string): Promise<ClientResponse> {
   return api(`/api/v1/clients/${id}/archive`, ClientResponseSchema, { method: 'POST' });
 }
@@ -652,9 +690,22 @@ export async function restoreClient(id: string): Promise<ClientResponse> {
   return api(`/api/v1/clients/${id}/restore`, ClientResponseSchema, { method: 'POST' });
 }
 
-// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-export async function resolveDeleteClient(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree (client nodes carry items: [{id, label}]).
+export async function dryRunDeleteClient(id: string): Promise<void> {
+  await api(`/api/v1/clients/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #345): body {resolutions?, expected} — `expected`
+// is MANDATORY server-side (bare DELETE → 422 expected_state_required).
+// Client is the only entity whose resolvable commit carries both. Accepts the
+// legacy flat resolutions map (pre-#345 callers) additively.
+export async function resolveDeleteClient(
+  id: string,
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): Promise<void> {
+  await api(`/api/v1/clients/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(resolveDeleteBody(payload)) });
 }
 
 // ─── Payments ───────────────────────────────────────────────────────────────
@@ -977,10 +1028,6 @@ export async function patchService(
   });
 }
 
-export async function deleteService(id: string): Promise<void> {
-  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveService(id: string): Promise<ServiceResponse> {
   return api(`/api/v1/services/${id}/archive`, ServiceResponseSchema, { method: 'POST' });
 }
@@ -989,9 +1036,21 @@ export async function restoreService(id: string): Promise<ServiceResponse> {
   return api(`/api/v1/services/${id}/restore`, ServiceResponseSchema, { method: 'POST' });
 }
 
-// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-export async function resolveDeleteService(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree. Service with activities is BLOCKED (Mode B archive).
+export async function dryRunDeleteService(id: string): Promise<void> {
+  await api(`/api/v1/services/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #345): body {resolutions?, expected} — `expected`
+// is MANDATORY server-side (bare DELETE → 422 expected_state_required).
+// Accepts the legacy flat resolutions map (pre-#345 callers) additively.
+export async function resolveDeleteService(
+  id: string,
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): Promise<void> {
+  await api(`/api/v1/services/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(resolveDeleteBody(payload)) });
 }
 
 // ─── Locations CRUD ────────────────────────────────────────────────────────
@@ -1021,10 +1080,6 @@ export async function patchLocation(
   });
 }
 
-export async function deleteLocation(id: string): Promise<void> {
-  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveLocation(id: string): Promise<LocationResponse> {
   return api(`/api/v1/locations/${id}/archive`, LocationResponseSchema, { method: 'POST' });
 }
@@ -1033,9 +1088,21 @@ export async function restoreLocation(id: string): Promise<LocationResponse> {
   return api(`/api/v1/locations/${id}/restore`, LocationResponseSchema, { method: 'POST' });
 }
 
-// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-export async function resolveDeleteLocation(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree. Location with activities is BLOCKED (Mode B archive).
+export async function dryRunDeleteLocation(id: string): Promise<void> {
+  await api(`/api/v1/locations/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #345): body {resolutions?, expected} — `expected`
+// is MANDATORY server-side (bare DELETE → 422 expected_state_required).
+// Accepts the legacy flat resolutions map (pre-#345 callers) additively.
+export async function resolveDeleteLocation(
+  id: string,
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): Promise<void> {
+  await api(`/api/v1/locations/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(resolveDeleteBody(payload)) });
 }
 
 export async function reorderLocations(ids: string[]): Promise<void> {
@@ -1076,10 +1143,6 @@ export async function patchMaterial(
   });
 }
 
-export async function deleteMaterial(id: string): Promise<void> {
-  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE' });
-}
-
 export async function archiveMaterial(id: string): Promise<MaterialResponse> {
   return api(`/api/v1/materials/${id}/archive`, MaterialResponseSchema, { method: 'POST' });
 }
@@ -1088,9 +1151,21 @@ export async function restoreMaterial(id: string): Promise<MaterialResponse> {
   return api(`/api/v1/materials/${id}/restore`, MaterialResponseSchema, { method: 'POST' });
 }
 
-// Execute a hard delete with dependency resolutions (GH #207 §6) — DELETE with body.
-export async function resolveDeleteMaterial(id: string, resolutions: Record<string, string>): Promise<void> {
-  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify({ resolutions }) });
+// Dry-run preview (GH #345, mirror of dryRunDeleteRecord GH #285 rev7):
+// DELETE ?dry_run=true without body. 204 No Content → resolves; 409 → ApiError
+// with .dependencies tree (Material's only dep is AUTO — services links).
+export async function dryRunDeleteMaterial(id: string): Promise<void> {
+  await api(`/api/v1/materials/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #345): body {resolutions?, expected} — `expected`
+// is MANDATORY server-side (bare DELETE → 422 expected_state_required).
+// Accepts the legacy flat resolutions map (pre-#345 callers) additively.
+export async function resolveDeleteMaterial(
+  id: string,
+  payload: ResolveDeleteEntityPayload | Record<string, string>,
+): Promise<void> {
+  await api(`/api/v1/materials/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(resolveDeleteBody(payload)) });
 }
 
 // ─── Dictionary bare /all endpoints (GH #205) ────────────────────────────────

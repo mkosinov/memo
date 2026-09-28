@@ -121,148 +121,414 @@ class TestLocationListStatusFilter:
 
 
 class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/locations/{id} — unified dry-run (no body) + execute (with body).
+    """DELETE /api/v1/locations/{id} — unified delete contract (GH #345,
+    one-to-one mirror of ``tags.py:216-300`` / #318 D2).
 
-    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
-      * §2  — Change 1: body presence distinguishes dry-run vs execute.
-      * §5  — 409 Conflict response (counters + sums only).
-      * §6  — DELETE with resolutions body (executor = Task 10).
-      * §14 — acceptance criteria.
+    Modes (spec §4.1): ``?dry_run=true`` pure preview (409 tree / 204
+    clean / 404); bare DELETE and a body without ``expected`` → 422
+    ``expected_state_required`` (the form check precedes the probe); body
+    ``{resolutions?, expected}`` — the deferred-delete commit with the
+    expected id-set subset verification (409 ``stale_dependencies`` on
+    mismatch) → resolutions validation → ``resolve_delete`` → 204.
+
+    Domain matrix (spec §4.4): ``activities`` is the ONLY non-auto dep —
+    blocked → a successful commit with ``resolutions`` is unreachable;
+    a clean or all-auto location (location_tags/photos) commits with
+    ``{expected: {}}``.
     """
 
-    def test_delete_location_with_activities_no_body_returns_409(
-        self, api_client, create_activity
+    # ── bare DELETE (no flag, no body) → 422 expected_state_required ─────
+
+    def test_bare_delete_blocked_location_returns_422_row_alive(
+        self, api_client, create_activity,
     ) -> None:
-        """No body + blocking dep (activities) → 409 + dependency tree (spec §5)."""
-        activity = create_activity()
-        location_id = activity["location_id"]
+        """S6: bare DELETE on a location with activities → 422, row alive."""
+        location_id = create_activity()["location_id"]
 
         resp = api_client.delete(f"/api/v1/locations/{location_id}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
+
+    def test_bare_delete_clean_location_returns_422(
+        self, api_client, create_location,
+    ) -> None:
+        """S6: bare DELETE executes nowhere — even a clean location refuses."""
+        location = create_location(title="loc-clean-bare")
+
+        resp = api_client.delete(f"/api/v1/locations/{location['id']}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    def test_bare_delete_unknown_id_returns_422_before_404(
+        self, api_client,
+    ) -> None:
+        """S6: form check precedes the existence probe — 422, not 404."""
+        resp = api_client.delete("/api/v1/locations/nonexistent-location-id")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+
+    def test_delete_resolutions_body_without_expected_returns_422(
+        self, api_client, create_location,
+    ) -> None:
+        """S6: resolutions-only body is the rejected legacy shape."""
+        location = create_location(title="loc-res-only")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            json={"resolutions": {"location_tags": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    def test_delete_unknown_keys_body_without_expected_returns_422(
+        self, api_client, create_location,
+    ) -> None:
+        """S6: unknown-keys-only body has no ``expected`` — same 422."""
+        location = create_location(title="loc-unknown-keys")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            json={"bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ────────────────
+
+    def test_dry_run_blocked_location_returns_409_tree_row_alive(
+        self, api_client, create_activity,
+    ) -> None:
+        """S6: dry-run on a location with activities → 409 has_dependencies.
+
+        ``activities`` is a blocked non-auto node: counters only, NO items
+        (spec §4.3 fixed boundary).
+        """
+        location_id = create_activity()["location_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location_id}",
+            params={"dry_run": "true"},
+        )
 
         assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
-        entities = [d["entity"] for d in body["dependencies"]]
-        assert "activities" in entities
-        activities_dep = next(
-            d for d in body["dependencies"] if d["entity"] == "activities"
-        )
-        assert activities_dep["count"] == 1
-        assert activities_dep["allowed_actions"] == []
-        assert activities_dep["message"] is not None
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["activities"]["count"] == 1
+        assert deps["activities"]["allowed_actions"] == []
+        assert deps["activities"]["auto"] is False
+        assert deps["activities"]["message"] is not None
+        # §4.3: no items for the activities node (exclude_none omits it).
+        assert "items" not in deps["activities"]
         # Row untouched.
         assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
 
-    def test_delete_bare_location_no_body_returns_204_and_row_gone(
-        self, api_client, create_location
+    def test_dry_run_all_auto_location_returns_409_tree_row_alive(
+        self, api_client, create_location,
     ) -> None:
-        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
-        location = create_location()
-
-        resp = api_client.delete(f"/api/v1/locations/{location['id']}")
-
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 404
-
-    def test_delete_nonexistent_location_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404 (service.delete returns False)."""
-        resp = api_client.delete("/api/v1/locations/nonexistent-location-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "LOCATION_NOT_FOUND"
-
-    def test_delete_nonexistent_location_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (executor returns False).
-
-        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
-        """
-        resp = api_client.request(
-            "DELETE",
-            "/api/v1/locations/nonexistent-location-id",
-            json={"resolutions": {"location_tags": "cascade"}},
-        )
-        assert resp.status_code == 404
-
-    def test_delete_location_with_tags_no_body_409_tree_shows_location_tags(
-        self, api_client, create_location
-    ) -> None:
-        """GH #318 regression: the parent 409-tree surfaces
-        ``location_tags`` via the fallback counter; items stay None
-        (§5 boundary — no item collector from the parent side). The
-        execute path (all-auto deps, ``{}`` body) is covered separately."""
-        location = create_location()
+        """S2(б): dry-run on an all-auto location (location_tags + photos,
+        NO activities) → 409 for informed consent; nothing is modified."""
+        location = create_location(title="loc-all-auto")
         tag_id = api_client.post(
-            "/api/v1/tags", json={"title": f"lt409-{location['id'][:8]}"}
+            "/api/v1/tags", json={"title": f"dry-lt-{location['id'][:8]}"}
         ).json()["id"]
         query_db(
             f"INSERT INTO location_tags (location_id, tag_id) "
             f"VALUES ('{location['id']}', '{tag_id}')"
         )
+        photo_id = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"dry-loc-{location['id'][:8]}.jpg",
+                  "location_id": location["id"]},
+        ).json()["id"]
 
-        resp = api_client.delete(f"/api/v1/locations/{location['id']}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            params={"dry_run": "true"},
+        )
 
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 409
         body = resp.json()
         assert body["detail"] == "has_dependencies"
         deps = {d["entity"]: d for d in body["dependencies"]}
-        dep = deps["location_tags"]
-        assert dep["count"] == 1
-        assert dep["allowed_actions"] == ["cascade"]
-        assert dep["auto"] is True  # parent perspective (#318 D1)
-        assert "items" not in dep or dep["items"] is None  # §5 boundary
-        # Dry-run modifies nothing: location + join row + tag row alive.
+        assert "activities" not in deps
+        assert deps["location_tags"]["count"] == 1
+        assert deps["location_tags"]["allowed_actions"] == ["cascade"]
+        assert deps["location_tags"]["auto"] is True  # parent perspective (#318 D1)
+        assert deps["photos"]["count"] == 1
+        assert deps["photos"]["allowed_actions"] == ["nullify"]
+        # Nothing modified: location + join + photo link alive.
         assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
-        assert (
-            query_db(
-                f"SELECT * FROM location_tags WHERE location_id='{location['id']}'"
-            )
-        )
-        assert query_db(f"SELECT * FROM tags WHERE id='{tag_id}'")
+        assert query_db(
+            f"SELECT location_id FROM photos WHERE id='{photo_id}'"
+        )[0]["location_id"] == location["id"]
+        assert query_db(f"SELECT * FROM location_tags WHERE location_id='{location['id']}'")
 
-    def test_delete_location_with_tags_with_body_executes_204(
-        self, api_client, create_location
+    def test_dry_run_clean_location_returns_204_and_row_alive(
+        self, api_client, create_location,
     ) -> None:
-        """With body ``{}`` + all-auto dep (location_tags) → 204 execute.
+        """S2(а): dry-run on a clean location → 204 WITHOUT deleting."""
+        location = create_location(title="loc-preview-only")
 
-        ``location_tags`` is auto-cascade — the empty ``{}`` body opts into
-        execute. EXPECTED RED until Task 10 lands ``ArchiveService.resolve_delete``
-        (AttributeError → 500 today).
-        """
-        location = create_location()
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    def test_dry_run_unknown_location_returns_404(self, api_client) -> None:
+        """S6: dry-run probes existence — missing location → 404."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/locations/nonexistent-location-id",
+            params={"dry_run": "true"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "LOCATION_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client, create_location,
+    ) -> None:
+        """S6: dry_run + resolutions → 422; combo checked before the probe."""
+        location = create_location(title="loc-combo")
+
+        for location_id in (location["id"], "nonexistent-location-id"):
+            resp = api_client.request(
+                "DELETE", f"/api/v1/locations/{location_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"location_tags": "cascade"}},
+            )
+            assert resp.status_code == 422, f"{location_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    def test_dry_run_with_expected_only_body_silently_ignored(
+        self, api_client, create_location,
+    ) -> None:
+        """Combinatorics: dry_run + expected-only body → preview proceeds."""
+        location = create_location(title="loc-expected-only-preview")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            params={"dry_run": "true"},
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    # ── body commit: existence + expected id-set verification ─────────────
+
+    def test_commit_unknown_location_with_body_returns_404(
+        self, api_client,
+    ) -> None:
+        """S6: nonexistent id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/locations/nonexistent-location-id",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "LOCATION_NOT_FOUND"
+
+    def test_commit_clean_location_expected_empty_returns_204(
+        self, api_client, create_location,
+    ) -> None:
+        """S2(а): clean path — ``{expected: {}}`` → 204 hard delete."""
+        location = create_location(title="loc-commit-clean")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 404
+
+    def test_commit_all_auto_location_expected_empty_executes_204(
+        self, api_client, create_location,
+    ) -> None:
+        """S2(б): all-auto deps (location_tags + photos) + commit
+        ``{expected: {}}`` → 204. The tag join rows are cascaded, the photo
+        survives with ``location_id IS NULL`` (auto-nullify, GH #211)."""
+        location = create_location(title="loc-commit-all-auto")
         tag_id = api_client.post(
-            "/api/v1/tags", json={"title": f"lt-{location['id'][:8]}"}
+            "/api/v1/tags", json={"title": f"cx-lt-{location['id'][:8]}"}
         ).json()["id"]
         query_db(
             f"INSERT INTO location_tags (location_id, tag_id) "
             f"VALUES ('{location['id']}', '{tag_id}')"
         )
+        photo_id = api_client.post(
+            "/api/v1/photos",
+            json={"filename": f"cx-loc-{location['id'][:8]}.jpg",
+                  "location_id": location["id"]},
+        ).json()["id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/locations/{location['id']}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/locations/{location['id']}", json={"expected": {}},
         )
 
-        assert resp.status_code == 204
-        # Location + tag join physically gone (Task 10 executor).
+        assert resp.status_code == 204, resp.text
         assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 404
+        # Join rows cascaded, TAG row survives (independent entity).
         assert (
-            query_db(
-                f"SELECT * FROM location_tags WHERE location_id='{location['id']}'"
-            )
+            query_db(f"SELECT * FROM location_tags WHERE location_id='{location['id']}'")
             == []
         )
+        assert query_db(f"SELECT * FROM tags WHERE id='{tag_id}'")
+        # Photo survives, unlinked (location_id IS NULL).
+        rows = query_db(f"SELECT location_id FROM photos WHERE id='{photo_id}'")
+        assert len(rows) == 1
+        assert rows[0]["location_id"] is None
 
-    def test_delete_location_with_activities_with_body_returns_422_blocking(
-        self, api_client, create_activity
+    def test_commit_appeared_activity_returns_409_stale(
+        self, api_client, create_master, create_service, create_location,
     ) -> None:
-        """With body + blocking dep (activities) → 422 'archive instead' (spec §6.4)."""
+        """S5: an activity that APPEARED after the (clean) dry-run window
+        → 409 ``stale_dependencies`` — caught by the expected-subset check
+        BEFORE the blocked-422 could fire."""
+        from datetime import UTC, datetime, timedelta
+
+        location = create_location(title="loc-race-appeared")
+
+        # Mid-window race: an activity appears via the API.
+        api_client.post("/api/v1/activities", json={
+            "master_id": create_master()["id"],
+            "service_id": create_service()["id"],
+            "location_id": location["id"],
+            "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        })
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["activities"]["count"] == 1
+        # Nothing deleted.
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 200
+
+    def test_commit_disappeared_activity_subset_passes_204(
+        self, api_client, create_activity,
+    ) -> None:
+        """S5: dep removed mid-window → subset semantics → 204 (delete
+        less than confirmed is OK)."""
+        activity = create_activity()
+        location_id = activity["location_id"]
+
+        # The confirmed activity dies first (its own deferred-delete commit).
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}",
+            json={"expected": {}},
+        )
+        assert act_resp.status_code == 204, act_resp.text
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location_id}",
+            json={"expected": {"activities": [activity["id"]]}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 404
+
+    def test_commit_blocked_location_any_body_returns_422(
+        self, api_client, create_activity,
+    ) -> None:
+        """S6: blocked dep (activities) at any body → 422 'archive instead'.
+
+        The expected-check passes (the activity IS confirmed) — the 422
+        comes from the resolutions validation inside ``resolve_delete``.
+        """
         activity = create_activity()
         location_id = activity["location_id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/locations/{location_id}", json={"resolutions": {}}
+            "DELETE", f"/api/v1/locations/{location_id}",
+            json={"expected": {"activities": [activity["id"]]}},
         )
 
-        assert resp.status_code == 422
+        assert resp.status_code == 422, resp.text
         # Row untouched.
+        assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
+
+    def test_commit_stale_beats_blocked_resolutions_returns_409_not_422(
+        self, api_client, create_activity,
+    ) -> None:
+        """Order pin (#285 D7 mirror): a stale expected → 409 even when
+        the resolutions/blocked branch would also 422."""
+        activity = create_activity()
+        location_id = activity["location_id"]
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location_id}",
+            json={"expected": {}},  # stale: an activity exists on the server
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
+
+    def test_commit_unknown_body_keys_silently_ignored(
+        self, api_client, create_location,
+    ) -> None:
+        """S6: unknown body keys (with ``expected`` present) ignored → 204."""
+        location = create_location(title="loc-unknown-keys-commit")
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location['id']}",
+            json={"expected": {}, "bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/locations/{location['id']}").status_code == 404
+
+    def test_commit_swapped_activity_id_returns_409(
+        self, api_client, create_activity,
+    ) -> None:
+        """S5 rev6 mirror: a ghost id at an unchanged counter → 409
+        (id-sets, not counters — the swap is caught)."""
+        from datetime import UTC, datetime, timedelta
+        from uuid import uuid4
+
+        activity = create_activity()
+        location_id = activity["location_id"]
+        ghost = str(uuid4())
+
+        # Swap: delete the confirmed activity, create another one at the
+        # SAME location — the counter stays 1, the id-set does not match.
+        act_resp = api_client.request(
+            "DELETE", f"/api/v1/activities/{activity['id']}", json={"expected": {}},
+        )
+        assert act_resp.status_code == 204
+        swapped = api_client.post("/api/v1/activities", json={
+            "master_id": activity["master_id"],
+            "service_id": activity["service_id"],
+            "location_id": location_id,
+            "start": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+            "duration": 90, "capacity": 10, "is_private": False,
+        })
+        assert swapped.status_code == 201, swapped.text
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/locations/{location_id}",
+            json={"expected": {"activities": [ghost]}},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
         assert api_client.get(f"/api/v1/locations/{location_id}").status_code == 200
 
 

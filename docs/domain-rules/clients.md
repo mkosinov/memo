@@ -74,7 +74,7 @@ Param `phone: str | None` on `ClientListParams`. Non-digits are stripped from th
 | POST | /api/v1/clients | Create |
 | PUT | /api/v1/clients/{id} | Full update |
 | PATCH | /api/v1/clients/{id} | Partial update |
-| DELETE | /api/v1/clients/{id} | Hard delete with resolutions (no body + 0 deps → 204; no body + deps → 409 dry-run; body `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` → 204 on success / 422 on invalid-or-missing) — spec GH #207 |
+| DELETE | /api/v1/clients/{id} | Unified deferred-delete contract (GH #345): `?dry_run=true` превью / commit `{resolutions?, expected}` — сверка внутри транзакции `delete_client` (единственная сущность с разрешимым commit: записи nullify + посетители cascade) |
 | POST | /api/v1/clients/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
 | POST | /api/v1/clients/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 (closes #198) |
 | GET | /api/v1/clients/{id}/visitors | List client's visitors |
@@ -120,19 +120,20 @@ Client is one of the 5 archive-aware entities. PUT/PATCH no longer accept `is_ac
 | **photos** (client_id) | nullable | **nullify** (auto) | auto — photo survives, becomes owner-less (GH #211). |
 
 - **`cascade_preview` for the visitors cascade: `{"visits": <count>}` only.** `Payment` is **record-scoped** (`payments.record_id → records.id`); Client→records is *nullify* (records survive, become anonymous), so their payments are NOT part of the visitors cascade and survive with the nullified records. Absent for nullify actions (nothing downstream is hard-deleted). (Spec §5.)
-- **DELETE `/{id}` (no body):** zero deps → 204 hard delete (row gone). Any dep → 409 + dependency tree (counters + sums only, no rows modified). For a Client with 47 records, 12 visitors (across 45 visits), and 5 client_tags:
+- **DELETE `/{id}` `?dry_run=true` (pure preview, GH #345 §4.1):** existence probe → missing → 404; zero deps → **204 without deleting**; any dep → 409 `has_dependencies` + dependency tree (never modifies rows). The two non-auto nodes carry `items` (records = date one-liners, visitors = names — the `expected` source); the visitors node also carries `cascade_preview`. For a Client with 47 records, 12 visitors (across 45 visits), and 5 client_tags:
   ```json
   {
     "detail": "has_dependencies",
     "dependencies": [
-      {"entity": "records", "count": 47, "allowed_actions": ["nullify"]},
-      {"entity": "visitors", "count": 12, "allowed_actions": ["cascade"],
-       "cascade_preview": {"visits": 45}},
-      {"entity": "client_tags", "count": 5, "allowed_actions": ["cascade"]}
+      {"entity": "records", "count": 47, "allowed_actions": ["nullify"], "auto": false, "items": [...]},
+      {"entity": "visitors", "count": 12, "allowed_actions": ["cascade"], "auto": false,
+       "cascade_preview": {"visits": 45}, "items": [...]},
+      {"entity": "client_tags", "count": 5, "allowed_actions": ["cascade"], "auto": true}
     ]
   }
   ```
-- **DELETE `/{id}` (with body):** `{"resolutions": {"records": "nullify", "visitors": "cascade"}}` (tags + photos auto — omitted from body). Invalid action → 422 (e.g. `{"records": "cascade"}` — records only allows nullify; `{"activities": "cascade"}` — activities is blocked). Missing a non-auto dep → 422 ("resolution required for entity records/visitors"). Auto deps sent in body are ignored. On success → 204, executed in ONE `@transactional` method: **nullify** records (set `client_id=null`) → **cascade** visitors via the extracted `VisitorService._delete_cascade` core on the shared session (NOT a per-visitor `@transactional` loop — atomicity, §8) → **cascade** client_tags → **nullify** photos (set `client_id=null`, auto) → **hard delete** the client row. (Spec §6.)
+- **Bare DELETE (no flag, no body) → 422 `expected_state_required`** (GH #345 §4.1): the legacy execute-if-clean path is abolished; the form check precedes the probe (an unknown id gets 422, not 404). A body without `expected` (resolutions-only or unknown-keys-only) → the same 422. `?dry_run=true` + a `resolutions` body → 422 `dry_run_with_resolutions_forbidden`; an expected-only body under dry_run is silently ignored.
+- **DELETE `/{id}` (with body `{resolutions?, expected}` — the deferred-delete commit):** `{"resolutions": {"records": "nullify", "visitors": "cascade"}, "expected": {"records": [...], "visitors": [...]}}` (tags + photos auto — omitted; `expected` carries the id-sets of the non-auto nodes from the full dry-run tree, §4.2; clean path sends `{"expected": {}}`). The subset verification + execution run in ONE `@transactional` transaction inside the `delete_client` scenario (spec §4.5): expected id-set check (`set(now) ⊆ set(expected)` per non-auto node; mismatch → **409 `stale_dependencies`** + fresh tree — a dep that disappeared mid-window does not block, one that appeared does) BEFORE resolutions validation (stale beats 422, #285 D7). Invalid action → 422 (e.g. `{"records": "cascade"}` — records only allows nullify). Missing a non-auto dep → 422 ("resolution required for entity records/visitors"). Auto deps sent in body are ignored; unknown body keys (with `expected` present) are ignored. On success → 204: **nullify** records (set `client_id=null`) → **cascade** visitors via the extracted `VisitorService._delete_cascade` core on the shared session (NOT a per-visitor `@transactional` loop — atomicity, §8) → **cascade** client_tags → **nullify** photos (set `client_id=null`, auto) → **hard delete** the client row. (Spec §6.)
 - **Result of a successful delete:** records survive with `client_id=null` (anonymous); **payments survive** with their nullified records (record-scoped, NOT deleted by the visitors cascade); photos survive with `client_id=null` (owner-less); visitors + their visits + visitor_tags + client_tags + the client row are physically gone.
 
 ### Master-only contrast (NOT applicable to Client)

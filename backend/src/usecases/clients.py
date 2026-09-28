@@ -8,13 +8,25 @@ unified client DELETE moves from the generic executor
 ROUTE keeps transport: the 409 dry-run tree (``collect_dependencies``
 preview), the 404/422 mapping, and the response format.
 
+GH #345 Task 4 (§4.5) — the scenario additionally owns the ``expected``
+subset verification INSIDE its transaction (the
+``delete_record``/``delete_staff`` mirror): an unconfirmed non-auto dep
+(records/visitors) raises ``StaleDependenciesError`` (route → 409
+``stale_dependencies``) BEFORE the blocking/resolutions checks could
+turn the race into a 422 (#285 D7 order pin). The ROUTE keeps the
+transport of the tags/records/staff family (§4.1 forms: bare DELETE →
+422 ``expected_state_required``, ``?dry_run=true`` preview,
+``dry_run_with_resolutions_forbidden``).
+
 CALLING CONVENTION (mirror of ``usecases/records.py``): the
 ``@transactional`` wrapper's signature is ``wrapper(self, *args,
 **kwargs)`` — a module-level scenario therefore MUST be called with an
 explicit leading ``None`` (the unused ``self`` slot) and keyword
 arguments::
 
-    ok = await delete_client(None, db_session=session, id=..., resolutions=...)
+    ok = await delete_client(
+        None, db_session=session, id=..., resolutions=..., expected=...,
+    )
 
 The selfless path opens the accumulator EMPTY — no auto entity-mark —
 so the scenario marks its OWN entity explicitly and byte-identically to
@@ -24,11 +36,12 @@ published ``{"clients"}`` even when the probe returned ``False``).
 
 DOCUMENTED DEVIATION from the ``delete_record`` precedent: the scenario
 imports the ``Client`` ORM class at RUNTIME as a STATIC registry key
-for ``FK_MATRIX`` / ``NULLIFY_HANDLERS`` / ``collect_dependencies`` —
-the record scenario reads ``type(row)`` off its probe because
-``RecordService.get`` returns an ORM row, while ``ClientService.get``
-returns a Pydantic schema (spec #327 §4.4). The import never builds ORM
-rows; every table write goes through owner services.
+for ``FK_MATRIX`` / ``NULLIFY_HANDLERS`` / ``collect_dependencies`` /
+``collect_dependency_ids`` — the record scenario reads ``type(row)``
+off its probe because ``RecordService.get`` returns an ORM row, while
+``ClientService.get`` returns a Pydantic schema (spec #327 §4.4). The
+import never builds ORM rows; every table write goes through owner
+services.
 
 EVENT GRID (GH #239), byte-parity with the pre-refactor executor:
 success publishes EXACTLY ``{"clients", "records", "photos",
@@ -36,8 +49,9 @@ success publishes EXACTLY ``{"clients", "records", "photos",
 (by dispatch fact, not row count; a clean client with empty
 resolutions ``{}`` publishes the same set). ``"visits"`` is
 deliberately NOT published (the pre-refactor hole, spec §8 — closing
-it is #375). The 404 branch publishes ``{"clients"}``; the 422 branches
-(validation exceptions) publish NOTHING (the accumulator resets).
+it is #375). The 404 branch publishes ``{"clients"}``; the 422/409
+branches (validation + stale exceptions) publish NOTHING (the
+accumulator resets).
 
 AUDIT (GH #344 §4.5): the deferred-delete COMMIT journals ONE
 ``("delete", "clients", id)`` row with the label + before-snapshot —
@@ -55,8 +69,11 @@ from src.domain.deletion import (
     NULLIFY_HANDLERS,
     BlockingDepsError,
     InvalidResolutionError,
+    StaleDependenciesError,
     collect_dependencies,
+    collect_dependency_ids,
     has_blocking_deps,
+    stale_expected_entities,
     validate_resolutions,
 )
 from src.events.emitter import mark_changed
@@ -75,6 +92,7 @@ async def delete_client(
     db_session: AsyncSession,
     id: str,
     resolutions: dict[str, str],
+    expected: dict[str, list[str]] | None = None,
 ) -> bool:
     """Delete a client — the whole resolution cascade in ONE transaction.
 
@@ -91,18 +109,28 @@ async def delete_client(
        selfless scenario reproduces that publication parity. The audit
        journal row is NOT staged here — it belongs to the success path,
        next to the row delete (the executor staged it there);
-    2. ``collect_dependencies`` (the 409 tree counters — read-only);
-    3. defensive blocking check → ``BlockingDepsError`` (route → 422;
+    2. GH #345 Task 4 — expected id-set verification (§4.1/§4.3, subset
+       semantics #285 rev8, the ``delete_staff``/``delete_record``
+       mirror): collect ``collect_dependency_ids`` and require
+       ``set(now_ids) ⊆ set(expected[entity])`` for every non-auto dep
+       (records/visitors; auto deps — client_tags/photos — are exempt);
+       mismatch → ``StaleDependenciesError`` carrying the fresh tree
+       (route → 409 ``stale_dependencies`` + tree). Fires BEFORE the
+       blocking/resolutions checks could turn a race into a 422
+       (#285 D7 order pin). Subset, not equality: a dep that
+       disappeared mid-window does not block; one that APPEARED does;
+    3. ``collect_dependencies`` (the 409 tree counters — read-only);
+    4. defensive blocking check → ``BlockingDepsError`` (route → 422;
        unreachable for the current ``FK_MATRIX[Client]`` — every dep is
        cascade/nullify — kept for parity, the matrix is data);
-    4. resolutions validation → ``InvalidResolutionError`` (route →
+    5. resolutions validation → ``InvalidResolutionError`` (route →
        422; the exception resets the accumulator without publishing);
-    5. nullify phase — dispatch ``FK_MATRIX[Client]`` deps with action
+    6. nullify phase — dispatch ``FK_MATRIX[Client]`` deps with action
        ``"nullify"`` through ``NULLIFY_HANDLERS`` on the client service
        instance (records: ``client_id → NULL``; photos: owner detach),
        ``mark_changed(dep.entity)`` UNCONDITIONALLY after each dispatch
        (parity: a zero-row dep still marks its entity);
-    6. visitors cascade — ``VisitorService.list_by_client(...,
+    7. visitors cascade — ``VisitorService.list_by_client(...,
        master_key=None)`` (admin mode, no scope predicate); per
        visitor: the owner visit brick
        ``delete_visits_by_visitor(..., mark_visits=False)`` then
@@ -112,13 +140,13 @@ async def delete_client(
        list. The visits are removed by their OWNER service (canon rule
        1), replacing the DB-level ``ondelete=CASCADE`` reliance of the
        interim state — net DB effects identical;
-    7. audit journal row (§4.5) — the client's own ``delete`` row with
+    8. audit journal row (§4.5) — the client's own ``delete`` row with
        the label + before-snapshot captured from the probe;
-    8. the client row via the own-edge brick
+    9. the client row via the own-edge brick
        ``ClientService.delete_row_with_tags`` (client_tags join rows
        BEFORE the row — FK with no ondelete), then
        ``mark_changed("client_tags")``;
-    9. ``True`` (route → 204).
+    10. ``True`` (route → 204).
 
     Service singletons are resolved by their factories INSIDE the body
     on EVERY call (never captured at module level): the API atomicity
@@ -126,7 +154,7 @@ async def delete_client(
     singleton, and the scenario must see the patched method.
 
     NOTE: call as ``delete_client(None, db_session=..., id=...,
-    resolutions=...)`` — see the module docstring for why.
+    resolutions=..., expected=...)`` — see the module docstring for why.
     """
     # ── Phase 0: existence probe (route → 404 on miss) ───────────────
     client_service = get_client_service()
@@ -139,25 +167,37 @@ async def delete_client(
     if client is None:
         return False
 
-    # ── Phase 2: dependency collection (the 409 tree counters) ───────
+    # ── Phase 2: GH #345 — expected snapshot verification FIRST
+    #    (fail-closed, #285 D7 order): a stale commit must 409 BEFORE
+    #    the blocking/resolutions validation could turn it into a 422,
+    #    and before any row is touched. Auto deps (client_tags/photos)
+    #    are exempt — they resolve themselves during execution and the
+    #    user could not have confirmed them. ───────────────────────────
+    now_ids = await collect_dependency_ids(db_session, Client, id)
+    if stale_expected_entities(Client, now_ids, expected or {}):
+        raise StaleDependenciesError(
+            await collect_dependencies(db_session, Client, id)
+        )
+
+    # ── Phase 3: dependency collection (the 409 tree counters) ───────
     # ``Client`` is the STATIC registry key (documented deviation — the
     # probe returns a Pydantic schema, not an ORM row; see module
     # docstring). The scenario never builds ORM rows.
     deps = await collect_dependencies(db_session, Client, id)
 
-    # ── Phase 3: defensive blocking check (route → 422) ──────────────
+    # ── Phase 4: defensive blocking check (route → 422) ──────────────
     if has_blocking_deps(deps):
         raise BlockingDepsError(
             "Entity has blocking dependencies — archive instead"
         )
 
-    # ── Phase 4: resolutions validation (route → 422) ────────────────
+    # ── Phase 5: resolutions validation (route → 422) ────────────────
     issues = validate_resolutions(Client, deps, resolutions)
     if issues:
         msg = "; ".join(f"{i.relation}: {i.message}" for i in issues)
         raise InvalidResolutionError(msg)
 
-    # ── Phase 5: nullify phase — matrix dispatch, unconditional marks ─
+    # ── Phase 6: nullify phase — matrix dispatch, unconditional marks ─
     for dep in FK_MATRIX[Client]:
         if dep.action != "nullify":
             continue
@@ -168,7 +208,7 @@ async def delete_client(
             # count — a zero-row nullify dep still marks its entity.
             mark_changed(dep.entity)
 
-    # ── Phase 6: visitors cascade — singletons resolved per call so a
+    # ── Phase 7: visitors cascade — singletons resolved per call so a
     #    monkeypatch on the visitor singleton keeps intercepting. ──────
     visitor_service = get_visitor_service()
     visitors = await visitor_service.list_by_client(
@@ -185,7 +225,7 @@ async def delete_client(
     # even when the loop found zero rows.
     mark_changed("visitors")
 
-    # ── Phase 7: audit journal row (§4.5) — next to the disappearance ─
+    # ── Phase 8: audit journal row (§4.5) — next to the disappearance ─
     # LAZY audit import — cycle discipline (usecases sit inside the
     # services walk graph, see src/events/entities.py WARNING). The
     # helpers read label/snapshot fields via getattr, so the Pydantic
@@ -200,9 +240,9 @@ async def delete_client(
         changes=snapshot_pairs_before("clients", client),
     )
 
-    # ── Phase 8: own-edge — client_tags join rows + the client row ───
+    # ── Phase 9: own-edge — client_tags join rows + the client row ───
     await client_service.delete_row_with_tags(db_session, id)
     mark_changed("client_tags")
 
-    # ── Phase 9: success (route → 204) ────────────────────────────────
+    # ── Phase 10: success (route → 204) ───────────────────────────────
     return True

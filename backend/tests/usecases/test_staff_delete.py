@@ -1,4 +1,5 @@
-"""Unit tests for the ``delete_staff`` scenario (GH #326 Task 4).
+"""Unit tests for the ``delete_staff`` scenario (GH #326 Task 4 +
+GH #345 Task 3).
 
 Behavior-preserving extraction of the DELETE commit branch (Corridor 2 —
 canon docs/domain-rules/service-layer.md rule 2): the executing body of
@@ -9,10 +10,16 @@ the ``delete_staff`` scenario owns the transaction + the own-entity mark
 and calls the core on the staff service instance (the undecorated call
 is allowed — canon rule 5 forbids only NESTED decorated calls).
 
-The ROUTE keeps transport (contract #207 — NOT the records shape: no
-``dry_run`` / ``expected``): the preview branch (``collect_dependencies``
-→ 409 + tree) stays in the route; missing id → 404; ResolutionError →
-422. Pinned here at the scenario level:
+GH #345 §4.5: the scenario additionally owns the ``expected`` subset
+verification INSIDE its transaction (the ``delete_record`` mirror) — an
+unconfirmed non-auto dep raises ``StaleDependenciesError`` (route → 409
+``stale_dependencies``) BEFORE the core's blocking/resolutions checks
+could turn the race into a 422 (#285 D7 order pin).
+
+The ROUTE keeps transport (GH #345 §4.1 — the tags/records family
+forms): the preview branch (``?dry_run=true`` → 409 + tree), the form
+422s, missing id → 404; ResolutionError → 422. Pinned here at the
+scenario level:
 
 - the scenario is ``@transactional`` and delegates to the CORE, never to
   the decorated ``resolve_delete`` (rule 5);
@@ -267,10 +274,51 @@ async def test_delete_with_resolutions_cascades_all(db_session) -> None:
 
 
 async def test_delete_blocked_by_activities_raises(db_session, subscriber) -> None:
-    """Activities still block (the matrix did not change): the core raises
-    ``BlockingDepsError`` (route → 422); nothing is deleted and NO event
-    batch publishes (rollback silence)."""
+    """Activities still block (the matrix did not change): with the
+    activity CONFIRMED in ``expected`` (stale check passes) the core
+    raises ``BlockingDepsError`` (route → 422); nothing is deleted and
+    NO event batch publishes (rollback silence)."""
     from src.domain.deletion import BlockingDepsError
+    from src.usecases.staff import delete_staff
+
+    staff = await _add_staff(db_session)
+    await _add_master_ext(db_session, staff.id)
+    service_ = Service(
+        title="S", description="d", image_url="i", specialty="живопись",
+        min_age=6, duration=90, record_info="r",
+    )
+    location = Location(title="L", capacity=10)
+    db_session.add_all([service_, location])
+    await db_session.flush()
+    activity = Activity(
+        master_id=staff.id, service_id=service_.id, location_id=location.id,
+        start=datetime.now(UTC) + timedelta(days=1), duration=90,
+        capacity=10, is_private=False,
+    )
+    db_session.add(activity)
+    await db_session.commit()  # persist setup — the rollback below must
+    staff_id = staff.id        # only undo the failed delete, not the fixture
+    _drain(subscriber)
+
+    with pytest.raises(BlockingDepsError):
+        await delete_staff(
+            None, db_session=db_session, id=staff_id, resolutions={},
+            expected={"activities": [activity.id]},  # confirmed → blocked fires
+        )
+
+    await db_session.rollback()
+    assert await db_session.get(Staff, staff_id) is not None
+    assert _drain(subscriber) == [], (
+        "the blocked branch must not publish an event batch"
+    )
+
+
+async def test_delete_stale_expected_raises_before_blocking(db_session) -> None:
+    """GH #345 §4.1/§4.5: an UNCONFIRMED activity (``expected`` misses it)
+    → ``StaleDependenciesError`` INSIDE the scenario transaction — the
+    #285 D7 order pin: the race gate fires before the blocked-422 branch
+    (route renders 409 ``stale_dependencies``, never 422)."""
+    from src.domain.deletion import StaleDependenciesError
     from src.usecases.staff import delete_staff
 
     staff = await _add_staff(db_session)
@@ -287,20 +335,35 @@ async def test_delete_blocked_by_activities_raises(db_session, subscriber) -> No
         start=datetime.now(UTC) + timedelta(days=1), duration=90,
         capacity=10, is_private=False,
     ))
-    await db_session.commit()  # persist setup — the rollback below must
-    staff_id = staff.id        # only undo the failed delete, not the fixture
-    _drain(subscriber)
+    await db_session.commit()
+    staff_id = staff.id
 
-    with pytest.raises(BlockingDepsError):
+    # ``expected: {}`` — the mid-window race: the activity is NOT confirmed.
+    with pytest.raises(StaleDependenciesError) as exc_info:
         await delete_staff(
             None, db_session=db_session, id=staff_id, resolutions={},
+            expected={},
         )
 
-    await db_session.rollback()
-    assert await db_session.get(Staff, staff_id) is not None
-    assert _drain(subscriber) == [], (
-        "the blocked branch must not publish an event batch"
-    )
+    # The fresh tree rides the exception (the route renders it as 409):
+    # the blocked activities node + the auto masters extension row.
+    assert [d.entity for d in exc_info.value.nodes] == [
+        "activities", "masters",
+    ]
+
+
+async def test_delete_missing_returns_false_before_collectors(
+    db_session,
+) -> None:
+    """The existence probe runs BEFORE the expected check: a ghost id
+    with a stale-looking ``expected`` still answers ``False`` (404),
+    never StaleDependenciesError."""
+    from src.usecases.staff import delete_staff
+
+    assert await delete_staff(
+        None, db_session=db_session, id="ghost", resolutions={},
+        expected={"activities": ["some-id"]},
+    ) is False
 
 
 # ─── event grid (GH #239 — byte-parity with today's resolve_delete) ─────────

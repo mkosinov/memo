@@ -44,6 +44,27 @@ class MaterialPatch(BaseModel):
     description: str | None = None
 
 
+class MaterialDeleteBody(BaseModel):
+    """DELETE /api/v1/materials/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``TagDeleteBody`` / #318 D2).
+
+    * ``expected`` — id-sets per non-auto FK entity. Material has NO
+      non-auto deps (only the auto-cascade ``service_materials`` join),
+      so ``{}`` is always the correct payload; the field is still
+      mandatory on the execute path (bare DELETE → 422).
+    * ``resolutions`` — never needed (the only dep is AUTO); the full
+      branch is still honored for API consumers and races.
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
+
+
 class MaterialResponse(MaterialBase):
     """Response schema with all material fields.
 

@@ -95,7 +95,11 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 vi.mock('@/hooks/useStaffMutations', () => ({
   useUpdateStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
   usePatchStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
-  useDeleteStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), dependencies: null, isPending: false })),
+  useDeleteStaff: vi.fn(() => ({
+    removeStaff: vi.fn().mockResolvedValue(undefined),
+    removeStaffResolved: vi.fn().mockResolvedValue(undefined),
+    isPending: false,
+  })),
   useCreateStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
   useArchiveStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
   useRestoreStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
@@ -139,7 +143,7 @@ import {
   usePatchUser,
   useIssuePasswordLink,
 } from '@/hooks/useStaffMutations';
-import { getStaff, resolveDeleteStaff, ApiError } from '@memo/api-client';
+import { getStaff, ApiError } from '@memo/api-client';
 
 const mockUseUpdateStaff = vi.mocked(useUpdateStaff);
 const mockUseCreateStaff = vi.mocked(useCreateStaff);
@@ -149,7 +153,6 @@ const mockUseRestoreStaff = vi.mocked(useRestoreStaff);
 const mockUsePatchUser = vi.mocked(usePatchUser);
 const mockUseIssuePasswordLink = vi.mocked(useIssuePasswordLink);
 const mockGetStaff = vi.mocked(getStaff);
-const mockResolveDeleteStaff = vi.mocked(resolveDeleteStaff);
 
 // ─── Test data ───────────────────────────────────────────────────────────────
 
@@ -197,9 +200,13 @@ function conflictError(dependencies: DependencyNode[]): ApiError {
 }
 
 function setupDeleteConflict(deps: DependencyNode[]) {
-  const mutateAsync = vi.fn().mockRejectedValue(conflictError(deps));
-  mockUseDeleteStaff.mockReturnValue({ mutateAsync, dependencies: deps, isPending: false } as never);
-  return mutateAsync;
+  const removeStaff = vi.fn().mockRejectedValue(conflictError(deps));
+  mockUseDeleteStaff.mockReturnValue({
+    removeStaff,
+    removeStaffResolved: vi.fn().mockResolvedValue(undefined),
+    isPending: false,
+  } as never);
+  return removeStaff;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -445,17 +452,17 @@ describe('StaffTable', () => {
     await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('m2'));
   });
 
-  // ─── Delete → DeleteDialog (#207 §7) ─────────────────────────────────────
+  // ─── Delete → DeleteDialog (GH #345: deferred conveyor) ───────────────────
 
   it('opens DeleteDialog with the 409 dependency tree when delete conflicts', async () => {
-    const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
+    const removeStaff = setupDeleteConflict(DEPS_BLOCKED);
     setupEnvelope();
     await renderLoaded();
 
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    expect(deleteMutateAsync).toHaveBeenCalledWith('m1');
+    expect(removeStaff).toHaveBeenCalledWith(TEST_STAFF[0]);
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Середа Ольга');
   });
@@ -471,9 +478,14 @@ describe('StaffTable', () => {
     expect(screen.getByTestId('delete-dialog-archive-btn')).toBeInTheDocument();
   });
 
-  it('Mode A confirm calls resolveDeleteStaff with {} (all deps auto)', async () => {
+  it('Mode A confirm enqueues the deferred delete (resolutions {} + the FULL tree)', async () => {
+    const removeStaffResolved = vi.fn().mockResolvedValue(undefined);
     setupDeleteConflict(DEPS_AUTO);
-    mockResolveDeleteStaff.mockResolvedValue(undefined);
+    mockUseDeleteStaff.mockReturnValue({
+      removeStaff: vi.fn().mockRejectedValue(conflictError(DEPS_AUTO)),
+      removeStaffResolved,
+      isPending: false,
+    } as never);
     setupEnvelope();
     await renderLoaded();
 
@@ -482,10 +494,13 @@ describe('StaffTable', () => {
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
-    await waitFor(() => expect(mockResolveDeleteStaff).toHaveBeenCalledWith('m1', {}));
+    // GH #345: enqueue is synchronous — the dialog closes immediately and
+    // removeStaffResolved carries the resolutions + the FULL tree (the
+    // parent hook builds `expected` from it; all-auto staff tree → {}).
     await waitFor(() =>
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['staff'] }),
+      expect(removeStaffResolved).toHaveBeenCalledWith(TEST_STAFF[0], {}, DEPS_AUTO),
     );
+    await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
   // ─── Edit ────────────────────────────────────────────────────────────────

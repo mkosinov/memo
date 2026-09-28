@@ -1,13 +1,16 @@
 /**
- * S3 — Delete Staff card WITH activities → blocked, archive instead (Mode B)
- * (#207 §12, GH #266: the flow moved from /masters to /staff).
+ * S4 — Staff card WITH activities → blocked, archive instead (Mode B)
+ * (spec §6 S4, GH #266: the flow lives on /staff).
  *
- * Flow: no-body DELETE → 409 with `activities` (allowed_actions: []) →
- * DeleteDialog Mode B: "Нельзя удалить: есть 3 активности.", primary =
- * "Архивировать", NO "Удалить". Archive → POST /staff/{id}/archive (body =
- * D6 defaults, both true) → 200 with `archived: true`; row leaves the active
- * view and returns via the archived filter. "Вернуть из архива" → restore →
- * `archived: false` (the PERSON only — master/user flags are explicit, D3).
+ * UNCHANGED dialog semantics, new tree source (§2 delta): the click fires
+ * the PURE dry-run preview (DELETE ?dry_run=true, no body) → 409 with
+ * `activities` (allowed_actions: []) → DeleteDialog Mode B: "Нельзя
+ * удалить: есть 3 активности.", primary = "Архивировать", NO "Удалить".
+ * The archive path stays INSTANT (POST /staff/{id}/archive, body = D6
+ * defaults, both true) → 200 with `archived: true` — no undo window, no
+ * ring toast (S7: archive is untouched by #345). Row leaves the active
+ * view and returns via the archived filter. "Вернуть из архива" → restore
+ * → `archived: false` (the PERSON only — master/user flags are explicit, D3).
  */
 import { test, expect } from './fixtures/test';
 import { cleanup, createTestActivity, createTestMaster } from './fixtures/factories';
@@ -15,6 +18,7 @@ import {
   clickRowDelete,
   clickRowStaffArchiveAction,
   openRowActionDropdown,
+  undoToast,
   waitForStaffReady,
   waitForToast,
 } from './fixtures/helpers';
@@ -22,8 +26,8 @@ import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
-test.describe('S3 — Staff delete blocked by activities → archive instead', () => {
-  test('Mode B dialog blocks delete; archive and restore round-trip', async ({ page, request }) => {
+test.describe('S4 — Staff delete blocked by activities → archive instead', () => {
+  test('dry-run 409 → Mode B dialog blocks delete; archive and restore round-trip', async ({ page, request }) => {
     // 1. SETUP — staff card (with master section) + 3 activities (the blocking dep).
     const master = await createTestMaster(request);
     const activities = [];
@@ -37,14 +41,19 @@ test.describe('S3 — Staff delete blocked by activities → archive instead', (
       const row = page.locator(`[data-testid="master-row-${master.id}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
-      // 2. ACTION — request delete. Capture the dry-run 409 tree.
-      const dryRunPromise = page.waitForResponse((resp) =>
-        resp.url().includes(`/api/v1/staff/${master.id}`) && resp.status() === 409
+      // 2. ACTION — the click fires the PURE dry-run preview (no body) → 409.
+      //    No committing DELETE (with body) may EVER fire on this path.
+      const dryRunPromise = page.waitForResponse(
+        (resp) =>
+          resp.url().includes(`/api/v1/staff/${master.id}`) &&
+          resp.url().includes('dry_run=true') &&
+          resp.status() === 409,
       );
       const dropdown = await openRowActionDropdown(row);
       await clickRowDelete(dropdown);
       const dryRun = await dryRunPromise;
       const dryRunJson = await dryRun.json();
+      expect(dryRunJson.detail).toBe('has_dependencies');
       expect(dryRunJson.dependencies).toEqual(expect.arrayContaining([
         expect.objectContaining({ entity: 'activities', count: 3, allowed_actions: [] }),
       ]));
@@ -58,7 +67,8 @@ test.describe('S3 — Staff delete blocked by activities → archive instead', (
       await expect(page.locator('[data-testid="delete-dialog-confirm-btn"]')).toHaveCount(0);
 
       // 4. ACTION — archive. Capture the POST /archive call (the dialog path
-      // sends the D6 checkbox body — both defaults true).
+      // sends the D6 checkbox body — both defaults true). S7: instant POST,
+      // no undo ring — the delete conveyor never enqueues here.
       const archivePromise = page.waitForResponse((resp) =>
         resp.url().includes(`/api/v1/staff/${master.id}/archive`) && resp.request().method() === 'POST'
       );
@@ -67,8 +77,10 @@ test.describe('S3 — Staff delete blocked by activities → archive instead', (
       expect(archive.status()).toBe(200);
       expect((await archive.json()).archived).toBe(true);
       // Dialog path emits no toast (only the dropdown D6 dialog does) — the
-      // dialog closing + list refetch are the observable effects here.
+      // dialog closing + list refetch are the observable effects here. S7:
+      // the delete conveyor never enqueues (no undo ring toast).
       await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+      await expect(undoToast(page)).toHaveCount(0);
 
       // VERIFY — archived:true server-side + the row leaves the active list.
       // (GET /masters/{id} was removed in #266 — the card reads from /staff.)
@@ -106,7 +118,7 @@ test.describe('S3 — Staff delete blocked by activities → archive instead', (
       for (const activity of activities) {
         await cleanup(request, `/api/v1/activities/${activity.id}`);
       }
-      // Activities gone → no-body DELETE now succeeds (no deps remain).
+      // Activities gone → commit `{expected:{}}` now succeeds (no deps remain).
       await cleanup(request, `/api/v1/staff/${master.id}`);
     }
   });

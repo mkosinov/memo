@@ -127,9 +127,15 @@ export function usePatchUser() {
  * exactly once, here — the caller assembles the handover URL from the page
  * origin and shows it in the dialog; repeat viewing is impossible by
  * construction. Errors: 404 unknown account, 422 ACCOUNT_DEACTIVATED.
+ *
+ * Invalidation: the card's account block carries `link_expires_at` — a
+ * fresh link must surface as «Ссылка выдана, действует до …» right away,
+ * not on the next unrelated refresh.
  */
 export function useIssuePasswordLink() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string): Promise<PasswordLinkResponse> => issuePasswordLink(id),
+    onSuccess: () => invalidateEntities(queryClient, ['staff']),
   });
 }

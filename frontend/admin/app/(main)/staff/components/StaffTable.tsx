@@ -120,10 +120,12 @@ export function StaffTable() {
         await patchUser.mutateAsync({ id: userId, data: { phone } });
         showToast('Телефон учётки обновлён');
       } catch (err) {
-        // PHONE_TAKEN stays inline in the modal («Этот телефон уже занят»);
+        // The §5 phone-edit domain codes render INLINE in the modal
+        // («Этот телефон уже занят» / «Некорректный номер телефона»);
         // anything else surfaces as a toast before rethrowing.
         const parsed = parseApiError(err);
-        if (parsed.code !== 'PHONE_TAKEN') showToast(parsed.message, 'error');
+        const inlineCode = parsed.code === 'PHONE_TAKEN' || parsed.code === 'PHONE_INVALID';
+        if (!inlineCode) showToast(parsed.message, 'error');
         throw err instanceof ApiError ? err : new ApiError(0, parsed.message);
       }
     },

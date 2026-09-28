@@ -223,6 +223,35 @@ describe('edit: issue link button (S3)', () => {
     await waitFor(() => expect(screen.getByTestId('link-url-field')).toBeInTheDocument());
     expect(onIssueLink).toHaveBeenCalledTimes(2);
   });
+
+  // Stacked layers (review): ONE Escape press must close the TOPMOST layer
+  // alone — the link dialog consumes the keystroke, the modal stays put.
+  it('Escape closes only the link dialog — the modal underneath stays open', async () => {
+    const onClose = vi.fn();
+    const onIssueLink = vi.fn().mockResolvedValue({
+      token: 'raw-token-abc',
+      expires_at: '2026-09-29T10:00:00Z',
+    });
+    render(
+      <StaffModal
+        mode="edit"
+        staff={staffWithAccount()}
+        positions={POSITIONS}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onIssueLink={onIssueLink}
+        onClose={onClose}
+        title="Ред."
+      />,
+    );
+    fireEvent.click(screen.getByTestId('issue-link-btn'));
+    await screen.findByTestId('link-url-field');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // The dialog consumed the keystroke; the modal's close was NOT invoked.
+    expect(screen.queryByTestId('link-url-field')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe('create: passwordless account block (S1)', () => {
@@ -261,6 +290,9 @@ describe('create: passwordless account block (S1)', () => {
     setupCreate();
     fireEvent.click(screen.getByTestId('create-user-checkbox'));
     expect(screen.getByTestId('create-user-checkbox-label')).toHaveTextContent('Создать учётку');
-    expect(screen.getByTestId('create-user-checkbox-label')).not.toHaveProperty('password');
+    // The whole create block carries NO password field label (#348 §6):
+    // neither the checkbox nor any input under it.
+    expect(screen.getByTestId('create-user-checkbox-label').textContent).not.toContain('Пароль');
+    expect(screen.queryByLabelText(/^Пароль/)).not.toBeInTheDocument();
   });
 });

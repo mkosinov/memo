@@ -58,12 +58,17 @@ export function PasswordLinkDialog({
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // Capture phase + stopPropagation: the dialog is the TOPMOST layer —
+    // one Escape closes IT alone, never a stacked handler beneath (e.g.
+    // the edit modal hosting the issuance button).
     const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape' || busy) return;
+      e.stopPropagation();
+      onClose();
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [busy, onClose]);
 
   const url = link ? assemblePasswordLinkUrl(link.token) : null;
 
@@ -83,6 +88,7 @@ export function PasswordLinkDialog({
       className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
+      aria-label="Ссылка установки пароля"
       data-testid="password-link-dialog-overlay"
     >
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={busy ? undefined : onClose} />
@@ -101,6 +107,7 @@ export function PasswordLinkDialog({
               <input
                 type="text"
                 readOnly
+                aria-label="Ссылка установки пароля"
                 value={url}
                 data-testid="link-url-field"
                 onFocus={(e) => e.target.select()}

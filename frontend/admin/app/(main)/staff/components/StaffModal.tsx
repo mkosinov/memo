@@ -9,9 +9,6 @@ import {
   type IssuedPasswordLink,
 } from './PasswordLinkDialog';
 
-// Re-export for the StaffTable prop typing convenience.
-export type { IssuedPasswordLink };
-
 /**
  * Structured form payload the StaffModal hands to its parent (StaffTable),
  * which maps it onto the typed wire schemas (StaffCreate / StaffUpdate).

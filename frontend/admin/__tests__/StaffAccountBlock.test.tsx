@@ -141,6 +141,30 @@ describe('edit: phone save via patchUser (S5)', () => {
     await waitFor(() => expect(screen.getByText('Этот телефон уже занят')).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('PHONE_INVALID renders inline too (same §5 domain class), modal open', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onPatchPhone = vi.fn().mockRejectedValue(
+      Object.assign(new Error('invalid'), { code: 'PHONE_INVALID' }),
+    );
+    render(
+      <StaffModal
+        mode="edit"
+        staff={staffWithAccount()}
+        positions={POSITIONS}
+        onSubmit={onSubmit}
+        onPatchPhone={onPatchPhone}
+        onIssueLink={vi.fn()}
+        onClose={vi.fn()}
+        title="Ред."
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '123' } });
+    fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
+    await waitFor(() => expect(screen.getByText('Некорректный номер телефона')).toBeInTheDocument());
+    // The card save never ran — the phone must be fixed first.
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });
 
 describe('edit: issue link button (S3)', () => {

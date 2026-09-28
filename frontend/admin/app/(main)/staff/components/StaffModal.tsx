@@ -52,7 +52,8 @@ export interface StaffModalProps {
    * #348 (edit, S5): save the account's phone as a SEPARATE request via
    * `patchUser(account.id, {phone})` — distinct from the card's own PUT.
    * The modal calls it (only when the phone changed) BEFORE onSubmit; a
-   * PHONE_TAKEN rejection renders inline and keeps the modal open.
+   * PHONE_TAKEN / PHONE_INVALID rejections render inline and keep the
+   * modal open (§5 phone-edit domain codes).
    */
   onPatchPhone?: (userId: string, phone: string) => Promise<void>;
   /**
@@ -265,7 +266,8 @@ export function StaffModal({
     try {
       // #348 (S5): the account phone is a SEPARATE write — PATCH /users/:id,
       // distinct from the card's own PUT. Only when it actually changed;
-      // a PHONE_TAKEN rejection renders inline and aborts the save.
+      // the §5 domain codes (PHONE_TAKEN / PHONE_INVALID) render inline
+      // and abort the save.
       if (
         mode === 'edit' &&
         account !== null &&
@@ -277,10 +279,19 @@ export function StaffModal({
           await onPatchPhone(account.id, accountPhone.trim());
           setPhoneError(null);
         } catch (err) {
+          // §5 phone-edit domain codes render INLINE (the admin fixes the
+          // field right there); anything else rethrows to the caller's toast.
           const code = (err as { code?: string }).code;
-          setPhoneError(code === 'PHONE_TAKEN' ? 'Этот телефон уже занят' : null);
-          if (code === 'PHONE_TAKEN') return; // modal stays open, inline error
-          throw err; // unexpected — surface to the caller's toast
+          if (code === 'PHONE_TAKEN') {
+            setPhoneError('Этот телефон уже занят');
+            return; // modal stays open, inline error
+          }
+          if (code === 'PHONE_INVALID') {
+            setPhoneError('Некорректный номер телефона');
+            return;
+          }
+          setPhoneError(null);
+          throw err;
         }
       }
       const master = masterEnabled

@@ -120,7 +120,11 @@ export function StaffTable() {
         await patchUser.mutateAsync({ id: userId, data: { phone } });
         showToast('Телефон учётки обновлён');
       } catch (err) {
-        throw err instanceof ApiError ? err : new ApiError(0, parseApiError(err).message);
+        // PHONE_TAKEN stays inline in the modal («Этот телефон уже занят»);
+        // anything else surfaces as a toast before rethrowing.
+        const parsed = parseApiError(err);
+        if (parsed.code !== 'PHONE_TAKEN') showToast(parsed.message, 'error');
+        throw err instanceof ApiError ? err : new ApiError(0, parsed.message);
       }
     },
     [patchUser],

@@ -232,6 +232,30 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
       setPeriod,
       navigate,
     }),
-    [state, defFrom, defTo, explicitFrom, explicitTo, update, setPeriod, navigate],
+    // Identity-stable on VALUES: the raw hook state object is rebuilt every
+    // render, but the mirror effect in RecordsProvider keys on this state's
+    // identity — it must NOT see a "new" state when the URL didn't change
+    // (otherwise the mirror would loop). The key covers every field above;
+    // defFrom/defTo shift at week boundaries, explicit* track the raw params.
+    [
+      state.q,
+      state.status,
+      state.location_id,
+      state.service_id,
+      state.master_id,
+      state.sort_by,
+      state.sort_order,
+      state.page,
+      state.per_page,
+      state.period.from,
+      state.period.to,
+      defFrom,
+      defTo,
+      explicitFrom,
+      explicitTo,
+      update,
+      setPeriod,
+      navigate,
+    ],
   );
 }

@@ -1,13 +1,33 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRecordsView } from '@memo/api-client';
 import type { PaginatedResponse, RecordView } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
-import type { RecordsUrlAdapter } from '@/app/(main)/records/useRecordsUrlState';
+import type { RecordsUrlAdapter, RecordsUrlPatch, RecordsUrlStateView } from '@/app/(main)/records/useRecordsUrlState';
+import { defaultRecordsPeriod } from '@/app/(main)/records/useRecordsUrlState';
 import { seedRecordFromList } from '@/lib/cache/recordCacheSync';
 import { qk } from '@/lib/queryKeys';
+
+/** Field-wise view equality (primitives + a flat filters bag). */
+function recordsStateEq(a: RecordsUrlStateView, b: RecordsUrlStateView): boolean {
+  return (
+    a.page === b.page &&
+    a.perPage === b.perPage &&
+    a.sortBy === b.sortBy &&
+    a.sortOrder === b.sortOrder &&
+    a.dateFrom === b.dateFrom &&
+    a.dateTo === b.dateTo &&
+    a.explicitFrom === b.explicitFrom &&
+    a.explicitTo === b.explicitTo &&
+    a.filters.locationId === b.filters.locationId &&
+    a.filters.serviceId === b.filters.serviceId &&
+    a.filters.masterId === b.filters.masterId &&
+    a.filters.status === b.filters.status &&
+    a.filters.search === b.filters.search
+  );
+}
 
 export interface RecordFilters {
   locationId: string;
@@ -73,6 +93,9 @@ export interface RecordsContextType {
 
 const RecordsContext = createContext<RecordsContextType | null>(null);
 
+/** The cleared filters bag (module const — stable identity for callbacks). */
+const DEFAULT_URL_FILTERS: RecordFilters = { locationId: '', serviceId: '', masterId: '', status: '', search: '' };
+
 export function RecordsProvider({
   children,
   urlState,
@@ -84,7 +107,50 @@ export function RecordsProvider({
   urlState: RecordsUrlAdapter;
 }) {
   const queryClient = useQueryClient();
-  const { state, update, setPeriod } = urlState;
+  const { state: urlSnapshot, update } = urlState;
+
+  // #349 follow-up — OPTIMISTIC MIRROR. The URL is the source of truth, but
+  // a query-key switch driven by a router navigation Transition (the
+  // useSearchParams re-render lands inside startTransition) lets the React
+  // Query data notification race the DOM read — records e2e #11/#12 family:
+  // desc fetched + 200, tbody kept the placeholder. The mirror restores the
+  // pre-#349 synchronous flow: every setter applies its value LOCALLY at
+  // once (instant re-render + fetch outside any Transition) and the URL
+  // write follows; EXTERNAL navigations (deep link / «назад») are adopted by
+  // the effect below once the URL state actually differs from a pending
+  // write (a pending push's values are already in the mirror).
+  const [mirror, setMirror] = useState(urlSnapshot);
+  const pendingWriteRef = useRef<RecordsUrlStateView | null>(null);
+
+  useEffect(() => {
+    const pending = pendingWriteRef.current;
+    if (pending) {
+      // Our own write is in flight: adopt NOTHING until its navigation
+      // commits (the URL then equals the pending values). NB: an EXTERNAL
+      // navigation landing inside the ~16ms window is indistinguishable
+      // from an uncommitted write — same limitation the hook's write base
+      // has; real navigations never straddle the window (they wait for
+      // responses/commits).
+      if (recordsStateEq(pending, urlSnapshot)) {
+        pendingWriteRef.current = null;
+      }
+      return;
+    }
+    if (!recordsStateEq(mirror, urlSnapshot)) {
+      setMirror(urlSnapshot);
+    }
+  }, [urlSnapshot, mirror]);
+
+  /** Apply a write optimistically: mirror now, URL right after. */
+  const applyWrite = useCallback(
+    (next: RecordsUrlStateView, urlPatch: RecordsUrlPatch, options?: { history?: 'push' | 'replace' }) => {
+      pendingWriteRef.current = next;
+      setMirror(next);
+      update(urlPatch, options);
+    },
+    [update],
+  );
+
   // The query-key range format is unchanged: the adapter defaults a missing
   // period side to the current-week monday..sunday — the same strings the
   // legacy useRecordsPeriod produced (cache keys byte-identical).
@@ -98,7 +164,7 @@ export function RecordsProvider({
     sortOrder,
     page,
     perPage,
-  } = state;
+  } = mirror;
   const sortBy = urlSortBy as RecordSortField;
 
   const refetch = useCallback(() => {
@@ -130,37 +196,68 @@ export function RecordsProvider({
   const records = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
-  // #349 Task 7 — setters are URL writes through the adapter: the hook's
-  // filter-change rule resets page→1 in the SAME navigation (spec §3),
-  // replacing the manual setPage(1) calls of the local-state era.
-  const setPage = useCallback((p: number) => update({ page: p }), [update]);
+  // #349 Task 7 — setters are optimistic URL writes: the value lands in the
+  // mirror at once (synchronous re-render) and the URL navigation follows;
+  // the hook's filter-change rule resets page→1 in the SAME navigation
+  // (spec §3) — the mirror applies the identical reset to stay in lockstep.
+  const setPage = useCallback(
+    (p: number) => applyWrite({ ...mirror, page: p }, { page: p }),
+    [applyWrite, mirror],
+  );
 
   const setFilters = useCallback(
-    (newFilters: Partial<RecordFilters>) => update(newFilters),
-    [update],
+    (newFilters: Partial<RecordFilters>) =>
+      applyWrite(
+        { ...mirror, filters: { ...mirror.filters, ...newFilters }, page: 1 },
+        newFilters as RecordsUrlPatch,
+      ),
+    [applyWrite, mirror],
   );
 
   const resetFilters = useCallback(
-    () =>
-      update({
-        locationId: '',
-        serviceId: '',
-        masterId: '',
-        status: '',
-        search: '',
-      }),
-    [update],
+    () => applyWrite({ ...mirror, filters: DEFAULT_URL_FILTERS, page: 1 }, { ...DEFAULT_URL_FILTERS }),
+    [applyWrite, mirror],
   );
 
-  const setPerPage = useCallback((pp: number) => update({ perPage: pp }), [update]);
+  const setPerPage = useCallback(
+    (pp: number) => applyWrite({ ...mirror, perPage: pp, page: 1 }, { perPage: pp }),
+    [applyWrite, mirror],
+  );
 
   // PagedListState.setSort contract (spec §6.4): field+order applied verbatim
-  // + page reset (§6.10.2, via the hook's auto-reset). Toggle-on-repeat was
-  // REMOVED — DataTable owns it (§6.10.4). `field` is `string` per the
-  // contract; the URL enum + server whitelist validate it upstream.
+  // + page reset (§6.10.2). Toggle-on-repeat was REMOVED — DataTable owns it
+  // (§6.10.4). `field` is `string` per the contract; the URL enum + server
+  // whitelist validate it upstream.
   const setSort = useCallback(
-    (field: string, order: SortOrder) => update({ sortBy: field, sortOrder: order }),
-    [update],
+    (field: string, order: SortOrder) =>
+      applyWrite(
+        { ...mirror, sortBy: field, sortOrder: order, page: 1 },
+        { sortBy: field, sortOrder: order },
+      ),
+    [applyWrite, mirror],
+  );
+
+  // #349 Task 7 / Gate B — the period write ('' removes a side). The mirror
+  // derives the effective range (a missing side → its own default) exactly
+  // like the adapter read; page resets with the same hook rule.
+  const setPeriod = useCallback(
+    (from: string, to: string) => {
+      const nextFrom = from === '' ? null : from;
+      const nextTo = to === '' ? null : to;
+      const def = defaultRecordsPeriod();
+      applyWrite(
+        {
+          ...mirror,
+          explicitFrom: nextFrom,
+          explicitTo: nextTo,
+          dateFrom: nextFrom ?? def.from,
+          dateTo: nextTo ?? def.to,
+          page: 1,
+        },
+        { period: { from: nextFrom, to: nextTo } },
+      );
+    },
+    [applyWrite, mirror],
   );
 
   // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
@@ -170,9 +267,9 @@ export function RecordsProvider({
   useEffect(() => {
     const items = data?.items || [];
     if (!isPending && !isFetching && items.length === 0 && page > 1) {
-      update({ page: page - 1 }, { history: 'replace' });
+      applyWrite({ ...mirror, page: page - 1 }, { page: page - 1 }, { history: 'replace' });
     }
-  }, [isPending, isFetching, data, page, update]);
+  }, [isPending, isFetching, data, page, applyWrite, mirror]);
 
   // Seed canonical ['record', id] from list responses. Avoids a redundant
   // getRecord() request the first time a record is opened (spec §2.1).

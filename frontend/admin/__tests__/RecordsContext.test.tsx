@@ -342,6 +342,12 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     await waitFor(() => {
       expect(result.current.page).toBe(3);
     });
+    // #349 follow-up: the optimistic mirror exposes page 3 IMMEDIATELY —
+    // wait for the URL write to COMMIT before the external navigation (a
+    // real navigation can't land inside the 16ms coalescing window).
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?page=3');
+    });
 
     // #138 Task 5: the range changes via a committed navigation — the mocked
     // router adopts the new params and the hook re-renders with them.
@@ -724,6 +730,94 @@ describe('RecordsContext — URL-backed state (#349 Task 7)', () => {
     });
     await waitFor(() => {
       expect(__currentQuery()).toBe('');
+    });
+  });
+});
+
+// #349 follow-up — main's SYNCHRONOUS render contract: a setter must apply
+// its value IMMEDIATELY (optimistic local application on top of the URL
+// write). Dev RSC navigation-commit latency made response→DOM reads race
+// (records e2e #11/#12 family); the URL stays the source of truth — the
+// mirror only restores the instant local re-render of the pre-#349 era.
+describe('RecordsContext — synchronous optimistic state (#349 follow-up)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetNavigation('', '/records');
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
+  });
+
+  it('setSort exposes the new sort SYNCHRONOUSLY (before the navigation commits)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setSort('total', 'desc');
+    });
+    expect(result.current.sortBy).toBe('total');
+    expect(result.current.sortOrder).toBe('desc');
+    expect(result.current.page).toBe(1);
+  });
+
+  it('setPage exposes the new page SYNCHRONOUSLY', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(3);
+    });
+    expect(result.current.page).toBe(3);
+  });
+
+  it('setFilters exposes the new filter SYNCHRONOUSLY', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ status: 'waiting' });
+    });
+    expect(result.current.filters.status).toBe('waiting');
+  });
+
+  it('setPeriod exposes the new period SYNCHRONOUSLY (absent side stays absent)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPeriod('2026-02-01', '');
+    });
+    expect(result.current.dateFrom).toBe('2026-02-01');
+    expect(result.current.explicitTo).toBeNull();
+    expect(result.current.page).toBe(1);
+  });
+
+  it('an EXTERNAL navigation (deep link / back) is adopted into the state', async () => {
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      __resetNavigation('?status=waiting&sort_by=total&sort_order=desc', '/records');
+    });
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('desc');
     });
   });
 });

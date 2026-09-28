@@ -49,14 +49,18 @@ and .opencode/scripts/ (container); when editing, change both (or edit
 one and copy over).
 Orphan wake-first scheme (2026-09-27, the #324 parked-PR incident): a card
 in In IMPL / PR (G7) whose sessions are silent and whose client process is
-dead is not released immediately — the watcher wakes the manager session up
-to ORPHAN_NUDGES times (ORPHAN_NUDGE_WINDOW_H counting window; the wake
-marker NUDGE-<kind> in the auto-impl log doubles as the counter; a fresh
-wake rests CLAIM_TTL_HOURS). A PR (G7) card escalates to gate=blocked —
-a visible blocker (user directive 2026-09-26: "blocked must not hide"); an
-In IMPL card falls through to the existing crash release. A live-but-silent
-client is never woken (a second driver is worse than a release) and keeps
-the old path.
+dead is not released immediately — the watcher wakes the manager session
+(the wake marker NUDGE-<kind> in the auto-impl log doubles as the counter;
+a fresh wake rests CLAIM_TTL_HOURS — the hourly cadence). Wake rules
+(2026-09-28, the #348 night — 4 of 5 wakes burned inside the closed z.ai
+quota window, each re-reading the manager history): before every wake the
+watcher tests the upstream with llm_ping.sh (a closed window costs no wake
+and writes no NUDGE marker); the budget is NUDGE_BUDGET wakes per
+NUDGE_BUDGET_H (24 per 24h). When the budget is exhausted, BOTH kinds park
+visibly on gate=blocked (an In IMPL card is released to Ready to IMPL with
+the gate re-stamped) — the old release-then-reclaim loop re-burned the
+manager context every hour. A live-but-silent client is never woken (a
+second driver is worse than a release) and keeps the old path.
 """
 import json
 import os
@@ -205,8 +209,8 @@ def cmd_next_up():
 
 
 CLAIM_TTL_HOURS = 1  # auto-impl: freshness of claim/blocked log entries — a fresh entry means the card is in flight or resting
-ORPHAN_NUDGES = 3  # orphan scheme (2026-09-27, the #324 parked-PR incident): wake attempts before escalation
-ORPHAN_NUDGE_WINDOW_H = 6  # the nudge counting window: a run that recovers and outlives it resets the counter
+NUDGE_BUDGET = 24  # orphan wake budget (2026-09-28, user decision after the #348 night: hourly wakes for a full day, not 3 per sliding 6h)
+NUDGE_BUDGET_H = 24  # the NUDGE-marker counting window for NUDGE_BUDGET
 HOST_BUDGETS = {"imac": 2, "macbook": 1}  # auto-impl: per-machine In IMPL slots (replaced the global MAX_TOTAL_INFLIGHT on 2026-09-20: parked cards on one machine must not starve another)
 DEFAULT_HOST_BUDGET = 1  # unknown hosts (hk, gcp — reserved) get one slot
 HOST_FIELD_NAME = "host"  # single-select ownership field; options imac/macbook/hk/gcp
@@ -534,7 +538,7 @@ def _blocked_count(number: int) -> int:
 
 def _nudge_entries(number: int, kind: str) -> list[datetime]:
     """Timestamps of this issue's auto-impl log entries "- <ts> NUDGE-<kind>:"
-    within ORPHAN_NUDGE_WINDOW_H, oldest first. Network errors → empty list
+    within NUDGE_BUDGET_H, oldest first. Network errors → empty list
     (fail-open, same as the other log readers). The NUDGE marker is written
     by the watcher when it sends a wake to an orphan card's manager session;
     it doubles as the wake counter."""
@@ -551,7 +555,7 @@ def _nudge_entries(number: int, kind: str) -> list[datetime]:
             ts = datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
         except ValueError:
             continue
-        if (now - ts).total_seconds() <= ORPHAN_NUDGE_WINDOW_H * 3600:
+        if (now - ts).total_seconds() <= NUDGE_BUDGET_H * 3600:
             out.append(ts)
     return sorted(out)
 
@@ -690,20 +694,20 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
             if alive is not False or was_blocked:
                 continue
             nudges = _nudge_count_recent(n, "pr")
-            if nudges < ORPHAN_NUDGES and idle_min is not None:
+            if nudges < NUDGE_BUDGET and idle_min is not None:
                 if _last_nudge_fresh(n, "pr"):
                     continue  # a wake was sent <CLAIM_TTL_HOURS ago — give it time
                 if dry_run:
-                    print(f"would: #{n}: PR (G7) orphan ({why}) — nudge due ({nudges}/{ORPHAN_NUDGES})")
+                    print(f"would: #{n}: PR (G7) orphan ({why}) — nudge due ({nudges}/{NUDGE_BUDGET})")
                 continue  # no flip, no gate — the watcher wakes the manager session
             desc = (f"#{n}: PR (G7) orphan (owner dead: {why}, nudges "
-                    f"{nudges}/{ORPHAN_NUDGES}) → gate=blocked (awaits the user)")
+                    f"{nudges}/{NUDGE_BUDGET}) → gate=blocked (awaits the user)")
             if dry_run:
                 print(f"would: {desc}")
                 continue
             try:
                 cmd_auto_log(n, f"BLOCKED reconciler: владелец PR мёртв ({why}), побудок "
-                                f"{nudges}/{ORPHAN_NUDGES} безуспешно — карточка ждёт "
+                                f"{nudges}/{NUDGE_BUDGET} безуспешно — карточка ждёт "
                                 f"пользователя в PR (G7). Разобрать: войти в сессию "
                                 f"менеджера либо мерж/правка PR руками; решение снимает "
                                 f"метку: python3 .opencode/scripts/gh_board.py gate {n} none")
@@ -714,27 +718,59 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
                 print(f"#{n}: gate → blocked (PR orphan)")
             print(desc)
             continue
-        # In IMPL stuck-dispatch repair (the crash release below), with the
-        # 2026-09-27 wake-first stage: a fully dead client (no run process)
-        # and existing sessions = nudge territory — the watcher wakes the
-        # manager session up to ORPHAN_NUDGES times before the release. A
-        # wedged-but-live client or a gate=blocked card keeps the
-        # 2026-09-26 release semantics (a second driver is worse than a
-        # release; the silence may be the card awaiting the user).
-        if idle_min is not None and not was_blocked and alive is False:
-            nudges = _nudge_count_recent(n, "impl")
-            if nudges < ORPHAN_NUDGES:
-                if _last_nudge_fresh(n, "impl"):
-                    continue  # wake sent recently — give it time to take effect
-                if dry_run:
-                    print(f"would: #{n}: In IMPL orphan ({why}) — nudge due ({nudges}/{ORPHAN_NUDGES})")
-                continue  # release deferred; the watcher wakes the manager session
-            # nudge budget exhausted → crash release below
-        crash_no = _blocked_count(n) + 1
+        # In IMPL stuck-dispatch repair, with the 2026-09-27 wake-first stage:
+        # a fully dead client (no run process) and existing sessions = nudge
+        # territory — the watcher wakes the manager session hourly (ping-gated
+        # via llm_ping.sh) up to NUDGE_BUDGET within NUDGE_BUDGET_H. A
+        # wedged-but-live client or a gate=blocked card keeps the 2026-09-26
+        # release semantics (a second driver is worse than a release; the
+        # silence may be the card awaiting the user).
         sticky = (f"; прогресс хоста {card_host} сохранён (метка host на Ready-карточке: "
                   f"продолжит только {card_host}, чужие хосты не берут; снять решением "
                   f"юзера: python3 .opencode/scripts/gh_board.py host {n} -)"
                   if card_host else "")
+        if idle_min is not None and not was_blocked and alive is False:
+            nudges = _nudge_count_recent(n, "impl")
+            if nudges < NUDGE_BUDGET:
+                if _last_nudge_fresh(n, "impl"):
+                    continue  # wake sent recently — give it time to take effect
+                if dry_run:
+                    print(f"would: #{n}: In IMPL orphan ({why}) — nudge due ({nudges}/{NUDGE_BUDGET})")
+                continue  # release deferred; the watcher wakes the manager session
+            # wake budget exhausted (2026-09-28: hourly wakes for a full day) —
+            # the run had 24h and never recovered: release AND park on
+            # gate=blocked. The old path (plain crash release) let pick-next
+            # re-claim the card and re-burn the manager context every hour
+            # (the #348 night); the gate makes the stop visible and sticky —
+            # only the user's answer clears it.
+            desc = (f"#{n}: In IMPL orphan ({why}), побудок {nudges}/{NUDGE_BUDGET} за "
+                    f"сутки безрезультатно → Ready to IMPL + gate=blocked (awaits the user)"
+                    + (f", host kept: {card_host}" if card_host else ""))
+            if dry_run:
+                print(f"would: {desc}")
+                continue
+            try:
+                cmd_auto_log(n, f"BLOCKED reconciler: прогон не ожил после {nudges} "
+                                f"почасовых побудок за сутки ({why}) — карточка в Ready "
+                                f"to IMPL с gate=blocked, дальше только решение "
+                                f"пользователя (снять: python3 .opencode/scripts/gh_board.py "
+                                f"gate {n} none)" + sticky)
+            except SystemExit as e:
+                print(f"warn: #{n} auto-log failed: {e}", file=sys.stderr)
+            try:
+                cmd_status(n, "Ready to IMPL")
+            except SystemExit as e:
+                print(f"warn: #{n} flip failed: {e}", file=sys.stderr)
+                continue
+            if card_host and card_host in _host_field_opts:
+                set_field(it["item_id"], _host_field_id, _host_field_opts[card_host])
+                print(f"#{n}: host kept → {card_host}")
+            if _gate_field_id and "blocked" in _gate_field_opts:
+                set_field(it["item_id"], _gate_field_id, _gate_field_opts["blocked"])
+                print(f"#{n}: gate → blocked (wake budget exhausted)")
+            print(desc)
+            continue
+        crash_no = _blocked_count(n) + 1
         desc = (f"#{n}: In IMPL stuck (crash #{crash_no}) → BLOCKED auto-log entry "
                 f"+ Ready to IMPL" + (f", host kept: {card_host}" if card_host else "")
                 + (", gate kept: blocked (awaits the user)" if was_blocked else ""))
@@ -785,7 +821,7 @@ def cmd_orphans(host_arg: str | None = None):
     An orphan: OPEN card, own host, board status In IMPL / PR (G7), session
     store silent > SESSION_IDLE_LIMIT_S, no live run process, gate != blocked,
     last wake stale (CLAIM_TTL_HOURS), wake budget not exhausted
-    (ORPHAN_NUDGES within ORPHAN_NUDGE_WINDOW_H — the escalation is
+    (NUDGE_BUDGET within NUDGE_BUDGET_H — the escalation is
     reconcile's job). Only cards with existing session rows are listed: a
     wake without a session is pointless (no rows → reconcile releases the
     In IMPL card or escalates the PR (G7) card directly)."""
@@ -812,8 +848,8 @@ def cmd_orphans(host_arg: str | None = None):
             continue  # a live client must never get a second driver
         if _last_nudge_fresh(it["number"], kind):
             continue  # a wake was just sent
-        if _nudge_count_recent(it["number"], kind) >= ORPHAN_NUDGES:
-            continue  # exhausted — reconcile escalates
+        if _nudge_count_recent(it["number"], kind) >= NUDGE_BUDGET:
+            continue  # exhausted — reconcile parks the card on gate=blocked
         out.append(f"{kind} {it['number']}")
     print("\n".join(out) if out else "NONE")
 

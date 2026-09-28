@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getMe, login as apiLogin, logout as apiLogout, setUnauthorizedHandler } from '@memo/api-client';
 import type { AuthUser, MasterSnapshot } from '@memo/api-client';
+import { markForcedNavigation } from '@/lib/forcedNavigation';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'guest';
 
@@ -60,11 +61,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 401 interceptor (spec §4.4): a mid-work session expiry sends the user to
-  // /login with the current location encoded in returnTo. Accepted MVP
-  // limitation: unsaved input at the moment of expiry is lost.
+  // /login with the current location encoded in returnTo. #397 §5.3: the
+  // redirect is system-forced — markForcedNavigation() lets the
+  // beforeunload guard (useUnsavedChangesGuard) skip the confirm dialog;
+  // pending deletions are quietly cancelled (safe "don't delete" outcome).
+  // Accepted MVP limitation: unsaved input at the moment of expiry is lost.
   useEffect(() => {
     setUnauthorizedHandler(() => {
       const current = `${window.location.pathname}${window.location.search}`;
+      markForcedNavigation();
       window.location.assign(`/login?returnTo=${encodeURIComponent(current)}`);
     });
     return () => {

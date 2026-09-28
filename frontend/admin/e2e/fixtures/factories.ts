@@ -465,6 +465,12 @@ export function linkRecordTag(recordId: string, tagId: string): void {
   );
 }
 
+export function linkPhotoTag(photoId: string, tagId: string): void {
+  executeSQL(
+    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
+  );
+}
+
 /**
  * Link an already-seeded user to a staff card by phone (users have no create
  * endpoint; backend tests link via UPDATE users SET staff_id=…). Renamed from

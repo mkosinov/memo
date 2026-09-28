@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -94,7 +94,9 @@ describe('createStaff', () => {
       last_name: 'Иванова',
       master: { specialty: 'живопись', color: '#5B8C7A' },
       position_ids: ['master'],
-      create_user: { phone: '+79991234567', password: 'secret123' },
+      // #348: passwordless create — the password is set by the owner via
+      // the one-time setup link, never entered by the admin.
+      create_user: { phone: '+79991234567' },
     });
     expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything(), {
       method: 'POST',
@@ -103,7 +105,7 @@ describe('createStaff', () => {
         last_name: 'Иванова',
         master: { specialty: 'живопись', color: '#5B8C7A' },
         position_ids: ['master'],
-        create_user: { phone: '+79991234567', password: 'secret123' },
+        create_user: { phone: '+79991234567' },
       }),
     });
   });
@@ -1672,6 +1674,94 @@ describe('changePassword', () => {
       },
     );
    });
+});
+
+// ─── Users vertical (#348 spec §5 — admin-side account ops) ────────────────
+
+describe('patchUser', () => {
+  it('calls PATCH /api/v1/users/:id with a strict {phone} body', async () => {
+    vi.mocked(api).mockResolvedValue({
+      id: 'u-1',
+      phone: '+79995556678',
+      role: 'master',
+      staff_id: 'st-1',
+      password_is_set: false,
+      is_active: true,
+    });
+    await patchUser('u-1', { phone: '+79995556678' });
+    expect(api).toHaveBeenCalledWith('/api/v1/users/u-1', expect.anything(), {
+      method: 'PATCH',
+      body: JSON.stringify({ phone: '+79995556678' }),
+    });
+  });
+});
+
+describe('issuePasswordLink', () => {
+  it('calls POST /api/v1/users/:id/password-link with no body', async () => {
+    vi.mocked(api).mockResolvedValue({
+      token: 'raw-token-shown-once',
+      expires_at: '2026-09-28T10:00:00Z',
+    });
+    const result = await issuePasswordLink('u-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/users/u-1/password-link',
+      expect.anything(),
+      { method: 'POST' },
+    );
+    expect(result.token).toBe('raw-token-shown-once');
+    expect(result.expires_at).toBe('2026-09-28T10:00:00Z');
+  });
+});
+
+describe('validatePasswordSetup', () => {
+  it('calls POST /api/v1/auth/password-setup/validate with {token}', async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true });
+    const result = await validatePasswordSetup('raw-token-abc');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/password-setup/validate',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ token: 'raw-token-abc' }),
+      },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('propagates the 422 PASSWORD_LINK_INVALID ApiError (screen chooser)', async () => {
+    vi.mocked(api).mockRejectedValue(
+      new ApiError(422, 'Ссылка недействительна или истекла', 'PASSWORD_LINK_INVALID'),
+    );
+    await expect(validatePasswordSetup('stale-token')).rejects.toMatchObject({
+      status: 422,
+      code: 'PASSWORD_LINK_INVALID',
+    });
+  });
+});
+
+describe('passwordSetup', () => {
+  it('calls POST /api/v1/auth/password-setup with {token, password}', async () => {
+    vi.mocked(api).mockResolvedValue(undefined); // 204 No Content
+    await passwordSetup('raw-token-abc', 'new-strong-pass');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/password-setup',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ token: 'raw-token-abc', password: 'new-strong-pass' }),
+      },
+    );
+  });
+
+  it('propagates the 422 PASSWORD_POLICY ApiError (inline error source)', async () => {
+    vi.mocked(api).mockRejectedValue(
+      new ApiError(422, 'Пароль: от 8 до 64 символов, пробелы по краям обрезаются', 'PASSWORD_POLICY'),
+    );
+    await expect(passwordSetup('raw-token-abc', 'short')).rejects.toMatchObject({
+      status: 422,
+      code: 'PASSWORD_POLICY',
+    });
+  });
 });
 
 describe('getTag', () => {

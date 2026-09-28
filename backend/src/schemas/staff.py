@@ -3,10 +3,11 @@
 Composite card contract: the person (``staff``) carries an optional master
 section (``master: {specialty, color} | null`` — the 1:0..1 ``masters``
 extension), a list of position ids (M2M ``staff_positions``), and — on
-create only — an account-creation flag (``create_user: {phone, password} |
-false``). ``StaffResponse`` inverts ``is_active`` into ``archived`` like
-every archive-aware entity; the embedded ``master`` view carries its own
-``archived`` (the schedule flag, D3).
+create only — an account-creation flag (``create_user: {phone} | false``
+— passwordless since #348; the password is set by the owner via the
+one-time setup link). ``StaffResponse`` inverts ``is_active`` into
+``archived`` like every archive-aware entity; the embedded ``master``
+view carries its own ``archived`` (the schedule flag, D3).
 """
 
 from __future__ import annotations
@@ -64,7 +65,13 @@ class MasterSectionView(BaseModel):
 
 
 class CreateUserSection(BaseModel):
-    """Account-creation checkbox (D6): phone + password, create-only.
+    """Account-creation checkbox (D6): phone, create-only — #348 breaking.
+
+    The PASSWORD field is REMOVED (#348, spec §5): the admin only enters
+    the phone; the account lands passwordless (``password_hash`` NULL)
+    and the owner sets the password via the one-time setup link the
+    admin hands over. The dev CLI surface (``usecases/user.py::
+    create_user``) keeps direct password entry — not a user flow.
 
     ``role`` (GH #263 D10): the manual role override. ``None`` (absent) →
     the service fills the role from the position template; a sent value
@@ -74,7 +81,6 @@ class CreateUserSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     phone: str = Field(min_length=1, max_length=20)
-    password: str = Field(min_length=1, max_length=64)
     role: UserRole | None = None
 
 
@@ -141,6 +147,45 @@ class StaffPatch(BaseModel):
     role: UserRole | None = None
 
 
+class StaffAccountView(BaseModel):
+    """The card's current account block (#348 spec §5).
+
+    ``{id, phone, role, password_is_set, is_active, link_expires_at}`` —
+    the «Учётка» card block. Built by the staff serializer over the linked
+    ``users`` row (``staff_id`` UNIQUE ⇒ at most one) LEFT JOINed with
+    its LIVE setup token: ``link_expires_at`` is the expiry of the
+    live link (``used_at IS NULL`` and unexpired) or ``None`` — a used
+    or expired link carries no date. ``is_active = false`` = the
+    account is archived (the block STAYS — the frontend renders it
+    read-only). ``password_is_set`` derives from the stored hash
+    (NULL = passwordless, #348) via the ``UserAccountResponse``
+    computed-field precedent.
+
+    ``id`` is the account's own ``users.id`` — the addressable key the
+    frontend uses for the users-vertical calls (``PATCH /users/{id}``,
+    ``POST /users/{id}/password-link``). ``staff.id`` ≠ ``users.id``
+    (different tables), and the block is the only frontend source: the
+    admin UI must not guess or probe. Additive-only change (#348 Task 7
+    wiring decision, option (a)).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    phone: str
+    role: str
+    is_active: bool
+    # Source attribute for the derived flag — never on the wire.
+    password_hash: str | None = Field(exclude=True)
+    link_expires_at: datetime | None = None
+
+    @computed_field
+    @property
+    def password_is_set(self) -> bool:
+        """True when the account has a password hash (NULL = passwordless)."""
+        return self.password_hash is not None
+
+
 class StaffResponse(StaffBase):
     """Response schema for a staff card (master section + positions filled).
 
@@ -149,6 +194,8 @@ class StaffResponse(StaffBase):
     ``has_user`` (T8 Gap B): a users row is linked to the card — ANY
     ``is_active`` (an archived account still counts: the D6 dismissal
     checkbox «Архивировать учётку» is shown when an account exists at all).
+    ``account`` (#348 spec §5): the linked account's projection incl. the
+    live setup-link expiry — ``None`` when the card has no account at all.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -157,6 +204,7 @@ class StaffResponse(StaffBase):
     master: MasterSectionView | None = None
     position_ids: list[str] = []
     has_user: bool = False
+    account: StaffAccountView | None = None
     created_at: datetime
     updated_at: datetime
     is_active: bool = Field(exclude=True)

@@ -3,6 +3,8 @@
  * anchored positions (admin > master > untouched), a manual edit wins for the
  * rest of the dialog session, and the chosen role is submitted explicitly
  * (create_user.role on create, role on edit).
+ *
+ * #348: the create account block is PASSWORDLESS — phone + role only.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -49,11 +51,11 @@ async function fillAndSubmit() {
   await submit();
 }
 
-/** Enable the create-user checkbox + fill phone/password (create mode). */
+/** Enable the create-user checkbox + fill the phone (create mode, #348:
+ *  the block is passwordless — there is no password field to fill). */
 function enableAccount() {
   fireEvent.click(screen.getByTestId('create-user-checkbox'));
   fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990000000' } });
-  fireEvent.change(screen.getByLabelText('Пароль *'), { target: { value: 'secret123' } });
 }
 
 beforeEach(() => {

@@ -3,6 +3,11 @@
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import type { StaffResponse, PositionResponse } from '@memo/api-client';
 import { Modal } from '@/app/components/shared/modal/Modal';
+import {
+  PasswordLinkDialog,
+  formatLinkExpiry,
+  type IssuedPasswordLink,
+} from './PasswordLinkDialog';
 
 /**
  * Structured form payload the StaffModal hands to its parent (StaffTable),
@@ -12,7 +17,9 @@ import { Modal } from '@/app/components/shared/modal/Modal';
  *   by activities server-side); a payload = upsert. `archived` is the schedule
  *   flag (D3/Gap A) — sent in edit to toggle the section's archive without
  *   deleting the row; omitted in create (a fresh section is born active).
- * - `create_user`: create-only (D6) — `{phone, password, role?}` or false.
+ * - `create_user`: create-only (D6) — `{phone, role?}` or false. NO PASSWORD
+ *   since #348 (spec §6): the account is born passwordless; the owner sets
+ *   the password via the one-time link the admin hands over.
  *   `role` (GH #263 D10) is the manual override for the linked account.
  * - `role`: edit-only top-level override (StaffUpdate.role) — sent only when
  *   the field has a value; absent → the backend position template decides.
@@ -24,7 +31,7 @@ export interface StaffFormData {
   sort_order: number;
   position_ids: string[];
   master: { specialty: string; color: string; archived?: boolean } | null;
-  create_user: { phone: string; password: string; role?: 'admin' | 'master' } | false;
+  create_user: { phone: string; role?: 'admin' | 'master' } | false;
   role?: 'admin' | 'master';
 }
 
@@ -38,6 +45,20 @@ export interface StaffModalProps {
   onClose: () => void;
   title: string;
   subtitle?: string;
+  /**
+   * #348 (edit, S5): save the account's phone as a SEPARATE request via
+   * `patchUser(account.id, {phone})` — distinct from the card's own PUT.
+   * The modal calls it (only when the phone changed) BEFORE onSubmit; a
+   * PHONE_TAKEN / PHONE_INVALID rejections render inline and keep the
+   * modal open (§5 phone-edit domain codes).
+   */
+  onPatchPhone?: (userId: string, phone: string) => Promise<void>;
+  /**
+   * #348 (S1/S3): issue a one-time password-setup link via
+   * `issuePasswordLink(account.id)` → `{token, expires_at}`. Also used by
+   * the post-create handover (the retry of a failed first issuance).
+   */
+  onIssueLink?: (userId: string) => Promise<IssuedPasswordLink>;
 }
 
 const TEXT_INPUT =
@@ -101,7 +122,17 @@ function RoleField({
   );
 }
 
-export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, subtitle }: StaffModalProps) {
+export function StaffModal({
+  mode,
+  staff,
+  positions,
+  onSubmit,
+  onPatchPhone,
+  onIssueLink,
+  onClose,
+  title,
+  subtitle,
+}: StaffModalProps) {
   const baseId = useId();
 
   // ─── Person fields ──────────────────────────────────────────────────────
@@ -135,10 +166,23 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
   // Schedule flag of an EXISTING section (D3). Edit-only; create defaults active.
   const [masterArchived, setMasterArchived] = useState<boolean>(staff?.master?.archived ?? false);
 
-  // ─── Account (D6, create-only) ──────────────────────────────────────────
+  // ─── Account (D6 create / #348 edit block) ──────────────────────────────
+  // create: the passwordless checkbox section — phone + role, NO password
+  // (#348 spec §6). edit: the «Учётка» block over staff.account —
+  // null = hidden; is_active=false = read-only («Учётка архивирована»).
+  const account = mode === 'edit' ? staff?.account ?? null : null;
   const [createUserEnabled, setCreateUserEnabled] = useState(false);
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const [accountPhone, setAccountPhone] = useState(account?.phone ?? '');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [issuingLink, setIssuingLink] = useState(false);
+
+  // The one-time link dialog state (#348 spec §6): a live issue response,
+  // or an issuance error with «Повторить» (the account keeps waiting).
+  const [linkDialog, setLinkDialog] = useState<{
+    link: IssuedPasswordLink | null;
+    error: string | null;
+  } | null>(null);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
@@ -169,6 +213,34 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
     if (suggested && !roleDirty) setRole(suggested);
   }, [markDirty, positionIds, roleDirty]);
 
+  // ─── Link issuance (S3 button / S1 retry) ───────────────────────────────
+  const issueFor = useCallback(
+    async (userId: string) => {
+      if (!onIssueLink) return;
+      setIssuingLink(true);
+      try {
+        const link = await onIssueLink(userId);
+        setLinkDialog({ link, error: null });
+      } catch (err) {
+        setLinkDialog({
+          link: null,
+          error:
+            err instanceof Error && err.message
+              ? err.message
+              : 'Не удалось выдать ссылку',
+        });
+      } finally {
+        setIssuingLink(false);
+      }
+    },
+    [onIssueLink],
+  );
+
+  const handleIssueLink = useCallback(() => {
+    if (!account) return;
+    void issueFor(account.id);
+  }, [account, issueFor]);
+
   const validate = useCallback((): boolean => {
     const next: Record<string, string> = {};
     if (!firstName.trim()) next.first_name = 'Обязательное поле';
@@ -180,16 +252,45 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
     }
     if (mode === 'create' && createUserEnabled) {
       if (!phone.trim()) next.phone = 'Обязательное поле';
-      if (!password.trim()) next.password = 'Обязательное поле';
     }
     setErrors(next);
     return Object.keys(next).length === 0;
-  }, [firstName, lastName, masterEnabled, specialty, color, mode, createUserEnabled, phone, password]);
+  }, [firstName, lastName, masterEnabled, specialty, color, mode, createUserEnabled, phone]);
 
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsSubmitting(true);
     try {
+      // #348 (S5): the account phone is a SEPARATE write — PATCH /users/:id,
+      // distinct from the card's own PUT. Only when it actually changed;
+      // the §5 domain codes (PHONE_TAKEN / PHONE_INVALID) render inline
+      // and abort the save.
+      if (
+        mode === 'edit' &&
+        account !== null &&
+        account.is_active &&
+        onPatchPhone &&
+        accountPhone.trim() !== account.phone
+      ) {
+        try {
+          await onPatchPhone(account.id, accountPhone.trim());
+          setPhoneError(null);
+        } catch (err) {
+          // §5 phone-edit domain codes render INLINE (the admin fixes the
+          // field right there); anything else rethrows to the caller's toast.
+          const code = (err as { code?: string }).code;
+          if (code === 'PHONE_TAKEN') {
+            setPhoneError('Этот телефон уже занят');
+            return; // modal stays open, inline error
+          }
+          if (code === 'PHONE_INVALID') {
+            setPhoneError('Некорректный номер телефона');
+            return;
+          }
+          setPhoneError(null);
+          throw err;
+        }
+      }
       const master = masterEnabled
         ? {
             specialty: specialty.trim(),
@@ -209,7 +310,7 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
           mode === 'create' && createUserEnabled
             ? {
                 phone: phone.trim(),
-                password: password.trim(),
+                // #348: passwordless — {phone, role?} only.
                 // D10: explicit role only when set — absent lets the backend
                 // template decide.
                 ...(role !== '' ? { role } : {}),
@@ -429,7 +530,7 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
             )}
           </section>
 
-          {/* ── Учётка (D6, create-only) ── */}
+          {/* ── Учётка (D6, create — passwordless #348) ── */}
           {mode === 'create' && (
             <section className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--line)' }}>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -441,8 +542,12 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
                   onChange={(e) => { setCreateUserEnabled(e.target.checked); markDirty(); }}
                   className="w-4 h-4 rounded border-gray-300 accent-[var(--brand)] cursor-pointer"
                 />
-                <span className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
-                  Создать учётку (телефон + пароль)
+                <span
+                  className="text-sm font-medium"
+                  data-testid="create-user-checkbox-label"
+                  style={{ color: 'var(--ink)' }}
+                >
+                  Создать учётку (телефон, пароль задаст сотрудник)
                 </span>
               </label>
               {createUserEnabled && (
@@ -460,35 +565,113 @@ export function StaffModal({ mode, staff, positions, onSubmit, onClose, title, s
                     />
                     {errorEl('phone')}
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor={`${baseId}-password`}>Пароль *</Label>
-                    <input
-                      id={`${baseId}-password`}
-                      type="password"
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); markDirty(); }}
-                      placeholder="••••••••"
-                      className={TEXT_INPUT}
-                      style={{ borderColor: errors.password ? 'var(--danger)' : 'var(--line)', color: 'var(--ink)' }}
-                    />
-                    {errorEl('password')}
-                  </div>
+                  {/* #348: NO password field — the account is born passwordless;
+                      the one-time setup link is issued after saving. */}
                   <RoleField baseId={baseId} role={role} onChange={handleRoleChange} />
                 </div>
               )}
             </section>
           )}
 
+          {/* ── Учётка (edit, #348 spec §6) ── */}
+          {mode === 'edit' && account !== null && (
+            <section className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--line)' }}>
+              <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--ink-light)' }}>
+                Учётка
+              </div>
+
+              {account.is_active ? (
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={`${baseId}-account-phone`}>Телефон *</Label>
+                    <input
+                      id={`${baseId}-account-phone`}
+                      type="text"
+                      value={accountPhone}
+                      onChange={(e) => {
+                        setAccountPhone(e.target.value);
+                        setPhoneError(null);
+                        markDirty();
+                      }}
+                      placeholder="+79990000000"
+                      className={TEXT_INPUT}
+                      style={{
+                        borderColor: phoneError ? 'var(--danger)' : 'var(--line)',
+                        color: 'var(--ink)',
+                      }}
+                    />
+                    {phoneError && (
+                      <span className="text-xs" role="alert" style={{ color: 'var(--danger)' }}>
+                        {phoneError}
+                      </span>
+                    )}
+                  </div>
+
+                  {!account.password_is_set && (
+                    <p className="text-xs" style={{ color: 'var(--ink-light)' }}>
+                      Пароль ещё не установлен
+                    </p>
+                  )}
+
+                  {onIssueLink && (
+                    <>
+                      <button
+                        type="button"
+                        data-testid="issue-link-btn"
+                        onClick={handleIssueLink}
+                        disabled={issuingLink}
+                        className="px-4 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50"
+                        style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
+                      >
+                        {issuingLink ? 'Выдача…' : account.password_is_set ? 'Сбросить пароль' : 'Выдать ссылку'}
+                      </button>
+                      {account.link_expires_at && (
+                        <p className="text-xs" data-testid="live-link-status" style={{ color: 'var(--ink-light)' }}>
+                          Ссылка выдана, действует до {formatLinkExpiry(account.link_expires_at)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                // Archived account (#348 §6): the block stays, READ-ONLY —
+                // no edits, no link issuance («Учётка архивирована»).
+                <div className="space-y-1">
+                  <p className="text-sm font-medium" style={{ color: 'var(--ink)' }}>
+                    Учётка архивирована
+                  </p>
+                  <p className="text-sm" style={{ color: 'var(--ink-mid)' }}>
+                    {account.phone}
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Edit-mode account note: an account is created exactly once (with
-              the card); linking/managing logins is #263, not the card. The
-              role override itself sits next to the positions section (D10). */}
-          {mode === 'edit' && staff?.has_user && (
+              the card); linking/managing logins is #263, not the card. */}
+          {mode === 'edit' && staff?.has_user && account === null && (
             <p className="text-xs" style={{ color: 'var(--ink-light)' }}>
               К карточке привязана учётка входа.
             </p>
           )}
         </div>
       </Modal>
+
+      {/* One-time link handover (#348 spec §6): rendered from a live issue
+          response only — or the issuance-error + «Повторить» state. */}
+      {linkDialog !== null && (
+        <PasswordLinkDialog
+          link={linkDialog.link}
+          error={linkDialog.error}
+          busy={issuingLink}
+          onRetry={() => {
+            if (!account) return;
+            void issueFor(account.id);
+          }}
+          onClose={() => setLinkDialog(null)}
+        />
+      )}
     </div>
   );
 }

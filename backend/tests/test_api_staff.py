@@ -124,7 +124,7 @@ class TestStaffCrud:
             "/api/v1/staff",
             json=_create_payload(
                 master=MASTER_SECTION,
-                create_user={"phone": "+79995556677", "password": "pw-master-1"},
+                create_user={"phone": "+79995556677"},
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -142,7 +142,7 @@ class TestStaffCrud:
         resp = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995556678", "password": "pw-admin-1"},
+                create_user={"phone": "+79995556678"},
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -150,6 +150,76 @@ class TestStaffCrud:
             "SELECT role FROM users WHERE phone='+79995556678'"
         )
         assert users[0]["role"] == "admin"
+
+    def test_create_user_account_is_passwordless(self, api_client) -> None:
+        """#348: the composite path lands a passwordless account row."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556679"},
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+        users = query_db(
+            "SELECT password_hash FROM users WHERE phone='+79995556679'"
+        )
+        assert users[0]["password_hash"] is None
+
+    def test_create_user_account_duplicate_phone_returns_422_phone_taken(
+        self, api_client
+    ) -> None:
+        """#348: explicit probe on the composite path — the same error
+        contract as the edit (spec §5), not the generic DB-integrity
+        code."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556680"},
+            ),
+        )
+        assert resp.status_code == 201, resp.text
+
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556680"},
+            ),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "PHONE_TAKEN"
+        # The failed create left nothing behind (atomic rollback).
+        staff_rows = query_db(
+            "SELECT COUNT(*) AS c FROM staff "
+            "WHERE first_name='Ольга' AND last_name='Иванова'"
+        )
+        assert staff_rows[0]["c"] == 1, "the rolled-back card must not persist"
+
+    def test_create_user_account_blank_phone_returns_422_phone_invalid(
+        self, api_client
+    ) -> None:
+        """#348: the shared validator gates the composite path (whitespace
+        passes the schema's min_length=1 but is blank after trim)."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "   "},
+            ),
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "PHONE_INVALID"
+
+    def test_create_user_account_password_field_rejected(
+        self, api_client
+    ) -> None:
+        """#348 breaking: the password field is GONE from the contract
+        (``extra="forbid"``) — callers must not send it."""
+        resp = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                create_user={"phone": "+79995556681", "password": "pw-1"},
+            ),
+        )
+        assert resp.status_code == 422
 
     def test_get_includes_archived(self, api_client) -> None:
         created = api_client.post("/api/v1/staff", json=_create_payload()).json()
@@ -1629,7 +1699,7 @@ class TestStaffHasUser:
         created = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995551100", "password": "pw-acc-1"}
+                create_user={"phone": "+79995551100"}
             ),
         ).json()
         resp = api_client.get(f"/api/v1/staff/{created['id']}")
@@ -1653,7 +1723,7 @@ class TestStaffHasUser:
         resp = api_client.post(
             "/api/v1/staff",
             json=_create_payload(
-                create_user={"phone": "+79995551101", "password": "pw-acc-2"}
+                create_user={"phone": "+79995551101"}
             ),
         )
         assert resp.status_code == 201, resp.text
@@ -1665,7 +1735,7 @@ class TestStaffHasUser:
             json=_create_payload(
                 first_name="С",
                 last_name="Сучёткой",
-                create_user={"phone": "+79995551102", "password": "pw-acc-3"},
+                create_user={"phone": "+79995551102"},
             ),
         ).json()
         api_client.post(

@@ -189,6 +189,12 @@ export interface StaffOverrides {
  * (users). Defaults: no master section, no positions, no account — a plain
  * person. Pass `master` to make it an acting schedule master, `positions`
  * to attach dictionary entries, `user` to create a login.
+ *
+ * #348 cleanup note: the passworded-`user` corridor (link + public setup)
+ * leaves a CONSUMED password_setup_tokens row behind (used_at set). The
+ * CLI reset runs with foreign_keys=OFF, so callers' cleanup that deletes
+ * users rows should sweep `password_setup_tokens WHERE user_id = …` too
+ * (the #348 specs do this in their finally blocks).
  */
 export async function createTestStaff(
   api: APIRequestContext,
@@ -203,6 +209,15 @@ export async function createTestStaff(
     positions = [],
     user = false,
   } = overrides;
+  // #348: the composite create is PASSWORDLESS (`create_user: {phone}` —
+  // the wire schema is extra=forbid, no password key). When a caller asks
+  // for a passworded account, install it through the #348 corridor: issue
+  // the one-time link (admin endpoint) + set the password through the
+  // PUBLIC setup endpoint. Same end state the pre-#348 factory produced,
+  // and exactly what a real passworded account looks like now.
+  const userWire = user
+    ? { phone: user.phone }
+    : false;
   const resp = await api.post(`${BACKEND}/api/v1/staff`, {
     data: {
       first_name,
@@ -211,11 +226,23 @@ export async function createTestStaff(
       sort_order,
       master,
       position_ids: positions,
-      create_user: user,
+      create_user: userWire,
     },
   });
   expect(resp.ok()).toBeTruthy();
-  return await resp.json();
+  const staff = await resp.json();
+  if (user) {
+    const accountId: string | undefined = staff.account?.id;
+    expect(accountId, 'createTestStaff: the created card must expose account.id').toBeTruthy();
+    const link = await api.post(`${BACKEND}/api/v1/users/${accountId}/password-link`);
+    expect(link.ok(), 'createTestStaff: password-link issuance').toBeTruthy();
+    const { token } = await link.json();
+    const setup = await api.post(`${BACKEND}/api/v1/auth/password-setup`, {
+      data: { token, password: user.password },
+    });
+    expect(setup.ok(), 'createTestStaff: password install via public setup').toBeTruthy();
+  }
+  return staff;
 }
 
 /**

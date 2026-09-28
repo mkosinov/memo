@@ -714,7 +714,7 @@ class TestStaffCompositeAudit:
                 last_name="Петров",
                 master=MasterSection(specialty="живопись", color="#000000"),
                 create_user=CreateUserSection(
-                    phone="+79990005551", password="long-password-1"
+                    phone="+79990005551"
                 ),
             ),
         )

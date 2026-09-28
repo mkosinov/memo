@@ -29,6 +29,8 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     resolveDeleteStaff: vi.fn(),
     archiveStaff: vi.fn(),
     restoreStaff: vi.fn(),
+    patchUser: vi.fn(),
+    issuePasswordLink: vi.fn(),
   };
 });
 
@@ -49,6 +51,8 @@ import {
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
+  usePatchUser,
+  useIssuePasswordLink,
 } from '../hooks/useStaffMutations';
 import {
   createStaff,
@@ -58,6 +62,8 @@ import {
   resolveDeleteStaff,
   archiveStaff,
   restoreStaff,
+  patchUser,
+  issuePasswordLink,
   ApiError,
 } from '@memo/api-client';
 import type { StaffCreate, StaffUpdate, DependencyNode } from '@memo/api-client';
@@ -69,10 +75,13 @@ const mockDryRun = vi.mocked(dryRunDeleteStaff);
 const mockResolveDeleteStaff = vi.mocked(resolveDeleteStaff);
 const mockArchiveStaff = vi.mocked(archiveStaff);
 const mockRestoreStaff = vi.mocked(restoreStaff);
+const mockPatchUser = vi.mocked(patchUser);
+const mockIssuePasswordLink = vi.mocked(issuePasswordLink);
 
 const staffResponse = {
   id: 's-1', first_name: 'Иван', last_name: 'Иванов', avatar_url: null,
   sort_order: 0, master: null, position_ids: [], has_user: false,
+  account: null, // #348: no linked account on this card
   archived: false, created_at: '', updated_at: '',
 };
 
@@ -282,6 +291,93 @@ describe('useStaffMutations', () => {
 
       await act(async () => {
         await result.current.mutateAsync('s-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
+    });
+  });
+
+  // ─── #348 users vertical ────────────────────────────────────────────────────
+
+  describe('useIssuePasswordLink', () => {
+    it('calls issuePasswordLink with the account id and returns the raw token once', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockIssuePasswordLink.mockResolvedValue({
+        token: 'raw-tok',
+        expires_at: '2026-09-29T10:00:00Z',
+      });
+
+      const { result } = renderHook(() => useIssuePasswordLink(), { wrapper });
+
+      let link: { token: string; expires_at: string } | undefined;
+      await act(async () => {
+        link = await result.current.mutateAsync('u-1');
+      });
+
+      expect(mockIssuePasswordLink).toHaveBeenCalledWith('u-1');
+      expect(link!.token).toBe('raw-tok');
+    });
+
+    // Review blocker: a fresh link must refresh the card's `link_expires_at`
+    // («Ссылка выдана, действует до …») right away — not on the next
+    // unrelated refresh.
+    it('invalidates the staff family on success (link_expires_at goes live)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockIssuePasswordLink.mockResolvedValue({
+        token: 'raw-tok',
+        expires_at: '2026-09-29T10:00:00Z',
+      });
+
+      const { result } = renderHook(() => useIssuePasswordLink(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('u-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
+      // Family fan-out (lib/invalidate): the read-only masters view too.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
+    });
+  });
+
+  describe('usePatchUser', () => {
+    it('calls patchUser with {id, data: {phone}}', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockPatchUser.mockResolvedValue({
+        id: 'u-1',
+        phone: '+79995556678',
+        role: 'master',
+        staff_id: 's-1',
+        password_is_set: false,
+        is_active: true,
+      });
+
+      const { result } = renderHook(() => usePatchUser(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'u-1', data: { phone: '+79995556678' } });
+      });
+
+      expect(mockPatchUser).toHaveBeenCalledWith('u-1', { phone: '+79995556678' });
+    });
+
+    it('invalidates the staff family on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockPatchUser.mockResolvedValue({
+        id: 'u-1',
+        phone: '+79995556678',
+        role: 'master',
+        staff_id: 's-1',
+        password_is_set: false,
+        is_active: true,
+      });
+
+      const { result } = renderHook(() => usePatchUser(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'u-1', data: { phone: '+79995556678' } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });

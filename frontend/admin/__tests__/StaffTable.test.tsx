@@ -103,6 +103,12 @@ vi.mock('@/hooks/useStaffMutations', () => ({
   useCreateStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
   useArchiveStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
   useRestoreStaff: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
+  // #348 Task 7: users-vertical hooks (patchUser / issuePasswordLink).
+  usePatchUser: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({}), isPending: false })),
+  useIssuePasswordLink: vi.fn(() => ({
+    mutateAsync: vi.fn().mockResolvedValue({ token: 't', expires_at: '2026-09-29T10:00:00Z' }),
+    isPending: false,
+  })),
 }));
 
 // Positions dictionary (D4): id → title for the table's position cells +
@@ -130,16 +136,22 @@ import { StaffTable } from '@/app/(main)/staff/components/StaffTable';
 import { StaffProvider } from '@/contexts/StaffContext';
 import {
   useUpdateStaff,
+  useCreateStaff,
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
+  usePatchUser,
+  useIssuePasswordLink,
 } from '@/hooks/useStaffMutations';
 import { getStaff, ApiError } from '@memo/api-client';
 
 const mockUseUpdateStaff = vi.mocked(useUpdateStaff);
+const mockUseCreateStaff = vi.mocked(useCreateStaff);
 const mockUseDeleteStaff = vi.mocked(useDeleteStaff);
 const mockUseArchiveStaff = vi.mocked(useArchiveStaff);
 const mockUseRestoreStaff = vi.mocked(useRestoreStaff);
+const mockUsePatchUser = vi.mocked(usePatchUser);
+const mockUseIssuePasswordLink = vi.mocked(useIssuePasswordLink);
 const mockGetStaff = vi.mocked(getStaff);
 
 // ─── Test data ───────────────────────────────────────────────────────────────
@@ -549,5 +561,154 @@ describe('StaffTable', () => {
       (s) => s.className.includes('rounded-full'),
     );
     expect(badges.map((b) => b.textContent)).toEqual(['Активен', 'Архив', 'Активен']);
+  });
+
+  // ─── #348 — «Учётка» users-vertical wiring (S1 create-issuance, S5 phone) ──
+
+  /** An ACTIVE card with an ACTIVE account — the S5/S3 wiring target. */
+  const ACCOUNTED = createMockStaffResponse({
+    id: 'm9',
+    first_name: 'Мария',
+    last_name: 'Тестова',
+    has_user: true,
+    account: {
+      id: 'u-m9',
+      phone: '+79990001122',
+      role: 'master',
+      password_is_set: true,
+      is_active: true,
+      link_expires_at: null,
+    },
+  });
+
+  async function renderAccounted() {
+    mockGetStaff.mockResolvedValue({ items: [ACCOUNTED], total: 1, page: 1, per_page: 10 });
+    renderTable();
+    await screen.findByText('Тестова Мария');
+  }
+
+  it('create with an account issues the link right after creation and shows the dialog (S1)', async () => {
+    const createMutateAsync = vi.fn().mockResolvedValue(
+      createMockStaffResponse({
+        id: 'new-1',
+        has_user: true,
+        account: {
+          id: 'u-new-1',
+          phone: '+79990007788',
+          role: 'master',
+          password_is_set: false,
+          is_active: true,
+          link_expires_at: null,
+        },
+      }),
+    );
+    mockUseCreateStaff.mockReturnValue({ mutateAsync: createMutateAsync, isPending: false } as never);
+    const issueMutateAsync = vi.fn().mockResolvedValue({ token: 'tok-s1', expires_at: '2026-09-29T10:00:00Z' });
+    mockUseIssuePasswordLink.mockReturnValue({ mutateAsync: issueMutateAsync, isPending: false } as never);
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('+ Добавить сотрудника'));
+    expect(await screen.findByText('Новый сотрудник')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('create-user-checkbox'));
+    fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Иван' } });
+    fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Петров' } });
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990007788' } });
+    fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
+
+    // The card is created with the passwordless create_user section…
+    await waitFor(() => expect(createMutateAsync).toHaveBeenCalled());
+    expect(createMutateAsync.mock.calls[0][0].create_user).toEqual({ phone: '+79990007788' });
+    // …then the link is issued for the NEW account (users.id, not staff.id)…
+    await waitFor(() => expect(issueMutateAsync).toHaveBeenCalledWith('u-new-1'));
+    // …and the handover dialog shows the assembled one-time URL.
+    const field = await screen.findByTestId('link-url-field');
+    expect((field as HTMLInputElement).value).toBe(
+      `${window.location.origin}/password-setup#token=tok-s1`,
+    );
+  });
+
+  it('create follow-up issuance failure → the error dialog with «Повторить», card created once (S1)', async () => {
+    const createMutateAsync = vi.fn().mockResolvedValue(
+      createMockStaffResponse({
+        id: 'm11',
+        has_user: true,
+        account: {
+          id: 'u-m11',
+          phone: '+79990006655',
+          role: 'master',
+          password_is_set: false,
+          is_active: true,
+          link_expires_at: null,
+        },
+      }),
+    );
+    mockUseCreateStaff.mockReturnValue({ mutateAsync: createMutateAsync, isPending: false } as never);
+    const issueMutateAsync = vi.fn().mockRejectedValue(new Error('network down'));
+    mockUseIssuePasswordLink.mockReturnValue({ mutateAsync: issueMutateAsync, isPending: false } as never);
+    setupEnvelope();
+    await renderLoaded();
+
+    fireEvent.click(screen.getByText('+ Добавить сотрудника'));
+    fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Аня' } });
+    fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Ошибка' } });
+    fireEvent.click(screen.getByTestId('create-user-checkbox'));
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990006655' } });
+    fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('link-dialog-error')).toBeInTheDocument());
+    // The card itself was created exactly once — the account waits for the
+    // block button (S1 fallback).
+    expect(createMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('edit phone of an active account calls patchUser with the account id (S5)', async () => {
+    const patchUserMutateAsync = vi.fn().mockResolvedValue({});
+    mockUsePatchUser.mockReturnValue({ mutateAsync: patchUserMutateAsync, isPending: false } as never);
+    const updateMutateAsync = setupUpdateMock();
+    await renderAccounted();
+
+    fireEvent.click(screen.getByText('Тестова Мария'));
+    expect(await screen.findByText('Учётка')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990003344' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    // The hook-level shape: {id: users.id, data: {phone}} → PATCH /users/:id.
+    await waitFor(() =>
+      expect(patchUserMutateAsync).toHaveBeenCalledWith({ id: 'u-m9', data: { phone: '+79990003344' } }),
+    );
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    // The phone never rides the card's own PUT (no phone field there).
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect((callArg.data as Record<string, unknown>).create_user).toBeUndefined();
+  });
+
+  it('unchanged phone → no patchUser call (no-op write guard)', async () => {
+    const patchUserMutateAsync = vi.fn().mockResolvedValue({});
+    mockUsePatchUser.mockReturnValue({ mutateAsync: patchUserMutateAsync, isPending: false } as never);
+    setupUpdateMock();
+    await renderAccounted();
+
+    fireEvent.click(screen.getByText('Тестова Мария'));
+    await screen.findByText('Учётка');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(patchUserMutateAsync).not.toHaveBeenCalled());
+  });
+
+  it('«Сбросить пароль» in the edit block issues the link and opens the dialog (S3)', async () => {
+    const issueMutateAsync = vi.fn().mockResolvedValue({ token: 'tok-s3', expires_at: '2026-09-29T10:00:00Z' });
+    mockUseIssuePasswordLink.mockReturnValue({ mutateAsync: issueMutateAsync, isPending: false } as never);
+    await renderAccounted();
+
+    fireEvent.click(screen.getByText('Тестова Мария'));
+    await screen.findByText('Учётка');
+    fireEvent.click(screen.getByTestId('issue-link-btn'));
+
+    await waitFor(() => expect(issueMutateAsync).toHaveBeenCalledWith('u-m9'));
+    const field = await screen.findByTestId('link-url-field');
+    expect((field as HTMLInputElement).value).toBe(
+      `${window.location.origin}/password-setup#token=tok-s3`,
+    );
   });
 });

@@ -62,7 +62,7 @@ const staffId = 's-1';
 
 const mockStaff: StaffResponse = {
   id: staffId, first_name: 'Иван', last_name: 'Иванов', avatar_url: null,
-  sort_order: 0, master: null, position_ids: [], has_user: false,
+  sort_order: 0, master: null, position_ids: [], has_user: false, account: null,
   archived: false, created_at: '', updated_at: '',
 };
 const otherStaff: StaffResponse = { ...mockStaff, id: 's-2', first_name: 'Пётр' };

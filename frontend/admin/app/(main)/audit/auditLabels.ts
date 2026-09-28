@@ -15,7 +15,9 @@
  */
 
 /** Journal action → Russian verb (spec §7: создал / изменил / удалил /
- *  заархивировал / восстановил / переставил; update/patch share «изменил»). */
+ *  заархивировал / восстановил / переставил; update/patch share «изменил»).
+ *  `password_link_issued` (#348 spec §8): the admin issued a one-time
+ *  password-setup link — not an entity CRUD verb, its own label. */
 export const ACTION_LABELS: Record<string, string> = {
   create: 'создал',
   update: 'изменил',
@@ -24,6 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   archive: 'заархивировал',
   restore: 'восстановил',
   reorder: 'переставил',
+  password_link_issued: 'выдал ссылку установки пароля',
 };
 
 /** Canonical #239 entity name → Russian noun (mirrors the `title` of every

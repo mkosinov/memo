@@ -215,12 +215,13 @@ test.describe('Staff — Create Modal', () => {
     await expect(dialog.getByText('Цвет *')).toBeVisible();
 
     // «Создать учётку» section toggle (D6) — off by default; checking it
-    // reveals phone + password.
+    // reveals phone + role. #348: passwordless creation — the password
+    // field is GONE (the employee sets it via the one-time link).
     const userToggle = dialog.locator('[data-testid="create-user-checkbox"]');
     await expect(userToggle).not.toBeChecked();
     await userToggle.check();
     await expect(dialog.getByText('Телефон *')).toBeVisible();
-    await expect(dialog.getByText('Пароль *')).toBeVisible();
+    await expect(dialog.locator('input[type="password"]')).toHaveCount(0);
   });
 
   test('closes modal with escape key', async ({ page }) => {

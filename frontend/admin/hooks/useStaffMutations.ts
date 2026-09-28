@@ -9,6 +9,8 @@ import {
   patchStaff,
   archiveStaff,
   restoreStaff,
+  patchUser,
+  issuePasswordLink,
   dryRunDeleteStaff,
   resolveDeleteStaff,
   ApiError,
@@ -19,6 +21,8 @@ import type {
   StaffPatch,
   StaffArchiveRequest,
   DependencyNode,
+  UserPhonePatch,
+  PasswordLinkResponse,
   PaginatedResponse,
   StaffResponse,
 } from '@memo/api-client';
@@ -303,6 +307,40 @@ export function useRestoreStaff() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreStaff(id),
+    onSuccess: () => invalidateEntities(queryClient, ['staff']),
+  });
+}
+
+// ─── Users vertical (#348 spec §5 — the «Учётка» block operations) ─────────
+
+/**
+ * Edit the linked account's phone (S5) — a SEPARATE write from the card's
+ * own PUT: PATCH /users/:id with strictly {phone}. 422 PHONE_TAKEN /
+ * PHONE_INVALID are DOMAIN outcomes the modal renders inline, so the
+ * rejection PROPAGATES (as a typed ApiError) instead of toasting.
+ */
+export function usePatchUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UserPhonePatch }) => patchUser(id, data),
+    onSuccess: () => invalidateEntities(queryClient, ['staff']),
+  });
+}
+
+/**
+ * Issue a one-time password-setup link (S1/S3). The RAW token surfaces
+ * exactly once, here — the caller assembles the handover URL from the page
+ * origin and shows it in the dialog; repeat viewing is impossible by
+ * construction. Errors: 404 unknown account, 422 ACCOUNT_DEACTIVATED.
+ *
+ * Invalidation: the card's account block carries `link_expires_at` — a
+ * fresh link must surface as «Ссылка выдана, действует до …» right away,
+ * not on the next unrelated refresh.
+ */
+export function useIssuePasswordLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string): Promise<PasswordLinkResponse> => issuePasswordLink(id),
     onSuccess: () => invalidateEntities(queryClient, ['staff']),
   });
 }

@@ -348,7 +348,10 @@ test.describe('Unified inline-editable rows', () => {
     test('× on unsaved payment row removes it without API call', async ({ page }) => {
       const apiCalls: string[] = [];
       page.on('request', (req) => {
-        if (req.url().includes('/api/v1/payments')) {
+        // Mutations only: background GET refetches (e.g. payments/totals)
+        // are benign and race this test — the discarded row must fire no
+        // writes.
+        if (req.url().includes('/api/v1/payments') && req.method() !== 'GET') {
           apiCalls.push(`${req.method()} ${req.url()}`);
         }
       });

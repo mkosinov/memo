@@ -71,6 +71,14 @@ import {
   UserSettingsResponseSchema,
   type UserSettingsResponse,
   type UserSettingsUpdate,
+  UserPhonePatchSchema,
+  type UserPhonePatch,
+  UserResponseSchema,
+  type UserResponse,
+  PasswordLinkResponseSchema,
+  type PasswordLinkResponse,
+  PasswordSetupValidateResponseSchema,
+  type PasswordSetupValidateResponse,
   StaffListResponseSchema,
   PositionListResponseSchema,
   MasterViewListResponseSchema,
@@ -1329,4 +1337,54 @@ export async function patchUserSettings(
       body: JSON.stringify(data),
     },
   );
+}
+
+// ─── Users vertical (#348 spec §5 — admin-side account ops) ────────────────
+
+// Admin-side phone edit of an account (S5): body is STRICTLY {phone}
+// (backend extra="forbid"); 404 unknown account, 422 PHONE_TAKEN /
+// PHONE_INVALID. Returns the account shape {id, phone, role, staff_id,
+// password_is_set, is_active} — the same block the staff card carries.
+export async function patchUser(id: string, data: UserPhonePatch): Promise<UserResponse> {
+  return api(`/api/v1/users/${id}`, UserResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(UserPhonePatchSchema.parse(data)),
+  });
+}
+
+// Issue a one-time password-setup link (S3/S7): the RAW token is returned
+// EXACTLY ONCE — the frontend assembles the handover URL from the page
+// origin ({origin}/password-setup#token=…) and shows it in the dialog;
+// repeat viewing is impossible by construction (only the SHA-256 digest is
+// stored). Errors: 404 unknown account, 422 ACCOUNT_DEACTIVATED.
+export async function issuePasswordLink(id: string): Promise<PasswordLinkResponse> {
+  return api(`/api/v1/users/${id}/password-link`, PasswordLinkResponseSchema, {
+    method: 'POST',
+  });
+}
+
+// ─── Public password setup (#348 spec §5/§6 — anonymous, token is the
+// authority) ────────────────────────────────────────────────────────────────
+
+// Probe a setup link on page open (spec §6 screen chooser): 200 {ok: true} →
+// the password form; the single 422 PASSWORD_LINK_INVALID (one answer for
+// unknown / expired / used / inactive) → «Ссылка недействительна или истекла».
+// The token comes from the URL fragment (#token=…).
+export async function validatePasswordSetup(token: string): Promise<PasswordSetupValidateResponse> {
+  return api('/api/v1/auth/password-setup/validate', PasswordSetupValidateResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+// Consume the one-time link and set the account password → 204 (resolves
+// undefined). A weak password answers 422 PASSWORD_POLICY (inline single
+// message); any invalid-token state answers the single 422
+// PASSWORD_LINK_INVALID. The 204 consumed the token — and the page already
+// stripped the fragment, so a refresh never re-issues the request.
+export async function passwordSetup(token: string, password: string): Promise<void> {
+  await api('/api/v1/auth/password-setup', z.any(), {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  });
 }

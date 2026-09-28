@@ -5,6 +5,9 @@ import {
   AuditLogListResponseSchema,
   AuditLogAuthorResponseSchema,
   StaffResponseSchema,
+  UserResponseSchema,
+  UserPhonePatchSchema,
+  PasswordLinkResponseSchema,
   type StaffResponse,
   StaffCreateSchema,
   StaffUpdateSchema,
@@ -87,9 +90,19 @@ const validStaff = {
   master: validStaffMasterSection,
   position_ids: ['master', '5f8a1c2d-0007-4000-8000-000000000007'],
   has_user: false, // T8 Gap B: no linked account row (backend always emits it)
+  account: null, // #348: no linked account → the block is null
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
+};
+
+const validStaffAccount = {
+  id: 'u-staff-1', // users.id — the address for patchUser/issuePasswordLink (#348)
+  phone: '+79991234567',
+  role: 'master',
+  password_is_set: false,
+  is_active: true,
+  link_expires_at: '2026-09-28T10:00:00Z', // live setup link expiry (#348)
 };
 
 describe('StaffResponseSchema', () => {
@@ -160,6 +173,141 @@ describe('StaffResponseSchema', () => {
     const { has_user: _h, ...without } = { ...validStaff, has_user: true };
     expect(() => StaffResponseSchema.parse(without)).toThrow();
   });
+
+  it('parses the account block with a live link expiry (#348)', () => {
+    const result = StaffResponseSchema.parse({
+      ...validStaff,
+      has_user: true,
+      account: validStaffAccount,
+    });
+    expect(result.account?.id).toBe('u-staff-1');
+    expect(result.account?.phone).toBe('+79991234567');
+    expect(result.account?.role).toBe('master');
+    expect(result.account?.password_is_set).toBe(false);
+    expect(result.account?.is_active).toBe(true);
+    expect(result.account?.link_expires_at).toBe('2026-09-28T10:00:00Z');
+    // The block never carries the raw token — only its expiry (spec §5).
+    expect(result.account).not.toHaveProperty('token');
+  });
+
+  it('account carries the users.id — the addressable key of the users vertical (#348 §5)', () => {
+    // patchUser(id) / issuePasswordLink(id) call /api/v1/users/{id}; the
+    // card block is the only frontend source of that id (staff.id ≠ users.id).
+    const result = StaffResponseSchema.parse({
+      ...validStaff,
+      has_user: true,
+      account: validStaffAccount,
+    });
+    expect(result.account?.id).toBe('u-staff-1');
+    // id is REQUIRED — a backend emitting the block without it breaks the
+    // «Учётка» block actions; loud zod failure beats a silent undefined.
+    const { id: _id, ...withoutId } = validStaffAccount;
+    expect(() =>
+      StaffResponseSchema.parse({ ...validStaff, has_user: true, account: withoutId }),
+    ).toThrow();
+  });
+
+  it('parses account: null (no linked account — the block is hidden in UI)', () => {
+    const result = StaffResponseSchema.parse({ ...validStaff, account: null });
+    expect(result.account).toBeNull();
+  });
+
+  it('parses an archived account with no live link (block stays, read-only)', () => {
+    const result = StaffResponseSchema.parse({
+      ...validStaff,
+      has_user: true,
+      account: {
+        ...validStaffAccount,
+        password_is_set: true,
+        is_active: false, // archived account — «Учётка архивирована»
+        link_expires_at: null, // no live link
+      },
+    });
+    expect(result.account?.is_active).toBe(false);
+    expect(result.account?.link_expires_at).toBeNull();
+  });
+
+  it('account is required — missing field throws (backend always emits it)', () => {
+    const { account: _a, ...without } = {
+      ...validStaff,
+      account: validStaffAccount,
+    };
+    expect(() => StaffResponseSchema.parse(without)).toThrow();
+  });
+
+  it('account.id is required — the block is addressable for users-vertical calls (#348)', () => {
+    const { id: _id, ...withoutId } = validStaffAccount;
+    expect(() =>
+      StaffResponseSchema.parse({
+        ...validStaff,
+        has_user: true,
+        account: withoutId,
+      }),
+    ).toThrow();
+  });
+});
+
+// ─── Staff account / users vertical (#348 spec §5) ─────────────────────────
+
+const validUserAccount = {
+  id: 'u-1',
+  phone: '+79995556677',
+  role: 'master',
+  staff_id: 'st-1',
+  password_is_set: false,
+  is_active: true,
+};
+
+describe('UserResponseSchema', () => {
+  it('parses the PATCH /users/:id account shape (#348 §5)', () => {
+    const result = UserResponseSchema.parse(validUserAccount);
+    expect(result.id).toBe('u-1');
+    expect(result.phone).toBe('+79995556677');
+    expect(result.role).toBe('master');
+    expect(result.staff_id).toBe('st-1');
+    expect(result.password_is_set).toBe(false);
+    expect(result.is_active).toBe(true);
+    // The account shape never carries the hash itself.
+    expect(result).not.toHaveProperty('password_hash');
+  });
+
+  it('staff_id is nullable (a pure admin has no card)', () => {
+    const result = UserResponseSchema.parse({ ...validUserAccount, staff_id: null });
+    expect(result.staff_id).toBeNull();
+  });
+
+  it('rejects a stray password_hash (never on the wire)', () => {
+    const result = UserResponseSchema.parse({
+      ...validUserAccount,
+      password_hash: 'argon2:secret',
+    });
+    expect(result).not.toHaveProperty('password_hash');
+  });
+});
+
+describe('UserPhonePatchSchema', () => {
+  it('parses a strict {phone} body', () => {
+    const result = UserPhonePatchSchema.parse({ phone: '+79995556677' });
+    expect(result.phone).toBe('+79995556677');
+  });
+
+  it('rejects extra keys (backend extra="forbid" → 422 parity)', () => {
+    expect(() =>
+      UserPhonePatchSchema.parse({ phone: '+79995556677', is_active: false }),
+    ).toThrow();
+  });
+});
+
+describe('PasswordLinkResponseSchema', () => {
+  it('parses {token, expires_at} — the raw token surfaces exactly once', () => {
+    const result = PasswordLinkResponseSchema.parse({
+      token: 'raw-token-43-chars-urlsafe',
+      expires_at: '2026-09-28T10:00:00Z',
+    });
+    expect(result.token).toBe('raw-token-43-chars-urlsafe');
+    expect(result.expires_at).toBe('2026-09-28T10:00:00Z');
+    expect(Object.keys(result).sort()).toEqual(['expires_at', 'token']);
+  });
 });
 
 // ─── StaffCreate (GH #266 D5/D6 — master block, positions, account flag) ────
@@ -173,10 +321,10 @@ describe('StaffCreateSchema', () => {
       sort_order: 0,
       master: { specialty: 'живопись', color: '#5B8C7A' },
       position_ids: ['master'],
-      create_user: { phone: '+79991234567', password: 'secret123' },
+      create_user: { phone: '+79991234567' },
     });
     expect(result.master?.specialty).toBe('живопись');
-    expect(result.create_user).toEqual({ phone: '+79991234567', password: 'secret123' });
+    expect(result.create_user).toEqual({ phone: '+79991234567' });
   });
 
   it('defaults: no master, no positions, no account (plain SMM person)', () => {
@@ -248,7 +396,7 @@ describe('StaffCreateSchema', () => {
     const result = StaffCreateSchema.parse({
       first_name: 'И',
       last_name: 'П',
-      create_user: { phone: '+79991234567', password: 'secret123', role: 'master' },
+      create_user: { phone: '+79991234567', role: 'master' },
     });
     expect(result.create_user).toMatchObject({ phone: '+79991234567', role: 'master' });
   });
@@ -259,7 +407,7 @@ describe('StaffCreateSchema', () => {
     const withUser = StaffCreateSchema.parse({
       first_name: 'И',
       last_name: 'П',
-      create_user: { phone: '+79991234567', password: 'secret123' },
+      create_user: { phone: '+79991234567' },
     });
     expect(withUser.create_user).not.toHaveProperty('role');
   });
@@ -269,7 +417,20 @@ describe('StaffCreateSchema', () => {
       StaffCreateSchema.parse({
         first_name: 'И',
         last_name: 'П',
-        create_user: { phone: '+79991234567', password: 'secret123', role: 'superuser' },
+        create_user: { phone: '+79991234567', role: 'superuser' },
+      }),
+    ).toThrow();
+  });
+
+  // #348 spec §5: create_user is PASSWORDLESS — the owner sets the password
+  // via the one-time setup link; a password key must be rejected
+  // (backend CreateUserSection extra="forbid" parity).
+  it('rejects a password in create_user (#348 — passwordless contract)', () => {
+    expect(() =>
+      StaffCreateSchema.parse({
+        first_name: 'И',
+        last_name: 'П',
+        create_user: { phone: '+79991234567', password: 'secret123' },
       }),
     ).toThrow();
   });

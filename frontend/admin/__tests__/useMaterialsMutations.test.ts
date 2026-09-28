@@ -10,16 +10,29 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     createMaterial: vi.fn(),
     updateMaterial: vi.fn(),
     patchMaterial: vi.fn(),
-    deleteMaterial: vi.fn(),
+    dryRunDeleteMaterial: vi.fn(),
+    resolveDeleteMaterial: vi.fn(),
     archiveMaterial: vi.fn(),
     restoreMaterial: vi.fn(),
   };
 });
 
+// The deferred-delete conveyor needs the PendingActions + UI contexts —
+// surface tests mock them (full branch matrix lives in
+// useDeleteMaterial.test.ts).
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
+
 import {
   useCreateMaterial,
   useUpdateMaterial,
-  usePatchMaterial,
   useDeleteMaterial,
   useArchiveMaterial,
   useRestoreMaterial,
@@ -28,7 +41,8 @@ import {
   createMaterial,
   updateMaterial,
   patchMaterial,
-  deleteMaterial,
+  dryRunDeleteMaterial,
+  resolveDeleteMaterial,
   archiveMaterial,
   restoreMaterial,
   ApiError,
@@ -38,7 +52,8 @@ import type { MaterialCreate, MaterialUpdate, DependencyNode } from '@memo/api-c
 const mockCreateMaterial = vi.mocked(createMaterial);
 const mockUpdateMaterial = vi.mocked(updateMaterial);
 const mockPatchMaterial = vi.mocked(patchMaterial);
-const mockDeleteMaterial = vi.mocked(deleteMaterial);
+const mockDryRun = vi.mocked(dryRunDeleteMaterial);
+const mockResolveDeleteMaterial = vi.mocked(resolveDeleteMaterial);
 const mockArchiveMaterial = vi.mocked(archiveMaterial);
 const mockRestoreMaterial = vi.mocked(restoreMaterial);
 
@@ -60,7 +75,11 @@ function createQueryClientWrapper() {
 }
 
 describe('useMaterialsMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+    mockResolveDeleteMaterial.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateMaterial', () => {
@@ -116,78 +135,42 @@ describe('useMaterialsMutations', () => {
     });
   });
 
-  describe('usePatchMaterial', () => {
-    it('calls patchMaterial with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
 
-      const { result } = renderHook(() => usePatchMaterial(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
-      });
-
-      expect(mockPatchMaterial).toHaveBeenCalledWith('mat-1', { title: 'Patched' });
-      expect(mockUpdateMaterial).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the materials query cache on success', async () => {
+  describe('useDeleteMaterial — hook surface (deferred conveyor)', () => {
+    it('removeMaterial always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchMaterial.mockResolvedValue({ ...materialResponse, title: 'Patched' });
+      queryClient.setQueryData(['materials'], [materialResponse]);
+      const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
 
-      const { result } = renderHook(() => usePatchMaterial(), { wrapper });
+      expect(result.current.removeMaterial).toBeTypeOf('function');
+      expect(result.current.removeMaterialResolved).toBeTypeOf('function');
+      expect(result.current.isPending).toBe(false);
 
       await act(async () => {
-        await result.current.mutateAsync({ id: 'mat-1', data: { title: 'Patched' } });
+        await result.current.removeMaterial(materialResponse);
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
+      expect(mockDryRun).toHaveBeenCalledWith('mat-1');
+      expect(mockResolveDeleteMaterial).not.toHaveBeenCalled();
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
-  });
 
-  describe('useDeleteMaterial', () => {
-    it('calls deleteMaterial with the provided id', async () => {
+    it('409 + dependency tree rejects upward so the call site opens the dialog', async () => {
+      // Linked material (GH #223): the single auto service_materials node.
+      const deps: DependencyNode[] = [
+        { entity: 'service_materials', auto: true, relation: 'Услуга', count: 1, allowed_actions: ['cascade'] },
+      ];
+      mockDryRun.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+
       const { wrapper } = createQueryClientWrapper();
-      mockDeleteMaterial.mockResolvedValue(undefined);
-
       const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
 
       await act(async () => {
-        await result.current.mutateAsync('mat-1');
+        await expect(result.current.removeMaterial(materialResponse)).rejects.toThrow(ApiError);
       });
 
-      expect(mockDeleteMaterial).toHaveBeenCalledWith('mat-1');
-    });
-
-    it('invalidates the materials query cache on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeleteMaterial.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync('mat-1');
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['materials'] });
-    });
-
-    it('exposes the dependency tree if the dry-run DELETE ever fails with 409', async () => {
-      // Material has zero FK deps (§4 matrix) so 409 cannot happen today —
-      // the hook still keeps the uniform 409-aware shape for all entities.
-      const { wrapper } = createQueryClientWrapper();
-      const deps: DependencyNode[] = [];
-      mockDeleteMaterial.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
-
-      const { result } = renderHook(() => useDeleteMaterial(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('mat-1')).rejects.toThrow(ApiError);
-      });
-
-      expect(result.current.dependencies).toEqual(deps);
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(mockResolveDeleteMaterial).not.toHaveBeenCalled();
     });
   });
 

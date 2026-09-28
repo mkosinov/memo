@@ -85,7 +85,7 @@ class TestAuditLogsMigration:
             assert cols["created_at"][0] == "DATETIME"
             assert cols["user_id"][0] == "VARCHAR(36)"
             assert cols["user_role"][0] == "VARCHAR(20)"
-            assert cols["action"][0] == "VARCHAR(16)"
+            assert cols["action"][0] == "VARCHAR(24)"  # widened for #348 password_link_issued
             assert cols["entity"][0] == "VARCHAR(32)"
             assert cols["entity_id"][0] == "VARCHAR(36)"
             assert cols["entity_label"][0] == "VARCHAR(255)"

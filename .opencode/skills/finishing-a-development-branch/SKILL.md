@@ -334,6 +334,27 @@ git branch -d <feature-branch>               # local branch safe to delete once 
 
 **Order matters:** remove the worktree first (frees the checked-out branch), then delete the local branch.
 
+**Before `git worktree remove` — stop the worktree's processes (2026-09-28, #324 incident).**
+Verification processes started inside the worktree (dev servers, watchers) survive both the
+merge and the worktree removal itself — a removed worktree's processes keep running from the
+deleted directory until someone kills them (observed: uvicorn + next dev ran 16+ hours on an
+In-main card, holding RAM and ports). Kill everything whose CWD is inside the worktree BEFORE
+the removal:
+
+```bash
+# Stop every process whose CWD is inside this worktree (dev servers etc.)
+for pid in /proc/[0-9]*; do
+  cwd=$(readlink "${pid}/cwd" 2>/dev/null) || continue
+  case "${cwd}/" in
+    "${WORKTREE_PATH}"/*) kill "${pid#/proc/}" 2>/dev/null ;;
+  esac
+done
+sleep 1   # let them die before the directory goes away
+```
+
+The hourly `impl_janitor.py` catches whatever survives (crashed runs, forgotten windows), but
+that is the safety net, not the plan — the finishing manager cleans up its own worktree here.
+
 **Otherwise:** The host environment (harness) owns this workspace. Do NOT remove it.
 
 ### Step 7: Report Board-Update Facts to @manager (mandatory)
@@ -383,4 +404,5 @@ After a successful merge, the architect does NOT touch the GH Project board — 
 - Clean up worktree only on the default merge success path and the explicit merge-locally / discard fallbacks
 - `cd` to main repo root before worktree removal
 - Run `git worktree prune` after removal
+- Kill a worktree's processes BEFORE `git worktree remove` — they outlive the directory otherwise (dev servers ran 16h past the merge, #324)
 - Delete remote and local branches from the main working copy root only — never use `gh pr merge --delete-branch` from inside a worktree (the local branch is checked out there)

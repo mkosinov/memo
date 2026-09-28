@@ -181,7 +181,11 @@ class TestClientsCrud:
         # Create then soft-delete
         create_resp = api_client.post("/api/v1/clients", json=CLIENT_PAYLOAD)
         client_id = create_resp.json()["id"]
-        api_client.delete(f"/api/v1/clients/{client_id}")
+        # GH #345: bare DELETE is 422 — the clean commit declares its state.
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client_id}", json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
 
         # Lookup should not find the deleted client
         response = api_client.get(
@@ -427,7 +431,11 @@ class TestPhoneSearchActiveOnlyRegression:
     ) -> None:
         """Archive a client with a known phone → lookup must 404."""
         client = create_client(phone="+79990009988", name="To Archive")
-        api_client.delete(f"/api/v1/clients/{client['id']}")
+        # GH #345: bare DELETE is 422 — the clean commit declares its state.
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client['id']}", json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
 
         resp = api_client.get(
             "/api/v1/clients/get", params={"phone": "+79990009988"}
@@ -613,59 +621,131 @@ def _link_client_tag(api_client, client_id: str, tag_name: str | None = None) ->
 
 
 class TestDeleteUnifiedRoute:
-    """DELETE /api/v1/clients/{id} — unified dry-run (no body) + execute (with body).
+    """DELETE /api/v1/clients/{id} — the unified deferred-delete contract
+    (GH #345 §4.1, one-to-one mirror of the tags/records/staff family).
 
-    Spec: docs/specs/2026-08-15-delete-hard-delete-and-dependency-resolution-design.md
-      * §2  — Change 1: body presence distinguishes dry-run vs execute.
-      * §4  — Client FK deps: records=nullify (user choice), visitors=cascade
-              (user choice, cascades through visits/photos/visitor_tags per
-              VisitorService._delete_cascade), client_tags=auto cascade.
-      * §5  — 409 Conflict response (counters + ``cascade_preview``).
-      * §6  — DELETE with resolutions body (executor = Task 10).
-      * §8  — atomicity (single outer ``@transactional``; loop calls the
-              non-decorated ``VisitorService._delete_cascade`` on a shared
-              session — NO per-visitor commit).
-      * S4  — User scenario at §12.S4 (records survive nullify; visitors
-              + visits + client_tags gone; payments survive with records).
+    Modes (spec §4.1):
+      * ``?dry_run=true`` — PURE preview: existence probe → missing → 404;
+        ``collect_dependencies`` → empty → 204 WITHOUT deleting; non-empty
+        → 409 + dependency tree. Never modifies rows; combined with a
+        ``resolutions`` body → 422 ``dry_run_with_resolutions_forbidden``
+        (checked before the probe).
+      * No body, no flag → 422 ``expected_state_required`` — the legacy
+        bare-DELETE (execute-if-clean / silent dry-run) is REMOVED (S6).
+      * Body ``{resolutions?, expected}`` — the deferred-delete commit
+        (S1): the ROUTE is transport only (spec §4.5) — the subset
+        verification AND execution live INSIDE the ``delete_client``
+        scenario's ``@transactional`` transaction (the
+        ``delete_record``/``delete_staff`` mirror).
+
+    Domain matrix (spec §4.4): Client is the ONLY entity with a
+    resolvable commit — records (nullify) + visitors (cascade) are the
+    two NON-auto deps (the ``expected`` source); client_tags/photos are
+    AUTO (exempt from the check). The visitors node carries
+    ``cascade_preview`` (visits count).
     """
 
-    def test_delete_bare_client_no_body_returns_204_and_row_gone(
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _dry_run(api_client, client_id: str):
+        return api_client.request(
+            "DELETE", f"/api/v1/clients/{client_id}", params={"dry_run": "true"},
+        )
+
+    @staticmethod
+    def _expected_from_tree(tree: list[dict]) -> dict[str, list[str]]:
+        """The frontend's ``expected`` builder (spec §4.2): id-sets of the
+        NON-auto nodes' FULL ``items`` arrays (auto nodes are exempt)."""
+        return {
+            d["entity"]: [item["id"] for item in d["items"]]
+            for d in tree
+            if d["auto"] is False
+        }
+
+    # ── bare DELETE (no flag, no body) → 422 expected_state_required ───────
+
+    def test_bare_delete_clean_client_returns_422_row_alive(
         self, api_client, create_client
     ) -> None:
-        """No body + zero deps → 204 hard delete; row physically gone (spec §2)."""
+        """S6: bare DELETE executes nowhere — even a clean client refuses."""
         client = create_client()
 
         resp = api_client.delete(f"/api/v1/clients/{client['id']}")
 
-        assert resp.status_code == 204
-        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 404
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
 
-    def test_delete_nonexistent_client_no_body_returns_404(self, api_client) -> None:
-        """No body + nonexistent id → 404 (service.delete returns False)."""
-        resp = api_client.delete("/api/v1/clients/nonexistent-client-id")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
-
-    def test_delete_nonexistent_client_with_body_returns_404(self, api_client) -> None:
-        """With body + nonexistent id → 404 (executor returns False).
-
-        EXPECTED RED until Task 10 (resolve_delete missing → AttributeError today).
-        """
-        resp = api_client.request(
-            "DELETE",
-            "/api/v1/clients/nonexistent-client-id",
-            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
-        )
-        assert resp.status_code == 404
-
-    def test_delete_client_with_deps_no_body_returns_409(
+    def test_bare_delete_client_with_deps_returns_422_row_alive(
         self, api_client, create_record
     ) -> None:
-        """No body + deps (records + visitors + client_tags) → 409 + tree (spec §5).
+        """S6: bare DELETE on an occupied client → 422 (form check first)."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
 
-        The 409 carries counters and the ``cascade_preview`` for visitors (visits
-        count only — payments EXCLUDED per §5, since they are record-scoped and
-        survive the records nullify).
+        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_bare_delete_unknown_id_returns_422_before_404(
+        self, api_client
+    ) -> None:
+        """S6: form check precedes the probe — 422, not 404."""
+        resp = api_client.delete("/api/v1/clients/nonexistent-client-id")
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+
+    def test_delete_resolutions_body_without_expected_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """S6: resolutions-only body is the rejected legacy shape."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_delete_unknown_keys_body_without_expected_returns_422(
+        self, api_client, create_client
+    ) -> None:
+        """S6: unknown-keys-only body has no ``expected`` — same 422."""
+        client = create_client()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client['id']}",
+            json={"bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    # ── ?dry_run=true — pure preview (never modifies rows) ─────────────────
+
+    def test_dry_run_client_with_deps_returns_409_tree_row_alive(
+        self, api_client, create_record
+    ) -> None:
+        """S6: dry-run on an occupied client → 409 ``has_dependencies``.
+
+        The tree carries the counters, the ``cascade_preview`` for
+        visitors (visits count only — payments are record-scoped and
+        survive the records nullify), and the ``items`` of the two
+        non-auto nodes (the ``expected`` source, GH #345 §4.2/§4.3).
         """
         record = create_record(
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
@@ -673,7 +753,7 @@ class TestDeleteUnifiedRoute:
         client_id = record["client_id"]
         _link_client_tag(api_client, client_id, tag_name=f"ct-{client_id[:8]}")
 
-        resp = api_client.delete(f"/api/v1/clients/{client_id}")
+        resp = self._dry_run(api_client, client_id)
 
         assert resp.status_code == 409
         body = resp.json()
@@ -681,27 +761,107 @@ class TestDeleteUnifiedRoute:
         deps = {d["entity"]: d for d in body["dependencies"]}
         assert deps["records"]["count"] == 1
         assert deps["records"]["allowed_actions"] == ["nullify"]
+        assert deps["records"]["auto"] is False
+        assert len(deps["records"]["items"]) == 1
         assert deps["visitors"]["count"] == 1
         assert deps["visitors"]["allowed_actions"] == ["cascade"]
-        # cascade_preview exists on visitors with downstream visits count.
+        assert deps["visitors"]["auto"] is False
+        assert len(deps["visitors"]["items"]) == 1
         assert deps["visitors"]["cascade_preview"] == {"visits": 1}
         assert deps["client_tags"]["count"] == 1
         assert deps["client_tags"]["allowed_actions"] == ["cascade"]
-        # Row untouched (dry-run modifies nothing).
+        assert deps["client_tags"]["auto"] is True
+        # Row untouched.
         assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
 
-    def test_delete_client_with_cascade_resolutions_executes_204(
+    def test_dry_run_clean_client_returns_204_and_row_alive(
+        self, api_client, create_client
+    ) -> None:
+        """S2(а)-mirror: dry-run on a clean client → 204 WITHOUT deleting."""
+        client = create_client()
+
+        resp = self._dry_run(api_client, client["id"])
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    def test_dry_run_unknown_client_returns_404(self, api_client) -> None:
+        """S6: dry-run probes existence — missing client → 404."""
+        resp = self._dry_run(api_client, "nonexistent-client-id")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
+
+    def test_dry_run_with_resolutions_body_returns_422(
+        self, api_client, create_client
+    ) -> None:
+        """S6: dry_run + resolutions → 422; combo checked before the probe."""
+        client = create_client()
+
+        for client_id in (client["id"], "nonexistent-client-id"):
+            resp = api_client.request(
+                "DELETE",
+                f"/api/v1/clients/{client_id}",
+                params={"dry_run": "true"},
+                json={"resolutions": {"records": "nullify"}},
+            )
+            assert resp.status_code == 422, f"{client_id}: {resp.text}"
+            assert resp.json()["detail"] == "dry_run_with_resolutions_forbidden"
+
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    def test_dry_run_with_expected_only_body_silently_ignored(
+        self, api_client, create_client
+    ) -> None:
+        """Combinatorics: dry_run + expected-only body → preview proceeds."""
+        client = create_client()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client['id']}",
+            params={"dry_run": "true"},
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    # ── body commit: existence + expected id-set verification ──────────────
+
+    def test_commit_unknown_client_with_body_returns_404(
+        self, api_client
+    ) -> None:
+        """S6: nonexistent id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE",
+            "/api/v1/clients/nonexistent-client-id",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "CLIENT_NOT_FOUND"
+
+    def test_commit_clean_client_expected_empty_returns_204(
+        self, api_client, create_client
+    ) -> None:
+        """Clean path — ``{expected: {}}`` → 204 hard delete."""
+        client = create_client()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 404
+
+    def test_commit_resolutions_expected_executes_204(
         self, api_client, create_record
     ) -> None:
-        """S4 scenario: DELETE with body → atomic nullify (records) + cascade
-        (visitors, visits, photos SET NULL, visitor_tags) + auto cascade
-        (client_tags) + hard delete client.
+        """S1 (DoD): the resolvable commit — dry-run 409 tree → dialog →
+        commit ``{resolutions, expected}`` (expected from the FULL tree
+        items, spec §4.2) → 204; records nullified, visitors deleted.
 
-        EXPECTED RED until Task 10 lands ``ClientService.resolve_delete``.
-
-        Per spec §12.S4 / §8 atomicity: ONE outer ``@transactional``; the
-        VisitorService._delete_cascade reuses the SHARED session (no
-        per-visitor commit).
+        Outcome assertions per spec §6.S4 / §8 atomicity: ONE outer
+        ``@transactional``; the VisitorService._delete_cascade reuses the
+        SHARED session (no per-visitor commit).
         """
         # 1 record + 2 visits + 2 visitors (Alice, Bob) for one client.
         record = create_record(
@@ -720,16 +880,12 @@ class TestDeleteUnifiedRoute:
         alice_vid = visitors[0]["id"]
         bob_vid = visitors[1]["id"]
         # Capture visit IDs (one per visitor).
-        alice_visit = query_db(
+        alice_visit_id = query_db(
             f"SELECT id FROM visits WHERE visitor_id='{alice_vid}'"
-        )
-        bob_visit = query_db(
+        )[0]["id"]
+        bob_visit_id = query_db(
             f"SELECT id FROM visits WHERE visitor_id='{bob_vid}'"
-        )
-        assert len(alice_visit) == 1
-        assert len(bob_visit) == 1
-        alice_visit_id = alice_visit[0]["id"]
-        bob_visit_id = bob_visit[0]["id"]
+        )[0]["id"]
         # Payment on the record (record-scoped — survives the records nullify).
         apipayment = api_client.post(
             "/api/v1/payments",
@@ -740,19 +896,26 @@ class TestDeleteUnifiedRoute:
         # Tag link (auto-cascade).
         _link_client_tag(api_client, client_id, tag_name=f"ct-{client_id[:8]}")
 
-        # No-body dry-run → 409 (deps present).
-        resp = api_client.delete(f"/api/v1/clients/{client_id}")
-        assert resp.status_code == 409
+        # The dialog-time preview → 409 + tree.
+        preview = self._dry_run(api_client, client_id)
+        assert preview.status_code == 409
+        expected = self._expected_from_tree(preview.json()["dependencies"])
+        assert set(expected) == {"records", "visitors"}
+        assert expected["records"] == [record_id]
+        assert set(expected["visitors"]) == {alice_vid, bob_vid}
 
-        # With-body execute → 204.
+        # Confirm → commit {resolutions, expected} → 204.
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": expected,
+            },
         )
         assert resp.status_code == 204
 
-        # S4 outcome assertions:
+        # S1/S4 outcome assertions:
         # records survive with client_id=NULL (nullify).
         rec_rows = query_db(
             f"SELECT client_id FROM records WHERE id='{record_id}'"
@@ -776,10 +939,140 @@ class TestDeleteUnifiedRoute:
         # client row physically gone.
         assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 404
 
-    def test_delete_client_with_wrong_action_returns_422(
+    def test_commit_appeared_record_returns_409_stale(
         self, api_client, create_record
     ) -> None:
-        """§6 rule 1: ``records: "cascade"`` (records only allows nullify) → 422."""
+        """S5 (DoD race): a record that APPEARED after the dialog window →
+        409 ``stale_dependencies`` — the subset check inside the scenario
+        transaction catches the race; the client AND the racing record
+        stay alive.
+        """
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+
+        # The dialog-time preview → expected built from the full tree.
+        preview = self._dry_run(api_client, client_id)
+        assert preview.status_code == 409
+        expected = self._expected_from_tree(preview.json()["dependencies"])
+
+        # Mid-window race: a NEW record lands on the same client via the API
+        # (its booking flow also creates a visitor — both non-auto id-sets
+        # drift, records is the asserted one).
+        racing = create_record(client_id=client_id)
+        assert racing["id"] != record["id"]
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": expected,
+            },
+        )
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "stale_dependencies"
+        deps = {d["entity"]: d for d in body["dependencies"]}
+        assert deps["records"]["count"] == 2
+        # Nothing deleted — client AND the racing record alive.
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+        assert query_db(f"SELECT * FROM records WHERE id='{racing['id']}'")
+
+    def test_commit_disappeared_record_subset_passes_204(
+        self, api_client, create_record
+    ) -> None:
+        """S5 (reverse race): a confirmed dependency that disappeared
+        mid-window does NOT block — subset semantics; the commit proceeds
+        (the stale expected is a superset, which is allowed)."""
+        record1 = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record1["client_id"]
+        record2 = create_record(client_id=client_id)  # 2 records at dialog time
+
+        preview = self._dry_run(api_client, client_id)
+        assert preview.status_code == 409
+        expected = self._expected_from_tree(preview.json()["dependencies"])
+        assert len(expected["records"]) == 2
+
+        # record2 dies mid-window via its own deferred-delete commit
+        # (1 visit — the expected state of THAT commit).
+        act_resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record2['id']}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [record2["visits"][0]["id"]]},
+            },
+        )
+        assert act_resp.status_code == 204, act_resp.text
+
+        # The client commit with the ORIGINAL (now supersized) expected → 204.
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": expected,
+            },
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 404
+        # record1 survived the nullify; record2 was already gone.
+        rec1 = query_db(f"SELECT client_id FROM records WHERE id='{record1['id']}'")
+        assert rec1[0]["client_id"] is None
+        assert query_db(f"SELECT * FROM records WHERE id='{record2['id']}'") == []
+
+    def test_commit_swapped_record_id_returns_409(
+        self, api_client, create_record
+    ) -> None:
+        """S5 rev6: a ghost id at an unchanged counter → 409 (id-sets, not
+        counters — the swap is caught)."""
+        record1 = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record1["client_id"]
+
+        preview = self._dry_run(api_client, client_id)
+        expected = self._expected_from_tree(preview.json()["dependencies"])
+
+        # Swap: the confirmed record dies, another lands on the same client.
+        act_resp = api_client.request(
+            "DELETE",
+            f"/api/v1/records/{record1['id']}",
+            json={
+                "resolutions": {"visits": "cascade", "payments": "cascade"},
+                "expected": {"visits": [record1["visits"][0]["id"]]},
+            },
+        )
+        assert act_resp.status_code == 204
+        swapped = create_record(client_id=client_id)
+        assert swapped["id"] != record1["id"]
+
+        # Commit with the STALE confirmed id-set (record1's id) → 409.
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": expected,
+            },
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_commit_stale_beats_validation_returns_409_not_422(
+        self, api_client, create_record
+    ) -> None:
+        """Order pin (#285 D7 mirror): a stale expected → 409 even when the
+        resolutions branch would also 422 (``records: "cascade"`` is an
+        invalid action)."""
         record = create_record(
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
@@ -788,50 +1081,146 @@ class TestDeleteUnifiedRoute:
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"resolutions": {"records": "cascade", "visitors": "cascade"}},
+            json={
+                "resolutions": {"records": "cascade", "visitors": "cascade"},
+                "expected": {},  # stale: deps exist on the server
+            },
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
+
+    def test_commit_confirmed_wrong_action_returns_422(
+        self, api_client, create_record
+    ) -> None:
+        """§6 rule 1 with a CONFIRMED expected: ``records: "cascade"``
+        (records only allows nullify) → 422 from the resolutions
+        validation inside the scenario."""
+        record = create_record(
+            visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
+        )
+        client_id = record["client_id"]
+        preview = self._dry_run(api_client, client_id)
+        expected = self._expected_from_tree(preview.json()["dependencies"])
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client_id}",
+            json={
+                "resolutions": {"records": "cascade", "visitors": "cascade"},
+                "expected": expected,
+            },
         )
 
         assert resp.status_code == 422
         # Row untouched.
         assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
 
-    def test_delete_client_with_missing_dep_returns_422(
+    def test_commit_confirmed_missing_dep_resolution_returns_422(
         self, api_client, create_record
     ) -> None:
-        """§6 rule 2: body omits ``visitors`` (a required non-auto dep) → 422."""
+        """§6 rule 2 with a CONFIRMED expected: body omits ``visitors``
+        (a required non-auto dep) → 422."""
         record = create_record(
             visits=[{"name": "Alice", "price": 3500, "status": "waiting"}]
         )
         client_id = record["client_id"]
+        preview = self._dry_run(api_client, client_id)
+        expected = self._expected_from_tree(preview.json()["dependencies"])
 
         resp = api_client.request(
             "DELETE",
             f"/api/v1/clients/{client_id}",
-            json={"resolutions": {"records": "nullify"}},  # no visitors resolution
+            json={
+                "resolutions": {"records": "nullify"},  # no visitors resolution
+                "expected": expected,
+            },
         )
 
         assert resp.status_code == 422
         assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
 
-    def test_delete_client_cascade_failure_rolls_back_atomically(
+    def test_commit_unknown_body_keys_silently_ignored(
+        self, api_client, create_client
+    ) -> None:
+        """S6: unknown body keys (with ``expected`` present) ignored → 204."""
+        client = create_client()
+
+        resp = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client['id']}",
+            json={"expected": {}, "bogus_key": "whatever"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 404
+
+    def test_commit_expected_carries_all_ids_beyond_ten(
+        self, api_client, create_activity, create_client
+    ) -> None:
+        """>10 items pin (spec §4.2): ``expected`` carries ALL ids of the
+        dependency tree, not the rendered top-10 rows — and the preview
+        tree itself lists all items (payload is not truncated).
+
+        12 records on one client; a commit confirming only the first 10
+        id-sets → 409 ``stale_dependencies`` (ids 11–12 appeared from the
+        check's point of view — mid-window race semantics).
+        """
+        client = create_client()
+        activity = create_activity(capacity=50)
+        record_ids = []
+        for i in range(12):
+            resp = api_client.post(
+                "/api/v1/records",
+                json={
+                    "activity_id": activity["id"],
+                    "client_id": client["id"],
+                    "comment": f"bulk-{i}",
+                    "visits": [{"name": f"Гость{i}", "price": 1000, "status": "waiting"}],
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            record_ids.append(resp.json()["id"])
+
+        # The preview tree carries ALL 12 items (no top-10 truncation).
+        preview = self._dry_run(api_client, client["id"])
+        assert preview.status_code == 409
+        tree = {d["entity"]: d for d in preview.json()["dependencies"]}
+        assert len(tree["records"]["items"]) == 12
+        assert len(tree["visitors"]["items"]) == 12
+
+        # Confirm only the first 10 records (ALL visitors — the pin is the
+        # records node) → the remaining 2 are "new" → 409.
+        partial = api_client.request(
+            "DELETE",
+            f"/api/v1/clients/{client['id']}",
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": {
+                    "records": record_ids[:10],
+                    "visitors": [i["id"] for i in tree["visitors"]["items"]],
+                },
+            },
+        )
+        assert partial.status_code == 409, partial.text
+        assert partial.json()["detail"] == "stale_dependencies"
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    def test_commit_cascade_failure_rolls_back_atomically(
         self, api_client, create_record, monkeypatch
     ) -> None:
-        """§8 atomicity: mid-cascade failure (``_delete_cascade`` raise on 2nd
-        visitor) rolls back the WHOLE outer transaction — client still present,
-        records still linked (NOT nullified), first visitor NOT deleted.
-
-        EXPECTED RED until Task 10 — until ``ClientService.resolve_delete``
-        wires the VisitorService loop AND runs in one outer ``@transactional``,
-        a mid-loop raise either (a) is unreachable (executor doesn't exist) →
-        500/AttributeError, or (b) commits per-visitor → first visitor lost.
+        """§8 atomicity: mid-cascade failure (``_delete_cascade`` raise on
+        2nd visitor) rolls back the WHOLE outer transaction — client still
+        present, records still linked (NOT nullified), first visitor NOT
+        deleted.
 
         NB: the api_client fixture uses the default ``raise_server_exceptions=
-        True``, so the unhandled ``RuntimeError`` bubbles up to the test client
-        (Starlette re-raises before FastAPI's ``exception_handler(Exception)``
-        can convert it to 500). We expect that exactly — the spec §8 contract
-        is "rollback on mid-cascade failure", not "200/422 status code". The
-        response status is whatever FastAPI decided to do; the IMPORTANT part
-        is the DB-level rollback observation afterwards.
+        True``, so the unhandled ``RuntimeError`` bubbles up to the test
+        client (Starlette re-raises before FastAPI's
+        ``exception_handler(Exception)`` can convert it to 500). We expect
+        that exactly — the §8 contract is "rollback on mid-cascade
+        failure"; the DB-level rollback observation is the important part.
         """
         record = create_record(
             visits=[
@@ -845,6 +1234,8 @@ class TestDeleteUnifiedRoute:
             f"SELECT id FROM visitors WHERE client_id='{client_id}' ORDER BY id"
         )
         assert len(visitors) == 2
+        preview = self._dry_run(api_client, client_id)
+        expected = self._expected_from_tree(preview.json()["dependencies"])
 
         # Patch VisitorService singleton: 2nd _delete_cascade call raises.
         from src.services.visitor import get_visitor_service
@@ -862,20 +1253,22 @@ class TestDeleteUnifiedRoute:
         monkeypatch.setattr(visitor_service, "_delete_cascade", patched)
 
         # The unhandled RuntimeError bubbles to the test client (above). The
-        # outer ``@transactional`` in ``resolve_delete`` saw the raise, skipped
-        # its commit, and ``get_db_session`` rolls back the session on exit —
+        # outer ``@transactional`` in the scenario saw the raise, skipped its
+        # commit, and ``get_db_session`` rolls back the session on exit —
         # leaving the DB state atomic (NO mid-loop commit).
         with pytest.raises(RuntimeError, match="mid-cascade"):
             api_client.request(
                 "DELETE",
                 f"/api/v1/clients/{client_id}",
-                json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
+                json={
+                    "resolutions": {"records": "nullify", "visitors": "cascade"},
+                    "expected": expected,
+                },
             )
 
         # Atomicity: rollback restored client + records + BOTH visitors.
         # (If the loop had committed per-visitor, the 1st visitor would be
-        # gone and the records would be NULL — spec §8 BLOCKER-class guards
-        # precisely against that.)
+        # gone and the records would be NULL — §8 guards against that.)
         assert api_client.get(f"/api/v1/clients/{client_id}").status_code == 200
         rec = query_db(f"SELECT client_id FROM records WHERE id='{record_id}'")
         assert rec[0]["client_id"] == client_id  # NULL was rolled back.
@@ -1302,3 +1695,152 @@ class TestClientListIdFilter:
         assert row["email"] is None
         assert "•" in row["phone"]
         assert row["phone"].endswith("6677")  # last 4 digits stay visible
+
+
+# ─── Sort contract (GH #367 Task 2 — check-point §4.1: generic brick + query) ──
+
+
+class TestClientSortContract:
+    """Hard 422 contract for clients `sort_by`/`sort_order` (#367 §3).
+
+    The schema-level `ClientSortBy` Literal (7 columns) must reject garbage
+    BEFORE the service sees it — via the ``Annotated[ClientListParams,
+    Query()]`` injection. This is the check-point smoke test for the
+    generic-``SortParams`` + query combination (spec §4.1).
+    """
+
+    SORT_BY_ENUM = [
+        "name", "records_count", "last_record", "total_paid",
+        "missed_records", "created_at", "updated_at",
+    ]
+
+    def test_garbage_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "banana"})
+        assert resp.status_code == 422, resp.text
+
+    def test_empty_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": ""})
+        assert resp.status_code == 422, resp.text
+
+    def test_wrong_case_sort_by_returns_422(self, api_client) -> None:
+        resp = api_client.get("/api/v1/clients", params={"sort_by": "Name"})
+        assert resp.status_code == 422, resp.text
+
+    def test_garbage_sort_order_returns_422(self, api_client) -> None:
+        resp = api_client.get(
+            "/api/v1/clients", params={"sort_order": "sideways"}
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_openapi_sort_by_is_enum_of_seven(self, api_client) -> None:
+        """OpenAPI guard of the generic brick (spec §4.1/§6): the clients
+        list `sort_by` param must render as an enum of the 7 columns —
+        nested generic models are FastAPI's unpaved road, this pins it."""
+        schema = api_client.get("/openapi.json").json()
+        params = schema["paths"]["/api/v1/clients"]["get"]["parameters"]
+        sort_by = next(p for p in params if p["name"] == "sort_by")
+        assert sort_by["schema"]["enum"] == self.SORT_BY_ENUM
+
+
+class TestClientSortApplication:
+    """GH #367 Task 3 — С1/С3: real ordering through the shared resolver.
+
+    ``list_clients_view`` routes ``sort_by``/``sort_order`` through
+    ``domain/sorting.apply_sort`` (canonical nulls policy: asc →
+    nullsfirst, desc → nullslast — byte-for-byte today's inline behavior)
+    and appends the NEW deterministic ``Client.id.asc()`` tie-break: rows
+    with equal sort values get a stable order across page boundaries
+    (spec §3 delta table; pattern: test_api_records.py paging sorts).
+    """
+
+    @staticmethod
+    def _ids(api_client, **params) -> list[str]:
+        resp = api_client.get("/api/v1/clients", params=params)
+        assert resp.status_code == 200, resp.text
+        return [c["id"] for c in resp.json()["items"]]
+
+    def test_sort_by_name_asc_desc(self, api_client, create_client) -> None:
+        first = create_client(name="Аида")
+        last = create_client(name="Яна")
+        asc = self._ids(api_client, sort_by="name", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="name", sort_order="desc", per_page=100)
+        assert asc.index(first["id"]) < asc.index(last["id"])
+        assert desc.index(last["id"]) < desc.index(first["id"])
+
+    def test_default_sort_is_name_asc(self, api_client, create_client) -> None:
+        """С3: no sort params → default ``name asc`` — same full order as
+        the explicit request (defaults fixed in the params model)."""
+        first = create_client(name="Аида")
+        last = create_client(name="Яна")
+        default = self._ids(api_client, per_page=100)
+        explicit = self._ids(api_client, sort_by="name", sort_order="asc", per_page=100)
+        assert default == [first["id"], last["id"]]
+        assert default == explicit
+
+    def test_sort_by_total_paid_asc_desc(self, api_client, create_record) -> None:
+        """С1: «Потрачено» column — full ordering chain zero → poor → rich
+        in both directions (record without payments keeps total_paid 0)."""
+        zero = create_record()["client_id"]
+        r_poor = create_record()
+        r_rich = create_record()
+        for record_id, amount in ((r_poor["id"], 100), (r_rich["id"], 9000)):
+            resp = api_client.post(
+                "/api/v1/payments",
+                json={"record_id": record_id, "amount": amount, "method": "card"},
+            )
+            assert resp.status_code == 201, resp.text
+        poor, rich = r_poor["client_id"], r_rich["client_id"]
+        asc = self._ids(api_client, sort_by="total_paid", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="total_paid", sort_order="desc", per_page=100)
+        assert asc.index(zero) < asc.index(poor) < asc.index(rich)
+        assert desc.index(rich) < desc.index(poor) < desc.index(zero)
+
+    def test_equal_total_paid_stable_across_pages(
+        self, api_client, create_client, create_record
+    ) -> None:
+        """С1 (core of #367): six clients with equal ``total_paid`` (three
+        with records, three bare — all 0) cut by a ``per_page=3``
+        boundary: pages concatenated == the full deterministic order
+        (``Client.id.asc()`` tie-break), pages disjoint, and a repeated
+        request returns the exact same page. Pattern:
+        ``test_api_records.py`` paging sorts (test_sort_pages_disjoint),
+        strengthened to a full order + repeat-stability pin."""
+        created = [create_record()["client_id"] for _ in range(3)]
+        created += [create_client()["id"] for _ in range(3)]
+        assert len(created) == 6  # data suffices to cut the page boundary
+        page = dict(sort_by="total_paid", sort_order="asc", per_page=3)
+        p1 = self._ids(api_client, page=1, **page)
+        p2 = self._ids(api_client, page=2, **page)
+        assert p1 + p2 == sorted(created)
+        assert not set(p1) & set(p2)
+        assert self._ids(api_client, page=1, **page) == p1
+
+    def test_last_record_nulls_as_today(
+        self, api_client, create_client, create_activity
+    ) -> None:
+        """``last_record`` NULLs — as today (canonical policy): asc →
+        nullsfirst (a client without records on top), desc → nullslast
+        (at the bottom), and the non-null tail orders by recency."""
+        from datetime import UTC, datetime, timedelta
+
+        bare = create_client(name="Безвизитный")
+        earlier = create_client(name="Ранний")
+        later = create_client(name="Поздний")
+        now = datetime.now(UTC)
+        for client, start in (
+            (earlier, now + timedelta(days=1)),
+            (later, now + timedelta(days=2)),
+        ):
+            resp = api_client.post("/api/v1/records", json={
+                "activity_id": create_activity(start=start)["id"],
+                "client_id": client["id"],
+                "visits": [{"name": "Гость", "price": 1000, "status": "waiting"}],
+            })
+            assert resp.status_code == 201, resp.text
+        asc = self._ids(api_client, sort_by="last_record", sort_order="asc", per_page=100)
+        desc = self._ids(api_client, sort_by="last_record", sort_order="desc", per_page=100)
+        assert asc[0] == bare["id"]
+        assert asc.index(earlier["id"]) < asc.index(later["id"])
+        assert desc[-1] == bare["id"]
+        assert desc.index(later["id"]) < desc.index(earlier["id"])
+

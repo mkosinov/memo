@@ -109,15 +109,19 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   };
 });
 
-// ─── Mutation hook mocks (GH #140 — ClientCardModal owns hook instances) ──
+// ─── Mutation hook mocks (GH #140 — ClientCardModal owns hook instances;
+// GH #345 — useDeleteClient returns the deferred-conveyor surface) ─────
 
 const createHook = { mutateAsync: vi.fn() };
 const updateHook = { mutateAsync: vi.fn() };
 const patchHook = { mutateAsync: vi.fn() };
-const deleteHook = { mutateAsync: vi.fn(), dependencies: null as DependencyNode[] | null };
+const deleteHook = {
+  removeClient: vi.fn(),
+  removeClientResolved: vi.fn(),
+  isPending: false,
+};
 const archiveHook = { mutateAsync: vi.fn() };
 const restoreHook = { mutateAsync: vi.fn() };
-const resolveDeleteHook = { mutateAsync: vi.fn() };
 
 vi.mock('@/hooks/useClientsMutations', () => ({
   useCreateClient: () => createHook,
@@ -126,7 +130,6 @@ vi.mock('@/hooks/useClientsMutations', () => ({
   useDeleteClient: () => deleteHook,
   useArchiveClient: () => archiveHook,
   useRestoreClient: () => restoreHook,
-  useResolveDeleteClient: () => resolveDeleteHook,
 }));
 
 vi.mock('@/contexts/UIContext', () => ({
@@ -137,11 +140,11 @@ beforeEach(() => {
   createHook.mutateAsync = vi.fn().mockResolvedValue({});
   updateHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
   patchHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
-  deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
-  deleteHook.dependencies = null;
+  deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
+  deleteHook.removeClientResolved = vi.fn().mockResolvedValue(undefined);
+  deleteHook.isPending = false;
   archiveHook.mutateAsync = vi.fn().mockResolvedValue({});
   restoreHook.mutateAsync = vi.fn().mockResolvedValue({});
-  resolveDeleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
   mockUseQuery.mockReturnValue({ data: [], isLoading: false });
 });
 
@@ -321,27 +324,26 @@ describe('ClientCardModal', () => {
   });
 
   it('footer «Удалить» with 409 + dependencies triggers the DeleteDialog flow (no window.confirm)', async () => {
-    deleteHook.mutateAsync = vi.fn().mockRejectedValue(
+    deleteHook.removeClient = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', DEPS_CHOICE),
     );
-    deleteHook.dependencies = DEPS_CHOICE;
     const onClose = vi.fn();
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.removeClient).toHaveBeenCalledWith(mockClientWithStats));
     // 409 + dependencies → DeleteDialog opens
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Анна Иванова');
   });
 
   it('footer "Удалить" with 204 dry-run success closes the modal immediately', async () => {
-    deleteHook.mutateAsync = vi.fn().mockResolvedValue(undefined);
+    deleteHook.removeClient = vi.fn().mockResolvedValue(undefined);
     const onClose = vi.fn();
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteHook.mutateAsync).toHaveBeenCalledWith('c1'));
+    await waitFor(() => expect(deleteHook.removeClient).toHaveBeenCalledWith(mockClientWithStats));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
@@ -350,10 +352,9 @@ describe('ClientCardModal', () => {
     const blocked: DependencyNode[] = [
       { entity: 'activities', auto: false, relation: 'Активность', count: 1, allowed_actions: [], message: null },
     ];
-    deleteHook.mutateAsync = vi.fn().mockRejectedValue(
+    deleteHook.removeClient = vi.fn().mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', blocked),
     );
-    deleteHook.dependencies = blocked;
     archiveHook.mutateAsync = vi.fn().mockResolvedValue({ ...mockClientWithStats, archived: true });
     const onClose = vi.fn();
     render(<ClientCardModal {...defaultProps} onClose={onClose} />);

@@ -29,11 +29,13 @@ from src.api.v1.staff import router as staff_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
 from src.api.v1.user_settings import router as user_settings_router
+from src.api.v1.users import router as users_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.visits import router as visits_router
 from src.auth.router import router as auth_router
 from src.core.config import settings
 from src.db.migrate import run_alembic_upgrade
+from src.domain.errors import UnknownSortKeyError
 from src.errors import ErrorCode, ErrorDetail
 from src.events import emitter
 from src.events.hub import hub
@@ -191,6 +193,23 @@ def create_app() -> FastAPI:
             ).model_dump()},
         )
 
+    @app.exception_handler(UnknownSortKeyError)
+    async def unknown_sort_key_handler(request: Request, exc: UnknownSortKeyError):
+        """Sort key missing from an entity's sort map → 422 VALIDATION_ERROR.
+
+        GH #367 spec §4.2 safety net: the main line is the per-entity
+        ``sort_by`` Literal (FastAPI 422 before the resolver runs); this
+        handler catches only paths that bypassed it, so a contract drift
+        surfaces as a validation error — never a 500.
+        """
+        return JSONResponse(
+            status_code=422,
+            content={"detail": ErrorDetail(
+                code=ErrorCode.VALIDATION_ERROR.value,
+                message=str(exc),
+            ).model_dump()},
+        )
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         """Catch-all for uncaught exceptions → 500 with INTERNAL_ERROR code.
@@ -234,6 +253,8 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
     app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #348 — users vertical: admin-side phone edit + password-link issue.
+    app.include_router(users_router, prefix="/api/v1/users")
     # GH #344 — audit journal reading (admin-only, spec §6).
     app.include_router(audit_logs_router, prefix="/api/v1/audit-logs")
     # GH #262 — own-data profile (session-guarded, no permission token).

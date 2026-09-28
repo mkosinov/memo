@@ -14,6 +14,8 @@ const ALL_ACTIONS = [
   'archive',
   'restore',
   'reorder',
+  // #348 spec §8: the link-issuance journal action (author — the admin).
+  'password_link_issued',
 ] as const;
 
 const ALL_ENTITIES = [
@@ -52,6 +54,11 @@ describe('ACTION_LABELS covers every journal action (GH #344 §7)', () => {
     expect(ACTION_LABELS.archive).toBe('заархивировал');
     expect(ACTION_LABELS.restore).toBe('восстановил');
     expect(ACTION_LABELS.reorder).toBe('переставил');
+  });
+
+  // #348 spec §8: link issuance journals a dedicated action verb.
+  it('labels the password-link issuance action (#348 §8)', () => {
+    expect(ACTION_LABELS.password_link_issued).toBe('выдал ссылку установки пароля');
   });
 });
 

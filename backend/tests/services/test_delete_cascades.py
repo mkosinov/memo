@@ -402,14 +402,19 @@ async def test_client_hard_delete_nullifies_photos(api_client, db_session):
     client = await _insert_client(db_session)
     photo = await _insert_photo(db_session, client_id=client.id)
 
-    # No-body dry-run → 409 (the photos dep is present in the tree).
-    resp = api_client.delete(f"/api/v1/clients/{client.id}")
+    # GH #345 §4.1: the preview moved behind ?dry_run=true (bare → 422) —
+    # the photos dep (with its ``_count_c_photos`` counter) appears in the
+    # dependency tree.
+    resp = api_client.request(
+        "DELETE", f"/api/v1/clients/{client.id}", params={"dry_run": "true"},
+    )
     assert resp.status_code == 409, resp.text
 
-    # photos is an AUTO dep → resolutions {} suffices → 204.
+    # photos is an AUTO dep → resolutions {} + the empty expected state
+    # suffice → 204.
     resp = api_client.request(
         "DELETE", f"/api/v1/clients/{client.id}",
-        json={"resolutions": {}},
+        json={"resolutions": {}, "expected": {}},
     )
     assert resp.status_code == 204, resp.text
 
@@ -421,20 +426,28 @@ async def test_client_hard_delete_nullifies_photos(api_client, db_session):
 
 async def test_location_hard_delete_nullifies_photos(api_client, db_session):
     """Location hard-delete via the unified DELETE route auto-nullifies its
-    photos: the photo row survives with ``location_id IS NULL``."""
+    photos: the photo row survives with ``location_id IS NULL``.
+
+    GH #345 §4.1: the dry-run is now the ``?dry_run=true`` preview flag;
+    the execute commit carries ``{expected: {}}`` (photos is AUTO —
+    exempt from the verification; location has no other deps here).
+    """
     from tests.conftest import query_db
 
     location = await _insert_location(db_session)
     photo = await _insert_photo(db_session, location_id=location.id)
 
-    # No-body dry-run → 409 (the photos dep is present in the tree).
-    resp = api_client.delete(f"/api/v1/locations/{location.id}")
-    assert resp.status_code == 409, resp.text
-
-    # photos is an AUTO dep → resolutions {} suffices → 204.
+    # Preview → 409 (the photos dep is present in the tree).
     resp = api_client.request(
         "DELETE", f"/api/v1/locations/{location.id}",
-        json={"resolutions": {}},
+        params={"dry_run": "true"},
+    )
+    assert resp.status_code == 409, resp.text
+
+    # photos is an AUTO dep → commit {expected: {}} → 204.
+    resp = api_client.request(
+        "DELETE", f"/api/v1/locations/{location.id}",
+        json={"expected": {}},
     )
     assert resp.status_code == 204, resp.text
 

@@ -6,6 +6,8 @@ import {
   clientSearchInput,
   expectDeepLinkChip,
   expectClientSearchEmpty,
+  commitDeleteWait,
+  undoToast,
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import {
@@ -251,26 +253,34 @@ test.describe('Clients page', () => {
       const modal = page.locator('[data-testid="client-card-modal"]');
       await expect(modal).toBeVisible({ timeout: 5000 });
 
-      // Click "Удалить" — #207: no-body DELETE dry-run; the freshly created
-      // client has zero deps → 204 instant hard delete, modal closes.
-      // (No confirm dialog anymore; the listener is a defensive no-op.)
-      page.on('dialog', (dialog) => dialog.accept());
+      // Click "Удалить" — GH #345 conveyor (T6): the click fires the PURE
+      // dry-run preview (DELETE ?dry_run=true, no body); the freshly created
+      // client has zero deps → clean 204 → OPTIMISTIC removal + the deferred
+      // commit at the end of the 5s undo window. No JS confirm dialog and no
+      // DeleteDialog on the clean path. Register the commit listener BEFORE
+      // the click (the window is 5s — the wait must not miss the request).
+      const commitWait = commitDeleteWait(page, '/api/v1/clients', clientId);
       await page.locator('button:has-text("Удалить")').click();
 
-      // Modal should close
+      // Modal closes immediately — the enqueue is synchronous (optimistic).
       await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-      // Reload page — hard-deleted client is gone from the list
-      // NOTE: default 'load' wait — 'networkidle' never resolves while the
-      // SSE /api/v1/events stream stays open (#239).
-      await page.reload();
-      await waitForClientsReady(page);
+      // The row disappears optimistically — no reload needed.
+      await expect(row).toHaveCount(0, { timeout: 10_000 });
 
-      // Client should no longer be visible in table
-      const remaining = page
-        .locator('table tbody tr')
-        .filter({ hasText: testName });
-      await expect(remaining).toHaveCount(0, { timeout: 10_000 });
+      // Ring toast «Удалено. Отменить» carries the 5s countdown.
+      const toast = undoToast(page);
+      await expect(toast).toBeVisible();
+      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+
+      // Deferred commit: DELETE with a JSON body ({expected: {}} — clean
+      // path) fires at the window end; postData() !== null discriminates it
+      // from the dry-run preview.
+      const commit = await commitWait;
+      expect(commit.status()).toBe(204);
+
+      // VERIFY DB — the client row is physically gone after the commit.
+      expect(queryDBRow(`SELECT id FROM clients WHERE id='${clientId}'`)).toBeNull();
     } finally {
       // Client was deleted, but cleanup just in case
       await cleanup(request, `/api/v1/clients/${clientId}`);

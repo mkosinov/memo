@@ -14,7 +14,11 @@ Exactly this list, no more, no less:
   ``GET /api/v1/photos/web`` — ``frontend/web`` ``useGallery``);
 - ``POST /api/v1/records`` — anonymous booking until #8;
 - ``GET /api/v1/health``;
-- the auth endpoints themselves (login / logout / me).
+- the auth endpoints themselves (login / logout / me) + the public
+  password-setup pair (#348 spec §5/§7: the authority of
+  ``password-setup`` is the one-time token itself — validate probes a
+  link, setup consumes it; both feed the shared per-IP failure counter
+  on invalid tokens).
 
 NOT here: ``GET /api/v1/events`` (SSE, GH #239) — it gets a session guard
 in T7; and user-settings — own-only since #247.
@@ -47,4 +51,9 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/logout"),
     ("GET", "/api/v1/auth/me"),
+    # GH #348 (spec §5/§7): the public password-setup pair — the
+    # authority is the one-time token itself (256-bit). Invalid-token
+    # attempts feed the shared §3.4 per-IP failure counter.
+    ("POST", "/api/v1/auth/password-setup/validate"),
+    ("POST", "/api/v1/auth/password-setup"),
 })

@@ -248,14 +248,6 @@ export const mockServiceResponse: ServiceResponse = {
 };
 
 /** Factory for creating ServiceResponse objects with overrides. */
-export function createMockServiceResponse(
-  overrides: Partial<ServiceResponse> = {},
-): ServiceResponse {
-  return {
-    ...mockServiceResponse,
-    ...overrides,
-  };
-}
 
 // ─── MasterViewResponse (read-only /masters view, GH #266) ────────────────
 // The view returns ACTING masters only (masters.is_active = true), so there is
@@ -307,14 +299,6 @@ export const mockMasterResponseArchived: MasterViewResponse = {
 };
 
 /** Factory for creating MasterViewResponse objects with overrides. */
-export function createMockMasterResponse(
-  overrides: Partial<MasterViewResponse> = {},
-): MasterViewResponse {
-  return {
-    ...mockMasterResponse,
-    ...overrides,
-  };
-}
 
 // ─── StaffResponse (composite staff card, GH #266 «Сотрудники» screen) ────
 // `archived` = the PERSON flag (staff.is_active inverted); `master.archived` =
@@ -336,6 +320,7 @@ export const mockStaffResponse: StaffResponse = {
   },
   position_ids: ['master'],
   has_user: false,
+  account: null, // #348: no linked account
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -356,6 +341,15 @@ export const mockStaffResponseArchived: StaffResponse = {
   },
   position_ids: ['master'],
   has_user: true,
+  account: {
+    // #348: archived account — the block stays, rendered read-only.
+    id: 'u-m2', // users.id — the users-vertical address key
+    phone: '+79991234502',
+    role: 'master',
+    password_is_set: true,
+    is_active: false,
+    link_expires_at: null,
+  },
   archived: true,
   created_at: '2024-01-10T10:00:00Z',
   updated_at: '2024-05-01T12:00:00Z',
@@ -371,6 +365,7 @@ export const mockStaffResponseNoMaster: StaffResponse = {
   master: null,
   position_ids: ['smm'],
   has_user: false,
+  account: null, // #348: no linked account
   archived: false,
   created_at: '2024-02-01T10:00:00Z',
   updated_at: '2024-02-01T10:00:00Z',

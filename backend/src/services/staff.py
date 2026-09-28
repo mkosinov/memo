@@ -30,6 +30,7 @@ marks live in the owner modules; their absence HERE is pinned by
 
 from __future__ import annotations
 
+from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
@@ -46,6 +47,7 @@ from src.repositories.generic import get_archive_repository
 from src.repositories.search import SearchField
 from src.schemas.common import PaginatedResponse
 from src.schemas.staff import (
+    StaffAccountView,
     StaffCreate,
     StaffResponse,
     StaffUpdate,
@@ -91,22 +93,50 @@ async def _position_ids(
     return result
 
 
-async def _user_presence(
+async def _account_blocks(
     db_session: AsyncSession, staff_ids: Sequence[str]
-) -> dict[str, bool]:
-    """Fetch {staff_id: has_user} — ANY linked users row counts (D6).
+) -> dict[str, StaffAccountView]:
+    """Fetch {staff_id: account block} for the cards' linked accounts
+    (#348 spec §5) — TWO queries (users by staff_id + the LIVE setup
+    tokens of those users), no N+1.
 
-    ``is_active`` is deliberately ignored: «наличие учётки» for the D6
-    dismissal checkbox means the row exists; applying the checkbox to an
-    active link is the dialog's own logic.
+    The block carries ANY ``is_active`` (an archived account is shown as
+    archived — «Учётка архивирована» — not dropped). ``link_expires_at``
+    = the LIVE token's expiry (``used_at IS NULL`` AND ``expires_at >
+    now``); used/expired/absent → ``None`` (the raw token never persists,
+    only its SHA-256 digest — no URL can ever be reassembled here).
     """
     if not staff_ids:
         return {}
-    rows = await db_session.execute(
-        select(User.staff_id).where(User.staff_id.in_(list(staff_ids)))
+    users = await db_session.execute(
+        select(User).where(User.staff_id.in_(list(staff_ids)))
     )
-    return {staff_id: True for (staff_id,) in rows.all()}
+    blocks: dict[str, StaffAccountView] = {}
+    staff_by_user: dict[str, str] = {}
+    for user in users.scalars().all():
+        blocks[user.staff_id] = StaffAccountView.model_validate(user)
+        staff_by_user[user.id] = user.staff_id
+    if not staff_by_user:
+        return blocks
+    # LAZY import — src.auth pulls the auth stack (sessions/service);
+    # keeping it function-local preserves the module import graph.
+    from src.auth.password_setup import PasswordSetupToken
 
+    live = await db_session.execute(
+        select(PasswordSetupToken.user_id, PasswordSetupToken.expires_at)
+        .where(
+            PasswordSetupToken.user_id.in_(list(staff_by_user)),
+            PasswordSetupToken.used_at.is_(None),
+            PasswordSetupToken.expires_at > datetime.utcnow(),
+        )
+        # Defensive: the partial unique index guarantees ONE live token
+        # per user; a deterministic order makes any violation loud
+        # (same-user duplicates would map to the same block anyway).
+        .order_by(PasswordSetupToken.expires_at)
+    )
+    for user_id, expires_at in live.all():
+        blocks[staff_by_user[user_id]].link_expires_at = expires_at
+    return blocks
 
 
 class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
@@ -131,6 +161,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         ext: Master | None,
         position_ids: list[str],
         has_user: bool = False,
+        account: StaffAccountView | None = None,
     ) -> StaffResponse:
         from src.schemas.staff import MasterSectionView
 
@@ -147,6 +178,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             sort_order=staff.sort_order,
             is_active=staff.is_active,
             has_user=has_user,
+            account=account,
             created_at=staff.created_at,
             updated_at=staff.updated_at,
         )
@@ -159,14 +191,21 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def _assemble(
         self, db_session: AsyncSession, staff_rows: Sequence[Staff]
     ) -> list[StaffResponse]:
-        """Bulk-fill master sections + position ids + has_user for a page."""
+        """Bulk-fill master sections + position ids + has_user + the
+        account block for a page."""
         ids = [s.id for s in staff_rows]
         exts = await _master_extensions(db_session, ids)
         links = await _position_ids(db_session, ids)
-        users = await _user_presence(db_session, ids)
+        accounts = await _account_blocks(db_session, ids)
         return [
             self._to_response(
-                s, exts.get(s.id), links.get(s.id, []), users.get(s.id, False)
+                s,
+                exts.get(s.id),
+                links.get(s.id, []),
+                # has_user (T8 Gap B): a linked users row EXISTS — the
+                # account block query already knows exactly that.
+                s.id in accounts,
+                accounts.get(s.id),
             )
             for s in staff_rows
         ]
@@ -181,8 +220,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             return None
         ext = (await _master_extensions(db_session, [id])).get(id)
         links = await _position_ids(db_session, [id])
-        has_user = (await _user_presence(db_session, [id])).get(id, False)
-        return self._to_response(staff, ext, links.get(id, []), has_user)
+        account = (await _account_blocks(db_session, [id])).get(id)
+        return self._to_response(
+            staff, ext, links.get(id, []), account is not None, account
+        )
 
     async def list(
         self,

@@ -1,12 +1,13 @@
 """Pydantic schemas for the clients domain."""
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field
 
 from src.domain.phone_digits import to_national_digits
 from src.models.enums import ArchiveStatus, Channel
+from src.schemas.common import SortOrder, SortParams
 from src.schemas.pagination import PaginationParams
 
 
@@ -54,6 +55,29 @@ class ClientPatch(BaseModel):
     phone: str | None = None
     email: str | None = None
     channel: Channel | None = None
+
+
+class ClientDeleteBody(BaseModel):
+    """DELETE /api/v1/clients/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``StaffDeleteBody`` / ``TagDeleteBody``).
+
+    * ``expected`` — id-sets per non-auto FK entity. Client's non-auto
+      deps are ``records`` (nullify) and ``visitors`` (cascade) — the
+      two sources of the confirmed id-sets (spec §4.4: Client is the
+      ONLY entity with a resolvable commit); the clean path sends
+      ``{}``. Auto deps (client_tags, photos) are exempt.
+    * ``resolutions`` — the user's cascade choices: an occupied client
+      sends ``{"records": "nullify", "visitors": "cascade"}`` alongside
+      ``expected``.
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
 
 
 class ClientResponse(BaseModel):
@@ -118,12 +142,27 @@ def _require_4_15_digits(digits: str | None) -> str:
     return digits
 
 
-class ClientListParams(PaginationParams):
+# GH #367 §4.1: the 7 sortable columns of the clients list view — mirrors
+# the ``sort_column_map`` keys in ``services/client.py::list_clients_view``
+# (CI drift guard: Literal values == map keys).
+ClientSortBy = Literal[
+    "name", "records_count", "last_record", "total_paid",
+    "missed_records", "created_at", "updated_at",
+]
+
+
+class ClientListParams(SortParams[ClientSortBy], PaginationParams):
     """Query parameters for GET /api/v1/clients with filtering, pagination, sorting.
 
     ``q`` (GH #212): renamed from ``search``; substring search over the
     ``ClientService.search_fields`` matrix (name/phone/email + full-UUID id).
     Length bounds live HERE (params-model field), so out-of-range q → 422.
+
+    Sort (GH #367): hard 422 contract — the ``ClientSortBy`` Literal rejects
+    garbage at the schema layer, BEFORE the service (the last soft-fallback
+    list is migrated to the shared ``SortParams`` brick; the service-side
+    ``.get(..., Client.name)`` fallback is removed in Task 3). Defaults are
+    fixed here, not in the brick (spec §4.1 «правило дефолтов»).
     """
 
     q: str | None = Field(default=None, min_length=2, max_length=100)
@@ -157,5 +196,7 @@ class ClientListParams(PaginationParams):
     max_paid: int | None = Field(default=None, ge=0)
     missed_from: int | None = Field(default=None, ge=0)
     missed_to: int | None = Field(default=None, ge=0)
-    sort_by: str = "name"
-    sort_order: str = "asc"
+    # Both fields re-declared (spec §4.1): fixed defaults live in the
+    # subclass, and `None` drops out of the sort_by type entirely.
+    sort_by: ClientSortBy = "name"
+    sort_order: SortOrder = "asc"

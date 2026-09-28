@@ -42,9 +42,6 @@ export function parseLocalISO(start: string): ParsedLocalISO {
  * Date using LOCAL getters — API writes. Replaces the inline padStart blocks
  * in ScheduleContext. Seconds are always '00' (schedule granularity: minutes).
  */
-export function dateToLocalISO(date: Date): string {
-  return `${toISODate(date)}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:00`;
-}
 
 /** Compose a datetime string from a date key + integer minutes (mutation payloads: drag/drop, quick-add). */
 export function composeLocalISO(date: string, startMinutes: number): string {
@@ -79,9 +76,6 @@ export function dayIndexToDate(monday: Date, dayIndex: number): string {
 }
 
 /** Mon=0..Sun=6 index of a Date (absorbs `transformers.normalizeDay`). */
-export function weekDayIndex(date: Date): number {
-  return (date.getDay() + 6) % 7;
-}
 
 /** Format integer minutes-from-midnight as 'HH:MM' — display ONLY. */
 export function formatTime(startMinutes: number): string {

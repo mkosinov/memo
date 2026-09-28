@@ -345,6 +345,33 @@ class TestPhotosListContract:
         created = [i["created_at"] for i in r.json()["items"]]
         assert created == sorted(created, reverse=True)
 
+    def test_photos_default_sort_created_at_desc_no_params(
+        self, api_client, photos_fixture,
+    ) -> None:
+        """NO sort params in the query → created_at desc (newest first).
+
+        GH #367 Task 4 flip guard: the photo table must stay newest-first.
+        The photos are created sequentially, but created_at second
+        granularity can collide — the fixture assigns DISTINCT descending
+        timestamps directly, so any direction flip (asc default, or a
+        resolver regression) breaks the strict-descending assertion.
+        """
+        # DISTINCT strictly-descending created_at: first fixture photo is
+        # the newest, last one is the oldest.
+        for pos, key in enumerate(FIXTURE_PHOTOS):
+            query_db_params(
+                "UPDATE photos SET created_at = :dt WHERE id = :id",
+                {"dt": f"2026-03-01 12:00:{59 - pos:02d}", "id": photos_fixture[key]["id"]},
+            )
+
+        response = api_client.get(PHOTOS_URL, params={"per_page": 100})
+
+        assert response.status_code == 200, response.text
+        got_ids = [i["id"] for i in response.json()["items"]]
+        assert got_ids == [photos_fixture[key]["id"] for key in FIXTURE_PHOTOS], (
+            "no sort params must default to created_at desc (newest first)"
+        )
+
     def test_photos_client_name(self, api_client, photos_fixture) -> None:
         """client_name: C1's name for client photos; None for others;
         still resolves after the client is archived."""

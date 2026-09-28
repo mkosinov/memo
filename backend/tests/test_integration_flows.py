@@ -379,7 +379,11 @@ class TestClientSearchFlow:
     def test_client_search_excludes_inactive(self, api_client, create_client) -> None:
         """Soft-deleted client is not returned by phone lookup."""
         client = create_client(phone="+79995554433")
-        api_client.delete(f"/api/v1/clients/{client['id']}")
+        # GH #345: bare DELETE is 422 — the clean commit declares its state.
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client['id']}", json={"expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
 
         resp = api_client.get("/api/v1/clients/get", params={"phone": "+79995554433"})
         assert resp.status_code == 404

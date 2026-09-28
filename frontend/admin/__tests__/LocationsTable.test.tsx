@@ -61,13 +61,9 @@ vi.mock('@/hooks/useLocationsMutations', () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
   })),
-  usePatchLocation: vi.fn(() => ({
-    mutateAsync: vi.fn().mockResolvedValue({}),
-    isPending: false,
-  })),
   useDeleteLocation: vi.fn(() => ({
-    mutateAsync: vi.fn().mockResolvedValue({}),
-    dependencies: null,
+    removeLocation: vi.fn().mockResolvedValue(undefined),
+    removeLocationResolved: vi.fn().mockResolvedValue(undefined),
     isPending: false,
   })),
   useCreateLocation: vi.fn(() => ({
@@ -100,20 +96,17 @@ import { LocationsTable } from '@/app/(main)/locations/components/LocationsTable
 import { LocationsProvider } from '@/contexts/LocationsContext';
 import {
   useUpdateLocation,
-  usePatchLocation,
   useDeleteLocation,
   useArchiveLocation,
   useRestoreLocation,
 } from '@/hooks/useLocationsMutations';
-import { getLocations, resolveDeleteLocation, ApiError } from '@memo/api-client';
+import { getLocations, ApiError } from '@memo/api-client';
 
 const mockUseUpdateLocation = vi.mocked(useUpdateLocation);
-const mockUsePatchLocation = vi.mocked(usePatchLocation);
 const mockUseDeleteLocation = vi.mocked(useDeleteLocation);
 const mockUseArchiveLocation = vi.mocked(useArchiveLocation);
 const mockUseRestoreLocation = vi.mocked(useRestoreLocation);
 const mockGetLocations = vi.mocked(getLocations);
-const mockResolveDeleteLocation = vi.mocked(resolveDeleteLocation);
 
 // ─── Test data ───────────────────────────────────────────────────────────
 
@@ -478,34 +471,21 @@ describe('LocationsTable', () => {
     expect(screen.queryByLabelText('Карта')).not.toBeInTheDocument();
   });
 
-  // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
+  // ─── Delete → DeleteDialog flow (#207 §7 / GH #345 deferred conveyor) ──
 
-  /** Delete hook whose dry-run rejects with a 409 carrying the given tree. */
+  /** Delete hook whose preview rejects with a 409 carrying the given tree. */
   function setupDeleteConflict(deps: DependencyNode[]) {
-    const mutateAsync = vi.fn().mockRejectedValue(conflictError(deps));
+    const removeLocation = vi.fn().mockRejectedValue(conflictError(deps));
     mockUseDeleteLocation.mockReturnValue({
-      mutateAsync,
-      dependencies: deps,
-      mutate: vi.fn(),
+      removeLocation,
+      removeLocationResolved: vi.fn().mockResolvedValue(undefined),
       isPending: false,
-      isSuccess: false,
-      isError: false,
-      isIdle: true,
-      data: undefined,
-      error: conflictError(deps),
-      status: 'error',
-      reset: vi.fn(),
-      failureCount: 1,
-      failureReason: conflictError(deps),
-      variables: undefined,
-      context: undefined,
-      submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteLocation>);
-    return mutateAsync;
+    return removeLocation;
   }
 
   it('opens DeleteDialog with the 409 dependency tree when delete conflicts', async () => {
-    const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
+    const removeLocation = setupDeleteConflict(DEPS_BLOCKED);
     setupEnvelope();
     await renderLoaded();
 
@@ -513,8 +493,8 @@ describe('LocationsTable', () => {
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    expect(deleteMutateAsync).toHaveBeenCalledWith('loc-1');
-    // window.confirm is gone — the dialog takes over (§7.3 fetch flow)
+    expect(removeLocation).toHaveBeenCalledWith(TEST_LOCATIONS[0]);
+    // window.confirm is gone — the dialog takes over (fetch flow)
     await waitFor(() => expect(screen.getByTestId('delete-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('delete-dialog-title').textContent).toContain('Студия на Невском');
   });
@@ -550,9 +530,14 @@ describe('LocationsTable', () => {
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
-  it('Mode A confirm calls resolveDeleteLocation with {} (all deps auto) and closes', async () => {
+  it('Mode A confirm enqueues the deferred delete (resolutions {} + the FULL tree)', async () => {
     setupDeleteConflict(DEPS_AUTO);
-    mockResolveDeleteLocation.mockResolvedValue(undefined);
+    const removeLocationResolved = vi.fn().mockResolvedValue(undefined);
+    mockUseDeleteLocation.mockReturnValue({
+      removeLocation: vi.fn().mockRejectedValue(conflictError(DEPS_AUTO)),
+      removeLocationResolved,
+      isPending: false,
+    } as unknown as ReturnType<typeof useDeleteLocation>);
     setupEnvelope();
     await renderLoaded();
 
@@ -563,36 +548,24 @@ describe('LocationsTable', () => {
     // All deps auto — no choice checkboxes, button enabled immediately
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
-    await waitFor(() => expect(mockResolveDeleteLocation).toHaveBeenCalledWith('loc-1', {}));
+    // GH #345: enqueue is synchronous — the dialog closes immediately and
+    // removeLocationResolved carries the resolutions + the FULL tree (the
+    // parent hook builds `expected` from it; all-auto location tree → {}).
     await waitFor(() =>
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['locations'] }),
+      expect(removeLocationResolved).toHaveBeenCalledWith(TEST_LOCATIONS[0], {}, DEPS_AUTO),
     );
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
-  it('204 dry-run success → instant delete: dry-run call happens, no dialog opens', async () => {
-    // Hook-level cross-invalidation (['locations'] + ['records']) is covered by
-    // useLocationsMutations.test.ts — the mutation is mocked out here, so this
-    // test asserts table behavior only: the dry-run fires and the dialog
-    // never opens when the delete succeeds.
-    const deleteMutateAsync = vi.fn().mockResolvedValue(undefined);
+  it('204 preview success → optimistic removal: preview fires, no dialog opens', async () => {
+    // Hook-level conveyor branches are covered by useDeleteLocation.test.ts
+    // — the hook is mocked out here, so this test asserts table behavior
+    // only: the preview fires and the dialog never opens on success.
+    const removeLocation = vi.fn().mockResolvedValue(undefined);
     mockUseDeleteLocation.mockReturnValue({
-      mutateAsync: deleteMutateAsync,
-      dependencies: null,
-      mutate: vi.fn(),
+      removeLocation,
+      removeLocationResolved: vi.fn().mockResolvedValue(undefined),
       isPending: false,
-      isSuccess: false,
-      isError: false,
-      isIdle: true,
-      data: undefined,
-      error: null,
-      status: 'idle',
-      reset: vi.fn(),
-      failureCount: 0,
-      failureReason: null,
-      variables: undefined,
-      context: undefined,
-      submittedAt: 0,
     } as unknown as ReturnType<typeof useDeleteLocation>);
     setupEnvelope();
     await renderLoaded();
@@ -600,12 +573,12 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getAllByLabelText(/Действия/)[0]);
     fireEvent.click(screen.getByText('Удалить'));
 
-    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledWith('loc-1'));
+    await waitFor(() => expect(removeLocation).toHaveBeenCalledWith(TEST_LOCATIONS[0]));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
   it('cancel closes the dialog without executing a delete', async () => {
-    const deleteMutateAsync = setupDeleteConflict(DEPS_BLOCKED);
+    const removeLocation = setupDeleteConflict(DEPS_BLOCKED);
     setupEnvelope();
     await renderLoaded();
 
@@ -616,17 +589,15 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
 
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
-    // Only the dry-run attempt happened — never executed beyond it
-    expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+    // Only the preview attempt happened — never executed beyond it
+    expect(removeLocation).toHaveBeenCalledTimes(1);
   });
 
   // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────
 
   it('calls archiveLocation when "В архив" clicked on an active location', async () => {
     const archiveMutateAsync = vi.fn().mockResolvedValue(createMockLocationResponse({ id: 'loc-1', archived: true }));
-    const patchMutateAsync = vi.fn();
     mockUseArchiveLocation.mockReturnValue({ mutateAsync: archiveMutateAsync, isPending: false } as never);
-    mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
     setupEnvelope();
     await renderLoaded();
 
@@ -634,14 +605,11 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByText('В архив'));
 
     await waitFor(() => expect(archiveMutateAsync).toHaveBeenCalledWith('loc-1'));
-    expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
   it('calls restoreLocation when "Восстановить" clicked on an archived location', async () => {
     const restoreMutateAsync = vi.fn().mockResolvedValue(createMockLocationResponse({ id: 'loc-2', archived: false }));
-    const patchMutateAsync = vi.fn();
     mockUseRestoreLocation.mockReturnValue({ mutateAsync: restoreMutateAsync, isPending: false } as never);
-    mockUsePatchLocation.mockReturnValue({ mutateAsync: patchMutateAsync, isPending: false } as never);
     setupEnvelope();
     await renderLoaded();
 
@@ -650,7 +618,6 @@ describe('LocationsTable', () => {
     fireEvent.click(screen.getByText('Восстановить'));
 
     await waitFor(() => expect(restoreMutateAsync).toHaveBeenCalledWith('loc-2'));
-    expect(patchMutateAsync).not.toHaveBeenCalled();
   });
 
   // ─── Column picker ──────────────────────────────────────────────────────

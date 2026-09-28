@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { ServiceResponse, ServiceUpdate, DependencyNode } from '@memo/api-client';
-import { resolveDeleteService, ApiError } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 import { useUpdateService, useCreateService, useDeleteService, useArchiveService, useRestoreService } from '@/hooks/useServicesMutations';
 import { useUI } from '@/contexts/UIContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,7 +14,6 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { serviceColumns, serviceActions } from './serviceColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { invalidateEntities } from '@/lib/invalidate';
 
 // ─── Component ────────────────────────────────────────────────────────────
 
@@ -37,10 +35,9 @@ export function ServicesTable() {
 
   const updateService = useUpdateService();
   const createService = useCreateService();
-  const deleteService = useDeleteService();
+  const { removeService, removeServiceResolved } = useDeleteService();
   const archiveService = useArchiveService();
   const restoreService = useRestoreService();
-  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Edit modal state ───────────────────────────────────────────────
@@ -116,24 +113,27 @@ export function ServicesTable() {
     }
   };
 
-  // ─── Delete ─────────────────────────────────────────────────────────
-  // #207 §7.3 dry-run flow: no-body DELETE → 204 (instant delete, no deps)
-  // or 409 + dependency tree → DeleteDialog (Mode A/B). The parent owns the
-  // call + open/close state; the dialog receives the parsed tree.
+  // ─── Delete (GH #345: deferred conveyor — useDeleteTag/useDeleteRecord
+  // template). removeService ALWAYS dry-runs (pure preview): a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window, commit = resolveDeleteService); a 409 WITH the dependency tree
+  // rejects here → park the tree + open DeleteDialog (the row stays
+  // visible). The hook swallows 404 (quiet family invalidation) and
+  // network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
 
-  const handleDelete = async (service: ServiceResponse) => {
+  const handleDelete = useCallback(async (s: ServiceResponse) => {
     try {
-      await deleteService.mutateAsync(service.id);
-      // 204 — already deleted (zero deps): refresh handled by the hook.
-      showToast('Услуга удалена');
+      await removeService(s);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
-        setDeleteTarget({ service, dependencies: err.dependencies });
-      } else {
-        showToast(parseApiError(err).message, 'error');
+        setDeleteTarget({ service: s, dependencies: err.dependencies });
+        return;
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  };
+  }, [removeService, showToast]);
 
   // §6.15 — memoize the factory outputs
   const columns = useMemo(() => serviceColumns(), []);
@@ -218,21 +218,22 @@ export function ServicesTable() {
         />
       )}
 
-      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately via onDone. Service matrix (§4.4):
+          activities BLOCK (Mode B — archive, the delete branch is
+          unreachable); tariffs, photos, service_tags and service_materials
+          auto-cascade (Mode A — the all-auto tree confirms immediately,
+          commit {resolutions:{}, expected:{}}). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={deleteTarget.service.title}
           entityType="service"
           entityId={deleteTarget.service.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteService(id, resolutions);
-            // The resolve call bypasses the hook's onSuccess, so refresh
-            // here — incl. cross-key ['records'] (useRecordData consumers).
-            // Family rules via the shared map (#239): ['services'] + ['materials']
-            // + ['records'] (see useServicesMutations).
-            invalidateEntities(queryClient, ['services']);
-            showToast('Услуга удалена');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeServiceResolved(deleteTarget.service, resolutions, deleteTarget.dependencies);
           }}
           onArchive={(id) => archiveService.mutateAsync(id)}
           onDone={() => setDeleteTarget(null)}

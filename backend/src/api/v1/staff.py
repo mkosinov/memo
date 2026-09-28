@@ -5,7 +5,9 @@ Full CRUD over the composite staff card (service = composite
 q / sort_by whitelist WITHOUT ``position`` — M2M is ambiguous; specialty
 and color sort through a LEFT JOIN on the masters extension, NULLs last),
 bare ``/all``, get (including archived), create (D6 flags), atomic
-PUT/PATCH, DELETE with the GH #207 dependency-resolution contract, and
+PUT/PATCH, DELETE with the unified deferred-delete contract (GH #345 —
+dry_run preview / commit body with ``expected``, verification inside the
+``delete_staff`` scenario transaction), and
 D6-checkbox archive/restore. ``PUT /reorder`` is NOT carried over from the
 old masters router (no consumers; ``sort_order`` stays the default-order
 column).
@@ -16,19 +18,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import asc, nullslast
+from sqlalchemy import asc
 
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.deletion import ResolutionError, StaleDependenciesError, collect_dependencies
 from src.domain.errors import (
     BareListLimitExceededError,
     ColorRequiredError,
+    PhoneInvalidError,
+    PhoneTakenError,
     PositionIsSystemError,
     PositionNotFoundError,
     SpecialtyRequiredError,
 )
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -38,6 +43,7 @@ from src.schemas.pagination import PaginationParams
 from src.schemas.staff import (
     StaffArchiveRequest,
     StaffCreate,
+    StaffDeleteBody,
     StaffPatch,
     StaffResponse,
     StaffSortBy,
@@ -79,43 +85,21 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("staff:read"))]
 
-# Sort whitelist map: UI key → ORM columns (domain-rules/staff.md «List
-# contract»). ``position`` is EXCLUDED (M2M, ambiguous). specialty/color
-# live on the masters extension → NULLs LAST in BOTH directions (a card
-# without the master section always sorts after sectioned ones).
-_STAFF_SORT_MAP: dict[str, list] = {
-    "name": [Staff.first_name, Staff.last_name],
-    "specialty": [Master.specialty],
-    "color": [Master.color],
-    "avatar": [Staff.avatar_url],
-    "status": [Staff.is_active],
+# Sort whitelist map: UI key → spec (GH #367 Task 5, domain-rules/staff.md
+# «List contract»). ``position`` is EXCLUDED (M2M, ambiguous). specialty/color
+# live on the masters extension (a LEFT JOIN in the list query supplies
+# them) → policy ``always_nulls_last``: a card without the master section
+# sorts after sectioned ones in BOTH directions (#266 — «пустые — в
+# конце»). All other keys are canonical (asc → nullsfirst / desc →
+# nullslast). The ``sort_by=None`` fallback stays in the route (spec §4.3:
+# entity default, never passed to the resolver).
+_STAFF_SORT_KEYS: SortKeyMap = {
+    "name": SortKeySpec([Staff.first_name, Staff.last_name]),
+    "specialty": SortKeySpec([Master.specialty], policy="always_nulls_last"),
+    "color": SortKeySpec([Master.color], policy="always_nulls_last"),
+    "avatar": SortKeySpec([Staff.avatar_url]),
+    "status": SortKeySpec([Staff.is_active]),
 }
-
-
-def _staff_order_by(sort_by: StaffSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/staff.
-
-    * ``sort_by=None`` → default: ``sort_order ASC, first_name ASC, id ASC``.
-    * ``name``/``avatar``/``status`` → staff columns (records idiom:
-      nulls-first asc / nulls-last desc, ``id ASC`` tiebreak).
-    * ``specialty``/``color`` → masters-extension columns; a LEFT JOIN in
-      the list query supplies them. NULLs (no master section) go LAST in
-      BOTH directions (spec: «пустые — в конце»).
-    """
-    if sort_by is None:
-        return [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
-    cols = _STAFF_SORT_MAP[sort_by]
-    if sort_by in ("specialty", "color"):
-        ordered = [
-            c.desc().nullslast() if sort_order == "desc" else nullslast(c.asc())
-            for c in cols
-        ]
-    else:
-        ordered = [
-            c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-            for c in cols
-        ]
-    return [*ordered, asc(Staff.id)]
 
 
 def _section_error(code: ErrorCode, message: str) -> HTTPException:
@@ -131,6 +115,8 @@ _SECTION_ERRORS: tuple[type[Exception], ...] = (
     PositionNotFoundError,
     PositionIsSystemError,
     PasswordPolicyError,
+    PhoneTakenError,
+    PhoneInvalidError,
 )
 
 
@@ -152,6 +138,10 @@ def _map_domain_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, PasswordPolicyError):
         return _section_error(ErrorCode.PASSWORD_POLICY, str(exc))
+    if isinstance(exc, PhoneTakenError):
+        return _section_error(ErrorCode.PHONE_TAKEN, str(exc))
+    if isinstance(exc, PhoneInvalidError):
+        return _section_error(ErrorCode.PHONE_INVALID, str(exc))
     return _section_error(ErrorCode.VALIDATION_ERROR, str(exc))
 
 
@@ -177,7 +167,12 @@ async def list_staff(
     ``q`` (GH #212): substring on first_name/last_name (each separately)
     or exact id on a full UUID.
     """
-    order_by = _staff_order_by(sort_by, sort_order)
+    if sort_by is None:
+        # Spec §4.3: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by (as before).
+        order_by = [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
+    else:
+        order_by = apply_sort(_STAFF_SORT_KEYS, sort_by, sort_order, Staff.id)
     if sort_by in ("specialty", "color"):
         # Extension sort needs the join so NULL cards (no master section)
         # stay in the result set while sorting after sectioned ones.
@@ -352,56 +347,82 @@ async def delete_staff(
     staff_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None, embed=True),
+    body: Annotated[StaffDeleteBody | None, Body()] = None,
+    dry_run: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Non-destructive preview: returns 204 without deleting "
+                "(no deps) or 409 with the dependency tree; never "
+                "modifies rows"
+            )
+        ),
+    ] = None,
 ) -> None:
-    """Unified DELETE — dry-run (no body) or execute (with body), GH #207.
+    """Unified delete contract — dry-run preview flag / commit body
+    (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2 and the
+    records transport / #285 rev7-rev9).
 
-    * No body: ``collect_dependencies`` → empty → hard delete (204);
-      non-empty → 409 + dependency tree (no rows modified).
-    * With body ``{"resolutions": {...}}``: run the resolution transaction
-      → 204; ``ResolutionError`` → 422 (activities block); missing → 404.
+    The legacy no-body DELETE (execute-if-clean / silent dry-run) is
+    REMOVED. Staff deps per the FK matrix: ``activities`` (blocked,
+    NON-auto — joined via the masters extension row; the race gate: its
+    id-set joins the expected check even though the node is never
+    confirmed), plus 4 AUTO deps (users, masters, master_tags,
+    staff_positions — resolved automatically, exempt from the check).
 
-    Deletion matrix (domain-rules/staff.md): activities BLOCK; the masters
-    extension row, users, master_tags and staff_positions auto-cascade.
+    * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
+      existence probe → missing → 404; present →
+      ``collect_dependencies`` → empty → 204 WITHOUT deleting;
+      non-empty → 409 + dependency tree. Combined with a
+      ``resolutions`` body → 422
+      ``dry_run_with_resolutions_forbidden`` (checked before the
+      existence probe); an expected-only body is silently ignored.
+    * No body, no flag → 422 ``{"detail": "expected_state_required"}``:
+      every real deletion must declare its state; rejected before any
+      DB access — the form check precedes the probe, so an unknown id
+      still gets 422, not 404. Same for a body whose ``expected`` is
+      absent (``{"resolutions": {...}}`` alone — the rejected legacy
+      shape).
+    * Body ``{resolutions?, expected}`` — the deferred-delete commit.
+      The ROUTE is transport only (spec §4.5): the subset verification
+      AND execution live INSIDE the ``delete_staff`` scenario's
+      ``@transactional`` transaction (the ``delete_record`` mirror —
+      one transaction for the verification + the cascade); this route
+      maps ``StaleDependenciesError`` → 409 ``stale_dependencies`` +
+      current tree, ``ResolutionError`` → 422 (blocked activities →
+      422 "archive instead"), missing id → 404 ``STAFF_NOT_FOUND``,
+      success → 204.
 
-    Corridor 2 (GH #326 Task 4): the commit branch lives in the
-    ``delete_staff`` scenario (usecases) — it owns the transaction, the
-    own-entity mark, and the call of the transactionless
-    ``_resolve_delete_core`` core; the route keeps transport: the preview
-    branch (409 tree) and the 404/422 mapping. The #207 contract is
-    unchanged (no ``dry_run`` / ``expected`` — those belong to records).
+    Per the §4.4 matrix a successful commit with ``resolutions`` is
+    unreachable for Staff (activities is blocked, the rest are auto) —
+    the branch is still honored in full: it is the contract for API
+    consumers and mid-window races.
     """
-    if resolutions is not None:
-        try:
-            ok = await delete_staff_scenario(  # type: ignore[misc]
-                None,  # type: ignore[arg-type]
-                db_session=session,
-                id=staff_id,
-                resolutions=resolutions,
-            )
-        except ResolutionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=ErrorDetail(
-                    code=ErrorCode.STAFF_NOT_FOUND,
-                    message="Сотрудник не найден",
-                ).model_dump(),
-            )
-        return
+    resolutions = body.resolutions if body is not None else None
+    expected = body.expected if body is not None else None
 
-    deps = await collect_dependencies(session, Staff, staff_id)
-    if deps:
+    # Rev7 (#285) mirror: bare DELETE without the flag is a contract
+    # violation — reject the request shape before any DB access. Literal
+    # string detail (same flat shape as the 409 preview) → JSONResponse,
+    # not raised: the global HTTPException handler wraps string details
+    # into {code, message} — not the pinned contract.
+    if not dry_run and expected is None:
         return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "has_dependencies",
-                "dependencies": [d.model_dump(exclude_none=True) for d in deps],
-            },
+            status_code=422,
+            content={"detail": "expected_state_required"},
         )
-    deleted = await service.delete(db_session=session, id=staff_id)
-    if not deleted:
+    # Pure preview never carries resolutions — forbidden combination.
+    # (An expected-only body IS allowed: silently ignored below.)
+    if dry_run and resolutions is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "dry_run_with_resolutions_forbidden"},
+        )
+
+    # Existence probe. The dry-run branch MUST 404 on a missing id
+    # instead of previewing an empty tree.
+    card = await service.get(db_session=session, id=staff_id)
+    if not card:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(
@@ -409,6 +430,63 @@ async def delete_staff(
                 message="Сотрудник не найден",
             ).model_dump(),
         )
+
+    if dry_run:
+        deps = await collect_dependencies(session, Staff, staff_id)
+        if deps:
+            return _dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only: no resolve_delete, no SSE marks.
+
+    # Body branch: the commit of the deferred delete — the business
+    # chain lives in the usecases scenario (spec §4.5): ONE
+    # @transactional transaction owns BOTH the expected subset
+    # verification and the execution (the ``delete_record`` mirror,
+    # unlike the session-request routers of the dictionary entities);
+    # the ROUTE keeps only transport — the 409 stale_dependencies
+    # rendering, the 422 mapping, and 404.
+    try:
+        ok = await delete_staff_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
+            db_session=session,
+            id=staff_id,
+            resolutions=resolutions or {},
+            expected=expected,
+        )
+    except StaleDependenciesError as exc:
+        return _dependencies_response(exc.nodes, detail="stale_dependencies")
+    except ResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.STAFF_NOT_FOUND,
+                message="Сотрудник не найден",
+            ).model_dump(),
+        )
+
+
+def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``.
+
+    Mirror of the tags/records/activities routes' builder (#285/#286/
+    #318; same pinned shape). ``detail`` distinguishes the two 409s of
+    the deferred-delete contract (GH #345 §4.1): ``has_dependencies``
+    (dry-run preview) and ``stale_dependencies`` (commit-time expected
+    mismatch — rendered here from the ``StaleDependenciesError`` nodes
+    the scenario raised inside its transaction). The ``dependencies``
+    array is ``DependencyNode`` dumps — optional-None node fields are
+    OMITTED (``exclude_none``), non-optional fields always serialize
+    (the Staff tree shows counters for all deps; items stay absent —
+    §4.3 fixed boundary).
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": detail,
+            "dependencies": [d.model_dump(exclude_none=True) for d in deps],
+        },
+    )
 
 
 @router.post("/{staff_id}/archive", response_model=StaffResponse, dependencies=_WRITE_GUARD)

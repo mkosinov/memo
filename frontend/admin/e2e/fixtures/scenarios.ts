@@ -14,18 +14,6 @@ import { queryDB, queryDBRow } from './db-query';
  * Open a specific activity on the schedule by its title text.
  * Assumes admin is already on /schedule.
  */
-export async function openActivityByTitle(
-  page: Page,
-  title: string
-): Promise<void> {
-  await waitForScheduleReady(page);
-  const card = page.locator(`[data-testid="activity-card"]`).filter({
-    hasText: title,
-  });
-  await expect(card).toBeVisible();
-  await card.click();
-  await expect(page.locator('[role="dialog"]')).toBeVisible();
-}
 
 /**
  * Switch to a client/record tab inside the open activity modal.
@@ -76,21 +64,7 @@ export async function addVisitor(
  * Read the occupied value from the activity card footer.
  * Returns "N/M" string.
  */
-export async function getOccupied(page: Page): Promise<string> {
-  const el = page.locator('[data-testid="occupied"]').first();
-  return (await el.textContent()) ?? '';
-}
 
 /**
  * Get a record's status icon name (Russian).
  */
-export async function getRecordStatus(
-  page: Page,
-  recordName: string
-): Promise<string> {
-  const record = page.locator('[data-testid="record"]').filter({
-    hasText: recordName,
-  });
-  const icon = record.locator('[data-testid="status-icon"]');
-  return (await icon.getAttribute('data-status')) ?? '';
-}

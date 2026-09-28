@@ -10,15 +10,28 @@ from sqlalchemy import asc, func, select
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.deletion import (
+    ResolutionError,
+    collect_dependencies,
+    collect_dependency_ids,
+    stale_expected_entities,
+)
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
 from src.models.tariff import Tariff
 from src.schemas.common import PaginatedResponse, SortOrder
 from src.schemas.pagination import PaginationParams
-from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceSortBy, ServiceUpdate
+from src.schemas.service import (
+    ServiceCreate,
+    ServiceDeleteBody,
+    ServicePatch,
+    ServiceResponse,
+    ServiceSortBy,
+    ServiceUpdate,
+)
 from src.services.service import ServiceService, get_service_service
 
 router = APIRouter(tags=["services"])
@@ -40,42 +53,27 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("services:read"))]
 
-# Sort whitelist map: UI key → list of ORM columns / subqueries (#205 Task 3,
-# spec §4.5). ``age`` → min_age; ``archived`` → is_active; ``tariffs`` →
-# correlated COUNT subquery (records idiom for aggregate sort keys).
-# ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
-_SERVICE_SORT_MAP: dict[str, list] = {
-    "title": [Service.title],
-    "duration": [Service.duration],
-    "age": [Service.min_age],
-    "tariffs": [
+# Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; GH #367
+# Task 5: SortKeyMap + shared resolver). ``age`` → min_age; ``archived``
+# → is_active; ``tariffs`` → correlated COUNT subquery (records idiom
+# for aggregate sort keys — #213 pin: content moves AS-IS, ``.correlate()``
+# preserved). ``material_hint`` removed by GH #223 Task 13 (spec §10).
+# All keys are canonical (asc → nullsfirst / desc → nullslast); the
+# ``sort_by=None`` fallback stays in the route (spec §4.3).
+_SERVICE_SORT_KEYS: SortKeyMap = {
+    "title": SortKeySpec([Service.title]),
+    "duration": SortKeySpec([Service.duration]),
+    "age": SortKeySpec([Service.min_age]),
+    "tariffs": SortKeySpec([
         select(func.count(Tariff.id))
         .where(Tariff.service_id == Service.id)
         .correlate(Service)
         .scalar_subquery()
-    ],
-    "specialty": [Service.specialty],
-    "archived": [Service.is_active],
-    "created_at": [Service.created_at],
+    ]),
+    "specialty": SortKeySpec([Service.specialty]),
+    "archived": SortKeySpec([Service.is_active]),
+    "created_at": SortKeySpec([Service.created_at]),
 }
-
-
-def _service_order_by(sort_by: ServiceSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/services.
-
-    * ``sort_by=None`` → spec §4.4 default: ``title ASC, id ASC`` (NEW —
-      services had no order_by before #205).
-    * User sort → mapped columns/subqueries with nulls-first (asc) /
-      nulls-last (desc), then ``id ASC`` tiebreak (records idiom).
-    """
-    if sort_by is None:
-        return [asc(Service.title), asc(Service.id)]
-    cols = _SERVICE_SORT_MAP[sort_by]
-    ordered = [
-        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-        for c in cols
-    ]
-    return [*ordered, asc(Service.id)]
 
 
 @router.get("", response_model=PaginatedResponse[ServiceResponse])
@@ -109,12 +107,18 @@ async def list_services(
     validation); valid-but-unknown → 200 with an empty page (filter
     semantics — the same shape as a ``q`` no-match).
     """
+    if sort_by is None:
+        # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by.
+        order_by = [asc(Service.title), asc(Service.id)]
+    else:
+        order_by = apply_sort(_SERVICE_SORT_KEYS, sort_by, sort_order, Service.id)
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         status=status,
-        order_by=_service_order_by(sort_by, sort_order),
+        order_by=order_by,
         q=q,
         material_id=str(material_id) if material_id is not None else None,
     )
@@ -219,47 +223,82 @@ async def delete_service(
     service_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None, embed=True),
+    body: Annotated[ServiceDeleteBody | None, Body()] = None,
+    dry_run: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Non-destructive preview: returns 204 without deleting "
+                "(no deps) or 409 with the dependency tree; never "
+                "modifies rows"
+            )
+        ),
+    ] = None,
 ) -> None:
-    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+    """Unified delete contract — dry-run preview flag / commit body
+    (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2).
 
-    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
-      non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
-      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
-      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
-      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
-      all-auto deps). ``service.resolve_delete`` runs the resolution
-      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    The legacy no-body DELETE (execute-if-clean / silent dry-run) is
+    REMOVED. Service deps per the FK matrix: ``activities`` (blocked,
+    NON-auto — the race gate: its id-set joins the expected check even
+    though the node is never confirmed), plus 4 AUTO deps (tariffs,
+    photos, service_tags, service_materials — resolved automatically,
+    exempt from the check).
+
+    * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
+      existence probe → missing → 404; present → ``collect_dependencies``
+      → empty → 204 WITHOUT deleting; non-empty → 409 + dependency tree.
+      Combined with a ``resolutions`` body → 422
+      ``dry_run_with_resolutions_forbidden`` (checked before the
+      existence probe); an expected-only body is silently ignored.
+    * No body, no flag → 422 ``{"detail": "expected_state_required"}``:
+      every real deletion must declare its state; rejected before any
+      DB access — the form check precedes the probe, so an unknown id
+      still gets 422, not 404. Same for a body whose ``expected`` is
+      absent (``{"resolutions": {...}}`` alone — the rejected legacy
+      shape).
+    * Body ``{resolutions?, expected}`` — the deferred-delete commit:
+      existence probe → ``collect_dependencies`` → expected id-set
+      verification (subset semantics: ``set(now_ids) ⊆
+      set(expected[entity])`` for the non-auto dep activities — a dep
+      that disappeared in the undo window does not block, one that
+      APPEARED does) → mismatch → 409 ``stale_dependencies`` + current
+      tree. Only on a match → ``resolve_delete`` (validates resolutions
+      — blocked activities → 422 "archive instead", ``ResolutionError``
+      → 422 — then nullifies photos, cascades tariffs/service_tags/
+      service_materials and hard-deletes the service) → 204; missing id
+      → 404 ``SERVICE_NOT_FOUND``.
+
+    Per the §4.4 matrix a successful commit with ``resolutions`` is
+    unreachable for Service (activities is blocked, the rest are auto) —
+    the branch is still honored in full: it is the contract for
+    API consumers and mid-window races.
     """
-    if resolutions is not None:
-        try:
-            ok = await service.resolve_delete(
-                db_session=session, id=service_id, resolutions=resolutions
-            )
-        except ResolutionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=ErrorDetail(
-                    code=ErrorCode.SERVICE_NOT_FOUND,
-                    message="Service not found",
-                ).model_dump(),
-            )
-        return
+    resolutions = body.resolutions if body is not None else None
+    expected = body.expected if body is not None else None
 
-    deps = await collect_dependencies(session, Service, service_id)
-    if deps:
+    # Rev7 (#285) mirror: bare DELETE without the flag is a contract
+    # violation — reject the request shape before any DB access. Literal
+    # string detail (same flat shape as the 409 preview) → JSONResponse,
+    # not raised: the global HTTPException handler wraps string details
+    # into {code, message} — not the pinned contract.
+    if not dry_run and expected is None:
         return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "has_dependencies",
-                "dependencies": [d.model_dump(exclude_none=True) for d in deps],
-            },
+            status_code=422,
+            content={"detail": "expected_state_required"},
         )
-    deleted = await service.delete(db_session=session, id=service_id)
-    if not deleted:
+    # Pure preview never carries resolutions — forbidden combination.
+    # (An expected-only body IS allowed: silently ignored below.)
+    if dry_run and resolutions is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "dry_run_with_resolutions_forbidden"},
+        )
+
+    # Existence probe. The dry-run branch MUST 404 on a missing id
+    # instead of previewing an empty tree.
+    svc = await service.get(db_session=session, id=service_id)
+    if not svc:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(
@@ -267,6 +306,63 @@ async def delete_service(
                 message="Service not found",
             ).model_dump(),
         )
+
+    if dry_run:
+        deps = await collect_dependencies(session, Service, service_id)
+        if deps:
+            return _dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only: no resolve_delete, no SSE marks.
+
+    # Body branch: the commit of the deferred delete. Expected id-set
+    # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
+    # the resolutions validation inside resolve_delete could turn it
+    # into a 422, and before any row is touched. Reads and the
+    # @transactional executor share the request session — one
+    # transaction (SQLite single-writer; #318 D2).
+    deps = await collect_dependencies(session, Service, service_id)
+    now_ids = await collect_dependency_ids(session, Service, service_id)
+    if stale_expected_entities(Service, now_ids, expected or {}):
+        return _dependencies_response(deps, detail="stale_dependencies")
+
+    # Match → execution by the generic executor: re-collects deps,
+    # validates resolutions (blocked activities → 422,
+    # ResolutionError → 422), nullifies photos, cascades tariffs /
+    # service_tags / service_materials, hard-deletes the service row.
+    try:
+        ok = await service.resolve_delete(
+            db_session=session, id=service_id, resolutions=resolutions or {},
+        )
+    except ResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.SERVICE_NOT_FOUND,
+                message="Service not found",
+            ).model_dump(),
+        )
+
+
+def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``.
+
+    Mirror of the tags/records/activities routes' builder (#285/#286/
+    #318; same pinned shape). ``detail`` distinguishes the two 409s of
+    the deferred-delete contract (GH #345 §4.1): ``has_dependencies``
+    (dry-run preview) and ``stale_dependencies`` (commit-time expected
+    mismatch). The ``dependencies`` array is ``DependencyNode`` dumps —
+    optional-None node fields are OMITTED (``exclude_none``),
+    non-optional fields always serialize (the Service tree shows
+    counters for all deps; items stay absent — §4.3 fixed boundary).
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": detail,
+            "dependencies": [d.model_dump(exclude_none=True) for d in deps],
+        },
+    )
 
 
 @router.post("/{service_id}/archive", response_model=ServiceResponse, dependencies=_WRITE_GUARD)

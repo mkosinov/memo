@@ -56,6 +56,20 @@ describe('parseApiError', () => {
     expect(parseApiError(err).message).toBe('Клиент с таким телефоном уже существует');
   });
 
+  // #348 spec §6 (S5): the inline «Учётка» block error when the phone is
+  // held by another account.
+  it('returns the taken-phone message for PHONE_TAKEN (#348 S5)', () => {
+    const err = new ApiError(422, 'Phone taken', 'PHONE_TAKEN');
+    const result = parseApiError(err);
+    expect(result.message).toBe('Этот телефон уже занят');
+    expect(result.code).toBe('PHONE_TAKEN');
+  });
+
+  it('returns the invalid-phone message for PHONE_INVALID (#348 S5)', () => {
+    const err = new ApiError(422, 'Phone invalid', 'PHONE_INVALID');
+    expect(parseApiError(err).message).toBe('Некорректный номер телефона');
+  });
+
   it('returns validation message for VALIDATION_ERROR', () => {
     const err = new ApiError(422, 'Name too long', 'VALIDATION_ERROR');
     expect(parseApiError(err).message).toBe('Проверьте правильность заполнения полей');

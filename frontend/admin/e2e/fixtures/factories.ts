@@ -12,12 +12,12 @@
  *   await cleanup(request, `/api/v1/clients/${client.id}`);
  */
 
-import crypto from 'node:crypto';
-import { type APIRequestContext, expect } from '@playwright/test';
-import { sqliteExecWithRetry } from './sqlite-exec';
-import { resolveTestDbPath } from '../lib/db-path';
+import crypto from "node:crypto";
+import { type APIRequestContext, expect } from "@playwright/test";
+import { sqliteExecWithRetry } from "./sqlite-exec";
+import { resolveTestDbPath } from "../lib/db-path";
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
 let testCounter = 0;
 function uid(): string {
@@ -36,7 +36,7 @@ export async function createTestClient(
   const name = overrides?.name || `Test Client ${uid()}`;
   const phone = overrides?.phone || `+7999${String(Date.now()).slice(-7)}`;
   const resp = await api.post(`${BACKEND}/api/v1/clients`, {
-    data: { name, phone, channel: 'telegram' },
+    data: { name, phone, channel: "telegram" },
   });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();
@@ -123,7 +123,7 @@ export async function createTestRecordWithClient(
  */
 export async function createTestRecordWithPayment(
   api: APIRequestContext,
-  paymentStatus?: 'Оплачено' | 'Частично' | 'Не оплачено',
+  paymentStatus?: "Оплачено" | "Частично" | "Не оплачено",
 ) {
   const client = await createTestClient(api, {
     name: `Payment Test ${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -133,9 +133,9 @@ export async function createTestRecordWithPayment(
 
   // Determine payment amount based on the status
   let amount = 3500; // full price = "Оплачено"
-  if (paymentStatus === 'Частично') {
+  if (paymentStatus === "Частично") {
     amount = 1500;
-  } else if (paymentStatus === 'Не оплачено') {
+  } else if (paymentStatus === "Не оплачено") {
     amount = 0;
   }
 
@@ -145,7 +145,7 @@ export async function createTestRecordWithPayment(
       data: {
         record_id: record.id,
         amount,
-        method: 'card',
+        method: "card",
       },
     });
     if (paymentResp.ok()) {
@@ -189,20 +189,35 @@ export interface StaffOverrides {
  * (users). Defaults: no master section, no positions, no account — a plain
  * person. Pass `master` to make it an acting schedule master, `positions`
  * to attach dictionary entries, `user` to create a login.
+ *
+ * #348 cleanup note: the passworded-`user` corridor (link + public setup)
+ * leaves a CONSUMED password_setup_tokens row behind (used_at set). The
+ * CLI reset runs with foreign_keys=OFF, so callers' cleanup that deletes
+ * users rows should sweep `password_setup_tokens WHERE user_id = …` too
+ * (the #348 specs do this in their finally blocks).
  */
 export async function createTestStaff(
   api: APIRequestContext,
   overrides: StaffOverrides = {},
 ) {
   const {
-    first_name = 'Тест',
+    first_name = "Тест",
     last_name = `Сотрудников ${uid()}`,
-    avatar_url = '',
+    avatar_url = "",
     sort_order = 999,
     master = null,
     positions = [],
     user = false,
   } = overrides;
+  // #348: the composite create is PASSWORDLESS (`create_user: {phone}` —
+  // the wire schema is extra=forbid, no password key). When a caller asks
+  // for a passworded account, install it through the #348 corridor: issue
+  // the one-time link (admin endpoint) + set the password through the
+  // PUBLIC setup endpoint. Same end state the pre-#348 factory produced,
+  // and exactly what a real passworded account looks like now.
+  const userWire = user
+    ? { phone: user.phone }
+    : false;
   const resp = await api.post(`${BACKEND}/api/v1/staff`, {
     data: {
       first_name,
@@ -211,11 +226,23 @@ export async function createTestStaff(
       sort_order,
       master,
       position_ids: positions,
-      create_user: user,
+      create_user: userWire,
     },
   });
   expect(resp.ok()).toBeTruthy();
-  return await resp.json();
+  const staff = await resp.json();
+  if (user) {
+    const accountId: string | undefined = staff.account?.id;
+    expect(accountId, 'createTestStaff: the created card must expose account.id').toBeTruthy();
+    const link = await api.post(`${BACKEND}/api/v1/users/${accountId}/password-link`);
+    expect(link.ok(), 'createTestStaff: password-link issuance').toBeTruthy();
+    const { token } = await link.json();
+    const setup = await api.post(`${BACKEND}/api/v1/auth/password-setup`, {
+      data: { token, password: user.password },
+    });
+    expect(setup.ok(), 'createTestStaff: password install via public setup').toBeTruthy();
+  }
+  return staff;
 }
 
 /**
@@ -232,15 +259,15 @@ export async function createTestMaster(
   overrides: Record<string, unknown> = {},
 ) {
   return createTestStaff(api, {
-    first_name: (overrides.first_name as string) ?? 'Тест',
+    first_name: (overrides.first_name as string) ?? "Тест",
     last_name: (overrides.last_name as string) ?? `Мастеров ${uid()}`,
-    avatar_url: (overrides.avatar_url as string | undefined) ?? '',
+    avatar_url: (overrides.avatar_url as string | undefined) ?? "",
     sort_order: (overrides.sort_order as number | undefined) ?? 999,
     master: {
-      specialty: (overrides.specialty as string) ?? 'керамика',
-      color: (overrides.color as string) ?? '#5B8C7A',
+      specialty: (overrides.specialty as string) ?? "керамика",
+      color: (overrides.color as string) ?? "#5B8C7A",
     },
-    positions: ['master'],
+    positions: ["master"],
   });
 }
 
@@ -268,13 +295,13 @@ export async function createTestService(
   const resp = await api.post(`${BACKEND}/api/v1/services`, {
     data: {
       title: `Услуга ${uid()}`,
-      description: 'e2e seed service',
-      image_url: '',
-      specialty: 'керамика',
+      description: "e2e seed service",
+      image_url: "",
+      specialty: "керамика",
       min_age: 5,
       max_age: null,
       duration: 90,
-      record_info: 'e2e seed',
+      record_info: "e2e seed",
       tariffs: [],
       tag_ids: [],
       ...overrides,
@@ -323,7 +350,10 @@ export async function createTestVisitor(
   overrides?: { name?: string },
 ) {
   const resp = await api.post(`${BACKEND}/api/v1/visitors`, {
-    data: { name: overrides?.name || `Test Visitor ${uid()}`, client_id: clientId },
+    data: {
+      name: overrides?.name || `Test Visitor ${uid()}`,
+      client_id: clientId,
+    },
   });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();
@@ -355,23 +385,33 @@ export async function createTestPayment(
   overrides?: { amount?: number },
 ) {
   const resp = await api.post(`${BACKEND}/api/v1/payments`, {
-    data: { record_id: recordId, amount: overrides?.amount ?? 3500, method: 'card' },
+    data: {
+      record_id: recordId,
+      amount: overrides?.amount ?? 3500,
+      method: "card",
+    },
   });
   expect(resp.ok()).toBeTruthy();
   return await resp.json();
 }
 
 /** Create a test tag and link it to a master (master_tags join row). */
-export async function createTestMasterTag(api: APIRequestContext, masterId: string) {
+export async function createTestMasterTag(
+  api: APIRequestContext,
+  masterId: string,
+) {
   const tag = await createTestTag(api);
-  linkTag('master_tags', masterId, tag.id);
+  linkTag("master_tags", masterId, tag.id);
   return tag;
 }
 
 /** Create a test tag and link it to a client (client_tags join row). */
-export async function createTestClientTag(api: APIRequestContext, clientId: string) {
+export async function createTestClientTag(
+  api: APIRequestContext,
+  clientId: string,
+) {
   const tag = await createTestTag(api);
-  linkTag('client_tags', clientId, tag.id);
+  linkTag("client_tags", clientId, tag.id);
   return tag;
 }
 
@@ -389,7 +429,7 @@ function resolveDBPath(): string {
 }
 
 function sqlValue(v: string | number | null | undefined): string {
-  if (v === null || v === undefined) return 'NULL';
+  if (v === null || v === undefined) return "NULL";
   return `'${String(v).replace(/'/g, "''")}'`;
 }
 
@@ -398,29 +438,24 @@ function executeSQL(sql: string): void {
   // metacharacters: `"` ends the command, `$` would be variable-expanded
   // (the Argon2 hash `$argon2id$v=19$m=65536…` lost its `$` markers that
   // way and the backend 500'd verifying the mangled hash — T14).
-  const shellSafe = sql.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+  const shellSafe = sql.replace(/"/g, '\\"').replace(/\$/g, "\\$");
   sqliteExecWithRetry(`sqlite3 "${resolveDBPath()}" "${shellSafe}"`);
 }
 
 /** Link an entity to a tag via the join table (backend tests do the same via raw SQL). */
 export function linkTag(
-  table: 'master_tags' | 'client_tags',
+  table: "master_tags" | "client_tags",
   entityId: string,
   tagId: string,
 ): void {
   executeSQL(
-    table === 'master_tags'
+    table === "master_tags"
       ? `INSERT INTO master_tags (master_id, tag_id) VALUES (${sqlValue(entityId)}, ${sqlValue(tagId)})`
       : `INSERT INTO client_tags (client_id, tag_id) VALUES (${sqlValue(entityId)}, ${sqlValue(tagId)})`,
   );
 }
 
 /** Link a photo to a tag via the photo_tags join table (GH #211 Task 10). */
-export function linkPhotoTag(photoId: string, tagId: string): void {
-  executeSQL(
-    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
-  );
-}
 
 /** Link a record to a tag via the record_tags join table (GH #318 — the
  *  table has no API writer; backend domain tests insert the same way). */
@@ -430,13 +465,21 @@ export function linkRecordTag(recordId: string, tagId: string): void {
   );
 }
 
+export function linkPhotoTag(photoId: string, tagId: string): void {
+  executeSQL(
+    `INSERT INTO photo_tags (photo_id, tag_id) VALUES (${sqlValue(photoId)}, ${sqlValue(tagId)})`,
+  );
+}
+
 /**
  * Link an already-seeded user to a staff card by phone (users have no create
  * endpoint; backend tests link via UPDATE users SET staff_id=…). Renamed from
  * `linkUserToMaster` (#266: users.master_id → users.staff_id).
  */
 export function linkUserToStaff(phone: string, staffId: string): void {
-  executeSQL(`UPDATE users SET staff_id=${sqlValue(staffId)} WHERE phone=${sqlValue(phone)}`);
+  executeSQL(
+    `UPDATE users SET staff_id=${sqlValue(staffId)} WHERE phone=${sqlValue(phone)}`,
+  );
 }
 
 /**
@@ -449,9 +492,9 @@ export function linkUserToStaff(phone: string, staffId: string): void {
  * Obviously-fake demo password, same spirit as the seeded admin12345
  * (public repo, dev/test only).
  */
-export const E2E_PASSWORD = 'e2e-pass-91d8ac5e';
+export const E2E_PASSWORD = "e2e-pass-91d8ac5e";
 export const E2E_PASSWORD_HASH =
-  '$argon2id$v=19$m=65536,t=3,p=4$/CDip4z1urPp5KFuifw3sA$Df8mLeKc4FqU12J2R34WMkhm9nhH2blGceK5G9yfHXQ';
+  "$argon2id$v=19$m=65536,t=3,p=4$/CDip4z1urPp5KFuifw3sA$Df8mLeKc4FqU12J2R34WMkhm9nhH2blGceK5G9yfHXQ";
 
 /**
  * Create a staff user row directly (no API writer exists; mirrors the raw
@@ -466,7 +509,7 @@ export const E2E_PASSWORD_HASH =
  */
 export function seedUser(overview: {
   phone: string;
-  role?: 'admin' | 'master';
+  role?: "admin" | "master";
   masterId?: string;
   isActive?: number;
   /**
@@ -483,7 +526,7 @@ export function seedUser(overview: {
   executeSQL(
     // GH #247 T1 added the lockout-ladder columns (failed_login_attempts,
     // lock_level, locked_until) — NOT NULL, so the INSERT must set them.
-    `INSERT INTO users (id, phone, email, password_hash, role, staff_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? 'master')}, ${sqlValue(staffId)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
+    `INSERT INTO users (id, phone, email, password_hash, role, staff_id, email_is_confirmed, phone_is_confirmed, failed_login_attempts, lock_level, locked_until, is_active, created_at, updated_at) VALUES (${sqlValue(id)}, ${sqlValue(overview.phone)}, NULL, ${sqlValue(E2E_PASSWORD_HASH)}, ${sqlValue(overview.role ?? "master")}, ${sqlValue(staffId)}, 0, 0, 0, 0, NULL, ${overview.isActive ?? 1}, datetime('now'), datetime('now'))`,
   );
   return id;
 }
@@ -495,7 +538,7 @@ export function seedUser(overview: {
  */
 export function seedStaffUser(overview: {
   phone: string;
-  role?: 'admin' | 'master';
+  role?: "admin" | "master";
   masterId?: string;
   isActive?: number;
 }): string {
@@ -524,7 +567,10 @@ export function seedStaffUser(overview: {
  * OTHER error (422 contract break, 5xx, network) THROWS — a silently
  * broken contract must not look like a green cleanup.
  */
-export async function cleanupActivity(api: APIRequestContext, activityId: string) {
+export async function cleanupActivity(
+  api: APIRequestContext,
+  activityId: string,
+) {
   const preview = await api.delete(
     `${BACKEND}/api/v1/activities/${activityId}?dry_run=true`,
   );
@@ -607,6 +653,18 @@ export async function cleanup(api: APIRequestContext, path: string) {
   ) {
     return cleanupFamilySubject(api, path);
   }
+  // GH #345 archivable family (staff/clients/services/locations/materials)
+  // — the same unified contract: the bare DELETE → 422
+  // `expected_state_required` (form check precedes the probe — even a
+  // 404-eligible id 422s), so the generic path below silently no-ops and
+  // leaks rows. Route to the dry-run-then-commit cleaner instead.
+  if (
+    /^\/api\/v1\/(staff|clients|services|locations|materials)\/[^/?]+$/.test(
+      path,
+    )
+  ) {
+    return cleanupArchivableSubject(api, path);
+  }
   try {
     const resp = await api.delete(`${BACKEND}${path}`);
     if (resp.status() === 409) {
@@ -615,8 +673,8 @@ export async function cleanup(api: APIRequestContext, path: string) {
       } | null;
       const resolutions: Record<string, string> = {};
       for (const dep of body?.dependencies ?? []) {
-        if ((dep.allowed_actions ?? []).includes('cascade')) {
-          resolutions[dep.entity] = 'cascade';
+        if ((dep.allowed_actions ?? []).includes("cascade")) {
+          resolutions[dep.entity] = "cascade";
         }
       }
       if (Object.keys(resolutions).length > 0) {
@@ -670,8 +728,8 @@ export async function cleanupRecord(api: APIRequestContext, recordId: string) {
         if (dep.items && dep.items.length > 0) {
           expected[dep.entity] = dep.items.map((item) => item.id);
         }
-        if ((dep.allowed_actions ?? []).includes('cascade')) {
-          resolutions[dep.entity] = 'cascade';
+        if ((dep.allowed_actions ?? []).includes("cascade")) {
+          resolutions[dep.entity] = "cascade";
         }
       }
       payload =
@@ -679,7 +737,9 @@ export async function cleanupRecord(api: APIRequestContext, recordId: string) {
           ? { resolutions, expected }
           : { expected };
     }
-    await api.delete(`${BACKEND}/api/v1/records/${recordId}`, { data: payload });
+    await api.delete(`${BACKEND}/api/v1/records/${recordId}`, {
+      data: payload,
+    });
   } catch {
     // Ignore cleanup errors
   }
@@ -703,7 +763,9 @@ export async function cleanupRecord(api: APIRequestContext, recordId: string) {
  */
 export async function cleanupTag(api: APIRequestContext, tagId: string) {
   try {
-    const preview = await api.delete(`${BACKEND}/api/v1/tags/${tagId}?dry_run=true`);
+    const preview = await api.delete(
+      `${BACKEND}/api/v1/tags/${tagId}?dry_run=true`,
+    );
     if (preview.status() === 404) return; // already deleted — nothing to clean
     let payload: Record<string, unknown> = { expected: {} };
     if (preview.status() === 409) {
@@ -720,8 +782,8 @@ export async function cleanupTag(api: APIRequestContext, tagId: string) {
         if (dep.items && dep.items.length > 0) {
           expected[dep.entity] = dep.items.map((item) => item.id);
         }
-        if ((dep.allowed_actions ?? []).includes('cascade')) {
-          resolutions[dep.entity] = 'cascade';
+        if ((dep.allowed_actions ?? []).includes("cascade")) {
+          resolutions[dep.entity] = "cascade";
         }
       }
       payload =
@@ -775,8 +837,8 @@ export async function cleanupFamilySubject(
         if (dep.items && dep.items.length > 0) {
           expected[dep.entity] = dep.items.map((item) => item.id);
         }
-        if ((dep.allowed_actions ?? []).includes('cascade')) {
-          resolutions[dep.entity] = 'cascade';
+        if ((dep.allowed_actions ?? []).includes("cascade")) {
+          resolutions[dep.entity] = "cascade";
         }
       }
       payload =
@@ -785,6 +847,66 @@ export async function cleanupFamilySubject(
           : { expected };
     } else if (preview.status() === 422) {
       return; // e.g. a seed system position — protected by design
+    }
+    await api.delete(`${BACKEND}${path}`, { data: payload });
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Hard-delete an archivable-family subject (staff/clients/services/
+ * locations/materials — GH #345) in cleanup under the unified
+ * deferred-delete contract.
+ *
+ * Structural mirror of {@link cleanupTag}: the bare DELETE is rejected now
+ * (422 `expected_state_required`) and the generic {@link cleanup}'s
+ * resolutions-only retry is too, so without this branch every client/
+ * staff/material/service/location cleanup across the suite would silently
+ * 422 and leak rows into later tests (resetToSeed only wipes the
+ * transactional tables — the dictionaries accumulate).
+ *
+ * Flow: 1. `?dry_run=true` preview — pure, never deletes:
+ *          404 → already gone, done; 204 → clean row → `{expected: {}}`;
+ *          409 → tree: `expected` = ids from the nodes' `items` (nodes
+ *                without items are skipped — auto deps never verify) +
+ *          `resolutions` = cascade/nullify per each dep's only allowed
+ *          action (choice deps carry exactly one today).
+ *       2. commit DELETE with the payload. A blocked tree (staff with
+ *          activities) 422s — cleanup must first remove the activities
+ *          (caller's ordering), else the row survives intentionally.
+ */
+export async function cleanupArchivableSubject(
+  api: APIRequestContext,
+  path: string,
+) {
+  try {
+    const preview = await api.delete(`${BACKEND}${path}?dry_run=true`);
+    if (preview.status() === 404) return; // already deleted — nothing to clean
+    let payload: Record<string, unknown> = { expected: {} };
+    if (preview.status() === 409) {
+      const body = (await preview.json().catch(() => null)) as {
+        dependencies?: Array<{
+          entity: string;
+          allowed_actions?: string[];
+          items?: Array<{ id: string }> | null;
+        }>;
+      } | null;
+      const expected: Record<string, string[]> = {};
+      const resolutions: Record<string, string> = {};
+      for (const dep of body?.dependencies ?? []) {
+        if (dep.items && dep.items.length > 0) {
+          expected[dep.entity] = dep.items.map((item) => item.id);
+        }
+        const action = dep.allowed_actions?.[0];
+        if (action) {
+          resolutions[dep.entity] = action;
+        }
+      }
+      payload =
+        Object.keys(resolutions).length > 0
+          ? { resolutions, expected }
+          : { expected };
     }
     await api.delete(`${BACKEND}${path}`, { data: payload });
   } catch {

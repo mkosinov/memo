@@ -1,11 +1,17 @@
 /**
- * useStaffMutations — GH #266 staff directory mutation family.
+ * useStaffMutations — GH #266 staff directory mutation family + GH #345
+ * Task 6 deferred delete.
  *
- * Mirrors the pre-#266 useMastersMutations suite: every mutation calls its
- * api-client endpoint and invalidates the ['staff'] family, which (via
+ * Every create/update/patch/archive/restore mutation calls its api-client
+ * endpoint and invalidates the ['staff'] family, which (via
  * INVALIDATION_MAP) also refreshes ['masters'] (the read-only view is
- * staff ⨝ masters) and ['records'] (master_name/master_color come from the
- * join). Archive carries the D6 dismissal checkboxes in the body.
+ * staff ⨝ masters) and ['records'] (master_name/master_color come from
+ * the join). Archive carries the D6 dismissal checkboxes in the body.
+ *
+ * The deferred-delete conveyor (dry-run → dialog → optimistic + enqueue →
+ * commit; PendingActions, 5s ring, undo) is covered by the dedicated
+ * `useDeleteStaff.test.ts` — here only the hook-surface contract is
+ * asserted (return shape + preview-phase guard).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
@@ -19,27 +25,44 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     createStaff: vi.fn(),
     updateStaff: vi.fn(),
     patchStaff: vi.fn(),
-    deleteStaff: vi.fn(),
+    dryRunDeleteStaff: vi.fn(),
+    resolveDeleteStaff: vi.fn(),
     archiveStaff: vi.fn(),
     restoreStaff: vi.fn(),
+    patchUser: vi.fn(),
+    issuePasswordLink: vi.fn(),
   };
 });
+
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
 
 import {
   useCreateStaff,
   useUpdateStaff,
-  usePatchStaff,
   useDeleteStaff,
   useArchiveStaff,
   useRestoreStaff,
+  usePatchUser,
+  useIssuePasswordLink,
 } from '../hooks/useStaffMutations';
 import {
   createStaff,
   updateStaff,
   patchStaff,
-  deleteStaff,
+  dryRunDeleteStaff,
+  resolveDeleteStaff,
   archiveStaff,
   restoreStaff,
+  patchUser,
+  issuePasswordLink,
   ApiError,
 } from '@memo/api-client';
 import type { StaffCreate, StaffUpdate, DependencyNode } from '@memo/api-client';
@@ -47,13 +70,17 @@ import type { StaffCreate, StaffUpdate, DependencyNode } from '@memo/api-client'
 const mockCreateStaff = vi.mocked(createStaff);
 const mockUpdateStaff = vi.mocked(updateStaff);
 const mockPatchStaff = vi.mocked(patchStaff);
-const mockDeleteStaff = vi.mocked(deleteStaff);
+const mockDryRun = vi.mocked(dryRunDeleteStaff);
+const mockResolveDeleteStaff = vi.mocked(resolveDeleteStaff);
 const mockArchiveStaff = vi.mocked(archiveStaff);
 const mockRestoreStaff = vi.mocked(restoreStaff);
+const mockPatchUser = vi.mocked(patchUser);
+const mockIssuePasswordLink = vi.mocked(issuePasswordLink);
 
 const staffResponse = {
   id: 's-1', first_name: 'Иван', last_name: 'Иванов', avatar_url: null,
   sort_order: 0, master: null, position_ids: [], has_user: false,
+  account: null, // #348: no linked account on this card
   archived: false, created_at: '', updated_at: '',
 };
 
@@ -69,7 +96,11 @@ function createQueryClientWrapper() {
 }
 
 describe('useStaffMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+    mockResolveDeleteStaff.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateStaff', () => {
@@ -138,95 +169,42 @@ describe('useStaffMutations', () => {
     });
   });
 
-  describe('usePatchStaff', () => {
-    it('calls patchStaff with id and partial data', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockPatchStaff.mockResolvedValue(staffResponse);
 
-      const { result } = renderHook(() => usePatchStaff(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's-1', data: { first_name: 'Пётр' } });
-      });
-
-      expect(mockPatchStaff).toHaveBeenCalledWith('s-1', { first_name: 'Пётр' });
-      expect(mockUpdateStaff).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the staff family on success', async () => {
+  describe('useDeleteStaff — hook surface (deferred conveyor)', () => {
+    it('removeStaff always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockPatchStaff.mockResolvedValue(staffResponse);
-
-      const { result } = renderHook(() => usePatchStaff(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 's-1', data: { first_name: 'Пётр' } });
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
-    });
-  });
-
-  describe('useDeleteStaff', () => {
-    it('calls deleteStaff with the provided id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockDeleteStaff.mockResolvedValue(undefined);
-
+      queryClient.setQueryData(['staff'], [staffResponse]);
       const { result } = renderHook(() => useDeleteStaff(), { wrapper });
 
-      await act(async () => {
-        await result.current.mutateAsync('s-1');
-      });
-
-      expect(mockDeleteStaff).toHaveBeenCalledWith('s-1');
-    });
-
-    it('invalidates staff family on success (cross-invalidation covers records)', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeleteStaff.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useDeleteStaff(), { wrapper });
+      expect(result.current.removeStaff).toBeTypeOf('function');
+      expect(result.current.removeStaffResolved).toBeTypeOf('function');
+      expect(result.current.isPending).toBe(false);
 
       await act(async () => {
-        await result.current.mutateAsync('s-1');
+        await result.current.removeStaff(staffResponse);
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(mockDryRun).toHaveBeenCalledWith('s-1');
+      expect(mockResolveDeleteStaff).not.toHaveBeenCalled();
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
 
-    it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
-      const { wrapper } = createQueryClientWrapper();
+    it('409 + dependency tree rejects upward so the call site opens the dialog', async () => {
       const deps: DependencyNode[] = [
         { entity: 'users', auto: true, relation: 'Пользователь', count: 1, allowed_actions: ['cascade'] },
         { entity: 'masters', auto: true, relation: 'Мастер', count: 1, allowed_actions: ['cascade'] },
-        { entity: 'master_tags', auto: true, relation: 'Тег', count: 3, allowed_actions: ['cascade'] },
-        { entity: 'staff_positions', auto: true, relation: 'Должность', count: 2, allowed_actions: ['cascade'] },
       ];
-      mockDeleteStaff.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+      mockDryRun.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
-      const { result } = renderHook(() => useDeleteStaff(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('s-1')).rejects.toThrow(ApiError);
-      });
-
-      expect(result.current.dependencies).toEqual(deps);
-    });
-
-    it('keeps dependencies null for non-409 errors', async () => {
       const { wrapper } = createQueryClientWrapper();
-      mockDeleteStaff.mockRejectedValue(new ApiError(404, 'Staff not found', 'STAFF_NOT_FOUND'));
-
       const { result } = renderHook(() => useDeleteStaff(), { wrapper });
 
       await act(async () => {
-        await expect(result.current.mutateAsync('s-1')).rejects.toThrow(ApiError);
+        await expect(result.current.removeStaff(staffResponse)).rejects.toThrow(ApiError);
       });
 
-      expect(result.current.dependencies).toBeNull();
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(mockResolveDeleteStaff).not.toHaveBeenCalled();
     });
   });
 
@@ -283,6 +261,93 @@ describe('useStaffMutations', () => {
 
       await act(async () => {
         await result.current.mutateAsync('s-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
+    });
+  });
+
+  // ─── #348 users vertical ────────────────────────────────────────────────────
+
+  describe('useIssuePasswordLink', () => {
+    it('calls issuePasswordLink with the account id and returns the raw token once', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockIssuePasswordLink.mockResolvedValue({
+        token: 'raw-tok',
+        expires_at: '2026-09-29T10:00:00Z',
+      });
+
+      const { result } = renderHook(() => useIssuePasswordLink(), { wrapper });
+
+      let link: { token: string; expires_at: string } | undefined;
+      await act(async () => {
+        link = await result.current.mutateAsync('u-1');
+      });
+
+      expect(mockIssuePasswordLink).toHaveBeenCalledWith('u-1');
+      expect(link!.token).toBe('raw-tok');
+    });
+
+    // Review blocker: a fresh link must refresh the card's `link_expires_at`
+    // («Ссылка выдана, действует до …») right away — not on the next
+    // unrelated refresh.
+    it('invalidates the staff family on success (link_expires_at goes live)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockIssuePasswordLink.mockResolvedValue({
+        token: 'raw-tok',
+        expires_at: '2026-09-29T10:00:00Z',
+      });
+
+      const { result } = renderHook(() => useIssuePasswordLink(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync('u-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
+      // Family fan-out (lib/invalidate): the read-only masters view too.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
+    });
+  });
+
+  describe('usePatchUser', () => {
+    it('calls patchUser with {id, data: {phone}}', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      mockPatchUser.mockResolvedValue({
+        id: 'u-1',
+        phone: '+79995556678',
+        role: 'master',
+        staff_id: 's-1',
+        password_is_set: false,
+        is_active: true,
+      });
+
+      const { result } = renderHook(() => usePatchUser(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'u-1', data: { phone: '+79995556678' } });
+      });
+
+      expect(mockPatchUser).toHaveBeenCalledWith('u-1', { phone: '+79995556678' });
+    });
+
+    it('invalidates the staff family on success', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      mockPatchUser.mockResolvedValue({
+        id: 'u-1',
+        phone: '+79995556678',
+        role: 'master',
+        staff_id: 's-1',
+        password_is_set: false,
+        is_active: true,
+      });
+
+      const { result } = renderHook(() => usePatchUser(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ id: 'u-1', data: { phone: '+79995556678' } });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });

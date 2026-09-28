@@ -9,14 +9,21 @@ from sqlalchemy import asc
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, collect_dependencies
+from src.domain.deletion import (
+    ResolutionError,
+    collect_dependencies,
+    collect_dependency_ids,
+    stale_expected_entities,
+)
 from src.domain.errors import BareListLimitExceededError
+from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
 from src.schemas.common import PaginatedResponse, SortOrder
 from src.schemas.location import (
     LocationCreate,
+    LocationDeleteBody,
     LocationPatch,
     LocationResponse,
     LocationSortBy,
@@ -45,19 +52,21 @@ _WRITE_GUARD = [
 ]
 _READ_GUARD = [Depends(require_permission("locations:read"))]
 
-# Sort whitelist map: UI key → list of ORM columns (#205 Task 3, spec §4.5;
-# #172: ``name`` → ``title``).
+# Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; #172:
+# ``name`` → ``title``; GH #367 Task 5: SortKeyMap + shared resolver).
 # ``archived`` → is_active (asc = is_active ASC = archived-first).
-_LOCATION_SORT_MAP: dict[str, list] = {
-    "title": [Location.title],
-    "short_title": [Location.short_title],
-    "capacity": [Location.capacity],
-    "address": [Location.address],
-    "location_hint": [Location.location_hint],
-    "description": [Location.description],
-    "archived": [Location.is_active],
-    "yandex_map_url": [Location.yandex_map_url],
-    "created_at": [Location.created_at],
+# All keys are canonical (asc → nullsfirst / desc → nullslast); the
+# ``sort_by=None`` fallback stays in the route (spec §4.3).
+_LOCATION_SORT_KEYS: SortKeyMap = {
+    "title": SortKeySpec([Location.title]),
+    "short_title": SortKeySpec([Location.short_title]),
+    "capacity": SortKeySpec([Location.capacity]),
+    "address": SortKeySpec([Location.address]),
+    "location_hint": SortKeySpec([Location.location_hint]),
+    "description": SortKeySpec([Location.description]),
+    "archived": SortKeySpec([Location.is_active]),
+    "yandex_map_url": SortKeySpec([Location.yandex_map_url]),
+    "created_at": SortKeySpec([Location.created_at]),
 }
 
 
@@ -68,23 +77,6 @@ _LOCATION_SORT_MAP: dict[str, list] = {
 # with the Depends() pagination model forbid the ``Annotated[Model,
 # Query()]`` form) — only the CONTRACT is shared, not the injection shape.
 IdListQuery = IdQueryParam
-
-
-def _location_order_by(sort_by: LocationSortBy | None, sort_order: SortOrder) -> list:
-    """Build the ``order_by`` list for GET /api/v1/locations.
-
-    * ``sort_by=None`` → spec §4.4 default: ``sort_order ASC, title ASC, id ASC``.
-    * User sort → mapped columns with nulls-first (asc) / nulls-last (desc),
-      then ``id ASC`` tiebreak for cross-page stability (records idiom).
-    """
-    if sort_by is None:
-        return [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
-    cols = _LOCATION_SORT_MAP[sort_by]
-    ordered = [
-        c.desc().nullslast() if sort_order == "desc" else c.asc().nullsfirst()
-        for c in cols
-    ]
-    return [*ordered, asc(Location.id)]
 
 
 @router.get("", response_model=PaginatedResponse[LocationResponse])
@@ -129,12 +121,18 @@ async def list_locations(
     (scalar mixing, fastapi #12481, prevents the Annotated[Model, Query()]
     shape here).
     """
+    if sort_by is None:
+        # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
+        # ``sort_order`` is IGNORED without an explicit sort_by.
+        order_by = [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
+    else:
+        order_by = apply_sort(_LOCATION_SORT_KEYS, sort_by, sort_order, Location.id)
     return await service.list(
         db_session=session,
         page=pagination.page,
         per_page=pagination.per_page,
         status=status,
-        order_by=_location_order_by(sort_by, sort_order),
+        order_by=order_by,
         q=q,
         ids=id,
     )
@@ -248,47 +246,81 @@ async def delete_location(
     location_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    resolutions: dict[str, str] | None = Body(default=None, embed=True),
+    body: Annotated[LocationDeleteBody | None, Body()] = None,
+    dry_run: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "Non-destructive preview: returns 204 without deleting "
+                "(no deps) or 409 with the dependency tree; never "
+                "modifies rows"
+            )
+        ),
+    ] = None,
 ) -> None:
-    """Unified DELETE — dry-run (no body) or execute (with body). Spec §2/§5/§6.
+    """Unified delete contract — dry-run preview flag / commit body
+    (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2).
 
-    * No body (dry-run): ``collect_dependencies`` → empty → hard delete (204);
-      non-empty → 409 + dependency tree (no rows modified).
-    * With body (execute): ``{"resolutions": {...}}`` per spec §6 (§2 L24,
-      §6 L161 — the ONLY accepted body form; the api-client ``resolveDeleteX``
-      sends exactly this; ``embed=True`` rejects a bare dict as a dry-run
-      shape). A wrapped empty ``{"resolutions": {}}`` still executes (S2 —
-      all-auto deps). ``service.resolve_delete`` runs the resolution
-      transaction (Task 10) → 204; ``ResolutionError`` → 422; missing → 404.
+    The legacy no-body DELETE (execute-if-clean / silent dry-run) is
+    REMOVED. Location deps per the FK matrix: ``activities`` (blocked,
+    NON-auto — the race gate: its id-set joins the expected check even
+    though the node is never confirmed), plus 2 AUTO deps
+    (location_tags cascade, photos nullify — resolved automatically,
+    exempt from the check).
+
+    * ``?dry_run=true`` — PURE preview (never touches rows, no SSE):
+      existence probe → missing → 404; present → ``collect_dependencies``
+      → empty → 204 WITHOUT deleting; non-empty → 409 + dependency tree.
+      Combined with a ``resolutions`` body → 422
+      ``dry_run_with_resolutions_forbidden`` (checked before the
+      existence probe); an expected-only body is silently ignored.
+    * No body, no flag → 422 ``{"detail": "expected_state_required"}``:
+      every real deletion must declare its state; rejected before any
+      DB access — the form check precedes the probe, so an unknown id
+      still gets 422, not 404. Same for a body whose ``expected`` is
+      absent (``{"resolutions": {...}}`` alone — the rejected legacy
+      shape).
+    * Body ``{resolutions?, expected}`` — the deferred-delete commit:
+      existence probe → ``collect_dependencies`` → expected id-set
+      verification (subset semantics for the non-auto dep activities —
+      a dep that disappeared in the undo window does not block, one
+      that APPEARED does) → mismatch → 409 ``stale_dependencies`` +
+      current tree. Only on a match → ``resolve_delete`` (validates
+      resolutions — blocked activities → 422 "archive instead",
+      ``ResolutionError`` → 422 — then cascades location_tags,
+      nullifies photos and hard-deletes the location) → 204; missing
+      id → 404 ``LOCATION_NOT_FOUND``.
+
+    Per the §4.4 matrix a successful commit with ``resolutions`` is
+    unreachable for Location (activities is blocked, the rest are
+    auto) — the branch is still honored in full: it is the contract
+    for API consumers and mid-window races.
     """
-    if resolutions is not None:
-        try:
-            ok = await service.resolve_delete(
-                db_session=session, id=location_id, resolutions=resolutions
-            )
-        except ResolutionError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=ErrorDetail(
-                    code=ErrorCode.LOCATION_NOT_FOUND,
-                    message="Location not found",
-                ).model_dump(),
-            )
-        return
+    resolutions = body.resolutions if body is not None else None
+    expected = body.expected if body is not None else None
 
-    deps = await collect_dependencies(session, Location, location_id)
-    if deps:
+    # Rev7 (#285) mirror: bare DELETE without the flag is a contract
+    # violation — reject the request shape before any DB access. Literal
+    # string detail (same flat shape as the 409 preview) → JSONResponse,
+    # not raised: the global HTTPException handler wraps string details
+    # into {code, message} — not the pinned contract.
+    if not dry_run and expected is None:
         return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "has_dependencies",
-                "dependencies": [d.model_dump(exclude_none=True) for d in deps],
-            },
+            status_code=422,
+            content={"detail": "expected_state_required"},
         )
-    deleted = await service.delete(db_session=session, id=location_id)
-    if not deleted:
+    # Pure preview never carries resolutions — forbidden combination.
+    # (An expected-only body IS allowed: silently ignored below.)
+    if dry_run and resolutions is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "dry_run_with_resolutions_forbidden"},
+        )
+
+    # Existence probe. The dry-run branch MUST 404 on a missing id
+    # instead of previewing an empty tree.
+    loc = await service.get(db_session=session, id=location_id)
+    if not loc:
         raise HTTPException(
             status_code=404,
             detail=ErrorDetail(
@@ -296,6 +328,63 @@ async def delete_location(
                 message="Location not found",
             ).model_dump(),
         )
+
+    if dry_run:
+        deps = await collect_dependencies(session, Location, location_id)
+        if deps:
+            return _dependencies_response(deps, detail="has_dependencies")
+        return  # 204 — preview only: no resolve_delete, no SSE marks.
+
+    # Body branch: the commit of the deferred delete. Expected id-set
+    # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
+    # the resolutions validation inside resolve_delete could turn it
+    # into a 422, and before any row is touched. Reads and the
+    # @transactional executor share the request session — one
+    # transaction (SQLite single-writer; #318 D2).
+    deps = await collect_dependencies(session, Location, location_id)
+    now_ids = await collect_dependency_ids(session, Location, location_id)
+    if stale_expected_entities(Location, now_ids, expected or {}):
+        return _dependencies_response(deps, detail="stale_dependencies")
+
+    # Match → execution by the generic executor: re-collects deps,
+    # validates resolutions (blocked activities → 422,
+    # ResolutionError → 422), cascades location_tags, nullifies
+    # photos, hard-deletes the location row.
+    try:
+        ok = await service.resolve_delete(
+            db_session=session, id=location_id, resolutions=resolutions or {},
+        )
+    except ResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorDetail(
+                code=ErrorCode.LOCATION_NOT_FOUND,
+                message="Location not found",
+            ).model_dump(),
+        )
+
+
+def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+    """The unified 409 preview payload: ``{detail, dependencies}``.
+
+    Mirror of the tags/records/activities routes' builder (#285/#286/
+    #318; same pinned shape). ``detail`` distinguishes the two 409s of
+    the deferred-delete contract (GH #345 §4.1): ``has_dependencies``
+    (dry-run preview) and ``stale_dependencies`` (commit-time expected
+    mismatch). The ``dependencies`` array is ``DependencyNode`` dumps —
+    optional-None node fields are OMITTED (``exclude_none``),
+    non-optional fields always serialize (the Location tree shows
+    counters for all deps; items stay absent — §4.3 fixed boundary).
+    """
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": detail,
+            "dependencies": [d.model_dump(exclude_none=True) for d in deps],
+        },
+    )
 
 
 @router.post("/{location_id}/archive", response_model=LocationResponse, dependencies=_WRITE_GUARD)

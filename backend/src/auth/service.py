@@ -1,5 +1,5 @@
 """AuthService — login / logout / resolve / change-password + login
-throttling — GH #247 §3.4 (+ #262 change-password).
+throttling — GH #247 §3.4 (+ #262 change-password, #348 null-guard).
 
 Two-tier brute-force throttle (spec §2.11 + §3.4):
 
@@ -27,6 +27,19 @@ Two-tier brute-force throttle (spec §2.11 + §3.4):
   reset an in-progress spray from the same IP). Expired entries are
   pruned on every login, so the store cannot grow without bound.
 
+  #348 extension (spec §5): the public password-setup routes share the
+  same per-IP counter — invalid-token attempts count toward the same
+  20/15-min trip wire (``register_ip_failure``), and a tripped IP is
+  pre-gated before any work (``ip_failure_gate``).
+
+Passwordless accounts (#348 spec §4): ``password_hash`` NULL means the
+password is not set yet. Login of such an account follows the
+unknown-phone branch exactly — dummy-hash verify (timing parity; a
+distinct timing or status would leak that the account exists without a
+password), the ORDINARY 401 ``AUTH_INVALID_CREDENTIALS``, both
+in-memory counters bumped — but the ladder is NOT fed (no per-account
+secret exists to brute-force; «лестницу учётки не кормить»).
+
 Login rotates the session: any token presented in the request is deleted
 before the new session row is created (OWASP session-id rotation on
 privilege change), and expired rows for the user are cleaned up
@@ -42,7 +55,8 @@ increment would let brute-force reset the ladder by crashing requests.
 ``@transactional`` is deliberately NOT used here (it skips the commit on
 the exception path, and auth is not an events-emitting entity).
 
-Spec: docs/specs/2026-09-08-auth-design.md §2.2, §2.11, §3.4
+Spec: docs/specs/2026-09-08-auth-design.md §2.2, §2.11, §3.4;
+docs/specs/2026-09-27-user-accounts-348-design.md §4, §5
 Domain rules: docs/domain-rules/auth.md (Sessions)
 """
 
@@ -50,7 +64,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
@@ -142,6 +156,38 @@ def _counter_exception(key: str, now: datetime) -> HTTPException | None:
 def threshold_for(key: str) -> int:
     """Threshold for a counter key: ``ip:`` → 20, ``phone:`` → 5."""
     return IP_FAILURE_THRESHOLD if key.startswith("ip:") else PHONE_FAILURE_THRESHOLD
+
+
+# ─── §3.4 extension — public setup routes (#348 Task 5) ────────────────────────
+
+
+def ip_failure_gate(client_ip: str) -> HTTPException | None:
+    """Pre-work per-IP gate for anonymous routes beyond login (#348).
+
+    The public password-setup endpoints share the login counter store
+    (spec §5: «расширение существующих счётчиков неудач входа, то же
+    окно» — 15 min / 20 failures per IP). Same order as ``login`` §3.4:
+    prune, then a tripped IP is rejected BEFORE any work — even for a
+    valid token. Returns the 429 to raise, or None when the gate passes.
+    """
+    now = datetime.utcnow()
+    _prune_counters(now)
+    return _counter_exception(f"ip:{client_ip}", now)
+
+
+def register_ip_failure(client_ip: str) -> HTTPException | None:
+    """Count one invalid-token attempt on the shared per-IP counter.
+
+    The invalid-login semantics (§3.4): every attempt that reached the
+    work and failed bumps the IP trip wire — a valid success elsewhere
+    never clears it. Returns the 429 when THIS bump itself trips the
+    gate (the counter rejection then wins over the route's own 422),
+    else None.
+    """
+    now = datetime.utcnow()
+    key = f"ip:{client_ip}"
+    _bump_counter(key, now)
+    return _counter_exception(key, now)
 
 
 class AuthService:
@@ -241,6 +287,25 @@ class AuthService:
                 or self._invalid_credentials()
             )
 
+        # ── passwordless account (#348: NULL password_hash) — the same
+        # shape as the unknown-phone branch: the dummy verify keeps the
+        # timing parity (the branch is indistinguishable from «no such
+        # phone» / «wrong password»), the ORDINARY invalid-credentials
+        # refusal carries (a distinct answer would leak that the account
+        # exists without a password), and BOTH in-memory counters count
+        # the attempt. The §2.11 ladder is deliberately NOT fed — there
+        # is no per-account secret to brute-force (spec §4: «лестницу
+        # учётки не кормить»).
+        if user.password_hash is None:
+            verify_password(password, DUMMY_HASH)
+            _bump_counter(phone_key, now)
+            _bump_counter(ip_key, now)
+            raise (
+                _counter_exception(phone_key, now)
+                or _counter_exception(ip_key, now)
+                or self._invalid_credentials()
+            )
+
         if not verify_password(password, user.password_hash):
             await self._register_failure(db_session, user, now)
             _bump_counter(phone_key, now)
@@ -290,6 +355,23 @@ class AuthService:
         """Delete the session row — instant revocation. Idempotent."""
         await db_session.execute(sa_delete(Session).where(Session.token == token))
         await db_session.commit()
+
+    # ─── session revocation by user (#348) ─────────────────────────────────
+
+    @staticmethod
+    async def revoke_user_sessions(
+        db_session: AsyncSession, user_id: str
+    ) -> int:
+        """Delete EVERY session row of the user — flush, no commit.
+
+        The #348 set-password-by-link block (S8): the scenario owns the
+        transaction, this owner method only executes the bulk delete.
+        Returns the rowcount (0 = nothing revoked — not an error).
+        """
+        result = await db_session.execute(
+            sa_delete(Session).where(Session.user_id == user_id)
+        )
+        return int(cast("Any", result).rowcount)
 
     # ─── change password (#262, spec §4 + D6) ─────────────────────────────
 

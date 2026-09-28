@@ -70,6 +70,28 @@ class LocationPatch(BaseModel):
     sort_order: int | None = None
 
 
+class LocationDeleteBody(BaseModel):
+    """DELETE /api/v1/locations/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``TagDeleteBody`` / #318 D2).
+
+    * ``expected`` — id-sets per non-auto FK entity. Location's only
+      non-auto dep is ``activities`` (blocked — never confirmed by the
+      user, but its id-set still participates in the race gate); the
+      clean/all-auto path sends ``{}``.
+    * ``resolutions`` — the user's cascade choices; for Location every
+      non-block dep is AUTO (location_tags, photos), so a successful
+      commit never needs them (the full branch is still honored).
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
+
+
 class LocationResponse(LocationBase):
     """Response schema with all location fields.
 

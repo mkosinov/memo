@@ -54,12 +54,18 @@
 # pick-next такие карточки пропускает — авто-повтора по ним нет.
 # Побудка сирот (2026-09-27, кейс #324): карточка своего хоста в In IMPL /
 # PR (G7) с молчащими сессиями и МЁРТВЫМ клиент-процессом не релизится
-# сверкой сразу — наблюдатель до ORPHAN_NUDGES раз будит сессию менеджера
-# (gh_board.py orphans + продолжающее сообщение; маркер NUDGE-<kind> в
-# auto-impl log = счётчик попыток, свежая побудка отдыхает CLAIM_TTL_HOURS).
-# Бюджет исчерпан → прежние пути: In IMPL → краш-релиз, PR (G7) →
-# gate=blocked (блокер виден на борде). Живой, но молчащий клиент побудке
-# не подлежит (второй водитель запрещён) — идёт прежними путями.
+# сверкой сразу — наблюдатель будит сессию менеджера (gh_board.py orphans +
+# продолжающее сообщение; маркер NUDGE-<kind> в auto-impl log = счётчик
+# попыток, свежая побудка отдыхает CLAIM_TTL_HOURS = часовой темп).
+# Правила побудок (2026-09-28, кейс #348 — ночь, где 4 из 5 побудок сгорели
+# в закрытом квотном окне z.ai): (1) перед каждым пинком — тест апстрима
+# llm_ping.sh (минимальный вызов модели; окно закрыто → пинок не тратится,
+# маркер NUDGE не пишется); (2) бюджет: раз в час до NUDGE_BUDGET (24) за
+# NUDGE_BUDGET_H (24ч) — исчерпан → In IMPL: Ready to IMPL + gate=blocked,
+# PR (G7): gate=blocked (в обоих случаях ждёт юзера, виден на борде).
+# Живой, но молчащий клиент побудке не подлежит (второй водитель запрещён).
+# Ежечасно impl_janitor.py прибивает остатки: процессы ворктри карточек вне
+# In IMPL / PR (G7) (старше часа) и осиротевшие TUI-окна старше 12ч.
 
 set -uo pipefail
 
@@ -101,16 +107,29 @@ while true; do
     python3 .opencode/scripts/gh_board.py reconcile "$HOST_LABEL" \
         || echo "$(date -Is) reconcile failed"
 
+    # ежечасный уборщик остатков (2026-09-28, кейс #324): процессы ворктри
+    # неактивных карточек и осиротевшие TUI-окна; сам троттлится меткой
+    # lastrun — звать можно каждый цикл
+    python3 "$REPO/.opencode/scripts/impl_janitor.py" \
+        || echo "$(date -Is) janitor failed"
+
     # побудка сирот (2026-09-27, кейс #324): карточки своего хоста в In IMPL /
     # PR (G7), чьи сессии молчат >1ч и чей клиент-процесс мёртв. reconcile НЕ
-    # релизит их, пока не исчерпан бюджет побудок (ORPHAN_NUDGES в
-    # gh_board.py) — здесь шлём продолжающее сообщение в существующую сессию
-    # менеджера и пишем маркер NUDGE-<kind> в auto-impl log (счётчик попыток).
-    # Живой клиент-процесс побудке не подлежит (второй водитель запрещён).
+    # релизит их, пока не исчерпан бюджет побудок (NUDGE_BUDGET/NUDGE_BUDGET_H
+    # в gh_board.py: раз в час до 24 за сутки) — здесь шлём продолжающее
+    # сообщение в существующую сессию менеджера и пишем маркер NUDGE-<kind> в
+    # auto-impl log (счётчик попыток). Перед пинком — тест апстрима llm_ping.sh:
+    # закрытое квотное окно не съедает побудку. Живой клиент-процесс побудке не
+    # подлежит (второй водитель запрещён).
     python3 .opencode/scripts/gh_board.py orphans "$HOST_LABEL" 2>/dev/null |
     while read -r OKIND ONUM; do
         case "$OKIND" in impl|pr) : ;; *) continue ;; esac
         case "$ONUM" in ''|*[!0-9]*) continue ;; esac
+        # тест апстрима перед пинком (2026-09-28): окно закрыто — будить некого
+        if ! bash "$REPO/.opencode/scripts/llm_ping.sh"; then
+            echo "$(date -Is) #$ONUM nudge skipped: upstream LLM unavailable (ping failed)"
+            continue
+        fi
         OSID=$(sqlite3 /root/.local/share/opencode/opencode.db \
             "select id from session where title like '%#${ONUM} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
         [ -z "$OSID" ] && continue

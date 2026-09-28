@@ -5,8 +5,6 @@ import type { StampState } from '@memo/domain';
 import { useScheduleView as useScheduleViewHook } from '@/hooks/useScheduleView';
 import type {
   ScheduleView,
-  ScheduleViewMode,
-  ScheduleColumnMode,
 } from '@/hooks/useScheduleView';
 
 // #138 Task 2: the view context no longer OWNS view state. viewMode /
@@ -16,8 +14,6 @@ import type {
 // the NavigationContext wiring are gone; only stamp and the two filter lists
 // stay local.
 
-export type ViewModeType = ScheduleViewMode;
-export type ColumnModeType = ScheduleColumnMode;
 
 export interface ScheduleViewContextType extends ScheduleView {
   filterMasterIds: string[];

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useRecordsPeriod } from '@/hooks/useRecordsPeriod';
+import { useRecords } from '@/contexts/RecordsContext';
 import { displayMasterName } from '@/lib/utils';
 import { StatusFiltersPicker } from '@/app/components/shared/StatusFiltersPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
@@ -37,12 +37,13 @@ export function RecordsFilters({
   onSearchChange,
   onReset,
 }: RecordsFiltersProps) {
-  // #138 Task 5: the date inputs write the URL period (?from=&to=, replace).
-  // dateFrom/dateTo come back from searchParams (default: current week), so
-  // the inputs always display a concrete range. An untouched ABSENT side
-  // stays absent (the spec's deliberate half-filter): handlers pass
-  // explicitTo/explicitFrom (null → ''), NOT the defaulted display value.
-  const { dateFrom, dateTo, explicitFrom, explicitTo, setPeriod } = useRecordsPeriod();
+  // #349 Task 7: the date inputs write the URL period through the page's
+  // SINGLE writer — the context (RecordsProvider → useRecordsUrlState), no
+  // private hook instance. dateFrom/dateTo are the EFFECTIVE display values
+  // (defaults for absent sides); an untouched ABSENT side stays absent (the
+  // deliberate half-filter): handlers pass explicitTo/explicitFrom (null →
+  // ''), NOT the defaulted display value. Gate B: the write is a push.
+  const { dateFrom, dateTo, explicitFrom, explicitTo, setPeriod } = useRecords();
 
   // Selection data owned by this component (GH #213 §6.4, R2): the shared RAW
   // hooks (#140) on the CANONICAL keys — TanStack dedupes with every other

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTableUrlState } from '@/hooks/useTableUrlState';
 import type { TableUrlConfig } from '@/hooks/useTableUrlState';
 import { getMonday, toISODate } from '@/lib/datetime';
@@ -122,6 +123,39 @@ const URL_KEY_OF = {
 } as const;
 
 /**
+ * Strict `YYYY-MM-DD` AND a real calendar date (mirrors useTableUrlState's
+ * parseDateKey / the legacy useRecordsPeriod validation). Anything else → null.
+ */
+function parseDateParam(raw: string | null): string | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [y, m, d] = raw.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+    return null;
+  }
+  return raw;
+}
+
+/**
+ * Explicitness CANNOT come from the preset state: the datePair read
+ * substitutes the default week when BOTH sides are absent, so
+ * state.period.to would leak the default sunday as "explicit" — and a
+ * half-filter write would seed the defaulted display value into the URL.
+ * Derived from the RAW params instead (the clients-adapter clientIds
+ * precedent): a side is explicit only when individually valid, and an
+ * explicitly inverted pair invalidates BOTH sides (they did not survive).
+ */
+function readExplicitPeriod(params: URLSearchParams): {
+  from: string | null;
+  to: string | null;
+} {
+  const from = parseDateParam(params.get('from'));
+  const to = parseDateParam(params.get('to'));
+  if (from !== null && to !== null && from > to) return { from: null, to: null };
+  return { from, to };
+}
+
+/**
  * Page-scoped URL adapter for /records (#349 Task 7). Created INSIDE the
  * page's Suspense boundary, passed into RecordsProvider as its urlState
  * integration — the ONE useTableUrlState instance on the /records URL.
@@ -131,6 +165,7 @@ const URL_KEY_OF = {
  */
 export function useRecordsUrlState(): RecordsUrlAdapter {
   const { state, update: urlUpdate, navigate } = useTableUrlState(recordsUrlConfig);
+  const searchParams = useSearchParams();
 
   const update = useCallback(
     (patch: RecordsUrlPatch, options?: { history?: 'push' | 'replace' }) => {
@@ -166,13 +201,20 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
   const defFrom = def.from;
   const defTo = def.to;
 
+  // Explicitness from the RAW params (see readExplicitPeriod/parseDateParam):
+  // an absent side is NEVER explicit, even though the display/effective
+  // value falls back to the default week.
+  const explicit = readExplicitPeriod(searchParams);
+  const explicitFrom = explicit.from;
+  const explicitTo = explicit.to;
+
   return useMemo(
     () => ({
       state: {
         dateFrom: state.period.from ?? defFrom,
         dateTo: state.period.to ?? defTo,
-        explicitFrom: state.period.from,
-        explicitTo: state.period.to,
+        explicitFrom,
+        explicitTo,
         filters: {
           locationId: state.location_id,
           serviceId: state.service_id,
@@ -189,6 +231,6 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
       setPeriod,
       navigate,
     }),
-    [state, defFrom, defTo, update, setPeriod, navigate],
+    [state, defFrom, defTo, explicitFrom, explicitTo, update, setPeriod, navigate],
   );
 }

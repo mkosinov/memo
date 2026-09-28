@@ -120,6 +120,18 @@ describe('useRecordsUrlState — period read', () => {
     expect(result.current.state.explicitTo).toBeNull();
   });
 
+  it('no params at all → BOTH explicit sides null (defaults are display-only, never written back)', () => {
+    const { result } = renderHook(() => useRecordsUrlState());
+    const def = expectedDefaultRange();
+    // Effective display values = the default week…
+    expect(result.current.state.dateFrom).toBe(def.from);
+    expect(result.current.state.dateTo).toBe(def.to);
+    // …but neither side is EXPLICIT (a half-filter write must not seed the
+    // defaulted display value into the URL).
+    expect(result.current.state.explicitFrom).toBeNull();
+    expect(result.current.state.explicitTo).toBeNull();
+  });
+
   it('an inverted pair makes BOTH sides non-explicit (they did not survive the read)', () => {
     __resetNavigation('?from=2026-03-10&to=2026-03-01', '/records');
     const { result } = renderHook(() => useRecordsUrlState());

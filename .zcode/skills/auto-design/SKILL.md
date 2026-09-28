@@ -62,7 +62,7 @@ Then `gate N spec` and end the turn. Push NOTHING before the explicit OK.
 
 ## Fast-track (docs/harness-only issues, no app code)
 
-No plan: the spec carries a `## Verification` section (mechanical checks). After the Gate B OK implement in THIS session, open a PR (`Closes #N` in the PR description only) and schedule the merge yourself right away: `gh pr merge <PR> --squash --auto --delete-branch` — GitHub merges on green CI; do NOT wait for the user's manual merge. Card `In IMPL` → `In-main` after the actual merge (next run if CI is still spinning); the card never sits in `Ready to IMPL`. Do NOT run `gh_board.py merged` on the host — the scratchpad file lives in the container and the command fails on the host.
+No plan: the spec carries a `## Verification` section (mechanical checks). After the Gate B OK implement in THIS session, open a PR (`Closes #N` in the PR description only). GREEN CI IS THE ONLY MERGE TRIGGER (user decision 2026-09-27, after the #399 incident): `gh pr checks --watch` blocks until every check concludes — merge ONLY on its exit 0 with `gh pr merge <PR> --squash --delete-branch`; NEVER pass `--auto` (without branch protection gh's `--auto` degenerates into an instant direct merge that bypasses CI entirely). Red CI → no merge, report and stop. Card `In IMPL` → `In-main` after the actual merge (next run if CI is still spinning); the card never sits in `Ready to IMPL`. Do NOT run `gh_board.py merged` on the host — the scratchpad file lives in the container and the command fails on the host.
 
 ## Rules
 

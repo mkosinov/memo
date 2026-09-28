@@ -27,7 +27,11 @@ vi.mock('@/contexts/UIContext', () => ({
 vi.mock('@/hooks/usePhotosMutations', () => ({
   useUpdatePhoto: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePhoto: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeletePhoto: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // #324: the deferred-delete hook pair (the instant mutateAsync path is gone).
+  useDeletePhoto: () => ({
+    removePhoto: vi.fn().mockResolvedValue(undefined),
+    removePhotoResolved: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock('@/app/(main)/photos/components/PhotoModal', () => ({

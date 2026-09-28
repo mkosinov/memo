@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import type { PhotoResponse } from '@memo/api-client';
+import React, { useCallback, useMemo, useState } from 'react';
+import type { DependencyNode, PhotoResponse } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 import { useUpdatePhoto, useCreatePhoto, useDeletePhoto } from '@/hooks/usePhotosMutations';
 import { useUI } from '@/contexts/UIContext';
 import { usePhotosTable } from '@/contexts/PhotosContext';
 import { PhotoModal } from './PhotoModal';
 import { DataTable } from '@/app/components/shared/DataTable';
+import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { photoColumns, photoActions } from './photoColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
 
@@ -25,14 +27,46 @@ export function PhotosTable() {
 
   const updateMutation = useUpdatePhoto();
   const createMutation = useCreatePhoto();
-  const deleteMutation = useDeletePhoto();
   const { showToast } = useUI();
 
   // ─── Modal state ────────────────────────────────────────────────────────
   const [editPhoto, setEditPhoto] = useState<PhotoResponse | null>(null);
   const [creatingPhoto, setCreatingPhoto] = useState(false);
 
-  // ─── Handlers (verbatim pre-#139) ───────────────────────────────────────
+  // Delete — GH #324 (spec §6/§9.1/§9.2): deferred flow, mirrors TagsTable
+  // (#318). removePhoto dry-runs (pure preview): a clean 204 removes the row
+  // optimistically + enqueues the deferred delete (5s undo window, commit =
+  // resolveDeletePhoto); a 409 WITH the photo_tags tree rejects here → park
+  // the tree + open DeleteDialog («Теги — будут отвязаны», the row stays
+  // visible). Any other error keeps its error toast. Toasts on success come
+  // from the pending stack («Удалено. Отменить» with the countdown ring) —
+  // not a success toast. NO instant delete path remains.
+  const { removePhoto, removePhotoResolved } = useDeletePhoto();
+  const [deleteTarget, setDeleteTarget] = useState<{
+    photo: PhotoResponse;
+    deps: DependencyNode[];
+  } | null>(null);
+
+  const handleDelete = useCallback(async (photo: PhotoResponse) => {
+    try {
+      await removePhoto(photo);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.dependencies) {
+        setDeleteTarget({ photo, deps: err.dependencies });
+        return;
+      }
+      // Non-409 dry-run errors keep their EXISTING toast surface —
+      // parseApiError maps status/code to the established russian texts.
+      showToast(
+        err instanceof Error
+          ? parseApiError(err).message
+          : 'Не удалось удалить. Попробуйте ещё раз.',
+        'error',
+      );
+    }
+  }, [removePhoto, showToast]);
+
+  // ─── Handlers ───────────────────────────────────────────────────────────
 
   const handleEdit = async (data: Record<string, unknown>) => {
     if (!editPhoto) return;
@@ -83,17 +117,6 @@ export function PhotosTable() {
     }
   };
 
-  const handleDelete = async (photo: PhotoResponse) => {
-    // Delete keeps the §6.9 locked window.confirm flow (pre-#139 PhotosTable)
-    if (!window.confirm('Удалить фото?')) return;
-    try {
-      await deleteMutation.mutateAsync(photo.id);
-      showToast('Фото удалено');
-    } catch (err) {
-      showToast(parseApiError(err).message, 'error');
-    }
-  };
-
   // §6.15 — memoize the factory outputs (recomputes when the /all maps change)
   const columns = useMemo(
     () => photoColumns({ servicesMap, locationsMap }),
@@ -105,8 +128,7 @@ export function PhotosTable() {
         onEdit: (p) => setEditPhoto(p),
         onDelete: (p) => void handleDelete(p),
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- §6.15 stable identity
-    [],
+    [handleDelete],
   );
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -158,6 +180,26 @@ export function PhotosTable() {
           onSubmit={handleCreateSubmit}
           onClose={() => setCreatingPhoto(false)}
           title="Новое фото"
+        />
+      )}
+
+      {/* Delete dialog — GH #324 (§9.2): opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately via onDone. Photos never hit Mode B —
+          the photo_tags tree has no blocked deps (join always cascades). */}
+      {deleteTarget && (
+        <DeleteDialog
+          entityName={deleteTarget.photo.filename}
+          entityType="photo"
+          entityId={deleteTarget.photo.id}
+          dependencies={deleteTarget.deps}
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removePhotoResolved(deleteTarget.photo, resolutions, deleteTarget.deps);
+          }}
+          onArchive={async () => { /* photos have no archive flow — never Mode B */ }}
+          onDone={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

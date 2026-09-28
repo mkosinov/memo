@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.schemas.common import SortOrder
+from src.schemas.common import SortOrder, SortParams
 from src.schemas.pagination import PaginationParams
 
 PhotoSortBy = Literal["filename", "is_public", "created_at"]
@@ -82,12 +82,17 @@ class PhotoTagResponse(BaseModel):
     title: str
 
 
-class PhotoListParams(PaginationParams):
+class PhotoListParams(SortParams[PhotoSortBy], PaginationParams):
     """Query parameters for GET /api/v1/photos (#211).
 
     Injected as ``Annotated[PhotoListParams, Query()]`` (Query, not
     Depends: this model is the sole query-param carrier for the photos
     list handler — no scalar-param mixing; fastapi #12481).
+
+    Sort (GH #367): inherits the shared ``SortParams`` brick; the
+    ``created_at``/``desc`` defaults are re-declared here per the spec
+    §4.1 defaults rule — **the desc default is load-bearing**: the photo
+    table shows newest first, flipping it to asc would invert the table.
     """
 
     q: str | None = Field(default=None, min_length=2, max_length=100)

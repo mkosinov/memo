@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, getClientByPhone, updateVisitStatus, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, deleteStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, deleteService, createLocation, updateLocation, deleteLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, deleteMaterial, deleteClient, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -235,10 +235,21 @@ describe('patchPosition', () => {
 });
 
 describe('deletePosition', () => {
-  it('calls DELETE /api/v1/positions/:id with no body (system ones 422 server-side)', async () => {
+  it('defaults the body to the leaf-clean snapshot {expected: {}} (T6 pattern)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
     await deletePosition('p-1');
     expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
       method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes an explicit expected payload through', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePosition('p-1', { expected: { staff_positions: ['st-1'] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { staff_positions: ['st-1'] } }),
     });
   });
 });
@@ -1058,14 +1069,34 @@ describe('updatePayment', () => {
   });
 });
 
+// GH #324 (family contract, leaves): the DELETE commit carries the mandatory
+// {expected} body — bare DELETE → 422 expected_state_required server-side.
+// Default is the leaf-clean snapshot {expected: {}} so existing in-repo
+// call sites keep their one-arg signature.
 describe('deletePayment', () => {
-  it('calls DELETE /api/v1/payments/:id', async () => {
+  it('calls DELETE /api/v1/payments/:id with default body {"expected":{}}', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
     await deletePayment('p-1');
     expect(api).toHaveBeenCalledWith(
       '/api/v1/payments/p-1',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
+    );
+  });
+
+  it('passes the explicit expected payload through as the body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePayment('p-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/payments/p-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
     );
   });
 });
@@ -1118,15 +1149,94 @@ describe('patchVisitor', () => {
   });
 });
 
+// ─── Visitors delete: optional body + dry-run/resolve (GH #324 Task 8,
+// mirror of photos/positions) — the bare instant DELETE is GONE (server
+// answers 422 expected_state_required); every in-repo commit carries {expected}.
+
 describe('deleteVisitor', () => {
-  it('calls DELETE /api/v1/visitors/:id', async () => {
+  it('one-arg call sends the leaf-clean body {"expected":{}}', async () => {
     vi.mocked(api).mockResolvedValue(undefined);
     await deleteVisitor('v-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('payload overload: expected id-sets travel verbatim (visits + visitor_tags)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisitor('v-1', {
+      expected: { visits: ['visit-1'], visitor_tags: ['tag-1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { visits: ['visit-1'], visitor_tags: ['tag-1'] } }),
+    });
+  });
+});
+
+describe('dryRunDeleteVisitor', () => {
+  it('calls DELETE /api/v1/visitors/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeleteVisitor('v-1');
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/visitors/v-1',
+      '/api/v1/visitors/v-1?dry_run=true',
       expect.anything(),
-      expect.objectContaining({ method: 'DELETE' }),
+      { method: 'DELETE' },
     );
+  });
+
+  it('propagates 409 ApiError with the visits/visitor_tags dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'visits', auto: false, relation: 'Посещение', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-visit-1', label: 'Гуашь, 3500 ₽' },
+          { id: 'uuid-visit-2', label: 'Акварель, 2500 ₽' },
+        ],
+      },
+      {
+        entity: 'visitor_tags', auto: true, relation: 'Тег', count: 1,
+        allowed_actions: ['cascade'],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeleteVisitor('v-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeleteVisitor', () => {
+  it('pure path: body is {"expected":{}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteVisitor('v-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('with-visits path: sends both expected groups (visits + visitor_tags) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeleteVisitor('v-1', {
+      resolutions: { visits: 'cascade' },
+      expected: { visits: ['uuid-visit-1', 'uuid-visit-2'], visitor_tags: ['uuid-tag-1'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/visitors/v-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { visits: ['uuid-visit-1', 'uuid-visit-2'], visitor_tags: ['uuid-tag-1'] },
+        resolutions: { visits: 'cascade' },
+      }),
+    });
   });
 });
 
@@ -1199,6 +1309,38 @@ describe('updateVisitStatus', () => {
       expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({ status: 'visited' }),
+      }),
+    );
+  });
+});
+
+// GH #324 (family contract, leaves): the DELETE commit carries the mandatory
+// {expected} body — bare DELETE → 422 expected_state_required server-side.
+// Default is the leaf-clean snapshot {expected: {}} so existing in-repo
+// call sites keep their one-arg signature.
+describe('deleteVisit', () => {
+  it('calls DELETE /api/v1/visits/:id with default body {"expected":{}}', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisit('v-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visits/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
+      }),
+    );
+  });
+
+  it('passes the explicit expected payload through as the body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deleteVisit('v-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/visits/v-1',
+      expect.anything(),
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ expected: {} }),
       }),
     );
   });
@@ -1920,6 +2062,157 @@ describe('resolveDeleteTag', () => {
       body: JSON.stringify({
         expected: { records: ['uuid-1', 'uuid-2'] },
         resolutions: { records: 'nullify' },
+      }),
+    });
+  });
+});
+
+// ─── Photos delete: dry-run + resolve (GH #324, mirror of tags GH #318) ─────
+// Photo = dependent subject: photo_tags join → 409 tree (node «Тег», items
+// with tag ids/titles); clean photo → 204 → commit {expected: {}}.
+
+describe('deletePhoto', () => {
+  it('defaults the body to the leaf-clean snapshot {expected: {}} (T6 pattern)', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePhoto('p-1');
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('passes an explicit expected payload through', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await deletePhoto('p-1', { expected: { photo_tags: ['t-1'] } });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: { photo_tags: ['t-1'] } }),
+    });
+  });
+});
+
+describe('dryRunDeletePhoto', () => {
+  it('calls DELETE /api/v1/photos/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeletePhoto('p-1');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/photos/p-1?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with the photo_tags dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'photo_tags', auto: false, relation: 'Тег', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-tag-1', label: 'Гуашь' },
+          { id: 'uuid-tag-2', label: 'Акварель' },
+        ],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeletePhoto('p-1');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeletePhoto', () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePhoto('p-1', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('tagged path: sends both expected (photo_tags id-set) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePhoto('p-1', {
+      resolutions: { photo_tags: 'cascade' },
+      expected: { photo_tags: ['uuid-tag-1', 'uuid-tag-2'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos/p-1', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { photo_tags: ['uuid-tag-1', 'uuid-tag-2'] },
+        resolutions: { photo_tags: 'cascade' },
+      }),
+    });
+  });
+});
+
+// ─── Positions delete: dry-run + resolve (GH #324, mirror of tags GH #318) ──
+// Position = dependent subject: staff_positions join → 409 tree (node
+// «Сотрудник», items with staff ids/names); system position → 422
+// POSITION_IS_SYSTEM before the fork (server-side guard, client passes through).
+
+describe('dryRunDeletePosition', () => {
+  it('calls DELETE /api/v1/positions/:id?dry_run=true with no body', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await dryRunDeletePosition('smm');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/positions/smm?dry_run=true',
+      expect.anything(),
+      { method: 'DELETE' },
+    );
+  });
+
+  it('propagates 409 ApiError with the staff_positions dependency tree', async () => {
+    const tree = [
+      {
+        entity: 'staff_positions', auto: false, relation: 'Сотрудник', count: 2,
+        allowed_actions: ['cascade'],
+        items: [
+          { id: 'uuid-staff-1', label: 'Анна Иванова' },
+          { id: 'uuid-staff-2', label: 'Мария Петрова' },
+        ],
+      },
+    ];
+    const err = new ApiError(409, 'has_dependencies', 'has_dependencies', tree);
+    vi.mocked(api).mockRejectedValue(err);
+    let caught: unknown;
+    try {
+      await dryRunDeletePosition('smm');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBe(err);
+    expect((caught as ApiError).dependencies).toEqual(tree);
+  });
+});
+
+describe('resolveDeletePosition', () => {
+  it('pure path: body is {"expected": {}} without resolutions key', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePosition('smm', { expected: {} });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/smm', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({ expected: {} }),
+    });
+  });
+
+  it('busy path: sends both expected (staff_positions id-set) and resolutions', async () => {
+    vi.mocked(api).mockResolvedValue(undefined);
+    await resolveDeletePosition('smm', {
+      resolutions: { staff_positions: 'cascade' },
+      expected: { staff_positions: ['uuid-staff-1', 'uuid-staff-2'] },
+    });
+    expect(api).toHaveBeenCalledWith('/api/v1/positions/smm', expect.anything(), {
+      method: 'DELETE',
+      body: JSON.stringify({
+        expected: { staff_positions: ['uuid-staff-1', 'uuid-staff-2'] },
+        resolutions: { staff_positions: 'cascade' },
       }),
     });
   });

@@ -132,9 +132,9 @@ export const photoColumns = ({ servicesMap, locationsMap }: PhotoColumnLookup): 
  * Action config factory. Callbacks are captured by the parent wrapper
  * (§6.15: wrapper useMemo's the output). Rows also open the edit modal via
  * onRowClick; "Редактировать" stays in the menu (existing behaviour + the
- * unchanged photos-crud e2e dropdown assertions). Delete keeps the §6.9
- * locked window.confirm('Удалить фото?') path — the parent implements it in
- * onDelete.
+ * unchanged photos-crud e2e dropdown assertions). Delete rides the #324
+ * deferred pipeline — the parent implements it in onDelete (clean → ring;
+ * tagged → DeleteDialog «Теги — будут отвязаны»).
  */
 export const photoActions = (cbs: {
   onEdit: (p: PhotoResponse) => void;

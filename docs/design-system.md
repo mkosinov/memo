@@ -638,7 +638,7 @@ Generic building blocks in `frontend/admin/app/components/shared/`
 | `StatusFiltersPicker` | `shared/StatusFiltersPicker.tsx` | See Status Display Components |
 | `Combobox` | `shared/Combobox.tsx` | Searchable select |
 | `MultiSelect` | `shared/MultiSelect.tsx` | Multi-value select |
-| `RemoteSearchSelect` | `shared/RemoteSearchSelect.tsx` | Typeahead against the API (GH #221) |
+| `RemoteSearchSelect` | `shared/RemoteSearchSelect.tsx` | Typeahead against the API (GH #221). Uncontrolled: external reset/substitution = remount via key; a reset is clearing the owner's state **and** bumping the key (two independent actions — a silent desync if only one); remount drops focus and in-flight work (documented React behavior, GH #368) |
 | `FilterDropdown` | `shared/FilterDropdown.tsx` | Header filter dropdown |
 | `DateTimePicker` | `shared/DateTimePicker.tsx` | Date+time input |
 | `TimePicker` | `shared/TimePicker.tsx` | Time input |

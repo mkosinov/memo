@@ -35,6 +35,7 @@ from src.api.v1.visits import router as visits_router
 from src.auth.router import router as auth_router
 from src.core.config import settings
 from src.db.migrate import run_alembic_upgrade
+from src.domain.errors import UnknownSortKeyError
 from src.errors import ErrorCode, ErrorDetail
 from src.events import emitter
 from src.events.hub import hub
@@ -189,6 +190,23 @@ def create_app() -> FastAPI:
             content={"detail": ErrorDetail(
                 code=ErrorCode.INTEGRITY_VIOLATION.value,
                 message="Database integrity constraint violated",
+            ).model_dump()},
+        )
+
+    @app.exception_handler(UnknownSortKeyError)
+    async def unknown_sort_key_handler(request: Request, exc: UnknownSortKeyError):
+        """Sort key missing from an entity's sort map → 422 VALIDATION_ERROR.
+
+        GH #367 spec §4.2 safety net: the main line is the per-entity
+        ``sort_by`` Literal (FastAPI 422 before the resolver runs); this
+        handler catches only paths that bypassed it, so a contract drift
+        surfaces as a validation error — never a 500.
+        """
+        return JSONResponse(
+            status_code=422,
+            content={"detail": ErrorDetail(
+                code=ErrorCode.VALIDATION_ERROR.value,
+                message=str(exc),
             ).model_dump()},
         )
 

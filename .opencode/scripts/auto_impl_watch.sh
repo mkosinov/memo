@@ -52,6 +52,20 @@
 # при ответе юзера в сессии. Возврат зависшего прогона СОХРАНЯЕТ blocked на
 # Ready-карточке (решение юзера 26.09: ожидание юзера не прячется), и
 # pick-next такие карточки пропускает — авто-повтора по ним нет.
+# Побудка сирот (2026-09-27, кейс #324): карточка своего хоста в In IMPL /
+# PR (G7) с молчащими сессиями и МЁРТВЫМ клиент-процессом не релизится
+# сверкой сразу — наблюдатель будит сессию менеджера (gh_board.py orphans +
+# продолжающее сообщение; маркер NUDGE-<kind> в auto-impl log = счётчик
+# попыток, свежая побудка отдыхает CLAIM_TTL_HOURS = часовой темп).
+# Правила побудок (2026-09-28, кейс #348 — ночь, где 4 из 5 побудок сгорели
+# в закрытом квотном окне z.ai): (1) перед каждым пинком — тест апстрима
+# llm_ping.sh (минимальный вызов модели; окно закрыто → пинок не тратится,
+# маркер NUDGE не пишется); (2) бюджет: раз в час до NUDGE_BUDGET (24) за
+# NUDGE_BUDGET_H (24ч) — исчерпан → In IMPL: Ready to IMPL + gate=blocked,
+# PR (G7): gate=blocked (в обоих случаях ждёт юзера, виден на борде).
+# Живой, но молчащий клиент побудке не подлежит (второй водитель запрещён).
+# Ежечасно impl_janitor.py прибивает остатки: процессы ворктри карточек вне
+# In IMPL / PR (G7) (старше часа) и осиротевшие TUI-окна старше 12ч.
 
 set -uo pipefail
 
@@ -92,6 +106,43 @@ while true; do
     # сверка стейл-карточек ДО выбора: чинить надо до захвата новых
     python3 .opencode/scripts/gh_board.py reconcile "$HOST_LABEL" \
         || echo "$(date -Is) reconcile failed"
+
+    # ежечасный уборщик остатков (2026-09-28, кейс #324): процессы ворктри
+    # неактивных карточек и осиротевшие TUI-окна; сам троттлится меткой
+    # lastrun — звать можно каждый цикл
+    python3 "$REPO/.opencode/scripts/impl_janitor.py" \
+        || echo "$(date -Is) janitor failed"
+
+    # побудка сирот (2026-09-27, кейс #324): карточки своего хоста в In IMPL /
+    # PR (G7), чьи сессии молчат >1ч и чей клиент-процесс мёртв. reconcile НЕ
+    # релизит их, пока не исчерпан бюджет побудок (NUDGE_BUDGET/NUDGE_BUDGET_H
+    # в gh_board.py: раз в час до 24 за сутки) — здесь шлём продолжающее
+    # сообщение в существующую сессию менеджера и пишем маркер NUDGE-<kind> в
+    # auto-impl log (счётчик попыток). Перед пинком — тест апстрима llm_ping.sh:
+    # закрытое квотное окно не съедает побудку. Живой клиент-процесс побудке не
+    # подлежит (второй водитель запрещён).
+    python3 .opencode/scripts/gh_board.py orphans "$HOST_LABEL" 2>/dev/null |
+    while read -r OKIND ONUM; do
+        case "$OKIND" in impl|pr) : ;; *) continue ;; esac
+        case "$ONUM" in ''|*[!0-9]*) continue ;; esac
+        # тест апстрима перед пинком (2026-09-28): окно закрыто — будить некого
+        if ! bash "$REPO/.opencode/scripts/llm_ping.sh"; then
+            echo "$(date -Is) #$ONUM nudge skipped: upstream LLM unavailable (ping failed)"
+            continue
+        fi
+        OSID=$(sqlite3 /root/.local/share/opencode/opencode.db \
+            "select id from session where title like '%#${ONUM} IMPL.%' order by rowid desc limit 1" 2>/dev/null)
+        [ -z "$OSID" ] && continue
+        if [ "$OKIND" = "pr" ]; then
+            OMSG="Auto-IMPL nudge: финал ветки прервался во время недоступности LLM (владелец-менеджер молчал больше часа). Продолжи диспатч 2 по своей карточке: проверь чеки PR — зелёные: мерж и штатный finishing (борд In-main, закрытие issue, сдвиг очереди); красные или продолжать не можешь: допиши в «auto-impl log:» строку «auto-impl blocked: <упавшие чеки>» и поставь метку: python3 .opencode/scripts/gh_board.py gate $ONUM blocked — и стоп."
+        else
+            OMSG="Auto-IMPL nudge: прогон прервался во время недоступности LLM (сессии молчали больше часа, клиент-процесс мёртв). Продолжи выполнение плана с места остановки: проверь состояние последнего таска/диспатча и продолжай. Если упрёшься в вопрос к пользователю — «auto-impl blocked: …» в лог и python3 .opencode/scripts/gh_board.py gate $ONUM blocked, и стоп."
+        fi
+        nohup opencode run --attach "http://localhost:${OPENCODE_PORT:-4096}" --dir "$REPO" \
+            --session "$OSID" "$OMSG" > "$STATE/auto-impl-$ONUM-nudge.log" 2>&1 &
+        echo "$(date -Is) #$ONUM nudge ($OKIND) sent (session $OSID, log: $STATE/auto-impl-$ONUM-nudge.log)"
+        python3 .opencode/scripts/gh_board.py auto-log "$ONUM" "NUDGE-$OKIND: auto-nudge sent (owner sessions silent >60 min, client process dead)" >/dev/null 2>&1 || true
+    done
 
     PICK=$(python3 .opencode/scripts/gh_board.py pick-next "$HOST_LABEL") || { echo "$(date -Is) board query failed: $PICK"; continue; }
     case "$PICK" in

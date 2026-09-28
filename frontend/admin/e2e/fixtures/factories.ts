@@ -624,6 +624,16 @@ export async function cleanup(api: APIRequestContext, path: string) {
     // DELETE (and the resolutions-only retry below) would 422 now.
     return cleanupTag(api, tagMatch[1]);
   }
+  // GH #324 delete-family subjects — the same unified contract (bare DELETE
+  // → 422, resolutions-only retry → 422): route to the dry-run-then-commit
+  // cleaner instead of the generic path below.
+  if (
+    /^\/api\/v1\/(photos|visitors|positions|visits|payments|user-settings)\/[^/?]+$/.test(
+      path,
+    )
+  ) {
+    return cleanupFamilySubject(api, path);
+  }
   try {
     const resp = await api.delete(`${BACKEND}${path}`);
     if (resp.status() === 409) {
@@ -747,6 +757,63 @@ export async function cleanupTag(api: APIRequestContext, tagId: string) {
           : { expected };
     }
     await api.delete(`${BACKEND}/api/v1/tags/${tagId}`, { data: payload });
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Hard-delete a delete-family subject (photos/visitors/positions/visits/
+ * payments — GH #324) in cleanup under the unified deferred-delete contract.
+ *
+ * Structural mirror of {@link cleanupTag}: the bare DELETE is rejected now
+ * (422 `expected_state_required`) and the generic {@link cleanup}'s
+ * resolutions-only retry is too, so without this branch every photo/
+ * position/visitor cleanup across the suite would silently 422 and leak
+ * rows into later tests.
+ *
+ * Flow: 1. `?dry_run=true` preview — pure, never deletes:
+ *          404 → already gone, done; 204 → clean row → `{expected: {}}`;
+ *          409 → tree: `expected` = ids from the nodes' `items` (nodes
+ *                without items are skipped — auto deps never verify) +
+ *          `resolutions` = cascade for every dep that allows it.
+ *       2. commit DELETE with the payload. 422 POSITION_IS_SYSTEM (a seed
+ *          built-in slipped into cleanup) is swallowed — nothing to delete.
+ */
+export async function cleanupFamilySubject(
+  api: APIRequestContext,
+  path: string,
+) {
+  try {
+    const preview = await api.delete(`${BACKEND}${path}?dry_run=true`);
+    if (preview.status() === 404) return; // already deleted — nothing to clean
+    let payload: Record<string, unknown> = { expected: {} };
+    if (preview.status() === 409) {
+      const body = (await preview.json().catch(() => null)) as {
+        dependencies?: Array<{
+          entity: string;
+          allowed_actions?: string[];
+          items?: Array<{ id: string }> | null;
+        }>;
+      } | null;
+      const expected: Record<string, string[]> = {};
+      const resolutions: Record<string, string> = {};
+      for (const dep of body?.dependencies ?? []) {
+        if (dep.items && dep.items.length > 0) {
+          expected[dep.entity] = dep.items.map((item) => item.id);
+        }
+        if ((dep.allowed_actions ?? []).includes('cascade')) {
+          resolutions[dep.entity] = 'cascade';
+        }
+      }
+      payload =
+        Object.keys(resolutions).length > 0
+          ? { resolutions, expected }
+          : { expected };
+    } else if (preview.status() === 422) {
+      return; // e.g. a seed system position — protected by design
+    }
+    await api.delete(`${BACKEND}${path}`, { data: payload });
   } catch {
     // Ignore cleanup errors
   }

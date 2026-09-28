@@ -29,7 +29,11 @@ import type { DependencyNode } from '@memo/api-client';
 // the real DELETE runs in the 5s commit. The rendering is unchanged for every
 // other entity (instant resolveDelete).
 
-export type DeleteDialogEntityType = 'staff' | 'master' | 'location' | 'service' | 'material' | 'client' | 'record' | 'activity' | 'tag';
+export type DeleteDialogEntityType =
+  | 'staff' | 'master' | 'location' | 'service' | 'material' | 'client'
+  | 'record' | 'activity' | 'tag'
+  // GH #324 — dependent subjects on the deferred pipeline.
+  | 'photo' | 'position' | 'visitor';
 
 export interface DeleteDialogProps {
   /** Human-readable entity name — shown in the dialog title. */
@@ -74,10 +78,13 @@ export interface DeleteDialogProps {
 // sides of each join now derive from `relation` (parent side: relation «Тег»
 // → RELATION_PLURAL fallback «Теги»; tag side: relation = the parent entity
 // → its plural). The entity-keyed map is side-blind and must not own them.
+// GH #324: staff_positions joins the side-aware set — staff side ships
+// relation «Должность» → RELATION_PLURAL «Должности» (the StaffTable
+// dialogs keep their label), position side ships «Сотрудник» →
+// «Сотрудники».
 const AUTO_ENTITY_LABEL: Record<string, string> = {
   users: 'Пользователь',
   masters: 'Мастер', // GH #266: the schedule extension row (relation «Мастер»)
-  staff_positions: 'Должности', // GH #266: M2M position links (relation «Должность»)
   tariffs: 'Тарифы',
   photos: 'Фото',
 };
@@ -107,6 +114,13 @@ const RELATION_PLURAL: Record<string, string> = {
   Локация: 'Локации',
   Клиент: 'Клиенты',
   Фото: 'Фото',
+  // GH #324: the staff-side relation of the staff_positions join (the
+  // position side ships «Сотрудник» — next entry).
+  Должность: 'Должности',
+  // GH #324: position-side tree relation — the staff cards survive, the
+  // wording is «Сотрудники» (side-aware: the staff-side auto dep derives
+  // «Должности» from «Должность»).
+  Сотрудник: 'Сотрудники',
 };
 
 /** Genitive entity name — used in the title and the Mode B fallback hint. */
@@ -120,6 +134,9 @@ const TITLE_BY_TYPE: Record<DeleteDialogEntityType, string> = {
   record: 'записи',
   activity: 'занятия', // #286: deferred activity delete (schedule card/modal)
   tag: 'тега', // #318: deferred tag delete (tags directory)
+  photo: 'фото', // #324: deferred photo delete (photos directory)
+  position: 'должности', // #324: deferred position delete (positions directory)
+  visitor: 'посетителя', // #324 Task 8: deferred visitor delete (client card)
 };
 
 // #286 (spec §4): the activity tree's auto deps (photos/activity_tags) are
@@ -168,6 +185,15 @@ function actionSuffix(dep: DependencyNode, entityType: DeleteDialogEntityType): 
   if (entityType === 'tag') {
     return pluralSuffix(dep.count, 'снят', 'сняты', 'сняты');
   }
+  // #324: photo's tags and position's holders SURVIVE the delete — the
+  // join rows die. Same per-type unlink wording («отвязан/отвязаны» for
+  // the tags, «потеряют должность» for the holders).
+  if (entityType === 'photo') {
+    return pluralSuffix(dep.count, 'отвязан', 'отвязаны', 'отвязаны');
+  }
+  if (entityType === 'position') {
+    return 'потеряют должность';
+  }
   return pluralSuffix(dep.count, 'удалён', 'удалены', 'удалены');
 }
 
@@ -195,7 +221,12 @@ function DepItemGroup({
   const items = dep.items ?? [];
   // #318 D9: same per-type tail as the counter line — the tag dialog's
   // groups say «будут сняты», every other entity keeps «будут удалены».
-  const groupTail = entityType === 'tag' ? 'будут сняты' : 'будут удалены';
+  // #324: photo's tags «будут отвязаны», position's holders «потеряют
+  // должность» — the surviving-parent wording again.
+  let groupTail = 'будут удалены';
+  if (entityType === 'tag') groupTail = 'будут сняты';
+  else if (entityType === 'photo') groupTail = 'будут отвязаны';
+  else if (entityType === 'position') groupTail = 'потеряют должность';
   return (
     <>
       <div className="font-medium" style={{ color: 'var(--ink)' }}>

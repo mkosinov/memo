@@ -185,7 +185,9 @@ class TestPaymentTotals:
         self._create_payment(api_client, r1, 3000)
         list_resp = api_client.get("/api/v1/payments", params={"record_id": r1})
         payment_id = list_resp.json()["items"][0]["id"]
-        del_resp = api_client.delete(f"/api/v1/payments/{payment_id}")
+        del_resp = api_client.request(
+            "DELETE", f"/api/v1/payments/{payment_id}", json={"expected": {}}
+        )
         assert del_resp.status_code == 204
         response = api_client.get(
             "/api/v1/payments/totals",
@@ -205,3 +207,125 @@ class TestPaymentTotals:
         )
         assert response.status_code == 200
         assert response.json() == {"totals": {r1: 10500}}
+
+
+# ─── GH #324 Task 5: the leaf SHORT set (spec §4/§10) ─────────────────────────
+
+
+class TestPaymentDeleteFamilyShortSet:
+    """DELETE /api/v1/payments/{id} — the leaf SHORT-form contract (GH
+    #324 §10: bare 422, dry_run 204, commit ``{expected: {}}``, 404 of
+    both kinds) + the payment leaf's entity extra: NO recompute (a
+    payment is not part of the record status/seats, spec §4).
+
+    The smoke level lives in ``test_api_delete_family_routes.py`` and
+    the four FORM 422s in ``test_errors.py``; what this class adds:
+
+    * the bare-DELETE 422 pins the row SURVIVES (leaf, busy-free — the
+      silent hard-delete path is gone);
+    * the commit branch's unknown-id 404 (with body) + the code shape;
+    * BOTH 404 kinds in BOTH branches (scope-helper foreign AND
+      nonexistent), not differing them;
+    * no-recompute: after a commit the record's seats/status are
+      untouched (the visit-side sibling recomputes — the payment side
+      must not).
+    """
+
+    @staticmethod
+    def _payment(api_client) -> dict:
+        record_id = _create_record(api_client)
+        resp = api_client.post(
+            "/api/v1/payments",
+            json={"record_id": record_id, "amount": 1500, "method": "card"},
+        )
+        assert resp.status_code == 201, resp.text
+        return {"payment": resp.json(), "record_id": record_id}
+
+    def test_bare_delete_returns_422_row_alive(self, api_client) -> None:
+        """§4.1: no flag, no body → 422 expected_state_required; the row
+        survives (the legacy bare hard delete is abolished)."""
+        made = self._payment(api_client)
+
+        resp = api_client.delete(f"/api/v1/payments/{made['payment']['id']}")
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"] == "expected_state_required"
+        assert (
+            api_client.get(f"/api/v1/payments/{made['payment']['id']}").status_code
+            == 200
+        )
+
+    def test_dry_run_returns_204_row_alive(self, api_client) -> None:
+        """§4.4: a leaf previews empty → 204 WITHOUT deleting."""
+        made = self._payment(api_client)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/payments/{made['payment']['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert (
+            api_client.get(f"/api/v1/payments/{made['payment']['id']}").status_code
+            == 200
+        )
+
+    def test_commit_unknown_id_with_body_returns_404_code(self, api_client) -> None:
+        """§4.2: cannot-exist id WITH body → 404 PAYMENT_NOT_FOUND."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/payments/00000000-0000-0000-0000-000000000000",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == "PAYMENT_NOT_FOUND"
+
+    def test_commit_expected_empty_204_row_gone(self, api_client) -> None:
+        """§4.5: the leaf commit ``{expected: {}}`` → 204, row gone."""
+        made = self._payment(api_client)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/payments/{made['payment']['id']}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert (
+            api_client.get(f"/api/v1/payments/{made['payment']['id']}").status_code
+            == 404
+        )
+
+    def test_scope_helper_foreign_id_404_both_branches(
+        self, api_client, make_master,
+    ) -> None:
+        """§4.2: the probe runs through ``_payment_scoped_or_404`` — a
+        scoped master's view of an admin-owned payment is the SAME 404
+        as a nonexistent id, in BOTH branches; the row survives."""
+        made = self._payment(api_client)
+        master = make_master()
+        url = f"/api/v1/payments/{made['payment']['id']}"
+
+        for resp in (
+            master["client"].request("DELETE", url, params={"dry_run": "true"}),
+            master["client"].request("DELETE", url, json={"expected": {}}),
+        ):
+            assert resp.status_code == 404, resp.text
+            assert resp.json()["detail"]["code"] == "PAYMENT_NOT_FOUND"
+        assert api_client.get(url).status_code == 200
+
+    def test_commit_triggers_no_record_recompute(self, api_client) -> None:
+        """§4: the payment entity extra — NO recompute. Deleting the
+        payment leaves the record's seats AND status untouched (unlike
+        the visit sibling, a payment is not part of the record
+        status/seats)."""
+        made = self._payment(api_client)
+        before = api_client.get(f"/api/v1/records/{made['record_id']}").json()
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/payments/{made['payment']['id']}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        after = api_client.get(f"/api/v1/records/{made['record_id']}").json()
+        assert after["seats"] == before["seats"]
+        assert after["status"] == before["status"]

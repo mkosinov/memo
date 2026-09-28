@@ -168,7 +168,10 @@ class TestDeleteOwnership:
             f"'dark', 'ru', '[]', '[]', datetime('now'), datetime('now'))"
         )
 
-        resp = api_client.delete(f"/api/v1/user-settings/{settings_id}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            json={"expected": {}},
+        )
         assert resp.status_code == 403, resp.text
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_FORBIDDEN.value
         # row untouched
@@ -182,7 +185,10 @@ class TestDeleteOwnership:
         created = other.post("/api/v1/user-settings", json={"user_id": other_user["id"]})
         assert created.status_code == 201, created.text
 
-        resp = other.delete(f"/api/v1/user-settings/{created.json()['id']}")
+        resp = other.request(
+            "DELETE", f"/api/v1/user-settings/{created.json()['id']}",
+            json={"expected": {}},
+        )
         assert resp.status_code == 204, resp.text
 
         from tests.conftest import query_db
@@ -190,5 +196,8 @@ class TestDeleteOwnership:
         assert rows == []
 
     def test_delete_nonexistent_returns_404(self, api_client) -> None:
-        resp = api_client.delete("/api/v1/user-settings/nonexistent-id")
+        resp = api_client.request(
+            "DELETE", "/api/v1/user-settings/nonexistent-id",
+            json={"expected": {}},
+        )
         assert resp.status_code == 404, resp.text

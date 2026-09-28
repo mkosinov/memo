@@ -27,7 +27,7 @@ import pytest
 
 from src.auth.passwords import hash_password
 from src.events.hub import hub
-from tests.conftest import insert_user, query_db
+from tests.conftest import delete_settings_row, insert_user, query_db
 
 pytestmark = pytest.mark.api
 
@@ -570,3 +570,117 @@ class TestPublicBoundary:
         keys: set = set()
         _collect_keys(resp.json(), keys)
         assert not (keys & PRIVATE_KEYS), keys & PRIVATE_KEYS
+
+
+# ─── GH #324 Task 5: user-settings leaf SHORT set + own-only 403 ──────────────
+
+
+class TestUserSettingsDeleteFamilyShortSet:
+    """DELETE /api/v1/user-settings/{id} — the leaf SHORT-form contract
+    (GH #324 §10: bare 422, dry_run 204, commit ``{expected: {}}``, 404
+    of both kinds) + the settings entity extra: own-only 403 on a
+    foreign row (the probe-read + ownership gate — spec §4.2).
+
+    The smoke level lives in ``test_api_delete_family_routes.py``, the
+    four FORM 422s in ``test_errors.py``; what this class adds on top:
+
+    * the bare-DELETE 422 pins the row SURVIVES;
+    * the own-only 403 pinned on a REAL foreign row in both branches
+      (smoke used the same shape — here the foreign user is the FULL
+      ``_make_staff_user`` pair, and the OWN row is asserted alive in
+      both branches — the same world as the §9 e2e audience);
+    * an anonymous probe: no session → 401 before any form work (the
+      router-level ``require_session`` guard — the delete-family
+      contract never widens access).
+    """
+
+    @staticmethod
+    def _own_row(api_client) -> dict:
+        """The api_client (admin) session user's settings row.
+
+        GH #319/#377 guarantee: every live user already HAS a row — POST
+        would hit the unique constraint. Drop the guaranteed row first
+        (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
+        POST is a clean 201 again.
+        """
+        me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        delete_settings_row(me)
+        resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def test_bare_delete_returns_422_row_alive(self, api_client) -> None:
+        """§4.1: no flag, no body → 422 expected_state_required; the row
+        survives."""
+        settings = self._own_row(api_client)
+
+        resp = api_client.delete(f"/api/v1/user-settings/{settings['id']}")
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"] == "expected_state_required"
+        assert api_client.get("/api/v1/user-settings").status_code == 200
+
+    def test_dry_run_returns_204_row_alive(self, api_client) -> None:
+        """§4.4: a leaf previews empty → 204 WITHOUT deleting."""
+        settings = self._own_row(api_client)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            params={"dry_run": "true"},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert api_client.get("/api/v1/user-settings").status_code == 200
+
+    def test_commit_unknown_id_with_body_returns_404(self, api_client) -> None:
+        """§4.2: cannot-exist id WITH body → 404 (probe after the form)."""
+        resp = api_client.request(
+            "DELETE", "/api/v1/user-settings/00000000-0000-0000-0000-000000000000",
+            json={"expected": {}},
+        )
+        assert resp.status_code == 404, resp.text
+
+    def test_commit_expected_empty_204_row_gone(self, api_client) -> None:
+        """§4.5: the leaf commit ``{expected: {}}`` → 204, row gone.
+
+        GH #319/#377: GET is get-or-create — «gone» means the committed
+        id is replaced by a fresh defaults row (a NEW id), never a 404
+        (the ``test_get_recreates_defaults_after_delete`` semantics).
+        """
+        settings = self._own_row(api_client)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        recreated = api_client.get("/api/v1/user-settings")
+        assert recreated.status_code == 200
+        assert recreated.json()["id"] != settings["id"]
+
+    def test_own_only_foreign_row_403_both_branches_row_alive(
+        self, api_client, login_as, _my_hash,
+    ) -> None:
+        """§4.2: the settings entity extra — a REAL second user hitting
+        the admin's row gets 403 AUTH_FORBIDDEN in BOTH branches (the
+        probe-read + ownership gate runs first); the row survives."""
+        settings = self._own_row(api_client)  # admin's own row
+        other, _sid = _make_staff_user(api_client, login_as, _my_hash)
+        url = f"/api/v1/user-settings/{settings['id']}"
+
+        for resp in (
+            other.request("DELETE", url, params={"dry_run": "true"}),
+            other.request("DELETE", url, json={"expected": {}}),
+        ):
+            assert resp.status_code == 403, resp.text
+            assert resp.json()["detail"]["code"] == "AUTH_FORBIDDEN"
+        # The owner's row survives the foreign attempts.
+        assert api_client.get("/api/v1/user-settings").status_code == 200
+
+    def test_no_session_401_before_form(self, anon) -> None:
+        """The router-level session guard fires before any delete-family
+        work: an anonymous bare DELETE gets 401 (never a form 422 — the
+        contract never widens access)."""
+        resp = anon.delete("/api/v1/user-settings/00000000-0000-0000-0000-000000000000")
+        assert resp.status_code == 401, resp.text

@@ -312,7 +312,11 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
       </QueryClientProvider></UIProvider>,
     );
 
-    const deleteBtn = screen.getByRole('button', { name: /Удалить/i });
+    // #324 Task 8: the visitors list now renders in this test (the
+    // visitors query returns mockVisitors), so the per-row × buttons
+    // («Удалить посетителя») also match /Удалить/i — scope to the modal's
+    // footer delete (exact text, not the aria-labeled row buttons).
+    const deleteBtn = screen.getByRole('button', { name: /^Удалить$/ });
 
     // #207: window.confirm is gone — clicking runs the no-body DELETE
     // dry-run; a 204 means the client is already deleted → modal closes.

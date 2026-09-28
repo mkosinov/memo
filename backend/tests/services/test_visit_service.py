@@ -566,7 +566,8 @@ async def test_delete_visits_by_visitor_does_not_commit(db_session):
 
 @pytest.mark.asyncio
 async def test_delete_visits_by_visitor_mark_true_sets_visits(db_session):
-    """mark_visits=True marks the helper's OWN entity ("visits")."""
+    """mark_visits=True marks the helper's OWN entity ("visits"); the
+    GH #324 recompute adds the recomputed parents ("records")."""
     from src.events import emitter
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
@@ -577,7 +578,7 @@ async def test_delete_visits_by_visitor_mark_true_sets_visits(db_session):
     token = emitter.start_accumulation(set())
     try:
         await service.delete_visits_by_visitor(db_session, visitor_id, mark_visits=True)
-        assert emitter.accumulated() == {"visits"}
+        assert emitter.accumulated() == {"visits", "records"}
     finally:
         emitter.reset_accumulation(token)
 
@@ -585,7 +586,9 @@ async def test_delete_visits_by_visitor_mark_true_sets_visits(db_session):
 @pytest.mark.asyncio
 async def test_delete_visits_by_visitor_mark_false_suppresses_mark(db_session):
     """mark_visits=False → NO "visits" mark (the caller owns the event
-    grid — both current callers pass False for parity)."""
+    grid — both current callers pass False for parity). The recompute
+    mark ("records", GH #324) is NOT gated by the flag — the recomputed
+    parents always publish."""
     from src.events import emitter
     from src.repositories.visit import get_visit_repository
     from src.services.visit import VisitService
@@ -596,6 +599,6 @@ async def test_delete_visits_by_visitor_mark_false_suppresses_mark(db_session):
     token = emitter.start_accumulation(set())
     try:
         await service.delete_visits_by_visitor(db_session, visitor_id, mark_visits=False)
-        assert emitter.accumulated() == set()
+        assert emitter.accumulated() == {"records"}
     finally:
         emitter.reset_accumulation(token)

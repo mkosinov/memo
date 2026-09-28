@@ -448,6 +448,73 @@ class TestStaffList:
         assert ids.index(red["id"]) < ids.index(blue["id"])
         assert ids.index(no_master["id"]) > ids.index(blue["id"])
 
+    def test_sort_by_specialty_desc_nulls_last(self, api_client) -> None:
+        """specialty desc: «пустые — в конце» holds in BOTH directions (#266).
+
+        always_nulls_last policy: cards without a master section (NULL
+        specialty) sort after sectioned ones even on desc — the inverse
+        of the canonical desc → nullslast is the same side here, so the
+        pin is the BOTH-directions invariant together with the asc test.
+        """
+        no_master = api_client.post(
+            "/api/v1/staff", json=_create_payload(first_name="НетМастера")
+        ).json()
+        sculptor = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="С", master={"specialty": "скульптура", "color": "#222222"}
+            ),
+        ).json()
+        painter = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="Ж", master={"specialty": "живопись", "color": "#111111"}
+            ),
+        ).json()
+
+        resp = api_client.get("/api/v1/staff?sort_by=specialty&sort_order=desc")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["items"]]
+        # desc: скульптура > живопись (reverse alpha); NULL still LAST.
+        assert ids.index(sculptor["id"]) < ids.index(painter["id"])
+        assert ids.index(no_master["id"]) > ids.index(painter["id"])
+
+    def test_sort_by_color_asc_nulls_last(self, api_client) -> None:
+        """color asc: «пустые — в конце» — nulls LAST on asc (#266).
+
+        This is the direction where always_nulls_last DIVERGES from the
+        canonical policy (asc → nullsfirst): a NULL color must NOT jump
+        to the top.
+        """
+        no_master = api_client.post(
+            "/api/v1/staff", json=_create_payload(first_name="НетМастера")
+        ).json()
+        blue = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="Синий", master={"specialty": "с", "color": "#0000FF"}
+            ),
+        ).json()
+        red = api_client.post(
+            "/api/v1/staff",
+            json=_create_payload(
+                first_name="Красный", master={"specialty": "с", "color": "#FF0000"}
+            ),
+        ).json()
+
+        resp = api_client.get("/api/v1/staff?sort_by=color&sort_order=asc")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["items"]]
+        # asc: 0000FF < FF0000; NULL (no section) LAST, not first.
+        assert ids.index(blue["id"]) < ids.index(red["id"])
+        assert ids.index(no_master["id"]) > ids.index(red["id"])
+
+    def test_sort_generic_garbage_key_422(self, api_client) -> None:
+        """sort_by=bogus → 422: generic unknown key, not just the legacy
+        ``position`` name (GH #367 — hard contract, no silent fallback)."""
+        resp = api_client.get("/api/v1/staff?sort_by=bogus")
+        assert resp.status_code == 422
+
     def test_sort_position_rejected_422(self, api_client) -> None:
         """position is EXCLUDED from the staff sort whitelist (M2M)."""
         resp = api_client.get("/api/v1/staff?sort_by=position")
@@ -826,7 +893,9 @@ class TestPositionsCrud:
         created = api_client.post(
             "/api/v1/positions", json={"title": "Временная"}
         ).json()
-        resp = api_client.delete(f"/api/v1/positions/{created['id']}")
+        resp = api_client.request(
+            "DELETE", f"/api/v1/positions/{created['id']}", json={"expected": {}}
+        )
         assert resp.status_code == 204
         assert (
             api_client.get(f"/api/v1/positions/{created['id']}").status_code
@@ -838,7 +907,9 @@ class TestPositionsCrud:
             "INSERT INTO positions (id, title, is_system, created_at, updated_at) "
             "VALUES ('master', 'Мастер', 1, datetime('now'), datetime('now'))"
         )
-        resp = api_client.delete("/api/v1/positions/master")
+        resp = api_client.request(
+            "DELETE", "/api/v1/positions/master", json={"expected": {}}
+        )
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == "POSITION_IS_SYSTEM"
         # row survives

@@ -1,7 +1,7 @@
 ---
 description: Workflow manager. Single entry point. Brainstorming with the user, human gates, scratchpad owner, phase dispatch to @architect, FasTP direct dispatch to coders.
 mode: primary
-model: omniroute/zai/glm-5.3-flash
+model: zai/glm-5.3
 variant: max
 temperature: 0.3
 permission:
@@ -218,6 +218,7 @@ task(subagent_type: "architect", prompt: |
 ```
 
 - **PR_CREATED:** (finishing Dispatch 1 returned — 2026-09-21 two-dispatch split) flip the card — `python3 .opencode/scripts/gh_board.py status N "PR (G7)"` — then IMMEDIATELY re-dispatch the architect to finish: «PR <url> on branch <branch>: watch CI, merge on green, cleanup, DONE report» (you own the watch — Awaiting-Handoff rule; a finished dispatch is never woken by its own notification, so the re-dispatch must happen from YOUR loop, not the architect's hope).
+- **Dispatch-2 failure (red CI / merge error, 2026-09-27):** a failed finishing report must never leave the card silently parked in `PR (G7)` — CI trouble is user-decision territory, and the gate field is how the user finds it: (1) append `auto-impl blocked: <failed checks / merge error>` to the issue's auto-impl log; (2) `python3 .opencode/scripts/gh_board.py gate N blocked` (the card stays in `PR (G7)`, visibly blocked); (3) report to the user. Their fix/decision clears it (`gate N none`) — then re-dispatch the architect to finish.
 - **DONE:** workflow complete. Then, in order: (1) GH Project board update from the architect's `## Board Update Needed` block — `python3 .opencode/scripts/gh_board.py status N "In-main"`, plus `shift` if the issue was Next Up 1; then close the issue if still open — `gh issue close N --reason completed` (the PR's `Closes #N` normally auto-closed it at merge; tolerate "already closed"); (2) scratchpad per v2 — append the merged line via `python3 .opencode/scripts/gh_board.py merged <issue> <pr> "<short title>"` and REMOVE your session section entirely (no Idle stub); the architect's follow-up candidates are filed as GH issues or dropped — never parked in the scratchpad; (3) show the user the refreshed trajectory (`next-up`) and report the merged PR.
 - **BLOCKED:** present to the user with the architect's summary. **Return path (spec/plan invalidation):** when the BLOCKED means the spec or the plan itself is wrong — not an env or implementer issue — returning the trajectory is the user's decision. If the user returns it: (1) post a GH issue comment describing the problem (`gh issue comment N --body "…"`); (2) move the card back — spec invalid → `In Design (G1a)`, spec intact but plan broken → `Spec OK (G1b)`; (3) ask the user keep-vs-discard for the worktree/branch (discard → have the architect remove it via `remove-worktree.sh`, or the user removes it); (4) scratchpad: remove your section if the worktree/branch was discarded; if it was kept, the section stays while that worktree lives (v2 — a section lives exactly as long as its worktree). The durable record of the return is the issue comment + board status, not the scratchpad. This is a one-time bounce-back, not a dialogue — the rework happens in a new host DESIGN session.
 

@@ -124,3 +124,19 @@ class FileInvalidTypeError(Exception):
     Renamed/foreign files are rejected regardless of filename; the router
     maps this to 415 ``FILE_INVALID_TYPE``.
     """
+
+
+class UnknownSortKeyError(Exception):
+    """A sort key missing from an entity's sort map (GH #367 spec §4.2).
+
+    Safety net behind the per-entity ``sort_by`` Literal validation: the
+    main line rejects unknown keys with a FastAPI 422 before the resolver
+    is ever reached, and a CI guard (spec §6) keeps the Literal and the
+    map in sync. This exception catches only a second entry path that
+    bypassed both (direct service call, future code drift). The global
+    exception handler maps it to 422 ``VALIDATION_ERROR`` — never a 500.
+    """
+
+    def __init__(self, sort_key: str) -> None:
+        super().__init__(f"Unknown sort key {sort_key!r}")
+        self.sort_key = sort_key

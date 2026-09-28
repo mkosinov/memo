@@ -5,7 +5,11 @@ from datetime import datetime
 
 import pytest
 
-from tests.conftest import query_db
+from tests.conftest import query_db, query_db_params
+from tests.delete_family_full_contract import (
+    DependentDeleteContractMixin,
+    DependentSubject,
+)
 
 pytestmark = pytest.mark.api
 
@@ -341,6 +345,33 @@ class TestPhotosListContract:
         created = [i["created_at"] for i in r.json()["items"]]
         assert created == sorted(created, reverse=True)
 
+    def test_photos_default_sort_created_at_desc_no_params(
+        self, api_client, photos_fixture,
+    ) -> None:
+        """NO sort params in the query → created_at desc (newest first).
+
+        GH #367 Task 4 flip guard: the photo table must stay newest-first.
+        The photos are created sequentially, but created_at second
+        granularity can collide — the fixture assigns DISTINCT descending
+        timestamps directly, so any direction flip (asc default, or a
+        resolver regression) breaks the strict-descending assertion.
+        """
+        # DISTINCT strictly-descending created_at: first fixture photo is
+        # the newest, last one is the oldest.
+        for pos, key in enumerate(FIXTURE_PHOTOS):
+            query_db_params(
+                "UPDATE photos SET created_at = :dt WHERE id = :id",
+                {"dt": f"2026-03-01 12:00:{59 - pos:02d}", "id": photos_fixture[key]["id"]},
+            )
+
+        response = api_client.get(PHOTOS_URL, params={"per_page": 100})
+
+        assert response.status_code == 200, response.text
+        got_ids = [i["id"] for i in response.json()["items"]]
+        assert got_ids == [photos_fixture[key]["id"] for key in FIXTURE_PHOTOS], (
+            "no sort params must default to created_at desc (newest first)"
+        )
+
     def test_photos_client_name(self, api_client, photos_fixture) -> None:
         """client_name: C1's name for client photos; None for others;
         still resolves after the client is archived."""
@@ -514,19 +545,25 @@ class TestPhotosCRUD:
         """DELETE /api/v1/photos/{id} hard-deletes a photo."""
         create = api_client.post(PHOTOS_URL, json={"filename": "delete-me.jpg"})
         photo_id = create.json()["id"]
-        response = api_client.delete(f"{PHOTOS_URL}/{photo_id}")
+        response = api_client.request(
+            "DELETE", f"{PHOTOS_URL}/{photo_id}", json={"expected": {}}
+        )
         assert response.status_code == 204
 
     def test_delete_photo_not_found(self, api_client) -> None:
         """DELETE /api/v1/photos/{id} returns 404 for non-existent photo."""
-        response = api_client.delete(f"{PHOTOS_URL}/nonexistent-id")
+        response = api_client.request(
+            "DELETE", f"{PHOTOS_URL}/nonexistent-id", json={"expected": {}}
+        )
         assert response.status_code == 404
 
     def test_deleted_photo_not_in_list(self, api_client) -> None:
         """Deleted photo no longer appears in GET /api/v1/photos."""
         create = api_client.post(PHOTOS_URL, json={"filename": "will-delete.jpg"})
         photo_id = create.json()["id"]
-        api_client.delete(f"{PHOTOS_URL}/{photo_id}")
+        api_client.request(
+            "DELETE", f"{PHOTOS_URL}/{photo_id}", json={"expected": {}}
+        )
         response = api_client.get(PHOTOS_URL)
         filenames = [p["filename"] for p in response.json()["items"]]
         assert "will-delete.jpg" not in filenames
@@ -707,3 +744,92 @@ class TestPhotosListIdFilter:
             [p1["id"], p2["id"]]
         )
         assert body["total"] == 2
+
+
+# ─── GH #324 Task 5: the FULL-form contract (photo = dependent subject) ───────
+
+
+@pytest.fixture
+def busy_photo(api_client, create_tag) -> DependentSubject:
+    """A photo linked to TWO tags — the busy dependent world (§3: the
+    photo's single dep is ``photo_tags`` — cascade, NON-auto; item ids
+    are the ``tag_id`` values within the photo's scope, the #318
+    convention). Built via API factories (photos POST takes ``tag_ids``)
+    — the ``test_api_tags.py:178+`` factory pattern."""
+    tag_keep = create_tag(title="фото-тег-1")
+    tag_keep2 = create_tag(title="фото-тег-2")
+    photo = api_client.post(PHOTOS_URL, json={
+        "filename": "busy-full-form.jpg",
+        "tag_ids": [tag_keep["id"], tag_keep2["id"]],
+    }).json()
+
+    tag_ids = [tag_keep["id"], tag_keep2["id"]]
+
+    def alive() -> None:
+        assert api_client.get(f"{PHOTOS_URL}/{photo['id']}").status_code == 200
+        assert api_client.get(f"/api/v1/tags/{tag_keep['id']}").status_code == 200
+        rows = query_db(
+            f"SELECT COUNT(*) AS c FROM photo_tags WHERE photo_id='{photo['id']}'"
+        )
+        assert rows[0]["c"] == 2
+
+    def subject_gone() -> None:
+        assert api_client.get(f"{PHOTOS_URL}/{photo['id']}").status_code == 404
+        assert (
+            query_db(f"SELECT * FROM photo_tags WHERE photo_id='{photo['id']}'") == []
+        )
+
+    def executor_effects() -> None:
+        # Photo gone, BOTH links stripped, BOTH tag dictionary rows
+        # survive (§5: the unlink is the only effect).
+        assert api_client.get(f"{PHOTOS_URL}/{photo['id']}").status_code == 404
+        assert (
+            query_db(f"SELECT * FROM photo_tags WHERE photo_id='{photo['id']}'") == []
+        )
+        for tid in tag_ids:
+            assert api_client.get(f"/api/v1/tags/{tid}").status_code == 200
+
+    def remove_one_dep() -> None:
+        # A tag link disappears mid-window (unlinked directly in the DB).
+        query_db_params(
+            "DELETE FROM photo_tags WHERE photo_id=:p AND tag_id=:t",
+            {"p": photo["id"], "t": tag_keep2["id"]},
+        )
+
+    return DependentSubject(
+        url=f"{PHOTOS_URL}/{photo['id']}",
+        unknown_url=f"{PHOTOS_URL}/00000000-0000-0000-0000-000000000000",
+        unknown_code="PHOTO_NOT_FOUND",
+        tree={
+            "photo_tags": {
+                "relation": "Тег",
+                "count": 2,
+                "auto": False,
+                "items": {
+                    (tag_keep["id"], "фото-тег-1"),
+                    (tag_keep2["id"], "фото-тег-2"),
+                },
+            },
+        },
+        resolutions={"photo_tags": "cascade"},
+        expected={"photo_tags": tag_ids},
+        alive=alive,
+        subject_gone=subject_gone,
+        executor_effects=executor_effects,
+        remove_one_dep=remove_one_dep,
+    )
+
+
+class TestPhotoDeleteFullForm(DependentDeleteContractMixin):
+    """The §10 FULL parametrized contract on the photo subject. The
+    smoke level (dry_run clean 204 / unknown+foreign 404 / the plain
+    stale 409 / the scope probe on an owner-less row) is in
+    ``test_api_delete_family_routes.py``; this is the full-form depth:
+    form-422-with-world-untouched, the complete tree shape, subset
+    semantics, resolutions validation, the stale-beats-invalid order
+    pin, and the executor assertions."""
+
+    @pytest.fixture
+    def busy_subject(self, busy_photo: DependentSubject) -> DependentSubject:
+        """Adapter: the mixin's world spec ← the photo fixture."""
+        return busy_photo

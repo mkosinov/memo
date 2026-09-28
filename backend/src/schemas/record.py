@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.visit_status import VisitStatus
+from src.schemas.common import SortOrder, SortParams
 from src.schemas.pagination import PaginationParams
 
 
@@ -157,13 +158,18 @@ RecordSortBy = Literal[
     "date", "client", "service", "master", "location",
     "guests", "status", "total", "payment",
 ]
-RecordSortOrder = Literal["asc", "desc"]
 
 
-class RecordListParams(PaginationParams):
+class RecordListParams(SortParams[RecordSortBy], PaginationParams):
     """Query parameters for GET /api/v1/records with filtering, pagination, sorting (#191).
 
     Injected as ``Annotated[RecordListParams, Query()]`` (Query, not Depends: this model is the sole query-param carrier for the records endpoint — no scalar-param mixing; Depends-with-model is discouraged upstream).
+
+    Sort (GH #367): inherits the shared ``SortParams`` brick; the fixed
+    ``date``/``asc`` defaults are re-declared here per the spec §4.1
+    defaults rule (brick carries the form, defaults live in subclasses).
+    The duplicate ``RecordSortOrder`` is retired in favor of the shared
+    ``SortOrder``.
     """
 
     client_id: str | None = None
@@ -175,7 +181,7 @@ class RecordListParams(PaginationParams):
     master_id: str | None = None
     status: VisitStatus | None = None
     sort_by: RecordSortBy = "date"
-    sort_order: RecordSortOrder = "asc"
+    sort_order: SortOrder = "asc"
     q: str | None = Field(default=None, min_length=2, max_length=100)
 
     @model_validator(mode="after")

@@ -240,22 +240,38 @@ test.describe('GH #319 С5 — card delete cascades the account AND its settings
       // Precondition: both rows exist.
       expect(queryDBRow(`SELECT id FROM user_settings WHERE user_id='${userId}'`)).not.toBeNull();
 
-      // 2. ACTION — delete the staff card (API; cascade-resolve like the
-      //    factories cleanup helper: dry-run 409 → resolutions body).
-      const dry = await request.delete(`${BACKEND}/api/v1/staff/${staff.id}`);
+      // 2. ACTION — delete the staff card (API; the GH #345 deferred-delete
+      //    contract, structurally mirroring cleanupArchivableSubject in
+      //    e2e/fixtures/factories.ts: `?dry_run=true` probe → build
+      //    `expected` from the tree's items ids (nodes without items are
+      //    skipped — auto deps never verify) → commit {resolutions?,
+      //    expected}. A bare DELETE is 422 `expected_state_required` now.)
+      const dry = await request.delete(`${BACKEND}/api/v1/staff/${staff.id}?dry_run=true`);
+      const expected: Record<string, string[]> = {};
       const resolutions: Record<string, string> = {};
       if (dry.status() === 409) {
         const body = (await dry.json().catch(() => null)) as {
-          dependencies?: Array<{ entity: string; allowed_actions?: string[] }>;
+          dependencies?: Array<{
+            entity: string;
+            allowed_actions?: string[];
+            items?: Array<{ id: string }> | null;
+          }>;
         } | null;
         for (const dep of body?.dependencies ?? []) {
-          if ((dep.allowed_actions ?? []).includes('cascade')) {
-            resolutions[dep.entity] = 'cascade';
+          if (dep.items && dep.items.length > 0) {
+            expected[dep.entity] = dep.items.map((item) => item.id);
+          }
+          const action = dep.allowed_actions?.[0];
+          if (action) {
+            resolutions[dep.entity] = action;
           }
         }
       }
       const commit = await request.delete(`${BACKEND}/api/v1/staff/${staff.id}`, {
-        data: Object.keys(resolutions).length > 0 ? { resolutions } : undefined,
+        data:
+          Object.keys(resolutions).length > 0
+            ? { resolutions, expected }
+            : { expected },
       });
       expect(commit.status()).toBe(204);
 

@@ -10,12 +10,22 @@ vi.mock('@memo/api-client', async (importOriginal) => {
     createClient: vi.fn(),
     updateClient: vi.fn(),
     patchClient: vi.fn(),
-    deleteClient: vi.fn(),
+    dryRunDeleteClient: vi.fn(),
+    resolveDeleteClient: vi.fn(),
     archiveClient: vi.fn(),
     restoreClient: vi.fn(),
-    resolveDeleteClient: vi.fn(),
   };
 });
+
+const mockEnqueuePendingAction = vi.fn();
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: mockEnqueuePendingAction }),
+}));
+
+const mockShowToast = vi.fn();
+vi.mock('@/contexts/UIContext', () => ({
+  useUI: () => ({ showToast: mockShowToast }),
+}));
 
 import {
   useCreateClient,
@@ -24,16 +34,15 @@ import {
   useDeleteClient,
   useArchiveClient,
   useRestoreClient,
-  useResolveDeleteClient,
 } from '../hooks/useClientsMutations';
 import {
   createClient,
   updateClient,
   patchClient,
-  deleteClient,
+  dryRunDeleteClient,
+  resolveDeleteClient,
   archiveClient,
   restoreClient,
-  resolveDeleteClient,
   ApiError,
 } from '@memo/api-client';
 import type { ClientUpdate, DependencyNode } from '@memo/api-client';
@@ -41,14 +50,19 @@ import type { ClientUpdate, DependencyNode } from '@memo/api-client';
 const mockCreateClient = vi.mocked(createClient);
 const mockUpdateClient = vi.mocked(updateClient);
 const mockPatchClient = vi.mocked(patchClient);
-const mockDeleteClient = vi.mocked(deleteClient);
+const mockDryRun = vi.mocked(dryRunDeleteClient);
+const mockResolveDeleteClient = vi.mocked(resolveDeleteClient);
 const mockArchiveClient = vi.mocked(archiveClient);
 const mockRestoreClient = vi.mocked(restoreClient);
-const mockResolveDeleteClient = vi.mocked(resolveDeleteClient);
 
 const clientResponse = {
   id: 'c1', name: 'Анна Иванова', phone: '+7 (900) 123-45-67', email: null,
   channel: 'telegram', created_at: '', updated_at: '', archived: false,
+};
+
+const clientWithStats = {
+  ...clientResponse,
+  records_count: 5, last_record: null, total_paid: 17500, missed_records: 1,
 };
 
 const updatePayload: ClientUpdate = {
@@ -67,7 +81,11 @@ function createQueryClientWrapper() {
 }
 
 describe('useClientsMutations', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDryRun.mockResolvedValue(undefined);
+    mockResolveDeleteClient.mockResolvedValue(undefined);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   describe('useCreateClient', () => {
@@ -162,85 +180,40 @@ describe('useClientsMutations', () => {
     });
   });
 
-  describe('useDeleteClient', () => {
-    it('calls deleteClient with the provided id', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockDeleteClient.mockResolvedValue(undefined as never);
-
-      const { result } = renderHook(() => useDeleteClient(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync('c1');
-      });
-
-      expect(mockDeleteClient).toHaveBeenCalledWith('c1');
-    });
-
-    it('invalidates BOTH clients AND records caches on success', async () => {
+  describe('useDeleteClient — hook surface (deferred conveyor)', () => {
+    it('removeClient always dry-runs first; 204 → optimistic + enqueue (surface)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockDeleteClient.mockResolvedValue(undefined as never);
-
+      queryClient.setQueryData(['clients'], [clientWithStats]);
       const { result } = renderHook(() => useDeleteClient(), { wrapper });
 
+      expect(result.current.removeClient).toBeTypeOf('function');
+      expect(result.current.removeClientResolved).toBeTypeOf('function');
+      expect(result.current.isPending).toBe(false);
+
       await act(async () => {
-        await result.current.mutateAsync('c1');
+        await result.current.removeClient(clientWithStats);
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+      expect(mockDryRun).toHaveBeenCalledWith('c1');
+      expect(mockResolveDeleteClient).not.toHaveBeenCalled();
+      expect(mockEnqueuePendingAction).toHaveBeenCalledTimes(1);
     });
 
-    it('exposes the dependency tree when the dry-run DELETE fails with 409', async () => {
-      const { wrapper } = createQueryClientWrapper();
+    it('409 + dependency tree rejects upward so the call site opens the dialog', async () => {
       const deps: DependencyNode[] = [
         { entity: 'records', auto: false, relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
       ];
-      mockDeleteClient.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
+      mockDryRun.mockRejectedValue(new ApiError(409, 'has_dependencies', undefined, deps));
 
-      const { result } = renderHook(() => useDeleteClient(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('c1')).rejects.toThrow(ApiError);
-      });
-
-      expect(result.current.dependencies).toEqual(deps);
-    });
-
-    it('clears a prior dependency tree on the next attempt (onMutate)', async () => {
       const { wrapper } = createQueryClientWrapper();
-      const deps: DependencyNode[] = [
-        { entity: 'records', auto: false, relation: 'Запись', count: 47, allowed_actions: ['nullify'], message: null },
-      ];
-      // First attempt: 409 parks the tree.
-      mockDeleteClient.mockRejectedValueOnce(new ApiError(409, 'has_dependencies', undefined, deps));
-
       const { result } = renderHook(() => useDeleteClient(), { wrapper });
 
       await act(async () => {
-        await expect(result.current.mutateAsync('c1')).rejects.toThrow(ApiError);
-      });
-      expect(result.current.dependencies).toEqual(deps);
-
-      // Second attempt: a non-409 rejection must clear the stale tree.
-      mockDeleteClient.mockRejectedValueOnce(new ApiError(404, 'Client not found', 'NOT_FOUND'));
-      await act(async () => {
-        await expect(result.current.mutateAsync('c1')).rejects.toThrow(ApiError);
-      });
-      expect(result.current.dependencies).toBeNull();
-    });
-
-    it('keeps dependencies null for non-409 errors', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockDeleteClient.mockRejectedValue(new ApiError(404, 'Client not found', 'NOT_FOUND'));
-
-      const { result } = renderHook(() => useDeleteClient(), { wrapper });
-
-      await act(async () => {
-        await expect(result.current.mutateAsync('c1')).rejects.toThrow(ApiError);
+        await expect(result.current.removeClient(clientWithStats)).rejects.toThrow(ApiError);
       });
 
-      expect(result.current.dependencies).toBeNull();
+      expect(mockEnqueuePendingAction).not.toHaveBeenCalled();
+      expect(mockResolveDeleteClient).not.toHaveBeenCalled();
     });
   });
 
@@ -297,37 +270,6 @@ describe('useClientsMutations', () => {
 
       await act(async () => {
         await result.current.mutateAsync('c1');
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
-    });
-  });
-
-  describe('useResolveDeleteClient', () => {
-    it('calls resolveDeleteClient with id and resolutions', async () => {
-      const { wrapper } = createQueryClientWrapper();
-      mockResolveDeleteClient.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useResolveDeleteClient(), { wrapper });
-      const resolutions = { records: 'nullify', visitors: 'cascade' };
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'c1', resolutions });
-      });
-
-      expect(mockResolveDeleteClient).toHaveBeenCalledWith('c1', resolutions);
-    });
-
-    it('invalidates BOTH clients AND records caches on success', async () => {
-      const { queryClient, wrapper } = createQueryClientWrapper();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      mockResolveDeleteClient.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useResolveDeleteClient(), { wrapper });
-
-      await act(async () => {
-        await result.current.mutateAsync({ id: 'c1', resolutions: {} });
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['clients'] });

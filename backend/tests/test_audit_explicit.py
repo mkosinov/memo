@@ -1251,6 +1251,7 @@ class TestVisitorServiceAudit:
         ok = await delete_client(
             None, db_session=db_session, id="cl-casc",
             resolutions={"visitors": "cascade"},
+            expected={"visitors": ["vis-casc"]},  # GH #345: confirmed state
         )
         assert ok is True
         rows = audit_rows()[before:]

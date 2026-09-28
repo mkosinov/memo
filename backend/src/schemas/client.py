@@ -57,6 +57,29 @@ class ClientPatch(BaseModel):
     channel: Channel | None = None
 
 
+class ClientDeleteBody(BaseModel):
+    """DELETE /api/v1/clients/{id} body — the deferred-delete commit
+    state (GH #345 §4.1, mirror of ``StaffDeleteBody`` / ``TagDeleteBody``).
+
+    * ``expected`` — id-sets per non-auto FK entity. Client's non-auto
+      deps are ``records`` (nullify) and ``visitors`` (cascade) — the
+      two sources of the confirmed id-sets (spec §4.4: Client is the
+      ONLY entity with a resolvable commit); the clean path sends
+      ``{}``. Auto deps (client_tags, photos) are exempt.
+    * ``resolutions`` — the user's cascade choices: an occupied client
+      sends ``{"records": "nullify", "visitors": "cascade"}`` alongside
+      ``expected``.
+
+    Both optional at the schema level: ``?dry_run=true`` needs no body,
+    and the execute-path requirement (``expected`` mandatory) is
+    enforced in the route branch so the preview stays body-free.
+    Unknown body keys are ignored (family semantics §16).
+    """
+
+    resolutions: dict[str, str] | None = None
+    expected: dict[str, list[str]] | None = None
+
+
 class ClientResponse(BaseModel):
     """Response schema with all client fields.
 

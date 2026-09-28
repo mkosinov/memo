@@ -56,7 +56,7 @@ Staff — карточка каждого сотрудника студии (м�
 | POST | /api/v1/staff | Создание карточки (+ флаги учётки/мастера, D6) |
 | PUT | /api/v1/staff/{id} | Update (карточка, должности, мастер-секция) |
 | PATCH | /api/v1/staff/{id} | Partial update |
-| DELETE | /api/v1/staff/{id} | Hard delete with resolutions (GH #207 контракт сохраняется) |
+| DELETE | /api/v1/staff/{id} | Unified deferred-delete contract (GH #345): `?dry_run=true` превью / commit `{resolutions?, expected}` — сверка внутри транзакции `delete_staff` |
 | POST | /api/v1/staff/{id}/archive | Архив с чекбоксами `{archive_master, archive_user}` (default true) |
 | POST | /api/v1/staff/{id}/restore | Возврат из архива |
 

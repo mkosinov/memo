@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { LocationResponse } from '@memo/api-client';
 import { useUpdateLocation, useCreateLocation, useDeleteLocation, useArchiveLocation, useRestoreLocation } from '@/hooks/useLocationsMutations';
 import type { LocationUpdate, DependencyNode } from '@memo/api-client';
-import { resolveDeleteLocation, ApiError } from '@memo/api-client';
-import { useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { useLocationsTable } from '@/contexts/LocationsContext';
 import { LocationModal } from './LocationModal';
@@ -14,7 +13,6 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { locationColumns, locationActions } from './locationColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { invalidateEntities } from '@/lib/invalidate';
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -24,10 +22,9 @@ export function LocationsTable() {
 
   const updateLocation = useUpdateLocation();
   const createLocation = useCreateLocation();
-  const deleteLocation = useDeleteLocation();
+  const { removeLocation, removeLocationResolved } = useDeleteLocation();
   const archiveLocation = useArchiveLocation();
   const restoreLocation = useRestoreLocation();
-  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Edit modal state ────────────────────────────────────────────────
@@ -109,24 +106,27 @@ export function LocationsTable() {
     }
   };
 
-  // ─── Delete ─────────────────────────────────────────────────────────
-  // #207 §7.3 dry-run flow: no-body DELETE → 204 (instant delete, no deps)
-  // or 409 + dependency tree → DeleteDialog (Mode A/B). The parent owns the
-  // call + open/close state; the dialog receives the parsed tree.
+  // ─── Delete (GH #345: deferred conveyor — useDeleteTag/useDeleteRecord
+  // template). removeLocation ALWAYS dry-runs (pure preview): a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window, commit = resolveDeleteLocation); a 409 WITH the dependency tree
+  // rejects here → park the tree + open DeleteDialog (the row stays
+  // visible). The hook swallows 404 (quiet family invalidation) and
+  // network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
 
-  const handleDelete = async (loc: LocationResponse) => {
+  const handleDelete = useCallback(async (loc: LocationResponse) => {
     try {
-      await deleteLocation.mutateAsync(loc.id);
-      // 204 — already deleted (zero deps): refresh handled by the hook.
-      showToast('Локация удалена');
+      await removeLocation(loc);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
         setDeleteTarget({ location: loc, dependencies: err.dependencies });
-      } else {
-        showToast(parseApiError(err).message, 'error');
+        return;
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  };
+  }, [removeLocation, showToast]);
 
   // §6.15 — memoize the factory outputs
   const columns = useMemo(() => locationColumns(), []);
@@ -221,20 +221,22 @@ export function LocationsTable() {
         />
       )}
 
-      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately via onDone. Location matrix (§4.4):
+          activities BLOCK (Mode B — archive, the delete branch is
+          unreachable); location_tags cascade and photos nullify (Mode A —
+          the all-auto tree confirms immediately, commit {resolutions:{},
+          expected:{}}). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={deleteTarget.location.title}
           entityType="location"
           entityId={deleteTarget.location.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteLocation(id, resolutions);
-            // The resolve call bypasses the hook's onSuccess, so refresh
-            // here — incl. cross-key ['records'] (useRecordData consumers).
-            // Family rules via the shared map (#239): ['locations'] + ['records'].
-            invalidateEntities(queryClient, ['locations']);
-            showToast('Локация удалена');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeLocationResolved(deleteTarget.location, resolutions, deleteTarget.dependencies);
           }}
           onArchive={(id) => archiveLocation.mutateAsync(id)}
           onDone={() => setDeleteTarget(null)}

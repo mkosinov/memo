@@ -50,7 +50,9 @@ as the pre-refactor oracle by ``tests/usecases/test_staff_*.py``:
   dispatch runs EVERY handler regardless of dep count (spec §2.7), so
   BOTH branches (bare-clean and resolved) publish
   {staff, users, masters, master_tags, staff_positions} — byte-parity
-  with the former decorated ``resolve_delete``;
+  with the former decorated ``resolve_delete``; the GH #345 ``expected``
+  verification raises ``StaleDependenciesError`` BEFORE the mark fires,
+  so a stale commit publishes nothing either (rollback silence);
 - every failure branch publishes nothing (rollback silence).
 """
 
@@ -464,35 +466,49 @@ async def delete_staff(
     db_session: AsyncSession,
     id: str,
     resolutions: dict[str, str],
+    expected: dict[str, list[str]] | None = None,
 ) -> bool:
-    """Hard-delete a staff card — the whole resolution cascade in ONE
-    transaction (GH #326 Task 4).
+    """Hard-delete a staff card — the whole deferred-delete chain in ONE
+    transaction (GH #326 Task 4; GH #345 Task 3 adds ``expected``).
 
-    The COMMIT branch of the former route → ``StaffService.resolve_delete``
-    chain. The executing body now lives in the non-decorated core
+    The COMMIT branch of the route: one-to-one mirror of ``delete_record``
+    (``usecases/records.py:419`` — spec §4.5 «Владение транзакцией»). The
+    executing body lives in the non-decorated core
     ``GenericService._resolve_delete_core`` (canon rule 3 — thin decorated
     method over a shared transactionless core); the scenario owns the
-    transaction + the own-entity mark and calls the CORE on the staff
-    service instance (an UNdecorated call — canon rule 5 forbids only
-    nested decorated ones). The FK matrix (domain/deletion.py) is
-    untouched: activities block; users / masters / master_tags /
-    staff_positions auto-cascade.
+    transaction + the own-entity mark + the ``expected`` subset
+    verification and calls the CORE on the staff service instance (an
+    UNdecorated call — canon rule 5 forbids only nested decorated ones).
+    The FK matrix (domain/deletion.py) is untouched: activities block;
+    users / masters / master_tags / staff_positions auto-cascade.
 
-    The ROUTE keeps transport (contract #207 — NOT the records shape: no
-    ``dry_run`` / ``expected``): the preview branch
-    (``collect_dependencies`` → 409 + tree, no body) stays in the route;
-    this scenario runs only on the commit branch (with a body). Step
-    order is identical to the pre-refactor flow:
+    The ROUTE keeps transport (GH #345 §4.1 — the tags/records family):
+    the form 422s (``expected_state_required`` /
+    ``dry_run_with_resolutions_forbidden``), the dry-run preview branch
+    (pure read — no transaction, no SSE), and the 409/404/422 mapping.
+    Step order mirrors ``delete_record``:
 
     0. mark the own entity ("staff") — selfless @transactional parity
        with the auto-mark the decorated ``resolve_delete`` used to seed
        via ``StaffService``;
-    1. the core: existence probe (missing id → ``False`` — the route
-       maps that to 404) → collect deps → blocking check
-       (``BlockingDepsError`` — route → 422) → resolutions validation
-       (``InvalidResolutionError`` — route → 422) → cascade dispatch
-       (nullify → cascade, per-dep ``mark_changed(dep.entity)`` sown by
-       the core) → hard delete of the card row.
+    1. existence probe — missing id → ``False`` (the route maps that to
+       404; the loaded row's class doubles as the model descriptor —
+       canon rule 2, ``delete_record`` mirror);
+    2. expected id-set verification (GH #345 §4.1/§4.3, subset
+       semantics #285 rev8): collect ``collect_dependency_ids`` and
+       require ``set(now_ids) ⊆ set(expected[entity])`` for every
+       non-auto dep (auto deps — users/masters/master_tags/
+       staff_positions — are exempt); mismatch →
+       ``StaleDependenciesError`` carrying the fresh tree (route → 409
+       ``stale_dependencies`` + tree). Fires BEFORE the core's checks
+       could turn a race into a 422 (#285 D7 order pin). Subset, not
+       equality: a dep that disappeared mid-window does not block; one
+       that APPEARED does;
+    3. the core (``_resolve_delete_core``): collect deps → blocking
+       check (``BlockingDepsError`` — route → 422) → resolutions
+       validation (``InvalidResolutionError`` — route → 422) → cascade
+       dispatch (nullify → cascade, per-dep ``mark_changed(dep.entity)``
+       sown by the core) → hard delete of the card row.
 
     BOTH execution branches run here: a bare-clean card (no deps → just
     the row delete) and a resolved one (the auto-cascade executes —
@@ -506,13 +522,42 @@ async def delete_staff(
     without publishing.
 
     NOTE: call as ``delete_staff(None, db_session=..., id=...,
-    resolutions=...)`` — see the module docstring for why.
+    resolutions=..., expected=...)`` — see the module docstring for why.
     """
     # Own-entity mark — selfless @transactional parity: the decorated
     # resolve_delete auto-marked "staff" via resolve_entity_name; the
     # module-level scenario opens the accumulator EMPTY, so the mark is
     # explicit here (grid byte-parity with the pre-refactor executor).
     mark_changed("staff")
+
+    # ── Existence probe (route → 404 on False). The loaded row's class is
+    #    the model descriptor the deletion domain is keyed on — the
+    #    scenario never imports ORM models at runtime (canon rule 2,
+    #    ``delete_record`` mirror). Runs BEFORE the expected check so a
+    #    ghost id never reaches the collectors. ─────────────────────────
+    card = await get_staff_service().get_card(db_session, id)
+    if card is None:
+        return False
+    model = type(card)
+
+    # ── Expected snapshot verification FIRST (fail-closed, #285 D7
+    #    order): a stale commit must 409 BEFORE the core's blocking or
+    #    resolutions validation could turn it into a 422, and before any
+    #    row is touched. Auto deps (users/masters/master_tags/
+    #    staff_positions) are exempt; the blocked ``activities`` node IS
+    #    verified — its id-collector (GH #345 Task 1) is the race gate
+    #    «занятие появилось за окно у чистого на момент диалога». ──────
+    from src.domain.deletion import (
+        StaleDependenciesError,
+        collect_dependencies,
+        collect_dependency_ids,
+        stale_expected_entities,
+    )
+
+    now_ids = await collect_dependency_ids(db_session, model, id)
+    if stale_expected_entities(model, now_ids, expected or {}):
+        deps = await collect_dependencies(db_session, model, id)
+        raise StaleDependenciesError(deps)
 
     # The transactionless core on the staff service instance — the
     # scenario owns the ONE outer transaction (canon rule 5).

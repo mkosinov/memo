@@ -205,9 +205,21 @@ class TestResolveDeleteExecutor:
         assert link.status_code == 200, link.text
         _drain(subscriber)
 
+        # GH #345: the commit carries the confirmed non-auto id-sets.
+        # The record's default visit auto-created a second visitor
+        # («Гость») — both ride the visitors node.
+        record_visitors = api_client.get(
+            f"/api/v1/clients/{client['id']}/visitors"
+        ).json()
         resp = api_client.request(
             "DELETE", f"/api/v1/clients/{client['id']}",
-            json={"resolutions": {"records": "nullify", "visitors": "cascade"}},
+            json={
+                "resolutions": {"records": "nullify", "visitors": "cascade"},
+                "expected": {
+                    "records": [record["id"]],
+                    "visitors": [v["id"] for v in record_visitors],
+                },
+            },
         )
         assert resp.status_code == 204, resp.text
 

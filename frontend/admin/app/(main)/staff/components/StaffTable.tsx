@@ -2,8 +2,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import type { StaffResponse, StaffCreate, StaffUpdate, StaffArchiveRequest, DependencyNode } from '@memo/api-client';
-import { resolveDeleteStaff, ApiError } from '@memo/api-client';
-import { useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '@memo/api-client';
 import {
   useUpdateStaff,
   useCreateStaff,
@@ -22,7 +21,6 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { staffColumns, staffActions } from './staffColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { invalidateEntities } from '@/lib/invalidate';
 
 // ─── Component ───────────────────────────────────────────────────────────
 
@@ -42,10 +40,9 @@ export function StaffTable() {
 
   const updateStaff = useUpdateStaff();
   const createStaff = useCreateStaff();
-  const deleteStaff = useDeleteStaff();
+  const { removeStaff, removeStaffResolved } = useDeleteStaff();
   const archiveStaff = useArchiveStaff();
   const restoreStaff = useRestoreStaff();
-  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Edit modal state ────────────────────────────────────────────────
@@ -154,23 +151,27 @@ export function StaffTable() {
     }
   };
 
-  // ─── Delete (GH #207 §7.3 dry-run flow) ──────────────────────────────
-  // no-body DELETE → 204 (instant, no deps) or 409 + dependency tree →
-  // DeleteDialog (Mode A/B). Staff matrix (#266): activities BLOCK; users,
-  // the masters row, master_tags and staff_positions auto-cascade.
+  // ─── Delete (GH #345: deferred conveyor — useDeleteTag/useDeleteRecord
+  // template). removeStaff ALWAYS dry-runs (pure preview): a clean 204
+  // removes the row optimistically + enqueues the deferred delete (5s undo
+  // window, commit = resolveDeleteStaff); a 409 WITH the dependency tree
+  // rejects here → park the tree + open DeleteDialog (the row stays
+  // visible). The hook swallows 404 (quiet family invalidation) and
+  // network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
 
-  const handleDelete = async (s: StaffResponse) => {
+  const handleDelete = useCallback(async (s: StaffResponse) => {
     try {
-      await deleteStaff.mutateAsync(s.id);
-      showToast('Сотрудник удалён');
+      await removeStaff(s);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
         setDeleteTarget({ staff: s, dependencies: err.dependencies });
-      } else {
-        showToast(parseApiError(err).message, 'error');
+        return;
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  };
+  }, [removeStaff, showToast]);
 
   // §6.15 — memoize the factory outputs.
   const columns = useMemo(() => staffColumns(positionTitle), [positionTitle]);
@@ -255,20 +256,22 @@ export function StaffTable() {
         />
       )}
 
-      {/* Delete dialog — §7.3: opened on dry-run 409, closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409; the confirm
+          enqueues the cascade deferred delete (enqueue is synchronous) and
+          the dialog closes immediately via onDone. Staff matrix (#266):
+          activities BLOCK (Mode B — archive); users, the masters row,
+          master_tags and staff_positions auto-cascade (Mode A — the
+          all-auto tree confirms immediately, commit {resolutions:{},
+          expected:{}}). */}
       {deleteTarget && (
         <DeleteDialog
           entityName={displayMasterName(deleteTarget.staff)}
           entityType="staff"
           entityId={deleteTarget.staff.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteStaff(id, resolutions);
-            // The resolve call bypasses the hook's onSuccess, so refresh here.
-            // Family rules via the shared map (#239/#266): ['staff'] +
-            // ['masters'] + ['records'].
-            invalidateEntities(queryClient, ['staff']);
-            showToast('Сотрудник удалён');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeStaffResolved(deleteTarget.staff, resolutions, deleteTarget.dependencies);
           }}
           onArchive={async (id) => archiveStaff.mutateAsync({ id, archive_master: true, archive_user: true })}
           onDone={() => setDeleteTarget(null)}

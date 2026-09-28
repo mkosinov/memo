@@ -17,6 +17,7 @@ import {
   mapRowListCache,
   type RowSnapshot,
 } from '@/lib/cache/rowSnapshotSync';
+import { expectedFromDependencies } from '@/lib/expectedFromDependencies';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
 import { invalidateEntities } from '@/lib/invalidate';
@@ -71,20 +72,6 @@ export function useUpdateTag() {
 /** Snapshot mechanics over the single ['tags', …] family (shared factory,
  *  #285 D5 — same rowSnapshotSync as records/activities). */
 const tagRowSync = createRowSnapshotSync(qk.tags);
-
-/** expected = id-sets per entity from the dialog tree's `items` (D6).
- *  Nodes without items are skipped (defensive — the tag tree always has
- *  items; the guard mirrors expectedFromDependencies). */
-function expectedFromDependencies(
-  dependencies: DependencyNode[],
-): Record<string, string[]> {
-  const expected: Record<string, string[]> = {};
-  for (const node of dependencies) {
-    if (!node.items) continue;
-    expected[node.entity] = node.items.map((item) => item.id);
-  }
-  return expected;
-}
 
 /** Tags cache shape: paged envelope ({items,…} — TagsContext factory) or a
  *  plain-array lookup list. Shape-agnostic via the shared mapRowListCache. */

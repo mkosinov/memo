@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { MaterialResponse, MaterialUpdate, DependencyNode } from '@memo/api-client';
-import { resolveDeleteMaterial, ApiError } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 import { useUpdateMaterial, useCreateMaterial, useDeleteMaterial, useArchiveMaterial, useRestoreMaterial } from '@/hooks/useMaterialsMutations';
 import { useUI } from '@/contexts/UIContext';
 import { useMaterialsTable } from '@/contexts/MaterialsContext';
@@ -13,7 +12,6 @@ import { DataTable } from '@/app/components/shared/DataTable';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import { materialColumns, materialActions } from './materialColumns';
 import { parseApiError } from '@/app/lib/api/parseApiError';
-import { invalidateEntities } from '@/lib/invalidate';
 
 // ─── Component ────────────────────────────────────────────────────────────
 
@@ -23,10 +21,9 @@ export function MaterialsTable() {
 
   const updateMaterial = useUpdateMaterial();
   const createMaterial = useCreateMaterial();
-  const deleteMaterial = useDeleteMaterial();
+  const { removeMaterial, removeMaterialResolved } = useDeleteMaterial();
   const archiveMaterial = useArchiveMaterial();
   const restoreMaterial = useRestoreMaterial();
-  const queryClient = useQueryClient();
   const { showToast } = useUI();
 
   // ─── Edit modal state ───────────────────────────────────────────────
@@ -88,24 +85,28 @@ export function MaterialsTable() {
     }
   };
 
-  // ─── Delete ─────────────────────────────────────────────────────────
-  // #207 §7.3 dry-run flow. GH #223 §7: an UNLINKED material still deletes
-  // with an instant 204, but a LINKED one now returns 409 + dependency tree
-  // (service_materials join, auto-cascade) → DeleteDialog Mode A (live code).
+  // ─── Delete (GH #345: deferred conveyor — useDeleteTag/useDeleteRecord
+  // template). removeMaterial ALWAYS dry-runs (pure preview): an unlinked
+  // material is clean (204) → row removed optimistically + the deferred
+  // delete enqueued (5s undo window, commit = resolveDeleteMaterial); a
+  // LINKED material rejects with 409 + the dependency tree (GH #223 §7)
+  // → park the tree + open DeleteDialog Mode A (auto-only information
+  // lines). The hook swallows 404 (quiet family invalidation) and
+  // network/5xx («Не удалось проверить зависимости» toast) — the catch
+  // below handles ONLY the 409-with-tree dialog path. Toasts on success
+  // come from the pending stack («Удалено. Отменить» with the ring).
 
-  const handleDelete = async (material: MaterialResponse) => {
+  const handleDelete = useCallback(async (m: MaterialResponse) => {
     try {
-      await deleteMaterial.mutateAsync(material.id);
-      // 204 — already deleted (zero deps): refresh handled by the hook.
-      showToast('Материал удалён');
+      await removeMaterial(m);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.dependencies) {
-        setDeleteTarget({ material, dependencies: err.dependencies });
-      } else {
-        showToast(parseApiError(err).message, 'error');
+        setDeleteTarget({ material: m, dependencies: err.dependencies });
+        return;
       }
+      showToast(parseApiError(err).message, 'error');
     }
-  };
+  }, [removeMaterial, showToast]);
 
   // §6.15 — memoize the factory outputs
   const columns = useMemo(() => materialColumns(), []);
@@ -180,17 +181,21 @@ export function MaterialsTable() {
         />
       )}
 
-      {/* Delete dialog — §7.3: opened on dry-run 409 (defensive), closed on done/cancel */}
+      {/* Delete dialog — GH #345: opened on dry-run 409 (linked material,
+          GH #223); the confirm enqueues the cascade deferred delete
+          (enqueue is synchronous) and the dialog closes immediately via
+          onDone. Material matrix (§4.4): NO blocked state — the single
+          `service_materials` node is auto-cascade, the tree is
+          information-only; commit {resolutions:{}, expected:{}}. */}
       {deleteTarget && (
         <DeleteDialog
           entityName={deleteTarget.material.title}
           entityType="material"
           entityId={deleteTarget.material.id}
           dependencies={deleteTarget.dependencies}
-          onResolve={async (id, resolutions) => {
-            await resolveDeleteMaterial(id, resolutions);
-            invalidateEntities(queryClient, ['materials']);
-            showToast('Материал удалён');
+          onResolve={async (_id, resolutions) => {
+            // Enqueue is synchronous — no await, the dialog closes at once.
+            void removeMaterialResolved(deleteTarget.material, resolutions, deleteTarget.dependencies);
           }}
           onArchive={(id) => archiveMaterial.mutateAsync(id)}
           onDone={() => setDeleteTarget(null)}

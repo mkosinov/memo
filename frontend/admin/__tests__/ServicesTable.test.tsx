@@ -104,12 +104,11 @@ const MOCK_MATERIALS: MaterialResponse[] = [
 const mockCreateMutateAsync = vi.fn().mockResolvedValue({});
 const mockUpdateMutateAsync = vi.fn().mockResolvedValue({});
 const mockPatchMutateAsync = vi.fn().mockResolvedValue({});
-const mockDeleteMutateAsync = vi.fn().mockResolvedValue({});
+// GH #345 — useDeleteService returns the deferred-conveyor surface.
+const mockRemoveService = vi.fn().mockResolvedValue(undefined);
+const mockRemoveServiceResolved = vi.fn().mockResolvedValue(undefined);
 const mockArchiveMutateAsync = vi.fn().mockResolvedValue({});
 const mockRestoreMutateAsync = vi.fn().mockResolvedValue({});
-// The hook's `dependencies` (409 dry-run tree) — mutable per test; read by the
-// factory arrow at render time.
-let mockDeleteDependencies: DependencyNode[] | null = null;
 const mockShowToast = vi.fn();
 
 // Shared so tests can assert invalidation (#207: ['services'] on dialog done).
@@ -148,8 +147,8 @@ vi.mock('@/hooks/useServicesMutations', () => ({
   useUpdateService: () => ({ mutateAsync: mockUpdateMutateAsync, isPending: false }),
   usePatchService: () => ({ mutateAsync: mockPatchMutateAsync, isPending: false }),
   useDeleteService: () => ({
-    mutateAsync: mockDeleteMutateAsync,
-    dependencies: mockDeleteDependencies,
+    removeService: mockRemoveService,
+    removeServiceResolved: mockRemoveServiceResolved,
     isPending: false,
   }),
   useArchiveService: () => ({ mutateAsync: mockArchiveMutateAsync, isPending: false }),
@@ -193,12 +192,11 @@ function mockAuthFor(role: 'admin' | 'master', permissions: string[]) {
   } as unknown as ReturnType<typeof useAuth>);
 }
 
-import { getServices, resolveDeleteService, getAllMaterials, ApiError } from '@memo/api-client';
+import { getServices, getAllMaterials, ApiError } from '@memo/api-client';
 import { ServicesTable } from '../app/(main)/services/components/ServicesTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
 
 const mockGetServices = vi.mocked(getServices);
-const mockResolveDeleteService = vi.mocked(resolveDeleteService);
 const mockGetAllMaterials = vi.mocked(getAllMaterials);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -801,25 +799,22 @@ describe('ServicesTable', () => {
     expect(screen.getByText('Удалить')).toBeInTheDocument();
   });
 
-  it('calls deleteService dry-run when "Удалить" clicked (204 → no dialog)', async () => {
-    mockDeleteMutateAsync.mockResolvedValue(undefined);
-    mockDeleteDependencies = null;
+  it('delete click runs the dry-run preview (204 → optimistic removal, no dialog)', async () => {
     setupEnvelope();
     await renderLoaded();
 
     const actionButtons = screen.getAllByLabelText(/Действия/);
     fireEvent.click(actionButtons[0]);
     fireEvent.click(screen.getByText('Удалить'));
-    await waitFor(() => expect(mockDeleteMutateAsync).toHaveBeenCalledWith('svc-1'));
+    await waitFor(() => expect(mockRemoveService).toHaveBeenCalledWith(TEST_SERVICES[0]));
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
   });
 
-  // ─── Delete → DeleteDialog flow (#207 §7) ──────────────────────────────
+  // ─── Delete → DeleteDialog flow (#207 §7 / GH #345 deferred conveyor) ──
 
-  /** Dry-run rejects with a 409 carrying the given tree; hook exposes it. */
+  /** Preview rejects with a 409 carrying the given tree → dialog opens. */
   function setupDeleteConflict(deps: DependencyNode[]) {
-    mockDeleteDependencies = deps;
-    mockDeleteMutateAsync.mockRejectedValue(
+    mockRemoveService.mockRejectedValue(
       new ApiError(409, 'Удаление невозможно', 'CONFLICT', deps),
     );
   }
@@ -854,9 +849,8 @@ describe('ServicesTable', () => {
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
 
-  it('Mode A confirm calls resolveDeleteService with {} (all deps auto) and closes', async () => {
+  it('Mode A confirm enqueues the deferred delete (resolutions {} + the FULL tree)', async () => {
     setupDeleteConflict(DEPS_AUTO);
-    mockResolveDeleteService.mockResolvedValue(undefined);
     setupEnvelope();
     await renderLoaded();
 
@@ -867,9 +861,11 @@ describe('ServicesTable', () => {
     // All deps auto — no confirm checkbox, button enabled immediately
     fireEvent.click(screen.getByTestId('delete-dialog-confirm-btn'));
 
-    await waitFor(() => expect(mockResolveDeleteService).toHaveBeenCalledWith('svc-1', {}));
+    // GH #345: enqueue is synchronous — the dialog closes immediately and
+    // removeServiceResolved carries the resolutions + the FULL tree (the
+    // parent hook builds `expected` from it; all-auto service tree → {}).
     await waitFor(() =>
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['services'] }),
+      expect(mockRemoveServiceResolved).toHaveBeenCalledWith(TEST_SERVICES[0], {}, DEPS_AUTO),
     );
     await waitFor(() => expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument());
   });
@@ -886,7 +882,7 @@ describe('ServicesTable', () => {
     fireEvent.click(screen.getByTestId('delete-dialog-cancel-btn'));
 
     expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
-    expect(mockDeleteMutateAsync).toHaveBeenCalledTimes(1);
+    expect(mockRemoveService).toHaveBeenCalledTimes(1);
   });
 
   // ─── Archive / Restore (#207 §7.2, replaces patchX({is_active})) ────────

@@ -25,6 +25,14 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: vi.fn(),
 }));
 
+// GH #345: the real tables consume the deferred-delete conveyor — the page
+// test only checks tab gating, so the PendingActions surface is stubbed
+// (ClientsIntegration.test.tsx precedent).
+vi.mock('@/contexts/PendingActionsContext', () => ({
+  usePendingActions: () => ({ enqueuePendingAction: vi.fn() }),
+  PendingActionsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 import { useAuth } from '@/contexts/AuthContext';
 import ServicesPage from '../app/(main)/services/page';
 import { UIProvider } from '@/contexts/UIContext';

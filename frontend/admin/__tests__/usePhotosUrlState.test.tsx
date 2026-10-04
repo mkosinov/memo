@@ -17,7 +17,7 @@ vi.mock('@/hooks/useLocations', () => ({ useLocationsRaw: () => ({ data: [] }) }
 // Real next/navigation shape via the shared stateful mock — the page-scoped
 // hook reads AND writes through it, so pushed URLs must re-render the tree.
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
-import { __resetNavigation, __lastPushedUrl } from './helpers/nextNavigationMock';
+import { __resetNavigation, __lastPushedUrl, __currentQuery } from './helpers/nextNavigationMock';
 
 import { getPhotos } from '@memo/api-client';
 import {
@@ -166,7 +166,10 @@ describe('PhotosProvider urlState wiring — fetcher params', () => {
       );
     }
     const utils = render(<Page />);
-    return { ...utils, probe };
+    // Re-render the SAME component (state preserved) — how an external
+    // navigation re-runs the hook against fresh mock params.
+    const rerenderPage = () => utils.rerender(<Page />);
+    return { ...utils, rerenderPage, probe };
   }
 
   it('clean mount: one fetch, defaults (page 1 / per_page 10, created_at desc), no q/tag_id', async () => {
@@ -257,5 +260,45 @@ describe('PhotosProvider urlState wiring — fetcher params', () => {
         sort_order: 'desc',
       }),
     );
+  });
+
+  // REGRESSION (quality review follow-up, RecordsContext precedent from
+  // 0a07a102): a reset immediately followed by a tag write in the SAME
+  // tick must compose on the PENDING write — the second write builds from
+  // the pending (not the stale closure mirror), so the cleared search must
+  // NOT resurrect, and the resolved pending must not pin pendingWriteRef
+  // (external adoption stays alive).
+  it('same-tick resetFilters + setFilters composes on pending and keeps external adoption alive', async () => {
+    __resetNavigation('?q=guest&tag_id=tag7&page=2', '/photos');
+    const { probe, rerenderPage } = renderProvider();
+    await waitFor(() => {
+      expect(mockGetPhotos).toHaveBeenCalled();
+      expect(probe.current!.search).toBe('guest');
+      expect(probe.current!.filters.tag_id).toEqual(['tag7']);
+      expect(probe.current!.page).toBe(2);
+    });
+
+    // Both setters in one synchronous tick.
+    act(() => {
+      probe.current!.resetFilters();
+      probe.current!.setFilters({ tag_id: ['tag1'] });
+    });
+
+    // The cleared search must NOT resurrect from the stale closure mirror;
+    // the composed state is reset + the new tag, page back at 1.
+    expect(probe.current!.search).toBe('');
+    expect(probe.current!.filters.tag_id).toEqual(['tag1']);
+    expect(probe.current!.page).toBe(1);
+
+    // The pending write resolves once the URL commits (ONE coalesced push)…
+    await waitFor(() => expect(__currentQuery()).toBe('?tag_id=tag1'));
+
+    // …so a later EXTERNAL navigation is adopted again (the pinned-pending
+    // early-return bug would swallow it).
+    act(() => {
+      __resetNavigation('?page=3', '/photos');
+    });
+    rerenderPage();
+    await waitFor(() => expect(probe.current!.page).toBe(3));
   });
 });

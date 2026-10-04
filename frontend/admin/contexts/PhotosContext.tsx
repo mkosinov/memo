@@ -255,19 +255,21 @@ export function PhotosProvider({
       if (Object.keys(rest).length > 0) {
         setLocalFilters((prev) => ({ ...prev, ...rest }));
       }
+      // One sanitized array feeds BOTH the mirror build and the URL patch
+      // (mirror == URL == wire); undefined = tag_id not in this patch.
+      const nextTagIds =
+        newFilters.tag_id !== undefined ? sanitizeTagIds(newFilters.tag_id) : undefined;
       // With tag_id the hook's filter rule resets page implicitly; a
       // local-only change must carry the page reset EXPLICITLY (an empty
       // patch would never navigate → a pending page≠URL write would pin
       // pendingWriteRef forever). An already-default page serializes to a
       // no-op URL write (cleared by the pending==snapshot comparison).
       const tagPatch: Parameters<PhotosUrlAdapter['update']>[0] =
-        newFilters.tag_id !== undefined
-          ? { tagIds: sanitizeTagIds(newFilters.tag_id) }
-          : { page: 1 };
+        nextTagIds !== undefined ? { tagIds: nextTagIds } : { page: 1 };
       applyWrite(
         (prev) => ({
           ...prev,
-          ...(newFilters.tag_id !== undefined ? { tagIds: sanitizeTagIds(newFilters.tag_id) } : {}),
+          ...(nextTagIds !== undefined ? { tagIds: nextTagIds } : {}),
           page: 1,
         }),
         tagPatch,

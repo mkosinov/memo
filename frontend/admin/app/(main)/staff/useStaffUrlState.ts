@@ -52,11 +52,10 @@ type StaffUrlState = TableUrlState<typeof staffUrlConfig>;
 
 export interface StaffUrlAdapter {
   // Record-compatible: the factory's PagedListUrlState consumes the state as
-  // a plain bag of canonical keys.
+  // a plain bag of canonical keys (no navigate member — the factory contract
+  // never calls it; precedent: 0a07a102 dropped it from the records adapter).
   state: StaffUrlState & Record<string, unknown>;
   update: (patch: Record<string, unknown>, options?: { history?: 'push' | 'replace' }) => void;
-  /** Full-query replacement through the hook (single-writer escape hatch). */
-  navigate: (url: string, options?: { history?: 'push' | 'replace' }) => void;
 }
 
 /**
@@ -66,7 +65,7 @@ export interface StaffUrlAdapter {
  * structured filters, so every patch key is a canonical URL param.
  */
 export function useStaffUrlState(): StaffUrlAdapter {
-  const { state, update, navigate } = useTableUrlState(staffUrlConfig);
+  const { state, update } = useTableUrlState(staffUrlConfig);
 
   // The factory writes a plain Record; the generic hook types the patch
   // narrowly — bridge with one cast (the config owns every legal key).
@@ -77,8 +76,5 @@ export function useStaffUrlState(): StaffUrlAdapter {
     [update],
   );
 
-  return useMemo(
-    () => ({ state, update: updateRecord, navigate }),
-    [state, updateRecord, navigate],
-  );
+  return useMemo(() => ({ state, update: updateRecord }), [state, updateRecord]);
 }

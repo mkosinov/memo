@@ -90,11 +90,22 @@ export function usePhotosUrlState(): PhotosUrlAdapter {
   );
 
   const { q, tag_id, page, per_page } = state as TableUrlState<typeof photosUrlConfig>;
+  // Primitive signature of the tag array: valid elements match
+  // /^[A-Za-z0-9_-]{1,64}$/ (isValidTagId) — comma-free by validation, so
+  // the join is collision-free and value-equal arrays collapse to ONE dep.
+  const tagSignature = tag_id.join(',');
   return useMemo(
     () => ({
       state: { search: q, tagIds: tag_id, page, perPage: per_page },
       update,
     }),
-    [q, tag_id, page, per_page, update],
+    // Identity-stable on VALUES (useRecordsUrlState precedent): the raw
+    // hook state is rebuilt EVERY render (params.getAll allocates a fresh
+    // array for a present tag_id), but PhotosProvider's mirror effect keys
+    // on this state's identity — a per-render fresh array would read as a
+    // "new" state while the URL didn't change. The deps cover every field
+    // BY VALUE (tagSignature above); raw `tag_id` would churn per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- value-keyed memo
+    [q, tagSignature, page, per_page, update],
   );
 }

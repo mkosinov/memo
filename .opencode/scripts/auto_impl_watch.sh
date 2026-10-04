@@ -80,8 +80,20 @@ cd "$REPO" || exit 1
 mkdir -p "$STATE"
 exec >>"$LOG" 2>&1
 
-if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
-    echo "$(date -Is) watcher already running"
+# Stale-lock guard (2026-10-04, #349 frozen in In IMPL for 5 days): a plain
+# container restart keeps /tmp but restarts the PID namespace, so the old lock
+# PID is almost always reused by one of the boot processes and the bare
+# kill -0 check made the freshly started watcher exit with a silent
+# "already running" (3rd case 2026-10-03 21:51; earlier 09-25, 09-27).
+# The lock counts as live only when /proc/<pid>/cmdline IS this watcher
+# script; a reused PID of any other process — including the entrypoint
+# wrapper, whose cmdline merely mentions the script — falls through and the
+# stale lock is replaced below.
+lock_pid="$(cat "$LOCK" 2>/dev/null || true)"
+if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null \
+   && tr '\0' '\n' < "/proc/$lock_pid/cmdline" 2>/dev/null \
+      | grep -Fxq "$REPO/.opencode/scripts/auto_impl_watch.sh"; then
+    echo "$(date -Is) watcher already running (pid $lock_pid)"
     exit 1
 fi
 echo $$ > "$LOCK"

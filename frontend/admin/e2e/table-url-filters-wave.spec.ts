@@ -1,4 +1,6 @@
 import { test, expect } from './fixtures/test';
+import { createTestTag, cleanup } from './fixtures/factories';
+import type { APIRequestContext } from '@playwright/test';
 
 /**
  * #349 Task 5 — wave group 1 URL filters (positions, tags, locations), US-5
@@ -9,12 +11,18 @@ import { test, expect } from './fixtures/test';
  * filter half) + a dedicated combined-link case below (service filters +
  * mat_-prefixed materials filters in ONE URL, spec §2).
  *
+ * #349 Task 9 — wave group 4: /audit joins WAVE_PAGES (seeded per test —
+ * the journal ships no seed rows) + a dedicated discrete-filters case
+ * below (action+entity+user_id+period in ONE URL, spec §5 п.7).
+ *
  * Parameterized skeleton (spec §5 «Тестирование волны»): one PAGE table per
  * checklist entry — the link params and the UI assertions stay declarative.
  * Counter convention follows the #231 S1/#349 clients test: count GETs to the
  * LIST endpoint pathname (`/api/v1/<entity>`; point paths like
- * `/api/v1/positions/<id>` are not list traffic).
+ * `/api/v1/positions/<id>` — and /audit-logs/authors — are not list traffic).
  */
+
+const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 interface WavePage {
   /** Route pathname, e.g. /positions. */
@@ -31,6 +39,20 @@ interface WavePage {
   expectedWireParams: Record<string, string>;
   /** A link whose params are ALL invalid for the page (dirty-URL smoke). */
   dirtyLink: string;
+  /** Page-size select default ('10' everywhere; /audit's factory = 20). */
+  defaultPerPage?: string;
+  /**
+   * Optional per-test data seeding returning a cleanup (the journal has NO
+   * seed rows — a tag created via API journals an admin-authored
+   * create/tags row, the audit-log.spec.ts pattern).
+   */
+  seed?: (request: APIRequestContext) => Promise<() => Promise<void>>;
+}
+
+/** Seed one journal row: an admin-authored tag create (action=create, entity=tags). */
+async function seedAuditRow(request: APIRequestContext): Promise<() => Promise<void>> {
+  const tag = await createTestTag(request, { title: `audit-wave-${Date.now()}` });
+  return () => cleanup(request, `/api/v1/tags/${tag.id}`);
 }
 
 const WAVE_PAGES: WavePage[] = [
@@ -122,6 +144,30 @@ const WAVE_PAGES: WavePage[] = [
     },
     dirtyLink: '/photos?tag_id=%21%21bad%21%21&page=0&per_page=7&q=x',
   },
+  {
+    // #349 Task 9 — wave group 4: /audit (журнал). URL contract (spec §5
+    // п.7): user_id/action/entity/date_from/date_to + page/per_page; the
+    // period names are date_from/date_to (NOT from/to) with the «не
+    // задано» default; sort is server-fixed and NEVER URL-addressable.
+    // The journal ships no seed rows — the per-test seed creates a tag via
+    // API, journals an admin-authored create/tags row the link matches.
+    // per_page default = 20 (the AuditLogContext factory default).
+    route: '/audit',
+    listPath: '/api/v1/audit-logs',
+    defaultPerPage: '20',
+    linkWithFilters:
+      '/audit?action=create&entity=tags&date_from=2020-01-01&date_to=2030-12-31&page=1&per_page=50',
+    expectedWireParams: {
+      action: 'create',
+      entity: 'tags',
+      date_from: '2020-01-01',
+      date_to: '2030-12-31',
+      page: '1',
+      per_page: '50',
+    },
+    dirtyLink: '/audit?action=bogus&entity=bogus&date_from=not-a-date&date_to=31-12-2030&page=0&per_page=7',
+    seed: seedAuditRow,
+  },
 ];
 
 /**
@@ -141,6 +187,16 @@ function listCounter(page: import('@playwright/test').Page, listPath: string): s
 test.describe('#349 — wave group 1 URL filters (US-5)', () => {
   for (const pageCase of WAVE_PAGES) {
     test.describe(`page ${pageCase.route}`, () => {
+      // Per-test data seeding (audit only today): creates the rows the
+      // page's assertions need, cleans up afterwards.
+      let seedCleanup: (() => Promise<void>) | undefined;
+      test.beforeEach(async ({ request }) => {
+        seedCleanup = pageCase.seed ? await pageCase.seed(request) : undefined;
+      });
+      test.afterEach(async () => {
+        await seedCleanup?.();
+      });
+
       // ── US-5 core: link with filters → state restored, exactly one request
       test('US-5: link with filters restores state, exactly one list request', async ({
         page,
@@ -175,11 +231,12 @@ test.describe('#349 — wave group 1 URL filters (US-5)', () => {
       test('dirty URL falls back to defaults silently, no rewrite', async ({ page }) => {
         await page.goto(pageCase.dirtyLink);
 
-        // Defaults applied: page 1 (prev disabled), per_page default.
+        // Defaults applied: page 1 (prev disabled), per_page default
+        // (10 everywhere; /audit's factory default is 20).
         const prevBtn = page.getByRole('button', { name: 'Предыдущая страница' });
         await expect(prevBtn).toBeDisabled({ timeout: 20_000 });
         const pageSize = page.getByTestId('page-size-select');
-        await expect(pageSize).toHaveValue('10');
+        await expect(pageSize).toHaveValue(pageCase.defaultPerPage ?? '10');
 
         // The dirty URL is NOT rewritten: garbage params stay as-is.
         await expect(page).toHaveURL(/page=0/);
@@ -259,7 +316,8 @@ test.describe('#349 — wave group 1 URL filters (US-5)', () => {
       expect(onlyMaterials.searchParams.get(key), `mat_${key} → ${key} on the wire`).toBe(value);
     }
     // The services table kept its state in the URL (hidden, not wiped).
-    await expect(page).toHaveURL(/q=%D0%B0%D0%BA%D0%B2/);
+    // [?&]-anchored: a bare /q=/ could also match the substring in mat_q=.
+    await expect(page).toHaveURL(/[?&]q=%D0%B0%D0%BA%D0%B2/);
     await expect(page).toHaveURL(/mat_q=%D0%BC%D0%B0%D1%81/);
   });
 });
@@ -424,5 +482,103 @@ test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
     const last = new URL(listRequests[listRequests.length - 1]!);
     expect(last.searchParams.getAll('tag_id')).toEqual(['tag1']);
     await expect(page.getByText('/images/guest-1.jpg')).toBeVisible({ timeout: 10_000 });
+  });
+});
+
+// ─── #349 Task 9 — audit: discrete filters + period in one URL ─────────────
+// The seed admin's user_id is a runtime UUID — resolved through the authors
+// API (GET /audit-logs/authors) after seeding a row, never hardcoded. The
+// combined link covers EVERY discrete filter of the journal (spec §5 п.7):
+// action + entity + user_id + the datePair period, all applied on the ONE
+// mount request; then ONE discrete filter change → exactly one more request
+// (single push, page reset implicit).
+
+test.describe('#349 Task 9 — audit: discrete filters in one URL', () => {
+  test('combined link action+entity+user_id+period → all applied by one request; one discrete change → one push', async ({
+    page,
+    request,
+  }) => {
+    // Seed: an admin-authored create/tags journal row (unique title).
+    const tag = await createTestTag(request, {
+      title: `audit-t9-${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    });
+
+    // Resolve the admin author id (authors API labels the phone fallback).
+    const authorsResp = await request.get(`${BACKEND}/api/v1/audit-logs/authors`);
+    expect(authorsResp.ok()).toBeTruthy();
+    const authors = (await authorsResp.json()) as Array<{
+      user_id: string;
+      label?: string | null;
+    }>;
+    const admin = authors.find((a) => (a.label ?? '').includes('+79990000001'));
+    expect(admin, 'seed admin present in the authors list').toBeDefined();
+
+    try {
+      const listRequests = listCounter(page, '/api/v1/audit-logs');
+      await page.goto(
+        `/audit?action=create&entity=tags&user_id=${admin!.user_id}` +
+          '&date_from=2020-01-01&date_to=2030-12-31&page=1&per_page=50',
+      );
+
+      // Every discrete control restored from the URL: action/entity/user_id
+      // selects + BOTH period date inputs (datePair).
+      await expect(page.getByLabel('Действие')).toHaveValue('create', { timeout: 20_000 });
+      await expect(page.getByLabel('Сущность')).toHaveValue('tags');
+      await expect(page.getByLabel('Автор')).toHaveValue(admin!.user_id);
+      const periodInputs = page.locator('input[aria-label="Период"]');
+      await expect(periodInputs.nth(0)).toHaveValue('2020-01-01');
+      await expect(periodInputs.nth(1)).toHaveValue('2030-12-31');
+
+      // The seeded row survives the combined narrowing.
+      await expect(
+        page.locator('[data-testid^="audit-row-"]').filter({ hasText: tag.title }),
+      ).toBeVisible({ timeout: 20_000 });
+
+      // Observation window, then the ONE-request DoD with params verbatim.
+      await page.waitForTimeout(500);
+      expect(listRequests).toHaveLength(1);
+      const only = new URL(listRequests[0]!);
+      for (const [key, value] of Object.entries({
+        action: 'create',
+        entity: 'tags',
+        user_id: admin!.user_id,
+        date_from: '2020-01-01',
+        date_to: '2030-12-31',
+        page: '1',
+        per_page: '50',
+      })) {
+        expect(only.searchParams.get(key), `${key} on the wire`).toBe(value);
+      }
+
+      // ONE discrete filter change (Действие → удалил): a single push —
+      // URL swaps action, the OTHER link filters stay, page resets to the
+      // stripped default 1, and exactly ONE more list request fires.
+      const mountRequests = listRequests.length;
+      await page.getByLabel('Действие').selectOption('delete');
+      // [?&]-anchored patterns: a bare /page=/ would also match the
+      // substring inside per_page=50 (same class as /q= vs mat_q=).
+      await expect(page).toHaveURL(/[?&]action=delete/, { timeout: 10_000 });
+      await expect(page).not.toHaveURL(/[?&]action=create/);
+      await expect(page).toHaveURL(/[?&]entity=tags/);
+      await expect(page).toHaveURL(/[?&]user_id=/);
+      await expect(page).not.toHaveURL(/[?&]page=/); // page=1 default → stripped
+
+      await page.waitForTimeout(500);
+      expect(listRequests.length).toBe(mountRequests + 1);
+      const last = new URL(listRequests[listRequests.length - 1]!);
+      expect(last.searchParams.get('action')).toBe('delete');
+      expect(last.searchParams.get('entity')).toBe('tags');
+      expect(last.searchParams.get('user_id')).toBe(admin!.user_id);
+      // The narrowed feed (action=delete) no longer contains OUR seeded
+      // create row — сужение доказано на собственных данных. The feed may
+      // hold accumulated delete-строки from earlier tests/runs (audit_logs
+      // are cleaned only at RUN start, not per test) — ими не владеем,
+      // не ассертим.
+      await expect(
+        page.locator('[data-testid^="audit-row-"]').filter({ hasText: tag.title }),
+      ).toHaveCount(0, { timeout: 10_000 });
+    } finally {
+      await cleanup(request, `/api/v1/tags/${tag.id}`);
+    }
   });
 });

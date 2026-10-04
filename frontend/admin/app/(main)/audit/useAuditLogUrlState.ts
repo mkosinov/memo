@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useTableUrlState } from '@/hooks/useTableUrlState';
-import type { TableUrlConfig } from '@/hooks/useTableUrlState';
+import type { TableUrlConfig, TableUrlState } from '@/hooks/useTableUrlState';
 import { ACTION_LABELS, ENTITY_LABELS } from './auditLabels';
 
 // #349 Task 9 — audit page URL state (wave group 4). The page-scoped hook

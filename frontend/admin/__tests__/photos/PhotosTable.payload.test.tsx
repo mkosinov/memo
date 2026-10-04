@@ -86,6 +86,7 @@ import { getPhotos, getAllServices, getAllLocations } from '@memo/api-client';
 import type { PhotoListResponse } from '@memo/api-client';
 import { PhotosTable } from '@/app/(main)/photos/components/PhotosTable';
 import { PhotosProvider } from '@/contexts/PhotosContext';
+import { createPhotosUrlStateStub } from '../helpers/photosUrlStateStub';
 
 const mockGetPhotos = vi.mocked(getPhotos);
 const mockGetAllServices = vi.mocked(getAllServices);
@@ -115,7 +116,7 @@ function renderTable() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <PhotosProvider>
+      <PhotosProvider urlState={createPhotosUrlStateStub()}>
         <PhotosTable />
       </PhotosProvider>
     </QueryClientProvider>,

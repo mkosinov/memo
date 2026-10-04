@@ -26,6 +26,11 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   };
 });
 
+// #349 Task 8 — the page now reads URL state (useTableUrlState) inside its
+// Suspense boundary: real next/navigation shape via the shared stateful mock.
+vi.mock('next/navigation', async () => await import('../helpers/nextNavigationMock'));
+import { __resetNavigation } from '../helpers/nextNavigationMock';
+
 import { getPhotos, getAllServices, getAllLocations } from '@memo/api-client';
 import PhotosPage from '../../app/(main)/photos/page';
 
@@ -35,6 +40,7 @@ const mockGetAllLocations = vi.mocked(getAllLocations);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetNavigation('', '/photos');
   mockGetPhotos.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
   mockGetAllServices.mockResolvedValue([]);
   mockGetAllLocations.mockResolvedValue([]);

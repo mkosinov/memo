@@ -36,6 +36,7 @@ import type {
   LocationResponse,
 } from '@memo/api-client';
 import { PhotosProvider, usePhotosTable } from '../contexts/PhotosContext';
+import { createPhotosUrlStateStub } from './helpers/photosUrlStateStub';
 
 const mockGetPhotos = vi.mocked(getPhotos);
 const mockGetAllServices = vi.mocked(getAllServices);
@@ -115,7 +116,7 @@ function setup() {
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <PhotosProvider>{children}</PhotosProvider>
+        <PhotosProvider urlState={createPhotosUrlStateStub()}>{children}</PhotosProvider>
       </QueryClientProvider>
     );
   }

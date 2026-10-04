@@ -87,6 +87,41 @@ const WAVE_PAGES: WavePage[] = [
     },
     dirtyLink: '/services?sort_by=bogus&status=xyz&page=0&per_page=7&mat_sort_by=bogus&mat_page=0',
   },
+  {
+    // #349 Task 8 — wave group 3: /staff (the ONE staff management page;
+    // read-only /masters is untouched). q=Ольга matches the seed staff
+    // «Ольга Середа» (first/last name substring, ≥2 chars).
+    route: '/staff',
+    listPath: '/api/v1/staff',
+    linkWithFilters:
+      '/staff?q=%D0%9E%D0%BB%D1%8C%D0%B3%D0%B0&status=all&sort_by=name&sort_order=desc&page=1&per_page=50',
+    expectedWireParams: {
+      q: 'Ольга',
+      status: 'all',
+      sort_by: 'name',
+      sort_order: 'desc',
+      page: '1',
+      per_page: '50',
+    },
+    // sort_by=position is dirty for this page (M2M — excluded from the
+    // whitelist, domain-rules/staff.md).
+    dirtyLink: '/staff?sort_by=position&status=xyz&page=0&q=x',
+  },
+  {
+    // #349 Task 8 — wave group 3: /photos. URL contract is q + tag_id
+    // (repeatable) + page + per_page (spec §5 п.6). q=guest + tag7 match
+    // the seed photos guest-1/guest-2.jpg (both tagged tag7).
+    route: '/photos',
+    listPath: '/api/v1/photos',
+    linkWithFilters: '/photos?q=guest&tag_id=tag7&page=1&per_page=50',
+    expectedWireParams: {
+      q: 'guest',
+      tag_id: 'tag7',
+      page: '1',
+      per_page: '50',
+    },
+    dirtyLink: '/photos?tag_id=%21%21bad%21%21&page=0&per_page=7&q=x',
+  },
 ];
 
 /**
@@ -321,5 +356,73 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
 
     // …and the dirty URL stays as-is (silent read, no rewrite).
     await expect(page).toHaveURL(/from=2030-12-31&to=2020-01-01/);
+  });
+});
+
+// ─── #349 Task 8 — photos: tag_id ARRAY (repeatable param) ────────────────
+// Seed facts (test_memo_349.db): tag1=«новинка», tag2=«хит»; ph5
+// (/images/tag-pair.jpg) is the ONLY photo with BOTH tags; ph6
+// (/images/guest-1.jpg) carries tag1+tag7 — after removing tag2 the AND
+// set widens to ph5+ph6 deterministically.
+
+test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
+  test('link with tag_id=tag1&tag_id=tag2 → both chips active, one request, AND semantics', async ({
+    page,
+  }) => {
+    const listRequests = listCounter(page, '/api/v1/photos');
+    await page.goto('/photos?tag_id=tag1&tag_id=tag2');
+
+    // Both filter chips restored from the URL (each chip's ✕ carries the
+    // tag title in its aria-label).
+    await expect(page.getByRole('button', { name: 'Удалить тег новинка' })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole('button', { name: 'Удалить тег хит' })).toBeVisible();
+
+    // AND semantics: exactly the both-tagged seed row is visible.
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('/images/tag-pair.jpg')).toBeVisible();
+
+    // Observation window: rows visible, then a short late-stray buffer.
+    await page.waitForTimeout(500);
+
+    // DoD: the link mount fired EXACTLY ONE list request, BOTH tag_id
+    // values verbatim on the wire (repeatable param).
+    expect(listRequests).toHaveLength(1);
+    const only = new URL(listRequests[0]!);
+    expect(only.searchParams.getAll('tag_id')).toEqual(['tag1', 'tag2']);
+  });
+
+  test('removing one tag of two → URL keeps a single tag_id, one new request', async ({ page }) => {
+    const listRequests = listCounter(page, '/api/v1/photos');
+    await page.goto('/photos?tag_id=tag1&tag_id=tag2');
+    await expect(page.getByRole('button', { name: 'Удалить тег хит' })).toBeVisible({
+      timeout: 20_000,
+    });
+    await page.waitForTimeout(300);
+    const mountRequests = listRequests.length;
+    expect(mountRequests).toBe(1);
+
+    // Remove «хит» (tag2) via its chip ✕.
+    await page.getByRole('button', { name: 'Удалить тег хит' }).click();
+
+    // URL: exactly ONE tag_id param survives — tag1; tag2 fully gone.
+    await expect(page).toHaveURL(/tag_id=tag1/, { timeout: 10_000 });
+    await expect(page).not.toHaveURL(/tag_id=tag2/);
+    expect((page.url().match(/tag_id=/g) ?? []).length).toBe(1);
+
+    // Chips: «новинка» stays active, «хит» is gone.
+    await expect(page.getByRole('button', { name: 'Удалить тег новинка' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole('button', { name: 'Удалить тег хит' })).toHaveCount(0);
+
+    // The filter change fired exactly ONE more list request with the
+    // remaining single tag; the AND set widens to include ph6 (tag1+tag7).
+    await page.waitForTimeout(500);
+    expect(listRequests.length).toBe(mountRequests + 1);
+    const last = new URL(listRequests[listRequests.length - 1]!);
+    expect(last.searchParams.getAll('tag_id')).toEqual(['tag1']);
+    await expect(page.getByText('/images/guest-1.jpg')).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -820,9 +820,81 @@ describe('RecordsContext — synchronous optimistic state (#349 follow-up)', () 
       expect(result.current.sortOrder).toBe('desc');
     });
   });
+
+  // REGRESSION (quality review, Stage 2): RecordsFilters.handleReset fires
+  // resetFilters() + setPeriod('', '') in the SAME tick. The second write used
+  // to build its next state from the STALE closure mirror, resurrecting the
+  // cleared filter and pinning pendingWriteRef forever (adoption dead).
+  it('same-tick resetFilters + setPeriod clears filter/period/page and keeps external adoption alive', async () => {
+    __resetNavigation('?status=waiting&from=2026-02-01&to=2026-02-07&page=2', '/records');
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.page).toBe(2);
+    });
+
+    // handleReset's exact shape: both setters in one synchronous tick.
+    act(() => {
+      result.current.resetFilters();
+      result.current.setPeriod('', '');
+    });
+
+    // The filter must NOT resurrect from the stale closure mirror.
+    expect(result.current.filters.status).toBe('');
+    expect(result.current.explicitFrom).toBeNull();
+    expect(result.current.explicitTo).toBeNull();
+    expect(result.current.page).toBe(1);
+
+    // The pending write resolves once the URL commits — a later EXTERNAL
+    // navigation must be adopted again (the pinned-pending early-return bug).
+    await waitFor(() => expect(__currentQuery()).not.toContain('status='));
+    act(() => {
+      __resetNavigation('?page=3', '/records');
+    });
+    rerender();
+    await waitFor(() => expect(result.current.page).toBe(3));
+  });
+
+  // REGRESSION (quality review, Stage 2): the hook clamps `page` into its
+  // URL-legal 1..10000 range on read; the mirror must clamp on WRITE too, or
+  // pendingWriteRef holds an out-of-range page that never equals the clamped
+  // URL snapshot (pinned pending → adoption dead).
+  it('setPage clamps into the URL-legal 1..10000 range and still adopts external navigation', async () => {
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(20_000);
+    });
+    expect(result.current.page).toBe(10_000);
+
+    act(() => {
+      result.current.setPage(0);
+    });
+    expect(result.current.page).toBe(1);
+
+    // Let the clamp writes commit (page=1 strips the param → back to the
+    // bare URL) BEFORE navigating externally — a nav inside the ~16ms write
+    // window is the documented indistinguishability limitation, not the
+    // pin under test.
+    await waitFor(() => expect(__currentQuery()).toBe(''));
+
+    // The clamp write resolves — external navigation is adopted afterwards.
+    act(() => {
+      __resetNavigation('?page=4', '/records');
+    });
+    rerender();
+    await waitFor(() => expect(result.current.page).toBe(4));
+  });
 });
 
-describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', () => {  beforeEach(() => {
+describe('RecordsContext — PagedListState alignment (§6.4, #139 T8 Part A)', () => {
+  beforeEach(() => {
     vi.clearAllMocks();
 
     __resetNavigation('', '/records');

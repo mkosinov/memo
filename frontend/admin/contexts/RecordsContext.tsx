@@ -120,8 +120,20 @@ export function RecordsProvider({
   // the effect below once the URL state actually differs from a pending
   // write (a pending push's values are already in the mirror).
   const [mirror, setMirror] = useState(urlSnapshot);
+  /** Read-latest base for same-tick writes — never re-subscribes effects. */
+  const mirrorRef = useRef(mirror);
   const pendingWriteRef = useRef<RecordsUrlStateView | null>(null);
 
+  /** Keep ref + state in lockstep (single-writer discipline). */
+  const commitMirror = useCallback((next: RecordsUrlStateView) => {
+    mirrorRef.current = next;
+    setMirror(next);
+  }, []);
+
+  // Deps include `mirror` as a TRIGGER only (values are read from refs):
+  // a write whose target URL equals the current URL (e.g. a coalesced
+  // no-op like setPage back to the default) produces NO URL event, so the
+  // pending comparison must also run right after each commitMirror.
   useEffect(() => {
     const pending = pendingWriteRef.current;
     if (pending) {
@@ -136,19 +148,32 @@ export function RecordsProvider({
       }
       return;
     }
-    if (!recordsStateEq(mirror, urlSnapshot)) {
-      setMirror(urlSnapshot);
+    if (!recordsStateEq(mirrorRef.current, urlSnapshot)) {
+      commitMirror(urlSnapshot);
     }
-  }, [urlSnapshot, mirror]);
+  }, [urlSnapshot, mirror, commitMirror]);
 
-  /** Apply a write optimistically: mirror now, URL right after. */
+  /**
+   * Apply a write optimistically: mirror now, URL right after. The next
+   * state is BUILT from the latest committed view (an in-flight pending,
+   * else the mirror ref) — NOT from the render's closure `mirror` — so two
+   * writes in the same tick (RecordsFilters handleReset: resetFilters() +
+   * setPeriod('', '')) compose instead of the second overwriting the first
+   * from a stale snapshot (quality-review blocker: filter resurrection +
+   * pendingWriteRef pinned forever).
+   */
   const applyWrite = useCallback(
-    (next: RecordsUrlStateView, urlPatch: RecordsUrlPatch, options?: { history?: 'push' | 'replace' }) => {
+    (
+      build: (prev: RecordsUrlStateView) => RecordsUrlStateView,
+      urlPatch: RecordsUrlPatch,
+      options?: { history?: 'push' | 'replace' },
+    ) => {
+      const next = build(pendingWriteRef.current ?? mirrorRef.current);
       pendingWriteRef.current = next;
-      setMirror(next);
+      commitMirror(next);
       update(urlPatch, options);
     },
-    [update],
+    [update, commitMirror],
   );
 
   // The query-key range format is unchanged: the adapter defaults a missing
@@ -200,28 +225,34 @@ export function RecordsProvider({
   // mirror at once (synchronous re-render) and the URL navigation follows;
   // the hook's filter-change rule resets page→1 in the SAME navigation
   // (spec §3) — the mirror applies the identical reset to stay in lockstep.
+  // The hook clamps `page` into 1…10⁴ on its URL read; the mirror must clamp
+  // on WRITE too — an out-of-range mirror page never equals the clamped URL
+  // snapshot and would pin pendingWriteRef forever (quality-review minor).
   const setPage = useCallback(
-    (p: number) => applyWrite({ ...mirror, page: p }, { page: p }),
-    [applyWrite, mirror],
+    (p: number) => {
+      const clamped = Math.min(10_000, Math.max(1, p));
+      applyWrite((prev) => ({ ...prev, page: clamped }), { page: clamped });
+    },
+    [applyWrite],
   );
 
   const setFilters = useCallback(
     (newFilters: Partial<RecordFilters>) =>
       applyWrite(
-        { ...mirror, filters: { ...mirror.filters, ...newFilters }, page: 1 },
+        (prev) => ({ ...prev, filters: { ...prev.filters, ...newFilters }, page: 1 }),
         newFilters as RecordsUrlPatch,
       ),
-    [applyWrite, mirror],
+    [applyWrite],
   );
 
   const resetFilters = useCallback(
-    () => applyWrite({ ...mirror, filters: DEFAULT_URL_FILTERS, page: 1 }, { ...DEFAULT_URL_FILTERS }),
-    [applyWrite, mirror],
+    () => applyWrite((prev) => ({ ...prev, filters: DEFAULT_URL_FILTERS, page: 1 }), { ...DEFAULT_URL_FILTERS }),
+    [applyWrite],
   );
 
   const setPerPage = useCallback(
-    (pp: number) => applyWrite({ ...mirror, perPage: pp, page: 1 }, { perPage: pp }),
-    [applyWrite, mirror],
+    (pp: number) => applyWrite((prev) => ({ ...prev, perPage: pp, page: 1 }), { perPage: pp }),
+    [applyWrite],
   );
 
   // PagedListState.setSort contract (spec §6.4): field+order applied verbatim
@@ -231,10 +262,10 @@ export function RecordsProvider({
   const setSort = useCallback(
     (field: string, order: SortOrder) =>
       applyWrite(
-        { ...mirror, sortBy: field, sortOrder: order, page: 1 },
+        (prev) => ({ ...prev, sortBy: field, sortOrder: order, page: 1 }),
         { sortBy: field, sortOrder: order },
       ),
-    [applyWrite, mirror],
+    [applyWrite],
   );
 
   // #349 Task 7 / Gate B — the period write ('' removes a side). The mirror
@@ -246,18 +277,18 @@ export function RecordsProvider({
       const nextTo = to === '' ? null : to;
       const def = defaultRecordsPeriod();
       applyWrite(
-        {
-          ...mirror,
+        (prev) => ({
+          ...prev,
           explicitFrom: nextFrom,
           explicitTo: nextTo,
           dateFrom: nextFrom ?? def.from,
           dateTo: nextTo ?? def.to,
           page: 1,
-        },
+        }),
         { period: { from: nextFrom, to: nextTo } },
       );
     },
-    [applyWrite, mirror],
+    [applyWrite],
   );
 
   // Spec §6.7 page clamp — after a SETTLED fetch returns an empty non-first
@@ -267,9 +298,10 @@ export function RecordsProvider({
   useEffect(() => {
     const items = data?.items || [];
     if (!isPending && !isFetching && items.length === 0 && page > 1) {
-      applyWrite({ ...mirror, page: page - 1 }, { page: page - 1 }, { history: 'replace' });
+      const stepBack = Math.max(1, page - 1);
+      applyWrite((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }), { page: stepBack }, { history: 'replace' });
     }
-  }, [isPending, isFetching, data, page, applyWrite, mirror]);
+  }, [isPending, isFetching, data, page, applyWrite]);
 
   // Seed canonical ['record', id] from list responses. Avoids a redundant
   // getRecord() request the first time a record is opened (spec §2.1).

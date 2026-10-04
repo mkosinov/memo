@@ -104,8 +104,6 @@ export interface RecordsUrlAdapter {
   update: (patch: RecordsUrlPatch, options?: { history?: 'push' | 'replace' }) => void;
   /** Legacy setPeriod shape: '' removes the side (empty string = absent). */
   setPeriod: (from: string, to: string) => void;
-  /** Full-query replacement through the hook (single-writer escape hatch). */
-  navigate: (url: string, options?: { history?: 'push' | 'replace' }) => void;
 }
 
 /** camelCase patch key → URL config key. */
@@ -164,7 +162,7 @@ function readExplicitPeriod(params: URLSearchParams): {
  * hook's default push (the legacy useRecordsPeriod replaced).
  */
 export function useRecordsUrlState(): RecordsUrlAdapter {
-  const { state, update: urlUpdate, navigate } = useTableUrlState(recordsUrlConfig);
+  const { state, update: urlUpdate } = useTableUrlState(recordsUrlConfig);
   const searchParams = useSearchParams();
 
   const update = useCallback(
@@ -176,6 +174,8 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
         if (urlKey !== undefined) urlPatch[urlKey] = value;
       }
       if (Object.keys(urlPatch).length > 0) {
+        // Enum-typed urlPatch → hook patch inversion: sanctioned cast —
+        // the services adapter (useServicesUrlState) set the precedent.
         urlUpdate(urlPatch as never, options);
       }
     },
@@ -230,7 +230,6 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
       },
       update,
       setPeriod,
-      navigate,
     }),
     // Identity-stable on VALUES: the raw hook state object is rebuilt every
     // render, but the mirror effect in RecordsProvider keys on this state's
@@ -255,7 +254,6 @@ export function useRecordsUrlState(): RecordsUrlAdapter {
       explicitTo,
       update,
       setPeriod,
-      navigate,
     ],
   );
 }

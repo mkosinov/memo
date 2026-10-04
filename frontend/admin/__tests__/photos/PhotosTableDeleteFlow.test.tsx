@@ -50,6 +50,9 @@ import { PhotosProvider } from '@/contexts/PhotosContext';
 import { UIProvider } from '@/contexts/UIContext';
 import { PendingActionsProvider } from '@/contexts/PendingActionsContext';
 import { ToastContainer } from '@/app/components/toast/ToastContainer';
+// #349 Task 8 made urlState required on PhotosProvider (RecordsProvider
+// precedent) — render the real provider with the shared static stub.
+import { createPhotosUrlStateStub } from '../helpers/photosUrlStateStub';
 
 const mockGetPhotos = vi.mocked(getPhotos);
 const mockGetAllServices = vi.mocked(getAllServices);
@@ -107,7 +110,7 @@ function renderFlow() {
     <QueryClientProvider client={queryClient}>
       <UIProvider>
         <PendingActionsProvider>
-          <PhotosProvider>
+          <PhotosProvider urlState={createPhotosUrlStateStub()}>
             <PhotosTable />
             <ToastContainer />
           </PhotosProvider>

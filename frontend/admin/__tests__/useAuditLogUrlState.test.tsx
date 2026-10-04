@@ -56,8 +56,10 @@ async function settle(ms = 30): Promise<void> {
 describe('useAuditLogUrlState — config (#349 Task 9)', () => {
   it('exposes the canonical preset contract for the audit page', () => {
     // Discrete enums = the REAL journal vocabularies (auditLabels.ts, spec
-    // §7): 7 actions (update/patch share «изменил» but stay distinct slugs)
-    // and the 16 canonical #239 entity names.
+    // §7): 8 actions (update/patch share «изменил» but stay distinct slugs;
+    // password_link_issued — #348 spec §8, backend canon: models/audit_log.py
+    // widened 16→24 + usecases/password_setup.py writes it) and the 16
+    // canonical #239 entity names.
     expect([...AUDIT_ACTION_VALUES]).toEqual([
       'create',
       'update',
@@ -66,6 +68,7 @@ describe('useAuditLogUrlState — config (#349 Task 9)', () => {
       'archive',
       'restore',
       'reorder',
+      'password_link_issued',
     ]);
     expect([...AUDIT_ENTITY_VALUES]).toEqual([
       'clients',

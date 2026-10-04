@@ -195,6 +195,13 @@ test.describe('#349 — clients URL filters', () => {
         force: true,
       });
       await expect(modal).not.toBeVisible({ timeout: 5000 });
+
+      // Task 10 (force status=all): the forced «Все» SURVIVES the card
+      // close — the overlay lives while clientId stays in the address, and
+      // it is still never written into the URL.
+      await expect(statusSelect).toHaveValue('all');
+      await expect(page).not.toHaveURL(/status=/);
+
       await page.getByRole('button', { name: 'Снять сужение' }).click();
 
       // clientId gone from the address → effective status falls back to

@@ -322,6 +322,37 @@ test.describe('#349 — wave group 1 URL filters (US-5)', () => {
   });
 });
 
+// ─── #349 Task 10 — точечный сценарий: односимвольный q ───────────────────
+// The ≥2-char server-search clamp lives on the QUERY BUILD
+// (createPagedListContext: `search.length >= 2 ? search : undefined`), NOT
+// on the field: a 1-char q from a link restores the text into the search
+// input, but the mount request goes out WITHOUT q — and it is still exactly
+// ONE list request (US-5), with the URL silently kept as-is.
+
+test.describe('#349 Task 10 — single-char q: field restored, wire without q', () => {
+  test('/tags?q=а → the field shows «а», the request has NO q, one list request', async ({
+    page,
+  }) => {
+    const listRequests = listCounter(page, '/api/v1/tags');
+    await page.goto('/tags?q=%D0%B0'); // q=а — one char
+
+    // The text is restored into the search field; the table loads.
+    const search = page.getByPlaceholder('Поиск тегов...');
+    await expect(search).toHaveValue('а', { timeout: 20_000 });
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 20_000 });
+
+    // Observation window: rows visible, then a short late-stray buffer.
+    await page.waitForTimeout(500);
+
+    // The single mount request went out WITHOUT q (the ≥2 clamp is on the
+    // query build), and the URL was not rewritten (silent read).
+    expect(listRequests).toHaveLength(1);
+    const only = new URL(listRequests[0]!);
+    expect(only.searchParams.has('q')).toBe(false);
+    await expect(page).toHaveURL(/[?&]q=/);
+  });
+});
+
 // ─── #349 Task 7 — records: period (datePair) + table filters ─────────────
 // Not in WAVE_PAGES: the seed records live in June 2026, so the BARE
 // /records route (default current-week period) renders ZERO rows — the

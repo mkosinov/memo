@@ -147,9 +147,16 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
     await page.locator('input[aria-label="Фильтр по дате до"]').fill(toISO(to));
     await viewTo;
 
-    // URL carries the pair.
-    expect(new URL(page.url()).searchParams.get('from')).toBe(toISO(from));
-    expect(new URL(page.url()).searchParams.get('to')).toBe(toISO(to));
+    // URL carries the pair. #349 (RecordsProvider optimistic mirror): the
+    // list fetch fires from the mirror BEFORE the router.push commits, so
+    // the awaited response does NOT imply the address has moved yet — poll
+    // for the navigation (the a8545599 read-after-response precedent).
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('from'), { timeout: 10_000 })
+      .toBe(toISO(from));
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('to'), { timeout: 10_000 })
+      .toBe(toISO(to));
 
     // Mini calendar: edges carry the full red pill, the middle the light tint.
     const startCell = miniDay(page, from).locator('span');

@@ -123,16 +123,38 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
 
   // ── US-4: records date filters → URL + red range on the mini calendar ──
   test('US-4: records «от/до» writes ?from=&to= and tints the mini-calendar range red', async ({ page }) => {
-    // Range inside the CURRENT month so both cells are visible without paging.
+    // The records default period is the CURRENT week (Mon..Sun, the
+    // defaultRecordsPeriod of useRecordsUrlState). A fixed «5th..9th» range
+    // collides with it whenever the 5th IS that Monday (Oct 2026): the «от»
+    // fill then equals the default — the query key does not change (no
+    // request → waitForResponse timeout) and the default-equal `from` is
+    // stripped by the hook's canonical serialization (the «до» fill then
+    // composes from a stale null explicitFrom and drops it from the URL).
+    // Pick a NEIGHBORING week instead — never the default one, and always
+    // inside the CURRENT month so every cell asserted below is visible
+    // without paging: a Monday on the ≥8th takes the PREVIOUS week, an
+    // early-month Monday (≤7th, previous week straddles the month boundary)
+    // takes the NEXT one (its Friday is ≤18th — in-month by construction).
     const now = new Date();
-    const from = new Date(now.getFullYear(), now.getMonth(), 5);
-    const to = new Date(now.getFullYear(), now.getMonth(), 9);
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    monday.setDate(monday.getDate() + (monday.getDay() === 0 ? -6 : 1 - monday.getDay()));
+    const weekShift = monday.getDate() >= 8 ? -7 : 7;
+    const addDays = (d: Date, days: number) => {
+      const shifted = new Date(d);
+      shifted.setDate(shifted.getDate() + days);
+      return shifted;
+    };
+    const from = addDays(monday, weekShift); // the chosen week's Monday…
+    const to = addDays(from, 4); // …through its Friday
+    // A day strictly OUTSIDE the range, still in the current month.
+    const out = addDays(monday, weekShift < 0 ? -1 : 6);
 
     await page.goto('/records');
     await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 60_000 });
 
     // Fill the date filters — the values are mirrored into the URL
-    // (?from=&to=, replace) and drive the same API request as before.
+    // (?from=&to=, push — a period change is a history step) and drive the
+    // same API request as before.
     const viewFrom = page.waitForResponse(
       (r) => r.url().includes('/api/v1/records/view') && r.url().includes(`date_from=${toISO(from)}`),
       { timeout: 15_000 },
@@ -161,13 +183,13 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
     // Mini calendar: edges carry the full red pill, the middle the light tint.
     const startCell = miniDay(page, from).locator('span');
     const endCell = miniDay(page, to).locator('span');
-    const midCell = miniDay(page, new Date(now.getFullYear(), now.getMonth(), 7)).locator('span');
+    const midCell = miniDay(page, addDays(from, 2)).locator('span');
     await expect(startCell).toHaveClass(/bg-red-400\/45/);
     await expect(endCell).toHaveClass(/bg-red-400\/45/);
     await expect(midCell).toHaveClass(/bg-red-400\/25/);
 
     // Outside the range: no red tint.
-    const outCell = miniDay(page, new Date(now.getFullYear(), now.getMonth(), 12)).locator('span');
+    const outCell = miniDay(page, out).locator('span');
     await expect(outCell).not.toHaveClass(/bg-red-400/);
   });
 

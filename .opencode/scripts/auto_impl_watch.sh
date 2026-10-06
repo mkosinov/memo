@@ -130,6 +130,15 @@ while true; do
     python3 "$REPO/.opencode/scripts/impl_janitor.py" \
         || echo "$(date -Is) janitor failed"
 
+    # страж зависших тул-вызовов (2026-10-06, порт из superagents 6edd871):
+    # тул-часть навсегда в status=running (bash без живого процесса, task с
+    # молчащим деревом детей, «мгновенные» инструменты) → gate=hang на
+    # карточке + один комментарий-доказательство на эпизод; monitoring-only,
+    # сам ничего не прерывает; окаменелости мёртвых прогонов (>48ч) и
+    # blocked-карточки не метит. Скан базы ~30с. --once: цикл ведёт наблюдатель
+    python3 "$REPO/.opencode/scripts/hang_monitor.py" --once \
+        || echo "$(date -Is) hang_monitor failed"
+
     # побудка сирот (2026-09-27, кейс #324): карточки своего хоста в In IMPL /
     # PR (G7), чьи сессии молчат >1ч и чей клиент-процесс мёртв. reconcile НЕ
     # релизит их, пока не исчерпан бюджет побудок (NUDGE_BUDGET/NUDGE_BUDGET_H

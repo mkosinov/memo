@@ -1,57 +1,44 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { ClientsProvider, useClientsTable } from '@/contexts/ClientsContext';
-import type { ClientFilters } from '@/contexts/ClientsContext';
-import { parseClientIds } from '@/lib/client-id-param';
 import { GridSettingsProvider } from '@/contexts/schedule/GridSettingsContext';
+import { useClientsUrlState } from './useClientsUrlState';
+import type { ClientsUrlAdapter } from './useClientsUrlState';
 import { ClientsTable } from './components/ClientsTable';
 import { ClientsFilters } from './components/ClientsFilters';
 import { ClientCardModal } from './components/ClientCardModal';
 import { ClientDeepLinkChip } from './components/ClientDeepLinkChip';
 import type { ClientWithStats } from '@memo/api-client';
 
-/** Stable comparison for the machine narrowing field (order-sensitive). */
-function sameIds(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
-  if ((a ?? null) === (b ?? null)) return true;
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((id, i) => id === b[i]);
-}
-
-function ClientsPageContent() {
+/**
+ * #349 single instance: Content consumes the adapter CREATED ONCE in
+ * ClientsPageInner (via props) — never calls useClientsUrlState() itself.
+ * The hook contract allows one instance per URL (pending-flush/navigate
+ * coalescing is per-instance); a second instance would clobber the first's
+ * write base and could resurrect a dropped clientId in the 16ms window.
+ */
+function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
   const [selectedClient, setSelectedClient] = useState<ClientWithStats | null>(null);
   const [isCreateMode, setIsCreateMode] = useState(false);
   // #139 T6 — legacy page-level pager removed; the unified <DataTable> pager
   // owns pagination for the page (spec §6.10, dict-table unification).
   // GH #140 — page-scoped factory state; lookups by id go through useClient.
-  const { items, filters, setFilters } = useClientsTable();
-  const searchParams = useSearchParams();
-  // #232 §3.3 — the address is the single writer of the narrowing: strict
-  // per-component UUID validation + dedup; null = no param. Memoized on the
-  // params object identity so the array (and the sync effect below) stay
-  // stable across re-renders: Next's useSearchParams returns an object that
-  // is stable per navigation and changes exactly when the address does
-  // (AppRouter memoizes url.searchParams on the canonical URL).
-  const urlClientIds = useMemo(() => parseClientIds(searchParams), [searchParams]);
+  const { items } = useClientsTable();
+  // #349 Task 4 — the adapter owns the canonical table params
+  // (q/status/sort/page/per_page in the address) and the machine `clientIds`
+  // narrowing (read-only from ?clientId=). No sync effect anymore: the
+  // provider is fully controlled from the first render, so a deep-link mount
+  // still fires exactly ONE narrowed GET (#231 S1).
+  const { state, navigate } = urlState;
   // Auto-open rule (#232 §3.3): exactly ONE valid id opens the modal
   // automatically; two or more never do (US-3) — cards open by row clicks.
-  const deepLinkId = urlClientIds && urlClientIds.length === 1 ? urlClientIds[0] : null;
+  const deepLinkId = state.clientIds && state.clientIds.length === 1 ? state.clientIds[0] : null;
   // GH #216 close-race fix (rewired in #232 §3.4): latch holding the single
   // id whose deep-link modal was already opened. Blocks auto-re-open after a
   // user close while the id is still the sole one in the URL; resets when the
   // auto-open condition (exactly one valid id) leaves the address.
   const consumedClientIdRef = useRef<string | null>(null);
-
-  // Live sync URL → clientIds machine field (#232 §3.3). Besides the
-  // mount-time seed, the field follows the address: in-tab navigation
-  // (back/forward, manual edit, narrowing removal) converges the filter to
-  // the URL value. No reverse flow — the filter never writes the address.
-  useEffect(() => {
-    if (!sameIds(filters.clientIds, urlClientIds)) {
-      setFilters({ clientIds: urlClientIds });
-    }
-  }, [urlClientIds, filters.clientIds, setFilters]);
 
   // GH #216 close-race fix: once the address no longer holds exactly one
   // valid id, the latch clears — a future deep-link with the same id opens
@@ -102,9 +89,16 @@ function ClientsPageContent() {
 
       {/* #232 §3.5 — narrowing chip: visible affordance for an active
           deep-link narrowing (between the filters block and the table). The
-          ✕ removes the param from the address only; the sync effect above
-          converges the machine filter. */}
-      {urlClientIds && <ClientDeepLinkChip clientIds={urlClientIds} />}
+          ✕ removes the param from the address through the SAME adapter's
+          navigate() (#349 single writer + single instance: a pending
+          coalesced flush must adopt the navigated URL, not resurrect the
+          dropped param). */}
+      {state.clientIds && (
+        <ClientDeepLinkChip
+          clientIds={state.clientIds}
+          onRemove={(url, options) => navigate(url, options)}
+        />
+      )}
 
       {/* Table */}
       <div
@@ -134,26 +128,21 @@ function ClientsPageContent() {
   );
 }
 
-// #231 §5.2 — boundary rebuild: the param reader sits ABOVE ClientsProvider so
-// the deep-link seed can be passed down as initialFilters (one narrowed GET on
-// mount instead of default + narrowed). #232 §3.3: the values are strictly
-// validated per component and deduped (lib/client-id-param); no valid UUID
-// left = no param = default filters. Status is forced to 'all' so the link
-// reaches archived clients too (#216 behavior preserved). The search box gets
-// no UUID at any stage — the narrowing lives in the machine field clientIds.
+// #349 Task 4 — managed mode (spec §3): the page-scoped hook is instantiated
+// EXACTLY ONCE, here — inside the Suspense boundary (useSearchParams) — and
+// flows DOWN to the provider and every consumer (Content, chip ✕) as props.
+// Status overlay rule: explicit ?status= wins, else a present ?clientId=
+// forces effective 'all' (never written to the URL — #216 behavior preserved
+// through the adapter's effectiveStatus).
 function ClientsPageInner() {
-  const searchParams = useSearchParams();
-  const clientIds = parseClientIds(searchParams);
-  const initialFilters: Partial<ClientFilters> | undefined = clientIds
-    ? { clientIds, status: 'all' }
-    : undefined;
+  const urlState = useClientsUrlState();
   return (
-    <ClientsProvider initialFilters={initialFilters}>
+    <ClientsProvider urlState={urlState}>
       {/* GH #138 Task 6: /clients needs only grid settings (gridFrequency in
           ClientRecordTab) — the schedule stack (URL view state + data) is
           schedule-page-only and must not mount here. */}
       <GridSettingsProvider>
-        <ClientsPageContent />
+        <ClientsPageContent urlState={urlState} />
       </GridSettingsProvider>
     </ClientsProvider>
   );

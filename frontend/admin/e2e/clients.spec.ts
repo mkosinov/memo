@@ -302,25 +302,25 @@ test.describe('Clients page', () => {
   test('9. Sorting — click header toggles sort direction', async ({ page }) => {
     await waitForClientsReady(page);
 
-    // Default sort is by "Имя" ascending (↑)
+    // #349 spec §2: sort default = NO sort — the header starts at ↕ (no
+    // active column). First click picks asc (↑), second flips to desc (↓).
+    // (The active column only toggles direction; ↕ returns solely via
+    // «Сбросить фильтры» or a clean link.)
     const nameHeader = page
       .locator('table thead th')
       .filter({ hasText: 'Имя' });
     await expect(nameHeader).toBeVisible();
+    await expect(nameHeader).toContainText('↕');
 
-    // Click to sort descending
+    // First click → ascending
     await nameHeader.click();
-    await page.waitForTimeout(500);
-
-    // Should now show descending indicator
-    await expect(nameHeader).toContainText('↓');
-
-    // Click again to sort ascending
-    await nameHeader.click();
-    await page.waitForTimeout(500);
-
-    // Should now show ascending indicator
     await expect(nameHeader).toContainText('↑');
+    await expect(page).toHaveURL(/sort_by=name/);
+
+    // Second click → descending
+    await nameHeader.click();
+    await expect(nameHeader).toContainText('↓');
+    await expect(page).toHaveURL(/sort_order=desc/);
   });
 
   // ── 10. Search filters clients ───────────────────────────────────────────
@@ -359,7 +359,9 @@ test.describe('Clients page', () => {
     const initialCount = await page.locator('table tbody tr').count();
     expect(initialCount).toBeGreaterThan(0);
 
-    // Select "Неактивные" status filter — wait for filtered API response
+    // Select "Неактивные" status filter — wait for filtered API response.
+    // #349: the status select writes ?status=archived to the address (the
+    // hook is the single writer); the list GET follows the URL change.
     const statusSelect = page.locator('select:has(option:text("Все"))');
     const filterResponse = page.waitForResponse(
       (resp) => resp.url().includes('/api/v1/clients') && resp.url().includes('status=archived'),
@@ -367,26 +369,25 @@ test.describe('Clients page', () => {
     );
     await statusSelect.selectOption('archived');
     await filterResponse;
+    await expect(page).toHaveURL(/status=archived/);
 
-    // After filtering, the table should show different results
-    // (either fewer rows if no inactive clients, or different set of clients)
-    const filteredCount = await page.locator('table tbody tr').count();
-    // Just verify the filter was applied — count changed or is 0
-    // Don't assert <= because inactive clients could outnumber active ones
+    // After filtering, the table shows the archived set (or the unified
+    // empty state).
+    await page
+      .locator('table tbody tr')
+      .first()
+      .waitFor({ timeout: 10_000 })
+      .catch(() => {}); // an empty result renders «Нет записей» instead
+    await page.waitForTimeout(300); // re-render buffer
 
-    // Reset and verify filters return to default. "Сбросить фильтры" calls
-    // resetFilters() which sets state to defaultFilters (status='active') and
-    // triggers a refetch via the React Query hook sending status=active. Use a
-    // content-based assertion on the status select: it must return to
-    // "Активные" (value 'active') after reset.
-    // #139 T6 + Addendum #12 — the reset button now lives ONLY in the
-    // page-level ClientsFilters bar (the table's duplicate was dropped when
-    // the empty state unified to "Нет записей"). The filters-panel scope
-    // below still selects the right one — it's the only "Сбросить фильтры"
-    // in the page now.
+    // Reset and verify filters return to default. "Сбросить фильтры" routes
+    // through the factory's resetFilters → the page adapter's reset (ONE
+    // push to the clean /clients — no filter params in the address) → the
+    // status select returns to «Активные» (value 'active').
     const filtersPanel = page.locator('div.rounded-xl').filter({ has: statusSelect });
     await filtersPanel.getByText('Сбросить фильтры').click();
     await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/clients$/, { timeout: 10_000 });
     const resetCount = await page.locator('table tbody tr').count();
     expect(resetCount).toBe(initialCount);
   });

@@ -28,6 +28,7 @@ import { useEffect, useReducer } from 'react';
 let params = new URLSearchParams();
 let pathname = '/schedule';
 let lastUrl: string | null = null;
+let lastMethod: 'push' | 'replace' | null = null;
 const listeners = new Set<() => void>();
 
 function notifyAll(): void {
@@ -49,6 +50,7 @@ function setParams(qs: string): void {
 export function __resetNavigation(query = '', path = '/schedule'): void {
   pathname = path;
   lastUrl = null;
+  lastMethod = null;
   setParams(query);
 }
 
@@ -61,6 +63,15 @@ export function __setPathname(path: string): void {
 /** The full URL of the last push/replace, or null if none since reset. */
 export function __lastPushedUrl(): string | null {
   return lastUrl;
+}
+
+/**
+ * WHICH router method produced the last navigation ('push' | 'replace'), or
+ * null if none since reset — #349 Gate B: the period change is a history
+ * step, tests must distinguish push from replace.
+ */
+export function __lastNavMethod(): 'push' | 'replace' | null {
+  return lastMethod;
 }
 
 /** Read the mocked query string as it would appear after location.search. */
@@ -98,8 +109,14 @@ export function useRouter(): {
   prefetch: (href: string) => void;
 } {
   return {
-    push: write,
-    replace: write,
+    push: (url: string) => {
+      lastMethod = 'push';
+      write(url);
+    },
+    replace: (url: string) => {
+      lastMethod = 'replace';
+      write(url);
+    },
     back: () => {},
     forward: () => {},
     refresh: () => {},

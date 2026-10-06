@@ -2,6 +2,7 @@
 
 import React, { Suspense } from 'react';
 import { RecordsProvider, useRecords } from '@/contexts/RecordsContext';
+import { useRecordsUrlState } from './useRecordsUrlState';
 import { RecordsFilters } from './components/RecordsFilters';
 import { RecordsTable } from './components/RecordsTable';
 
@@ -46,16 +47,28 @@ function RecordsPageContent() {
   );
 }
 
+/**
+ * #349 Task 7 — the URL adapter is created INSIDE the Suspense boundary (its
+ * useTableUrlState reads useSearchParams) and passed into RecordsProvider:
+ * the ONE useTableUrlState instance on the /records URL (single writer).
+ */
+function RecordsUrlBoundary() {
+  const urlState = useRecordsUrlState();
+  return (
+    <RecordsProvider urlState={urlState}>
+      <RecordsPageContent />
+    </RecordsProvider>
+  );
+}
+
 export default function RecordsPage() {
-  // #138 Task 5 (spec §2.2): the tree reads ?from=&to= via useSearchParams —
-  // the Suspense boundary is MANDATORY for the Next 14 static build (same
-  // pattern as app/(main)/schedule/page.tsx); the deep-link first paint
-  // (?from=2024-01-01) must not fetch with the default range.
+  // The tree reads the URL via useSearchParams — the Suspense boundary is
+  // MANDATORY for the Next 14 static build (same pattern as
+  // app/(main)/schedule/page.tsx); the deep-link first paint
+  // (?from=2024-01-01&status=waiting) must not fetch with the defaults.
   return (
     <Suspense fallback={<div className="p-4">Загрузка...</div>}>
-      <RecordsProvider>
-        <RecordsPageContent />
-      </RecordsProvider>
+      <RecordsUrlBoundary />
     </Suspense>
   );
 }

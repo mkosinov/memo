@@ -1,13 +1,15 @@
 /**
- * Tests for RecordsContext — #138 Task 5: the records period comes from the
- * URL (?from=&to=) via useRecordsPeriod, NOT NavigationContext.
+ * Tests for RecordsContext — the records period comes from the
+ * URL (?from=&to=) via the page adapter (#349 Task 7:
+ * useRecordsUrlState → useTableUrlState; the legacy useRecordsPeriod is
+ * deleted — Gate B: a period change is a history step, push not replace).
  *
  * Invariants:
  *  - no params → the query key carries monday..sunday of the current week
  *    (SAME 'YYYY-MM-DD' string format as the legacy NavigationContext keys —
  *    cache keys must stay byte-identical)
  *  - explicit ?from&to → the key carries those strings verbatim
- *  - setPeriod writes ?from=&to= via router.replace
+ *  - setPeriod writes ?from=&to= via router.push (Gate B, #349)
  *  - the date-range change resets page to 1 (kept from NavigationContext era)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -21,9 +23,11 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 import { getRecordsView } from '@memo/api-client';
-import { __resetNavigation, __currentQuery } from './helpers/nextNavigationMock';
+import type { RecordView } from '@memo/api-client';
+import { __resetNavigation, __currentQuery, __lastNavMethod } from './helpers/nextNavigationMock';
 import { getMonday, toISODate } from '@/lib/datetime';
 import { RecordsProvider, useRecords } from '../contexts/RecordsContext';
+import { useRecordsUrlState } from '../app/(main)/records/useRecordsUrlState';
 
 function envelope<T>(items: T[]) {
   return { items, total: items.length, page: 1, per_page: 10 };
@@ -40,10 +44,12 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // #349 Task 7: the page adapter shape — created inside the wrapper.
   function Wrapper({ children }: { children: React.ReactNode }) {
+    const urlState = useRecordsUrlState();
     return (
       <QueryClientProvider client={queryClient}>
-        <RecordsProvider>{children}</RecordsProvider>
+        <RecordsProvider urlState={urlState}>{children}</RecordsProvider>
       </QueryClientProvider>
     );
   }
@@ -56,7 +62,7 @@ beforeEach(() => {
   __resetNavigation('', '/records');
 });
 
-describe('RecordsContext — URL period (?from=&to=, #138 Task 5)', () => {
+describe('RecordsContext — URL period (?from=&to=, #349 Task 7)', () => {
   it('invariant: no params → key range = monday..sunday of the current week', async () => {
     const { queryClient, Wrapper } = createWrapper();
     renderHook(() => useRecords(), { wrapper: Wrapper });
@@ -100,7 +106,7 @@ describe('RecordsContext — URL period (?from=&to=, #138 Task 5)', () => {
     });
   });
 
-  it('exposes setPeriod writing ?from=&to= (replace)', async () => {
+  it('exposes setPeriod writing ?from=&to= via PUSH (Gate B: a history step)', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -110,10 +116,19 @@ describe('RecordsContext — URL period (?from=&to=, #138 Task 5)', () => {
 
     act(() => result.current.setPeriod('2026-02-01', '2026-02-28'));
 
-    expect(__currentQuery()).toBe('?from=2026-02-01&to=2026-02-28');
+    // The 16ms-coalesced flush lands the navigation (push, not replace).
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?from=2026-02-01&to=2026-02-28');
+    });
+    expect(__lastNavMethod()).toBe('push');
   });
 
   it('a period change (setPeriod → new URL) resets page to 1', async () => {
+    // Non-empty pages — the §6.7 clamp must NOT walk page 3 back to 1
+    // before the period change does (envelope([]) would clamp).
+    vi.mocked(getRecordsView).mockImplementation(() =>
+      Promise.resolve(envelope([{} as RecordView])),
+    );
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -127,7 +142,8 @@ describe('RecordsContext — URL period (?from=&to=, #138 Task 5)', () => {
     });
 
     // Commit the navigation: the mocked router updates searchParams → the
-    // context re-renders with the new period.
+    // provider re-renders with the new period; the hook's auto-reset drops
+    // page back to its default in the SAME navigation.
     act(() => result.current.setPeriod('2026-02-01', '2026-02-28'));
     await waitFor(() => {
       expect(result.current.page).toBe(1);

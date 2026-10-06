@@ -28,9 +28,11 @@ vi.mock('@memo/api-client', () => ({
   getRecordsView: vi.fn(),
 }));
 
-// #138 Task 5: the period comes from the URL (useRecordsPeriod →
-// useSearchParams), so the old NavigationContext mock is replaced by the
-// shared next-navigation mock. Default: /records with NO params → the
+// #349 Task 7: ALL records page state is URL state — the provider takes the
+// page-scoped adapter (useRecordsUrlState → useTableUrlState) as a prop and
+// derives everything from it; setters navigate (16ms-coalesced push). The
+// shared next-navigation mock commits those navigations, so waitFor() sees
+// the URL-mediated state changes. Default: /records with NO params → the
 // current-week monday..sunday default range.
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
 
@@ -41,9 +43,10 @@ import type {
   VisitResponse,
 } from '@memo/api-client';
 
-import { __resetNavigation } from './helpers/nextNavigationMock';
+import { __resetNavigation, __currentQuery } from './helpers/nextNavigationMock';
 
 import { RecordsProvider, useRecords } from '../contexts/RecordsContext';
+import { useRecordsUrlState } from '../app/(main)/records/useRecordsUrlState';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -121,10 +124,13 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // #349 Task 7: the adapter is created INSIDE the wrapper (hook rules) —
+  // exactly the page's RecordsUrlBoundary shape.
   function Wrapper({ children }: { children: React.ReactNode }) {
+    const urlState = useRecordsUrlState();
     return (
       <QueryClientProvider client={queryClient}>
-        <RecordsProvider>{children}</RecordsProvider>
+        <RecordsProvider urlState={urlState}>{children}</RecordsProvider>
       </QueryClientProvider>
     );
   }
@@ -290,6 +296,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('setFilters resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -320,6 +327,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('date-range change resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -333,6 +341,12 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
 
     await waitFor(() => {
       expect(result.current.page).toBe(3);
+    });
+    // #349 follow-up: the optimistic mirror exposes page 3 IMMEDIATELY —
+    // wait for the URL write to COMMIT before the external navigation (a
+    // real navigation can't land inside the 16ms coalescing window).
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?page=3');
     });
 
     // #138 Task 5: the range changes via a committed navigation — the mocked
@@ -349,6 +363,7 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
   });
 
   it('setPerPage resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -368,8 +383,10 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
       result.current.setPerPage(50);
     });
 
-    expect(result.current.page).toBe(1);
-    expect(result.current.perPage).toBe(50);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+      expect(result.current.perPage).toBe(50);
+    });
   });
 
   it('setSort(field, order) applies field and order verbatim (two-arg, §6.4)', async () => {
@@ -383,15 +400,19 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortBy).toBe('status');
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('status');
+      expect(result.current.sortOrder).toBe('desc');
+    });
 
     // Explicit order on another field — applied as given (no asc default).
     act(() => {
       result.current.setSort('total', 'asc');
     });
-    expect(result.current.sortBy).toBe('total');
-    expect(result.current.sortOrder).toBe('asc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('asc');
+    });
 
     // Fetcher receives the two-arg state.
     await waitFor(() => {
@@ -412,18 +433,23 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortOrder).toBe('desc');
+    });
 
     // Same call again — the context applies the given order verbatim;
     // the asc/desc toggle logic lives in DataTable (§6.10.4).
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.sortBy).toBe('status');
-    expect(result.current.sortOrder).toBe('desc');
+    await waitFor(() => {
+      expect(result.current.sortBy).toBe('status');
+      expect(result.current.sortOrder).toBe('desc');
+    });
   });
 
   it('setSort resets page to 1 (§6.10.2 drift fix)', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -434,12 +460,16 @@ describe('RecordsContext — server-driven page/filters/sort state (#191)', () =
     act(() => {
       result.current.setPage(5);
     });
-    expect(result.current.page).toBe(5);
+    await waitFor(() => {
+      expect(result.current.page).toBe(5);
+    });
 
     act(() => {
       result.current.setSort('status', 'desc');
     });
-    expect(result.current.page).toBe(1);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
   });
 
   it('exposes server total', async () => {
@@ -543,6 +573,7 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
   });
 
   it('setFilters({ search }) resets page to 1', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
 
@@ -562,7 +593,9 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
       result.current.setFilters({ search: 'тест' });
     });
 
-    expect(result.current.page).toBe(1);
+    await waitFor(() => {
+      expect(result.current.page).toBe(1);
+    });
     await waitFor(() => {
       expect(vi.mocked(getRecordsView)).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1, q: 'тест' }),
@@ -590,7 +623,273 @@ describe('RecordsContext — server-side search q (GH #212 Task 12)', () => {
       result.current.resetFilters();
     });
 
-    expect(result.current.filters.search).toBe('');
+    await waitFor(() => {
+      expect(result.current.filters.search).toBe('');
+    });
+  });
+});
+
+// #349 Task 7 — ALL records state is URL state: the provider consumes the
+// page adapter (managed mode). Deep links restore state at mount; every
+// setter is a URL write through the single writer.
+describe('RecordsContext — URL-backed state (#349 Task 7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    __resetNavigation('', '/records');
+
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([]));
+  });
+
+  it('a deep link restores page/filters/sort/per_page at mount', async () => {
+    __resetNavigation(
+      '?page=3&per_page=50&status=waiting&q=%D0%B0%D0%BD%D0%BD%D0%B0&location_id=loc-1&sort_by=total&sort_order=desc',
+      '/records',
+    );
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.page).toBe(3);
+      expect(result.current.perPage).toBe(50);
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.filters.search).toBe('анна');
+      expect(result.current.filters.locationId).toBe('loc-1');
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('desc');
+    });
+
+    // The FIRST fetch carries the link's params on the wire.
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          page: 3,
+          per_page: 50,
+          status: 'waiting',
+          q: 'анна',
+          location_id: 'loc-1',
+          sort_by: 'total',
+          sort_order: 'desc',
+        }),
+      );
+    });
+  });
+
+  it('setFilters writes the URL (?status=…, page stripped as default)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ status: 'waiting' });
+    });
+
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?status=waiting');
+    });
+  });
+
+  it('setPage writes ?page=', async () => {
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(3);
+    });
+
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?page=3');
+    });
+  });
+
+  it('setSort writes sort params; back to date/asc strips them', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setSort('total', 'desc');
+    });
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('?sort_by=total&sort_order=desc');
+    });
+
+    act(() => {
+      result.current.setSort('date', 'asc');
+    });
+    await waitFor(() => {
+      expect(__currentQuery()).toBe('');
+    });
+  });
+});
+
+// #349 follow-up — main's SYNCHRONOUS render contract: a setter must apply
+// its value IMMEDIATELY (optimistic local application on top of the URL
+// write). Dev RSC navigation-commit latency made response→DOM reads race
+// (records e2e #11/#12 family); the URL stays the source of truth — the
+// mirror only restores the instant local re-render of the pre-#349 era.
+describe('RecordsContext — synchronous optimistic state (#349 follow-up)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetNavigation('', '/records');
+    vi.mocked(getRecordsView).mockResolvedValue(envelope([makeRecord('r1')]));
+  });
+
+  it('setSort exposes the new sort SYNCHRONOUSLY (before the navigation commits)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setSort('total', 'desc');
+    });
+    expect(result.current.sortBy).toBe('total');
+    expect(result.current.sortOrder).toBe('desc');
+    expect(result.current.page).toBe(1);
+  });
+
+  it('setPage exposes the new page SYNCHRONOUSLY', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(3);
+    });
+    expect(result.current.page).toBe(3);
+  });
+
+  it('setFilters exposes the new filter SYNCHRONOUSLY', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setFilters({ status: 'waiting' });
+    });
+    expect(result.current.filters.status).toBe('waiting');
+  });
+
+  it('setPeriod exposes the new period SYNCHRONOUSLY (absent side stays absent)', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPeriod('2026-02-01', '');
+    });
+    expect(result.current.dateFrom).toBe('2026-02-01');
+    expect(result.current.explicitTo).toBeNull();
+    expect(result.current.page).toBe(1);
+  });
+
+  it('an EXTERNAL navigation (deep link / back) is adopted into the state', async () => {
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      __resetNavigation('?status=waiting&sort_by=total&sort_order=desc', '/records');
+    });
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.sortBy).toBe('total');
+      expect(result.current.sortOrder).toBe('desc');
+    });
+  });
+
+  // REGRESSION (quality review, Stage 2): RecordsFilters.handleReset fires
+  // resetFilters() + setPeriod('', '') in the SAME tick. The second write used
+  // to build its next state from the STALE closure mirror, resurrecting the
+  // cleared filter and pinning pendingWriteRef forever (adoption dead).
+  it('same-tick resetFilters + setPeriod clears filter/period/page and keeps external adoption alive', async () => {
+    __resetNavigation('?status=waiting&from=2026-02-01&to=2026-02-07&page=2', '/records');
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+      expect(result.current.filters.status).toBe('waiting');
+      expect(result.current.page).toBe(2);
+    });
+
+    // handleReset's exact shape: both setters in one synchronous tick.
+    act(() => {
+      result.current.resetFilters();
+      result.current.setPeriod('', '');
+    });
+
+    // The filter must NOT resurrect from the stale closure mirror.
+    expect(result.current.filters.status).toBe('');
+    expect(result.current.explicitFrom).toBeNull();
+    expect(result.current.explicitTo).toBeNull();
+    expect(result.current.page).toBe(1);
+
+    // The pending write resolves once the URL commits — a later EXTERNAL
+    // navigation must be adopted again (the pinned-pending early-return bug).
+    await waitFor(() => expect(__currentQuery()).not.toContain('status='));
+    act(() => {
+      __resetNavigation('?page=3', '/records');
+    });
+    rerender();
+    await waitFor(() => expect(result.current.page).toBe(3));
+  });
+
+  // REGRESSION (quality review, Stage 2): the hook clamps `page` into its
+  // URL-legal 1..10000 range on read; the mirror must clamp on WRITE too, or
+  // pendingWriteRef holds an out-of-range page that never equals the clamped
+  // URL snapshot (pinned pending → adoption dead).
+  it('setPage clamps into the URL-legal 1..10000 range and still adopts external navigation', async () => {
+    const { Wrapper } = createWrapper();
+    const { result, rerender } = renderHook(() => useRecords(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(vi.mocked(getRecordsView)).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setPage(20_000);
+    });
+    expect(result.current.page).toBe(10_000);
+
+    act(() => {
+      result.current.setPage(0);
+    });
+    expect(result.current.page).toBe(1);
+
+    // Let the clamp writes commit (page=1 strips the param → back to the
+    // bare URL) BEFORE navigating externally — a nav inside the ~16ms write
+    // window is the documented indistinguishability limitation, not the
+    // pin under test.
+    await waitFor(() => expect(__currentQuery()).toBe(''));
+
+    // The clamp write resolves — external navigation is adopted afterwards.
+    act(() => {
+      __resetNavigation('?page=4', '/records');
+    });
+    rerender();
+    await waitFor(() => expect(result.current.page).toBe(4));
   });
 });
 

@@ -22,20 +22,24 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// #138 Task 5: the date inputs write the URL via useRecordsPeriod →
-// next/navigation — the old NavigationContext mock is replaced by the shared
-// next-navigation mock (default: /records, no params).
+// #349 Task 7: the date inputs write the URL via the context (useRecords →
+// RecordsProvider → useRecordsUrlState) — the bar is rendered in the page's
+// wiring (adapter → provider → bar) under the shared next-navigation mock
+// (default: /records, no params).
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
 vi.mock('@memo/api-client', () => ({
   getAllLocations: vi.fn(),
   getAllServices: vi.fn(),
   getAllMasters: vi.fn(),
+  getRecordsView: vi.fn(),
 }));
 
 import {
   __resetNavigation,
 } from './helpers/nextNavigationMock';
-import { getAllLocations, getAllServices, getAllMasters } from '@memo/api-client';
+import { getAllLocations, getAllServices, getAllMasters, getRecordsView } from '@memo/api-client';
+import { RecordsProvider } from '../contexts/RecordsContext';
+import { useRecordsUrlState } from '../app/(main)/records/useRecordsUrlState';
 import { RecordsFilters } from '../app/(main)/records/components/RecordsFilters';
 import {
   mockLocationResponse,
@@ -70,12 +74,20 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
-/** Render the bar inside a QueryClientProvider (its own canonical-key queries). */
+/** Render the bar in the page's wiring (adapter → provider → bar). */
 function renderFilters(overrides: Partial<RecordsFiltersProps> = {}) {
   const queryClient = createTestQueryClient();
+  function Harness() {
+    const urlState = useRecordsUrlState();
+    return (
+      <RecordsProvider urlState={urlState}>
+        <RecordsFilters {...defaultProps(overrides)} />
+      </RecordsProvider>
+    );
+  }
   return render(
     <QueryClientProvider client={queryClient}>
-      <RecordsFilters {...defaultProps(overrides)} />
+      <Harness />
     </QueryClientProvider>,
   );
 }
@@ -115,6 +127,8 @@ const ARCHIVED_SERVICE: ServiceResponse = {
 
 beforeEach(() => {
   __resetNavigation('', '/records');
+  // The provider's list query — resolved empty (the bar tests don't need rows).
+  vi.mocked(getRecordsView).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 });
 });
 
 afterEach(() => {
@@ -146,14 +160,24 @@ describe('RecordsFilters — search field (GH #212 Task 12)', () => {
 
   it('clears the input when the search prop resets to empty', () => {
     const queryClient = createTestQueryClient();
+    // The page's wiring, rerendered with a fresh prop bag (Harness identity
+    // must stay stable across the rerender for the provider to persist).
+    function Harness({ filters }: { filters: RecordsFiltersProps }) {
+      const urlState = useRecordsUrlState();
+      return (
+        <RecordsProvider urlState={urlState}>
+          <RecordsFilters {...filters} />
+        </RecordsProvider>
+      );
+    }
     const utils = render(
       <QueryClientProvider client={queryClient}>
-        <RecordsFilters {...defaultProps({ search: 'анна' })} />
+        <Harness filters={defaultProps({ search: 'анна' })} />
       </QueryClientProvider>,
     );
     utils.rerender(
       <QueryClientProvider client={queryClient}>
-        <RecordsFilters {...defaultProps({ search: '' })} />
+        <Harness filters={defaultProps({ search: '' })} />
       </QueryClientProvider>,
     );
     expect(screen.getByLabelText('Поиск по клиенту или услуге')).toHaveValue('');

@@ -1,13 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { ServicesTable } from './components/ServicesTable';
 import { MaterialsTable } from './components/MaterialsTable';
 import { ServicesProvider } from '@/contexts/ServicesContext';
 import { MaterialsProvider } from '@/contexts/MaterialsContext';
+import { useServicesUrlState, useMaterialsUrlState } from './useServicesUrlState';
 import { useAuth } from '@/contexts/AuthContext';
 
-export default function ServicesPage() {
+// #349 Task 6 — managed mode (spec §3): BOTH page-scoped URL adapters are
+// instantiated EXACTLY ONCE, here — inside the Suspense boundary
+// (useSearchParams) — and flow DOWN to their providers as the urlState
+// integration. The services table owns the canonical param names; the
+// materials table owns the mat_-prefixed set (spec §2) — see the two-
+// instances-safety note in useServicesUrlState.ts (disjoint configs +
+// mutually exclusive table branches = no clobbering).
+function ServicesPageInner() {
+  const servicesUrlState = useServicesUrlState();
+  const materialsUrlState = useMaterialsUrlState();
   const [view, setView] = useState<'services' | 'materials'>('services');
   // GH #263 T9: the «Материалы» block is the materials surface on this page —
   // without materials:read (master) the toggle must not render; switching to
@@ -58,17 +68,31 @@ export default function ServicesPage() {
       >
         {/* Each table sits inside its own server-pagination provider (#205):
             ServicesProvider (Task 9), MaterialsProvider (Task 10) — the two
-            branches render independently, so there's no nesting conflict. */}
+            branches render independently, so there's no nesting conflict.
+            #349: only the visible table's provider is mounted — at most one
+            URL writer is active at a time (see useServicesUrlState.ts). */}
         {view === 'services' ? (
-          <ServicesProvider>
+          <ServicesProvider urlState={servicesUrlState}>
             <ServicesTable />
           </ServicesProvider>
         ) : (
-          <MaterialsProvider>
+          <MaterialsProvider urlState={materialsUrlState}>
             <MaterialsTable />
           </MaterialsProvider>
         )}
       </div>
     </div>
+  );
+}
+
+export default function ServicesPage() {
+  // #349 Task 6: the Suspense boundary stays at the very top — the providers
+  // (and their first GETs) live under the boundary. Nothing observable
+  // renders outside it, so the «Загрузка...» fallback stays the first
+  // visible frame (locations T5 precedent).
+  return (
+    <Suspense fallback={<div className="p-4">Загрузка...</div>}>
+      <ServicesPageInner />
+    </Suspense>
   );
 }

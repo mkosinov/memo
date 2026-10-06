@@ -407,11 +407,15 @@ test.describe('Records Page — Table and Filters', () => {
       await clientHeader.click();
       await descWait;
 
-      const afterFirstDesc = await getName(0);
-
-      // Ascending and descending have different first elements (unless all same)
+      // Ascending and descending have different first elements (unless all
+      // same). expect.poll: waitForResponse resolves at response RECEIPT,
+      // while React commits the desc rows a frame later — a one-shot read
+      // raced that commit (read-before-render flake, ~33%; snapshot
+      // sort-fail-ctx-iter4). Mirrors the row-count poll above.
       if (afterFirstAsc !== afterLastAsc) {
-        expect(afterFirstDesc).not.toBe(afterFirstAsc);
+        await expect
+          .poll(() => getName(0), { timeout: 3_000 })
+          .not.toBe(afterFirstAsc);
       }
 
       // Sort indicator shows descending after the second click

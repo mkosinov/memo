@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { buildUrlWithoutClientId } from '@/lib/client-id-param';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 export interface ClientDeepLinkChipProps {
   /**
@@ -12,27 +12,33 @@ export interface ClientDeepLinkChipProps {
    * visible in the narrowed table, and vanished names have none).
    */
   clientIds: string[];
+  /**
+   * #349 single-writer wiring: the ✕ no longer calls the router itself —
+   * the page passes the hook's `navigate()` here. A direct router.replace
+   * racing a pending coalesced `update()` flush would resurrect the dropped
+   * param from the stale pre-navigation snapshot; going through the hook
+   * makes the navigated URL the write base for the pending flush.
+   */
+  onRemove: (url: string, options?: { history?: 'push' | 'replace' }) => void;
 }
 
 /**
  * #232 §3.5 — narrowing chip: the visible affordance for an active deep-link
  * narrowing («Открыт по ссылке» / «Открыто по ссылке: N») and its removal.
  *
- * The ✕ does exactly ONE thing: removes every `clientId` occurrence from the
- * address (`URLSearchParams.delete` → `router.replace(..., { scroll: false })`),
- * preserving all other query params. The Task 4 sync effect then converges the
- * `clientIds` machine filter — this component deliberately holds NO
- * `setFilters` (the address stays the single writer) and is not a
- * ClientsContext consumer at all.
+ * The ✕ does exactly ONE thing: removes every `clientId` occurrence from
+ * the address (`URLSearchParams.delete` → `onRemove(buildUrlWithout…)`),
+ * preserving all other query params. The page's URL hook then converges the
+ * provider state — this component deliberately holds NO `setFilters` (the
+ * address stays the single writer) and is not a ClientsContext consumer.
  */
-export function ClientDeepLinkChip({ clientIds }: ClientDeepLinkChipProps) {
-  const router = useRouter();
+export function ClientDeepLinkChip({ clientIds, onRemove }: ClientDeepLinkChipProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const removeNarrowing = useCallback(() => {
-    router.replace(buildUrlWithoutClientId(searchParams, pathname), { scroll: false });
-  }, [router, pathname, searchParams]);
+    onRemove(buildUrlWithoutClientId(searchParams, pathname));
+  }, [onRemove, pathname, searchParams]);
 
   const label = clientIds.length === 1 ? 'Открыт по ссылке' : `Открыто по ссылке: ${clientIds.length}`;
 

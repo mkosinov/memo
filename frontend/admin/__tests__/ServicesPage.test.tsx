@@ -33,6 +33,14 @@ vi.mock('@/contexts/PendingActionsContext', () => ({
   PendingActionsProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+// #349 Task 6 — the page now mounts two useTableUrlState instances (the
+// URL adapters under its Suspense boundary) → real next/navigation would
+// throw «invariant expected app router to be mounted». The shared stateful
+// mock provides useSearchParams/useRouter/usePathname (useServicesUrlState
+// test precedent).
+vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
+import { __resetNavigation } from './helpers/nextNavigationMock';
+
 import { useAuth } from '@/contexts/AuthContext';
 import ServicesPage from '../app/(main)/services/page';
 import { UIProvider } from '@/contexts/UIContext';
@@ -79,6 +87,7 @@ describe('ServicesPage materials gating (GH #263 T9)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    __resetNavigation('', '/services');
   });
 
   afterEach(() => {

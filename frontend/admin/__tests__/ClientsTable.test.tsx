@@ -187,7 +187,7 @@ describe('ClientsTable', () => {
     mockTableState = {
       ...mockTableState,
       items: [],
-      filters: { ...mockTableState.filters, search: 'test' },
+      search: 'test',
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // No "Ничего не найдено" + reset link inside the table — both dropped.
@@ -199,7 +199,7 @@ describe('ClientsTable', () => {
     mockTableState = {
       ...mockTableState,
       items: [],
-      filters: { ...mockTableState.filters, search: 'test' },
+      search: 'test',
     };
     render(<ClientsTable onClientClick={vi.fn()} />);
     // The legacy "Сбросить фильтры" inside the table is gone.

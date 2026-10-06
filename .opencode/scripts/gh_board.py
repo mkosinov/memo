@@ -16,7 +16,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
   python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
   python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it (host survives PR (G7), clears on leaving it)
-  python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|none — the pending-ask marker: a design gate stop or an IMPL blocker awaiting the user
+  python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|auto-retry|none — the pending-ask marker: a design gate stop, an IMPL blocker awaiting the user, or a temporary upstream pause (auto-retry — the watcher stamps/clears it, nobody awaits the user)
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
   python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
 
@@ -34,15 +34,24 @@ cleared only by the user (host N - — accepting the progress loss) or
 reassigned (host N <label>). A clean release (gate-fail return, manual
 status move) still clears the label as before.
 The pending-ask marker lives in the single-select field "gate" (options:
-concept, spec, plan, blocked — created manually 2026-09-20): a design
-session stamps it at a gate stop, an IMPL manager stamps "blocked" when a
-blocker awaits the user; it is emptied at the user's answer (given in the
-opencode session) and automatically when the card leaves In IMPL/In
-Design — except the crash release: reconcile re-stamps "blocked" on the
-returned Ready card (2026-09-26 user decision — a card awaiting the user
-must stay visible), and pick-next skips gate=blocked cards, so a blocked
-card gets no auto-retry; the user's answer clears the gate and the card
-re-enters the pipeline. It replaced the gate:* issue labels.
+concept, spec, plan, blocked, auto-retry — the first four created manually
+2026-09-20, auto-retry added 2026-10-06): a design session stamps it at a
+gate stop, an IMPL manager stamps "blocked" when a blocker awaits the
+user; it is emptied at the user's answer (given in the opencode session)
+and automatically when the card leaves In IMPL/In Design — except the
+crash release: reconcile re-stamps "blocked" on the returned Ready card
+(2026-09-26 user decision — a card awaiting the user must stay visible),
+and pick-next skips gate=blocked cards, so a blocked card gets no
+auto-retry; the user's answer clears the gate and the card re-enters the
+pipeline. It replaced the gate:* issue labels.
+"auto-retry" (2026-10-06, after the #349 frozen week) marks a TEMPORARY
+pause: the watcher stamps it when a nudge is skipped on a failed upstream
+ping (quota window / outage) and clears it when the ping passes and the
+wake is sent — the pipeline self-heals, nobody awaits the user. The Gate
+column thus separates "will retry" from "blocked" (awaits a user
+decision). cmd_gate is idempotent: re-setting the current value or
+clearing an empty gate is a no-op, so per-cycle watcher calls cost no
+GraphQL writes.
 The script is part of the host/container seam and travels via git.
 Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
 and .opencode/scripts/ (container); when editing, change both (or edit
@@ -948,18 +957,28 @@ def cmd_status(number: int, status: str, host: str | None = None):
 
 
 def cmd_gate(number: int, value: str):
-    """Set the card's gate field — the single "this card awaits the user"
-    marker: concept|spec|plan = a design gate stop, blocked = an IMPL
-    blocker awaiting the user; none = the ask is answered (also cleared
-    automatically when the card leaves In IMPL/In Design via cmd_status)."""
+    """Set the card's gate field — the pending-ask marker: concept|spec|plan
+    = a design gate stop, blocked = an IMPL blocker awaiting the user,
+    auto-retry = a temporary upstream pause the watcher stamps and clears
+    itself (nobody awaits the user); none = the ask is answered (also
+    cleared automatically when the card leaves In IMPL/In Design via
+    cmd_status). Idempotent (2026-10-06): the watcher may call it every
+    cycle — re-setting the current value (or clearing an already-empty
+    gate) prints "gate unchanged" and performs no GraphQL write."""
     load_status_field()
     it = find_item(number)
     if value == "none":
+        if not it["gate"]:
+            print(f"#{number}: gate unchanged (empty)")
+            return
         set_field(it["item_id"], _gate_field_id, None)
         print(f"#{number}: gate cleared")
         return
     if value not in _gate_field_opts:
         sys.exit(f"Unknown gate '{value}'. Available: {', '.join(_gate_field_opts)}, none")
+    if (it["gate"] or "").lower() == value.lower():
+        print(f"#{number}: gate unchanged ({value})")
+        return
     set_field(it["item_id"], _gate_field_id, _gate_field_opts[value])
     print(f"#{number}: gate → {value}")
 

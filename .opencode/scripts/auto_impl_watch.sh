@@ -64,6 +64,11 @@
 # NUDGE_BUDGET_H (24ч) — исчерпан → In IMPL: Ready to IMPL + gate=blocked,
 # PR (G7): gate=blocked (в обоих случаях ждёт юзера, виден на борде).
 # Живой, но молчащий клиент побудке не подлежит (второй водитель запрещён).
+# Пауза видима (2026-10-06, неделя #349): побудка, пропущенная по провалу
+# пинга, ставит карточке gate=auto-retry — временная пауза в отличие от
+# blocked «ждёт юзера» — и одну строку AUTO-RETRY в auto-impl log на начало
+# паузы; при успешной побудке метка снимается. Установщик gate идемпотентен
+# («gate unchanged» без записи) — звать можно каждый цикл без страха.
 # Ежечасно impl_janitor.py прибивает остатки: процессы ворктри карточек вне
 # In IMPL / PR (G7) (старше часа) и осиротевшие TUI-окна старше 12ч.
 
@@ -137,9 +142,16 @@ while true; do
     while read -r OKIND ONUM; do
         case "$OKIND" in impl|pr) : ;; *) continue ;; esac
         case "$ONUM" in ''|*[!0-9]*) continue ;; esac
-        # тест апстрима перед пинком (2026-09-28): окно закрыто — будить некого
+        # тест апстрима перед пинком (2026-09-28): окно закрыто — будить некого.
+        # Пауза видима (2026-10-06): gate=auto-retry на карточке + одна строка
+        # AUTO-RETRY в лог на начало паузы; снимется при успешной побудке ниже.
         if ! bash "$REPO/.opencode/scripts/llm_ping.sh"; then
             echo "$(date -Is) #$ONUM nudge skipped: upstream LLM unavailable (ping failed)"
+            GOUT=$(python3 .opencode/scripts/gh_board.py gate "$ONUM" auto-retry 2>/dev/null) || GOUT=""
+            if [ "$GOUT" = "#$ONUM: gate → auto-retry" ]; then
+                python3 .opencode/scripts/gh_board.py auto-log "$ONUM" \
+                    "AUTO-RETRY: побудки приостановлены — апстрим недоступен (провал проверки моделей) с $(date -u +%FT%TZ); конвейер продолжит сам, когда апстрим ответит" >/dev/null 2>&1 || true
+            fi
             continue
         fi
         OSID=$(sqlite3 /root/.local/share/opencode/opencode.db \
@@ -154,6 +166,12 @@ while true; do
             --session "$OSID" "$OMSG" > "$STATE/auto-impl-$ONUM-nudge.log" 2>&1 &
         echo "$(date -Is) #$ONUM nudge ($OKIND) sent (session $OSID, log: $STATE/auto-impl-$ONUM-nudge.log)"
         python3 .opencode/scripts/gh_board.py auto-log "$ONUM" "NUDGE-$OKIND: auto-nudge sent (owner sessions silent >60 min, client process dead)" >/dev/null 2>&1 || true
+        # пауза кончилась — снять auto-retry, если стояла (строго: только своё
+        # значение; blocked сюда не доходит — orphans их отфильтровал)
+        CURGATE=$(python3 .opencode/scripts/gh_board.py show "$ONUM" 2>/dev/null | awk '/^  Gate:/{print $2}')
+        if [ "$CURGATE" = "auto-retry" ]; then
+            python3 .opencode/scripts/gh_board.py gate "$ONUM" none >/dev/null 2>&1 || true
+        fi
     done
 
     PICK=$(python3 .opencode/scripts/gh_board.py pick-next "$HOST_LABEL") || { echo "$(date -Is) board query failed: $PICK"; continue; }

@@ -26,6 +26,7 @@ import {
   openRowActionDropdown,
   undoToast,
   waitForMaterialsReady,
+  withUndoWindow,
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
@@ -64,23 +65,38 @@ test.describe('S2(a) — Clean material: no dialog, deferred commit at window en
       const commitWait = commitDeleteWait(page, '/api/v1/materials', material.id);
 
       // ACTION — the click dry-runs clean (204, no body) → NO dialog, the
-      // row disappears optimistically with the undo toast + ring.
+      // row disappears optimistically with the undo toast + ring. The
+      // window runs under the paused page clock (#417): the wrapper's
+      // instant rewind expires it instead of a real 5.5s sleep;
+      // commitDeleteWait above was registered before the window-creating
+      // click (helper contract).
       const dropdown = await openRowActionDropdown(row);
-      await clickRowDelete(dropdown);
+      await withUndoWindow(page, async () => {
+        await clickRowDelete(dropdown);
 
-      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
-      await expect(row).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+        await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+        // The toast is plain React state (UIContext) — it renders on the
+        // real macrotask loop and proves the async dry-run resolved and
+        // the enqueue (optimistic remove + notifications) completed.
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        // #417: TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused page
+        // clock, so the page-level list provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the row's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(row).not.toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      });
 
       // Window expires → commit fires with the clean-path body → 204.
       const commit = await commitWait;
       expect(commit.status()).toBe(204);
       expect(JSON.parse(commit.request().postData() ?? '{}')).toEqual({ expected: {} });
 
-      // VERIFY DB — hard delete after the window (DB-poll pattern, #285).
-      await page.waitForTimeout(5_500);
+      // VERIFY DB — hard delete after the window (expired by the wrapper's
+      // rewind; the 204 commit response above proves the server finished).
       const getResp = await request.get(`${BACKEND}/api/v1/materials/${material.id}`);
       expect(getResp.status()).toBe(404);
       expect(queryDBRow(`SELECT id FROM materials WHERE id='${material.id}'`)).toBeNull();

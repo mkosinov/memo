@@ -8,7 +8,7 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
-import { waitForScheduleReady } from './fixtures/helpers';
+import { waitForScheduleReady, withUndoWindow } from './fixtures/helpers';
 import { clickFabRobust } from './fixtures/server-push';
 
 /**
@@ -148,21 +148,44 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       const { bodyDeletes, stop } = trackBodyDeletes(page, activity.id);
 
       await enableDeleteMode(page);
-      await clickCard(page, activity.id);
+      // The undo window under the paused page clock (#417): the 5s commit
+      // window is expired by the wrapper's instant rewind, not by a real
+      // 5.5s sleep. The DELETE tracker above was registered before the
+      // card click, as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        await clickCard(page, activity.id);
+        // #417: ActivityCard dispatches the deferred delete via a 150ms
+        // fade-out setTimeout — frozen under the paused clock. Release it
+        // with a matching fast-forward; the dry-run fetch then runs on
+        // real network time.
+        await page.clock.fastForward(150);
+        // The toast is plain React state (UIContext) — it renders on the
+        // real macrotask loop and proves the dry-run resolved and the
+        // enqueue (optimistic remove + notifications) completed.
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        // #417: TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused clock,
+        // so the schedule data provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the card's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(card).not.toBeVisible();
 
-      // Optimistic removal + undo toast…
-      await expect(card).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
+        // …undone inside the window: the toast hides (the card returns —
+        // asserted after the wrapper, where the rewind has flushed the
+        // restore notifications; the pilot's #291 order).
+        await toast.getByRole('button', { name: 'Отменить' }).click();
+        await expect(toast).toBeHidden();
+      });
 
-      // …undone inside the window: card returns, toast hides.
-      await toast.getByRole('button', { name: 'Отменить' }).click();
+      // The card is back (undo restore flushed by the wrapper's rewind).
       await expect(card).toBeVisible();
-      await expect(toast).toBeHidden();
 
-      // Let the full window elapse: no committing DELETE may have been sent
-      // (the dry-run — postData() === null — does not count).
-      await page.waitForTimeout(5_500);
+      // The window expired via the wrapper's rewind and the drainMs buffer
+      // already elapsed inside it — no committing DELETE may have been
+      // sent (the dry-run — postData() === null — does not count; #417
+      // step 5, negative-case sync).
       expect(bodyDeletes).toHaveLength(0);
       stop();
 
@@ -273,21 +296,29 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       const dialog = page.locator('[data-testid="delete-dialog"]');
       await expect(dialog).toBeVisible({ timeout: 10_000 });
       await dialog.locator('[data-testid="delete-dialog-confirm-checkbox"]').check();
-      await dialog.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 
-      // Optimistic removal + undo toast with the countdown ring…
-      await expect(card).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      // The undo window under the paused page clock (#417): the confirm
+      // click creates it, the wrapper's instant rewind expires it instead
+      // of a real 5.5s sleep. The DELETE tracker above was registered
+      // before the card click, as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        await dialog.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 
-      // …undone inside the window: the card returns, toast hides.
-      await toast.getByRole('button', { name: 'Отменить' }).click();
-      await expect(card).toBeVisible();
-      await expect(toast).toBeHidden();
+        // Optimistic removal + undo toast with the countdown ring…
+        await expect(card).not.toBeVisible();
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
 
-      // Let the full window elapse: no committing DELETE was sent.
-      await page.waitForTimeout(5_500);
+        // …undone inside the window: the card returns, toast hides.
+        await toast.getByRole('button', { name: 'Отменить' }).click();
+        await expect(card).toBeVisible();
+        await expect(toast).toBeHidden();
+      });
+
+      // The window expired via the wrapper's rewind and the drainMs buffer
+      // already elapsed inside it — no committing DELETE was sent (#417
+      // step 5, negative-case sync).
       expect(bodyDeletes).toHaveLength(0);
       stop();
 

@@ -9,7 +9,7 @@ import {
   createTestVisit,
   createTestVisitor,
 } from './fixtures/factories';
-import { waitForClientsReady } from './fixtures/helpers';
+import { waitForClientsReady, withUndoWindow } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
 /**
@@ -179,15 +179,21 @@ test.describe('Deferred visitor delete from the client card (GH #324 §9.3–§9
       await page.locator('[data-testid="delete-dialog-confirm-checkbox"]').check();
 
       // 4. ACTION — confirm; enqueue is sync → the card row disappears +
-      // ring toast; the commit DELETE (with body) fires at the 5s window end.
+      // ring toast; the commit DELETE (with body) fires at the 5s window
+      // end. The window runs under the paused page clock (#417): the
+      // wrapper's instant rewind expires it instead of a real 5.5s sleep;
+      // commitDeleteWait above was registered before the window-creating
+      // click (helper contract).
       const commitWait = commitDeleteWait(page, visitor.id);
-      await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
-      await expect(dialog).toHaveCount(0);
+      await withUndoWindow(page, async () => {
+        await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
+        await expect(dialog).toHaveCount(0);
 
-      await expect(row).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+        await expect(row).not.toBeVisible();
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      });
 
       const commit = await commitWait;
       expect(commit.status()).toBe(204);
@@ -199,9 +205,10 @@ test.describe('Deferred visitor delete from the client card (GH #324 §9.3–§9
         expected: { visits: expect.arrayContaining(visitsDep.items!.map((i) => i.id)) },
       });
 
-      // 5. VERIFY DB — after the commit window: visitor + visits gone,
-      // record recomputed honestly (visited,3 → waiting,0).
-      await page.waitForTimeout(5_500);
+      // 5. VERIFY DB — after the commit window (expired by the wrapper's
+      // rewind; the 204 commit response above proves the server finished):
+      // visitor + visits gone, record recomputed honestly (visited,3 →
+      // waiting,0).
       expect(queryDBRow(`SELECT id FROM visitors WHERE id='${visitor.id}'`)).toBeNull();
       expect(
         queryDBRows(`SELECT id FROM visits WHERE visitor_id='${visitor.id}'`),

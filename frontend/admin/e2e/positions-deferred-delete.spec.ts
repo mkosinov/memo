@@ -5,6 +5,7 @@ import {
   clickRowDelete,
   openRowActionDropdown,
   waitForPositionsReady,
+  withUndoWindow,
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
@@ -120,15 +121,27 @@ test.describe('Deferred position delete (GH #324 §9.5–§9.6)', () => {
       await page.locator('[data-testid="delete-dialog-confirm-checkbox"]').check();
 
       // 4. ACTION — confirm; enqueue is sync → row disappears + ring toast;
-      // the commit DELETE (with body) fires at the 5s window end.
+      // the commit DELETE (with body) fires at the 5s window end. The
+      // window runs under the paused page clock (#417): the wrapper's
+      // instant rewind expires it instead of a real 5.5s sleep;
+      // commitDeleteWait above was registered before the window-creating
+      // click (helper contract).
       const commitWait = commitDeleteWait(page, position.id);
-      await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
-      await expect(dialog).toHaveCount(0);
-
-      await expect(row).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      await withUndoWindow(page, async () => {
+        await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
+        await expect(dialog).toHaveCount(0);
+        // #417: the confirm chain is fully synchronous (remove → enqueue →
+        // onDone), but TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused page
+        // clock, so the page-level list provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the row's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(row).not.toBeVisible();
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      });
 
       const commit = await commitWait;
       expect(commit.status()).toBe(204);
@@ -141,9 +154,10 @@ test.describe('Deferred position delete (GH #324 §9.5–§9.6)', () => {
         },
       });
 
-      // 5. VERIFY DB — after the commit window: position gone, both join
-      // rows stripped, BOTH staff cards alive (holderB keeps «smm»).
-      await page.waitForTimeout(5_500);
+      // 5. VERIFY DB — after the commit window (expired by the wrapper's
+      // rewind; the 204 commit response above proves the server finished):
+      // position gone, both join rows stripped, BOTH staff cards alive
+      // (holderB keeps «smm»).
       expect(queryDBRow(`SELECT id FROM positions WHERE id='${position.id}'`)).toBeNull();
       expect(
         queryDBRows(`SELECT * FROM staff_positions WHERE position_id='${position.id}'`),

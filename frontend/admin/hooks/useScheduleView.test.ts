@@ -120,6 +120,30 @@ describe('useScheduleView — setters push vs replace', () => {
   });
 });
 
+describe('useScheduleView — openDayView (week→day drill-down)', () => {
+  it('writes view+date+col together in ONE push (Back returns to the week)', () => {
+    // Week header date click: viewed Wednesday 2026-09-16, click Thursday 09-17
+    const { result } = renderWithParams('?view=week&date=2026-09-16&col=masters');
+    act(() => result.current.openDayView(new Date(2026, 8, 17), 'locations'));
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(lastWrite(mockPush)).toBe('/schedule?view=day&date=2026-09-17&col=locations');
+  });
+
+  it('the explicit date wins over the week→day anchor', () => {
+    // Viewed week is the CURRENT week — a plain setViewMode('day') would
+    // anchor today; the drill-down must open the CLICKED date instead.
+    const todayMonday = toISODate(getMonday(new Date()));
+    const clicked = new Date();
+    clicked.setDate(clicked.getDate() + 2); // any day inside the viewed week
+    const { result } = renderWithParams(`?view=week&date=${todayMonday}`);
+    act(() => result.current.openDayView(clicked, 'locations'));
+    expect(lastWrite(mockPush)).toBe(
+      `/schedule?view=day&date=${toISODate(clicked)}&col=locations`,
+    );
+  });
+});
+
 describe('useScheduleView — period navigation', () => {
   it('prevPeriod in week view steps back 7 days from currentWeek (Monday)', () => {
     // 2026-09-16 is a Wednesday; its week Monday is 09-14 → prev week is 09-07

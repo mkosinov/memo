@@ -54,9 +54,11 @@ async function resetUserSettings(request: import('@playwright/test').APIRequestC
  *               seed data.
  */
 async function switchToDayView(page: import('@playwright/test').Page, date?: string) {
-  await page.locator('[data-testid="day-button"]').click();
-  // Wait for day view to be active by checking button text
-  await expect(page.locator('[data-testid="day-button"]')).toContainText(/День/);
+  // Single view selector: open the dropdown, pick «День мастеров»
+  await page.locator('[data-testid="view-selector"]').click();
+  await page.locator('[data-testid="view-masters"]').click();
+  // Wait for day view to be active via the trigger label
+  await expect(page.locator('[data-testid="view-selector"]')).toContainText(/День/);
 
   if (date) {
     // Deep-link to the specific date via the schedule URL
@@ -445,7 +447,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await resetUserSettings(request);
     await waitForScheduleReady(page);
     // #138: the column mode is URL state (col=locations) — deep-link
-    // directly instead of the day-button dropdown dance.
+    // directly instead of clicking the view selector.
     await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });
 
     // Verify we're in day view with location columns. Poll (GH #239: a
@@ -499,7 +501,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
     await resetUserSettings(request);
     await waitForScheduleReady(page);
     // #138: the column mode is URL state (col=locations) — deep-link
-    // directly instead of the day-button dropdown dance.
+    // directly instead of clicking the view selector.
     await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });
 
     await expect(page.locator('[data-testid^="column-header-"]').first()).toBeVisible();

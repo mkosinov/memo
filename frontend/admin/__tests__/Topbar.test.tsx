@@ -149,6 +149,12 @@ function renderTopbar(overrides: TopbarMockOverrides = {}) {
   return render(providersElement());
 }
 
+/** Open the «Вид» dropdown and click one of its options. */
+function selectViewOption(testId: string) {
+  fireEvent.click(screen.getByTestId('view-selector'));
+  fireEvent.click(screen.getByTestId(testId));
+}
+
 /** Real-hook render: flips the hook mock to the REAL implementation so
  *  Topbar + ScheduleViewProvider run the actual URL hook + REAL context
  *  against the mocked router. Asserts URL outcomes via __currentQuery(). */
@@ -232,26 +238,45 @@ describe('Topbar', () => {
     expect(screen.queryByLabelText('Фильтры')).not.toBeInTheDocument();
   });
 
-  it('renders combined Day button with column mode text', () => {
+  it('renders the single view selector: trigger shows the active option (week)', () => {
     renderTopbar();
-    // Should show "День по мастерам" instead of just "День"
-    expect(screen.getByText('День по мастерам')).toBeInTheDocument();
-    expect(screen.getByText('Неделя')).toBeInTheDocument();
+    expect(screen.getByTestId('view-selector')).toHaveTextContent('Неделя');
   });
 
-  it('shows "День по локациям" when columnMode is locations', () => {
-    renderTopbar({ view: { columnMode: 'locations' } });
-    expect(screen.getByText('День по локациям')).toBeInTheDocument();
+  it('trigger label follows the day option (day by locations)', () => {
+    renderTopbar({ view: { viewMode: 'day', columnMode: 'locations' } });
+    expect(screen.getByTestId('view-selector')).toHaveTextContent('День локаций');
+  });
+
+  it('dropdown opens with three options, active marked per current view', () => {
+    renderTopbar();
+    fireEvent.click(screen.getByTestId('view-selector'));
+    expect(screen.getByTestId('view-mode-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('view-masters')).toHaveTextContent('День мастеров');
+    expect(screen.getByTestId('view-locations')).toHaveTextContent('День локаций');
+    expect(screen.getByTestId('view-week')).toHaveTextContent('Неделя');
+    expect(screen.getByTestId('view-week')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByTestId('view-masters')).toHaveAttribute('data-active', 'false');
+  });
+
+  it('dropdown closes after selecting an option', () => {
+    renderTopbar();
+    fireEvent.click(screen.getByTestId('view-selector'));
+    fireEvent.click(screen.getByTestId('view-week'));
+    expect(screen.queryByTestId('view-mode-menu')).not.toBeInTheDocument();
   });
 
   // ── View mode switch — DELEGATES to the hook, no duplicated logic ────
 
-  it('calls hook setViewMode("day") when Day button is clicked from week', () => {
+  it('calls hook setViewMode("day") when «День мастеров» is clicked from week', () => {
     const setViewMode = vi.fn();
-    renderTopbar({ view: { viewMode: 'week', setViewMode } });
+    const setColumnMode = vi.fn();
+    renderTopbar({ view: { viewMode: 'week', setViewMode, setColumnMode } });
 
-    fireEvent.click(screen.getByText('День по мастерам'));
+    selectViewOption('view-masters');
     expect(setViewMode).toHaveBeenCalledWith('day');
+    // columnMode is already masters (default) — no redundant col write
+    expect(setColumnMode).not.toHaveBeenCalled();
   });
 
   it('does NOT call setSelectedDay on week→day switch (day-anchor lives in the hook)', () => {
@@ -261,12 +286,12 @@ describe('Topbar', () => {
       view: { viewMode: 'week', currentWeek: new Date(2026, 5, 8), setViewMode, setSelectedDay },
     });
 
-    fireEvent.click(screen.getByText('День по мастерам'));
+    selectViewOption('view-masters');
     expect(setViewMode).toHaveBeenCalledTimes(1);
     expect(setSelectedDay).not.toHaveBeenCalled();
   });
 
-  it('week→day switch does NOT call selectDateRange-style range writes (only setViewMode)', () => {
+  it('same-option click in week view is a no-op (no setter calls)', () => {
     const setViewMode = vi.fn();
     const setSelectedDay = vi.fn();
     const setColumnMode = vi.fn();
@@ -274,8 +299,7 @@ describe('Topbar', () => {
       view: { viewMode: 'week', setViewMode, setSelectedDay, setColumnMode },
     });
 
-    fireEvent.click(screen.getByText('Неделя'));
-    // same mode → early return, no write at all
+    selectViewOption('view-week');
     expect(setViewMode).not.toHaveBeenCalled();
     expect(setSelectedDay).not.toHaveBeenCalled();
     expect(setColumnMode).not.toHaveBeenCalled();
@@ -285,7 +309,7 @@ describe('Topbar', () => {
     const setViewMode = vi.fn();
     renderTopbar({ view: { viewMode: 'day', setViewMode } });
 
-    fireEvent.click(screen.getByText('Неделя'));
+    selectViewOption('view-week');
     expect(setViewMode).toHaveBeenCalledWith('week');
   });
 
@@ -293,73 +317,68 @@ describe('Topbar', () => {
     const setViewMode = vi.fn();
     renderTopbar({ view: { viewMode: 'week', setViewMode } });
 
-    fireEvent.click(screen.getByText('Неделя'));
+    selectViewOption('view-week');
     expect(setViewMode).not.toHaveBeenCalled();
   });
 
-  it('opens dropdown menu when day button is clicked', () => {
-    renderTopbar();
-    // Click the day button (which now contains the dropdown arrow)
-    const dayButton = screen.getByTestId('day-button');
-    fireEvent.click(dayButton);
-    // After opening, both options should be visible
-    expect(screen.getByRole('menuitem', { name: /по мастерам/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
-  });
-
-  it('calls hook setColumnMode when dropdown option is selected (already in day mode)', () => {
+  it('calls hook setColumnMode when a day option is clicked (already in day mode)', () => {
     const setColumnMode = vi.fn();
     const setViewMode = vi.fn();
     renderTopbar({
       view: { viewMode: 'day', setViewMode, setColumnMode },
     });
 
-    // Open dropdown
-    fireEvent.click(screen.getByTestId('day-button'));
-    // Click the locations option
-    fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+    selectViewOption('view-locations');
     expect(setColumnMode).toHaveBeenCalledWith('locations');
     // Already in day mode — no view switch
     expect(setViewMode).not.toHaveBeenCalled();
   });
 
-  it('column-mode select from week mode also switches to day via the hook', () => {
+  it('same-option day click is a no-op (no setter calls)', () => {
+    const setColumnMode = vi.fn();
+    const setViewMode = vi.fn();
+    renderTopbar({
+      view: { viewMode: 'day', columnMode: 'masters', setViewMode, setColumnMode },
+    });
+
+    selectViewOption('view-masters');
+    expect(setColumnMode).not.toHaveBeenCalled();
+    expect(setViewMode).not.toHaveBeenCalled();
+  });
+
+  it('day option from week mode writes column mode AND switches to day via the hook', () => {
     const setColumnMode = vi.fn();
     const setViewMode = vi.fn();
     renderTopbar({
       view: { viewMode: 'week', setViewMode, setColumnMode },
     });
 
-    fireEvent.click(screen.getByTestId('day-button'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+    selectViewOption('view-locations');
     expect(setColumnMode).toHaveBeenCalledWith('locations');
     expect(setViewMode).toHaveBeenCalledWith('day');
   });
 
-  it('closes dropdown after selecting an option', () => {
-    const setColumnMode = vi.fn();
-    renderTopbar({
-      view: { viewMode: 'day', setColumnMode },
-    });
+  // ── Tools panel toggle (stamp button in the topbar) ───────────────────
 
-    // Open dropdown
-    fireEvent.click(screen.getByTestId('day-button'));
-    expect(screen.getByRole('menuitem', { name: /по локациям/i })).toBeInTheDocument();
-
-    // Select an option
-    fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
-
-    // Dropdown should close
-    expect(screen.queryByRole('menuitem', { name: /по мастерам/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /по локациям/i })).not.toBeInTheDocument();
+  it('renders the stamp toggle right of the zoom button (collapsed by default)', () => {
+    renderTopbar();
+    const stamp = screen.getByTestId('stamp-toggle');
+    expect(stamp).toHaveAttribute('aria-label', 'Открыть панель инструментов');
+    // Order check: the stamp toggle is the LAST control of the topbar
+    const topbar = screen.getByTestId('topbar');
+    const buttons = topbar.querySelectorAll('button');
+    expect(buttons[buttons.length - 1]).toBe(stamp);
   });
 
-  it('highlights active column mode in dropdown', () => {
-    renderTopbar({ view: { columnMode: 'locations' } });
+  it('stamp toggle click opens and closes the tools panel (aria flips)', () => {
+    renderTopbar();
+    const stamp = screen.getByTestId('stamp-toggle');
 
-    fireEvent.click(screen.getByTestId('day-button'));
-    const locationsItem = screen.getByRole('menuitem', { name: /по локациям/i });
-    expect(locationsItem).toHaveAttribute('data-active', 'true');
+    fireEvent.click(stamp);
+    expect(stamp).toHaveAttribute('aria-label', 'Закрыть панель инструментов');
+
+    fireEvent.click(stamp);
+    expect(stamp).toHaveAttribute('aria-label', 'Открыть панель инструментов');
   });
 
   // ── Date Navigation ──────────────────────────────────────────────────
@@ -471,7 +490,7 @@ describe('Topbar', () => {
       __resetNavigation('?view=week&date=2026-06-10');
       renderTopbarReal();
 
-      fireEvent.click(screen.getByText('День по мастерам'));
+      selectViewOption('view-masters');
       const q = new URLSearchParams(__currentQuery());
       expect(q.get('view')).toBe('day');
       // Viewed week is current-week-relative: 2026-06-10 belongs to a week
@@ -487,6 +506,7 @@ describe('Topbar', () => {
         return d.toISOString().slice(0, 10);
       })();
       expect([viewedMonday, nowMonday]).toContain(date);
+      // masters is the default column mode — no redundant ?col write
       expect(q.get('col')).toBeNull();
     });
 
@@ -494,7 +514,7 @@ describe('Topbar', () => {
       __resetNavigation('?view=day&date=2026-06-10&col=locations');
       renderTopbarReal();
 
-      fireEvent.click(screen.getByText('Неделя'));
+      selectViewOption('view-week');
       const q = new URLSearchParams(__currentQuery());
       expect(q.get('view')).toBe('week');
       expect(q.get('date')).toBe('2026-06-10');
@@ -527,12 +547,11 @@ describe('Topbar', () => {
       expect(q.get('col')).toBeNull();
     });
 
-    it('column-mode select from week composes BOTH writes: view=day + date anchor + col', () => {
+    it('day-option click from week composes BOTH writes: view=day + date anchor + col', () => {
       __resetNavigation('?view=week&date=2026-06-10&col=masters');
       renderTopbarReal();
 
-      fireEvent.click(screen.getByTestId('day-button'));
-      fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+      selectViewOption('view-locations');
 
       const q = new URLSearchParams(__currentQuery());
       expect(q.get('view')).toBe('day');
@@ -541,12 +560,11 @@ describe('Topbar', () => {
       expect(['2026-06-08']).toContain(q.get('date')!);
     });
 
-    it('column-mode select in day mode writes ONLY ?col (replace, no extra params)', () => {
+    it('day-option click in day mode writes ONLY ?col (replace, no extra params)', () => {
       __resetNavigation('?view=day&date=2026-06-10&col=masters');
       renderTopbarReal();
 
-      fireEvent.click(screen.getByTestId('day-button'));
-      fireEvent.click(screen.getByRole('menuitem', { name: /по локациям/i }));
+      selectViewOption('view-locations');
 
       const q = new URLSearchParams(__currentQuery());
       expect(q.get('col')).toBe('locations');

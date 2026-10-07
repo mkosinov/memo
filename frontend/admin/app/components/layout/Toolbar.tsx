@@ -61,7 +61,7 @@ export function Toolbar() {
   // toasts from the mutation result (spec §6) — the Toolbar shows no toasts.
   const handleCopyLastWeek = () => setCopyPopoverOpen(prev => !prev);
 
-  // If collapsed, don't render panel (toggled via StampFab)
+  // If collapsed, don't render panel (toggled by the stamp button in the Topbar)
   if (rightPanelCollapsed) {
     return null;
   }
@@ -70,7 +70,7 @@ export function Toolbar() {
     <>
       <aside
         data-testid="right-panel"
-        className="fixed right-0 top-0 z-[var(--z-grid-panel)] h-full border-l bg-white transition-all duration-200"
+        className="h-full shrink-0 border-l bg-white"
         style={{
           width: 'var(--right-w)',
           borderColor: 'var(--line)',
@@ -127,9 +127,9 @@ export function Toolbar() {
     </aside>
 
       {/* #242 spec §6: copy popup lives NEXT TO the Toolbar (not inside the
-          aside) — the aside's z-[--z-grid-panel] stacking context would trap
-          the popover under the z-[--z-topbar] topbar. As a root-context child
-          it keeps its --z-popover-stack layering (same as OverlapPopover).
+          aside) — it is position:fixed to the viewport and must render in the
+          root stacking context, above the topbar and the panel alike, at its
+          own --z-popover-stack layer (same as OverlapPopover).
           The popover owns the real toasts; the Toolbar shows none. */}
       {copyPopoverOpen && (
         <CopyLastWeekPopover

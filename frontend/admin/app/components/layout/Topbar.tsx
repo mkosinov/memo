@@ -9,6 +9,7 @@ import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { useSavingToast } from '@/hooks/useSavingToast';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
+import { useUI } from '@/contexts/UIContext';
 import { CELL_HEIGHT_OPTIONS, GRID_FREQUENCY_OPTIONS, formatWeekRange, formatDayLabel } from '@/lib/utils';
 import { MultiSelect } from '../shared/MultiSelect';
 import { CalendarPopover } from '../shared/CalendarPopover';
@@ -20,10 +21,20 @@ function groupMastersBySpecialty(master: Master): string {
   return master.specialty || 'Без специальности';
 }
 
+/** Options of the single view selector (the «Вид» dropdown). */
+const VIEW_OPTIONS = [
+  { kind: 'masters', label: 'День мастеров' },
+  { kind: 'locations', label: 'День локаций' },
+  { kind: 'week', label: 'Неделя' },
+] as const;
+
+type ViewOptionKind = (typeof VIEW_OPTIONS)[number]['kind'];
+
 // ─── Topbar ───────────────────────────────────────────────────────────────
 
 export function Topbar() {
   const { masters, locations } = useScheduleData();
+  const { rightPanelCollapsed, toggleRightPanel } = useUI();
   // View state: consumed straight from the URL hook — the single writer of
   // /schedule?view=&date=&col= (#138 Task 3). Day-anchor logic lives there.
   const {
@@ -66,40 +77,29 @@ export function Topbar() {
   useSavingToast();
 
   // Dropdown state
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Zoom popup state
   const [zoomOpen, setZoomOpen] = useState(false);
   const zoomRef = useRef<HTMLDivElement>(null);
+
+  // View selector dropdown state
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
 
   // Calendar popover state
   const [calendarOpen, setCalendarOpen] = useState(false);
   const calendarRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Close popups on outside click
   useEffect(() => {
-    if (!dropdownOpen) return;
+    if (!zoomOpen && !viewMenuOpen) return;
+    const refs = [zoomRef, viewMenuRef];
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
+      if (refs.some((ref) => ref.current?.contains(e.target as Node))) return;
+      setZoomOpen(false);
+      setViewMenuOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [dropdownOpen]);
-
-  // Close zoom popup on outside click
-  useEffect(() => {
-    if (!zoomOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (zoomRef.current && !zoomRef.current.contains(e.target as Node)) {
-        setZoomOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [zoomOpen]);
+  }, [zoomOpen, viewMenuOpen]);
 
   // #138 Task 3: pure delegation — the hook's setViewMode owns the day anchor
   // (today if the viewed week is current, else its Monday) and writes the URL.
@@ -109,19 +109,21 @@ export function Topbar() {
     setViewMode(newMode);
   }, [viewMode, setViewMode]);
 
-  const handleDayButtonClick = useCallback(() => {
-    handleViewModeSwitch('day');
-    setDropdownOpen(prev => !prev);
-  }, [handleViewModeSwitch]);
-
-  const handleColumnModeSelect = useCallback((mode: 'masters' | 'locations') => {
-    setColumnMode(mode);
-    setDropdownOpen(false);
-    // Also switch to day view if not already
-    if (viewMode !== 'day') {
-      handleViewModeSwitch('day');
+  // Single view selector (three options over the same hook writes):
+  // «Неделя» → setViewMode only; a day option → setColumnMode (display
+  // replace, skipped when already active) + setViewMode('day') when coming
+  // from the week (navigation push — the day anchor lives in the hook).
+  const handleViewSelect = useCallback((kind: ViewOptionKind) => {
+    setViewMenuOpen(false);
+    if (kind === 'week') {
+      handleViewModeSwitch('week');
+      return;
     }
-  }, [setColumnMode, viewMode, handleViewModeSwitch]);
+    if (columnMode !== kind) {
+      setColumnMode(kind);
+    }
+    handleViewModeSwitch('day');
+  }, [columnMode, setColumnMode, handleViewModeSwitch]);
 
   const handleZoomSelect = useCallback((height: number) => {
     setCellHeight(height);
@@ -140,7 +142,10 @@ export function Topbar() {
     setCalendarOpen(false);
   }, [setSelectedDay]);
 
-  const dayLabel = columnMode === 'masters' ? 'День по мастерам' : 'День по локациям';
+  // The active option of the single view selector: in week view it is
+  // «Неделя», in day view the current column mode.
+  const activeViewOption = viewMode === 'week' ? 'week' : columnMode;
+  const activeViewLabel = VIEW_OPTIONS.find(({ kind }) => kind === activeViewOption)?.label;
 
   return (
     <div
@@ -203,8 +208,8 @@ export function Topbar() {
         </button>
       </div>
 
-      {/* ── Right: Masters + Locations filters ── */}
-      <div className="flex items-center gap-2">
+      {/* ── Area: Filters (masters + locations) ── */}
+      <TopbarArea label="Фильтры" data-testid="topbar-filters-area">
         <MultiSelect<Master>
           items={masters}
           selectedIds={filterMasterIds}
@@ -245,29 +250,30 @@ export function Topbar() {
             />
           }
         />
-      </div>
+      </TopbarArea>
 
-      {/* ── Right: Combined Day+ColumnMode / Week Toggle ── */}
-      <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ backgroundColor: 'var(--surface)' }}>
-        {/* Day button with dropdown */}
-        <div className="relative" ref={dropdownRef}>
+      {/* ── Area: View — single dropdown selector (day by masters / day by locations / week) ── */}
+      <TopbarArea label="Вид" data-testid="topbar-view-area">
+        <div className="relative" ref={viewMenuRef}>
           <button
-            onClick={handleDayButtonClick}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors"
-            style={viewMode === 'day'
-              ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-              : { color: 'var(--ink-light)' }
-            }
-            data-testid="day-button"
+            onClick={() => setViewMenuOpen(prev => !prev)}
+            data-testid="view-selector"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap"
+            style={{
+              backgroundColor: 'var(--white)',
+              border: '1px solid var(--line)',
+              color: 'var(--ink)',
+            }}
+            aria-haspopup="menu"
+            aria-expanded={viewMenuOpen}
           >
-            {dayLabel}
+            {activeViewLabel}
             <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
 
-          {/* Dropdown menu */}
-          {dropdownOpen && (
+          {viewMenuOpen && (
             <div
               className="absolute top-full right-0 mt-1 min-w-[160px] rounded-lg border py-1 z-[var(--z-popover)]"
               style={{
@@ -276,62 +282,36 @@ export function Topbar() {
                 boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
               }}
               role="menu"
-              data-testid="column-mode-menu"
+              data-testid="view-mode-menu"
             >
-              <button
-                role="menuitem"
-                data-active={columnMode === 'masters'}
-                onClick={() => handleColumnModeSelect('masters')}
-                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
-                style={columnMode === 'masters'
-                  ? { color: 'var(--brand)' }
-                  : { color: 'var(--ink)' }
-                }
-              >
-                {columnMode === 'masters' && (
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-                <span className={columnMode === 'masters' ? '' : 'pl-[20px]'}>
-                  По мастерам
-                </span>
-              </button>
-              <button
-                role="menuitem"
-                data-active={columnMode === 'locations'}
-                onClick={() => handleColumnModeSelect('locations')}
-                className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
-                style={columnMode === 'locations'
-                  ? { color: 'var(--brand)' }
-                  : { color: 'var(--ink)' }
-                }
-              >
-                {columnMode === 'locations' && (
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-                <span className={columnMode === 'locations' ? '' : 'pl-[20px]'}>
-                  По локациям
-                </span>
-              </button>
+              {VIEW_OPTIONS.map(({ kind, label }) => {
+                const active = activeViewOption === kind;
+                return (
+                  <button
+                    key={kind}
+                    role="menuitem"
+                    data-testid={`view-${kind}`}
+                    data-active={active}
+                    onClick={() => handleViewSelect(kind)}
+                    className="w-full px-3 py-1.5 text-left text-xs font-medium transition-colors flex items-center gap-2"
+                    style={active
+                      ? { color: 'var(--brand)' }
+                      : { color: 'var(--ink)' }
+                    }
+                  >
+                    {active && (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 6L5 9L10 3" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                    <span className={active ? '' : 'pl-[20px]'}>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
-
-        {/* Week button */}
-        <button
-          onClick={() => handleViewModeSwitch('week')}
-          className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
-          style={viewMode === 'week'
-            ? { backgroundColor: 'var(--brand)', color: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }
-            : { color: 'var(--ink-light)' }
-          }
-        >
-          Неделя
-        </button>
-      </div>
+      </TopbarArea>
 
       {/* ── Zoom icon + popup ── */}
       <div className="relative" ref={zoomRef}>
@@ -454,11 +434,75 @@ export function Topbar() {
           </div>
         )}
       </div>
+
+      {/* ── Tools panel toggle (stamp) — lives in the topbar, right of the
+          zoom; the bottom floating button was removed. Same aria contract as
+          the old StampFab («Открыть/Закрыть панель инструментов»). ── */}
+      <button
+        onClick={toggleRightPanel}
+        data-testid="stamp-toggle"
+        className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-surface shrink-0"
+        style={{
+          color: rightPanelCollapsed ? 'var(--ink-mid)' : 'var(--brand)',
+          border: `1px solid ${rightPanelCollapsed ? 'var(--line)' : 'var(--brand)'}`,
+        }}
+        aria-label={rightPanelCollapsed ? 'Открыть панель инструментов' : 'Закрыть панель инструментов'}
+        title={rightPanelCollapsed ? 'Инструменты' : 'Закрыть инструменты'}
+      >
+        <svg
+          className="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 21h14" />
+          <path d="M5 18h14v3H5z" />
+          <path d="M9 18V9l3-6 3 6v9" />
+          <path d="M7 18h10" />
+          <circle cx="12" cy="11" r="1" fill="currentColor" />
+        </svg>
+      </button>
     </div>
   );
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────
+
+/**
+ * Labeled topbar area — groups related controls into one visually distinct
+ * region (surface background + border + small uppercase caption on the left).
+ */
+function TopbarArea({
+  label,
+  'data-testid': testId,
+  children,
+}: {
+  label: string;
+  'data-testid'?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex items-center gap-2 rounded-lg border px-2 py-1 shrink-0"
+      style={{
+        backgroundColor: 'var(--surface)',
+        borderColor: 'var(--line)',
+      }}
+    >
+      <span
+        className="text-[10px] font-semibold uppercase tracking-wide select-none"
+        style={{ color: 'var(--ink-light)' }}
+      >
+        {label}
+      </span>
+      <div className="flex items-center gap-1.5">{children}</div>
+    </div>
+  );
+}
 
 /** GH #267: «Показывать архивные» checkbox in a filter dropdown footer. */
 function ArchivedToggle({

@@ -56,10 +56,9 @@ import {
  * helper waits for it properly and confirms (entity-level checkbox →
  * enqueue).
  *
- * Opening the panel goes through clickFabRobust — the StampFab (fixed
- * bottom-right, z-50) shares the screen corner with the toast container
- * (fixed bottom-right, z-[250]) and parallel-spec toasts would otherwise
- * swallow the click.
+ * Opening the panel goes through clickFabRobust — the panel toggle lives in
+ * the Topbar (right of the zoom); the robust retry keeps stray overlays from
+ * eating the click.
  */
 async function deleteActivityViaUI(
   pageB: Page,

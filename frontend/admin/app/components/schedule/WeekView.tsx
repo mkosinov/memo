@@ -32,7 +32,7 @@ export function WeekView() {
     gridStartMinutes,
     gridEndMinutes,
   } = useScheduleData();
-  const { currentWeek, stamp, filterMasterIds, filterLocationIds } = useScheduleView();
+  const { currentWeek, stamp, filterMasterIds, filterLocationIds, openDayView } = useScheduleView();
   const { cellHeight, gridFrequency } = useGridSettings();
   const { showToast } = useUI();
   const monday = getMonday(currentWeek);
@@ -214,19 +214,25 @@ export function WeekView() {
         }}
       >
         <div className="min-w-[800px] h-full flex flex-col">
-          {/* Header row — sticky above cards */}
+          {/* Header row — sticky above cards. Each date is a drill-down:
+              click → day view by locations on that exact date (one URL step). */}
           <ScheduleColumnHeader>
             {days.map((day, i) => (
-              <div
+              <button
                 key={i}
-                className="flex-1 text-center py-2 text-xs font-medium"
+                type="button"
+                onClick={() => openDayView(day, 'locations')}
+                data-testid={`week-day-header-${i}`}
+                className="flex-1 text-center py-2 text-xs font-medium cursor-pointer transition-colors hover:bg-surface"
                 style={{ color: isSameDay(day, today) ? 'var(--brand)' : 'var(--ink-mid)' }}
+                title={`Открыть ${DAYS[i]} по локациям`}
+                aria-label={`Открыть ${DAYS[i]}, ${day.getDate()} — день по локациям`}
               >
                 <div className="uppercase tracking-wide">{DAYS[i]}</div>
                 <div className={`text-base font-bold ${isSameDay(day, today) ? 'text-brand' : ''}`}>
                   {day.getDate()}
                 </div>
-              </div>
+              </button>
             ))}
           </ScheduleColumnHeader>
 

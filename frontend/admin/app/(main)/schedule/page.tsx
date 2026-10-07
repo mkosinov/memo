@@ -3,7 +3,6 @@
 import { Suspense } from 'react';
 import { Topbar } from '../../components/layout/Topbar';
 import { Toolbar } from '../../components/layout/Toolbar';
-import { StampFab } from '../../components/layout/StampFab';
 import { WeekView } from '../../components/schedule/WeekView';
 import { DayView } from '../../components/schedule/DayView';
 import { useUI } from '@/contexts/UIContext';
@@ -16,14 +15,19 @@ function ScheduleView() {
 
   return (
     <>
-      <Topbar />
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-auto">
-          {viewMode === 'day' ? <DayView /> : <WeekView />}
+      {/* The Toolbar is an INLINE flex item (not a fixed overlay): the inner
+          column wraps Topbar + grid, so the open panel squeezes BOTH the
+          topbar and the grid — nothing hides underneath it. The panel is
+          toggled by the stamp button in the Topbar (right of the zoom). */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <Topbar />
+          <div className="flex-1 overflow-auto">
+            {viewMode === 'day' ? <DayView /> : <WeekView />}
+          </div>
         </div>
         {!rightPanelCollapsed && <Toolbar />}
       </div>
-      <StampFab />
     </>
   );
 }

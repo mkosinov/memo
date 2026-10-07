@@ -237,9 +237,9 @@ test('S2: archived location — hidden by default, toggle reveals card and day-v
     );
 
     // DayView «по локациям»: the archived location gains its column.
-    await page.locator('[data-testid="day-button"]').click();
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
+    await page.locator('[data-testid="view-selector"]').click();
+    await page.locator('[data-testid="view-locations"]').click();
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
     // DayView shows the selected day — navigate explicitly to the activity's
     // own day. The factory `start` is UTC; convert to the LOCAL date first
     // (same as S6), so the opened week always contains the card's grid day.

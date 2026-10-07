@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 
 // Server-coupled typeahead (debounce 300ms; consumer-tuned search gate via
 // minChars/canSearch, default min-2) — the remote counterpart of Combobox
@@ -48,6 +48,13 @@ export interface RemoteSearchSelectProps<
    * e.g. the tags multi-pickers; GH #328 spec §6.2).
    */
   inputId?: string;
+  /**
+   * Adornment rendered inside the field frame, BEFORE the input — a generic
+   * slot (e.g. the phone country selector, GH #414), not phone logic. Clicks
+   * on it are stopped at the slot boundary and never open the suggestions
+   * dropdown. Without the prop the markup and behavior are unchanged.
+   */
+  prefix?: ReactNode;
 }
 
 interface SearchItem {
@@ -59,6 +66,16 @@ interface SearchItem {
 
 const INPUT_CLASSES =
   'w-full rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand)]';
+
+// Prefix mode (GH #414): the frame moves from the input onto a flex row so a
+// consumer-supplied adornment can sit inside the border, before the input.
+const FRAME_CLASSES =
+  'flex w-full items-center rounded-lg border transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--brand)]';
+
+const PREFIXED_INPUT_CLASSES =
+  'min-w-0 flex-1 bg-transparent border-0 pl-2 pr-3 py-2 text-sm focus:outline-none';
+
+const PREFIX_SLOT_CLASSES = 'flex shrink-0 items-center py-2 pl-3';
 
 const INPUT_STYLE = {
   borderColor: 'var(--line, #e5e7eb)',
@@ -113,6 +130,7 @@ export default function RemoteSearchSelect<
   onInputValueChange,
   inputTestId,
   inputId,
+  prefix,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -199,6 +217,19 @@ export default function RemoteSearchSelect<
     if (results.length > 0 && !selectedLabel) setIsOpen(true);
   }, [results.length, selectedLabel]);
 
+  // Shared between both field layouts so they can never drift apart.
+  const inputProps = {
+    type: 'text',
+    value: selectedLabel || query,
+    onChange: handleInputChange,
+    onFocus: handleFocus,
+    placeholder: selectedLabel ? '' : placeholder,
+    readOnly: !!selectedLabel,
+    id: inputId,
+    'aria-label': label,
+    'data-testid': inputTestId,
+  } as const;
+
   return (
     <div ref={containerRef} className="relative">
       <label
@@ -208,19 +239,23 @@ export default function RemoteSearchSelect<
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <div className="relative">
-        <input
-          type="text"
-          value={selectedLabel || query}
-          onChange={handleInputChange}
-          onFocus={handleFocus}
-          placeholder={selectedLabel ? '' : placeholder}
-          className={INPUT_CLASSES}
-          style={INPUT_STYLE}
-          readOnly={!!selectedLabel}
-          id={inputId}
-          aria-label={label}
-          data-testid={inputTestId}
-        />
+        {prefix ? (
+          <div className={FRAME_CLASSES} style={INPUT_STYLE}>
+            {/* Stop the click at the slot boundary: prefix interactions (e.g.
+                opening the country selector) must not reach the typeahead —
+                in particular, never open the suggestions dropdown. */}
+            <div
+              className={PREFIX_SLOT_CLASSES}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {prefix}
+            </div>
+            <input {...inputProps} className={PREFIXED_INPUT_CLASSES} />
+          </div>
+        ) : (
+          <input {...inputProps} className={INPUT_CLASSES} style={INPUT_STYLE} />
+        )}
         {selectedLabel && (
           <button
             type="button"

@@ -21,9 +21,19 @@ import { queryDBRow } from './fixtures/db-query';
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 let phoneCounter = 0;
+/**
+ * GH #414: the account phone is the PhoneField widget — a 10-digit RU
+ * remainder (possible for RU); the compact '+7…' reaches the wire/DB, the
+ * national remainder (phone.slice(2)) is what the test types into the input.
+ */
 function uniquePhone(): string {
   phoneCounter += 1;
-  return `+7994${String(Date.now()).slice(-7)}${phoneCounter}`;
+  return `+7994${String(Date.now()).slice(-6)}${phoneCounter}`;
+}
+
+/** The grouped display of a 10-digit RU remainder in the widget input. */
+function groupedRu(national: string): string {
+  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
 }
 
 /** A passwordless staff card + account (no link yet) — the admin corridor. */
@@ -88,14 +98,16 @@ test.describe('#348 S5 — account phone edit', () => {
       await waitForStaffReady(page);
       await page.locator(`[data-testid="master-row-${staffId}"]`).click();
 
-      // The «Учётка» block is present with the CURRENT phone prefilled.
+      // The «Учётка» block is present with the CURRENT phone prefilled —
+      // the widget initialized from the stored compact (RU selector, the
+      // grouped national remainder in the input).
       const dialog = page.getByRole('dialog');
       await expect(dialog.getByText('Редактирование сотрудника')).toBeVisible();
-      const accountPhone = dialog.locator('input[placeholder="+79990000000"]');
-      await expect(accountPhone).toHaveValue(phone);
+      const accountPhone = dialog.locator('[data-testid="staff-account-phone-input"]');
+      await expect(accountPhone).toHaveValue(groupedRu(phone.slice(2)));
 
       // Change the phone and save — the account write is a SEPARATE request.
-      await accountPhone.fill(newPhone);
+      await accountPhone.fill(newPhone.slice(2));
       const patchPromise = page.waitForResponse(
         (r) => r.url().includes(`/api/v1/users/${userId}`) && r.request().method() === 'PATCH',
       );
@@ -130,8 +142,10 @@ test.describe('#348 S5 — account phone edit', () => {
       await page.locator(`[data-testid="master-row-${staffId}"]`).click();
       await expect(page.getByRole('dialog').getByText('Редактирование сотрудника')).toBeVisible();
       const dialog2 = page.getByRole('dialog');
-      // The seeded admin's phone (+79990000001) is taken by construction.
-      await dialog2.locator('input[placeholder="+79990000000"]').fill('+79990000001');
+      // The seeded admin's phone (+79990000001) is taken by construction —
+      // the national remainder is typed into the widget; the PATCH carries
+      // the assembled compact.
+      await dialog2.locator('[data-testid="staff-account-phone-input"]').fill('9990000001');
       const patch2Promise = page.waitForResponse(
         (r) => r.url().includes(`/api/v1/users/${userId}`) && r.request().method() === 'PATCH',
       );
@@ -202,7 +216,8 @@ test.describe('#348 S6 — passwordless account state', () => {
         .toContainText('Ссылка выдана, действует до', { timeout: 10_000 });
       await expect(dialog2.locator('[data-testid="issue-link-btn"]')).toHaveText('Выдать ссылку');
       // The raw link is NOT shown in the block — only the expiry status.
-      await expect(dialog2.locator('input[placeholder="+79990000000"]')).toHaveValue(phone);
+      await expect(dialog2.locator('[data-testid="staff-account-phone-input"]'))
+        .toHaveValue(groupedRu(phone.slice(2)));
       await expect(dialog2.getByTestId('link-url-field')).toHaveCount(0);
 
       // Login by the passwordless account is REFUSED — the ordinary

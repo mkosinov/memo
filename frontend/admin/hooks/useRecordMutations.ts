@@ -29,6 +29,9 @@ import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 import { resolveDefaultTariff } from '@/lib/tariff-resolver';
+// National-digit phone reduction (spec #221 §3 / #414 §Единая редукция цифр)
+// moved to its single TS home — imported here for the save-time check below.
+import { toNationalDigits } from '@/app/components/shared/phone/format';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -66,24 +69,6 @@ interface CreateRecordBase {
 export type CreateRecordInput =
   | ({ kind: 'picked'; client_id: string } & CreateRecordBase)
   | ({ kind: 'unpicked'; phone: string; name: string; client_id: null } & CreateRecordBase);
-
-/**
- * Spec #221 §3 — national-digit phone reduction, TS mirror of the backend's
- * `to_national_digits` (backend/src/domain/phone_digits.py): strip non-digits;
- * drop the leading 7/8 of an 11-digit RU number. Tolerant by design — never
- * parses, never raises; NULL/empty/no-digits → empty string. The equality
- * check at save time (§6) compares BOTH sides through this same reduction, so
- * any stored format (`+79991234567`, `8 999 123-45-67`) matches the typed one.
- */
-export function toNationalDigits(value: string | null | undefined): string {
-  if (!value) return '';
-  const digits = value.replace(/\D+/g, '');
-  if (!digits) return '';
-  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
-    return digits.slice(1);
-  }
-  return digits;
-}
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
   const queryClient = useQueryClient();

@@ -45,7 +45,7 @@ import {
   patchVisit,
   deleteVisit,
 } from '@memo/api-client';
-import { useRecordMutations, toNationalDigits } from '../hooks/useRecordMutations';
+import { useRecordMutations } from '../hooks/useRecordMutations';
 import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
 
 const mockCreateRecord = vi.mocked(createRecord);
@@ -319,33 +319,9 @@ describe('useRecordMutations', () => {
 
   // ─── GH #221 Task 7: save-time digits resolution (no duplicates, fail closed) ───
 
-  describe('toNationalDigits (spec §3 — mirror of Python to_national_digits)', () => {
-    it('strips non-digits from a formatted string', () => {
-      expect(toNationalDigits('+7 (999) 123-45-67')).toBe('9991234567');
-    });
-
-    it('drops the leading 7/8 of an 11-digit RU number', () => {
-      expect(toNationalDigits('89991234567')).toBe('9991234567');
-      expect(toNationalDigits('79991234567')).toBe('9991234567');
-      expect(toNationalDigits('+7 999 123 45 67')).toBe('9991234567');
-    });
-
-    it('keeps 10-digit strings as-is', () => {
-      expect(toNationalDigits('9991234567')).toBe('9991234567');
-    });
-
-    it('tolerates NULL/empty/no-digits → empty string', () => {
-      expect(toNationalDigits(null)).toBe('');
-      expect(toNationalDigits(undefined)).toBe('');
-      expect(toNationalDigits('')).toBe('');
-      expect(toNationalDigits('—')).toBe('');
-    });
-
-    it('does NOT drop leading 7/8 of a shorter-than-11 digit string', () => {
-      // 7 digits starting with 8 — not an 11-digit RU number, keep as-is
-      expect(toNationalDigits('8123456')).toBe('8123456');
-    });
-  });
+  // toNationalDigits reduction cases (spec §3) moved to
+  // app/components/shared/phone/__tests__/format.test.ts (GH #414 Task 1 —
+  // the function now lives in app/components/shared/phone/format.ts).
 
   describe('createRecord — unpicked save-time resolution (GH #221 Task 7)', () => {
     /** Input exactly as the mask renders a full RU number (WYSIWYG). */

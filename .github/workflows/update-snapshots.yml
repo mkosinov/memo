@@ -12,9 +12,20 @@ name: Update Snapshots (shard-rest)
 # Usage:
 #   gh workflow run update-snapshots.yml --ref feat-ci-green
 # Then download the `updated-snapshots-shard-rest` artifact and commit the PNGs.
+#
+# `mode` (default `changed`) maps to `playwright --update-snapshots=<mode>`:
+# `changed` rewrites only failing comparisons (a test passing within
+# maxDiffPixels keeps its old baseline); `all` rewrites every baseline
+# unconditionally — the only way to refresh a baseline of a green test.
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Snapshot update mode: changed (only failing) | all (rewrite every baseline)"
+        type: choice
+        options: [changed, all]
+        default: changed
 
 jobs:
   update-snapshots:
@@ -115,7 +126,7 @@ jobs:
           sleep 10
 
       - name: Regenerate shard-rest snapshots
-        run: pnpm exec playwright test --project=shard-rest --update-snapshots --workers=1
+        run: pnpm exec playwright test --project=shard-rest --update-snapshots=${{ inputs.mode }} --workers=1
         working-directory: frontend/admin
         env:
           SHARD_ID: 2

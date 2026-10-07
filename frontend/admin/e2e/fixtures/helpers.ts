@@ -686,6 +686,65 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
   return { bodyDeletes, stop: () => page.off('request', onRequest) };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GH #417 — undo window under a controlled page clock. Replaces literal
+// `waitForTimeout(5_500)` waits: the window stops ticking while the test
+// works inside it, then expires via one instant rewind instead of 5.5s of
+// real sleep.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run an undo-window interaction under a paused page clock (GH #417).
+ *
+ * Mechanics: pause the page clock at the real "now" → run `fn` →
+ * fast-forward `opts.advanceMs` in one operation → real Node-side drain of
+ * `opts.drainMs` (request events for rewound timers are async and not
+ * governed by the clock) → `clock.resume()`.
+ *
+ * Contract:
+ * - Call BEFORE the action that creates the window (the «×» click). Timers
+ *   scheduled BEFORE the pause are real and are NOT governed by the rewind.
+ * - Inside `fn` — window work ONLY: the «×» click, toast/row-hidden checks,
+ *   and in undo scenarios the «Отменить» click. Nothing that depends on
+ *   real time (debounced input, waiting for SSE events) — the clock stands.
+ * - After `fn` returns, verify commit/no-commit via the usual channels
+ *   (commitDeleteWait for positives, a short real buffer for negatives) —
+ *   the drain only lets rewound events reach Node-side listeners.
+ * - Returns `fn`'s result. If `fn` throws, the rewind+drain+resume still
+ *   run (try/finally — the clock is never left paused) and the error is
+ *   re-thrown as-is.
+ * - Calling `withUndoWindow` again later in the same test is legal (e.g.
+ *   the unified-rows scenario 19 pair of windows): after `resume()` the
+ *   clock can be paused anew.
+ *
+ * @param page Playwright page
+ * @param fn window body: `(page) => Promise<T>`
+ * @param opts.advanceMs rewind span, default 5_500 (the deferred-delete
+ *   window; interval ring callbacks fire at most once per rewind)
+ * @param opts.drainMs real Node-side wait after the rewind, default 500
+ */
+export async function withUndoWindow<T>(
+  page: Page,
+  fn: (page: Page) => Promise<T>,
+  opts?: { advanceMs?: number; drainMs?: number },
+): Promise<T> {
+  const advanceMs = opts?.advanceMs ?? 5_500;
+  const drainMs = opts?.drainMs ?? 500;
+  // pauseAt = install fakes + set time + pause in one operation; a bare
+  // install() would NOT stop time — the window would keep ticking.
+  await page.clock.pauseAt(new Date());
+  try {
+    return await fn(page);
+  } finally {
+    // Expires the window instantly (commit timer + toast auto-hide fire
+    // together), then lets the rewound events surface on the Node side
+    // before real time flows again. Runs even if fn threw.
+    await page.clock.fastForward(advanceMs);
+    await new Promise((resolve) => setTimeout(resolve, drainMs));
+    await page.clock.resume();
+  }
+}
+
 
 /**
  * Wait for photos page to load with table.

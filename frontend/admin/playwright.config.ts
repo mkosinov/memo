@@ -50,6 +50,14 @@ const AUTH_STORAGE_STATE = resolveAuthStatePath();
  * Browsers are pre-installed in the Docker image.
  * Do NOT run `npx playwright install` in worktrees.
  */
+// #278: pixel comparison is CI-only. The container's font stack (Debian 12)
+// differs from the runner's (ubuntu-latest): every text drifts ~1% pixels,
+// so local visual runs are pure environment noise (2026-10-07 measurement:
+// 46/71 failed on a CI-green main commit). E2E_VISUAL=1 opts back in for
+// deliberate local investigation.
+const RUN_VISUAL = process.env.CI === 'true' || process.env.E2E_VISUAL === '1';
+const VISUAL_SPECS = /(^|\/)(visual-regression|week-view|wave6-status-snapshots)\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: require.resolve('./e2e/globalSetup'),
@@ -58,6 +66,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: 'list',
+  // #278: collect visual specs only on CI (or the E2E_VISUAL investigation
+  // opt-in) — see the RUN_VISUAL note above the config.
+  testIgnore: RUN_VISUAL ? [] : [VISUAL_SPECS],
   // Generous timeouts — 2 Next.js dev servers on 4 cores may still be slow
   // on first compilation. 60s test timeout + 60s navigation gives headroom.
   timeout: 60_000,

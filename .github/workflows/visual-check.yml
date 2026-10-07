@@ -1,0 +1,148 @@
+name: Visual Check (manual, spec #278)
+
+# Manually-triggered NARROW visual-only run: the three screenshot e2e spec
+# files of the `shard-rest` project, check-only. Complements the existing
+# manual full-suite dispatch (`gh workflow run test.yml --ref <branch>`)
+# with a ~10-minute pixel-verdict channel.
+#
+# Mirrors `update-snapshots.yml` (same ubuntu-latest runner that records
+# the baselines, same Node/pnpm/uv versions, same shard-2 stack:
+# SHARD_ID=2, frontend :3003, backend :8002) with two deliberate diffs:
+#   - NO `--update-snapshots` flag: the explicit `=none` mode guarantees
+#     this run never writes baselines (Playwright's default `missing`
+#     mode would silently create missing ones).
+#   - On failure it uploads the pixel diffs (test-results) as an artifact.
+#
+# Dispatch limits (#278 review): GitHub only discovers workflow_dispatch
+# workflows once their file is on the default branch, and the selected
+# `--ref` must contain the file — i.e. branches forked after this lands.
+#
+# Usage:
+#   gh workflow run visual-check.yml --ref <branch>
+
+on:
+  workflow_dispatch:
+
+jobs:
+  visual-check:
+    runs-on: ubuntu-latest
+
+    env:
+      SHARD_ID: 2
+      SHARD_PORT: 3003
+      BACKEND_PORT: 8002
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev
+        working-directory: backend
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend/admin
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/admin
+
+      # CI guard (mirror of #209 in update-snapshots.yml): fail EARLY if the
+      # three named spec files resolve to zero tests (project-name typo,
+      # file renames, testMatch/testIgnore regression) — before the stack
+      # starts. Catches filter breakage, NOT list drift between the config
+      # regex and this invocation (a new visual file not listed here is
+      # caught by its local redness instead — see spec #278 "Издержки").
+      - name: Spec-file guard (visual specs)
+        run: |
+          list_output=$(mktemp)
+          if ! pnpm exec playwright test --project=shard-rest \
+              visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts \
+              --list > "$list_output"; then
+            echo "ERROR: playwright --list failed for the visual spec set."
+            rm -f "$list_output"
+            exit 1
+          fi
+          spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
+          rm -f "$list_output"
+          if [ "$spec_count" -eq 0 ]; then
+            echo "ERROR: the visual spec set resolved 0 tests."
+            echo "Likely cause: file rename or testIgnore/testMatch regression"
+            echo "(frontend/admin/playwright.config.ts)."
+            exit 1
+          fi
+          echo "Spec-file guard OK: ${spec_count} visual tests resolved."
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: 2
+          SHARD_PORT: 3003
+          BACKEND_PORT: 8002
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
+          BACKEND_URL: http://127.0.0.1:8002
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
+
+      - name: Start E2E stack (shard-rest)
+        run: |
+          SHARD_ID=2 \
+          SHARD_PORT=3003 \
+          BACKEND_PORT=8002 \
+          TEST_DB_PATH=backend/test_memo_shard2.db \
+          BACKEND_URL=http://127.0.0.1:8002 \
+          NEXT_PUBLIC_API_URL=http://127.0.0.1:8002 \
+            bash scripts/e2e-shard-start.sh &
+
+          # Wait for frontend to be ready (up to 120s)
+          echo "Waiting for frontend on :3003..."
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3003/" --max-time 30 2>/dev/null || echo "000")
+            if echo "$code" | grep -qE "^(2|3)"; then
+              echo "Frontend ready on :3003 (HTTP $code)"
+              break
+            fi
+            if [ "$i" -eq 120 ]; then
+              echo "ERROR: Frontend failed to start on :3003"
+              exit 1
+            fi
+            sleep 1
+          done
+          # Buffer for Next.js compilation to stabilize
+          sleep 10
+
+      # Check-only run: `--update-snapshots=none` guarantees no baseline
+      # writes (default "missing" mode would create absent baselines).
+      - name: Run visual specs (check-only)
+        run: pnpm exec playwright test --project=shard-rest visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts --workers=1 --update-snapshots=none
+        working-directory: frontend/admin
+        env:
+          SHARD_ID: 2
+          SHARD_PORT: 3003
+          BACKEND_PORT: 8002
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
+          BACKEND_URL: http://127.0.0.1:8002
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
+
+      # Diffs land here only on pixel failures; a stack/guard failure yields
+      # no artifact by design (its cause is in the log above).
+      - name: Upload pixel diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-check-diffs
+          path: frontend/admin/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore

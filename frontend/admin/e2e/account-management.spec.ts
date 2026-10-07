@@ -230,7 +230,8 @@ test.describe('#348 S6 — passwordless account state', () => {
       });
       const empPage = await employeeCtx.newPage();
       await empPage.goto('/login');
-      await empPage.locator('#login-phone').fill(phone);
+      // GH #414: RU remainder — compact on submit equals the seeded phone.
+      await empPage.locator('#login-phone').fill(phone.replace('+7', ''));
       await empPage.locator('#login-password').fill('any-guess-will-fail');
       await empPage.getByRole('button', { name: 'Войти' }).click();
       await expect(empPage.getByTestId('login-error')).toContainText('Неверный телефон или пароль', {

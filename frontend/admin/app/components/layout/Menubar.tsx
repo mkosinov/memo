@@ -26,7 +26,7 @@ import { UserMenu } from './UserMenu';
 // ─── Icons ─────────────────────────────────────────────────────────────────
 // GH #143: hand-written SVGs replaced by lucide-react (D3–D6). Sizing contract
 // for sidebar icons: size={18} strokeWidth={2}; inline chevrons carry their own
-// size (12 for the mini-calendar arrows, 16 for the sidebar collapse toggle).
+// size (12 for the mini-calendar arrows, 12 for the sidebar collapse edge-tab).
 
 /** Thin wrapper over lucide ChevronRight — rotates 90° when the section is expanded. */
 function ChevronIcon({ className, expanded }: { className?: string; expanded: boolean }) {
@@ -652,22 +652,6 @@ export function Menubar() {
             avatar-only circular trigger (was hidden entirely before). */}
         {status === 'authenticated' && <UserMenu collapsed={sidebarCollapsed} />}
 
-        {/* Collapse — the theme slider moved into the UserMenu popup (§5.1) */}
-        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-end'} px-3 py-2`}>
-          <button
-            onClick={toggleSidebar}
-            className="flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:bg-white/10 hover:text-white/90 transition-colors"
-            aria-label={sidebarCollapsed ? 'Развернуть sidebar' : 'Свернуть sidebar'}
-            title={sidebarCollapsed ? 'Развернуть' : 'Свернуть'}
-          >
-            <ChevronLeft
-              size={16}
-              strokeWidth={2}
-              className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}
-            />
-          </button>
-        </div>
-
         {/* Version at bottom */}
         {!sidebarCollapsed && (
           <div className="px-3 pb-2">
@@ -675,6 +659,25 @@ export function Menubar() {
           </div>
         )}
       </div>
+
+      {/* Collapse — edge tab outside the panel (user decision 2026-10-07,
+          playground fast-track): a small tab hugging the right edge, vertically
+          centered. The aside is `fixed` and has no overflow clipping, so the
+          tab may protrude beyond the panel edge. aria-labels preserved —
+          Menubar tests and e2e (cabinet/navigation specs) click by name. */}
+      <button
+        onClick={toggleSidebar}
+        className="absolute left-full top-1/2 -translate-y-1/2 flex h-12 w-4 items-center justify-center rounded-r-lg border border-l-0 border-white/10 text-white/60 hover:bg-white/5 hover:text-white/90 transition-colors"
+        style={{ backgroundColor: 'var(--sidebar-bg)' }}
+        aria-label={sidebarCollapsed ? 'Развернуть sidebar' : 'Свернуть sidebar'}
+        title={sidebarCollapsed ? 'Развернуть' : 'Свернуть'}
+      >
+        <ChevronLeft
+          size={12}
+          strokeWidth={2}
+          className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}
+        />
+      </button>
     </aside>
   );
 }

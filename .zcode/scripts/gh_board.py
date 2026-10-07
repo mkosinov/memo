@@ -6,7 +6,7 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
   python3 .zcode/scripts/gh_board.py host N                     — read the card's host field (watcher tiebreak token)
   python3 .zcode/scripts/gh_board.py host N <label>|-           — set/clear the host label; on a Ready card a host label is the sticky progress marker (crash-released session lives on that machine, other hosts skip it, cleared only by the user accepting the progress loss)
-  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry (host label preserved — sticky progress, user-release only); PR (G7) with a dead owner → wake-first, then gate=blocked
+  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry (host label preserved — sticky progress, user-release only); PR (G7) with a dead owner → wake-first, then gate=blocked; mirror sweep: an open issue without a card → card (Backlog; containers — issues with sub-issues — get Hold, never Backlog), an open issue's card without a Status value → Backlog/Hold by the same rule
   python3 .zcode/scripts/gh_board.py orphans [host]             — token for auto-impl watcher: "impl N"/"pr N" lines (nudge-due orphan cards) | NONE
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
@@ -602,10 +602,118 @@ def _closing_pr(number: int) -> tuple[int, str] | None:
     return None
 
 
+def _open_issues() -> dict[int, dict]:
+    """Open repo issues → number → {number, title, id} (id = the GraphQL node
+    id addProjectV2ItemById needs). One cheap REST call; empty dict on
+    failure (the mirror sweep is fail-open)."""
+    r = subprocess.run(
+        ["gh", "issue", "list", "--state", "open", "--limit", "500",
+         "--repo", f"{OWNER}/{REPO}", "--json", "number,title,id"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"warn: mirror sweep skipped (issue list failed: {r.stderr.strip()})", file=sys.stderr)
+        return {}
+    return {i["number"]: i for i in json.loads(r.stdout or "[]")}
+
+
+def _sub_issue_totals(numbers: list[int]) -> dict[int, int]:
+    """Issue number → count of sub-issues (any state — total never shrinks,
+    so a direction stays a container even with all its sub-issues done).
+    One batched GraphQL query per 100 issues (alias-per-issue). Raises
+    SystemExit on failure — the caller decides fail-open."""
+    totals: dict[int, int] = {}
+    for chunk in (numbers[i:i + 100] for i in range(0, len(numbers), 100)):
+        parts = ", ".join(
+            f'i{n}: issue(number: {n}) {{ subIssuesSummary {{ total }} }}'
+            for n in chunk
+        )
+        d = gql(f'query {{ repository(owner: "{OWNER}", name: "{REPO}") {{ {parts} }} }}')
+        for alias, node in d["repository"].items():
+            if node:  # None = the issue vanished between list and query — skip
+                totals[int(alias[1:])] = node["subIssuesSummary"]["total"]
+    return totals
+
+
+def _mirror_sweep(items: list[dict], dry_run: bool):
+    """Repair 3 in cmd_reconcile — the board mirrors ALL open issues
+    (2026-10-07: 47 open issues had silently accumulated off-board again,
+    the 2026-09-14 incident recurring). Host-independent, matched by issue
+    number. Leaves (issues with no sub-issues): no card → card with
+    Status=Backlog; a card with no Status value → Backlog (the native
+    "Auto-add to project" workflow adds cards without field values — this
+    closes that gap). Containers (issues WITH sub-issues, e.g. the #279
+    direction): the card belongs in Hold, never Backlog — a Backlog
+    container is pickable work for the design pipeline (user decision
+    2026-10-07: Hold is where containers live; «эпик ≠ Backlog», 2026-09-15).
+    Container drift kinds: no card → card+Hold, empty status → Hold,
+    Backlog → Hold (covers "container created before its first sub-issue" —
+    the card first landed in Backlog; totals never shrink, so this repair
+    is one-way). Any other status an agent or the user has set is never
+    overwritten; closed issues are never carded or stamped. On a failed
+    sub-issue totals query the sweep skips the cycle — a container must
+    never be guessed into Backlog."""
+    open_issues = _open_issues()
+    if not open_issues:
+        return
+    backlog_id = _status_opts.get("Backlog")
+    if not backlog_id:
+        print("warn: mirror sweep skipped (no 'Backlog' status on the board)", file=sys.stderr)
+        return
+    try:
+        totals = _sub_issue_totals(sorted(open_issues))
+    except SystemExit as e:
+        print(f"warn: mirror sweep skipped this cycle (sub-issue totals failed: {e})", file=sys.stderr)
+        return
+    hold_id = _status_opts.get("Hold")
+    if not hold_id and any(t > 0 for t in totals.values()):
+        print("warn: mirror sweep: no 'Hold' status on the board — container handling skipped", file=sys.stderr)
+    carded = {it["number"]: it for it in items if it["number"] in open_issues}
+
+    def target(n: int) -> tuple[str, str] | None:
+        """(desc, status_name) for one open issue's drift, or None."""
+        it = carded.get(n)
+        if totals.get(n, 0) > 0:  # container
+            if not hold_id:
+                return None
+            if it is None:
+                return f"#{n}: container issue without a card → added with Status=Hold", "Hold"
+            if not it["status"]:
+                return f"#{n}: container card without Status → Hold", "Hold"
+            if it["status"] == "Backlog":
+                return f"#{n}: container card in Backlog → Hold (containers are not pickable work)", "Hold"
+            return None
+        if it is None:
+            return f"#{n}: open issue without a card → added with Status=Backlog", "Backlog"
+        if not it["status"]:
+            return f"#{n}: card without Status → Backlog", "Backlog"
+        return None
+
+    plan: list[tuple[int, str, str]] = []
+    for n in sorted(open_issues):
+        t = target(n)
+        if t:
+            plan.append((n, t[0], t[1]))
+    for n, desc, status_name in plan:
+        if dry_run:
+            print(f"would: {desc}")
+            continue
+        opt_id = hold_id if status_name == "Hold" else backlog_id
+        it = carded.get(n)
+        if it is None:
+            d = gql(f'mutation {{ addProjectV2ItemById(input: {{ projectId: "{PROJECT_ID}", contentId: "{open_issues[n]["id"]}" }}) {{ item {{ id }} }} }}')
+            set_field(d["addProjectV2ItemById"]["item"]["id"], _status_field_id, opt_id)
+        else:
+            set_field(it["item_id"], _status_field_id, opt_id)
+        print(desc)
+    if plan and not dry_run:
+        print(f"mirror sweep: {len(plan)} repair(s) applied")
+
+
 def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
     """Watcher-side sweep of stale cards (top of every auto_impl_watch.sh
-    loop). Two repairs, both from the 2026-09-22 incident class — a closed or
-    dead card left sitting in In IMPL:
+    loop). Three repairs. Repairs 1–2 come from the 2026-09-22 incident
+    class — a closed or dead card left sitting in In IMPL:
       1. issue CLOSED while the card still sits in In IMPL / PR (G7) — the
          finishing flip was lost (e.g. a network flake at the very end of a
          marathon run): flip to In-main (stateReason COMPLETED) or
@@ -628,14 +736,25 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
          auto-retry) and the user's in-session answer clears the gate,
          returning the card to the pipeline; the log entry then says the
          card awaits the user, not "auto-retry".
+      3. Mirror sweep (2026-10-07, the 47-off-board-issues incident): the
+         board mirrors ALL open issues — an OPEN issue with no card is added
+         with Status=Backlog (containers — issues with sub-issues — go to
+         Hold instead: user decision 2026-10-07, a Backlog container is
+         pickable work for the design pipeline), and an OPEN issue's card
+         with no Status value is stamped by the same rule (the native
+         "Auto-add to project" workflow adds cards without field values).
+         A status an agent has already set is never overwritten; closed
+         issues are never carded. Host-independent.
     Liveness = session-store freshness (the opencode run CLI is a mere attach
     client and dies while the session keeps working — run processes only fill
     the "no session rows yet" window); run this from the container, where the
-    store lives; on a host run (no store) repair 2 is skipped (repair 1 still
-    works)."""
+    store lives; on a host run (no store) repair 2 is skipped (repairs 1 and
+    3 still work)."""
     host = _resolve_host(host_arg)
     load_status_field()
-    for it in items_with_fields():
+    items = items_with_fields()
+    _mirror_sweep(items, dry_run)
+    for it in items:
         status = (it["status"] or "").lower()
         if not (status.startswith("in impl") or status.startswith("pr")):
             continue

@@ -317,7 +317,7 @@ Rules:
 
 ## GitHub Project Board
 
-Invoke `github-board` skill before moving any issue status. ALL board interaction (reads and writes) goes through `gh_board.py` — never hand-written `gh api graphql`. Status-option changes (new/renamed statuses) are user-only in the GitHub web UI: `updateProjectV2Field` replaces the whole option list and detaches card values (2026-09-09: 65/69 cards lost Status) — never run it.
+Invoke `github-board` skill before moving any issue status or creating an issue. ALL board interaction (reads and writes) goes through `gh_board.py` — never hand-written `gh api graphql`. Every new issue gets its board card in the same breath — `python3 .opencode/scripts/gh_board.py status N "Backlog"` right after `gh issue create` (this includes follow-up candidates filed at DONE/wrap-up; containers — issues with sub-issues — get Hold instead; the reconcile mirror sweep is the safety net, not the license to skip). Status-option changes (new/renamed statuses) are user-only in the GitHub web UI: `updateProjectV2Field` replaces the whole option list and detaches card values (2026-09-09: 65/69 cards lost Status) — never run it.
 
 ## Conflict Principle (hard rule)
 

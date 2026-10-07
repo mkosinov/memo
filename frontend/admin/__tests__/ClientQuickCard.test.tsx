@@ -10,6 +10,7 @@ import type {
   VisitResponse,
 } from '@memo/api-client';
 import { mockClient, mockLocationResponse } from './helpers/mockData';
+import { formatPhoneDisplay } from '../app/components/shared/phone/format';
 
 // GH #213 §6.5: NO RecordsContext mock — the card renders without any
 // RecordsProvider. `useRecords()` throws outside its provider, so a stray
@@ -189,7 +190,8 @@ describe('records-folder ClientQuickCard — re-homed off RecordsContext (#213)'
     await waitFor(() => {
       expect(screen.getByText(/Анна Иванова/)).toBeInTheDocument();
     });
-    expect(screen.getByText('+7 (900) 123-45-67')).toBeInTheDocument();
+    // GH #414: the stored '+7 (900) 123-45-67' renders grouped.
+    expect(screen.getByText('+7 900 123 45 67')).toBeInTheDocument();
 
     expect(vi.mocked(getClientById)).toHaveBeenCalledWith('c1');
   });
@@ -262,4 +264,26 @@ describe('records-folder ClientQuickCard — re-homed off RecordsContext (#213)'
     });
     expect(screen.getAllByText(/16:30 · Альпика/)).toHaveLength(2);
   });
+
+  // ─── Phone display through the shared formatter (GH #414 Task 9) ───────
+  // Legacy seed-row spellings → the grouped display (spec §Форматирование,
+  // показ); the second pin locks the header line to `formatPhoneDisplay` —
+  // the automatable seed-row eyeball check.
+  it.each([
+    ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
+    ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
+    ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
+    ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
+  ] as Array<[string, string]>)(
+    'header renders stored %s as %s (formatPhoneDisplay)',
+    async (stored, expected) => {
+      vi.mocked(getClientById).mockResolvedValue({ ...mockClient, phone: stored });
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByText(expected)).toBeInTheDocument();
+      });
+      expect(expected).toBe(formatPhoneDisplay(stored));
+    },
+  );
 });

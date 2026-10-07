@@ -11,6 +11,7 @@ import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import { safeStatus } from '@/app/lib/status-utils';
 import { parseLocalISO, formatTime } from '@/lib/datetime';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -95,7 +96,10 @@ export function ClientQuickCard({ clientId, onClose }: ClientQuickCardProps) {
                     <h1 className="text-xl font-semibold text-white flex items-center gap-3">
                       👤 {client.name}
                     </h1>
-                    <div className="text-sm mt-1 text-white/70">{client.phone}</div>
+                    {/* GH #414 (spec §Форматирование, показ): grouped display
+                        via the shared formatter; legacy garbage passes
+                        through verbatim. */}
+                    <div className="text-sm mt-1 text-white/70">{formatPhoneDisplay(client.phone)}</div>
                   </div>
                   <div className="grid grid-cols-3 divide-x" style={{ borderColor: 'var(--line)' }}>
                     <div className="px-6 py-4 text-center">

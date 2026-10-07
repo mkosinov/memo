@@ -18,6 +18,7 @@ import { Modal } from '@/app/components/shared/modal/Modal';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
 import type { ClientWithStats, DependencyNode } from '@memo/api-client';
 import { parseApiError } from '@/app/lib/api/parseApiError';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 
 interface ClientCardModalProps {
   client: ClientWithStats | null;
@@ -121,7 +122,10 @@ export function ClientCardModal({ client, isOpen, onClose, onClientCreated, mode
   if (!isOpen) return null;
 
   const clientName = client?.name ?? 'Дорогой гость';
-  const clientPhone = client?.phone || 'Не указан';
+  // GH #414 (spec §Форматирование, показ): the left-panel header phone goes
+  // through the shared display formatter (the info-tab field is the PhoneField
+  // widget — the card's other phone surface); empty → «Не указан» as before.
+  const clientPhone = formatPhoneDisplay(client?.phone) || 'Не указан';
 
   return (
     <div className="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center" data-testid="client-card-modal">

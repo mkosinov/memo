@@ -592,12 +592,14 @@ describe('ActivityDetailsModal — per-tab client resolution (#140 US-2)', () =>
 
     // Default active tab is 'settings' — no record tab activated, yet both
     // clients resolve (US-2 core: beyond-first-20 clients always render).
+    // GH #414 (spec §Форматирование, показ): the label phones render grouped
+    // via formatPhoneDisplay (ClientLabelById), not the raw stored strings.
     const tab1 = screen.getByTestId('tab-client-r1');
     const tab2 = screen.getByTestId('tab-client-r2');
     expect(tab1.textContent).toContain('Анна Иванова');
-    expect(tab1.textContent).toContain('+7 (900) 123-45-67');
+    expect(tab1.textContent).toContain('+7 900 123 45 67');
     expect(tab2.textContent).toContain('Борис Петров');
-    expect(tab2.textContent).toContain('+7 (900) 987-65-43');
+    expect(tab2.textContent).toContain('+7 900 987 65 43');
   });
 
   it('resolves each tab client via useClient on the shared per-id key', () => {

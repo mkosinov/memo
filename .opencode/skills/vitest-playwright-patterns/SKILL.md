@@ -352,7 +352,7 @@ DB_PATH resolves as: `process.env.TEST_DB_PATH || 'backend/test_memo.db'`
 | 6 | `page.waitForTimeout()` for async sync | Use `expect(locator).toBeVisible({ timeout })` |
 | 7 | Mocking transitive dependencies in unit tests | Mock only direct `@/contexts/*` dependencies |
 | 8 | Using `renderWithProviders` when context mocks suffice | Use `renderWithProviders` only when testing real provider interactions |
-| 9 | Treating a local screenshot e2e pixel-diff as a regression | Check CI first: `gh run list --branch main` and `gh run view <id>`. If the `e2e-tests` job in `.github/workflows/test.yml` is green on both `main` and the PR, the diff is font/OS rendering drift — baselines are recorded in CI via `.github/workflows/update-snapshots.yml`. Don't edit the code and don't re-record baselines locally. See `docs/tests_workflow.md` → "Known caveats" (precedent: 2026-07-29, IMPL #182 — 6 local failures, CI green). |
+| 9 | Treating a local screenshot e2e pixel-diff as a regression | Local runs do not collect visual specs at all (#278): `playwright.config.ts` skips them outside CI, so a red "visual" local run only happens under the deliberate `E2E_VISUAL=1` opt-in (`pnpm run test:e2e:visual`) — and there diffs are expected font-stack drift (container Debian ≠ runner ubuntu), not regressions. CI is the authority (`shard-rest` in `test.yml`); a narrow manual verdict on a branch: `gh workflow run visual-check.yml --ref <branch>`. Baselines are recorded in CI via `update-snapshots.yml` only. See `docs/tests_workflow.md` → "Known caveats" (#278 measurement: 46/71 local failures on a CI-green commit). |
 
 ---
 

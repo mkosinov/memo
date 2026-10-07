@@ -226,37 +226,44 @@ In CI:
 
 ## Known caveats
 
-### Screenshot e2e can pixel-diff locally while CI is green
+### Screenshot e2e: pixel comparison runs in CI only (#278)
 
-Screenshot-based e2e specs (`visual-regression.spec.ts`,
-`wave6-status-snapshots.spec.ts`, the `toHaveScreenshot` part of
-`visual-compliance-checks.spec.ts`, and the `week-view.spec.ts` snapshots)
-use PNG baselines that were recorded **inside the CI runner** via
+Screenshot e2e (the visual specs — `visual-regression.spec.ts`,
+`week-view.spec.ts`, `wave6-status-snapshots.spec.ts`) compares page
+snapshots against PNG baselines recorded **inside the CI runner** via
 [`.github/workflows/update-snapshots.yml`](../.github/workflows/update-snapshots.yml).
-This is intentional: rendering fonts/system UI depends on the host OS, and
-recording baselines in CI keeps them consistent across machines.
+Rendering depends on the distro's font stack, and the local container
+(Debian 12: fontconfig 2.14 / freetype 2.12) differs from the runner
+(ubuntu-latest: fontconfig 2.15 / freetype 2.13) even though the font
+packages themselves already match — a 2026-10-07 measurement on a
+CI-green `main` commit showed **46 of 71 visual checks failing locally**
+with ~1% pixel drift on every text and shifted label widths. Local pixel
+comparison is therefore pure environment noise, and it is disabled:
 
-Practical implications:
-
-- **A local pixel-diff is not a code regression.** It is environment drift
-  (different font metrics / OS subpixel rendering between your machine and
-  the CI runner). Do not "fix" the code or re-record baselines locally to
-  silence it.
-- **CI is the source of truth for screenshot e2e.** If the `e2e-tests` jobs
-  in `.github/workflows/test.yml` are green on `main` and on the PR, the
-  visual specs are passing — full stop. Investigate other failure modes
-  (logic, layout selector, etc.) before assuming a visual regression.
+- **Local runs do not collect visual specs at all.** `playwright.config.ts`
+  skips the three visual spec files unless `CI=true` (GitHub) or
+  `E2E_VISUAL=1` is set. Naming an ignored spec directly returns
+  Playwright's "No tests found" — that is expected; set `E2E_VISUAL=1`.
+- **`E2E_VISUAL=1` (or `pnpm run test:e2e:visual`) opts back in for
+  investigation** — to eyeball diffs and tell font drift from a genuinely
+  broken layout. Red local visual runs under the opt-in are expected
+  environment noise, not regressions.
+- **CI is the source of truth for screenshot e2e.** The `shard-rest` job of
+  `.github/workflows/test.yml` runs all visual specs on every PR.
+- **Manual visual verdict on a branch:** run the narrow check-only workflow
+  (available after its file lands on `main`, on branches that contain it):
+  `gh workflow run visual-check.yml --ref <branch>` (~10 min, diffs
+  artifact on failure). The full suite has always been dispatchable via
+  `gh workflow run test.yml --ref <branch>`.
 - **Re-recording baselines is a CI-only operation.** Always run
-  `.github/workflows/update-snapshots.yml` to refresh snapshots; never run
-  `pnpm run test:e2e:update` locally and commit the result. Local baselines
-  will drift again on the next CI run.
-- **Worktree runs amplify this.** Tests run in a fresh git worktree on a
-  different host can show extra diffs; again, defer to CI.
+  `.github/workflows/update-snapshots.yml`; never commit locally recorded
+  PNGs. Locally `test:e2e:update` can no longer touch visual baselines at
+  all (the specs are not collected).
 
-Precedent: 2026-07-29 (IMPL #182) — 6 visual e2e failures appeared in a
-local worktree run while the same commits' `e2e-tests` CI jobs on `main`
-and the PR were green. Root cause was classified as environment drift,
-not a code regression.
+Precedent: 2026-07-29 (IMPL #182) — 6 visual e2e failures in a local
+worktree run while CI was green, classified as environment drift (before
+the local skip existed). 2026-10-07 (#278) — the measurement above led to
+the CI-only policy.
 
 ## See also
 

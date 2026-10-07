@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:update": "playwright test --update-snapshots",
+    "test:e2e:visual": "E2E_VISUAL=1 playwright test visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts",
     "test:all": "vitest run && playwright test",
     "type-check": "tsc --noEmit"
   },

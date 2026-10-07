@@ -30,6 +30,7 @@ import {
   resolveRecordDate,
   expectDeepLinkChip,
   expectClientSearchEmpty,
+  withUndoWindow,
 } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
@@ -220,35 +221,38 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       const targetTestId = await targetRow.getAttribute('data-testid');
       const visitId = targetTestId!.replace('visit-row-', '');
 
-      await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      // 3. The undo window under the paused page clock (#417): the 5s
+      //    commit window is expired by the wrapper's instant rewind, not by
+      //    a real 5.5s sleep. The DELETE tracker above was registered
+      //    before the «×» click, as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
 
-      // Toast appears
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // Row disappeared (optimistic) — 1s budget (#291: fails fast on an
+        // empty run instead of burning 3s)
+        await expect(
+          page.locator(`[data-testid="visit-row-${visitId}"]`),
+        ).not.toBeVisible({ timeout: 1_000 });
 
-      // Row disappeared (optimistic)
+        // Toast appears
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+
+        // 4. Click "Отменить" in the toast (the only button it carries)
+        await page.locator('button:has-text("Отменить")').click();
+      });
+
+      // 5. ASSERT — row is back (bare expect → default 10s budget: broken
+      //    undo is red under any budget, the wider one only tolerates slow
+      //    re-render — #291)
       await expect(
         page.locator(`[data-testid="visit-row-${visitId}"]`),
-      ).not.toBeVisible({ timeout: 3_000 });
+      ).toBeVisible();
 
-      // 3. ASSERT — NO DELETE request fired yet (deferred)
-      expect(deleteRequests).toHaveLength(0);
-
-      // 4. Click "Отменить" in the toast
-      const undoBtn = page.locator('button:has-text("Отменить")');
-      await expect(undoBtn).toBeVisible({ timeout: 3_000 });
-      await undoBtn.click();
-
-      // 5. ASSERT — row is back
-      await expect(
-        page.locator(`[data-testid="visit-row-${visitId}"]`),
-      ).toBeVisible({ timeout: 3_000 });
-
-      // 6. ASSERT — still no DELETE was sent
-      expect(deleteRequests).toHaveLength(0);
-
-      // Wait beyond the 5s timer to confirm undo really cancelled the DELETE
-      await page.waitForTimeout(5_500);
+      // 6. ASSERT — no DELETE was ever sent. The window expired via the
+      //    rewind and the drainMs buffer already elapsed inside the wrapper,
+      //    so a commit timer that survived the undo would have surfaced by
+      //    now (#417 step 5, negative-case sync).
       expect(deleteRequests).toHaveLength(0);
     } finally {
       await cleanupRecord(request, record.id);

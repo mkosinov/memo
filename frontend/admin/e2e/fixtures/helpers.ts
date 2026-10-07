@@ -709,7 +709,12 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
  *   real time (debounced input, waiting for SSE events) — the clock stands.
  * - After `fn` returns, verify commit/no-commit via the usual channels
  *   (commitDeleteWait for positives, a short real buffer for negatives) —
- *   the drain only lets rewound events reach Node-side listeners.
+ *   the drain only lets rewound events reach Node-side listeners. BUT
+ *   register every response waiter / request tracker (commitDeleteWait,
+ *   page.waitForResponse, page.on('request')) BEFORE the «×» click —
+ *   inside `fn` ahead of it, or before calling withUndoWindow — NEVER
+ *   after the wrapper returns: a response that already arrived during
+ *   the drain is invisible to a waiter registered later.
  * - Returns `fn`'s result. If `fn` throws, the rewind+drain+resume still
  *   run (try/finally — the clock is never left paused) and the error is
  *   re-thrown as-is.

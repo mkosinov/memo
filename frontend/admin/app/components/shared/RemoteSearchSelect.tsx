@@ -33,12 +33,21 @@ export interface RemoteSearchSelectProps<
    *  Runs once per keystroke; the formatted value is what canSearch/buildParams
    *  and the debounced search see. Defaults to identity. */
   formatInput?: (raw: string) => string;
+  /** Derives the RENDERED value from the committed query without touching
+   *  the state — e.g. re-grouping the typed digits under a newly selected
+   *  country the moment the consumer's country state changes (GH #414).
+   *  Receives what formatInput produced; canSearch/buildParams and
+   *  onInputValueChange keep seeing the committed query. Defaults to
+   *  identity. */
+  displayQuery?: (query: string) => string;
   /** Renders a dropdown/selected label for an item; defaults to
    *  `${displayField} — ${subtitleField}`. */
   getDisplayLabel?: (item: SearchItem) => string;
   /** Lifts the committed input value (post-formatInput) to the consumer on
    *  every change, INCLUDING pick (display label) and ×-clear ('') — it
-   *  always mirrors what the input shows (GH #221 WYSIWYG). */
+   *  always mirrors the committed query (GH #221 WYSIWYG). When displayQuery
+   *  is set, the RENDERED value may group differently — the lift stays the
+   *  committed one (GH #414). */
   onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
@@ -126,6 +135,7 @@ export default function RemoteSearchSelect<
   canSearch,
   buildParams,
   formatInput,
+  displayQuery,
   getDisplayLabel,
   onInputValueChange,
   inputTestId,
@@ -218,9 +228,12 @@ export default function RemoteSearchSelect<
   }, [results.length, selectedLabel]);
 
   // Shared between both field layouts so they can never drift apart.
+  // The rendered query runs through displayQuery (GH #414) — a pure
+  // render-time derivation; the committed `query` state is untouched, so
+  // the search gates and lifts keep seeing what formatInput produced.
   const inputProps = {
     type: 'text',
-    value: selectedLabel || query,
+    value: selectedLabel || (displayQuery ? displayQuery(query) : query),
     onChange: handleInputChange,
     onFocus: handleFocus,
     placeholder: selectedLabel ? '' : placeholder,

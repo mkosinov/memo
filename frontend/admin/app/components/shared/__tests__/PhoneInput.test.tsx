@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import PhoneInput from '@/app/components/shared/PhoneInput';
+import PhoneInput, { getNationalDigits } from '@/app/components/shared/PhoneInput';
 import RemoteSearchSelect from '@/app/components/shared/RemoteSearchSelect';
 
-// GH #221 Task 5: adaptive-mask phone typeahead built on RemoteSearchSelect.
-// Mask via libphonenumber-js AsYouType (min metadata), 4-DIGIT threshold,
-// ?phone=<national digits>&per_page=10 requests, read-only state after pick.
+// GH #414 Task 4: record-form phone typeahead rebuilt on the country-selector
+// engine (spec §Поиск и привязка клиента). RemoteSearchSelect keeps the
+// typeahead role; `prefix` hosts the shared country selector (PhoneField's
+// piece); formatting, the 4-NATIONAL-digit threshold and `?phone=` params key
+// off the SELECTED country; onInputValueChange lifts the compact
+// «+<код><национальные>» (replaces #221's visible-string WYSIWYG). Read-only
+// after pick shows «Имя · телефон» (display formatter) with ×; the selector
+// is inert there. The input-phone anchor stays on the remainder input.
 
 const mockSearch = vi.fn();
 
@@ -34,30 +39,113 @@ async function advanceDebounce() {
   });
 }
 
+function selectCountry(iso: string) {
+  act(() => {
+    fireEvent.click(screen.getByTestId('phone-country-select'));
+  });
+  act(() => {
+    fireEvent.click(screen.getByTestId(`phone-country-select-option-${iso}`));
+  });
+}
+
 function renderPhoneInput(overrides: Record<string, unknown> = {}) {
   return render(
     <PhoneInput onSearch={mockSearch} onPick={vi.fn()} {...overrides} />,
   );
 }
 
-describe('PhoneInput', () => {
-  // (a) adaptive mask: RU grouping for national digits, BY for +375
-  it('formats RU digits progressively (9991234 → 999 123-4)', () => {
+describe('PhoneInput — country selector in the prefix (GH #414)', () => {
+  it('renders «+7 Россия» in the prefix; input-phone anchors the remainder with the honest RU placeholder', () => {
     renderPhoneInput();
-    typeValue('9991234');
+    const trigger = screen.getByTestId('phone-country-select');
+    expect(trigger).toHaveTextContent('+7');
+    expect(trigger).toHaveTextContent('Россия');
+
     const input = screen.getByTestId('input-phone') as HTMLInputElement;
-    expect(input.value).toBe('999 123-4');
+    expect(input).toHaveAttribute('placeholder', '999 123-45-67');
+    expect(input).toHaveValue('');
   });
 
-  it('switches to BY grouping when +375 is typed', () => {
+  it('opens the country listbox from the prefix, never the suggestion dropdown', () => {
     renderPhoneInput();
-    typeValue('+375291234567');
-    const input = screen.getByTestId('input-phone') as HTMLInputElement;
-    expect(input.value).toBe('+375 29 123 45 67');
+    act(() => {
+      fireEvent.click(screen.getByTestId('phone-country-select'));
+    });
+    expect(screen.getByTestId('phone-country-select-popover')).toBeInTheDocument();
+    // Only the country listbox exists — the typeahead never opened.
+    expect(screen.getAllByRole('listbox')).toHaveLength(1);
+    expect(screen.getAllByRole('option')).toHaveLength(9);
+    expect(screen.getByTestId('phone-country-select-option-RU')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
-  // (b) 4-digit threshold: no request below, one debounced request at 4
-  it('does not fetch below 4 digits', async () => {
+  it('switching the country mid-entry keeps the digits and regroups immediately (RU → LV)', () => {
+    renderPhoneInput();
+    typeValue('2312345');
+    // RU min metadata does not group a 7-digit tail — digits as typed.
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('2312345');
+
+    selectCountry('LV');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Латвия');
+    // Same digits, regrouped under the LV template on the spot.
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('23 123 45');
+    expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '23 123 456');
+  });
+
+  it('switches the placeholder to the honest template of the chosen country', () => {
+    renderPhoneInput();
+    selectCountry('BY');
+    expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '29 123 45 67');
+  });
+});
+
+describe('PhoneInput — «+»-leading input parses as an international paste (GH #414)', () => {
+  it('a list-country paste selects the country and keeps the national remainder', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('+375 29 123-45-67');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Беларусь');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('291234567');
+    // The lift is already the BY compact — the parse binds before lifting.
+    expect(onInputValueChange).toHaveBeenLastCalledWith('+375291234567');
+  });
+
+  it('an out-of-list paste («+1 …») enters «no country»: selector unchanged, raw digits, empty compact', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('+1 555 123-45-67');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('15551234567');
+    // No honest template while unbound; compact is undefined → lifted as ''.
+    expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('');
+  });
+
+  it('choosing a country exits «no country»: digits kept, template and compact follow', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('+1 555 123-45-67');
+    selectCountry('DE');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Германия');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('15551234567');
+    expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '1512 3456789');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('+4915551234567');
+  });
+
+  it('a typed «+» alone is ignored — the selector owns the country code', () => {
+    renderPhoneInput();
+    typeValue('+');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('');
+    typeValue('999+');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('999');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+  });
+});
+
+describe('PhoneInput — threshold and search digits from the SELECTED country (GH #221 invariant)', () => {
+  it('does not fetch below 4 national digits', async () => {
     renderPhoneInput();
     typeValue('999');
     await advanceDebounce();
@@ -72,83 +160,23 @@ describe('PhoneInput', () => {
     expect(mockSearch).toHaveBeenCalledWith({ phone: '9991', per_page: 10 });
   });
 
-  // (c) digits-source amendment: trunk 8 must not leak into the query
-  it('sends national digits without the phantom 8 for 8-prefixed input', async () => {
+  it('trunk 8 never leaks into the query — digits come from getNationalNumber', async () => {
     renderPhoneInput();
     typeValue('89991234');
+    expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('8 (999) 123-4');
     await advanceDebounce();
     expect(mockSearch).toHaveBeenCalledWith({ phone: '9991234', per_page: 10 });
   });
 
-  it('sends national digits without the country code for +7 input', async () => {
+  it('searches with the selected country’s national digits (BY)', async () => {
     renderPhoneInput();
-    typeValue('+79991234');
+    selectCountry('BY');
+    typeValue('2912');
     await advanceDebounce();
-    expect(mockSearch).toHaveBeenCalledWith({ phone: '9991234', per_page: 10 });
+    expect(mockSearch).toHaveBeenCalledWith({ phone: '2912', per_page: 10 });
   });
 
-  // (d) nameless clients render «Без имени»
-  it('renders «Без имени» for nameless suggestions', async () => {
-    mockSearch.mockResolvedValue([
-      { id: 'c1', name: null, phone: '+79991234567' },
-    ]);
-    renderPhoneInput();
-    typeValue('9991');
-    await advanceDebounce();
-    await waitFor(() => {
-      expect(screen.getByText('Без имени · +79991234567')).toBeInTheDocument();
-    });
-  });
-
-  // (e) pick → read-only + ×, clear → typing restored
-  it('shows picked client read-only with clear button; clear restores typing', async () => {
-    const onPick = vi.fn();
-    mockSearch.mockResolvedValue([
-      { id: 'c1', name: 'Анна Иванова', phone: '+79991234567' },
-    ]);
-    renderPhoneInput({ onPick });
-    typeValue('9991');
-    await advanceDebounce();
-
-    await waitFor(() => {
-      expect(screen.getByText('Анна Иванова · +79991234567')).toBeInTheDocument();
-    });
-    const rows = screen.getAllByText('Анна Иванова · +79991234567');
-    const row = rows.find((el) => el.closest('li'));
-    fireEvent.click(row!);
-    expect(onPick).toHaveBeenCalledWith({
-      id: 'c1',
-      name: 'Анна Иванова',
-      phone: '+79991234567',
-    });
-
-    // read-only display + × affordance
-    const input = screen.getByTestId('input-phone') as HTMLInputElement;
-    expect(input).toHaveAttribute('readonly');
-    expect(input.value).toBe('Анна Иванова · +79991234567');
-    expect(screen.getByRole('button', { name: /clear/i })).toBeInTheDocument();
-
-    // clear → typing restored
-    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
-    const cleared = screen.getByTestId('input-phone') as HTMLInputElement;
-    expect(cleared).not.toHaveAttribute('readonly');
-    expect(cleared.value).toBe('');
-  });
-
-  // (f) paste reformats on the next change; query digits are national
-  it('reformats a pasted +7 999 123-45-67 and queries 9991234567', async () => {
-    renderPhoneInput();
-    typeValue('+7 999 123-45-67');
-    const input = screen.getByTestId('input-phone') as HTMLInputElement;
-    expect(input.value).toBe('+7 999 123 45 67');
-    await advanceDebounce();
-    expect(mockSearch).toHaveBeenCalledWith({
-      phone: '9991234567',
-      per_page: 10,
-    });
-  });
-
-  it('does not fire for digits shorter than the threshold while typing', async () => {
+  it('does not fire while digits stay under the threshold', async () => {
     renderPhoneInput();
     typeValue('9');
     await advanceDebounce();
@@ -158,49 +186,130 @@ describe('PhoneInput', () => {
     await advanceDebounce();
     expect(mockSearch).not.toHaveBeenCalled();
   });
+});
 
-  // (h) GH #221 Task 6: the consumer needs the visible formatted string for
-  // the unpicked save payload (WYSIWYG) — PhoneInput lifts it per keystroke.
-  it('lifts the formatted value via onInputValueChange', () => {
+describe('PhoneInput — onInputValueChange lifts the compact (GH #414)', () => {
+  it('lifts «+<код><национальные>» per keystroke', () => {
     const onInputValueChange = vi.fn();
     renderPhoneInput({ onInputValueChange });
     typeValue('9991234');
-    expect(onInputValueChange).toHaveBeenLastCalledWith('999 123-4');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('+79991234');
   });
 
-  it('lifts an empty string when the input is cleared', () => {
+  it('re-lifts the compact when the country changes mid-entry', () => {
+    const onInputValueChange = vi.fn();
+    renderPhoneInput({ onInputValueChange });
+    typeValue('9991234');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('+79991234');
+    selectCountry('LV');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('+3719991234');
+  });
+
+  it('lifts «» when the field is emptied', () => {
     const onInputValueChange = vi.fn();
     renderPhoneInput({ onInputValueChange });
     typeValue('999');
     typeValue('');
     expect(onInputValueChange).toHaveBeenLastCalledWith('');
   });
+});
 
-  // (i) GH #221 followup: contract symmetry — the lifted value mirrors the
-  // input ALWAYS: a pick swaps it to the display label, × clears it to ''.
-  it('lifts the display label on pick and empty string on × clear', async () => {
-    const onInputValueChange = vi.fn();
+describe('PhoneInput — read-only pick state (GH #221 × #414)', () => {
+  it('suggestion rows show «Имя · телефон» via the display formatter; pick freezes the field and the selector; × restores', async () => {
     const onPick = vi.fn();
     mockSearch.mockResolvedValue([
       { id: 'c1', name: 'Анна Иванова', phone: '+79991234567' },
     ]);
-    renderPhoneInput({ onPick, onInputValueChange });
+    renderPhoneInput({ onPick });
     typeValue('9991');
     await advanceDebounce();
 
     await waitFor(() => {
-      expect(screen.getByText('Анна Иванова · +79991234567')).toBeInTheDocument();
+      expect(screen.getByText('Анна Иванова · +7 999 123 45 67')).toBeInTheDocument();
     });
-    const rows = screen.getAllByText('Анна Иванова · +79991234567');
+    const rows = screen.getAllByText('Анна Иванова · +7 999 123 45 67');
     const row = rows.find((el) => el.closest('li'));
-    fireEvent.click(row!);
+    act(() => {
+      fireEvent.click(row!);
+    });
+    expect(onPick).toHaveBeenCalledWith({
+      id: 'c1',
+      name: 'Анна Иванова',
+      phone: '+79991234567',
+    });
 
-    // Pick → the visible input now shows the display label.
-    expect(onInputValueChange).toHaveBeenLastCalledWith('Анна Иванова · +79991234567');
+    const input = screen.getByTestId('input-phone') as HTMLInputElement;
+    expect(input).toHaveAttribute('readonly');
+    expect(input.value).toBe('Анна Иванова · +7 999 123 45 67');
+    // The country selector is inert while frozen.
+    expect(screen.getByTestId('phone-country-select')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /clear/i })).toBeInTheDocument();
 
-    // × → the input is empty again.
-    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    // × → typing restored, selector live again.
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    });
+    const cleared = screen.getByTestId('input-phone') as HTMLInputElement;
+    expect(cleared).not.toHaveAttribute('readonly');
+    expect(cleared.value).toBe('');
+    expect(screen.getByTestId('phone-country-select')).toBeEnabled();
+  });
+
+  it('renders «Без имени» for nameless suggestions', async () => {
+    mockSearch.mockResolvedValue([
+      { id: 'c1', name: null, phone: '+79991234567' },
+    ]);
+    renderPhoneInput();
+    typeValue('9991');
+    await advanceDebounce();
+    await waitFor(() => {
+      expect(screen.getByText('Без имени · +7 999 123 45 67')).toBeInTheDocument();
+    });
+  });
+
+  it('lifts «» on pick (no typed number remains) and «» on × clear', async () => {
+    const onInputValueChange = vi.fn();
+    mockSearch.mockResolvedValue([
+      { id: 'c1', name: 'Анна Иванова', phone: '+79991234567' },
+    ]);
+    renderPhoneInput({ onInputValueChange });
+    typeValue('9991');
+    await advanceDebounce();
+
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова · +7 999 123 45 67')).toBeInTheDocument();
+    });
+    const rows = screen.getAllByText('Анна Иванова · +7 999 123 45 67');
+    const row = rows.find((el) => el.closest('li'));
+    act(() => {
+      fireEvent.click(row!);
+    });
     expect(onInputValueChange).toHaveBeenLastCalledWith('');
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    });
+    expect(onInputValueChange).toHaveBeenLastCalledWith('');
+  });
+
+  it('a consumer-controlled picked prop keeps the selector inert', () => {
+    renderPhoneInput({
+      picked: { id: 'c1', name: 'Анна', phone: '+79991234567' },
+    });
+    expect(screen.getByTestId('phone-country-select')).toBeDisabled();
+  });
+});
+
+describe('getNationalDigits — digit source keyed by the selected country', () => {
+  it('reduces via AsYouType(country).getNationalNumber()', () => {
+    expect(getNationalDigits('9991234', 'RU')).toBe('9991234');
+    // The typed trunk 8 is stripped — digits never scraped off the display.
+    expect(getNationalDigits('8 (999) 123-4', 'RU')).toBe('9991234');
+    expect(getNationalDigits('291234567', 'BY')).toBe('291234567');
+  });
+
+  it('«no country» falls back to the raw digits', () => {
+    expect(getNationalDigits('15551234567', null)).toBe('15551234567');
   });
 });
 

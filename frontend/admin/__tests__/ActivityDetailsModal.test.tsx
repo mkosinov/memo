@@ -1154,10 +1154,11 @@ describe('NewRecordTab — picked client (GH #221)', () => {
     });
   });
 
-  it('submits the unpicked union (visible phone + name) when nothing is picked', () => {
+  it('submits the unpicked union (compact phone + name) when nothing is picked', () => {
     render(<NewRecordTab {...defaultProps2} />);
-    // The visible string is the AsYouType-formatted value (mask is live even
-    // unpicked) — WYSIWYG: it is exactly what reaches the payload.
+    // GH #414: PhoneInput lifts the compact «+<код><нац.>» per keystroke —
+    // a «+…» fill parses to the national remainder under the bound country,
+    // and the compact is exactly what reaches the payload (storage form).
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый клиент' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
@@ -1165,7 +1166,7 @@ describe('NewRecordTab — picked client (GH #221)', () => {
     const payload = defaultProps2.onSubmit.mock.calls[0][0];
     expect(payload).toEqual({
       kind: 'unpicked',
-      phone: '+7 999 123 45 67',
+      phone: '+79991234567',
       name: 'Новый клиент',
       client_id: null,
       visitors: [],

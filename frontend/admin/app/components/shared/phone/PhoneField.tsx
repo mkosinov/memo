@@ -1,18 +1,19 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { AsYouType, isPossiblePhoneNumber } from 'libphonenumber-js/min';
 import {
   PHONE_COUNTRIES,
   DEFAULT_PHONE_COUNTRY,
   type PhoneCountryIso,
 } from './countries';
+import { PhoneCountrySelect } from './CountrySelect';
 import { compact, parseStoredPhone } from './format';
 
 // GH #414 (spec §Виджет PhoneField): composite phone field —
 // `[«+7 Россия ⌄»] │ [remainder input] [×]` in a single frame. The selector
-// follows the admin listbox pattern (StatusPicker): own popover on
-// --z-popover, mouse-only, click-outside/ESC close, selected row marked.
+// is the shared PhoneCountrySelect (admin listbox pattern: own popover on
+// --z-popover, mouse-only, click-outside/ESC close, selected row marked).
 // Controlled value { country, national, pristine }; derived visible/compact/
 // isComplete live beside the component as pure functions.
 //
@@ -73,24 +74,6 @@ export interface PhoneFieldProps {
   inputTestId?: string;
 }
 
-/** Chevron (StatusPicker parity). */
-function Chevron() {
-  return (
-    <svg
-      className="w-3 h-3 shrink-0 opacity-60"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
-}
-
 export function PhoneField({
   value,
   onChange,
@@ -107,55 +90,25 @@ export function PhoneField({
   className,
   inputTestId = 'phone-input',
 }: PhoneFieldProps) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // The selector BUTTON keeps showing the last non-null country even while
-  // the binding is `null` («без страны»): the spec keeps the selector
-  // unchanged — RU by default — and choosing a list country re-binds it.
-  const [displayCountry, setDisplayCountry] = useState<PhoneCountryIso>(
-    value.country ?? DEFAULT_PHONE_COUNTRY,
-  );
-  if (value.country !== null && value.country !== displayCountry) {
-    setDisplayCountry(value.country);
-  }
-
-  const shown = PHONE_COUNTRIES.find((c) => c.iso === displayCountry) ?? PHONE_COUNTRIES[0];
-
-  // Close on outside click / ESC (StatusPicker parity)
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
+  // Country pick: a list country re-binds the field keeping the typed digits
+  // (spec §Виджет — country switch mid-entry); re-picking the bound country
+  // changes nothing. Also the exit from the «no country» state.
   const handleSelect = useCallback(
     (iso: PhoneCountryIso) => {
-      setOpen(false);
-      setDisplayCountry(iso);
-      // Re-picking the bound country changes nothing (also exits «без страны»
-      // only when the binding actually differs).
       if (iso === value.country) return;
-      // Country switch mid-entry keeps the typed digits (spec §Виджет).
       onChange({ country: iso, national: value.national, pristine: false });
     },
     [onChange, value.country, value.national],
   );
 
   const visible = phoneVisible(value);
+
+  // Honest national template of the bound country — none while unbound.
+  const placeholder = value.country === null
+    ? ''
+    : PHONE_COUNTRIES.find((c) => c.iso === value.country)?.placeholder ?? '';
 
   // Keystroke loop: non-digits are ignored (a typed «+» is never entered —
   // the selector owns the country code). When the digits did not change the
@@ -176,7 +129,6 @@ export function PhoneField({
   // × — clears the remainder, returns to RU and lifts the «no country»
   // state (spec §Виджет). An already fresh field lifts nothing.
   const handleClear = useCallback(() => {
-    setDisplayCountry(DEFAULT_PHONE_COUNTRY);
     if (value.country === DEFAULT_PHONE_COUNTRY && value.national === '') return;
     onChange({ country: DEFAULT_PHONE_COUNTRY, national: '', pristine: false });
   }, [onChange, value.country, value.national]);
@@ -191,7 +143,6 @@ export function PhoneField({
       if (!text.trim().startsWith('+')) return; // ordinary paste → change path
       e.preventDefault();
       const parsed = parseStoredPhone(text);
-      if (parsed.country !== null) setDisplayCountry(parsed.country);
       if (parsed.country === value.country && parsed.national === value.national) return;
       onChange({ country: parsed.country, national: parsed.national, pristine: false });
     },
@@ -200,26 +151,15 @@ export function PhoneField({
 
   return (
     <div
-      ref={containerRef}
       className={`relative flex items-stretch rounded-lg border bg-white ${className ?? ''}`}
       style={{ borderColor: 'var(--line)' }}
       data-testid="phone-field"
     >
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
+      <PhoneCountrySelect
+        country={value.country}
+        onSelect={handleSelect}
         disabled={disabled || readOnly}
-        className="flex items-center gap-1.5 rounded-l-lg px-2 py-1.5 text-sm text-ink-mid bg-white hover:bg-[var(--surface)] transition-colors disabled:opacity-50 disabled:hover:bg-white whitespace-nowrap"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        data-testid="phone-country-select"
-      >
-        <span className="font-medium">+{shown.callingCode}</span>
-        <span>{shown.name}</span>
-        <Chevron />
-      </button>
-
-      <div className="self-stretch w-px my-1" style={{ backgroundColor: 'var(--line)' }} aria-hidden="true" />
+      />
 
       <input
         ref={inputRef}
@@ -239,7 +179,7 @@ export function PhoneField({
         value={visible}
         onChange={handleInputChange}
         onPaste={handlePaste}
-        placeholder={value.country === null ? '' : shown.placeholder}
+        placeholder={placeholder}
         className="flex-1 min-w-0 px-2 py-1.5 text-sm bg-transparent outline-none rounded-r-lg disabled:opacity-50"
         data-testid={inputTestId}
       />
@@ -265,36 +205,6 @@ export function PhoneField({
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
-
-      {open && (
-        <div
-          className="absolute z-[var(--z-popover)] mt-1 top-full left-0 bg-white border rounded-lg shadow-lg py-1 min-w-[176px]"
-          style={{ borderColor: 'var(--line)' }}
-          role="listbox"
-          data-testid="phone-country-select-popover"
-        >
-          {PHONE_COUNTRIES.map((c) => {
-            const isActive = c.iso === value.country;
-            return (
-              <button
-                key={c.iso}
-                type="button"
-                onClick={() => handleSelect(c.iso)}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-[var(--surface)] transition-colors ${
-                  isActive ? 'bg-[var(--surface)] font-medium' : ''
-                }`}
-                role="option"
-                aria-selected={isActive}
-                data-testid={`phone-country-select-option-${c.iso}`}
-              >
-                <span className="font-medium min-w-[3rem]">+{c.callingCode}</span>
-                {' '}
-                <span>{c.name}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

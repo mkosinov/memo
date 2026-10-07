@@ -47,8 +47,10 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
     setName('');
   }, []);
 
-  // Visible formatted string (WYSIWYG): the unpicked save payload sends it
-  // verbatim, exactly as rendered in the field.
+  // Compact «+<код><нац. цифры>» (GH #414): PhoneInput's onInputValueChange
+  // lifts the compact of the selected country + typed remainder ('' in the
+  // «no country» state and on a pick) — the unpicked save payload carries
+  // it verbatim to the hook's сверка.
   const handlePhoneInput = useCallback((value: string) => {
     setPhone(value);
   }, []);
@@ -107,9 +109,10 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
       }
     }
 
-    // Picked → bind by id; unpicked → the visible formatted string + typed
-    // name name the (possibly new) client (spec §5). The `kind` tag makes
-    // the two branches disjoint payloads, not placeholder empties.
+    // Picked → bind by id; unpicked → the lifted COMPACT «+<код><нац.>» +
+    // typed name name the (possibly new) client (spec #414 §Поиск и
+    // привязка клиента). The `kind` tag makes the two branches disjoint
+    // payloads, not placeholder empties.
     if (pickedClient) {
       onSubmit({
         kind: 'picked',
@@ -120,10 +123,11 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
         seats: seatsCount,
       });
     } else {
-      // Completeness guard (GH #221 spec §2 decision 11, §6 step 2): the
-      // visible value must be a complete valid number before anything is
-      // fetched or created. Picked clients are never validated (stored data).
-      // Same library + same RU default as the AsYouType mask.
+      // Completeness guard (GH #221 §2 decision 11 / #414 §Форматирование):
+      // the lifted compact must parse as a complete valid number before
+      // anything is fetched or created (the compact is country-bound by
+      // construction — a '' lift is the no-country/pick state). Picked
+      // clients are never validated (stored data).
       // An EMPTY phone is NOT guarded: the phone-less quick-add predates
       // #221 (spec §10 — write paths untouched) and must keep working; the
       // guard targets TYPED-BUT-INCOMPLETE numbers only (its message says

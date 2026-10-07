@@ -20,6 +20,18 @@ vi.mock('@memo/api-client', () => ({
   createVisit: vi.fn(),
   patchVisit: vi.fn(),
   deleteVisit: vi.fn(),
+  // Shape-compatible stand-in — the hook throws it client-side for the
+  // String(20) compact guard; tests only read `.message`.
+  ApiError: class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  },
 }));
 
 // Mock the PendingActions provider so the hook's usePendingActions() call is controlled by tests.
@@ -323,15 +335,17 @@ describe('useRecordMutations', () => {
   // app/components/shared/phone/__tests__/format.test.ts (GH #414 Task 1 —
   // the function now lives in app/components/shared/phone/format.ts).
 
-  describe('createRecord — unpicked save-time resolution (GH #221 Task 7)', () => {
-    /** Input exactly as the mask renders a full RU number (WYSIWYG). */
-    const maskedInput = {
+  describe('createRecord — unpicked save-time resolution (GH #221 Task 7 / #414 Task 5)', () => {
+    /** Input exactly as PhoneInput lifts it since #414: the compact
+     *  «+<код><нац. цифры>». The old #221 visible formatted string no
+     *  longer reaches the hook — the entered side of the сверка is the
+     *  compact, and the reduction compares it against the stored string. */
+    const compactInput = {
       ...baseCreateRecordInput,
-      phone: '+7 (999) 123-45-67',
+      phone: '+79991234567',
     };
 
-    it('(a) binds the EXISTING client by digits equality; createClient NOT called', async () => {
-      // Stored format differs from the visible string — only national digits match.
+    it('(a) binds the EXISTING client stored as a compact by digits equality; createClient NOT called', async () => {
       mockGetClientsPaged.mockResolvedValue({
         items: [{ ...mockClientResponse, id: 'c-existing', phone: '+79991234567' }],
         total: 1,
@@ -342,7 +356,7 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.createRecord(maskedInput, serviceTariffs);
+        await result.current.createRecord(compactInput, serviceTariffs);
       });
 
       // Fresh full-digits fetch — never the suggestion snapshot, never the exact route.
@@ -354,7 +368,7 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('(a2) matches a client stored in an OLD format (8 999 123-45-67)', async () => {
+    it('(a2) matches a client stored in the OLD «8 …» spelling (reduction parity)', async () => {
       mockGetClientsPaged.mockResolvedValue({
         items: [{ ...mockClientResponse, id: 'c-old-format', phone: '8 999 123-45-67' }],
         total: 1,
@@ -365,7 +379,7 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.createRecord(maskedInput, serviceTariffs);
+        await result.current.createRecord(compactInput, serviceTariffs);
       });
 
       expect(mockCreateClient).not.toHaveBeenCalled();
@@ -374,18 +388,70 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('(b) unknown number → createClient called with the VISIBLE formatted string', async () => {
+    it('(a3) matches a client stored in the OLD spaced «+7 …» spelling', async () => {
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-spaced', phone: '+7 (999) 123-45-67' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
       const { wrapper } = createQueryClientWrapper();
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.createRecord(maskedInput, serviceTariffs);
+        await result.current.createRecord(compactInput, serviceTariffs);
       });
 
-      // WYSIWYG: the visible string is stored verbatim, not the reduced digits.
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-spaced' }),
+      );
+    });
+
+    it('(b) BY compact «+375…» keeps its full digits — matches the stored compact', async () => {
+      // Non-RU codes never lose digits: the 11-digit drop fires only on a
+      // leading 7/8, so the BY reduction includes the country code.
+      const byInput = { ...baseCreateRecordInput, phone: '+375291234567' };
+      mockGetClientsPaged.mockResolvedValue({
+        items: [{ ...mockClientResponse, id: 'c-by', phone: '+375 29 1234567' }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(byInput, serviceTariffs);
+      });
+
+      expect(mockGetClientsPaged).toHaveBeenCalledWith({ phone: '375291234567', per_page: 10 });
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-by' }),
+      );
+    });
+
+    it('(c) garbage stored rows never match → createClient with the compact (мусор → создание)', async () => {
+      mockGetClientsPaged.mockResolvedValue({
+        items: [
+          { ...mockClientResponse, id: 'c-garbage', phone: 'спам' },
+          { ...mockClientResponse, id: 'c-short', phone: '12345' },
+        ],
+        total: 2,
+        page: 1,
+        per_page: 10,
+      } as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(compactInput, serviceTariffs);
+      });
+
       expect(mockCreateClient).toHaveBeenCalledWith({
         name: 'Новый клиент',
-        phone: '+7 (999) 123-45-67',
+        phone: '+79991234567',
         channel: 'whatsapp',
       });
       expect(mockCreateRecord).toHaveBeenCalledWith(
@@ -393,22 +459,27 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('(c) fetch failure propagates — mutation rejects, NO silent create (fail closed)', async () => {
-      mockGetClientsPaged.mockRejectedValue(new Error('network down') as never);
+    it('(d) unknown number → createClient called with the compact verbatim', async () => {
       const { wrapper } = createQueryClientWrapper();
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
-      await expect(
-        act(async () => {
-          await result.current.createRecord(maskedInput, serviceTariffs);
-        }),
-      ).rejects.toThrow('network down');
+      await act(async () => {
+        await result.current.createRecord(compactInput, serviceTariffs);
+      });
 
-      expect(mockCreateClient).not.toHaveBeenCalled();
-      expect(mockCreateRecord).not.toHaveBeenCalled();
+      // Storage contract (#414): a changed number is saved as the compact,
+      // exactly as lifted — not the reduced digits, not a re-formatted view.
+      expect(mockCreateClient).toHaveBeenCalledWith({
+        name: 'Новый клиент',
+        phone: '+79991234567',
+        channel: 'whatsapp',
+      });
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: 'c-new' }),
+      );
     });
 
-    it('(d) two clients sharing the national digits → the FIRST returned row binds', async () => {
+    it('(e) two clients sharing the reduction → the FIRST returned row binds', async () => {
       mockGetClientsPaged.mockResolvedValue({
         items: [
           { ...mockClientResponse, id: 'c-first', phone: '+79991234567' },
@@ -422,7 +493,7 @@ describe('useRecordMutations', () => {
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
 
       await act(async () => {
-        await result.current.createRecord(maskedInput, serviceTariffs);
+        await result.current.createRecord(compactInput, serviceTariffs);
       });
 
       // First-match parity with the old first-or-404 semantics.
@@ -430,6 +501,61 @@ describe('useRecordMutations', () => {
         expect.objectContaining({ client_id: 'c-first' }),
       );
       expect(mockCreateClient).not.toHaveBeenCalled();
+    });
+
+    it('(f) fetch failure propagates — mutation rejects, NO silent create (fail closed)', async () => {
+      mockGetClientsPaged.mockRejectedValue(new Error('network down') as never);
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await expect(
+        act(async () => {
+          await result.current.createRecord(compactInput, serviceTariffs);
+        }),
+      ).rejects.toThrow('network down');
+
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).not.toHaveBeenCalled();
+    });
+
+    // ── Defensive String(20) guard (GH #414 §Форматирование, хранение) ──
+    // A compact of a valid list-country number is ≤16 chars; anything past
+    // the clients.phone column limit cannot be stored — block the save.
+
+    it('blocks the save when the compact exceeds the String(20) limit — clear message, no API calls', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      // 21 chars — no valid list-country compact is ever this long.
+      await expect(
+        act(async () => {
+          await result.current.createRecord(
+            { ...baseCreateRecordInput, phone: '+79991234567012345678' },
+            serviceTariffs,
+          );
+        }),
+      ).rejects.toThrow('Слишком длинный номер телефона');
+
+      expect(mockGetClientsPaged).not.toHaveBeenCalled();
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockCreateRecord).not.toHaveBeenCalled();
+    });
+
+    it('allows a compact of exactly 20 chars — the guard fires only PAST the limit', async () => {
+      const phone20 = '+3752912345670123456'; // «+375» + 16 national digits
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, phone: phone20 },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockCreateClient).toHaveBeenCalledWith(
+        expect.objectContaining({ phone: phone20 }),
+      );
     });
   });
 

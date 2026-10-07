@@ -10,11 +10,29 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
 import { useUI } from '@/contexts/UIContext';
 import { qk } from '@/lib/queryKeys';
 import { ClientStatistics } from '@/app/components/shared/record/blocks/ClientStatistics';
+import {
+  PhoneField,
+  phoneCompact,
+  phoneIsComplete,
+  type PhoneFieldValue,
+} from '@/app/components/shared/phone/PhoneField';
+import { parseStoredPhone } from '@/app/components/shared/phone/format';
 
 const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
 type ChannelValue = (typeof CHANNEL_VALUES)[number];
 const isKnownChannel = (v: string): v is ChannelValue =>
   (CHANNEL_VALUES as readonly string[]).includes(v);
+
+// GH #414 (spec §Форматирование, валидация, хранение): the two messages of
+// the completeness validator — applied to a CHANGED number only.
+const PHONE_NO_COUNTRY_ERROR = 'Выберите страну из списка';
+const PHONE_INCOMPLETE_ERROR = 'Проверьте номер телефона — возможно, он введён не полностью';
+
+/** Widget state from a stored string — pristine until the user edits it
+ *  (spec §Инициализация существующих значений). */
+function storedToPhoneValue(stored: string | null | undefined): PhoneFieldValue {
+  return { ...parseStoredPhone(stored), pristine: true };
+}
 
 export interface ClientInfoTabHandle {
   save: () => Promise<void>;
@@ -33,7 +51,11 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   ref,
 ) {
   const [name, setName] = useState(client?.name || '');
-  const [phone, setPhone] = useState(client?.phone || '');
+  // GH #414: the phone is the PhoneField widget state — parsed from the
+  // stored string on open; `pristine` marks the untouched value that saves
+  // to the DB verbatim (byte-identical legacy spellings survive a save).
+  const [phone, setPhone] = useState<PhoneFieldValue>(() => storedToPhoneValue(client?.phone));
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [email, setEmail] = useState(client?.email || '');
   const [channel, setChannel] = useState(client?.channel && isKnownChannel(client.channel) ? client.channel : '');
   const [hasChanges, setHasChanges] = useState(false);
@@ -58,7 +80,8 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
 
   useEffect(() => {
     setName(client?.name || '');
-    setPhone(client?.phone || '');
+    setPhone(storedToPhoneValue(client?.phone));
+    setPhoneError(null);
     setEmail(client?.email || '');
     setChannel(client?.channel || '');
     setHasChanges(false);
@@ -68,19 +91,52 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
 
   const handleChange = useCallback(() => setHasChanges(true), []);
 
+  // Every widget edit flips the dirty flag and clears a stale inline error
+  // (re-validation happens at save time).
+  const handlePhoneChange = useCallback(
+    (value: PhoneFieldValue) => {
+      setPhone(value);
+      setPhoneError(null);
+      handleChange();
+    },
+    [handleChange],
+  );
+
   const handleSave = useCallback(async () => {
+    // GH #414 (spec §Форматирование, валидация, хранение): the phone payload
+    // — PRISTINE value goes to the DB AS STORED (no re-canonicalization, no
+    // completeness check); a CHANGED number is validated and saved as the
+    // compact «+<код><нац.>»; a CLEARED number saves as null (phone is
+    // nullable). An invalid CHANGED number blocks the save with the inline
+    // message below the field.
+    let phonePayload: string | null;
+    if (phone.pristine) {
+      phonePayload = client?.phone || null;
+    } else if (phone.national === '') {
+      phonePayload = null;
+    } else if (phone.country === null) {
+      setPhoneError(PHONE_NO_COUNTRY_ERROR);
+      return; // blocked — the parent modal's PUT never fires
+    } else if (!phoneIsComplete(phone)) {
+      setPhoneError(PHONE_INCOMPLETE_ERROR);
+      return; // blocked — the parent modal's PUT never fires
+    } else {
+      phonePayload = phoneCompact(phone);
+    }
+
     await onSave({
       name: name || null,
-      phone: phone || null,
+      phone: phonePayload,
       email: email || null,
       channel: isKnownChannel(channel) ? channel : null,
     });
     setHasChanges(false);
-  }, [name, phone, email, channel, onSave]);
+  }, [name, phone, email, channel, client, onSave]);
 
   const handleCancel = useCallback(() => {
     setName(client?.name || '');
-    setPhone(client?.phone || '');
+    setPhone(storedToPhoneValue(client?.phone));
+    setPhoneError(null);
     setEmail(client?.email || '');
     setChannel(client?.channel || '');
     setHasChanges(false);
@@ -165,16 +221,20 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
           </div>
           <div>
             <label htmlFor="client-phone" className="text-xs font-medium text-ink-mid block mb-1">Телефон</label>
-            <input
+            {/* GH #414: PhoneField composite — country selector + grouped
+                national remainder; inline completeness error under the field
+                (changed numbers only) per the screen's error pattern. */}
+            <PhoneField
               id="client-phone"
-              className={inputClass}
-              style={inputStyle}
               value={phone}
-              onChange={e => {
-                setPhone(e.target.value);
-                handleChange();
-              }}
+              onChange={handlePhoneChange}
+              inputTestId="client-phone-input"
             />
+            {phoneError && (
+              <span role="alert" className="text-xs block mt-1" style={{ color: 'var(--danger)' }}>
+                {phoneError}
+              </span>
+            )}
           </div>
           <div>
             <label htmlFor="client-channel" className="text-xs font-medium text-ink-mid block mb-1">Канал</label>

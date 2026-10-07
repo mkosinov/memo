@@ -309,7 +309,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
     await page.goto('/schedule');
     await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
-    // Right panel starts collapsed → open it via the StampFab
+    // Right panel starts collapsed → open it via the topbar stamp toggle
     const panel = page.locator('[data-testid="right-panel"]');
     if (!(await panel.isVisible().catch(() => false))) {
       await page.getByRole('button', { name: 'Открыть панель инструментов' }).click();

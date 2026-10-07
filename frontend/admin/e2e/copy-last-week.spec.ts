@@ -109,7 +109,7 @@ function parityCount(srcMonday: string, tgtMonday: string): number {
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
-/** Open the right toolbar panel (collapsed by default — StampFab toggle). */
+/** Open the right toolbar panel (collapsed by default — topbar stamp toggle). */
 async function openToolbar(page: Page): Promise<void> {
   const rightPanel = page.getByTestId('right-panel');
   if (!(await rightPanel.isVisible().catch(() => false))) {

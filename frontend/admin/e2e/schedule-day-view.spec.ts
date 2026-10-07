@@ -1,13 +1,20 @@
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
+import type { Page } from '@playwright/test';
 
 /**
  * E2E tests for Schedule Day View: switching between WeekView and DayView,
- * column mode switching (По мастерам / По локациям), zoom popup for
- * cell height and grid frequency adjustments.
+ * the single view-selector dropdown (День мастеров / День локаций / Неделя),
+ * week-header date drill-down, zoom popup for cell height and grid frequency.
  *
  * Requires: dev server on :3001, backend on :8000
  */
+
+/** Open the «Вид» dropdown and click one of its options. */
+async function selectView(page: Page, option: 'view-masters' | 'view-locations' | 'view-week') {
+  await page.locator('[data-testid="view-selector"]').click();
+  await page.locator(`[data-testid="${option}"]`).click();
+}
 
 // ---------------------------------------------------------------------------
 // Tests — View Mode Switching
@@ -18,14 +25,14 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
     await waitForScheduleReady(page);
   });
 
-  test('day button switches from week to day view', async ({ page }) => {
+  test('day option switches from week to day view', async ({ page }) => {
     // Default is week view — 7 day columns should be visible
     for (let i = 0; i < 7; i++) {
       await expect(page.locator(`[data-testid="day-column-${i}"]`)).toBeVisible();
     }
 
-    // Click the day button
-    await page.locator('[data-testid="day-button"]').click();
+    // Select «День мастеров» in the view dropdown
+    await selectView(page, 'view-masters');
     await page.waitForTimeout(500);
 
     // Day view should show only 1 day column (day-column-0)
@@ -37,18 +44,16 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
     }
   });
 
-  test('week button switches from day back to week view', async ({ page }) => {
+  test('week option switches from day back to week view', async ({ page }) => {
     // Switch to day view first
-    await page.locator('[data-testid="day-button"]').click();
+    await selectView(page, 'view-masters');
     await page.waitForTimeout(500);
 
     // Verify day view
     await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
 
-    // Find and click the week button
-    const weekButton = page.locator('button:has-text("Неделя")');
-    await expect(weekButton).toBeVisible();
-    await weekButton.click();
+    // Select the week option
+    await selectView(page, 'view-week');
     await page.waitForTimeout(500);
 
     // Week view should show 7 day columns
@@ -57,29 +62,20 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
     }
   });
 
-  test('day button text changes based on column mode', async ({ page }) => {
-    const dayButton = page.locator('[data-testid="day-button"]');
+  test('selector trigger shows the active option', async ({ page }) => {
+    // Week by default → trigger reads «Неделя»
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('Неделя');
 
-    // Default column mode is 'masters', so button shows "День по мастерам"
-    await expect(dayButton).toContainText('День по мастерам');
-
-    // Switch to locations column mode
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
-
-    const columnMenu = page.locator('[data-testid="column-mode-menu"]');
-    await expect(columnMenu).toBeVisible();
-
-    await columnMenu.locator('button:has-text("По локациям")').click();
+    // Switch to day by locations
+    await selectView(page, 'view-locations');
     await page.waitForTimeout(500);
 
-    // Button should now say "День по локациям"
-    await expect(dayButton).toContainText('День по локациям');
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
   });
 
   test('day view shows correct date label in topbar', async ({ page }) => {
     // Switch to day view
-    await page.locator('[data-testid="day-button"]').click();
+    await selectView(page, 'view-masters');
     await page.waitForTimeout(500);
 
     // Date nav text should show a date (day label format)
@@ -94,73 +90,87 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests — Column Mode Switching
+// Tests — View Selector dropdown (День мастеров / День локаций / Неделя)
 // ---------------------------------------------------------------------------
 
-test.describe('Schedule — Column Mode (По мастерам / По локациям)', () => {
+test.describe('Schedule — View selector dropdown', () => {
   test.beforeEach(async ({ page }) => {
     await waitForScheduleReady(page);
   });
 
-  test('column mode dropdown opens and shows two options', async ({ page }) => {
-    // Click day-button: switches to day view AND opens column-mode dropdown
-    await page.locator('[data-testid="day-button"]').click();
-    // Auto-wait for the dropdown menu to be visible
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
-
-    const menu = page.locator('[data-testid="column-mode-menu"]');
-    // Should have two menu items
-    await expect(menu.locator('button:has-text("По мастерам")')).toBeVisible();
-    await expect(menu.locator('button:has-text("По локациям")')).toBeVisible();
+  test('dropdown opens with all three options, active marked', async ({ page }) => {
+    await page.locator('[data-testid="view-selector"]').click();
+    await expect(page.locator('[data-testid="view-mode-menu"]')).toBeVisible();
+    await expect(page.locator('[data-testid="view-masters"]')).toBeVisible();
+    await expect(page.locator('[data-testid="view-locations"]')).toBeVisible();
+    await expect(page.locator('[data-testid="view-week"]')).toBeVisible();
+    // Week is the default view → active
+    await expect(page.locator('[data-testid="view-week"]')).toHaveAttribute('data-active', 'true');
   });
 
-  test('switching to "По локациям" changes column mode', async ({ page }) => {
-    // Click day-button: switches to day view AND opens column-mode dropdown
-    await page.locator('[data-testid="day-button"]').click();
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
+  test('«День локаций» click switches column mode (client-side only — no API call)', async ({ page }) => {
+    await selectView(page, 'view-locations');
+    await page.waitForTimeout(500);
 
-    // Column mode switch is client-side only — no API call
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
-
-    // The day button text should change
-    await expect(page.locator('[data-testid="day-button"]')).toContainText('День по локациям');
+    // The trigger now shows the locations option
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
 
     // Day column should still be visible
     await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
   });
 
-  test('switching to "По мастерам" changes column mode back', async ({ page }) => {
-    // Click day-button: switches to day view AND opens column-mode dropdown
-    await page.locator('[data-testid="day-button"]').click();
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
+  test('«День мастеров» click switches column mode back', async ({ page }) => {
+    await selectView(page, 'view-locations');
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
 
-    // Switch to locations first (client-side only — no API call)
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По локациям")').click();
-    await expect(page.locator('[data-testid="day-button"]')).toContainText('День по локациям');
+    await selectView(page, 'view-masters');
+    await page.waitForTimeout(500);
 
-    // Click day-button again: already in day view, toggles dropdown open
-    await page.locator('[data-testid="day-button"]').click();
-    await expect(page.locator('[data-testid="column-mode-menu"]')).toBeVisible({ timeout: 5_000 });
-
-    // Switch back to masters
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По мастерам")').click();
-
-    await expect(page.locator('[data-testid="day-button"]')).toContainText('День по мастерам');
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День мастеров');
   });
 
-  test('selecting column mode auto-switches to day view', async ({ page }) => {
+  test('day-option click from week view auto-switches to day view', async ({ page }) => {
     // Start in week view (default)
     await expect(page.locator('[data-testid="day-column-6"]')).toBeVisible();
 
-    // Open column mode dropdown and select masters (client-side only — no API call)
-    await page.locator('[data-testid="day-button"]  ').click();
-    await page.waitForTimeout(300);
-    await page.locator('[data-testid="column-mode-menu"] button:has-text("По мастерам")').click();
+    // Select a day option (client-side only — no API call)
+    await selectView(page, 'view-masters');
     await page.waitForTimeout(500);
 
     // Should now be in day view (only day-column-0 visible)
     await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
     await expect(page.locator('[data-testid="day-column-6"]')).not.toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Week header drill-down (date click → day by locations)
+// ---------------------------------------------------------------------------
+
+test.describe('Schedule — Week header date click', () => {
+  test.beforeEach(async ({ page }) => {
+    await waitForScheduleReady(page);
+  });
+
+  test('clicking a week date opens that day by locations', async ({ page }) => {
+    // Monday of the current week; click its Wednesday (index 2)
+    const now = new Date();
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    const wednesday = new Date(monday);
+    wednesday.setDate(monday.getDate() + 2);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    await page.locator('[data-testid="week-day-header-2"]').click();
+    await page.waitForTimeout(500);
+
+    // Day view by locations on the clicked date
+    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="day-column-6"]')).not.toBeVisible();
+    await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
+    expect(new URL(page.url()).searchParams.get('view')).toBe('day');
+    expect(new URL(page.url()).searchParams.get('col')).toBe('locations');
+    expect(new URL(page.url()).searchParams.get('date')).toBe(iso(wednesday));
   });
 });
 
@@ -263,7 +273,7 @@ test.describe('Schedule — Day View Date Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await waitForScheduleReady(page);
     // Switch to day view
-    await page.locator('[data-testid="day-button"]').click();
+    await selectView(page, 'view-masters');
     await page.waitForTimeout(500);
   });
 

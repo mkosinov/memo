@@ -55,8 +55,8 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
     expect(new URL(page.url()).searchParams.get('view')).toBe('day');
     expect(new URL(page.url()).searchParams.get('date')).toBe(date);
 
-    // The day button reflects the active mode.
-    await expect(page.getByTestId('day-button')).toContainText(/День/);
+    // The view selector trigger reflects the active mode.
+    await expect(page.getByTestId('view-selector')).toContainText('День мастеров');
 
     // Activity cards render on the seeded June dates — day view of the date.
     await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible({

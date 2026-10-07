@@ -244,11 +244,10 @@ export async function expectNoOwnEchoToast(
 /**
  * Dismiss/wait out transient toast overlays before a click.
  *
- * The toast container (fixed bottom-right, z-[250]) shares the screen corner
- * with the StampFab (fixed bottom-right, z-50); a toast overlapping the FAB
- * swallows the click and the panel never opens. Foreign pushes from parallel
- * specs can pop a toast at ANY moment, so a one-shot wait is not enough —
- * retry the click until it lands, re-waiting out overlays after each miss.
+ * The panel toggle lives in the Topbar («Открыть панель инструментов», right
+ * of the zoom button). Parallel-spec toasts can no longer cover it (they sit
+ * in the bottom corner), but the retry loop stays as a cheap guard: any
+ * overlay that does land on the button must not eat the click.
  */
 export async function clickFabRobust(page: Page, timeoutMs = 15_000) {
   const fab = page.getByRole('button', { name: 'Открыть панель инструментов' });

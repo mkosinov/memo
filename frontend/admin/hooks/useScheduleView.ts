@@ -46,6 +46,12 @@ export interface ScheduleView {
   setViewMode(mode: ScheduleViewMode): void;
   setSelectedDay(date: Date): void;
   setColumnMode(mode: ScheduleColumnMode): void;
+  /**
+   * Week→day drill-down (date click in the week header): opens an exact
+   * date in day view with the given column mode — one push, so Back
+   * returns to the week. The explicit date wins over the week→day anchor.
+   */
+  openDayView(date: Date, columnMode: ScheduleColumnMode): void;
   goToToday(): void;
   prevPeriod(): void;
   nextPeriod(): void;
@@ -138,6 +144,13 @@ export function useScheduleView(): ScheduleView {
     [updateParams],
   );
 
+  const openDayView = useCallback(
+    (date: Date, mode: ScheduleColumnMode) => {
+      updateParams({ view: 'day', date: toISODate(date), col: mode }, 'push');
+    },
+    [updateParams],
+  );
+
   const goToToday = useCallback(
     () => updateParams({ date: toISODate(today()) }, 'push'),
     [updateParams],
@@ -163,6 +176,7 @@ export function useScheduleView(): ScheduleView {
     setViewMode,
     setSelectedDay,
     setColumnMode,
+    openDayView,
     goToToday,
     prevPeriod,
     nextPeriod,

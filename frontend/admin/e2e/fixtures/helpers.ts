@@ -686,6 +686,85 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
   return { bodyDeletes, stop: () => page.off('request', onRequest) };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GH #417 — undo window under a controlled page clock. Replaces literal
+// `waitForTimeout(5_500)` waits: the window stops ticking while the test
+// works inside it, then expires via one instant rewind instead of 5.5s of
+// real sleep.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run an undo-window interaction under a paused page clock (GH #417).
+ *
+ * Mechanics: pause the page clock at the page's CURRENT fake "now" (read
+ * from the page via `page.evaluate(() => Date.now())` — ≈ real "now" for
+ * the first window in a test) → run `fn` → fast-forward `opts.advanceMs`
+ * in one operation → real Node-side drain of `opts.drainMs` (request
+ * events for rewound timers are async and not governed by the clock) →
+ * `clock.resume()`.
+ *
+ * Contract:
+ * - Call BEFORE the action that creates the window (the «×» click). Timers
+ *   scheduled BEFORE the pause are real and are NOT governed by the rewind.
+ * - Inside `fn` — window work ONLY: the «×» click, toast/row-hidden checks,
+ *   and in undo scenarios the «Отменить» click. Nothing that depends on
+ *   real time (debounced input, waiting for SSE events) — the clock stands.
+ * - After `fn` returns, verify commit/no-commit via the usual channels
+ *   (commitDeleteWait for positives, a short real buffer for negatives) —
+ *   the drain only lets rewound events reach Node-side listeners. BUT
+ *   register every response waiter / request tracker (commitDeleteWait,
+ *   page.waitForResponse, page.on('request')) BEFORE the «×» click —
+ *   inside `fn` ahead of it, or before calling withUndoWindow — NEVER
+ *   after the wrapper returns: a response that already arrived during
+ *   the drain is invisible to a waiter registered later.
+ * - Returns `fn`'s result. If `fn` throws, the rewind+drain+resume still
+ *   run (try/finally — the clock is never left paused) and the error is
+ *   re-thrown as-is.
+ * - Calling `withUndoWindow` again later in the same test is legal (e.g.
+ *   the unified-rows scenario 19 pair of windows): after `resume()` the
+ *   clock can be paused anew. The pause target is re-read from the page
+ *   on every call — after a rewind the fake clock runs AHEAD of real
+ *   time, and only the page's own fake "now" (plus a 10ms epsilon) is
+ *   guaranteed to be a legal (non-past) pauseAt target. Node-side offset
+ *   bookkeeping was removed on purpose: it raced the ticking fake clock
+ *   under load ("Cannot fast-forward to the past").
+ *
+ * @param page Playwright page
+ * @param fn window body: `(page) => Promise<T>`
+ * @param opts.advanceMs rewind span, default 5_500 (the deferred-delete
+ *   window; interval ring callbacks fire at most once per rewind)
+ * @param opts.drainMs real Node-side wait after the rewind, default 500
+ */
+export async function withUndoWindow<T>(
+  page: Page,
+  fn: (page: Page) => Promise<T>,
+  opts?: { advanceMs?: number; drainMs?: number },
+): Promise<T> {
+  const advanceMs = opts?.advanceMs ?? 5_500;
+  const drainMs = opts?.drainMs ?? 500;
+  // pauseAt = install fakes + set time + pause in one operation; a bare
+  // install() would NOT stop time — the window would keep ticking. The
+  // target must be the page's CURRENT fake "now": after a previous
+  // window's rewind the fake clock runs ahead of real time, and
+  // pauseAt() may not target the fake past. Reading the fake time from
+  // the page (not computing an offset Node-side — that races the
+  // ticking clock under load) makes the target ≥ fake-now by
+  // construction; the 10ms epsilon keeps it monotonic across the
+  // evaluate→pauseAt round trip, and the max() keeps the first window
+  // (fakeNow ≈ real now) anchored to real "now".
+  const fakeNow: number = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(new Date(Math.max(Date.now(), fakeNow + 10)));
+  try {
+    return await fn(page);
+  } finally {
+    // Expires the window instantly (commit timer + toast auto-hide fire
+    // together), then lets the rewound events surface on the Node side
+    // before real time flows again. Runs even if fn threw.
+    await page.clock.fastForward(advanceMs);
+    await new Promise((resolve) => setTimeout(resolve, drainMs));
+    await page.clock.resume();
+  }
+}
 
 /**
  * Wait for photos page to load with table.

@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, openModal } from './fixtures/helpers';
+import {
+  waitForScheduleReady,
+  openModal,
+  withUndoWindow,
+  commitDeleteWait,
+} from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
   createTestClient,
@@ -795,19 +800,35 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       expect(testId).toBeTruthy();
       const visitId = testId!.replace('visit-row-', '');
 
-      // 2. ACTION — delete visitor (× button)
-      await visitRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      // 2. ACTION — delete visitor (× button); the undo window runs under
+      //    the paused page clock (#417): the wrapper's instant rewind
+      //    expires the 5s commit window (expiry WITHOUT undo) instead of
+      //    a real 5.5s sleep. commitDeleteWait below is registered before
+      //    the window-creating click, as the helper contract requires.
+      const commitWait = commitDeleteWait(page, '/api/v1/visits', visitId);
+      await withUndoWindow(page, async () => {
+        await visitRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
 
-      // Toast appears: "Удалено. Отменить"
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance needed — the record tab owns its data;
+        // the enqueue churn of PendingActionsContext re-renders the tab,
+        // which re-reads the query cache synchronously (the frozen
+        // notifyManager flush is bypassed — same surface as the US-3
+        // pilot in unify-caches). LOAD-BEARING: this holds only while
+        // that context value stays unmemoized; a memoization cleanup
+        // would reintroduce the freeze — then add a fastForward(1)
+        // micro-advance here.
 
-      // Row disappeared from UI (optimistic)
-      await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).not.toBeVisible({ timeout: 3_000 });
+        // Toast appears: "Удалено. Отменить"
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // 3. Wait for deferred DELETE to fire (5s + buffer)
-      // The toast expires after 5s, which triggers the actual DELETE.
-      await page.waitForTimeout(5_500);
+        // Row disappeared from UI (optimistic)
+        await expect(page.locator(`[data-testid="visit-row-${visitId}"]`)).not.toBeVisible({ timeout: 3_000 });
+      });
+
+      // 3. Positive sync (#417 step 5): the rewound commit DELETE has
+      //    landed server-side before the modal reopen refetch below.
+      await commitWait;
 
       // 4. Close the modal
       await page.locator('[data-testid="modal-close-btn"]').click();
@@ -849,18 +870,27 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const paymentRow = page.locator(`[data-testid="payment-${payment.id}"]`);
       await expect(paymentRow).toBeVisible({ timeout: 5_000 });
 
-      // 2. ACTION — delete payment (× button)
-      await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
+      // 2. ACTION — delete payment (× button); the undo window runs under
+      //    the paused page clock (#417): the wrapper's instant rewind
+      //    expires the commit window (expiry WITHOUT undo) instead of a
+      //    real 5.5s sleep. commitDeleteWait below is registered before
+      //    the window-creating click, as the helper contract requires.
+      const commitWait = commitDeleteWait(page, '/api/v1/payments', payment.id);
+      await withUndoWindow(page, async () => {
+        await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
-      // Toast appears
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance — record-tab surface, same mechanism
+        // and LOAD-BEARING unmemoized-context caveat as scenario 16.
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // Row disappeared from UI (optimistic)
-      await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
+        // Row disappeared from UI (optimistic)
+        await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
+      });
 
-      // 3. Wait for deferred DELETE to fire (5s + buffer)
-      await page.waitForTimeout(5_500);
+      // 3. Positive sync (#417 step 5): the rewound commit DELETE has
+      //    landed server-side before the modal reopen refetch below.
+      await commitWait;
 
       // 4. Close the modal
       await page.locator('[data-testid="modal-close-btn"]').click();
@@ -1021,46 +1051,75 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
       const paymentRow = page.locator(`[data-testid="payment-${payment.id}"]`);
       await expect(paymentRow).toBeVisible({ timeout: 5_000 });
 
-      // 2. ACTION — click × on the payment row
-      await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
-
-      // 3. ASSERT — toast "Удалено. Отменить" appears
       const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // 4. ASSERT — payment row disappeared from table
-      await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
+      // 2. FIRST window — the undo part, under the paused page clock
+      //    (#417): the × click, the deferred-proof checks, and
+      //    «Отменить» run with the clock standing, so the undo cannot
+      //    lose a race with the commit timer; the wrapper's rewind then
+      //    expires the (already-cancelled) window instantly. The DELETE
+      //    tracker (page.route above) was registered before the click,
+      //    as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        // ACTION — click × on the payment row
+        await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
-      // 5. ASSERT — NO DELETE request was sent yet (deferred)
-      expect(deleteRequests).toHaveLength(0);
+        // #417: no micro-advance — record-tab surface, same mechanism
+        // and LOAD-BEARING unmemoized-context caveat as scenario 16.
 
-      // 6. Click "Отменить" in the toast
-      const undoBtn = page.locator('button:has-text("Отменить")');
-      await expect(undoBtn).toBeVisible({ timeout: 3_000 });
-      await undoBtn.click();
+        // 3. ASSERT — toast "Удалено. Отменить" appears
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // 7. ASSERT — payment row reappears in table
+        // 4. ASSERT — payment row disappeared from table
+        await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
+
+        // 5. ASSERT — NO DELETE request was sent yet (deferred; the
+        //    clock stands, so the commit timer cannot fire mid-window)
+        expect(deleteRequests).toHaveLength(0);
+
+        // 6. Click "Отменить" in the toast
+        const undoBtn = page.locator('button:has-text("Отменить")');
+        await expect(undoBtn).toBeVisible({ timeout: 3_000 });
+        await undoBtn.click();
+      });
+
+      // 7. ASSERT — payment row reappears in table (outside the window:
+      //    the wrapper's rewind has flushed the undo-restore
+      //    notifications — the pilot's #291 order).
       await expect(paymentRow).toBeVisible({ timeout: 3_000 });
 
-      // 8. ASSERT — still no DELETE request sent
+      // 8. ASSERT — still no DELETE request sent (the window expired via
+      //    the wrapper's rewind and the drain buffer already elapsed
+      //    inside it — #417 step 5, negative-case sync).
       expect(deleteRequests).toHaveLength(0);
 
-      // 9. Now test the deferred delete path: click × again, DON'T undo
-      await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
+      // 9. SECOND window — the commit part: the deferred delete path
+      //    WITHOUT undo. A second withUndoWindow call in the same test
+      //    is legal (#417 S6): after resume() real time flows between
+      //    the windows and the clock can be paused anew. commitDeleteWait
+      //    below is registered before the window-creating click, as the
+      //    helper contract requires.
+      const commitWait = commitDeleteWait(page, '/api/v1/payments', payment.id);
+      await withUndoWindow(page, async () => {
+        // Click × again, DON'T undo
+        await paymentRow.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
-      // Toast appears again
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance — record-tab surface, same mechanism
+        // and LOAD-BEARING unmemoized-context caveat as scenario 16.
 
-      // Row disappeared
-      await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
+        // Toast appears again
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // Still no DELETE (deferred)
-      expect(deleteRequests).toHaveLength(0);
+        // Row disappeared
+        await expect(paymentRow).not.toBeVisible({ timeout: 3_000 });
 
-      // 10. Wait for toast to expire (5s) + buffer → DELETE fires
-      // Note: In E2E (real browser), we can't mock setTimeout.
-      // We use page.waitForTimeout to actually wait for the deferred delete.
-      await page.waitForTimeout(5_500);
+        // Still no DELETE (deferred; the clock stands)
+        expect(deleteRequests).toHaveLength(0);
+      });
+
+      // 10. Positive sync (#417 step 5): the rewound commit DELETE has
+      //     landed server-side.
+      await commitWait;
 
       // 11. ASSERT — DELETE request was now sent
       expect(deleteRequests.length).toBeGreaterThanOrEqual(1);

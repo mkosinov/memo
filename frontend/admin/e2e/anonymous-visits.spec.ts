@@ -4,6 +4,7 @@ import {
   openAddTab,
   getFirstActivity,
   waitForClientsReady,
+  withUndoWindow,
 } from './fixtures/helpers';
 import {
   createTestClient,
@@ -543,23 +544,33 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       };
       page.on('request', onRequest);
 
-      // ACTION: «−» → optimistic removal + the undo toast.
-      await header.locator('[data-testid="anonym-visits-dec"]').click();
-      await expect(visitRow).not.toBeVisible({ timeout: 5_000 });
-      await expect(counter).toHaveText('0 анонимных');
-      const toast = page
-        .locator('[data-testid="toast-info"]')
-        .filter({ hasText: 'Удалено. Отменить' });
-      await expect(toast).toBeVisible();
+      // The undo window under the paused page clock (#417): the 5s commit
+      // window is expired by the wrapper's instant rewind, not by a real
+      // 5.5s sleep. The DELETE tracker above was registered before the
+      // «−» click, as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        // #417: no micro-advance needed — the visit row hides via local
+        // component state (the record tab owns its data), a synchronous
+        // re-render that bypasses the frozen query-notify flush.
+        // ACTION: «−» → optimistic removal + the undo toast.
+        await header.locator('[data-testid="anonym-visits-dec"]').click();
+        await expect(visitRow).not.toBeVisible({ timeout: 5_000 });
+        await expect(counter).toHaveText('0 анонимных');
+        const toast = page
+          .locator('[data-testid="toast-info"]')
+          .filter({ hasText: 'Удалено. Отменить' });
+        await expect(toast).toBeVisible();
 
-      // Undo inside the window: the row (and the counter) return.
-      await toast.locator('button:has-text("Отменить")').click();
-      await expect(visitRow).toBeVisible({ timeout: 5_000 });
-      await expect(counter).toHaveText('1 анонимных');
-      await expect(toast).toBeHidden();
+        // Undo inside the window: the row (and the counter) return.
+        await toast.locator('button:has-text("Отменить")').click();
+        await expect(visitRow).toBeVisible({ timeout: 5_000 });
+        await expect(counter).toHaveText('1 анонимных');
+        await expect(toast).toBeHidden();
+      });
 
-      // Let the full window elapse: no server DELETE may have been sent…
-      await page.waitForTimeout(5_500);
+      // The window expired via the wrapper's rewind and the drainMs buffer
+      // already elapsed inside it — no server DELETE may have been sent
+      // (#417 step 5, negative-case sync)…
       expect(visitDeletes).toHaveLength(0);
       page.off('request', onRequest);
       // …and the server never lost the visit.

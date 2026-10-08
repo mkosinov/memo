@@ -10,6 +10,7 @@ import {
   clickRowDelete,
   openRowActionDropdown,
   waitForPhotosReady,
+  withUndoWindow,
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
@@ -95,24 +96,43 @@ test.describe('Deferred photo delete (GH #324 §9.1–§9.2)', () => {
       const { bodyDeletes, stop } = trackBodyDeletes(page, photo.id);
 
       // 2. ACTION — the click dry-runs clean (204, no body) → NO dialog, the
-      // row disappears optimistically with the undo toast.
+      // row disappears optimistically with the undo toast. The undo window
+      // runs under the paused page clock (#417): the wrapper's instant
+      // rewind expires it instead of a real 5.5s sleep; the DELETE tracker
+      // above was registered before the «×» click (helper contract).
       const dropdown = await openRowActionDropdown(row);
-      await clickRowDelete(dropdown);
+      await withUndoWindow(page, async () => {
+        await clickRowDelete(dropdown);
 
-      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
-      await expect(row).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+        await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+        // The toast is plain React state (UIContext) — it renders on the
+        // real macrotask loop and proves the async dry-run resolved and
+        // the enqueue (optimistic remove + notifications) completed.
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        // #417: TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused page
+        // clock, so the page-level list provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the row's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(row).not.toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
 
-      // …undone inside the window: row returns, toast hides.
-      await toast.getByRole('button', { name: 'Отменить' }).click();
+        // …undone inside the window: the toast hides (the row returns —
+        // asserted after the wrapper, where the rewind has flushed the
+        // restore notifications; the pilot's #291 order).
+        await toast.getByRole('button', { name: 'Отменить' }).click();
+        await expect(toast).toBeHidden();
+      });
+
+      // The row is back (undo restore flushed by the wrapper's rewind).
       await expect(row).toBeVisible();
-      await expect(toast).toBeHidden();
 
-      // Let the full window elapse: no committing DELETE was sent (the
-      // dry-run preview — postData() === null — does not count).
-      await page.waitForTimeout(5_500);
+      // The window expired via the wrapper's rewind and the drainMs buffer
+      // already elapsed inside it — no committing DELETE was sent (the
+      // dry-run preview — postData() === null — does not count; #417 step
+      // 5, negative-case sync).
       expect(bodyDeletes).toHaveLength(0);
       stop();
 
@@ -189,15 +209,27 @@ test.describe('Deferred photo delete (GH #324 §9.1–§9.2)', () => {
       await page.locator('[data-testid="delete-dialog-confirm-checkbox"]').check();
 
       // 4. ACTION — confirm; enqueue is sync → row disappears + ring toast;
-      // the commit DELETE (with body) fires at the 5s window end.
+      // the commit DELETE (with body) fires at the 5s window end. The
+      // window runs under the paused page clock (#417): the wrapper's
+      // instant rewind expires it instead of a real 5.5s sleep;
+      // commitDeleteWait above was registered before the window-creating
+      // click (helper contract).
       const commitWait = commitDeleteWait(page, photo.id);
-      await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
-      await expect(dialog).toHaveCount(0);
-
-      await expect(row).not.toBeVisible();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
-      await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      await withUndoWindow(page, async () => {
+        await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
+        await expect(dialog).toHaveCount(0);
+        // #417: the confirm chain is fully synchronous (remove → enqueue →
+        // onDone), but TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused page
+        // clock, so the page-level list provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the row's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(row).not.toBeVisible();
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        await expect(toast.getByTestId('toast-countdown')).toBeVisible();
+      });
 
       const commit = await commitWait;
       expect(commit.status()).toBe(204);
@@ -208,9 +240,10 @@ test.describe('Deferred photo delete (GH #324 §9.1–§9.2)', () => {
         expected: { photo_tags: expect.arrayContaining([tagA.id, tagB.id]) },
       });
 
-      // 5. VERIFY DB — after the commit window: photo gone, join rows
-      // unlinked, BOTH tag rows alive (the catalog keeps them).
-      await page.waitForTimeout(5_500);
+      // 5. VERIFY DB — after the commit window (expired by the wrapper's
+      // rewind; the 204 commit response above proves the server finished):
+      // photo gone, join rows unlinked, BOTH tag rows alive (the catalog
+      // keeps them).
       expect(queryDBRow(`SELECT id FROM photos WHERE id='${photo.id}'`)).toBeNull();
       expect(
         queryDBRows(`SELECT * FROM photo_tags WHERE photo_id='${photo.id}'`),

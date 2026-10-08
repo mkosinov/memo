@@ -1,7 +1,7 @@
 """User settings ORM model — stores per-user preferences."""
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
 import sqlalchemy as sa
+from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.abstract import AbstractModel

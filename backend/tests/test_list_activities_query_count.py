@@ -91,7 +91,7 @@ def test_list_activities_query_count_is_bounded_with_q(
     counter, listener = _count_select_queries(db_engine)
     try:
         resp = api_client.get(
-            f"/api/v1/activities",
+            "/api/v1/activities",
             params={"q": "Test Serv", "date_from": date_from, "date_to": date_to},
         )
     finally:

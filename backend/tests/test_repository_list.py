@@ -29,8 +29,8 @@ from sqlalchemy.orm import selectinload
 
 from src.models.activity import Activity
 from src.models.location import Location
-from src.models.staff import Staff  # GH #266: people entity
 from src.models.service import Service
+from src.models.staff import Staff  # GH #266: people entity
 from src.repositories.generic import get_archive_repository, get_base_repository
 from src.repositories.search import SearchField
 

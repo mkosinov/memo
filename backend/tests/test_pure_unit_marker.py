@@ -1,7 +1,6 @@
 """Verify pure_unit marker behavior and registration."""
 import pytest
 
-
 pytestmark = pytest.mark.pure_unit
 
 

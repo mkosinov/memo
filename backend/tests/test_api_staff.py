@@ -1853,7 +1853,7 @@ class TestDeleteCascadesUserSettings:
             f"INSERT INTO user_settings (id, user_id, theme, language, "
             f"column_order_staff, column_order_locations, show_archived_masters, "
             f"show_archived_locations, created_at, updated_at) "
-            f"VALUES ('{str(_uuid.uuid4())}', '{user_id}', 'light', 'ru', '[]', '[]', "
+            f"VALUES ('{_uuid.uuid4()!s}', '{user_id}', 'light', 'ru', '[]', '[]', "
             f"1, 0, datetime('now'), datetime('now'))"
         )
 

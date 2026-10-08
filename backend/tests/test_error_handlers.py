@@ -10,15 +10,13 @@ main.py. Before T1.2, only IntegrityError handler exists — the other
 """
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError as FastAPIValidationError
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
 from src.errors import ErrorCode, ErrorDetail
 from src.main import create_app
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 

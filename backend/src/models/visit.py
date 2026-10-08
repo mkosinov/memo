@@ -24,5 +24,5 @@ class Visit(AbstractModel):
     custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20))
 
-    record: Mapped["Record"] = relationship("Record", back_populates="visits")
-    tariff: Mapped["Tariff | None"] = relationship("Tariff")
+    record: Mapped[Record] = relationship("Record", back_populates="visits")
+    tariff: Mapped[Tariff | None] = relationship("Tariff")

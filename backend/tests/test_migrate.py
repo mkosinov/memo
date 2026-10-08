@@ -14,16 +14,15 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-
 # Path to backend root (where alembic.ini lives)
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 def test_run_alembic_upgrade_on_already_at_head(tmp_path) -> None:
     """When DB is at head, run_alembic_upgrade is a no-op (no errors)."""
-    from alembic import command
     from alembic.config import Config
 
+    from alembic import command
     from src.db.base import Base
     from src.db.database import DBManager
     from src.db.migrate import run_alembic_upgrade
@@ -162,9 +161,9 @@ def test_run_alembic_upgrade_version_row_without_tables_rebuilds_from_base(
     real tables (crash debris / hollow stamp from an older head). The version
     row is meaningless — resuming the chain from it crashes (batch_alter on a
     missing table). Must reset to base and rebuild the schema."""
-    from alembic import command
     from alembic.config import Config
 
+    from alembic import command
     from src.db.database import DBManager
     from src.db.migrate import run_alembic_upgrade
 
@@ -218,9 +217,9 @@ def test_run_alembic_upgrade_version_row_without_tables_rebuilds_from_base(
 
 def test_run_alembic_upgrade_fast_path_when_at_head(tmp_path, monkeypatch) -> None:
     """When at head, command.upgrade is NOT called (fast-path)."""
-    from alembic import command
     from alembic.config import Config
 
+    from alembic import command
     from src.db.base import Base
     from src.db.database import DBManager
     from src.db.migrate import run_alembic_upgrade

@@ -1,10 +1,9 @@
 """Tests for the Records + Visits CRUD API endpoints."""
 
 import uuid as _uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 import pytest
-from fastapi.testclient import TestClient
 
 from tests.conftest import query_db
 

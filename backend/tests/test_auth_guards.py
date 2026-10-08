@@ -101,7 +101,6 @@ def anon_client(app):
     need BOTH views in one test — an authenticated client to seed parent
     rows (masters/services/… writes) and an anonymous one to probe guards.
     """
-    from fastapi.testclient import TestClient
 
     client = TestClient(app)
     yield client

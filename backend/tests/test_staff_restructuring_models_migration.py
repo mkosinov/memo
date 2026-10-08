@@ -12,7 +12,6 @@ from sqlalchemy import text
 
 from src.db.base import Base
 from src.models import Master, Position, Staff, User, UserSettings
-from src.models.position import staff_positions
 from tests.conftest import query_db
 
 

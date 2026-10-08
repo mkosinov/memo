@@ -9,12 +9,15 @@ functions; neither knows about the other.
 """
 
 from datetime import UTC, datetime
+
 from fastapi import HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.visit_status import (
-    VisitItem, compute_record_status, ACTIVE_RECORD_STATUSES,
+    ACTIVE_RECORD_STATUSES,
+    VisitItem,
+    compute_record_status,
 )
 from src.errors import ErrorCode, ErrorDetail
 from src.models.activity import Activity

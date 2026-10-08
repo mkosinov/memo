@@ -113,7 +113,7 @@ async def list_visits(
     record_id: str | None = None,
     # GH #263 T2: scope via visit → record → activity («всё через записи»);
     # conjunctive with the record_id param. Admin → no filter.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[VisitResponse]:
     """List active visits, optionally filtered by record_id."""
     return await service.list(
@@ -128,7 +128,7 @@ async def get_visit(
     service: _ServiceDep,
     session: SessionDep,
     # GH #263 T2: чужой визит → 404 (single scope-aware query).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitResponse:
     """Return a single visit by ID."""
     visit = await service.get_scoped(
@@ -154,7 +154,7 @@ async def create_visit(
     # GH #263 T2: a master may add visits only to his own records — the
     # parent record's activity must be his (чужая → 404, same code as
     # «родитель не найден»).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitResponse:
     """Create a new visit, cascade status + seats to parent record."""
     if scope.master_key is not None:
@@ -187,7 +187,7 @@ async def update_visit(
     data: VisitUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitResponse:
     """Full-replace update of a visit, cascade status to parent record."""
     await _visit_scoped_or_404(service, session, visit_id, scope)
@@ -224,7 +224,7 @@ async def patch_visit(
     data: VisitPatch,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitResponse:
     """Partial update of a visit, cascade status to parent record."""
     await _visit_scoped_or_404(service, session, visit_id, scope)
@@ -247,7 +247,7 @@ async def delete_visit(
     session: SessionDep,
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> None:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     leaf subject — mirror of the records/tags routes #285/#318).
@@ -302,7 +302,7 @@ async def update_visit_status(
     data: VisitStatusUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitResponse:
     """Update a visit's status only."""
     await _visit_scoped_or_404(service, session, visit_id, scope)

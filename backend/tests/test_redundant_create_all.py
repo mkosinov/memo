@@ -1,7 +1,7 @@
 """Tests that prove the redundant create_all calls are removable without breaking tests."""
 
 import asyncio
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI

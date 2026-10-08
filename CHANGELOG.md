@@ -49,6 +49,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     records.spec, зелёный на повторе), shard2 функциональные зелёные; 46 локальных пиксель-диффов
     wave6 — документированный фонт-дрифт контейнера, CI авторитетен; полный e2e-гейт — PR CI.
   - Status: `docs/status/2026-10-08-phone-field-country-selector-414-impl.md`
+- **GH #306 — Бэкенд lint/mypy рахет-гейт + волновая чистка до нуля: волна 0 (задачи 1–3 из 9)**
+  — branch `306-backend-lint-mypy-ratchet` (3 коммита `a949d09c..e58bf6f6`, base `93dbba1a`;
+  73 файла, +805/−197; multi-wave feature — волны 1–9 идут следующими PR после мержа этого;
+  спека `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`, план
+  `docs/plans/2026-10-08-backend-lint-mypy-ratchet-306-plan.md`):
+  - **T1 — скрипт бюджета:** новый `backend/scripts/lint_budget.py` — единственный исполнитель
+    ruff + mypy и владелец exit-кодов; пороги per-rule (ruff) и тотал (mypy), правила «факт >
+    порога / факт < порога / рост порога против базы — красные, равенство — зелёное»,
+    fail-closed на поломке инструмента; запрет роста порогов в CI читает пороги из merge-base
+    (`git show`, для пуша в main — `HEAD~1`); юнит-тесты `test_lint_budget.py` — 33 кейса.
+  - **T2 — CI-джоба `backend-lint`:** в `test.yml` рядом с `backend-coverage`, без `needs`
+    (параллельно тестам), `fetch-depth: 0` + `uv sync --extra dev` + вызов скрипта.
+  - **T3 — волна 0 чистки:** B008 37 → 0 конфигом `extend-immutable-calls` (fastapi-Depends
+    семейство в `pyproject.toml`); safe-автоправки ruff по 71 файлу — ruff 272 → **119**
+    (I001 −44, F401 −29, RUF100 16 → 3, UP037 −11, W292 −9, F811 −4 — мёртвые импорты/дубликаты,
+    проверено ревью); mypy 531 → 531 (в волне 0 не трогался, осознанно); пороги в скрипте =
+    факту (ruff 119 / mypy 531).
+  - **Behavioral delta:** нулевая — конфиг линтера, автоправки импортов/стиля и test-infra;
+    прод-поведение не менялось.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped** (40:25 detached);
+    `test_lint_budget.py` 33/33; гейт `uv run python scripts/lint_budget.py` exit 0; e2e-шарды —
+    гейт PR CI.
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave0.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

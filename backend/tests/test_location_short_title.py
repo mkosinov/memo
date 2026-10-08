@@ -7,7 +7,6 @@ Covers:
   - DB: column exists, nullable, VARCHAR(50)
 """
 
-import sqlite3
 
 import pytest
 

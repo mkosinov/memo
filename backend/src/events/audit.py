@@ -59,11 +59,12 @@ from __future__ import annotations
 
 import contextvars
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 
 logger = logging.getLogger("memo.audit")
 

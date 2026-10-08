@@ -20,6 +20,6 @@ class Visitor(AbstractModel):
     name: Mapped[str] = mapped_column(String(200))
     age: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    tags: Mapped[list["Tag"]] = relationship(
+    tags: Mapped[list[Tag]] = relationship(
         "Tag", secondary="visitor_tags", back_populates="visitors"
     )

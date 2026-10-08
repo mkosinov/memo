@@ -61,6 +61,32 @@ jobs:
       - name: Check coverage threshold
         run: uv run pytest --cov=src --cov-report=xml --cov-fail-under=80 -n auto
 
+  # Рахет-гейт lint/mypy (#306): быстрый сигнал, параллельно тестам —
+  # без needs. Скрипт в PR-режиме делает git show <merge-base>:… —
+  # checkout требует полную историю (fetch-depth: 0).
+  backend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Lint budget (ruff/mypy ratchet)
+        run: uv run python scripts/lint_budget.py
+
   frontend-tests:
     runs-on: ubuntu-latest
     strategy:

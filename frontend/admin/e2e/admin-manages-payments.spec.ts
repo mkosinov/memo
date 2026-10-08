@@ -134,6 +134,11 @@ test('S1: delete payment — undo toast, «Отменить» returns the row, n
       // enqueue/undo churn of PendingActionsContext re-renders the tab,
       // which re-reads the query cache synchronously (the frozen
       // notifyManager flush is bypassed — same surface as the US-3 pilot).
+      // LOAD-BEARING (both row assertions below): this holds only while
+      // the PendingActionsContext value stays unmemoized — a standard
+      // memoization cleanup would reintroduce the notify-freeze, and the
+      // row-return would need the post-wrapper placement (pilot #291
+      // order) or an in-window micro-advance.
 
       // ACTION: delete the payment.
       await page.locator(`[data-testid="payment-${payment.id}-delete"]`).click();

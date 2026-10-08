@@ -548,6 +548,9 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       // 5.5s sleep. The DELETE tracker above was registered before the
       // «−» click, as the helper contract requires.
       await withUndoWindow(page, async () => {
+        // #417: no micro-advance needed — the visit row hides via local
+        // component state (the record tab owns its data), a synchronous
+        // re-render that bypasses the frozen query-notify flush.
         // ACTION: «−» → optimistic removal + the undo toast.
         await header.locator('[data-testid="anonym-visits-dec"]').click();
         await expect(visitRow).not.toBeVisible({ timeout: 5_000 });

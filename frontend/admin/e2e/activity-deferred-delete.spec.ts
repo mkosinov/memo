@@ -165,10 +165,12 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
         const toast = undoToast(page);
         await expect(toast).toBeVisible();
         // #417: TanStack Query v5's notifyManager flushes cache→React
-        // notifications via setTimeout(0) — frozen under the paused clock,
-        // so the schedule data provider never re-renders. A 1ms
-        // fast-forward releases the batch; React then renders the card's
-        // optimistic removal through its (unfaked) MessageChannel.
+        // notifications via setTimeout(0) — frozen under the paused clock.
+        // The provider still re-renders via the context churn (the
+        // enqueue's setCounts → unmemoized PendingActionsContext value →
+        // its consumers), re-reading the cache at render time; the 1ms
+        // advance releases the frozen notify batch so the card's removal
+        // does not depend on that churn path.
         await page.clock.fastForward(1);
         await expect(card).not.toBeVisible();
 
@@ -304,17 +306,31 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       await withUndoWindow(page, async () => {
         await dialog.locator('[data-testid="delete-dialog-confirm-btn"]').click();
 
+        // #417: no fastForward(1) micro-advance here (unlike the
+        // photos/positions dialog migrations and S2 above) — the schedule
+        // provider re-renders through the context-churn path: the dialog
+        // close is setPendingActivityConfirm(null), the provider's OWN
+        // state, and the enqueue's setCounts churn re-renders every
+        // usePendingActions consumer (the PendingActionsContext value is
+        // an unmemoized object literal), so the grid re-reads the query
+        // cache at render time — the frozen notify-driven flush is
+        // bypassed. LOAD-BEARING: this holds only while that context value
+        // stays unmemoized; a memoization cleanup would reintroduce the
+        // freeze — then add the S2 micro-advance here too.
         // Optimistic removal + undo toast with the countdown ring…
         await expect(card).not.toBeVisible();
         const toast = undoToast(page);
         await expect(toast).toBeVisible();
         await expect(toast.getByTestId('toast-countdown')).toBeVisible();
 
-        // …undone inside the window: the card returns, toast hides.
+        // …undone inside the window: the toast hides (the card returns —
+        // asserted after the wrapper, the pilot's #291 order, as in S2).
         await toast.getByRole('button', { name: 'Отменить' }).click();
-        await expect(card).toBeVisible();
         await expect(toast).toBeHidden();
       });
+
+      // The card is back (undo restore flushed by the wrapper's rewind).
+      await expect(card).toBeVisible();
 
       // The window expired via the wrapper's rewind and the drainMs buffer
       // already elapsed inside it — no committing DELETE was sent (#417

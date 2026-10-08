@@ -189,6 +189,10 @@ test.describe('Deferred visitor delete from the client card (GH #324 §9.3–§9
         await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
         await expect(dialog).toHaveCount(0);
 
+        // #417: no micro-advance needed — ClientInfoTab owns both the
+        // visitor-list query and the dialog/toast state, so its own state
+        // churn re-renders it and it re-reads the cache synchronously
+        // (the frozen notifyManager flush is bypassed).
         await expect(row).not.toBeVisible();
         const toast = undoToast(page);
         await expect(toast).toBeVisible();

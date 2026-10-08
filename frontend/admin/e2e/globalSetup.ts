@@ -101,7 +101,7 @@ function sanityCheckCanon(dbPath: string): void {
   if (canon.length < 100) {
     throw new Error(`[#310] Canon file looks empty/truncated (${canon.length} bytes): ${canonPath}. Regenerate by restarting the shard stack (scripts/e2e-shard-start.sh).`);
   }
-  const deleted = new Set([...canon.matchAll(/DELETE FROM "([^"]+)"/g)].map((m) => m[1]));
+  const deleted = new Set(Array.from(canon.matchAll(/DELETE FROM "([^"]+)"/g), (m) => m[1]));
   const schemaTables = sqliteExecWithRetry(
     `sqlite3 "${dbPath}" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"`,
   )
@@ -116,7 +116,7 @@ function sanityCheckCanon(dbPath: string): void {
         `It was likely generated before a schema change — restart the shard stack to regenerate.`,
     );
   }
-  console.log(`[globalSetup] Canon sanity OK: ${deleted.size} tables covered, exceptions: ${[...CANON_EXCEPTIONS].join(', ')}.`);
+  console.log(`[globalSetup] Canon sanity OK: ${deleted.size} tables covered, exceptions: ${Array.from(CANON_EXCEPTIONS).join(', ')}.`);
 }
 
 export default async function globalSetup() {

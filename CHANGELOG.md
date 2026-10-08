@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-10-08
+## [Unreleased] — 2026-10-09
 
 ### Added
 - **GH #417 — e2e окно отмены на управляемых часах (`page.clock` вместо 22×5,5 с реальных
@@ -138,6 +138,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     seed 26 / repositories 15 (generic.py) / schemas 9 / main.py 7 / models 3 / auth 3 /
     cli.py 2 / core 1 — следующая волна 2: admin (~148).
   - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-2.md`
+- **GH #306 — mypy-волна 2 admin, Task 5 (admin/setup.py → 0, одним под-PR)** — branch
+  `306-mypy-admin-1` (1 коммит `a9064752`, base `8063b940`; 4 файла, +155/−41; Refs #306 —
+  multi-wave, не закрывает; план Task 5, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** семья admin = один файл `src/admin/setup.py` 148 → 0 (90 list-item, 28 type-arg,
+    26 assignment, 2 import-untyped, 1 no-untyped-def, 1 misc); под-PR 2 не нужен — семья
+    завершена целиком одним под-PR.
+  - **Пороги:** **mypy 318 → 170** (−148), порог в скрипте переснят = факту; ruff 119 per-rule
+    == baseline (B008=0), не менялся.
+  - **Подавления:** НОЛЬ — ни `type: ignore`, ни оверрайдов; идиомы вместо подавлений:
+    `ClassVar[Sequence[_AdminAttr]]` + PEP-695 `type _AdminAttr` (контракт sqladmin 0.26
+    `MODEL_ATTR`, ковариантность `Sequence`); `types-WTForms` в dev-зависимостях
+    (−2 import-untyped; CI ставит `uv sync --extra dev`).
+  - **Behavioral delta:** нулевая — runtime AST-идентичен (комплаенс-ревью: все 26 списков
+    element-for-element).
+  - **Баг найден, не чинен (тикет-кандидат):** `inline_models` не существует в sqladmin 0.26.0 —
+    атрибут в `StaffAdmin` молча игнорируется, inline-редактирование master-расширения Staff,
+    вероятно, не работает вовсе (семантика списана с flask-admin); `tests/test_admin.py:55`
+    проверяет только наличие атрибута.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**; `test_admin` +
+    `test_lint_budget` 37/37; гейты зелёные (mypy 170 == порог, ruff 119); ревью —
+    комплаенс ✅, качество approved.
+  - **Остаток mypy-долга 170 по семьям:** api/v1 ≈77 / seed 26 / domain/deletion 26 /
+    repositories/generic 15 / schemas 9 / main.py 7 / models 3 / auth 3 / cli 2 /
+    domain/record_visits 2 / core 1 — следующая волна 3: api (~77).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave2-admin.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

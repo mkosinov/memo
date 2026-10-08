@@ -341,8 +341,9 @@ describe('SettingsTab', () => {
 // ─── ClientTab Tests ────────────────────────────────────────────────────────
 
 describe('ClientTab', () => {
-  // Hook-driven prop signature (#127 Task 7; GH #140 — no `client` prop,
-  // ClientTab resolves its client via useClient(clientId)).
+  // Hook-driven prop signature (#127 Task 7). The client's name+phone are NOT
+  // here — they live only in the tab-strip label (ClientLabelById); the
+  // per-tab resolution states are covered by the #140 US-2 describe below.
   const defaultProps = {
     recordId: 'r1',
     activityId: 'ev_1',
@@ -351,21 +352,11 @@ describe('ClientTab', () => {
     onClose: vi.fn(),
   };
 
-  it('renders client name', () => {
+  it('renders the record summary (no duplicated client header)', () => {
     stubClientsById({ c1: { data: mockClient } });
     render(<ClientTab {...defaultProps} />);
-    // GH #140 US-2: the resolved client shows in the tab content header.
-    const header = screen.getByTestId('client-tab-header');
-    expect(header.textContent).toContain('Анна Иванова');
     expect(screen.getByTestId('record-summary')).toBeInTheDocument();
-  });
-
-  it('renders client phone as read-only', () => {
-    stubClientsById({ c1: { data: mockClient } });
-    render(<ClientTab {...defaultProps} />);
-    // GH #140 US-2: phone renders next to the name in the tab content.
-    const header = screen.getByTestId('client-tab-header');
-    expect(header.textContent).toContain('+7 (900) 123-45-67');
+    expect(screen.queryByTestId('client-tab-header')).not.toBeInTheDocument();
   });
 
   it('renders client link', () => {
@@ -390,25 +381,6 @@ describe('ClientTab', () => {
   it('renders payment summary', () => {
     render(<ClientTab {...defaultProps} />);
     expect(screen.getByText(/Оплачено/)).toBeInTheDocument();
-  });
-
-  it('shows «…» while the client query is pending', () => {
-    stubClientsById({ c1: { isPending: true } });
-    render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('…');
-  });
-
-  it('shows «Без контакта» when the client query errors', () => {
-    stubClientsById({ c1: { isError: true } });
-    render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
-  });
-
-  it('shows «Без контакта» immediately for an anonymous record (no client_id)', () => {
-    // clientId '' → useClient(undefined): no query fires, no «…» phase.
-    render(<ClientTab {...defaultProps} clientId="" />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
-    expect(mockUseClient).toHaveBeenCalledWith(undefined);
   });
 });
 

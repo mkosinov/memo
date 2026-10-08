@@ -12,17 +12,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, or_
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import InstrumentedAttribute
 
 _ESCAPE = "\\"
 
 
 @dataclass(frozen=True)
 class SearchField:
-    column: ColumnElement  # InstrumentedAttribute at call sites
+    # Honest type: every declaration site passes an ORM instrumented
+    # attribute (``Model.column``). ``InstrumentedAttribute`` is NOT a
+    # ``ColumnElement`` subclass in SQLAlchemy 2.0 typings, so the former
+    # ``ColumnElement`` annotation was false at every call site.
+    column: InstrumentedAttribute[Any]
     kind: Literal["substring", "exact", "uuid"] = "substring"
 
 
@@ -44,7 +51,7 @@ def search_predicate(q: str, fields: Sequence[SearchField]) -> ColumnElement[boo
     if not fields:
         raise ValueError("search_fields must be non-empty when q is provided")
     uuid_q = _full_uuid(q)
-    clauses = []
+    clauses: list[ColumnElement[bool]] = []
     for f in fields:
         if f.kind == "substring":
             clauses.append(f.column.ilike(f"%{_escape_like(q)}%", escape=_ESCAPE))

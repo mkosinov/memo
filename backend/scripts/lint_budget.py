@@ -47,8 +47,11 @@ TOOL_TIMEOUT_SECONDS = 600
 # Снапшот фактических счётчиков после волны 0 (конфиг B008 для fastapi-семейства
 # + безопасные автоправки ruff --fix по src/tests): ruff check src tests scripts —
 # 119 находок, mypy src --no-incremental — 531 ошибка (без изменений).
-# Обновлять только вниз (рахет): снёс ошибки — опусти порог до факта;
+# Обновлять только вниз (рахет): снеси ошибки — опусти порог до факта;
 # правило ушло в ноль — оставь запись «правило: 0» или удали её.
+# 2026-10-08 (GH #306, Task 4 транш 1 — mypy-волна services): mypy
+# 531 → 397 (record.py + generic.py → 0; поддерживающие правки сигнатур:
+# SearchField.column, SortExpr, repositories reorder); ruff-факт не менялся.
 RUFF_BUDGET: dict[str, int] = {
     "B006": 1,
     "B011": 2,
@@ -76,7 +79,7 @@ RUFF_BUDGET: dict[str, int] = {
     "W291": 2,
     "W293": 2,
 }
-MYPY_BUDGET: int = 531
+MYPY_BUDGET: int = 397
 
 _MYPY_TOTAL_RE = re.compile(r"^Found (\d+) errors?", re.MULTILINE)
 

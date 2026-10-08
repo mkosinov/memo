@@ -43,12 +43,22 @@ from src.domain.errors import UnknownSortKeyError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from sqlalchemy.orm import InstrumentedAttribute
+
     from src.schemas.common import SortOrder
 
 __all__ = ["NullsPolicy", "SortExpr", "SortKeyMap", "SortKeySpec", "apply_sort"]
 
-#: Type alias for SQLAlchemy order-by expression elements.
-SortExpr = ColumnElement[Any]
+#: Type alias for SQLAlchemy order-by expression elements. Two honest
+#: arms: a plain SQL ``ColumnElement`` (labeled scalar subqueries, unary
+#: expressions) or an ORM ``InstrumentedAttribute`` (``Model.column`` —
+#: NOT a ``ColumnElement`` subclass in SQLAlchemy 2.0 typings). Both
+#: carry ``asc``/``desc``/``nullsfirst``/``nullslast`` (ColumnOperators),
+#: which is all ``apply_sort`` needs. The PEP 695 ``type`` statement is
+#: fine here: the alias is never subscripted (unlike ``ModelList`` in
+#: ``src/repositories/generic.py``, which must keep the ``TypeAlias``
+#: form for mypy subscript support).
+type SortExpr = ColumnElement[Any] | InstrumentedAttribute[Any]
 
 #: Per-key nulls placement strategy (GH #367 spec §4.2).
 #:

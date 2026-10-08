@@ -6,7 +6,7 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy import Select, delete, not_, select
@@ -15,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from uuid import UUID
+
+    from src.db.base import Base
+    from src.domain.sorting import SortExpr
+    from src.models.abstract import AbstractModelSoftDelete
+    from src.repositories.generic import ModelList
 
 from src.domain.deletion import (
     CASCADE_HANDLERS,
@@ -67,7 +72,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     def __init__(
         self,
         repository: BaseRepository,
-        model: type,
+        model: type[Base],
         response_schema: type[ResponseSchemaT],
     ) -> None:
         self._repository = repository
@@ -87,8 +92,9 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         equality-only «column = value»; an IN-list is not an equality).
         """
         stmt = select(self._model)
-        # ``self._model`` is typed ``type`` — the ignore keeps the id access
-        # honest (every concrete model has the AbstractModel UUID PK).
+        # ``self._model`` is typed ``type[Base]`` — the ignore keeps the id
+        # access honest (every concrete model has the AbstractModel UUID PK,
+        # but ``id`` is not declared on the ``Base`` declarative root).
         id_pred = ids_in_predicate(self._model.id, ids)  # type: ignore[attr-defined]
         if id_pred is not None:
             stmt = stmt.where(id_pred)
@@ -102,10 +108,10 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
         ids: Sequence[UUID] | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page of records, optionally filtered/ordered/searched.
 
@@ -132,9 +138,9 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by=None,
-        **filters,
-    ) -> list[ResponseSchemaT]:
+        order_by: Sequence[SortExpr] | None = None,
+        **filters: Any,
+    ) -> ModelList[ResponseSchemaT]:
         """Unpaginated list for dictionary /all endpoints, capped by BARE_LIST_MAX_ROWS.
 
         Reuses ``_list_stmt(**filters)`` (same equality-filter semantics as
@@ -199,7 +205,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             return None
         return self._response_schema.model_validate(orm)
 
-    def _patch_payload(self, data: BaseModel) -> dict:
+    def _patch_payload(self, data: BaseModel) -> dict[str, Any]:
         """Build the apply-dict for ``patch()``: ``exclude_unset`` dump with
         ``None`` values for ``NOT_NULL_FIELDS`` stripped (client intent is
         "don't change", not "set to null").
@@ -244,8 +250,8 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     @transactional
     async def reorder(
-        self, db_session: AsyncSession, ids: list[str]
-    ) -> list[ResponseSchemaT]:
+        self, db_session: AsyncSession, ids: ModelList[str]
+    ) -> ModelList[ResponseSchemaT]:
         """Reorder records by assigning sort_order based on the order of IDs."""
         orm_list = await self._repository.reorder(db_session, self._model, ids)
         return [self._response_schema.model_validate(o) for o in orm_list]
@@ -374,8 +380,9 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
             entity_label=derive_row_label(_audit_entity, entity),
             changes=snapshot_pairs_before(_audit_entity, entity),
         )
+        # Same ``id``-on-the-declarative-root story as ``_list_stmt``.
         await db_session.execute(
-            delete(self._model).where(self._model.id == id)
+            delete(self._model).where(self._model.id == id)  # type: ignore[attr-defined]
         )
         return True
 
@@ -398,6 +405,16 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
       knowledge).
     """
 
+    # Narrowed contracts (annotation-only; same idiom as
+    # ``RecordService._repository``): every ArchiveService heir maps an
+    # ``AbstractModelSoftDelete`` model (the ``is_active`` predicates below
+    # and archive/restore depend on the flag) and every Archive factory
+    # injects ``get_archive_repository()`` — an ``ArchiveRepository`` whose
+    # ``list()`` accepts the ``status=`` kwarg (#206 Task 2 documented the
+    # runtime invariant; the annotations express it without casts).
+    _model: type[AbstractModelSoftDelete]
+    _repository: ArchiveRepository
+
     def _list_stmt(
         self,
         ids: Sequence[UUID] | None = None,
@@ -416,26 +433,29 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
-        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
         ids: Sequence[UUID] | None = None,
-        **filters,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters: Any,
     ) -> PaginatedResponse[ResponseSchemaT]:
         """Return a paginated page filtered by archive status and ``q`` (GH #212).
 
         ``q`` ANDs with the status predicate (archived rows never surface
         under the default ACTIVE status — spec §5.1 typeahead parity).
         ``ids`` (GH #232 §3.1) is the typed ``?id=`` narrowing, carried
-        BESIDE the ``filters`` bag (guard: never inside it).
+        BESIDE the ``filters`` bag (guard: never inside it). ``status``
+        TRAILS the base ``GenericService.list`` params — an override may
+        only append optional params after the superclass signature (every
+        caller passes it by keyword).
 
-        ``self._repository`` is typed ``BaseRepository`` (inherited from
-        ``GenericService.__init__``), but every Archive factory injects
-        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
-        ``list()`` accepts the ``status=`` kwarg. The cast documents that
-        runtime invariant without touching the factories (#206 Task 2).
+        ``self._repository`` is narrowed to ``ArchiveRepository`` at the
+        class level (annotation-only, see the class attribute block): the
+        inherited ``__init__`` types it ``BaseRepository``, but every
+        Archive factory injects ``get_archive_repository()`` whose
+        ``list()`` accepts the ``status=`` kwarg.
         """
-        items_orm, total = await cast("ArchiveRepository", self._repository).list(
+        items_orm, total = await self._repository.list(
             db_session,
             self._model,
             status=status,
@@ -453,10 +473,10 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
-        **filters,
-    ) -> list[ResponseSchemaT]:
+        **filters: Any,
+    ) -> ModelList[ResponseSchemaT]:
         """Unpaginated list filtered by archive status (mirrors ``list()``).
 
         Delegates to ``GenericService.list_all`` passing ``status`` through as

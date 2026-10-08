@@ -694,25 +694,13 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Per-page fake-clock bookkeeping (GH #417 S6). After a window's rewind the
- * fake time runs AHEAD of real time by (advanceMs − real work inside the
- * window), and `clock.pauseAt()` may not target the fake past ("Cannot
- * fast-forward to the past") — a bare `pauseAt(new Date())` on a SECOND
- * window in the same test throws whenever less than `advanceMs` of real
- * work separates the windows. The stored offset lets the next pause target
- * the page's CURRENT fake "now" instead; it is 0 until a window completes,
- * so single-window tests are unaffected.
- */
-const fakeClockAheadBy = new WeakMap<Page, number>();
-
-/**
  * Run an undo-window interaction under a paused page clock (GH #417).
  *
- * Mechanics: pause the page clock at the page's current "now" (real "now"
- * for the first window in a test; the fake "now" for later ones — see
- * `fakeClockAheadBy`) → run `fn` → fast-forward `opts.advanceMs` in one
- * operation → real Node-side drain of `opts.drainMs` (request events for
- * rewound timers are async and not governed by the clock) →
+ * Mechanics: pause the page clock at the page's CURRENT fake "now" (read
+ * from the page via `page.evaluate(() => Date.now())` — ≈ real "now" for
+ * the first window in a test) → run `fn` → fast-forward `opts.advanceMs`
+ * in one operation → real Node-side drain of `opts.drainMs` (request
+ * events for rewound timers are async and not governed by the clock) →
  * `clock.resume()`.
  *
  * Contract:
@@ -734,7 +722,12 @@ const fakeClockAheadBy = new WeakMap<Page, number>();
  *   re-thrown as-is.
  * - Calling `withUndoWindow` again later in the same test is legal (e.g.
  *   the unified-rows scenario 19 pair of windows): after `resume()` the
- *   clock can be paused anew.
+ *   clock can be paused anew. The pause target is re-read from the page
+ *   on every call — after a rewind the fake clock runs AHEAD of real
+ *   time, and only the page's own fake "now" (plus a 10ms epsilon) is
+ *   guaranteed to be a legal (non-past) pauseAt target. Node-side offset
+ *   bookkeeping was removed on purpose: it raced the ticking fake clock
+ *   under load ("Cannot fast-forward to the past").
  *
  * @param page Playwright page
  * @param fn window body: `(page) => Promise<T>`
@@ -751,10 +744,16 @@ export async function withUndoWindow<T>(
   const drainMs = opts?.drainMs ?? 500;
   // pauseAt = install fakes + set time + pause in one operation; a bare
   // install() would NOT stop time — the window would keep ticking. The
-  // target is the page's current fake "now" (real "now" + the ahead-offset
-  // a previous window left) — pauseAt cannot target the fake past.
-  const pauseTarget = new Date(Date.now() + (fakeClockAheadBy.get(page) ?? 0));
-  await page.clock.pauseAt(pauseTarget);
+  // target must be the page's CURRENT fake "now": after a previous
+  // window's rewind the fake clock runs ahead of real time, and
+  // pauseAt() may not target the fake past. Reading the fake time from
+  // the page (not computing an offset Node-side — that races the
+  // ticking clock under load) makes the target ≥ fake-now by
+  // construction; the 10ms epsilon keeps it monotonic across the
+  // evaluate→pauseAt round trip, and the max() keeps the first window
+  // (fakeNow ≈ real now) anchored to real "now".
+  const fakeNow: number = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(new Date(Math.max(Date.now(), fakeNow + 10)));
   try {
     return await fn(page);
   } finally {
@@ -764,14 +763,6 @@ export async function withUndoWindow<T>(
     await page.clock.fastForward(advanceMs);
     await new Promise((resolve) => setTimeout(resolve, drainMs));
     await page.clock.resume();
-    // After resume the fake clock keeps ticking at real pace from
-    // (pauseTarget + advanceMs): record how far ahead of real time it now
-    // runs, so a FOLLOWING window in the same test pauses at the fake
-    // "now" instead of the fake past (S6). Clamped at 0 — if the window
-    // body outlasted the rewind, pausing at real "now" is a legal forward
-    // jump for the lagging fake clock.
-    const aheadBy = pauseTarget.getTime() + advanceMs - Date.now();
-    fakeClockAheadBy.set(page, Math.max(0, aheadBy));
   }
 }
 

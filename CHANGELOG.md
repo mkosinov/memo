@@ -50,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     wave6 — документированный фонт-дрифт контейнера, CI авторитетен; полный e2e-гейт — PR CI.
   - Status: `docs/status/2026-10-08-phone-field-country-selector-414-impl.md`
 
+### Fixed
+- **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch
+  `296-remote-search-select-debounce-cleanup` (1 commit `cb1a15f2`, base `9659785f`;
+  спека `docs/specs/2026-10-07-remote-search-select-debounce-cleanup-296-design.md` rev3
+  (Gate B) и план `docs/plans/2026-10-08-remote-search-select-debounce-cleanup-296-plan.md` —
+  оба на main, unchanged by IMPL):
+  - Новый `useEffect` с пустым массивом зависимостей: cleanup при размонтировании
+    сбрасывает `debounceRef` через `clearTimeout` — закрытие окна/смена страницы в узком
+    окне дебаунса (300 мс) отменяет отложенный поиск целиком (ни запроса, ни обновлений
+    состояния размонтированного компонента).
+  - Остальное поведение виджета идентично (механика дебаунса, пропсы, консюмеры не
+    менялись); закрыт вектор стохастических падений полных прогонов.
+  - Отдельный регрессионный тест не пишется (решение юзера на гейте B); приёмка —
+    ревью правки + полный прогон: vitest **2885p/0f** (178 файлов), `pnpm type-check`
+    чист; CI-шарды — PR CI.
+
 ## [Unreleased] — 2026-10-04
 
 ### Added

@@ -161,6 +161,16 @@ export default function RemoteSearchSelect<
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Cancel the pending debounced search when the widget unmounts.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+      }
+    };
+  }, []);
+
   const search = useCallback(
     async (q: string) => {
       // GH #212: server-side ?q= is min-2-char; do not fire below the threshold.

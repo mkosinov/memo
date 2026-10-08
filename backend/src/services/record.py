@@ -26,14 +26,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import TypeAdapter
-from sqlalchemy import Select, case, delete, func, select
+from sqlalchemy import Case, ScalarSelect, Select, case, delete, func, select
 from sqlalchemy.orm import selectinload
 
 from src.domain.dates import day_range
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -59,6 +59,11 @@ from src.services.generic import GenericService
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    # Alias import keeps the builtin ``list`` usable in the class body
+    # (``RecordService.list`` shadows it) — see its definition in
+    # ``src/repositories/generic.py``.
+    from src.repositories.generic import ModelList
 
 # Serializes a datetime EXACTLY as a Pydantic ``datetime`` model field does
 # (pydantic emits ``Z`` for UTC-aware values where bare ``isoformat()``
@@ -203,7 +208,7 @@ def _build_list_stmt(
 # instances per call: one scalar_subquery object must not be planted into
 # several clauses of one statement, and ``list_records_view`` adds its own
 # display copies of the same shapes.
-def _client_name_sq():
+def _client_name_sq() -> ScalarSelect[Any]:
     return (
         select(Client.name)
         .where(Record.client_id == Client.id)
@@ -212,7 +217,7 @@ def _client_name_sq():
     )
 
 
-def _service_title_sq():
+def _service_title_sq() -> ScalarSelect[Any]:
     return (
         select(Service.title)
         .where(Activity.service_id == Service.id)
@@ -223,7 +228,7 @@ def _service_title_sq():
 
 # GH #266: master name sorts resolve through the extension → card
 # join (names live on Staff; Master keeps only staff_id PK).
-def _master_last_sq():
+def _master_last_sq() -> ScalarSelect[Any]:
     return (
         select(Staff.last_name)
         .join(Master, Master.staff_id == Staff.id)
@@ -232,7 +237,7 @@ def _master_last_sq():
     )
 
 
-def _master_first_sq():
+def _master_first_sq() -> ScalarSelect[Any]:
     return (
         select(Staff.first_name)
         .join(Master, Master.staff_id == Staff.id)
@@ -241,7 +246,7 @@ def _master_first_sq():
     )
 
 
-def _location_name_sq():
+def _location_name_sq() -> ScalarSelect[Any]:
     return (
         select(Location.title)
         .where(Location.id == Activity.location_id)
@@ -249,7 +254,7 @@ def _location_name_sq():
     )
 
 
-def _total_price_sq():
+def _total_price_sq() -> ScalarSelect[Any]:
     return (
         select(func.coalesce(func.sum(Visit.price), 0))
         .where(Visit.record_id == Record.id)
@@ -257,7 +262,7 @@ def _total_price_sq():
     )
 
 
-def _paid_sum_sq():
+def _paid_sum_sq() -> ScalarSelect[Any]:
     return (
         select(func.coalesce(func.sum(Payment.amount), 0))
         .where(Payment.record_id == Record.id)
@@ -265,7 +270,7 @@ def _paid_sum_sq():
     )
 
 
-def _payment_bucket():
+def _payment_bucket() -> Case[Any]:
     paid_sum = _paid_sum_sq()
     total_price = _total_price_sq()
     return case(
@@ -281,7 +286,7 @@ def _payment_bucket():
 # ``seats - anonym_visits`` (== live visits count): ALL named visits
 # count as "guests" regardless of status; anonymous visits
 # (visitor_id IS NULL) don't.
-def _named_visits_count_sq():
+def _named_visits_count_sq() -> ScalarSelect[Any]:
     return (
         select(func.count())
         .select_from(Visit)
@@ -310,7 +315,7 @@ _RECORD_SORT_KEYS: SortKeyMap = {
 }
 
 
-def _sort_columns(params: RecordListParams) -> list:
+def _sort_columns(params: RecordListParams) -> list[SortExpr]:
     """Sort map → ORDER BY expressions via the shared resolver (#191,
     mirrors the deleted client-side comparator; collation note: SQLite
     BINARY ≠ localeCompare). Module level since GH #217 Task 1 — shared
@@ -344,6 +349,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     record-row operations.
     """
 
+    # Narrowed repository contract (annotation-only): the factory below
+    # injects the OWNER ``RecordRepository`` — the own-edge bulk commands
+    # (``delete_tags_by_record_*`` / ``delete_rows_by_ids``) live there.
+    _repository: RecordRepository
+
     def __init__(
         self,
         repository: RecordRepository,
@@ -351,10 +361,14 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
     ) -> None:
         super().__init__(repository, model, response_schema=RecordResponse)
 
-    async def list(
+    # GH #171: ``list``/``get`` deliberately REPLACE the GenericService
+    # signatures (raw ORM ``Record`` page with a params object / scoped
+    # point get) — the validated-schema contract does not apply to the
+    # owner service's reads. Documented, intentional override narrowing.
+    async def list(  # type: ignore[override]
         self, db_session: AsyncSession, params: RecordListParams,
         master_key: str | None = None,
-    ) -> PaginatedResponse:  # items are ORM Record instances
+    ) -> PaginatedResponse[Any]:  # items are ORM Record instances
         """Return a paginated page of records (ORM items, visits eagerly loaded).
 
         Filter → Sort → Paginate, fully server-side (#191).
@@ -397,7 +411,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             stmt = stmt.where(Activity.master_id == master_key)
         return (await db_session.execute(stmt)).scalar_one_or_none()
 
-    async def get(
+    async def get(  # type: ignore[override]
         self, db_session: AsyncSession, id: str
     ) -> Record | None:
         """Return a record by ID with visits eagerly loaded (raw ORM)."""
@@ -428,7 +442,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         await db_session.execute(delete(Record).where(Record.id == record_id))
 
     async def delete_rows_with_tags_bulk(
-        self, db_session: AsyncSession, record_ids: list[str],
+        self, db_session: AsyncSession, record_ids: ModelList[str],
     ) -> None:
         """Remove the given records' OWN tag bundles + rows — WITHOUT committing.
 
@@ -543,10 +557,14 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         if not record:
             return None
 
+        # Per-key value types come from ``RecordPatch`` (comment is
+        # ``str | None``, custom_price is ``int | None``); the dict-level
+        # type cannot express it without pushing a TypedDict into the
+        # usecases caller.
         if "comment" in fields:
-            record.comment = fields["comment"]
+            record.comment = cast("str | None", fields["comment"])
         if "custom_price" in fields:
-            record.custom_price = fields["custom_price"]
+            record.custom_price = cast("int | None", fields["custom_price"])
         record.updated_at = datetime.now(UTC)
         await db_session.flush()
         return record

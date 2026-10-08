@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 
 // Server-coupled typeahead (debounce 300ms; consumer-tuned search gate via
 // minChars/canSearch, default min-2) — the remote counterpart of Combobox
@@ -33,12 +33,21 @@ export interface RemoteSearchSelectProps<
    *  Runs once per keystroke; the formatted value is what canSearch/buildParams
    *  and the debounced search see. Defaults to identity. */
   formatInput?: (raw: string) => string;
+  /** Derives the RENDERED value from the committed query without touching
+   *  the state — e.g. re-grouping the typed digits under a newly selected
+   *  country the moment the consumer's country state changes (GH #414).
+   *  Receives what formatInput produced; canSearch/buildParams and
+   *  onInputValueChange keep seeing the committed query. Defaults to
+   *  identity. */
+  displayQuery?: (query: string) => string;
   /** Renders a dropdown/selected label for an item; defaults to
    *  `${displayField} — ${subtitleField}`. */
   getDisplayLabel?: (item: SearchItem) => string;
   /** Lifts the committed input value (post-formatInput) to the consumer on
    *  every change, INCLUDING pick (display label) and ×-clear ('') — it
-   *  always mirrors what the input shows (GH #221 WYSIWYG). */
+   *  always mirrors the committed query (GH #221 WYSIWYG). When displayQuery
+   *  is set, the RENDERED value may group differently — the lift stays the
+   *  committed one (GH #414). */
   onInputValueChange?: (value: string) => void;
   /** data-testid for the input element (consumer E2E anchors). */
   inputTestId?: string;
@@ -48,6 +57,13 @@ export interface RemoteSearchSelectProps<
    * e.g. the tags multi-pickers; GH #328 spec §6.2).
    */
   inputId?: string;
+  /**
+   * Adornment rendered inside the field frame, BEFORE the input — a generic
+   * slot (e.g. the phone country selector, GH #414), not phone logic. Clicks
+   * on it are stopped at the slot boundary and never open the suggestions
+   * dropdown. Without the prop the markup and behavior are unchanged.
+   */
+  prefix?: ReactNode;
 }
 
 interface SearchItem {
@@ -59,6 +75,16 @@ interface SearchItem {
 
 const INPUT_CLASSES =
   'w-full rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand)]';
+
+// Prefix mode (GH #414): the frame moves from the input onto a flex row so a
+// consumer-supplied adornment can sit inside the border, before the input.
+const FRAME_CLASSES =
+  'flex w-full items-center rounded-lg border transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-[var(--brand)]';
+
+const PREFIXED_INPUT_CLASSES =
+  'min-w-0 flex-1 bg-transparent border-0 pl-2 pr-3 py-2 text-sm focus:outline-none';
+
+const PREFIX_SLOT_CLASSES = 'flex shrink-0 items-center py-2 pl-3';
 
 const INPUT_STYLE = {
   borderColor: 'var(--line, #e5e7eb)',
@@ -109,10 +135,12 @@ export default function RemoteSearchSelect<
   canSearch,
   buildParams,
   formatInput,
+  displayQuery,
   getDisplayLabel,
   onInputValueChange,
   inputTestId,
   inputId,
+  prefix,
 }: RemoteSearchSelectProps<Q>) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -131,6 +159,16 @@ export default function RemoteSearchSelect<
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Cancel the pending debounced search when the widget unmounts.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+      }
+    };
   }, []);
 
   const search = useCallback(
@@ -199,6 +237,22 @@ export default function RemoteSearchSelect<
     if (results.length > 0 && !selectedLabel) setIsOpen(true);
   }, [results.length, selectedLabel]);
 
+  // Shared between both field layouts so they can never drift apart.
+  // The rendered query runs through displayQuery (GH #414) — a pure
+  // render-time derivation; the committed `query` state is untouched, so
+  // the search gates and lifts keep seeing what formatInput produced.
+  const inputProps = {
+    type: 'text',
+    value: selectedLabel || (displayQuery ? displayQuery(query) : query),
+    onChange: handleInputChange,
+    onFocus: handleFocus,
+    placeholder: selectedLabel ? '' : placeholder,
+    readOnly: !!selectedLabel,
+    id: inputId,
+    'aria-label': label,
+    'data-testid': inputTestId,
+  } as const;
+
   return (
     <div ref={containerRef} className="relative">
       <label
@@ -208,19 +262,23 @@ export default function RemoteSearchSelect<
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <div className="relative">
-        <input
-          type="text"
-          value={selectedLabel || query}
-          onChange={handleInputChange}
-          onFocus={handleFocus}
-          placeholder={selectedLabel ? '' : placeholder}
-          className={INPUT_CLASSES}
-          style={INPUT_STYLE}
-          readOnly={!!selectedLabel}
-          id={inputId}
-          aria-label={label}
-          data-testid={inputTestId}
-        />
+        {prefix ? (
+          <div className={FRAME_CLASSES} style={INPUT_STYLE}>
+            {/* Stop the click at the slot boundary: prefix interactions (e.g.
+                opening the country selector) must not reach the typeahead —
+                in particular, never open the suggestions dropdown. */}
+            <div
+              className={PREFIX_SLOT_CLASSES}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {prefix}
+            </div>
+            <input {...inputProps} className={PREFIXED_INPUT_CLASSES} />
+          </div>
+        ) : (
+          <input {...inputProps} className={INPUT_CLASSES} style={INPUT_STYLE} />
+        )}
         {selectedLabel && (
           <button
             type="button"

@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 
+from src.models.location import Location
 from src.repositories.generic import get_archive_repository
 from src.repositories.search import SearchField
-from src.models.location import Location
 from src.schemas.location import LocationCreate, LocationResponse, LocationUpdate
 from src.services.generic import ArchiveService
 

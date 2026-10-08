@@ -17,14 +17,14 @@ Only what is pushed/flipped crosses the seam (git + board). Workflow canon: `~/d
 2. Git pre-flight (in `~/dev/memo`): `git fetch origin && git status -sb`
    - behind → `git pull --ff-only`, continue;
    - **diverged (ahead+behind) → STOP**: show the user, reset nothing (precedent — passenger commit cc8bc52).
-3. Board: `next-up` (§7) → show the trajectory to the user.
+3. Board: `show all` (§7) → show the user the board; the trajectory is the user-set Priority field (Critical first, unset last).
 4. The user picks an issue → `status N "In Design" imac` (third arg = the host field value; design runs on the iMac host — the field is the single ownership source for In IMPL/In Design cards). Guard: the issue must not sit in `In IMPL` — one issue lives in one phase at a time.
 5. **Scout (pre-design recon) — by dispatch, not by hand.** Right after the issue is picked, dispatch built-in read-only subagents to gather facts (zcode — `Explore`, opencode — `explorer`; a cheap model is these agents' default). Default is **one**; wide scope (many subsystems / dependency issues) — several in parallel, one per zone, in a single Agent-tool message. The prompt: issue number, what the issue claims, what to verify against the live tree (dependencies, consumers, patterns) — plus an **actuality check**: is the gap the issue describes still there, claim-by-claim against live code and recently merged PRs.
    - Back comes a **compact fact sheet**: key files' structure/size vs the issue's claims; every claim confirmed/denied with `file:line`; dependency issues' state (open/closed + a one-line delta); consumer inventory; ready patterns to reuse; ending with the **actuality verdict**: `actual` / `partially stale` / `stale`.
    - **Stale-issue auto-close (2026-09-18, user decision):** verdict `stale` — every load-bearing claim of the issue contradicted by the live tree AND the described gap verifiably gone (already implemented or fully superseded; cite `file:line` and the PR/merge that closed it). The main session FIRST re-verifies 1–2 load-bearing claims itself against the code (scout reports err in paths — #287 lesson); confirmed → comment the evidence on the issue, `gh issue close N --reason "not planned"`, board card → `Not planned`, report in this session. A wrong close is one click to reopen. A doubtful verdict never closes: comment what is off and keep designing. `partially stale` → correct the stale claims in an issue comment and bake the corrections into the concept and spec; the issue body itself is not edited.
    - Until Gate A the main session reads **only scout reports** — as-is, no raw merging. No raw file bodies or grep dumps into its context (`gh issue view` on dependencies goes to the scout too). Rationale: the main session's context is expensive and lives the whole session (Gate A → Gate C); recon garbage in it is dead weight (issue #14: ~10 tool calls and a 577-line file read to produce a ~40-line concept).
    - A spot check during the Gate A dialogue (one grep / one file section) is fine by hand; bulk recon — scout only.
-6. **Step-0 report + Gate A.** The design turn's first user-facing message opens with the **step-0 block** — the issue retold for a reader who has not opened it: issue number; 3–5 keywords; the issue as a user scenario (who does what, what changes for them — plain words, no jargon); the problem it solves. Then Gate A (§2): candidate approaches → auto-OK, or the divergence stop. There is no separate interactive question-by-question dialogue.
+6. **Step-0 report + Gate A.** The design turn's first user-facing message opens with the **step-0 block** — the issue retold for a reader who has not opened it. Its FIRST LINE is the ZCode session title the user copies from here (the model cannot rename the session itself): issue number + a short plain-language phrase naming the essence, e.g. «296 лишний запрос отмененного поиска». Then: the issue as a user scenario (who does what, what changes for them — plain words, no jargon); the problem it solves. No keywords list — dropped 2026-10-08 by user decision (the title line replaced it). Then Gate A (§2): candidate approaches → auto-OK, or the divergence stop. There is no separate interactive question-by-question dialogue.
 
 ## 1.5 Session rules (talking to the user)
 
@@ -44,12 +44,11 @@ Restructured 2026-09-18 by user decision: the old interactive G1a brainstorm and
 | B — spec | the spec — after the panel's consolidated report and fixes | always — the user's OK is mandatory | `gate N none`; commit + **push** the spec; the card stays `In Design` |
 | C — plan | the plan — after plan-reviewer | the plan forces a spec change | auto-OK: fixes folded in; commit + **push** the plan; card → `Ready to IMPL`. Stop → `gate N plan`. Gate C is the last point where the discussion may still return to Gate A |
 
-### The gate field (the pending ask is a single-select field on the board card, not a label and not a board status; replaced the gate:* issue labels 2026-09-20)
+### The gate field (board mechanics canonical in the github-board skill — here only the design session's duties)
 
-- Exactly one value may sit in the field: `concept` / `spec` / `plan` (a design stop) or `blocked` (an IMPL blocker awaiting the user — set by the container manager); set together with the stop message via `gh_board.py gate N <value>`, cleared (`gate N none`) the moment the user answers (a new stop replaces the old value). Empty + `In Design` = the agent is working, nothing awaits the user. Leaving `In Design`/`In IMPL` via `status` clears the field automatically.
-- One writer: only the design session of that issue touches its gate value.
+- The design session writes only `concept` / `spec` / `plan`: set together with the stop message via `gh_board.py gate N <value>`, cleared the moment the user answers (`gate N none`); one writer — only the design session of that issue touches its gate value. Full field semantics (the one-value rule, `blocked` / `auto-retry` / `hang`, auto-clear when the card leaves In Design/In IMPL) — `.zcode/skills/github-board/SKILL.md`.
 - Read–check–repair: on any session start and on return from IMPL, cross-check (status × gate) against git — the spec on main = Gate B passed, the plan on main = Gate C passed. On mismatch git wins: repair the gate/status and say so out loud.
-- `gh_board.py status` matches option names exactly (`In Design`, `Ready to IMPL`); pickers match by prefix. Agents never rename or add board options (2026-09-09 incident).
+- `gh_board.py status` matches option names exactly (`In Design`, `Ready to IMPL`); pickers match by prefix. Option lists are user-managed — agents never rename or add options (github-board rules, 2026-09-09 incident).
 
 ### Gate A divergence filter (run before any user stop)
 
@@ -72,13 +71,15 @@ Restructured 2026-09-18 by user decision: the old interactive G1a brainstorm and
 **Fast-track exception (docs/harness issues):** an issue touching only
 documentation (`docs/`) or the harness (`.zcode/`/`.opencode/` — no app
 code) may skip the container IMPL session entirely: Gates A/B unchanged,
-Gate C collapsed by default — the spec carries a `## Verification` section
-(mechanical checks) instead of a plan artifact; keep the plan only for
-≥3-task decompositions or verification that needs design (user decides at
-Gate B). The host session implements right after the gates; spec/plan (if
-any) land in the change PR; the card goes `In IMPL` while the PR is open →
-`In-main` on merge and never sits in `Ready to IMPL`; `Closes #N`
-belongs in the PR description only; no handoff message. Full details:
+Gate C collapsed — the spec carries a `## Verification` section (mechanical
+checks) instead of a plan artifact. If a plan turns out to be needed (a
+≥3-task decomposition or verification that needs design), the issue leaves
+fast-track and is reclassified as a normal design: plan + Gate C →
+`Ready to IMPL` → container IMPL (user decision 2026-10-07 — no plan inside
+fast-track). The host session implements right after the gates; the spec
+lands in the change PR; the card goes `In IMPL` while the PR is open →
+`In-main` on merge and never sits in `Ready to IMPL`; `Closes #N` belongs
+in the PR description only; no handoff message. Full details:
 superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
 
 ## 3. Artifacts
@@ -109,7 +110,7 @@ superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
 5. Availability policy: a summary line `rc!=0` (124 = timeout, rate limit) or an empty report → **one** rerun of that agent alone (same script, only that agent as the argument); second failure → mark it `skipped` in the consolidated report, verdict on the rest.
 6. best-practices returned `Verdict: FAILED` (web research unavailable) → note it in the report and exclude it from the verdict — that is its designed refusal, not a crash.
 7. The panel sees the repo at origin/main only (the script syncs the clean clone); uncommitted host-side state is invisible to it — keep the spec self-contained (§3).
-8. Fallback: container unreachable → dispatch the host agents `.zcode/agents/spec-panel-*.md` (omniroute combos) the pre-D-flow way; aggregation unchanged.
+8. Fallback: container unreachable → dispatch the host agents `.zcode/agents/spec-panel-*.md` the pre-D-flow way; aggregation unchanged.
 
 ## 5. Gate C — plan review (container runner)
 
@@ -125,18 +126,13 @@ Dispatch `plan-reviewer` through the same panel runner (§4): stage the plan + t
 - After Gate C tell the user: «скажи менеджеру в opencode: продолжаем траекторию #NNN». The container needs nothing else.
 - Does NOT cross the seam: `.opencode/scratchpad.md` (the container seeds its section at IMPL start — DESIGN itself writes nothing, v2), worktrees, env. The host **never writes or reads** the scratchpad — there are no container operations during the DESIGN phase at all.
 
-## 7. Board (the script lives in memo, run locally)
+## 7. Board — the design session's operations
 
-```bash
-python3 .zcode/scripts/gh_board.py next-up
-python3 .zcode/scripts/gh_board.py show 247                # read one card; `show all` = whole board
-python3 .zcode/scripts/gh_board.py status 176 "Ready to IMPL"   # leaving In Design/In IMPL clears the host field automatically
-python3 .zcode/scripts/gh_board.py set-next-up 176 1   # only on the user's word
-```
+Board mechanics are canonical in the **github-board skill** (`.zcode/skills/github-board/SKILL.md`): field semantics (Status / Priority / host / gate), the command list, script-only interaction, the user-only option-mutation rule, who-flips-what, the mirror rule. This session obeys it and keeps only its own duties:
 
-- The script's golden source is **the memo repo itself** (`.zcode/scripts/gh_board.py`, Project #3 constants baked in). The script is part of the seam: it lives in git, so both the host and the container have it after a pull; the container copy is `.opencode/scripts/gh_board.py`. No extra copies outside the harness folders.
-- **No raw-GraphQL fallback.** ALL board interaction — reads and writes — goes through the script; never hand-write `gh api graphql` against the project. Field-definition mutations (`updateProjectV2Field`: adding/renaming status options) are forbidden for agents: the mutation replaces the whole option list and detaches every card's value (2026-09-09: 65/69 cards lost Status this way). A new status is added by the user in the GitHub web UI, which appends safely.
-- One writer per issue: DESIGN flips (`In Design` → `Ready to IMPL`; inside the design the pending gate is the `gate` field value, §2; fast-track goes straight to `In IMPL`) — this session; IMPL flips — the container manager. The script adds an issue to the board on first contact.
+- Claim: `status N "In Design" imac` (third arg = the host field value — the design runs on the iMac host).
+- Stops and answers: `gate N concept|spec|plan` / `gate N none` (§2).
+- The only design flip: `status N "Ready to IMPL"` at Gate C — fast-track goes straight to `In IMPL` instead (§2 fast-track exception).
 
 ## 8. Rules
 
@@ -144,4 +140,4 @@ python3 .zcode/scripts/gh_board.py set-next-up 176 1   # only on the user's word
 - One DESIGN session = one issue.
 - Parallel DESIGN sessions (different issues, different host sessions): simultaneous push → `git pull --rebase`.
 - Return from IMPL: the card goes to `In Design` + an issue comment — a broken spec restarts the design, a broken plan additionally sets `gate N plan` (decision needed); that is a new DESIGN session's starting point (§1.1).
-- DESIGN-phase agents and skills live **in this repo**: `.zcode/agents/` + `.zcode/skills/` — `design-phase` (the phase protocol) and `brainstorming` (standalone explicit-invocation dialogue — «побрейнштормим»; since the 2026-09-18 gate restructure no design gate routes through it) (git = source of truth for the memo port). Superagents canon: bodies — `~/dev/superagents/.opencode/agents/`, reference seed of host ports — `~/dev/superagents/.zcode/agents/`; a canon change is ported by editing the files in `.zcode/agents/` (the port is marked in each file's header). Canon v3.4 (2026-09-06): panel `spec-review-*` → `spec-panel-*`; `spec-reviewer` split into `plan-reviewer` (G2, host) + `code-compliance-reviewer` (G5, container-only). The omniroute model catalog is the local `~/.zcode/v2/config.json` (with keys — never committed).
+- DESIGN-phase agents and skills live **in this repo**: `.zcode/agents/` + `.zcode/skills/` — `design-phase` (the phase protocol) and `brainstorming` (standalone explicit-invocation dialogue — «побрейнштормим»; since the 2026-09-18 gate restructure no design gate routes through it) (git = source of truth for the memo port). Superagents canon: bodies — `~/dev/superagents/.opencode/agents/`, reference seed of host ports — `~/dev/superagents/.zcode/agents/`; a canon change is ported by editing the files in `.zcode/agents/` (the port is marked in each file's header). Canon v3.4 (2026-09-06): panel `spec-review-*` → `spec-panel-*`; `spec-reviewer` split into `plan-reviewer` (G2, host) + `code-compliance-reviewer` (G5, container-only). Models: host agents point at the z.ai coding-plan account; container panel + plan-reviewer agents ride the built-in opencode zen provider (free tier — never part of the removed omniroute gateway), the rest of the container agents at `zai` (the omniroute gateway was removed for good, 2026-10-08).

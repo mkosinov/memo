@@ -77,7 +77,7 @@ async def list_records(
     # GH #263 T2 (D2): the server scope ANDs conjunctively with the
     # client-supplied filters — a master's ``master_id`` filter ≠ his own
     # key yields an empty result, never the other master's rows.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[RecordResponse]:
     """Return records with nested visits — server-side filter, sort, paginate (#191)."""
     result = await service.list(
@@ -98,7 +98,7 @@ async def get_records_view(
     params: Annotated[RecordListParams, Query()],
     # GH #263 T2: same builder, same scope — the records table's read
     # surface must be leak-proof identically.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[RecordViewResponse]:
     """Composite read for the records table — records page enriched with
     denormalized display fields from joins (GH #213 §4).
@@ -128,7 +128,7 @@ async def get_record(
     session: SessionDep,
     # GH #263 T2: чужая запись → 404 (indistinguishable from missing);
     # single scope-aware query (404-fast-path, plan T7).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> RecordResponse:
     """Return a single record by ID with nested visits."""
     record = await service.get_scoped(
@@ -177,7 +177,7 @@ async def create_record(
     session: SessionDep,
     # GH #263 T2-quality: the booking route stays public, but a scoped
     # master may only book onto his OWN activities (foreign → 404).
-    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_optional_scope),
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""
     await _activity_scoped_or_404(session, data.activity_id, scope)
@@ -221,7 +221,7 @@ async def update_record(
     data: RecordUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> RecordResponse:
     """Full-update a record by ID. Replaces visits, recalculates seats."""
     await _scoped_or_404(service, session, record_id, scope)
@@ -253,7 +253,7 @@ async def patch_record(
     data: RecordPatch,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> RecordResponse:
     """Partial-update a record by ID (PATCH). Only sent fields are changed."""
     await _scoped_or_404(service, session, record_id, scope)
@@ -310,7 +310,7 @@ async def delete_record(
             )
         ),
     ] = None,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> None:
     """Unified delete contract — dry-run preview flag / commit body (rev7, #285).
 

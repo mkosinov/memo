@@ -21,6 +21,6 @@ class Client(AbstractModelSoftDelete):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    tags: Mapped[list["Tag"]] = relationship(
+    tags: Mapped[list[Tag]] = relationship(
         "Tag", secondary="client_tags", back_populates="clients"
     )

@@ -389,8 +389,9 @@ async def test_seed_raises_on_populated_db(db_manager: DBManager) -> None:
     Replaces the old test_seed_is_idempotent which asserted skip-on-exists
     (a contract abolished in #152).
     """
-    from src.seed.seed import seed_data
     from sqlalchemy.exc import IntegrityError
+
+    from src.seed.seed import seed_data
 
     await seed_data(db_manager)  # first run: OK on empty DB
 

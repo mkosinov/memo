@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ApiError } from '@memo/api-client';
 
@@ -40,8 +40,11 @@ const mockAuthMe = {
   master: null,
 };
 
-function fillForm(phone: string, password: string) {
-  fireEventChange(screen.getByLabelText('Телефон'), phone);
+// GH #414: the phone field is the PhoneField widget — the helper types the
+// NATIONAL remainder (the calling code lives in the country selector, RU by
+// default). The submitted value is the compact the page lifts on submit.
+function fillForm(nationalRemainder: string, password: string) {
+  fireEventChange(screen.getByLabelText('Телефон'), nationalRemainder);
   fireEventChange(screen.getByLabelText('Пароль'), password);
 }
 
@@ -80,6 +83,12 @@ function renderLogin() {
       </AuthProvider>
     </UIProvider>,
   );
+}
+
+function clickSubmit() {
+  act(() => {
+    screen.getByRole('button', { name: 'Войти' }).click();
+  });
 }
 
 describe('LoginPage', () => {
@@ -124,10 +133,8 @@ describe('LoginPage', () => {
     window.history.replaceState(null, '', '/login?returnTo=%2F%2Fevil.example.com%2Fphish');
     mockLogin.mockResolvedValue(mockAuthMe);
     renderLogin();
-    fillForm('+79990000001', 'secret123');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'secret123');
+    clickSubmit();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
     });
@@ -137,10 +144,8 @@ describe('LoginPage', () => {
     window.history.replaceState(null, '', '/login?returnTo=%2Frecords');
     mockLogin.mockResolvedValue(mockAuthMe);
     renderLogin();
-    fillForm('+79990000001', 'secret123');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'secret123');
+    clickSubmit();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/records');
     });
@@ -153,11 +158,10 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
     });
-    fillForm('+79990000001', 'secret123');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'secret123');
+    clickSubmit();
     await waitFor(() => {
+      // The typed RU remainder is lifted as the compact «+79990000001».
       expect(mockLogin).toHaveBeenCalledWith('+79990000001', 'secret123');
       // THE regression assertion: the AuthContext instance shared with the
       // probe is authenticated — the page updated context state, not just
@@ -170,10 +174,8 @@ describe('LoginPage', () => {
   it('routes to / on success without returnTo', async () => {
     mockLogin.mockResolvedValue(mockAuthMe);
     renderLogin();
-    fillForm('+79990000001', 'secret123');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'secret123');
+    clickSubmit();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
     });
@@ -182,10 +184,8 @@ describe('LoginPage', () => {
   it('shows inline error + toast on invalid credentials and stays on the page', async () => {
     mockLogin.mockRejectedValue(new ApiError(401, 'Invalid phone or password', 'AUTH_INVALID_CREDENTIALS'));
     renderLogin();
-    fillForm('+79990000001', 'wrong-pass');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'wrong-pass');
+    clickSubmit();
     await waitFor(() => {
       // Inline error visible (spec §6 scenario 3)
       expect(screen.getByText('Неверный телефон или пароль')).toBeInTheDocument();
@@ -202,14 +202,93 @@ describe('LoginPage', () => {
   it('shows generic network error message when fetch fails', async () => {
     mockLogin.mockRejectedValue(new TypeError('Failed to fetch'));
     renderLogin();
-    fillForm('+79990000001', 'secret123');
-    act(() => {
-      screen.getByRole('button', { name: 'Войти' }).click();
-    });
+    fillForm('9990000001', 'secret123');
+    clickSubmit();
     await waitFor(() => {
       expect(screen.getByText('Ошибка сети')).toBeInTheDocument();
     });
     expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('LoginPage — phone widget (GH #414, spec §Экран входа)', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/login');
+    mockGetMe.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/login');
+  });
+
+  it('renders the PhoneField widget with the RU selector default', () => {
+    renderLogin();
+    expect(screen.getByTestId('phone-field')).toBeInTheDocument();
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    // The remainder input keeps the page's label/id anchor (#login-phone).
+    expect(screen.getByLabelText('Телефон')).toHaveAttribute('id', 'login-phone');
+  });
+
+  it('submits the compact of a bound country (selector pick → compact on the wire)', async () => {
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    // Bind Belarus via the selector, then type the BY remainder.
+    act(() => {
+      fireEvent.click(screen.getByTestId('phone-country-select'));
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId('phone-country-select-option-BY'));
+    });
+    fillForm('291234567', 'secret123');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith('+375291234567', 'secret123');
+    });
+  });
+
+  it('required-empty only: an empty phone blocks submit with no API call', async () => {
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    fireEventChange(screen.getByLabelText('Пароль'), 'secret123');
+    clickSubmit();
+    // The only login gate (spec §Экран входа): the field's native required —
+    // jsdom enforces constraint validation, so the submit event never fires
+    // and the empty phone cannot reach the API. No completeness validator.
+    await act(async () => { /* drain microtasks */ });
+    expect(mockLogin).not.toHaveBeenCalled();
+    expect(screen.getByTestId('auth-probe')).toHaveTextContent('guest');
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('NO completeness gate: an incomplete number still submits its compact', async () => {
+    // Spec §Экран входа: no fullness validator on login — legacy partial
+    // spellings and out-of-list numbers must physically reach the server.
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    fillForm('999123', 'secret123'); // 6 digits — not a possible RU number
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith('+7999123', 'secret123');
+    });
+  });
+
+  it('«no country» (out-of-list «+1 …» paste) submits digits only', async () => {
+    mockLogin.mockResolvedValue(mockAuthMe);
+    renderLogin();
+    fireEventChange(screen.getByLabelText('Пароль'), 'secret123');
+    act(() => {
+      fireEvent.paste(screen.getByLabelText('Телефон'), {
+        clipboardData: { getData: () => '+1 555 123-45-67' },
+      });
+    });
+    // Unbound field → raw digits, no grouping, no honest template.
+    expect(screen.getByLabelText('Телефон')).toHaveValue('15551234567');
+    clickSubmit();
+    await waitFor(() => {
+      // No compact exists while unbound — the typed digits go as entered.
+      expect(mockLogin).toHaveBeenCalledWith('15551234567', 'secret123');
+    });
   });
 });

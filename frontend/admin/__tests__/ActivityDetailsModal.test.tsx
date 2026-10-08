@@ -341,8 +341,9 @@ describe('SettingsTab', () => {
 // ─── ClientTab Tests ────────────────────────────────────────────────────────
 
 describe('ClientTab', () => {
-  // Hook-driven prop signature (#127 Task 7; GH #140 — no `client` prop,
-  // ClientTab resolves its client via useClient(clientId)).
+  // Hook-driven prop signature (#127 Task 7). The client's name+phone are NOT
+  // here — they live only in the tab-strip label (ClientLabelById); the
+  // per-tab resolution states are covered by the #140 US-2 describe below.
   const defaultProps = {
     recordId: 'r1',
     activityId: 'ev_1',
@@ -351,21 +352,11 @@ describe('ClientTab', () => {
     onClose: vi.fn(),
   };
 
-  it('renders client name', () => {
+  it('renders the record summary (no duplicated client header)', () => {
     stubClientsById({ c1: { data: mockClient } });
     render(<ClientTab {...defaultProps} />);
-    // GH #140 US-2: the resolved client shows in the tab content header.
-    const header = screen.getByTestId('client-tab-header');
-    expect(header.textContent).toContain('Анна Иванова');
     expect(screen.getByTestId('record-summary')).toBeInTheDocument();
-  });
-
-  it('renders client phone as read-only', () => {
-    stubClientsById({ c1: { data: mockClient } });
-    render(<ClientTab {...defaultProps} />);
-    // GH #140 US-2: phone renders next to the name in the tab content.
-    const header = screen.getByTestId('client-tab-header');
-    expect(header.textContent).toContain('+7 (900) 123-45-67');
+    expect(screen.queryByTestId('client-tab-header')).not.toBeInTheDocument();
   });
 
   it('renders client link', () => {
@@ -390,25 +381,6 @@ describe('ClientTab', () => {
   it('renders payment summary', () => {
     render(<ClientTab {...defaultProps} />);
     expect(screen.getByText(/Оплачено/)).toBeInTheDocument();
-  });
-
-  it('shows «…» while the client query is pending', () => {
-    stubClientsById({ c1: { isPending: true } });
-    render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('…');
-  });
-
-  it('shows «Без контакта» when the client query errors', () => {
-    stubClientsById({ c1: { isError: true } });
-    render(<ClientTab {...defaultProps} />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
-  });
-
-  it('shows «Без контакта» immediately for an anonymous record (no client_id)', () => {
-    // clientId '' → useClient(undefined): no query fires, no «…» phase.
-    render(<ClientTab {...defaultProps} clientId="" />);
-    expect(screen.getByTestId('client-tab-header').textContent).toBe('Без контакта');
-    expect(mockUseClient).toHaveBeenCalledWith(undefined);
   });
 });
 
@@ -592,12 +564,14 @@ describe('ActivityDetailsModal — per-tab client resolution (#140 US-2)', () =>
 
     // Default active tab is 'settings' — no record tab activated, yet both
     // clients resolve (US-2 core: beyond-first-20 clients always render).
+    // GH #414 (spec §Форматирование, показ): the label phones render grouped
+    // via formatPhoneDisplay (ClientLabelById), not the raw stored strings.
     const tab1 = screen.getByTestId('tab-client-r1');
     const tab2 = screen.getByTestId('tab-client-r2');
     expect(tab1.textContent).toContain('Анна Иванова');
-    expect(tab1.textContent).toContain('+7 (900) 123-45-67');
+    expect(tab1.textContent).toContain('+7 900 123 45 67');
     expect(tab2.textContent).toContain('Борис Петров');
-    expect(tab2.textContent).toContain('+7 (900) 987-65-43');
+    expect(tab2.textContent).toContain('+7 900 987 65 43');
   });
 
   it('resolves each tab client via useClient on the shared per-id key', () => {
@@ -1154,10 +1128,11 @@ describe('NewRecordTab — picked client (GH #221)', () => {
     });
   });
 
-  it('submits the unpicked union (visible phone + name) when nothing is picked', () => {
+  it('submits the unpicked union (compact phone + name) when nothing is picked', () => {
     render(<NewRecordTab {...defaultProps2} />);
-    // The visible string is the AsYouType-formatted value (mask is live even
-    // unpicked) — WYSIWYG: it is exactly what reaches the payload.
+    // GH #414: PhoneInput lifts the compact «+<код><нац.>» per keystroke —
+    // a «+…» fill parses to the national remainder under the bound country,
+    // and the compact is exactly what reaches the payload (storage form).
     fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+79991234567' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Новый клиент' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
@@ -1165,7 +1140,7 @@ describe('NewRecordTab — picked client (GH #221)', () => {
     const payload = defaultProps2.onSubmit.mock.calls[0][0];
     expect(payload).toEqual({
       kind: 'unpicked',
-      phone: '+7 999 123 45 67',
+      phone: '+79991234567',
       name: 'Новый клиент',
       client_id: null,
       visitors: [],
@@ -1214,6 +1189,17 @@ describe('NewRecordTab — unpicked completeness guard (GH #221 Task 7)', () => 
   beforeEach(() => {
     guardProps.onSubmit.mockClear();
     guardProps.showToast.mockClear();
+    // Same fake-timer harness as the sibling «picked client» describe: the
+    // phone typing below schedules RemoteSearchSelect's REAL 300 ms debounce,
+    // and a real timer surviving past the environment teardown surfaces as an
+    // unhandled `window is not defined` rejection (aggravated by the GH #414
+    // fix-round tests — the guard block now owns its timers).
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
@@ -1235,6 +1221,37 @@ describe('NewRecordTab — unpicked completeness guard (GH #221 Task 7)', () => 
     // with no phone) predates #221 (§10: write paths untouched) and must
     // submit as before.
     render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
+    );
+  });
+
+  it('(0c) out-of-list paste («без страны» with digits) blocks the save with «Выберите страну из списка»; nothing submitted (GH #414 fix)', () => {
+    // The pasted «+1 …» number has no list country: the compact lift is ''
+    // (indistinguishable from empty), so pre-fix the save sailed through and
+    // the hook created a client with phone: '' — silent data loss. The fix
+    // blocks BEFORE the completeness guard with the PhoneField message
+    // (client-card parity, spec §Граничные случаи).
+    render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+1 650 555 1234' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.onSubmit).not.toHaveBeenCalled();
+    expect(guardProps.showToast).toHaveBeenCalledWith('Выберите страну из списка');
+  });
+
+  it('(0d) clearing the digits after an out-of-list paste lifts the block — empty save proceeds', () => {
+    render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+1 650 555 1234' } });
+    // Empty the field — no digits, no «без страны» block (the phone-less
+    // quick-add path stays open).
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
 

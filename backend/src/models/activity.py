@@ -31,6 +31,6 @@ class Activity(AbstractModel):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     record_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    tags: Mapped[list["Tag"]] = relationship(
+    tags: Mapped[list[Tag]] = relationship(
         "Tag", secondary="activity_tags", back_populates="activities"
     )

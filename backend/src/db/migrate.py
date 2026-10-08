@@ -26,12 +26,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from alembic import command
 
 logger = logging.getLogger(__name__)
 

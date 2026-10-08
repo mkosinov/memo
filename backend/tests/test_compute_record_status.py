@@ -1,6 +1,7 @@
 """Unit tests for compute_record_status derivation function."""
 import pytest
-from src.domain.visit_status import VisitStatus, VisitItem, compute_record_status
+
+from src.domain.visit_status import VisitItem, VisitStatus, compute_record_status
 
 
 @pytest.mark.parametrize(

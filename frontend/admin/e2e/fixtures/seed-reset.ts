@@ -1,99 +1,33 @@
 /**
- * seed-reset.ts — Shared canonical reset-to-seed SQL for E2E (GH #252).
+ * seed-reset.ts — canonical reset-to-seed for E2E (GH #310).
  *
- * ONE merged statement (spec §3.1, rev 2) consumed by BOTH:
- *   - `globalSetup.ts` (boot-time safety net, before any test runs)
- *   - the per-test wrapper fixture (Task 2 — reset before EVERY test)
+ * The canon is an auto-generated SQL file (scripts/gen_seed_canon.py) that
+ * scripts/e2e-shard-start.sh snapshots ONCE per stack, right after the seed
+ * subprocess — the only moment the DB is guaranteed pristine. This module
+ * applies that file:
+ *   - `globalSetup.ts` (boot: a long-lived stack may start a later run on a
+ *     garbage DB from the previous run — boot application restores the canon
+ *     before the #152 seed-contract check and the logins below it);
+ *   - the per-test wrapper fixture (reset before EVERY test, incl. retries).
  *
- * Merged from the two historical variants:
- *   - `globalSetup.ts` inline DELETEs (children-first)
- *   - the former manual per-test cleanup in `helpers.ts` (deleted in
- *     Task 3 — this reset supersedes it) — stricter prefix-based
- *     activities filter (NOT
- *     length-based: any `evt_*` id must go, `ev_*`/`ev_fixed_*` seed ids
- *     must stay) + sort_order CASE-restores for masters/locations, which
- *     dayview-column-reorder's permanent reorder writes would otherwise
- *     corrupt for every later visual baseline.
+ * Policy (GH #310, spec rev 4): mutations of ANY seed row are allowed — the
+ * reset restores every table and every field (incl. created_at/updated_at
+ * stamps and relative-week ev_* activities) from the canon. Two exceptions
+ * BY DESIGN:
+ *   - `audit_logs` — append-only journal, never wiped;
+ *   - `sessions`   — the auth-cookie invariant (GH #252 §3.1): storageState
+ *                    logins from globalSetup must survive per-test resets.
  *
- * The DELETE order is children-first incl. visitors BEFORE clients
- * (visitors → clients FK). `PRAGMA busy_timeout=5000` gives this CLI
- * subprocess the same lock patience backend connections have — required
- * in the per-test regime where the backend is LIVE while we reset.
- *
- * Seed IDs are short (c1..c5, r1..r6, v1..v10, p1..p6, ev_0..ev_44) so
- * length checks distinguish them from UUID test data. Seed generation is
- * NOT duplicated here (D3): edited/deleted seed rows are not restored —
- * tests must not mutate seed rows.
+ * The canon file is data-only (DELETE + INSERT in one transaction with
+ * `BEGIN IMMEDIATE`, so the write lock is taken up front — no WAL upgrade
+ * deadlock against the LIVE backend pool) and is applied through the shared
+ * busy-wait retry wrapper, same as every other sqlite3 CLI call in the suite.
  */
 import fs from 'fs';
 import path from 'path';
 
 import { sqliteExecWithRetry } from './sqlite-exec';
 import { resolveTestDbPath } from '../lib/db-path';
-
-/**
- * Seed staff ids preserved by the #266 migration (m6 never existed) and the
- * seed positions dictionary (built-ins «master»/«admin» + user-defined «smm»).
- * Kept as named lists so the IN-clauses below stay in sync with seed.py.
- */
-const SEED_STAFF = ['m1', 'm2', 'm3', 'm4', 'm5', 'm7'];
-const SEED_POSITIONS = ['master', 'admin', 'smm'];
-const inList = (ids: string[]) => ids.map((id) => `'${id}'`).join(',');
-
-/**
- * The canonical reset statement (spec §3.1 + GH #266 «Тестирование»:
- * full rewrite of the staff domain across the FOUR restructured tables —
- * staff / masters / positions / staff_positions — back to seed).
- *
- * Delete order is CHILDREN-FIRST so the statement is FK-clean even though the
- * `sqlite3` CLI runs with `foreign_keys=OFF` (it would neither enforce nor
- * cascade — so dangling references are avoided explicitly, not relied upon):
- *
- *   1. transactional rows (payments…clients) — unchanged from §3.1;
- *   2. master_tags of NON-seed masters (child of masters; the DB-level
- *      ON DELETE CASCADE does NOT fire under the CLI, so delete the join rows
- *      explicitly before their masters row);
- *   3. staff_positions wiped whole, then the 6 canonical seed links re-inserted
- *      («восстановление позиций сида»);
- *   3b. user_settings wiped whole (GH #267): settings rows are test-created
- *      state (persisted archived-visibility toggles; NO seed rows exist) —
- *      a surviving row would make «default» scenarios non-deterministic;
- *   4. users.staff_id DETACHED for non-seed cards — users/sessions are NEVER
- *      deleted (the auth cookie must survive per-test resets, #252 §3.1), but
- *      a dangling staff_id would be FK-unclean once its card is deleted;
- *   5. masters (non-seed) → staff (non-seed) → positions (non-seed);
- *   6. restore seed invariants: staff.sort_order (m1–m5=0–4, m7=5 — the
- *      dayview-column-reorder spec permanently reorders these), positions
- *      title/is_system (a spec may rename «master» or flip is_system), and
- *      locations.sort_order (unchanged).
- *
- * The seed rows themselves are matched by their SHORT literal ids (m1…m7 /
- * master/admin/smm); every test-created row carries a UUID, so `NOT IN` cleanly
- * separates seed from test data.
- */
-export const RESET_SQL = `
-  PRAGMA busy_timeout=5000;
-  DELETE FROM payments  WHERE length(id) > 3;
-  DELETE FROM visits     WHERE length(id) > 3;
-  DELETE FROM records    WHERE length(id) > 3;
-  DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%';
-  DELETE FROM visitors   WHERE length(id) > 5;
-  DELETE FROM clients    WHERE length(id) > 3;
-  DELETE FROM master_tags      WHERE master_id NOT IN (${inList(SEED_STAFF)});
-  DELETE FROM staff_positions;
-  -- GH #267: user_settings rows are test-created state (persisted toggles);
-  -- NO seed rows exist, so wipe the table whole — a surviving row would make
-  -- «default» archived-visibility scenarios depend on the previous test.
-  DELETE FROM user_settings;
-  UPDATE users SET staff_id = NULL WHERE staff_id IS NOT NULL AND staff_id NOT IN (${inList(SEED_STAFF)});
-  DELETE FROM masters   WHERE staff_id NOT IN (${inList(SEED_STAFF)});
-  DELETE FROM staff     WHERE id NOT IN (${inList(SEED_STAFF)});
-  DELETE FROM positions WHERE id NOT IN (${inList(SEED_POSITIONS)});
-  INSERT OR IGNORE INTO staff_positions (staff_id, position_id) VALUES ('m1','master'),('m2','master'),('m3','master'),('m4','master'),('m5','master'),('m7','master');
-  UPDATE staff     SET sort_order = CASE id WHEN 'm1' THEN 0 WHEN 'm2' THEN 1 WHEN 'm3' THEN 2 WHEN 'm4' THEN 3 WHEN 'm5' THEN 4 WHEN 'm7' THEN 5 ELSE sort_order END WHERE id IN (${inList(SEED_STAFF)});
-  UPDATE positions SET title = CASE id WHEN 'master' THEN 'Мастер' WHEN 'admin' THEN 'Администратор' WHEN 'smm' THEN 'СММ' ELSE title END, is_system = CASE id WHEN 'master' THEN 1 WHEN 'admin' THEN 1 WHEN 'smm' THEN 0 ELSE is_system END WHERE id IN (${inList(SEED_POSITIONS)});
-  UPDATE locations SET sort_order = CASE id WHEN 'alpika' THEN 0 WHEN 'grand' THEN 1 WHEN 'p1389' THEN 2 ELSE sort_order END WHERE id IN ('alpika','grand','p1389');
-`;
 
 /**
  * Resolve the test DB path AT CALL TIME — never at module load (env vars
@@ -107,6 +41,15 @@ export function resolveSeedDbPath(): string {
     shardId: process.env.SHARD_ID,
     testDbPath: process.env.TEST_DB_PATH,
   });
+}
+
+/**
+ * Path of the canonical reset script for the resolved test DB. The shard
+ * stack generates it at `<db>.canon.sql` (gen_seed_canon.py) — per-shard by
+ * construction, deterministic, stable for the lifetime of the stack.
+ */
+export function resolveSeedCanonPath(): string {
+  return `${resolveSeedDbPath()}.canon.sql`;
 }
 
 /**
@@ -147,13 +90,23 @@ export function wipeAvatarsDir(): void {
 }
 
 /**
- * Reset the test DB to canonical seed state by executing RESET_SQL through
- * the shared busy-wait retry wrapper (same lock-retry semantics as every
- * other sqlite3 CLI call in the suite). Exported for the per-test wrapper
- * fixture (spec §3.2) and reused by globalSetup.
+ * Reset the test DB to canonical seed state by applying the canon file
+ * through the shared busy-wait retry wrapper (same lock-retry semantics as
+ * every other sqlite3 CLI call in the suite). A missing canon file is a
+ * LOUD error naming the fix: the stack must be started via
+ * scripts/e2e-shard-start.sh, which generates the canon after seeding.
  */
 export function resetToSeed(): string {
-  return sqliteExecWithRetry(`sqlite3 "${resolveSeedDbPath()}" "${RESET_SQL}"`);
+  const canonPath = resolveSeedCanonPath();
+  if (!fs.existsSync(canonPath)) {
+    throw new Error(
+      `[seed-canon] Canonical reset script not found: ${canonPath}. ` +
+        `It is generated by scripts/e2e-shard-start.sh (gen_seed_canon.py) right after ` +
+        `seeding. Start the stack via \`bash scripts/test-all.sh\` (CI/local) or ` +
+        `\`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` (standalone), then retry.`,
+    );
+  }
+  return sqliteExecWithRetry(`sqlite3 "${resolveSeedDbPath()}" ".read '${canonPath}'"`);
 }
 
 /**

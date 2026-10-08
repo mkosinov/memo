@@ -1,7 +1,6 @@
 """Edge case tests for API validation, boundaries, and data integrity."""
 
 import pytest
-from pydantic import ValidationError
 
 from src.schemas.activity import ActivityResponse
 from src.schemas.client import ClientViewResponse

@@ -21,8 +21,8 @@ from src.models.enums import ArchiveStatus
 from src.models.staff import Staff
 from src.models.tag import Tag
 from src.services.generic import BARE_LIST_MAX_ROWS
-from src.services.staff import get_staff_service
 from src.services.service import get_service_service
+from src.services.staff import get_staff_service
 from src.services.tag import get_tag_service
 
 pytestmark = pytest.mark.asyncio

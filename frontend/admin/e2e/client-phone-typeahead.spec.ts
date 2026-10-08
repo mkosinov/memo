@@ -48,16 +48,16 @@ async function cleanupClientAndRecords(request: APIRequestContext, clientId: str
  *   4. Ignored suggestions never duplicate (save-time resolution, Task 7).
  *   5. Archived clients stay invisible in suggestions.
  *   6. Editing an existing record keeps the client (no rebind).
- *   7. Mask as you type; silence below the threshold; WYSIWYG save (Task 7).
+ *   7. Mask as you type; silence below the threshold; compact save (GH #414).
  */
 
 /**
- * Mask display for a full 10-digit RU national number: shared helper
- * (`phoneMaskDisplay`) pins the actual AsYouType output — space after the
- * 3rd digit, then dashes for national typing (compliance-review finding:
- * the previous space-grouped expectation never matched the real mask).
- * The unit tests in app/components/shared/__tests__/PhoneInput.test.tsx
- * pin the same grouping.
+ * GH #414: the record-form phone field is a country-selector composite —
+ * typing goes into the REMAINDER input (`input-phone` anchor); the display
+ * groups under the selected country (AsYouType), and the unpicked save
+ * stores the COMPACT «+<код><нац.>» (space contract: the visible grouped
+ * string is no longer what lands in the DB). The unit tests in
+ * app/components/shared/__tests__/PhoneInput.test.tsx pin the same engine.
  */
 
 /** Count typeahead-specific list requests: /clients with a `phone` param. */
@@ -137,8 +137,8 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     }
   });
 
-  // ── Scenario 2: old stored format still matches a typed +7… query ─────
-  test('2. Client stored as "8 999 123-45-67" matches a +7999… query', async ({
+  // ── Scenario 2: old stored format still matches a typed RU query ──────
+  test('2. Client stored as "8 999 123-45-67" matches a typed 999… query', async ({
     page,
     request,
   }) => {
@@ -151,8 +151,11 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     try {
       await openAddTab(page);
 
-      // Type the international prefix form of the same number.
-      const resp = await (await typePhoneQuery(page, '+79991234')).json();
+      // Type the national remainder of the same number under RU (GH #414:
+      // a typed «+» is ignored by design — the country selector owns the
+      // code, so the equivalent of the old «+7999…» query is remainder
+      // typing).
+      const resp = await (await typePhoneQuery(page, '9991234')).json();
       expect(
         resp.items.some((c: { id: string }) => c.id === seeded.id),
       ).toBe(true);
@@ -200,13 +203,13 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     );
     expect(notCreated).toBeNull();
 
-    // ── Part B: full unknown number → client created, phone EXACTLY as displayed ──
+    // ── Part B: full unknown number → client created, phone is the COMPACT ──
     // Clear the partial input and finish typing the full number.
     const phoneInput = page.locator('[data-testid="input-phone"]');
     await phoneInput.fill('');
     await phoneInput.pressSequentially(digits);
-    // The mask keeps rendering progressively (display = WYSIWYG truth).
-    const fullDisplay = await phoneInput.inputValue();
+    // The mask keeps rendering progressively (display truth)…
+    await expect(phoneInput).toHaveValue(phoneMaskDisplay(digits, 'national'));
     await page
       .locator('[data-testid="input-client-name"]')
       .fill(`Новый WYSIWYG E2E-221 ${uid}`);
@@ -214,12 +217,13 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
 
     await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 15_000 });
 
-    // VERIFY DB — the client exists with the phone EXACTLY as displayed.
+    // VERIFY DB — the client exists with the COMPACT phone (GH #414 storage
+    // contract: «+<код><нац.>», not the visible grouped string).
     await expect.poll(() => {
       const row = queryDBRow(
         `SELECT id, phone FROM clients WHERE name = 'Новый WYSIWYG E2E-221 ${uid}'`,
       );
-      return row !== null && row.phone === fullDisplay;
+      return row !== null && row.phone === `+7${digits}`;
     }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
 
     // Cleanup: the record(s) created for the client FIRST, then the client.
@@ -243,8 +247,9 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     try {
       await openAddTab(page);
 
-      // Type the masked form of the SAME number — the suggestion appears…
-      await typePhoneQuery(page, '+79991234567');
+      // Type the national remainder of the SAME number — the suggestion
+      // appears (GH #414: typed «+» is ignored; remainder digits only)…
+      await typePhoneQuery(page, '9991234567');
       await expect(
         page.getByRole('option', { name: /Дубликат-щит E2E-221/ }),
       ).toBeVisible({ timeout: 10_000 });
@@ -334,9 +339,10 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
       await openModal(page, { recordId: record.id });
       await clickModalTab(page, `tab-client-${record.id}`);
 
-      // The bound client renders on the record tab (ClientTab header).
-      const header = page.locator('[data-testid="client-tab-header"]');
-      await expect(header).toContainText('Правка E2E-221', { timeout: 10_000 });
+      // The bound client renders on the record tab — in the tab-strip label
+      // (ClientLabelById); the tab content no longer duplicates it.
+      const tabLabel = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await expect(tabLabel).toContainText('Правка E2E-221', { timeout: 10_000 });
 
       // The phone field offers no re-binding in edit mode: the new-record
       // typeahead is only on the "+" tab; the record tab shows the frozen
@@ -370,10 +376,10 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     }
   });
 
-  // ── Scenario 7: mask + threshold + WYSIWYG save (Task 7) ──────────────
-  // GH #221: the WYSIWYG create path (unpicked save stores the visible
-  // string) is covered by the save assertion below (Task 7 unskipped it).
-  test('7. Mask as you type; silence below the threshold; save stores the visible string', async ({
+  // ── Scenario 7: mask + threshold + compact save (GH #414) ────────────
+  // #221 legacy: the unpicked save stored the visible string; #414 stores
+  // the COMPACT — covered by the save assertion below.
+  test('7. Mask as you type; silence below the threshold; save stores the compact', async ({
     page,
     request,
   }) => {
@@ -408,14 +414,14 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     // Exactly one typeahead request fired in total (zero below threshold).
     expect(spy.count()).toBe(1);
 
-    // ── ACTION 3: save unpicked → the visible string IS the stored phone ──
+    // ── ACTION 3: save unpicked → the stored phone is the COMPACT ───────
     await page.locator('[data-testid="input-client-name"]').fill(clientName);
     await page.locator('[data-testid="btn-create-record"]').click();
     await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 15_000 });
 
     await expect.poll(() => {
       const row = queryDBRow(`SELECT id, phone FROM clients WHERE name = '${clientName}'`);
-      return row !== null && row.phone === expectedDisplay;
+      return row !== null && row.phone === `+7${digits}`;
     }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(true);
 
     const created = queryDBRow(`SELECT id FROM clients WHERE name = '${clientName}'`);
@@ -437,7 +443,7 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
     await openAddTab(page);
     await page
       .locator('[data-testid="input-phone"]')
-      .pressSequentially('+79991234567');
+      .pressSequentially('9991234567');
     await page.locator('[data-testid="input-phone"]').blur();
 
     // Give any hypothetical handler a beat, then assert silence.

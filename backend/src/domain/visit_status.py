@@ -1,6 +1,6 @@
 """Single source of truth for record/visit status (mirrors packages/domain/src/visit_status.ts)."""
+from collections.abc import Sequence
 from enum import Enum
-from typing import Sequence
 
 from pydantic import BaseModel
 

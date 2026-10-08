@@ -32,6 +32,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     намеренно осталось реальным ожиданием (стражу ухода нужна настоящая реальность).
   - Тестовый скоуп: 13 файлов, все `frontend/admin/e2e/`, +733/−301; код приложения, UI и
     контракты не менялись.
+- **GH #414 — Поле телефона: селектор кода страны + ввод остатка номера (PhoneField во всех
+  точках ввода)** — branch `414-phone-field-country-selector` (14 коммитов `cb65e310..48295aba`,
+  base `5d90a560`; 61 файл, +4373/−442; спека
+  `docs/specs/2026-10-07-phone-field-country-selector-414-design.md` rev3 и план
+  `docs/plans/2026-10-07-phone-field-country-selector-414-plan.md` — 11/11 задач T1–T11 — оба на
+  main, unchanged by IMPL):
+  - **Модуль и виджет (T1–T2):** новый `frontend/admin/app/components/shared/phone/` — словарь
+    9 стран (`countries.ts`, RU первым) и единый TS-дом редукции `format.ts`
+    (`toNationalDigits` переехал из `useRecordMutations`, `compact`, `parseStoredPhone`,
+    `formatPhoneDisplay`); `PhoneField` — селектор кода страны (кнопка «+7 Россия ⌄», listbox,
+    клик-вне/ESC) + инпут остатка (`AsYouType(страна)`, вставка «+…» парсится: страна списка
+    выбирается / вне списка → «без страны») + × (очистка со сбросом к RU); controlled
+    `{country, national, pristine}` + `visible`/`compact`/`isComplete`.
+  - **Точки ввода (T3–T7):** `RemoteSearchSelect` — опциональные `prefix`-слот (клик не открывает
+    подсказки) и generic `displayQuery` (мгновенная перегруппировка при смене страны, девиация
+    спеки — санкционирована); `PhoneInput` записи пересобран на новом движке (порог поиска и
+    `?phone=` — от выбранной страны, якорь `input-phone` на инпуте остатка); `useRecordMutations` —
+    введённая сторона сверки = компакт + защитный гейт `String(20)`; карточка клиента и оба поля
+    сотрудника (`StaffModal`) — PhoneField, валидатор полноты гейтит изменённые номера и PATCH
+    аккаунта #348; pristine-значения уходят в базу как лежали; вставка «+…» вне списка в форме
+    записи блокирует сохранение («Выберите страну из списка» — решение архитектора, пробел спеки).
+  - **Вход (T8):** экран входа — PhoneField без валидатора полноты, отправка компакта при
+    привязанной стране, иначе только цифры; бэкенд — поиск аккаунта: точная строка → при нуле
+    уникальная редукция `to_national_digits` обеих сторон (ровно одно совпадение = вход, ноль/
+    несколько, включая RU/KZ коллизию, = единый отказ «Неверный телефон или пароль»); лестница
+    защиты не менялась.
+  - **Показ и аудит (T9–T10):** `formatPhoneDisplay` (международная группировка; мусор → как
+    есть) в пяти точках — колонка «Телефон», шапка записи, метка клиента, карточка (оба места),
+    краткая карточка; разовый аудит `users.phone` (`scripts/audit_user_phones.py`) — dev-БД 2/2
+    OK, 0 нецифровых (прод-перепроверка перед приёмкой — `docs/status/2026-10-08-user-phones-audit-414.md`).
+  - **Behavioral delta:** хранение не менялось (`clients.phone`/`User.phone` = `String(20)`, без
+    миграций); при вводе в базу уходит компакт `+<код><нац.цифры>`, показ везде группированный;
+    старые написания («+7 999 …», «8…», «999…») остаются рабочими ключами входа.
+  - **Tests:** admin vitest **3015/3015** (182 файла, TZ=UTC), tsc clean; backend auth 25/25
+    точечно (`test_auth_login_phone_reduction.py`), 261/261 auth-wide; e2e — 5 новых спек
+    сценариев 1–7 + якоря составного поля в существующих, shard1 123/124 (1 посторонний флейк
+    records.spec, зелёный на повторе), shard2 функциональные зелёные; 46 локальных пиксель-диффов
+    wave6 — документированный фонт-дрифт контейнера, CI авторитетен; полный e2e-гейт — PR CI.
+  - Status: `docs/status/2026-10-08-phone-field-country-selector-414-impl.md`
+- **GH #306 — Бэкенд lint/mypy рахет-гейт + волновая чистка до нуля: волна 0 (задачи 1–3 из 9)**
+  — branch `306-backend-lint-mypy-ratchet` (3 коммита `a949d09c..e58bf6f6`, base `93dbba1a`;
+  73 файла, +805/−197; multi-wave feature — волны 1–9 идут следующими PR после мержа этого;
+  спека `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`, план
+  `docs/plans/2026-10-08-backend-lint-mypy-ratchet-306-plan.md`):
+  - **T1 — скрипт бюджета:** новый `backend/scripts/lint_budget.py` — единственный исполнитель
+    ruff + mypy и владелец exit-кодов; пороги per-rule (ruff) и тотал (mypy), правила «факт >
+    порога / факт < порога / рост порога против базы — красные, равенство — зелёное»,
+    fail-closed на поломке инструмента; запрет роста порогов в CI читает пороги из merge-base
+    (`git show`, для пуша в main — `HEAD~1`); юнит-тесты `test_lint_budget.py` — 33 кейса.
+  - **T2 — CI-джоба `backend-lint`:** в `test.yml` рядом с `backend-coverage`, без `needs`
+    (параллельно тестам), `fetch-depth: 0` + `uv sync --extra dev` + вызов скрипта.
+  - **T3 — волна 0 чистки:** B008 37 → 0 конфигом `extend-immutable-calls` (fastapi-Depends
+    семейство в `pyproject.toml`); safe-автоправки ruff по 71 файлу — ruff 272 → **119**
+    (I001 −44, F401 −29, RUF100 16 → 3, UP037 −11, W292 −9, F811 −4 — мёртвые импорты/дубликаты,
+    проверено ревью); mypy 531 → 531 (в волне 0 не трогался, осознанно); пороги в скрипте =
+    факту (ruff 119 / mypy 531).
+  - **Behavioral delta:** нулевая — конфиг линтера, автоправки импортов/стиля и test-infra;
+    прод-поведение не менялось.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped** (40:25 detached);
+    `test_lint_budget.py` 33/33; гейт `uv run python scripts/lint_budget.py` exit 0; e2e-шарды —
+    гейт PR CI.
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave0.md`
+- **GH #306 — mypy-волна services, под-PR 1 (транш 1: record + generic)** — branch
+  `306-mypy-services-1` (2 коммита `e584933b..6371b520`, base `4633001a`; 7 файлов, +120/−58;
+  Refs #306 — multi-wave, не закрывает; план Task 4, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** `src/services/record.py` (37→0) + `src/services/generic.py` (24→0); коллатерал —
+    ложные типы в сигнатурах-источниках (`repositories/search.py`, `domain/sorting.py`,
+    `repositories/generic.py`, `api/v1/locations.py`).
+  - **Пороги:** **mypy 531 → 397** (−134: транш 61 + коллатерал services 32 + api/v1 32 +
+    репо 11), порог в скрипте переснят = факту; ruff 119 per-rule == baseline (B008=0),
+    не менялся.
+  - **Подавления:** точечные с обоснованиями — `type: ignore[override]` ×2 (`record.py`,
+    контракт #171), `[attr-defined]` ×2 (`generic.py`, `.id` на `type[Base]`), `noqa: UP040` ×1
+    (SchemaList→ModelList паттерн); глобальных оверрайдов нет.
+  - **Behavioral delta:** нулевая — аннотации + один LSP-фикс порядка параметров
+    `ArchiveService.list` (все вызовы keyword-only, проверено ревью по 11 роутерам).
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**;
+    `test_lint_budget.py` 33/33; `tests/services` 375p/0f/12s; ревью — комплаенс ✅,
+    качество approved (3 minor исправлены в полиш-коммите).
+  - **Остаток семьи services (транш 2):** 77 — staff 20, client 16, service 15, activity 7,
+    material 6, photo 5, payment 5, visitor 1, visit 1, position 1.
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-1.md`
+
+### Fixed
+- **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch
+  `296-remote-search-select-debounce-cleanup` (1 commit `cb1a15f2`, base `9659785f`;
+  спека `docs/specs/2026-10-07-remote-search-select-debounce-cleanup-296-design.md` rev3
+  (Gate B) и план `docs/plans/2026-10-08-remote-search-select-debounce-cleanup-296-plan.md` —
+  оба на main, unchanged by IMPL):
+  - Новый `useEffect` с пустым массивом зависимостей: cleanup при размонтировании
+    сбрасывает `debounceRef` через `clearTimeout` — закрытие окна/смена страницы в узком
+    окне дебаунса (300 мс) отменяет отложенный поиск целиком (ни запроса, ни обновлений
+    состояния размонтированного компонента).
+  - Остальное поведение виджета идентично (механика дебаунса, пропсы, консюмеры не
+    менялись); закрыт вектор стохастических падений полных прогонов.
+  - Отдельный регрессионный тест не пишется (решение юзера на гейте B); приёмка —
+    ревью правки + полный прогон: vitest **2885p/0f** (178 файлов), `pnpm type-check`
+    чист; CI-шарды — PR CI.
 
 ## [Unreleased] — 2026-10-04
 

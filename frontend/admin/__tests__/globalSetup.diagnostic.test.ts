@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 vi.mock('../e2e/fixtures/sqlite-exec', () => ({
   sqliteExecWithRetry: vi.fn(),
@@ -30,13 +33,37 @@ vi.mock('@playwright/test', () => ({
 import { sqliteExecWithRetry } from '../e2e/fixtures/sqlite-exec';
 import globalSetupFunc from '../e2e/globalSetup';
 
+// GH #310: globalSetup now (1) boot-applies the canon file, (2) sanity-checks
+// it against the schema, (3) runs the #152 checks. The mocks below feed that
+// call sequence:
+//   sqlite call #1 — canon application (.read) — returns ''
+//   sqlite call #2 — schema table list for the canon sanity — returns the
+//                    tables the fake canon below "covers"
+//   sqlite call #3 — #152 seed-rows count — per test ('0' or '30')
+// The canon file itself is a REAL temp file (TEST_DB_PATH-based, SHARD_ID
+// unset), so resetToSeed()'s existence check and the sanity read succeed.
 describe('globalSetup #152 diagnostics', () => {
+  let tmpDir: string;
+
   beforeEach(() => {
     vi.mocked(sqliteExecWithRetry).mockReset();
-    // Avoid polluting env between tests
-    vi.stubEnv('SHARD_ID', '2');
+    // Avoid polluting env between tests; a TEST_DB_PATH (no SHARD_ID) keeps
+    // the canon path inside our temp dir instead of <repo>/backend.
     vi.stubEnv('SHARD_PORT', '3003');
     vi.stubEnv('BACKEND_PORT', '8002');
+    delete process.env.SHARD_ID;
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'globalsetup-diag-'));
+    const dbPath = path.join(tmpDir, 'test_memo_diag.db');
+    process.env.TEST_DB_PATH = dbPath;
+    fs.writeFileSync(
+      `${dbPath}.canon.sql`,
+      '-- fake canon (GH #310 unit fixture)\n' +
+        'PRAGMA busy_timeout=5000;\nPRAGMA foreign_keys=OFF;\nBEGIN IMMEDIATE;\n' +
+        'DELETE FROM "activities";\nDELETE FROM "records";\n' +
+        'INSERT INTO "records" ("id") VALUES (\'r1\');\nCOMMIT;\n',
+    );
+
     // Silence console
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -44,22 +71,27 @@ describe('globalSetup #152 diagnostics', () => {
   });
 
   afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    delete process.env.TEST_DB_PATH;
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
   it('throws when seed rows are missing (manual-run bypass)', async () => {
-    // First sqliteExecWithRetry call (UUID cleanup, current code) returns ''
-    vi.mocked(sqliteExecWithRetry).mockReturnValueOnce('');
-    // Second sqliteExecWithRetry call (seed-rows check) returns '0'
-    vi.mocked(sqliteExecWithRetry).mockReturnValueOnce('0');
+    vi.mocked(sqliteExecWithRetry)
+      .mockReturnValueOnce('') // canon application (.read)
+      .mockReturnValueOnce('activities\nrecords') // schema tables for sanity
+      .mockReturnValueOnce('0'); // seed-rows check → missing
 
     await expect(globalSetupFunc()).rejects.toThrow(/Seed data is missing/);
   });
 
   it('throws when current-week activities API returns empty', async () => {
-    vi.mocked(sqliteExecWithRetry).mockReturnValueOnce('').mockReturnValueOnce('30'); // cleanup OK, seed rows present
+    vi.mocked(sqliteExecWithRetry)
+      .mockReturnValueOnce('')
+      .mockReturnValueOnce('activities\nrecords')
+      .mockReturnValueOnce('30'); // seed rows present
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [],
@@ -70,7 +102,10 @@ describe('globalSetup #152 diagnostics', () => {
   });
 
   it('passes when seed rows present and activities API non-empty', async () => {
-    vi.mocked(sqliteExecWithRetry).mockReturnValueOnce('').mockReturnValueOnce('30');
+    vi.mocked(sqliteExecWithRetry)
+      .mockReturnValueOnce('')
+      .mockReturnValueOnce('activities\nrecords')
+      .mockReturnValueOnce('30');
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],
@@ -83,11 +118,11 @@ describe('globalSetup #152 diagnostics', () => {
     // Setup env like CI: backend on :8002, frontend on :3003 (SHARD_PORT).
     vi.stubEnv('BACKEND_URL', 'http://127.0.0.1:8002');
     vi.stubEnv('SHARD_PORT', '3003');      // frontend — must NOT end up in the URL
-    vi.stubEnv('BACKEND_PORT', '8002');
 
     vi.mocked(sqliteExecWithRetry)
-      .mockReturnValueOnce('')        // UUID cleanup (existing call)
-      .mockReturnValueOnce('30');     // seed-rows check (new diagnostic branch 1)
+      .mockReturnValueOnce('')
+      .mockReturnValueOnce('activities\nrecords')
+      .mockReturnValueOnce('30');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],
@@ -100,5 +135,15 @@ describe('globalSetup #152 diagnostics', () => {
     // Must point at BACKEND_URL (backend 8002), NOT SHARD_PORT (frontend 3003)
     expect(String(calledUrl)).toContain('8002');
     expect(String(calledUrl)).not.toContain('3003');
+  });
+
+  it('throws a clear #310 diagnostic when the canon does not cover a schema table', async () => {
+    // Sanity check: the fake canon covers activities+records, but the schema
+    // (mocked) also has "clients" — the mismatch must fail loud and early.
+    vi.mocked(sqliteExecWithRetry)
+      .mockReturnValueOnce('')
+      .mockReturnValueOnce('activities\nrecords\nclients');
+
+    await expect(globalSetupFunc()).rejects.toThrow(/does not cover schema table\(s\): clients/);
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useClient } from '@/hooks/useClient';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 
 /**
  * Progressive client label for a record tab (spec §5.4, GH #140 US-2).
@@ -34,7 +35,11 @@ export function ClientLabelById({ clientId }: { clientId: string | undefined }) 
   }
 
   const name = data.name?.trim();
-  const phone = data.phone?.trim();
+  // GH #414 (spec §Форматирование, показ): the phone renders through the
+  // shared display formatter — legacy spellings group like compacts, garbage
+  // passes through verbatim. Whitespace-only stays «no phone» as before.
+  const rawPhone = data.phone?.trim();
+  const phone = rawPhone ? formatPhoneDisplay(rawPhone) : '';
   return (
     <div className="flex flex-col min-w-0">
       <span className="truncate">{name || phone || 'Дорогой гость'}</span>

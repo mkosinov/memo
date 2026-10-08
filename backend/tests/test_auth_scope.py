@@ -270,7 +270,7 @@ def scope_app(app):
 
     @probe.get("/_scope_probe")
     async def _scope_probe(
-        scope: ScopeContext = Depends(get_scope),  # noqa: B008 — FastAPI idiom
+        scope: ScopeContext = Depends(get_scope),
     ) -> dict:
         return {
             "user_id": scope.user_id,

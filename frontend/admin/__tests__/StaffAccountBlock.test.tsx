@@ -68,7 +68,9 @@ describe('edit: «Учётка» block states (S6)', () => {
   it('active account: shows the block with the phone and the reset button', () => {
     setupEdit(staffWithAccount());
     expect(screen.getByText('Учётка')).toBeInTheDocument();
-    expect((screen.getByLabelText('Телефон *') as HTMLInputElement).value).toBe('+79990001122');
+    // GH #414: the stored compact initializes the widget — RU selector + the
+    // grouped national remainder in the input.
+    expect((screen.getByLabelText('Телефон *') as HTMLInputElement).value).toBe('999 000-11-22');
     expect(screen.getByTestId('issue-link-btn')).toHaveTextContent('Сбросить пароль');
   });
 
@@ -106,7 +108,9 @@ describe('edit: «Учётка» block states (S6)', () => {
 describe('edit: phone save via patchUser (S5)', () => {
   it('submitting a changed phone calls onPatchPhone with the account id and the phone', async () => {
     const { onPatchPhone, onSubmit } = setupEdit(staffWithAccount());
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990003344' } });
+    // GH #414: widget input — the national remainder is typed; the PATCH
+    // carries the assembled compact '+7…'.
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990003344' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
     await waitFor(() => expect(onPatchPhone).toHaveBeenCalledWith('u-1', '+79990003344'));
     // The card itself is saved through onSubmit as before.
@@ -136,7 +140,7 @@ describe('edit: phone save via patchUser (S5)', () => {
         title="Ред."
       />,
     );
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990009999' } });
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990009999' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
     await waitFor(() => expect(screen.getByText('Этот телефон уже занят')).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
@@ -159,7 +163,10 @@ describe('edit: phone save via patchUser (S5)', () => {
         title="Ред."
       />,
     );
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '123' } });
+    // GH #414: a COMPLETE number is required to reach the PATCH (an
+    // incomplete one is blocked client-side by validate()) — the §5 server
+    // code then renders inline like PHONE_TAKEN.
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990001111' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
     await waitFor(() => expect(screen.getByText('Некорректный номер телефона')).toBeInTheDocument());
     // The card save never ran — the phone must be fixed first.
@@ -278,7 +285,8 @@ describe('create: passwordless account block (S1)', () => {
     expect(screen.queryByLabelText('Пароль *')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Иван' } });
     fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Петров' } });
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990007788' } });
+    // GH #414: widget input — national digits; the compact is asserted below.
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990007788' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const data = onSubmit.mock.calls[0][0] as StaffFormData;

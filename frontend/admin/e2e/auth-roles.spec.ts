@@ -23,7 +23,8 @@ test.describe('User Scenario 2 — master signs in (role menu)', () => {
 
   test('master signs in: role menu, own user block, client mutation rejected', async ({ page }) => {
     await page.goto('/login');
-    await page.locator('#login-phone').fill('+79990000002');
+    // GH #414: RU remainder of «+79990000002» (compact rebuilt on submit).
+    await page.locator('#login-phone').fill('9990000002');
     await page.locator('#login-password').fill('master12345');
     await page.getByRole('button', { name: 'Войти' }).click();
 

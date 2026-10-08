@@ -84,6 +84,7 @@ from src.auth.session import (
     Session,
     new_session,
 )
+from src.domain.phone_digits import to_national_digits
 from src.errors import ErrorCode, ErrorDetail
 from src.models.user import User
 
@@ -237,12 +238,13 @@ class AuthService:
     ) -> tuple[AuthedUser, str]:
         """Verify phone + password; create a session and return the principal.
 
-        Check order (spec §3.4): the §2.11 user ladder (a locked account is
-        rejected even with the correct password), then the per-IP counter
-        gate (a tripped IP is rejected even with the correct password),
-        then the Argon2 verify with timing parity for unknown phones, then
-        — on failure — the in-memory counters. Returns ``(AuthedUser,
-        token)``.
+        Check order (spec §3.4): the account lookup (#414: exact string →
+        unique reduction match), the §2.11 user ladder (a locked account
+        is rejected even with the correct password), then the per-IP
+        counter gate (a tripped IP is rejected even with the correct
+        password), then the Argon2 verify with timing parity for unknown
+        phones, then — on failure — the in-memory counters. Returns
+        ``(AuthedUser, token)``.
         """
         now = datetime.utcnow()
         normalized = phone.strip()
@@ -253,13 +255,7 @@ class AuthService:
         # growth otherwise (every sprayed IP would leave a permanent key).
         _prune_counters(now)
 
-        user = (
-            await db_session.execute(
-                select(User).where(
-                    User.phone == normalized, User.is_active == True,  # noqa: E712
-                )
-            )
-        ).scalar_one_or_none()
+        user = await self._find_login_user(db_session, normalized)
 
         # ── §2.11 ladder: locked accounts never reach the verify ────────
         if user is not None:
@@ -475,6 +471,54 @@ class AuthService:
             staff_id=user.staff_id,
             permissions=ROLE_PERMISSIONS.get(user.role, frozenset()),
         )
+
+    @staticmethod
+    async def _find_login_user(
+        db_session: AsyncSession, phone: str
+    ) -> User | None:
+        """#414 §Экран входа: exact string → unique reduction match → None.
+
+        Path (1) is today's indexed exact match (``users.phone`` is
+        UNIQUE-exact and keeps serving this path). Path (2) runs only
+        when (1) finds nothing — the login phone may arrive as a
+        PhoneField compact while stored strings are legacy free-form
+        spellings: a linear read of ACTIVE users (the table is small by
+        design) comparing ``to_national_digits`` of BOTH sides — the
+        single §Единая редукция цифр rule, no second reduction. Exactly
+        one match resolves the account; zero or several (a collision,
+        incl. RU/KZ sharing +7) → None, so the caller's unknown-phone
+        branch refuses with the unified message. A digit-less typed
+        string reduces to None and skips the scan (garbage must not
+        None-match garbage-stored phones). The security ladder is
+        untouched: whatever account this resolves behaves exactly like
+        an exact match from there on, and the in-memory counters stay
+        keyed by the TYPED string.
+        """
+        exact = (
+            await db_session.execute(
+                select(User).where(
+                    User.phone == phone, User.is_active == True,  # noqa: E712
+                )
+            )
+        ).scalar_one_or_none()
+        if exact is not None:
+            return exact
+
+        typed_digits = to_national_digits(phone)
+        if typed_digits is None:
+            return None
+
+        active_users = (
+            await db_session.execute(
+                select(User).where(User.is_active == True)  # noqa: E712
+            )
+        ).scalars()
+        matches = [
+            candidate
+            for candidate in active_users
+            if to_national_digits(candidate.phone) == typed_digits
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _ladder_check(user: User, now: datetime) -> HTTPException | None:

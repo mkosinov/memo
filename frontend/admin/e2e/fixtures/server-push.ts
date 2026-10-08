@@ -284,6 +284,9 @@ export async function createRecordViaUI(pageB: Page, clientName: string) {
   const today = new Date().toISOString().slice(0, 10);
   await openAddTab(pageB, { date: today });
 
+  // GH #414: a «+»-fill into the composite phone field is a PASTE — the
+  // country binds from the string, the national remainder commits; the
+  // `input-phone` anchor lives on the remainder input.
   const phone = `+7999${Date.now().toString().slice(-7)}`;
   await pageB.getByTestId('input-phone').fill(phone);
   await pageB.getByTestId('input-client-name').fill(clientName);

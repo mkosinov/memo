@@ -2,19 +2,16 @@
 """gh_board.py — GH Project #3 (Memo Project) board management.
 
 Usage (from repo root):
-  python3 .zcode/scripts/gh_board.py next-up                     — show the trajectory (Next Up 1→3)
   python3 .zcode/scripts/gh_board.py pick-next [host]           — token for auto-impl watcher: NONE | <issue>; per-host budget HOST_BUDGETS
   python3 .zcode/scripts/gh_board.py host N                     — read the card's host field (watcher tiebreak token)
   python3 .zcode/scripts/gh_board.py host N <label>|-           — set/clear the host label; on a Ready card a host label is the sticky progress marker (crash-released session lives on that machine, other hosts skip it, cleared only by the user accepting the progress loss)
-  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry (host label preserved — sticky progress, user-release only); PR (G7) with a dead owner → wake-first, then gate=blocked
+  python3 .zcode/scripts/gh_board.py reconcile [host] [--dry-run] — watcher-side stale-card sweep: closed issue in In IMPL/PR (G7) → In-main/Not planned; dead In IMPL run on this host → Ready to IMPL + BLOCKED auto-log entry (host label preserved — sticky progress, user-release only); PR (G7) with a dead owner → wake-first, then gate=blocked; mirror sweep: an open issue without a card → card (Backlog; containers — issues with sub-issues — get Hold, never Backlog), an open issue's card without a Status value → Backlog/Hold by the same rule
   python3 .zcode/scripts/gh_board.py orphans [host]             — token for auto-impl watcher: "impl N"/"pr N" lines (nudge-due orphan cards) | NONE
   python3 .zcode/scripts/gh_board.py pick-next-design            — token for design kickoff: <issue> | NONE (reason)
   python3 .zcode/scripts/gh_board.py auto-log N "BLOCKED ..."    — append an entry to the issue's auto-impl log comment
   python3 .zcode/scripts/gh_board.py auto-state N                — last auto-impl log entry (or nothing)
   python3 .zcode/scripts/gh_board.py show N                      — read one card: status + queue position
   python3 .zcode/scripts/gh_board.py show all                    — the whole board as a table
-  python3 .zcode/scripts/gh_board.py set-next-up N 1|2|3|none    — set/clear queue position
-  python3 .zcode/scripts/gh_board.py shift                       — after Next Up 1 completes: clear it, shift 2→1, 3→2
   python3 .zcode/scripts/gh_board.py status N "In IMPL" [host]  — move a card; entering In IMPL/In Design stamps the host field, leaving clears it (host survives PR (G7), clears on leaving it)
   python3 .zcode/scripts/gh_board.py gate N concept|spec|plan|blocked|auto-retry|none — the pending-ask marker: a design gate stop, an IMPL blocker awaiting the user, or a temporary upstream pause (auto-retry — the watcher stamps/clears it, nobody awaits the user)
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
@@ -52,6 +49,11 @@ column thus separates "will retry" from "blocked" (awaits a user
 decision). cmd_gate is idempotent: re-setting the current value or
 clearing an empty gate is a no-op, so per-cycle watcher calls cost no
 GraphQL writes.
+The pick order (pick-next / pick-next-design) is the user-set Priority field —
+Critical > High > Medium > Low, unset last, ties by the older issue number;
+agents read Priority and never write it (the user sets it in the web UI). The
+old Next Up queue field (1/2/3) was removed 2026-10-07 by user decision — the
+field was dropped from the board.
 The script is part of the host/container seam and travels via git.
 Identical copies ship in BOTH harness folders — .zcode/scripts/ (host)
 and .opencode/scripts/ (container); when editing, change both (or edit
@@ -92,9 +94,6 @@ PROJECT_ID = "PVT_kwHOA-0Z984BXl3Z"
 OWNER = "mkosinov"
 REPO = "memo"
 PROJECT_NUM = 3
-
-NEXT_UP_FIELD = "PVTSSF_lAHOA-0Z984BXl3ZzhZEGRs"
-NEXT_UP_OPTS = {"1": "ad936c13", "2": "8167d82e", "3": "ece04007"}
 
 # Statuses are read live from the board (the option list is user-managed in
 # the web UI — e.g. "Not planned" was added there 2026-09-09; never hardcode).
@@ -169,7 +168,7 @@ def items_with_fields() -> list[dict]:
                 "title": c["title"],
                 "state": c["state"],
                 "status": vals.get("Status"),
-                "next_up": vals.get("Next Up"),
+                "priority": vals.get("Priority"),
                 "host": vals.get(HOST_FIELD_NAME),
                 "gate": vals.get(GATE_FIELD_NAME),
             })
@@ -192,7 +191,7 @@ def find_item(number: int) -> dict:
     return {
         "item_id": d2["addProjectV2ItemById"]["item"]["id"],
         "number": number, "title": issue["title"], "state": issue["state"],
-        "status": None, "next_up": None, "host": None, "gate": None,
+        "status": None, "priority": None, "host": None, "gate": None,
     }
 
 
@@ -205,18 +204,6 @@ def set_field(item_id: str, field_id: str, option_id: str | None):
         gql(f'mutation {{ updateProjectV2ItemFieldValue(input: {{ projectId: "{PROJECT_ID}", itemId: "{item_id}", fieldId: "{field_id}", {value} }}) {{ projectV2Item {{ id }} }} }}')
 
 
-def cmd_next_up():
-    items = [it for it in items_with_fields() if it["next_up"] and it["state"] == "OPEN"]
-    items.sort(key=lambda x: x["next_up"])
-    if not items:
-        print("Trajectory is empty — no open issue has Next Up set.")
-        return
-    print("Trajectory (Next Up):")
-    for it in items:
-        g = f" gate={it['gate']}" if it["gate"] else ""
-        print(f"  {it['next_up']}. #{it['number']} [{it['status'] or 'no status'}{g}] {it['title']}")
-
-
 CLAIM_TTL_HOURS = 1  # auto-impl: freshness of claim/blocked log entries — a fresh entry means the card is in flight or resting
 NUDGE_BUDGET = 24  # orphan wake budget (2026-09-28, user decision after the #348 night: hourly wakes for a full day, not 3 per sliding 6h)
 NUDGE_BUDGET_H = 24  # the NUDGE-marker counting window for NUDGE_BUDGET
@@ -224,6 +211,7 @@ HOST_BUDGETS = {"imac": 2, "macbook": 1}  # auto-impl: per-machine In IMPL slots
 DEFAULT_HOST_BUDGET = 1  # unknown hosts (hk, gcp — reserved) get one slot
 HOST_FIELD_NAME = "host"  # single-select ownership field; options imac/macbook/hk/gcp
 GATE_FIELD_NAME = "gate"  # single-select pending-ask field; options concept/spec/plan/blocked (replaced the gate:* issue labels 2026-09-20)
+PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}  # pick ordering: Critical first, unset last, ties by issue number
 AUTO_IMPL_LOG_PREFIX = "auto-impl log:"
 _DEP_RE = re.compile(r"(?im)^\s*depends-on:\s*(.+)$")
 _NUM_RE = re.compile(r"#(\d+)")
@@ -301,10 +289,20 @@ def _resolve_host(explicit: str | None = None) -> str | None:
     return None
 
 
+def _priority_key(it: dict) -> tuple[int, int]:
+    """Pick ordering key (priority first, then the older issue number):
+    rank Critical=0, High=1, Medium=2, Low=3, unset=4. Priority NEVER
+    overrides status eligibility — it only orders the eligible cards;
+    set by the user in the web UI, agents read it and never write it."""
+    p = (it.get("priority") or "").strip().lower()
+    return (PRIORITY_RANK.get(p, 4), it["number"])
+
+
 def cmd_pick_next(host_arg: str | None = None):
     """Token protocol for .opencode/scripts/auto_impl_watch.sh: NONE | <number>.
     Candidates: OPEN issues with board status "Ready to IMPL".
-    Order: Next Up position ascending (99 = unset), then board order.
+    Order: priority (Critical > High > Medium > Low, unset last), then the
+    lower (older) issue number. Priority never overrides status eligibility.
     Skipped: cards with gate=blocked (awaiting the user's answer —
     2026-09-26 decision, no auto-retry against a user decision), cards
     whose auto-impl log comment's LAST entry is a fresh
@@ -331,7 +329,7 @@ def cmd_pick_next(host_arg: str | None = None):
         return
     # статус на борде — "Ready to IMPL (G2)": матч по префиксу, не по точной строке
     ready = [it for it in items if (it["status"] or "").startswith("Ready to IMPL")]
-    ready.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
+    ready.sort(key=_priority_key)
     for it in ready:
         # sticky progress marker (2026-09-26): a Ready card carrying a host
         # label belongs to that machine's unfinished session — only that host
@@ -370,7 +368,7 @@ def cmd_pick_next_design():
     "In Design", nothing new enters design (one design at a time).
     Candidates: OPEN issues with board status starting with "Backlog".
     Skipped: cards whose body declares `depends-on: #N` with N still OPEN.
-    Order: Next Up position ascending (99 = unset), then board order."""
+    Order: priority (Critical > High > Medium > Low, unset last), then the lower (older) issue number. Priority never overrides status eligibility."""
     all_items = items_with_fields()
     # инвариант мощности: дизайн занят — новых карточек не берём
     busy = [f"#{it['number']}" for it in all_items
@@ -384,7 +382,7 @@ def cmd_pick_next_design():
     if not backlog:
         print("NONE (no Backlog cards)")
         return
-    backlog.sort(key=lambda it: int(it["next_up"]) if it["next_up"] else 99)
+    backlog.sort(key=_priority_key)
     for it in backlog:
         if _open_deps(it["number"]):
             continue
@@ -602,10 +600,118 @@ def _closing_pr(number: int) -> tuple[int, str] | None:
     return None
 
 
+def _open_issues() -> dict[int, dict]:
+    """Open repo issues → number → {number, title, id} (id = the GraphQL node
+    id addProjectV2ItemById needs). One cheap REST call; empty dict on
+    failure (the mirror sweep is fail-open)."""
+    r = subprocess.run(
+        ["gh", "issue", "list", "--state", "open", "--limit", "500",
+         "--repo", f"{OWNER}/{REPO}", "--json", "number,title,id"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"warn: mirror sweep skipped (issue list failed: {r.stderr.strip()})", file=sys.stderr)
+        return {}
+    return {i["number"]: i for i in json.loads(r.stdout or "[]")}
+
+
+def _sub_issue_totals(numbers: list[int]) -> dict[int, int]:
+    """Issue number → count of sub-issues (any state — total never shrinks,
+    so a direction stays a container even with all its sub-issues done).
+    One batched GraphQL query per 100 issues (alias-per-issue). Raises
+    SystemExit on failure — the caller decides fail-open."""
+    totals: dict[int, int] = {}
+    for chunk in (numbers[i:i + 100] for i in range(0, len(numbers), 100)):
+        parts = ", ".join(
+            f'i{n}: issue(number: {n}) {{ subIssuesSummary {{ total }} }}'
+            for n in chunk
+        )
+        d = gql(f'query {{ repository(owner: "{OWNER}", name: "{REPO}") {{ {parts} }} }}')
+        for alias, node in d["repository"].items():
+            if node:  # None = the issue vanished between list and query — skip
+                totals[int(alias[1:])] = node["subIssuesSummary"]["total"]
+    return totals
+
+
+def _mirror_sweep(items: list[dict], dry_run: bool):
+    """Repair 3 in cmd_reconcile — the board mirrors ALL open issues
+    (2026-10-07: 47 open issues had silently accumulated off-board again,
+    the 2026-09-14 incident recurring). Host-independent, matched by issue
+    number. Leaves (issues with no sub-issues): no card → card with
+    Status=Backlog; a card with no Status value → Backlog (the native
+    "Auto-add to project" workflow adds cards without field values — this
+    closes that gap). Containers (issues WITH sub-issues, e.g. the #279
+    direction): the card belongs in Hold, never Backlog — a Backlog
+    container is pickable work for the design pipeline (user decision
+    2026-10-07: Hold is where containers live; «эпик ≠ Backlog», 2026-09-15).
+    Container drift kinds: no card → card+Hold, empty status → Hold,
+    Backlog → Hold (covers "container created before its first sub-issue" —
+    the card first landed in Backlog; totals never shrink, so this repair
+    is one-way). Any other status an agent or the user has set is never
+    overwritten; closed issues are never carded or stamped. On a failed
+    sub-issue totals query the sweep skips the cycle — a container must
+    never be guessed into Backlog."""
+    open_issues = _open_issues()
+    if not open_issues:
+        return
+    backlog_id = _status_opts.get("Backlog")
+    if not backlog_id:
+        print("warn: mirror sweep skipped (no 'Backlog' status on the board)", file=sys.stderr)
+        return
+    try:
+        totals = _sub_issue_totals(sorted(open_issues))
+    except SystemExit as e:
+        print(f"warn: mirror sweep skipped this cycle (sub-issue totals failed: {e})", file=sys.stderr)
+        return
+    hold_id = _status_opts.get("Hold")
+    if not hold_id and any(t > 0 for t in totals.values()):
+        print("warn: mirror sweep: no 'Hold' status on the board — container handling skipped", file=sys.stderr)
+    carded = {it["number"]: it for it in items if it["number"] in open_issues}
+
+    def target(n: int) -> tuple[str, str] | None:
+        """(desc, status_name) for one open issue's drift, or None."""
+        it = carded.get(n)
+        if totals.get(n, 0) > 0:  # container
+            if not hold_id:
+                return None
+            if it is None:
+                return f"#{n}: container issue without a card → added with Status=Hold", "Hold"
+            if not it["status"]:
+                return f"#{n}: container card without Status → Hold", "Hold"
+            if it["status"] == "Backlog":
+                return f"#{n}: container card in Backlog → Hold (containers are not pickable work)", "Hold"
+            return None
+        if it is None:
+            return f"#{n}: open issue without a card → added with Status=Backlog", "Backlog"
+        if not it["status"]:
+            return f"#{n}: card without Status → Backlog", "Backlog"
+        return None
+
+    plan: list[tuple[int, str, str]] = []
+    for n in sorted(open_issues):
+        t = target(n)
+        if t:
+            plan.append((n, t[0], t[1]))
+    for n, desc, status_name in plan:
+        if dry_run:
+            print(f"would: {desc}")
+            continue
+        opt_id = hold_id if status_name == "Hold" else backlog_id
+        it = carded.get(n)
+        if it is None:
+            d = gql(f'mutation {{ addProjectV2ItemById(input: {{ projectId: "{PROJECT_ID}", contentId: "{open_issues[n]["id"]}" }}) {{ item {{ id }} }} }}')
+            set_field(d["addProjectV2ItemById"]["item"]["id"], _status_field_id, opt_id)
+        else:
+            set_field(it["item_id"], _status_field_id, opt_id)
+        print(desc)
+    if plan and not dry_run:
+        print(f"mirror sweep: {len(plan)} repair(s) applied")
+
+
 def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
     """Watcher-side sweep of stale cards (top of every auto_impl_watch.sh
-    loop). Two repairs, both from the 2026-09-22 incident class — a closed or
-    dead card left sitting in In IMPL:
+    loop). Three repairs. Repairs 1–2 come from the 2026-09-22 incident
+    class — a closed or dead card left sitting in In IMPL:
       1. issue CLOSED while the card still sits in In IMPL / PR (G7) — the
          finishing flip was lost (e.g. a network flake at the very end of a
          marathon run): flip to In-main (stateReason COMPLETED) or
@@ -628,14 +734,25 @@ def cmd_reconcile(host_arg: str | None = None, dry_run: bool = False):
          auto-retry) and the user's in-session answer clears the gate,
          returning the card to the pipeline; the log entry then says the
          card awaits the user, not "auto-retry".
+      3. Mirror sweep (2026-10-07, the 47-off-board-issues incident): the
+         board mirrors ALL open issues — an OPEN issue with no card is added
+         with Status=Backlog (containers — issues with sub-issues — go to
+         Hold instead: user decision 2026-10-07, a Backlog container is
+         pickable work for the design pipeline), and an OPEN issue's card
+         with no Status value is stamped by the same rule (the native
+         "Auto-add to project" workflow adds cards without field values).
+         A status an agent has already set is never overwritten; closed
+         issues are never carded. Host-independent.
     Liveness = session-store freshness (the opencode run CLI is a mere attach
     client and dies while the session keeps working — run processes only fill
     the "no session rows yet" window); run this from the container, where the
-    store lives; on a host run (no store) repair 2 is skipped (repair 1 still
-    works)."""
+    store lives; on a host run (no store) repair 2 is skipped (repairs 1 and
+    3 still work)."""
     host = _resolve_host(host_arg)
     load_status_field()
-    for it in items_with_fields():
+    items = items_with_fields()
+    _mirror_sweep(items, dry_run)
+    for it in items:
         status = (it["status"] or "").lower()
         if not (status.startswith("in impl") or status.startswith("pr")):
             continue
@@ -869,9 +986,9 @@ def cmd_show(arg: str):
         if not items:
             print("Board is empty.")
             return
-        print(f"{'#':>5}  {'Status':<18} {'NextUp':<6} {'Host':<7} {'Gate':<8}  Title")
+        print(f"{'#':>5}  {'Status':<18} {'Priority':<8} {'Host':<7} {'Gate':<8}  Title")
         for it in items:
-            print(f"{it['number']:>5}  {(it['status'] or '-'):<18} {(it['next_up'] or '-'):<6} {(it['host'] or '-'):<7} {(it['gate'] or '-'):<8}  {it['title']} [{it['state']}]")
+            print(f"{it['number']:>5}  {(it['status'] or '-'):<18} {(it['priority'] or '-'):<8} {(it['host'] or '-'):<7} {(it['gate'] or '-'):<8}  {it['title']} [{it['state']}]")
         return
     if not arg.isdigit():
         sys.exit("argument must be an issue number or 'all'")
@@ -880,40 +997,11 @@ def cmd_show(arg: str):
         if it["number"] == number:
             print(f"#{number} [{it['state']}] {it['title']}")
             print(f"  Status: {it['status'] or '-'}")
-            print(f"  Next Up: {it['next_up'] or '-'}")
+            print(f"  Priority: {it['priority'] or '-'}")
             print(f"  Host: {it['host'] or '-'}")
             print(f"  Gate: {it['gate'] or '-'}")
             return
-    sys.exit(f"#{number} is not on the board. It is added automatically by the first set-next-up/status call.")
-
-
-def cmd_set_next_up(number: int, pos: str):
-    it = find_item(number)
-    if pos == "none":
-        set_field(it["item_id"], NEXT_UP_FIELD, None)
-        print(f"#{number}: Next Up cleared")
-        return
-    if pos not in NEXT_UP_OPTS:
-        sys.exit("pos must be 1|2|3|none")
-    # conflict: if the position is taken by another issue — clear it there
-    for other in items_with_fields():
-        if other["next_up"] == pos and other["number"] != number:
-            set_field(other["item_id"], NEXT_UP_FIELD, None)
-            print(f"#{other['number']}: Next Up {pos} freed (was occupied)")
-    set_field(it["item_id"], NEXT_UP_FIELD, NEXT_UP_OPTS[pos])
-    print(f"#{number}: Next Up = {pos}")
-
-
-def cmd_shift():
-    items = {it["next_up"]: it for it in items_with_fields() if it["next_up"]}
-    if "1" in items:
-        set_field(items["1"]["item_id"], NEXT_UP_FIELD, None)
-        print(f"#{items['1']['number']}: Next Up 1 cleared (completed)")
-    for src, dst in (("2", "1"), ("3", "2")):
-        if src in items:
-            set_field(items[src]["item_id"], NEXT_UP_FIELD, NEXT_UP_OPTS[dst])
-            print(f"#{items[src]['number']}: Next Up {src} → {dst}")
-    print("Queue shifted. Position 3 is free.")
+    sys.exit(f"#{number} is not on the board. It is added automatically by the first status call.")
 
 
 def cmd_status(number: int, status: str, host: str | None = None):
@@ -1056,9 +1144,7 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
     cmd = args[0]
-    if cmd == "next-up":
-        cmd_next_up()
-    elif cmd == "pick-next" and len(args) <= 2:
+    if cmd == "pick-next" and len(args) <= 2:
         cmd_pick_next(args[1] if len(args) == 2 else None)
     elif cmd == "pick-next-design":
         cmd_pick_next_design()
@@ -1079,10 +1165,6 @@ if __name__ == "__main__":
         cmd_orphans(args[1] if len(args) == 2 else None)
     elif cmd == "show" and len(args) == 2:
         cmd_show(args[1])
-    elif cmd == "set-next-up" and len(args) == 3:
-        cmd_set_next_up(int(args[1]), args[2])
-    elif cmd == "shift":
-        cmd_shift()
     elif cmd == "status" and len(args) in (3, 4):
         cmd_status(int(args[1]), args[2], args[3] if len(args) == 4 else None)
     elif cmd == "gate" and len(args) == 3:

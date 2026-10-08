@@ -1,5 +1,4 @@
 """Verify that the API rejects a 'status' field in Record payloads (422)."""
-import pytest
 
 
 def test_post_rejects_status_field(api_client, create_activity):

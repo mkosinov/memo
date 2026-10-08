@@ -86,7 +86,7 @@ async def list_activities(
     # sees only his own activities — master_key (or the empty-scope
     # sentinel) becomes the ``master_id`` equality kwarg; anonymous /
     # admin → master_key=None → no filter (unchanged behaviour).
-    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_optional_scope),
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range and service.
 
@@ -119,7 +119,7 @@ async def get_activity(
     service: _ServiceDep,
     session: SessionDep,
     # GH #263 T2: public route + master narrowing (see list_activities).
-    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_optional_scope),
 ) -> ActivityResponse:
     """Return a single activity by ID with computed occupied count.
 

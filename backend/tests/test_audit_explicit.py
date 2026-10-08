@@ -231,7 +231,6 @@ class TestStaffArchiveAudit:
         self, db_session, actor, audit_rows
     ) -> None:
         from src.services.staff import get_staff_service
-
         from src.usecases.staff import archive_staff
 
         _insert_staff_card("staff-res", "Сидор", "Сидоров")
@@ -1130,9 +1129,9 @@ class TestServiceServiceAudit:
         """§5.1/§4.2: a tag-only patch re-sending the SAME tag set
         changes no journaled scalar — no journal row (the tag links are
         non-canonical cascade children, never journaled)."""
-        from tests.conftest import query_db
         from src.schemas.service import ServicePatch
         from src.services.service import get_service_service
+        from tests.conftest import query_db
 
         _insert_service("svc-tag-noop", "Неизменное название")
         _insert_tag("tag-svc-noop", "пастель")

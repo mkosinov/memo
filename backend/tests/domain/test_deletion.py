@@ -21,7 +21,6 @@ Spec:
 
 from __future__ import annotations
 
-# ruff: noqa: RUF001  -- Cyrillic text is intentional (Russian UI labels per spec §5)
 import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 

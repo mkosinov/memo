@@ -82,7 +82,7 @@ async def get_client_by_phone(
     # GH #263 T3 (D4): the phone lookup is scope-free — ALL active studio
     # clients — but the scoped (master) response is still MASKED (D3):
     # the number is a search key, not response data.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> ClientResponse:
     """Get an active client by exact phone (GH #212; was /clients/search)."""
     result = await service.list(
@@ -112,7 +112,7 @@ async def list_clients(
     # GH #263 T3 (D1/D4): EXISTS-scope «есть запись клиента к своей
     # активности» for the plain list; ``?phone=`` searches studio-wide,
     # both paths masked for a scoped (master) caller (D3).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[ClientViewResponse]:
     """Return paginated clients with stats aggregation, filtering, and sorting."""
     return await list_clients_view(
@@ -127,7 +127,7 @@ async def get_client(
     session: SessionDep,
     # GH #263 T3 (D1): свой → 200 (masked), чужой → 404 — one scope-aware
     # query, indistinguishable from «не существует» (404-fast-path, T7).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> ClientResponse:
     """Return a single client by ID."""
     client = await service.get_scoped(
@@ -351,7 +351,7 @@ async def list_client_visitors(
     # returned visitors carry the T2 visibility predicate — visitors
     # without visits on the master's records stay invisible. Admin
     # (master_key=None): unchanged, all visitors.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> list[VisitorResponse]:
     """Return all visitors for a given client."""
     # GH #263 T3-fix (S7 admin regression): the visibility gate is a

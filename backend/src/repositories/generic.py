@@ -364,8 +364,8 @@ class BaseRepository:
         return True
 
     async def reorder(
-        self, session: AsyncSession, table: type[ModelType], ids: list[str]
-    ) -> list[ModelType]:
+        self, session: AsyncSession, table: type[ModelType], ids: ModelList[str]
+    ) -> ModelList[ModelType]:
         """Set sort_order for records based on the order of IDs in the list.
 
         Any matching id gets sort_order updated (no is_active check).
@@ -452,8 +452,8 @@ class ArchiveRepository(BaseRepository):
         return list(result.scalars().all()), total
 
     async def reorder(
-        self, session: AsyncSession, table: type[ModelType], ids: list[str]
-    ) -> list[ModelType]:
+        self, session: AsyncSession, table: type[ModelType], ids: ModelList[str]
+    ) -> ModelList[ModelType]:
         """Set sort_order for active records only.
 
         Only active records matching the given IDs are updated.

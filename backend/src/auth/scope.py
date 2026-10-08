@@ -140,7 +140,7 @@ async def get_scope(
     db_session: Annotated[AsyncSession, Depends(db_manager.get_db_session)],
     # B008 (`Depends` in defaults) is the idiomatic FastAPI dependency
     # pattern used across this repo (cf. require_session).
-    authed: AuthedUser = Depends(require_session),  # noqa: B008
+    authed: AuthedUser = Depends(require_session),
 ) -> ScopeContext:
     """FastAPI dependency: session guard + scope resolution (D1).
 

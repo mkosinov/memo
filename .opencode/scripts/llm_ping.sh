@@ -4,9 +4,9 @@
 # the closed z.ai quota window and each one still re-read the manager history).
 # A minimal real model call ("connection test") against the SAME upstream the
 # IMPL agents use — zai direct (ZAI_API_KEY); a health endpoint would not prove
-# the quota is back. 2026-10-04: retargeted from the decommissioned omniroute
-# gateway — its stale defaults answered http=000 while zai was fine, so every
-# nudge was skipped without a trace and #349 froze in In IMPL for 5 days.
+# the quota is back. 2026-10-04: retargeted from the removed local gateway
+# (its stale defaults answered http=000 while zai was fine, so every
+# nudge was skipped without a trace and #349 froze in In IMPL for 5 days).
 # Exit 0 = upstream serves, the nudge may go;
 # non-zero = closed window / outage, the nudge is skipped and no NUDGE marker
 # is written (the wake budget is not consumed by a dead window).

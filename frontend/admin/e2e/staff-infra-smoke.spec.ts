@@ -130,12 +130,12 @@ test.describe('GH #266 T7 — staff e2e infrastructure smoke', () => {
       expect(queryDBRows(`SELECT * FROM staff_positions WHERE staff_id='${id}'`)).toHaveLength(0);
     }
 
-    // Leaked users are KEPT (reset never deletes users — the auth cookie
-    // survives, #252) but DETACHED so no staff_id FK dangles.
-    expect(queryDBRow(`SELECT staff_id FROM users WHERE phone='${leaked.phoneA}'`))
-      .toMatchObject({ staff_id: null });
-    expect(queryDBRow(`SELECT staff_id FROM users WHERE phone='${leaked.phoneB}'`))
-      .toMatchObject({ staff_id: null });
+    // Leaked users are REMOVED entirely (GH #310 policy flip: the canon
+    // restores `users` to seed — the pre-#310 compromise was "keep the row,
+    // detach staff_id"; non-seed user rows simply do not survive). The auth
+    // invariant lives in `sessions`, which the canon never touches.
+    expect(queryDBRow(`SELECT staff_id FROM users WHERE phone='${leaked.phoneA}'`)).toBeNull();
+    expect(queryDBRow(`SELECT staff_id FROM users WHERE phone='${leaked.phoneB}'`)).toBeNull();
 
     // Seed preserved: 6 staff cards, correct sort_order, 3 positions, and the
     // seeded master account still linked to m1.

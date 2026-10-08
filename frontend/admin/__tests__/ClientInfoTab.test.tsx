@@ -112,7 +112,10 @@ describe('ClientInfoTab', () => {
   it('renders phone in input', () => {
     renderClientInfoTab();
     const input = screen.getByLabelText('Телефон') as HTMLInputElement;
-    expect(input.value).toBe('+7 (900) 123-45-67');
+    // GH #414: the stored «+7 (900) 123-45-67» initializes the widget on RU
+    // with the national remainder, grouped as-you-type for display.
+    expect(input.value).toBe('900 123-45-67');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
   });
 
   it('renders email in input', () => {
@@ -237,7 +240,7 @@ describe('ClientInfoTab', () => {
       onHasChanges.mockClear();
 
       const phoneInput = screen.getByLabelText('Телефон');
-      fireEvent.change(phoneInput, { target: { value: '+7 (999) 111-22-33' } });
+      fireEvent.change(phoneInput, { target: { value: '9991112233' } });
       expect(onHasChanges).toHaveBeenCalledWith(true);
     });
 
@@ -271,7 +274,7 @@ describe('ClientInfoTab', () => {
 
       // Subsequent changes don't re-fire onHasChanges since hasChanges is already true
       // (React effect won't re-run when the value hasn't changed)
-      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (000) 000-00-00' } });
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9990000000' } });
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@b.com' } });
       // hasChanges remains true throughout
       expect(onHasChanges).toHaveBeenLastCalledWith(true);
@@ -325,7 +328,8 @@ describe('ClientInfoTab', () => {
       const { getRef } = renderClientInfoTabWithRef({ onSave });
 
       fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Новое Имя' } });
-      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (000) 000-00-00' } });
+      // GH #414: a CHANGED number saves as the compact «+<код><нац.>».
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991112233' } });
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@test.com' } });
       fireEvent.change(screen.getByLabelText('Канал'), { target: { value: 'whatsapp' } });
 
@@ -335,7 +339,7 @@ describe('ClientInfoTab', () => {
       await waitFor(() => {
         expect(onSave).toHaveBeenCalledWith({
           name: 'Новое Имя',
-          phone: '+7 (000) 000-00-00',
+          phone: '+79991112233',
           email: 'new@test.com',
           channel: 'whatsapp',
         });
@@ -351,6 +355,155 @@ describe('ClientInfoTab', () => {
     it('shows formatted total paid with ₽ symbol', () => {
       renderClientInfoTab();
       expect(screen.getByText(/17 500 ₽/)).toBeInTheDocument();
+    });
+  });
+
+  // ─── GH #414: PhoneField in the client card (spec §Инициализация
+  // существующих значений / §Форматирование, валидация, хранение) ────────
+  //
+  // The card initializes the widget from the stored string; a PRISTINE
+  // (untouched) value saves VERBATIM (byte-identical legacy spellings
+  // survive a save); validation applies ONLY to a CHANGED number —
+  // «без страны» → «Выберите страну из списка», incomplete → the #221
+  // message; empty is allowed (phone nullable).
+  describe('phone field (GH #414)', () => {
+    const LEGACY_RU = '8 999 123-45-67';
+    const OUT_OF_LIST = '+1 555 123-45-67';
+    const INCOMPLETE_MSG = 'Проверьте номер телефона — возможно, он введён не полностью';
+    const NO_COUNTRY_MSG = 'Выберите страну из списка';
+
+    it('initializes from a legacy «8 …» spelling: RU bound, national remainder grouped', () => {
+      renderClientInfoTab({ client: { ...mockClientWithStats, phone: LEGACY_RU } });
+      expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('999 123-45-67');
+      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    });
+
+    it('initializes an out-of-list stored number into the «без страны» state (digits shown)', () => {
+      renderClientInfoTab({ client: { ...mockClientWithStats, phone: OUT_OF_LIST } });
+      expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('15551234567');
+      // No honest template while unbound.
+      expect(screen.getByLabelText('Телефон')).toHaveAttribute('placeholder', '');
+    });
+
+    it('an empty stored phone starts on the RU selector, pristine', () => {
+      renderClientInfoTab({ client: { ...mockClientWithStats, phone: null } });
+      expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('');
+      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    });
+
+    it('pristine legacy value saves VERBATIM (no compact rewrite, no validation)', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({
+        onSave,
+        client: { ...mockClientWithStats, phone: LEGACY_RU },
+      });
+      // Only the name changes — the phone is never touched.
+      fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Новое Имя' } });
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({ name: 'Новое Имя', phone: LEGACY_RU }),
+        );
+      });
+    });
+
+    it('pristine garbage value saves verbatim too (the pristine path never validates)', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({
+        onSave,
+        client: { ...mockClientWithStats, phone: 'звонить вечером' },
+      });
+      fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'X' } });
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ phone: 'звонить вечером' }));
+      });
+    });
+
+    it('a CHANGED number without country blocks the save with «Выберите страну из списка»', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({ onSave });
+      // Paste an out-of-list number — the «no country» state.
+      fireEvent.paste(screen.getByLabelText('Телефон'), {
+        clipboardData: { getData: () => OUT_OF_LIST },
+      });
+      await getRef()!.save();
+      expect(screen.getByText(NO_COUNTRY_MSG)).toBeInTheDocument();
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it('a CHANGED incomplete RU number blocks the save with the #221 message', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({ onSave });
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234' } });
+      await getRef()!.save();
+      expect(screen.getByText(INCOMPLETE_MSG)).toBeInTheDocument();
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it('a blocked save keeps hasChanges true (the fix is one edit away)', async () => {
+      const onHasChanges = vi.fn();
+      const { getRef } = renderClientInfoTabWithRef({ onHasChanges });
+      onHasChanges.mockClear();
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234' } });
+      await getRef()!.save();
+      expect(onHasChanges).toHaveBeenLastCalledWith(true);
+    });
+
+    it('a CHANGED complete number saves as the compact «+<код><нац.>»', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({ onSave });
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234567' } });
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ phone: '+79991234567' }));
+      });
+    });
+
+    it('a CLEARED phone saves as null (phone is nullable)', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({
+        onSave,
+        client: { ...mockClientWithStats, phone: LEGACY_RU },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'clear' }));
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ phone: null }));
+      });
+    });
+
+    it('the error clears on the next edit of the field', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({ onSave });
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234' } });
+      await getRef()!.save();
+      expect(screen.getByText(INCOMPLETE_MSG)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234567' } });
+      expect(screen.queryByText(INCOMPLETE_MSG)).not.toBeInTheDocument();
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ phone: '+79991234567' }));
+      });
+    });
+
+    it('cancel() restores the stored phone (display AND the pristine save path)', async () => {
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { getRef } = renderClientInfoTabWithRef({
+        onSave,
+        client: { ...mockClientWithStats, phone: LEGACY_RU },
+      });
+      fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9991234' } });
+      act(() => {
+        getRef()!.cancel();
+      });
+      expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('999 123-45-67');
+      fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Y' } });
+      await getRef()!.save();
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ phone: LEGACY_RU }));
+      });
     });
   });
 

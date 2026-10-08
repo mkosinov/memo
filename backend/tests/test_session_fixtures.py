@@ -11,7 +11,6 @@ session-scoped login would die at the first truncate).
 import asyncio
 import uuid as _uuid
 
-import pytest
 from sqlalchemy import text
 
 from src.auth.passwords import hash_password
@@ -177,7 +176,6 @@ class TestUserFactory:
         every new user its UserSettings defaults row («база закрыта с
         рождения»); tests that need the anomaly «no row» delete it
         explicitly."""
-        import uuid as _uuid
 
         from tests.conftest import insert_user, query_db
 
@@ -212,9 +210,7 @@ class TestLoginAs:
         Inserts a master-role user directly (the ``_user`` pattern, no
         user API) with a real hash_password hash, then logs in as them.
         """
-        import uuid as _uuid
 
-        from src.auth.passwords import hash_password
 
         from tests.conftest import query_db
 

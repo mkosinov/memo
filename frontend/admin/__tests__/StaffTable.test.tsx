@@ -613,7 +613,9 @@ describe('StaffTable', () => {
     fireEvent.click(screen.getByTestId('create-user-checkbox'));
     fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Иван' } });
     fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Петров' } });
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990007788' } });
+    // GH #414: the phone field is the widget — national digits are typed;
+    // the compact '+7…' is assembled by the modal (assertion below).
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990007788' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
 
     // The card is created with the passwordless create_user section…
@@ -653,7 +655,7 @@ describe('StaffTable', () => {
     fireEvent.change(screen.getByLabelText('Имя *'), { target: { value: 'Аня' } });
     fireEvent.change(screen.getByLabelText('Фамилия *'), { target: { value: 'Ошибка' } });
     fireEvent.click(screen.getByTestId('create-user-checkbox'));
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990006655' } });
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990006655' } });
     fireEvent.click(screen.getByTestId('staff-modal-save-btn'));
 
     await waitFor(() => expect(screen.getByTestId('link-dialog-error')).toBeInTheDocument());
@@ -670,7 +672,9 @@ describe('StaffTable', () => {
 
     fireEvent.click(screen.getByText('Тестова Мария'));
     expect(await screen.findByText('Учётка')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '+79990003344' } });
+    // GH #414: widget input — the national remainder is typed; the PATCH
+    // carries the assembled compact '+7…' (assertion below).
+    fireEvent.change(screen.getByLabelText('Телефон *'), { target: { value: '9990003344' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     // The hook-level shape: {id: users.id, data: {phone}} → PATCH /users/:id.

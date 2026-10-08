@@ -29,11 +29,12 @@
  * behaviour outside #328's scope; S2/S4 therefore run on s1, whose
  * tariffs no visit references (t1*), and S1 on s4 (t4* likewise free).
  *
- * State restore (spec §6.4): RESET_SQL does not touch services /
- * service_tags, so every seed mutation is undone in `finally` with a FULL
- * PUT payload whose `tag_ids` come from the GET snapshot (`row.tags`) —
- * a partial PUT would itself wipe the tags (the very bug #328). No
- * sqlite reads: the GET body carries the eager-loaded `tags` (spec §2.6).
+ * State restore (GH #310): the canonical per-test reset fully restores
+ * services / service_tags from the generated canon, so the former manual
+ * FULL-PUT `finally` undo is deleted — seed mutations are allowed by
+ * policy. `captureService` stays: its GET snapshots double as the
+ * seed-contract asserts above each mutation (no sqlite reads — the GET
+ * body carries the eager-loaded `tags`, spec §2.6).
  */
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
@@ -73,48 +74,16 @@ async function getService(request: APIRequestContext, id: string): Promise<Servi
   return (await resp.json()) as ServiceRow;
 }
 
-/** Capture the CURRENT state of a service as a restorable snapshot.
+/** Capture the CURRENT state of a service as a seed-contract snapshot.
  * Tag ids come straight from the GET body — it carries the eager-loaded
  * `tags` relation (spec §2.6; the old «tags arrives empty» comment in
- * services-null-max-age.spec.ts was a wrong-DB artefact, resolved). */
+ * services-null-max-age.spec.ts was a wrong-DB artefact, resolved).
+ * GH #310: no longer a restore source — the canonical reset owns that;
+ * the snapshot only feeds the pre-mutation seed asserts. */
 async function captureService(request: APIRequestContext, id: string) {
   const row = await getService(request, id);
   const tagIds = row.tags.map((t) => t.id);
   return { row, tagIds };
-}
-
-/** Map a GET response onto the exact ServiceUpdate shape (PUT forbids
- * extras). Material links ride the GET as `{id, note}` — the write shape
- * is `{material_id, note}`. Same mapping as the null-max-age canon. */
-function toUpdatePayload(s: ServiceRow, tagIds: string[]) {
-  return {
-    title: s.title,
-    description: s.description,
-    image_url: s.image_url,
-    specialty: s.specialty,
-    min_age: s.min_age,
-    max_age: s.max_age,
-    duration: s.duration,
-    record_info: s.record_info,
-    tariffs: s.tariffs.map((t) => ({ title: t.title, description: t.description, price: t.price })),
-    tag_ids: tagIds,
-    materials: s.materials.map((m) => ({ material_id: m.id, note: m.note })),
-  };
-}
-
-/** PUT the captured state back — undo every mutation the test made.
- * The payload is FULL and carries `tag_ids` from the snapshot: PUT is a
- * full-update canonical replace (a missing list would read as «wipe all»)
- * — restoring with a partial payload would re-inflict bug #328. */
-async function restoreService(
-  request: APIRequestContext,
-  snapshot: { row: ServiceRow; tagIds: string[] },
-): Promise<void> {
-  const resp = await request.put(`${BACKEND}/api/v1/services/${snapshot.row.id}`, {
-    data: toUpdatePayload(snapshot.row, snapshot.tagIds),
-  });
-  expect(resp.ok(), `restore PUT /services/${snapshot.row.id} must succeed: ${await resp.text()}`)
-    .toBeTruthy();
 }
 
 /** Row of the service in the services table, anchored to the row testid
@@ -192,46 +161,43 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
       snapshot.tagIds,
       'seed contract: s4 «Акварель» → tag3 «для детей» (created before the form opens)',
     ).toContain('tag3');
-    try {
-      await waitForServicesReady(page);
-      await enableTagsColumn(page);
+    // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
+    await waitForServicesReady(page);
+    await enableTagsColumn(page);
 
-      // Seed link visible in the table BEFORE any mutation.
-      await expect(
-        serviceRow(page, 's4'),
-        'S1: seed tag visible in the table before the edit',
-      ).toContainText(TAG_TITLES.kids);
+    // Seed link visible in the table BEFORE any mutation.
+    await expect(
+      serviceRow(page, 's4'),
+      'S1: seed tag visible in the table before the edit',
+    ).toContainText(TAG_TITLES.kids);
 
-      const dialog = await openServiceModal(page, 's4', snapshot.row.title);
-      await expect(
-        chip(dialog, TAG_TITLES.kids),
-        'S1: modal prefills the chip from service.tags',
-      ).toBeVisible();
+    const dialog = await openServiceModal(page, 's4', snapshot.row.title);
+    await expect(
+      chip(dialog, TAG_TITLES.kids),
+      'S1: modal prefills the chip from service.tags',
+    ).toBeVisible();
 
-      // ACTION — touch ONLY «Длительность» (the #328 repro: an
-      // unrelated-field save must not disturb the tag set).
-      await durationInput(dialog).fill('160');
-      await dialog.getByText('Сохранить').click();
-      await waitForToast(page, 'Услуга обновлена');
+    // ACTION — touch ONLY «Длительность» (the #328 repro: an
+    // unrelated-field save must not disturb the tag set).
+    await durationInput(dialog).fill('160');
+    await dialog.getByText('Сохранить').click();
+    await waitForToast(page, 'Услуга обновлена');
 
-      // VERIFY UI — the chip is still on the row after the save+refetch.
-      await expect(
-        serviceRow(page, 's4'),
-        'S1: tag chip survives a duration-only save (table)',
-      ).toContainText(TAG_TITLES.kids);
+    // VERIFY UI — the chip is still on the row after the save+refetch.
+    await expect(
+      serviceRow(page, 's4'),
+      'S1: tag chip survives a duration-only save (table)',
+    ).toContainText(TAG_TITLES.kids);
 
-      // VERIFY API — the live link. Pre-fix the form PUT tag_ids:[] and
-      // this GET would return no tags (the reported bug).
-      const after = await getService(request, 's4');
-      expect(after.duration, 'S1: the duration change landed').toBe(160);
-      expect(after.title, 'S1: title untouched').toBe(snapshot.row.title);
-      expect(
-        after.tags.map((t) => t.id),
-        'S1: GET returns the live service→tag link',
-      ).toContain('tag3');
-    } finally {
-      await restoreService(request, snapshot);
-    }
+    // VERIFY API — the live link. Pre-fix the form PUT tag_ids:[] and
+    // this GET would return no tags (the reported bug).
+    const after = await getService(request, 's4');
+    expect(after.duration, 'S1: the duration change landed').toBe(160);
+    expect(after.title, 'S1: title untouched').toBe(snapshot.row.title);
+    expect(
+      after.tags.map((t) => t.id),
+      'S1: GET returns the live service→tag link',
+    ).toContain('tag3');
   });
 
   test('S2 swap-tag-set: remove A, add B via typeahead', async ({ page, request }) => {
@@ -240,91 +206,72 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
       [...snapshot.tagIds].sort(),
       'seed contract: s1 «Картина маслом» → tag2 «хит» + tag4 «популярное»',
     ).toEqual(['tag2', 'tag4']);
-    try {
-      await waitForServicesReady(page);
-      await enableTagsColumn(page);
+    // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
+    await waitForServicesReady(page);
+    await enableTagsColumn(page);
 
-      const dialog = await openServiceModal(page, 's1', snapshot.row.title);
-      await expect(chip(dialog, TAG_TITLES.hit)).toBeVisible();
+    const dialog = await openServiceModal(page, 's1', snapshot.row.title);
+    await expect(chip(dialog, TAG_TITLES.hit)).toBeVisible();
 
-      // ACTION — remove chip A («хит»), add chip B («сезонное») through
-      // the ≥2-char search; «популярное» stays untouched.
-      await removeTagButton(dialog, TAG_TITLES.hit).click();
-      await expect(chip(dialog, TAG_TITLES.hit), 'S2: chip A removed from the form').toHaveCount(0);
-      await addTagViaSearch(page, dialog, 'сезон', TAG_TITLES.seasonal);
+    // ACTION — remove chip A («хит»), add chip B («сезонное») through
+    // the ≥2-char search; «популярное» stays untouched.
+    await removeTagButton(dialog, TAG_TITLES.hit).click();
+    await expect(chip(dialog, TAG_TITLES.hit), 'S2: chip A removed from the form').toHaveCount(0);
+    await addTagViaSearch(page, dialog, 'сезон', TAG_TITLES.seasonal);
 
-      await dialog.getByText('Сохранить').click();
-      await waitForToast(page, 'Услуга обновлена');
+    await dialog.getByText('Сохранить').click();
+    await waitForToast(page, 'Услуга обновлена');
 
-      // VERIFY UI — B present in the row, A gone.
-      const row = serviceRow(page, 's1');
-      await expect(row, 'S2: new tag chip in the table').toContainText(TAG_TITLES.seasonal);
-      await expect(row, 'S2: removed tag gone from the table').not.toContainText(TAG_TITLES.hit);
+    // VERIFY UI — B present in the row, A gone.
+    const row = serviceRow(page, 's1');
+    await expect(row, 'S2: new tag chip in the table').toContainText(TAG_TITLES.seasonal);
+    await expect(row, 'S2: removed tag gone from the table').not.toContainText(TAG_TITLES.hit);
 
-      // VERIFY API — the set was REPLACED (full-update PUT semantics):
-      // exactly the untouched seed tag plus the newly picked one.
-      const after = await getService(request, 's1');
-      expect(
-        after.tags.map((t) => t.title).sort(),
-        'S2: GET returns exactly the new set',
-      ).toEqual([TAG_TITLES.popular, TAG_TITLES.seasonal]);
-    } finally {
-      await restoreService(request, snapshot);
-    }
+    // VERIFY API — the set was REPLACED (full-update PUT semantics):
+    // exactly the untouched seed tag plus the newly picked one.
+    const after = await getService(request, 's1');
+    expect(
+      after.tags.map((t) => t.title).sort(),
+      'S2: GET returns exactly the new set',
+    ).toEqual([TAG_TITLES.popular, TAG_TITLES.seasonal]);
   });
 
   test('S3 create-with-tag: a new service is born with a link', async ({ page, request }) => {
     const TITLE = 'E2E #328 create-with-tag';
-    let createdId: string | null = null;
-    try {
-      await waitForServicesReady(page);
-      await enableTagsColumn(page);
+    // GH #310: no `finally` cleanup — the canonical per-test reset deletes the created service row.
+    await waitForServicesReady(page);
+    await enableTagsColumn(page);
 
-      // ACTION — blank form, minimal valid service, pick a tag in-form.
-      await page.getByRole('button', { name: '+ Добавить услугу' }).click();
-      const dialog = page.getByRole('dialog');
-      await expect(dialog).toBeVisible({ timeout: 10_000 });
-      await titleInput(dialog).fill(TITLE);
-      await durationInput(dialog).fill('90');
-      await addTagViaSearch(page, dialog, 'новин', TAG_TITLES.news);
-      await dialog.getByText('Сохранить').click();
-      await waitForToast(page, 'Услуга создана');
+    // ACTION — blank form, minimal valid service, pick a tag in-form.
+    await page.getByRole('button', { name: '+ Добавить услугу' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await titleInput(dialog).fill(TITLE);
+    await durationInput(dialog).fill('90');
+    await addTagViaSearch(page, dialog, 'новин', TAG_TITLES.news);
+    await dialog.getByText('Сохранить').click();
+    await waitForToast(page, 'Услуга создана');
 
-      // Find the created id via the API list (no q= dependence).
-      const listResp = await request.get(`${BACKEND}/api/v1/services?page=1&per_page=100`);
-      expect(listResp.ok(), 'GET /services must succeed').toBeTruthy();
-      const items = ((await listResp.json()) as { items?: ServiceRow[] }).items ?? [];
-      createdId = items.find((s) => s.title === TITLE)?.id ?? null;
-      expect(createdId, 'S3: the created service is listable').toBeTruthy();
+    // Find the created id via the API list (no q= dependence).
+    const listResp = await request.get(`${BACKEND}/api/v1/services?page=1&per_page=100`);
+    expect(listResp.ok(), 'GET /services must succeed').toBeTruthy();
+    const items = ((await listResp.json()) as { items?: ServiceRow[] }).items ?? [];
+    const createdId = items.find((s) => s.title === TITLE)?.id ?? null;
+    expect(createdId, 'S3: the created service is listable').toBeTruthy();
 
-      // VERIFY UI — toolbar search narrows the table to the new row; the
-      // chip column shows the tag it was born with.
-      await page.getByPlaceholder('Название...').fill(TITLE);
-      await page.keyboard.press('Enter');
-      const row = serviceRow(page, createdId!);
-      await expect(row, 'S3: created row shows the tag chip').toContainText(TAG_TITLES.news);
+    // VERIFY UI — toolbar search narrows the table to the new row; the
+    // chip column shows the tag it was born with.
+    await page.getByPlaceholder('Название...').fill(TITLE);
+    await page.keyboard.press('Enter');
+    const row = serviceRow(page, createdId!);
+    await expect(row, 'S3: created row shows the tag chip').toContainText(TAG_TITLES.news);
 
-      // VERIFY API — the link was created together with the service.
-      const after = await getService(request, createdId!);
-      expect(
-        after.tags.map((t) => t.title),
-        'S3: GET returns the created link',
-      ).toEqual([TAG_TITLES.news]);
-    } finally {
-      if (createdId) {
-        // Fresh service deps = just its tag links (service_tags, auto).
-        // GH #345: every real DELETE must carry `expected` — the bare
-        // resolutions-only body is the rejected legacy shape (422
-        // `expected_state_required`). The created service has ONLY the auto
-        // service_tags dep, so the clean commit is `{expected: {}}` (auto
-        // deps resolve server-side, no resolutions needed) — the tag link
-        // cascades with the service, nothing leaks past the run.
-        const resp = await request.delete(`${BACKEND}/api/v1/services/${createdId}`, {
-          data: { expected: {} },
-        });
-        expect(resp.ok(), `cleanup DELETE /services/${createdId} must succeed`).toBeTruthy();
-      }
-    }
+    // VERIFY API — the link was created together with the service.
+    const after = await getService(request, createdId!);
+    expect(
+      after.tags.map((t) => t.title),
+      'S3: GET returns the created link',
+    ).toEqual([TAG_TITLES.news]);
   });
 
   test('S4 remove-all-tags: both chips off, no links left, no errors', async ({ page, request }) => {
@@ -333,36 +280,33 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
       [...snapshot.tagIds].sort(),
       'seed contract: s1 «Картина маслом» → tag2 «хит» + tag4 «популярное»',
     ).toEqual(['tag2', 'tag4']);
-    try {
-      await waitForServicesReady(page);
-      await enableTagsColumn(page);
+    // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
+    await waitForServicesReady(page);
+    await enableTagsColumn(page);
 
-      const row = serviceRow(page, 's1');
-      await expect(row, 'S4: both seed chips visible before the edit').toContainText(
-        TAG_TITLES.hit,
-      );
-      await expect(row).toContainText(TAG_TITLES.popular);
+    const row = serviceRow(page, 's1');
+    await expect(row, 'S4: both seed chips visible before the edit').toContainText(
+      TAG_TITLES.hit,
+    );
+    await expect(row).toContainText(TAG_TITLES.popular);
 
-      // ACTION — remove both chips, save the now-empty set.
-      const dialog = await openServiceModal(page, 's1', snapshot.row.title);
-      await removeTagButton(dialog, TAG_TITLES.hit).click();
-      await removeTagButton(dialog, TAG_TITLES.popular).click();
-      await expect(chip(dialog, TAG_TITLES.hit)).toHaveCount(0);
-      await expect(chip(dialog, TAG_TITLES.popular)).toHaveCount(0);
+    // ACTION — remove both chips, save the now-empty set.
+    const dialog = await openServiceModal(page, 's1', snapshot.row.title);
+    await removeTagButton(dialog, TAG_TITLES.hit).click();
+    await removeTagButton(dialog, TAG_TITLES.popular).click();
+    await expect(chip(dialog, TAG_TITLES.hit)).toHaveCount(0);
+    await expect(chip(dialog, TAG_TITLES.popular)).toHaveCount(0);
 
-      await dialog.getByText('Сохранить').click();
-      // Success toast — the save itself raised no error.
-      await waitForToast(page, 'Услуга обновлена');
+    await dialog.getByText('Сохранить').click();
+    // Success toast — the save itself raised no error.
+    await waitForToast(page, 'Услуга обновлена');
 
-      // VERIFY UI — neither tag in the row anymore.
-      await expect(row, 'S4: «хит» gone from the row').not.toContainText(TAG_TITLES.hit);
-      await expect(row, 'S4: «популярное» gone from the row').not.toContainText(TAG_TITLES.popular);
+    // VERIFY UI — neither tag in the row anymore.
+    await expect(row, 'S4: «хит» gone from the row').not.toContainText(TAG_TITLES.hit);
+    await expect(row, 'S4: «популярное» gone from the row').not.toContainText(TAG_TITLES.popular);
 
-      // VERIFY API — zero links survive.
-      const after = await getService(request, 's1');
-      expect(after.tags, 'S4: GET returns an empty tag set').toEqual([]);
-    } finally {
-      await restoreService(request, snapshot);
-    }
+    // VERIFY API — zero links survive.
+    const after = await getService(request, 's1');
+    expect(after.tags, 'S4: GET returns an empty tag set').toEqual([]);
   });
 });

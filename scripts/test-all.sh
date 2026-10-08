@@ -110,6 +110,21 @@ else
   echo "  ⚠️  skip dryrun test (no timeout binary)"
 fi
 
+# ── Visual-compliance parser node-tests (env-free, milliseconds) ───────────
+# Unit + fixture suite for scripts/visual-compliance-parser.js (GH #311,
+# US-1/US-2): §10 checkbox parsing, { applicable, checks } contract, N/A
+# grammar. Synchronous like the dryrun test above — a red suite aborts the
+# run before any expensive stage starts.
+echo "  → visual-compliance parser tests..."
+node "$ROOT/scripts/test-visual-compliance-parser.js"
+
+# ── Visual-compliance smoke tests (env-free, no dev server) ────────────────
+# Stage-order guard for scripts/visual-compliance-check.sh (GH #311, US-2/US-3):
+# N/A-marker spec → exit 0 + «not applicable» BEFORE any server contact;
+# missing/empty/prose-only section → exit 3. Both paths need no :3001 stack.
+echo "  → visual-compliance smoke tests..."
+bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh"
+
 # Track all background PIDs for waiting
 ALL_PIDS=()
 

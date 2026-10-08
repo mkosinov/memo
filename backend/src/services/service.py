@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 from sqlalchemy import delete, not_, select
@@ -19,7 +19,7 @@ from src.models.service_material import ServiceMaterial
 from src.models.tag import service_tags
 from src.models.tariff import Tariff
 from src.repositories.generic import ArchiveRepository, get_archive_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.service import (
     ServiceCreate,
@@ -30,6 +30,13 @@ from src.schemas.service import (
 )
 from src.services.decorators import transactional
 from src.services.generic import BARE_LIST_MAX_ROWS, ArchiveService
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
+    from src.domain.sorting import SortExpr
+    from src.repositories.generic import ModelList
 
 # GH #344: journaled field set for an explicit service mark (§5.1) — the
 # scalar columns a user action can change; free-text fields
@@ -117,11 +124,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        status: ArchiveStatus = ArchiveStatus.ACTIVE,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
         material_id: str | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[ServiceResponse]:
         """Return services filtered by archive status, with tariffs and tags.
 
@@ -133,7 +141,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         ``total`` always reflects every filter.
 
         ``q`` (GH #212) narrows rows via ``search_predicate`` over
-        ``self.search_fields``.
+        ``self.search_fields``; ``ids`` (GH #232 §3.1) is the typed
+        ``?id=`` set narrowing (shared helper).
 
         ``material_id`` (GH #223 spec §5) adds a join predicate —
         ``Service.id.in_(SELECT service_id FROM service_materials WHERE
@@ -151,6 +160,10 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             stmt = stmt.where(Service.is_active)
         elif status == ArchiveStatus.ARCHIVED:
             stmt = stmt.where(not_(Service.is_active))
+        # GH #232 §3.1: typed ``?id=`` set narrowing (shared helper).
+        id_pred = ids_in_predicate(Service.id, ids)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if q is not None:
             stmt = stmt.where(search_predicate(q, self.search_fields))
         for key, value in filters.items():
@@ -177,10 +190,10 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
-        **filters,
-    ) -> list[ServiceResponse]:
+        **filters: Any,
+    ) -> ModelList[ServiceResponse]:
         """Unpaginated list of services with tariffs/tags eagerly loaded.
 
         Mirrors the ``list()`` override: the eager-load (``selectinload``) is
@@ -212,7 +225,13 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             raise BareListLimitExceededError(Service.__tablename__, BARE_LIST_MAX_ROWS)
         return [ServiceResponse.model_validate(s) for s in rows]
 
-    async def get(
+    # GH #171 precedent (``RecordService.list``): ``get``/``create``/
+    # ``update``/``patch`` deliberately REPLACE the GenericService
+    # validated-schema contract — they return/accept the eager-loaded ORM
+    # ``Service`` (``create``/``update``/``patch`` mutate the instance and
+    # re-read it through ``get``; the router's ``response_model`` performs
+    # the schema validation). Documented, intentional override narrowing.
+    async def get(  # type: ignore[override]
         self, db_session: AsyncSession, id: str
     ) -> Service | None:
         """Return a service by ID with tariffs, tags, and materials, or None."""
@@ -231,7 +250,7 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         self,
         db_session: AsyncSession,
         service_id: str,
-        items: list[ServiceMaterialLinkIn],
+        items: ModelList[ServiceMaterialLinkIn],
     ) -> None:
         """Hard-replace the service's material links (GH #223 spec §4).
 
@@ -284,7 +303,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             )
 
     @transactional
-    async def create(
+    # ORM contract — see the ``get`` block above.
+    async def create(  # type: ignore[override]
         self, db_session: AsyncSession, data: ServiceCreate
     ) -> Service:
         """Create service with nested tariffs, tag links, and material links."""
@@ -322,10 +342,14 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         # never fires, so the explicit mark is the row's only journal
         # source; the nested children are never journaled (§4.2).
         _service_mark(service, "create")
-        return await self.get(db_session, service.id)
+        result = await self.get(db_session, service.id)
+        if result is None:  # pragma: no cover — the row was flushed above
+            raise RuntimeError("created service row vanished before re-read")
+        return result
 
     @transactional
-    async def update(
+    # ORM contract — see the ``get`` block above.
+    async def update(  # type: ignore[override]
         self, db_session: AsyncSession, id: str, data: ServiceUpdate
     ) -> Service | None:
         """Full-update: replaces attributes, tariffs, tag links, and material links."""
@@ -374,7 +398,8 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         return await self.get(db_session, id)
 
     @transactional
-    async def patch(
+    # ORM contract — see the ``get`` block above.
+    async def patch(  # type: ignore[override]
         self, db_session: AsyncSession, id: str, data: ServicePatch
     ) -> Service | None:
         """Partial-update a service — only sent fields are changed.

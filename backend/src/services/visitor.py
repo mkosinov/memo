@@ -1,11 +1,11 @@
 """Business logic for visitor CRUD operations."""
 
-from collections.abc import Sequence
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
@@ -14,12 +14,22 @@ from src.models.tag import visitor_tags
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.repositories.generic import BaseRepository, get_base_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorCreate, VisitorResponse, VisitorUpdate
 from src.services.decorators import transactional
 from src.services.generic import GenericService
 from src.services.visit import get_visit_service
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Any
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from src.domain.sorting import SortExpr
 
 
 class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorResponse]):
@@ -91,16 +101,20 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         master_key: str | None = None,
-        **filters: object,
+        **filters: Any,
     ) -> PaginatedResponse[VisitorResponse]:
         """Return a paginated page of visitors, scoped + searched (GH #263 T2).
 
-        The scope EXISTS-predicate, the ``q`` search predicate and the
-        generic ``**filters`` equality narrowings all land BEFORE the
-        COUNT, so ``total`` reflects the filtered count (the generic
-        list contract — ``id=`` etc. — keeps working on this override).
+        The scope EXISTS-predicate, the ``q`` search predicate, the typed
+        ``ids`` narrowing (GH #232 §3.1) and the generic ``**filters``
+        equality narrowings all land BEFORE the COUNT, so ``total``
+        reflects the filtered count (the generic list contract —
+        ``id=`` etc. — keeps working on this override). ``order_by``
+        applies after the count, like the repo core (#213).
         """
         stmt = select(Visitor)
         predicate = self._visibility_predicate(master_key)
@@ -109,10 +123,15 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         for key, value in filters.items():  # generic equality filters (contract)
             if value is not None:
                 stmt = stmt.where(getattr(Visitor, key) == value)
+        id_pred = ids_in_predicate(Visitor.id, ids)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if q:
             stmt = stmt.where(search_predicate(q, self.search_fields or []))
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await db_session.execute(count_stmt)).scalar_one()
+        if order_by is not None:
+            stmt = stmt.order_by(*order_by)
         rows = await db_session.execute(
             stmt.limit(per_page).offset((page - 1) * per_page)
         )

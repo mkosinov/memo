@@ -34,6 +34,12 @@ class PositionService(
 
     NOT_NULL_FIELDS = {"title"}
 
+    # Narrowed model contract (annotation-only; the ``ArchiveService``
+    # idiom): the factory below always injects ``Position`` — the typed
+    # PK access in ``delete`` (``position.is_system``) needs it, the
+    # inherited ``type[Base]`` root has no declared columns.
+    _model: type[Position]
+
     # GH #212 search matrix: substring on title; exact id equality on a
     # full UUID (built-in ids like "master" are shorter — never matched by
     # the uuid branch, which is exactly right for a typeahead).

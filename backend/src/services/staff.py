@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, not_, select
@@ -57,11 +57,14 @@ from src.services.generic import ArchiveService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from uuid import UUID
 
     from pydantic import BaseModel
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.domain.sorting import SortExpr
     from src.models.enums import ArchiveStatus
+    from src.repositories.generic import ModelList
 
 
 async def _master_extensions(
@@ -114,8 +117,14 @@ async def _account_blocks(
     blocks: dict[str, StaffAccountView] = {}
     staff_by_user: dict[str, str] = {}
     for user in users.scalars().all():
-        blocks[user.staff_id] = StaffAccountView.model_validate(user)
-        staff_by_user[user.id] = user.staff_id
+        staff_id = user.staff_id
+        if staff_id is None:
+            # unreachable: the WHERE staff_id IN (…) predicate never
+            # returns NULL staff_id rows — the guard only narrows the
+            # ``str | None`` column type for the dict keys below.
+            continue
+        blocks[staff_id] = StaffAccountView.model_validate(user)
+        staff_by_user[user.id] = staff_id
     if not staff_by_user:
         return blocks
     # LAZY import — src.auth pulls the auth stack (sessions/service);
@@ -143,6 +152,13 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     """Owner of the staff card: reads + row blocks + own positions bundle."""
 
     NOT_NULL_FIELDS = {"first_name", "last_name", "sort_order"}
+
+    # Narrowed model contract (annotation-only; the ``ArchiveService``
+    # idiom): the factory below always injects the ``Staff`` model — the
+    # card-block attribute access (``first_name`` etc.) and the composite
+    # assembly need the concrete type, the inherited ``type[Base]`` root
+    # declares no columns.
+    _model: type[Staff]
 
     # GH #212 search matrix (spec §5.2, former masters contract → staff):
     # substring on first_name/last_name (each separately), exact id on a
@@ -230,24 +246,32 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
-        status: ArchiveStatus | None = None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
-        **filters,
+        ids: Sequence[UUID] | None = None,
+        status: ArchiveStatus | None = None,
+        **filters: Any,
     ) -> PaginatedResponse[StaffResponse]:
-        """Paginated list (GH #205 envelope) with composite fields filled."""
+        """Paginated list (GH #205 envelope) with composite fields filled.
+
+        Keeps the full ``ArchiveService.list`` contract (``order_by`` /
+        ``q`` / ``ids`` ride the repository core); ``status=None``
+        normalizes to ACTIVE, like the router's Query default.
+        """
         from src.models.enums import ArchiveStatus
-        from src.repositories.generic import ArchiveRepository
 
         if status is None:
             status = ArchiveStatus.ACTIVE
-        staff_rows, total = await cast("ArchiveRepository", self._repository).list(
+        # ``self._repository`` is narrowed to ``ArchiveRepository`` at the
+        # ``ArchiveService`` class level (annotation-only) — no cast.
+        staff_rows, total = await self._repository.list(
             db_session,
             self._model,
             status=status,
             filters=filters,
             q=q,
             search_fields=self.search_fields,
+            ids=ids,
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
@@ -260,10 +284,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus | None = None,
-        **filters,
-    ) -> list[StaffResponse]:
+        **filters: Any,
+    ) -> ModelList[StaffResponse]:
         """Bare /all list (BARE_LIST_MAX_ROWS guard) with composite fields."""
         from src.domain.errors import BareListLimitExceededError
         from src.models.enums import ArchiveStatus
@@ -287,10 +311,10 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus | None = None,
         q: str | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[StaffResponse]:
         """Extension-sort variant of ``list`` — LEFT JOIN on masters.
 
@@ -396,7 +420,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         return staff
 
     async def patch_card(
-        self, db_session: AsyncSession, id: str, fields: dict
+        self, db_session: AsyncSession, id: str, fields: dict[str, Any]
     ) -> Staff | None:
         """Apply the SENT card fields of a PATCH — WITHOUT committing.
 
@@ -412,7 +436,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         await db_session.flush()
         return staff
 
-    def patch_payload(self, data: BaseModel) -> dict:
+    def patch_payload(self, data: BaseModel) -> dict[str, Any]:
         """PATCH prep for the scenario: ``exclude_unset`` dump with ``None``
         values for ``NOT_NULL_FIELDS`` stripped (client intent is "don't
         change", not "set to null") — the generic ``_patch_payload``

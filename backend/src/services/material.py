@@ -1,12 +1,13 @@
 """Business logic for material CRUD operations."""
 
-# Class-body annotations reference the builtin ``list`` AFTER a method named
-# ``list`` is defined in the same class body — string annotations (PEP 563)
-# keep ``list[MaterialResponse]`` resolving to the builtin, not the method
-# (same idiom as ``services/generic.py``).
+# Class-body annotations and return types reference a parametrized list
+# AFTER a method named ``list`` is defined in the same class body — mypy
+# resolves the bare ``list[...]`` to the METHOD, so the ``ModelList``
+# alias is used instead (same idiom as ``services/generic.py``).
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -21,6 +22,13 @@ from src.repositories.search import SearchField
 from src.schemas.common import PaginatedResponse
 from src.schemas.material import MaterialCreate, MaterialResponse, MaterialUpdate
 from src.services.generic import ArchiveService
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
+    from src.domain.sorting import SortExpr
+    from src.repositories.generic import ModelList
 
 
 async def _attach_counts(
@@ -93,10 +101,11 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
-        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
-        **filters,
+        ids: Sequence[UUID] | None = None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        **filters: Any,
     ) -> PaginatedResponse[MaterialResponse]:
         """Paginated list with the usage counter attached to every item."""
         paginated = await super().list(
@@ -104,8 +113,9 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
             page=page,
             per_page=per_page,
             order_by=order_by,
-            status=status,
             q=q,
+            ids=ids,
+            status=status,
             **filters,
         )
         await _attach_counts(db_session, paginated.items)
@@ -114,10 +124,10 @@ class MaterialService(ArchiveService[MaterialCreate, MaterialUpdate, MaterialRes
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
-        **filters,
-    ) -> list[MaterialResponse]:
+        **filters: Any,
+    ) -> ModelList[MaterialResponse]:
         """Bare /all list with the usage counter attached to every item."""
         items = await super().list_all(
             db_session, order_by=order_by, status=status, **filters

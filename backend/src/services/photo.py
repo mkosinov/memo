@@ -10,6 +10,7 @@ remains the owner of create / update / patch / delete / point gets.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, delete, exists, or_, select, update
@@ -28,12 +29,14 @@ from src.schemas.photo import (
     OWNER_FIELDS,
     PhotoCreate,
     PhotoListParams,
-    PhotoPatch,
     PhotoResponse,
     PhotoUpdate,
 )
 from src.services.decorators import transactional
 from src.services.generic import GenericService
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 # Sort whitelist (GH #211 §6.8): filename | is_public | created_at.
 # FK columns and the denormalized client_name are NOT sortable.
@@ -55,7 +58,7 @@ _PHOTO_MARK_FIELDS = ("filename", "is_public")
 
 
 def _photo_mark(
-    orm: Photo, action: str, old: dict | None = None
+    orm: Photo, action: str, old: dict[str, Any] | None = None
 ) -> None:
     """Stage ONE journal row for a direct photo write (spec §4.3).
 
@@ -71,7 +74,7 @@ def _photo_mark(
     if old is None:
         # ``diff_pairs`` over an EMPTY "before" = [None, value] pairs
         # with ``None`` values skipped — the create-snapshot shape.
-        changes: dict | None = diff_pairs(_PHOTO_MARK_FIELDS, {}, orm) or None
+        changes: dict[str, Any] | None = diff_pairs(_PHOTO_MARK_FIELDS, {}, orm) or None
     else:
         changes = diff_pairs(_PHOTO_MARK_FIELDS, old, orm)
     mark_audit(
@@ -82,7 +85,7 @@ def _photo_mark(
     )
 
 
-def _merged_owner_conflict(existing: Photo, changes: dict) -> str | None:
+def _merged_owner_conflict(existing: Photo, changes: dict[str, Any]) -> str | None:
     """Merged-set owner guard (GH #211 §6.2).
 
     Combines the stored row with the applied payload fields (unset fields
@@ -226,8 +229,13 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
         # GH #344 (§4.3): single-photo create — standard explicit mark.
         _photo_mark(orm, "create")
-        # Reload with tags
-        return await self.get(db_session, orm.id)
+        # Reload with tags. ``None`` is unreachable (the row was flushed
+        # and refreshed two lines above) — the guard only satisfies the
+        # ``PhotoResponse | None`` return of ``get`` for mypy.
+        result = await self.get(db_session, orm.id)
+        if result is None:  # pragma: no cover — flush+refresh just populated it
+            raise RuntimeError("created photo row vanished before re-read")
+        return result
 
     @transactional
     async def update(
@@ -281,7 +289,7 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
     @transactional
     async def patch(
-        self, db_session: AsyncSession, id: str, data: PhotoPatch
+        self, db_session: AsyncSession, id: str, data: BaseModel
     ) -> PhotoResponse | None:
         """Partial-update a photo — only sent fields are changed.
 
@@ -294,6 +302,9 @@ class PhotoService(GenericService[PhotoCreate, PhotoUpdate, PhotoResponse]):
 
         tag_ids: if sent → hard-replace all tag links via the photo_tags
         join table. If not sent → existing tag links are preserved.
+
+        ``data`` keeps the base ``BaseModel`` contract (no narrowing —
+        the body reads everything through ``model_dump(exclude_unset)``).
         """
         orm = await self._repository.get(db_session, Photo, id)
         if orm is None:

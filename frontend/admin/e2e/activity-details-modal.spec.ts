@@ -2,7 +2,7 @@ import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
-import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, phoneMaskDisplay } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
 import { searchAndSelect } from './helpers/combobox';
 
 /**
@@ -38,9 +38,11 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     // stored value derives from the digits the field ends up holding.
     const nationalDigits = `999${String(Date.now()).slice(-7)}`;
     const testPhone = `+7${nationalDigits}`;
-    // GH #221 WYSIWYG: the form saves the VISIBLE AsYouType-formatted
-    // string, not the raw typed text — expect the masked form in the DB.
-    const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
+    // GH #414 storage contract: filling the composite field with a «+»
+    // string is a PASTE — the widget binds RU and commits the national
+    // remainder, and the save stores the COMPACT «+7…» (not the visible
+    // grouped string of the #221 WYSIWYG era).
+    const expectedStoredPhone = `+7${nationalDigits}`;
     const testClientName = `E2E Client ${uid}`;
     const testVisitorName = `E2E Visitor ${uid}`;
 
@@ -75,7 +77,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
       // 3. VERIFY DB — client was created (retry until DB commit lands).
-      //    GH #221: the stored phone is the masked visible string (WYSIWYG).
+      //    GH #414: the stored phone is the COMPACT «+7…».
       await expect.poll(async () => {
         clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${expectedStoredPhone}' AND is_active=1`);
         return clientRow !== null;
@@ -492,13 +494,11 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await clientTab.click();
       await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
 
-      // Verify client name is displayed in the tab content (GH #140 US-2:
-      // name+phone render in the client-tab-header). Scoped to the header
-      // testid — an unscoped getByText(name) strict-mode-collides with the
-      // tab-strip label (ClientLabelById shows the same name).
-      await expect(
-        page.locator('[data-testid="client-tab-header"]'),
-      ).toContainText(client.name, { timeout: 10_000 });
+      // Verify the client resolves on the record tab (GH #140 US-2: name+phone
+      // render in the tab-strip label — ClientLabelById; the tab content no
+      // longer duplicates them). Scoped to the tab testid — an unscoped
+      // getByText(name) strict-mode-collides with other matches.
+      await expect(clientTab).toContainText(client.name, { timeout: 10_000 });
 
       await page.locator('[data-testid="btn-delete-record"]').click();
 
@@ -602,11 +602,10 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   //    the modal looked clients up in a paged map (first 20 active only) →
   //    beyond-page-1 clients rendered «Без контакта». Now every tab mounts its
   //    own useClient(record.client_id) point observer, so the client resolves
-  //    regardless of list position. Asserted in BOTH the tab-strip label
-  //    (ClientLabelById) and the client-tab-header (ClientTab) — two elements
-  //    legitimately carry the name, so each is scoped by its testid.
+  //    regardless of list position. The name+phone carrier is the tab-strip
+  //    label (ClientLabelById) — the tab content does not duplicate them.
 
-  test('14. US-2: record tab resolves a client beyond the first 20 (name+phone on tab strip + header)', async ({
+  test('14. US-2: record tab resolves a client beyond the first 20 (name+phone on the tab strip)', async ({
     page,
     request,
   }) => {
@@ -661,13 +660,13 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await expect(tabLabel).toContainText(target.phone);
       await expect(tabLabel).not.toContainText('Без контакта');
 
-      // Select the record tab, then assert the client-tab-header content.
+      // Select the record tab — the content opens without a duplicated
+      // client header (name+phone live only in the tab-strip label above).
       await tabLabel.click();
       await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
-      const header = page.locator('[data-testid="client-tab-header"]');
-      await expect(header).toContainText(target.name, { timeout: 10_000 });
-      await expect(header).toContainText(target.phone);
-      await expect(header).not.toContainText('Без контакта');
+      await expect(
+        page.locator('[data-testid="client-tab-header"]'),
+      ).toHaveCount(0);
     } finally {
       if (record) await cleanupRecord(request, record.id);
       if (activity) await cleanup(request, `/api/v1/activities/${activity.id}`);

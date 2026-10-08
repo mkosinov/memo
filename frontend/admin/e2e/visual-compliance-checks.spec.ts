@@ -22,8 +22,6 @@
 
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
-import { execSync } from 'child_process';
-import { resolveTestDbPath } from './lib/db-path';
 import {
   createTestClient,
   createTestActivity,
@@ -40,35 +38,9 @@ function log(line: string) {
   process.stdout.write(`[VCC] ${line}\n`);
 }
 
-function dbPath() {
-  // GH #209: shared resolver — the previous local "TEST_DB_PATH wins"
-  // precedence is gone; a SHARD_ID × TEST_DB_PATH conflict is a loud error.
-  return resolveTestDbPath({
-    shardId: process.env.SHARD_ID,
-    testDbPath: process.env.TEST_DB_PATH,
-  });
-}
-
-function clean() {
-  try {
-    execSync(
-      `sqlite3 "${dbPath()}" "
-        DELETE FROM payments WHERE length(id) > 3;
-        DELETE FROM visits WHERE length(id) > 3;
-        DELETE FROM records WHERE length(id) > 3;
-        DELETE FROM activities WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\\\' AND id NOT LIKE 'ev_fixed_%';
-        DELETE FROM clients WHERE length(id) > 3;
-      "`,
-      { stdio: 'pipe' },
-    );
-  } catch (e: any) {
-    log(`clean warn: ${e?.message}`);
-  }
-}
-
-test.beforeAll(() => {
-  clean();
-});
+// GH #310: the local `clean()` (an inline partial copy of the old RESET_SQL)
+// is deleted — the per-test auto fixture applies the canonical seed reset
+// before EVERY test, which this copy could only approximate and drift from.
 
 test.describe.configure({ mode: 'serial' });
 

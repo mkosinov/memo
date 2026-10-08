@@ -26,7 +26,9 @@ test.describe('User Scenario 1 — admin signs in', () => {
   test('admin logs in via UI and sees all sections incl. Материалы and Платежи', async ({ page }) => {
     await page.goto('/login');
 
-    await page.locator('#login-phone').fill('+79990000001');
+    // GH #414: #login-phone is the widget's remainder input — type the RU
+    // national part; the page lifts the compact «+79990000001» on submit.
+    await page.locator('#login-phone').fill('9990000001');
     await page.locator('#login-password').fill('admin12345');
     await page.getByRole('button', { name: 'Войти' }).click();
 
@@ -66,7 +68,9 @@ test.describe('User Scenario 3 — wrong password', () => {
     });
 
     await page.goto('/login');
-    await page.locator('#login-phone').fill(phone);
+    // GH #414: the remainder after «+7» — the rebuilt compact equals the
+    // seeded string, so the wrong-password path (not lookup) is exercised.
+    await page.locator('#login-phone').fill(phone.slice(2));
     await page.locator('#login-password').fill(`wrong-${E2E_PASSWORD}`);
     await page.getByRole('button', { name: 'Войти' }).click();
 

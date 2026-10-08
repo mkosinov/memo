@@ -2,7 +2,7 @@
 name: spike-child
 description: Spike test child — reads a marker file and reports its contents verbatim. Used only to verify custom-agent loading and nested dispatch.
 tools: [Read, Bash]
-model: omniroute/panel-completeness
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: disabled
 ---
 

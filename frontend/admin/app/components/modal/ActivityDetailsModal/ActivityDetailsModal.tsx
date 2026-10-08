@@ -240,10 +240,11 @@ function ExistingActivityContent({
   }, []);
 
   // New record submit handler — delegates to useRecordMutations hook.
-  // GH #221: the submit payload is a disjoint union — `picked` carries the
-  // picked client_id (bind by id, resolve-or-create skipped); `unpicked`
-  // carries the visible formatted phone + name (resolve-or-create path,
-  // Task 7 replaces it with digits resolution).
+  // GH #221/#414: the submit payload is a disjoint union — `picked` carries
+  // the picked client_id (bind by id, resolve-or-create skipped); `unpicked`
+  // carries the compact «+<код><нац.>» lifted by PhoneInput + name
+  // (resolve-or-create path: reduction-equality сверка, create with the
+  // compact).
   const handleNewRecordSubmit = useCallback(
     async (data: NewRecordSubmitData) => {
       try {

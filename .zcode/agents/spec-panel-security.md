@@ -2,7 +2,7 @@
 name: spec-panel-security
 description: Spec panel reviewer — application security perspective. Finds authentication, authorization/role, and security-model breakage risks in spec documents; returns an explicit no-attack-surface verdict when a spec touches none.
 tools: [Read, Bash]
-model: builtin:zai-coding-plan/GLM-5.3-Flash
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: disabled
 ---
 

@@ -79,7 +79,9 @@ async function loginAsUser(page: Page, phone: string, password: string): Promise
   // this helper is order-independent (first test or not).
   const submit = page.getByRole('button', { name: 'Войти' });
   await expect(submit).toBeVisible({ timeout: 60_000 });
-  await page.locator('#login-phone').fill(phone);
+  // GH #414: #login-phone is the widget's remainder input — strip «+7» from
+  // the seeded phone; the compact rebuilt on submit equals it.
+  await page.locator('#login-phone').fill(phone.replace('+7', ''));
   await page.locator('#login-password').fill(password);
   await submit.click({ timeout: 30_000 });
   await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
@@ -216,7 +218,8 @@ test.describe('S2 — change password', () => {
       await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
 
       // Old password → rejected (one wrong attempt, under the 3-strike ladder).
-      await page.locator('#login-phone').fill(phone);
+      // GH #414: fill the RU remainder of the seeded phone.
+      await page.locator('#login-phone').fill(phone.replace('+7', ''));
       await page.locator('#login-password').fill(E2E_PASSWORD);
       await page.getByRole('button', { name: 'Войти' }).click();
       await expect(page.locator('[data-testid="login-error"]'))

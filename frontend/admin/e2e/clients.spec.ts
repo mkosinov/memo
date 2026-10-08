@@ -2,7 +2,6 @@ import { test, expect } from './fixtures/test';
 import {
   waitForClientsReady,
   openAddTab,
-  phoneMaskDisplay,
   clientSearchInput,
   expectDeepLinkChip,
   expectClientSearchEmpty,
@@ -1220,9 +1219,10 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
     // 10 national digits: 966 + 7 unique tail digits → typed as +7 966….
     const nationalDigits = `966${String(ts).slice(-7)}`;
     const newPhone = `+7${nationalDigits}`;
-    // GH #221 WYSIWYG: the form saves the VISIBLE AsYouType-formatted
-    // string, not the raw typed text — expect the masked form in the DB.
-    const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
+    // GH #414 storage contract: the composite field treats the «+»-fill as a
+    // paste (RU binds, national remainder commits) and the save stores the
+    // COMPACT «+7…» — not the #221-era visible masked string.
+    const expectedStoredPhone = `+7${nationalDigits}`;
     let clientId: string | null = null;
     let recordId: string | null = null;
 
@@ -1252,7 +1252,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       await expect(page.locator('[data-testid="activity-details-modal"]')).toHaveCount(0);
 
       // Resolve the created ids from the DB (cleanup targets).
-      // GH #221: the stored phone is the masked visible string (WYSIWYG).
+      // GH #414: the stored phone is the COMPACT «+7…».
       await expect
         .poll(
           () => {

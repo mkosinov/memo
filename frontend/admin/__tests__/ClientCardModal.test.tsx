@@ -4,6 +4,7 @@ import React from 'react';
 import { ClientCardModal } from '../app/(main)/clients/components/ClientCardModal';
 import type { ClientWithStats, DependencyNode } from '@memo/api-client';
 import { ApiError } from '@memo/api-client';
+import { formatPhoneDisplay } from '../app/components/shared/phone/format';
 
 // ─── Dependency tree fixtures (mirror backend src/domain/deletion.py) ─────
 
@@ -228,7 +229,8 @@ describe('ClientCardModal', () => {
   it('shows client phone in left panel header', () => {
     render(<ClientCardModal {...defaultProps} />);
     const leftPanel = screen.getByTestId('client-card-left-panel');
-    expect(within(leftPanel).getByText('+7 (900) 123-45-67')).toBeInTheDocument();
+    // GH #414: the stored '+7 (900) 123-45-67' renders grouped.
+    expect(within(leftPanel).getByText('+7 900 123 45 67')).toBeInTheDocument();
   });
 
   it('shows "Дорогой гость" when client is null (create mode)', () => {
@@ -241,6 +243,25 @@ describe('ClientCardModal', () => {
     render(<ClientCardModal {...defaultProps} client={noPhoneClient} />);
     expect(screen.getByText('Не указан')).toBeInTheDocument();
   });
+
+  // ─── Phone display through the shared formatter (GH #414 Task 9) ───────
+  // Legacy seed-row spellings → the grouped display (spec §Форматирование,
+  // показ); the second pin locks the left-panel header to
+  // `formatPhoneDisplay` — the automatable seed-row eyeball check.
+  it.each([
+    ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
+    ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
+    ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
+    ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
+  ] as Array<[string, string]>)(
+    'left panel header renders stored %s as %s (formatPhoneDisplay)',
+    (stored, expected) => {
+      render(<ClientCardModal {...defaultProps} client={{ ...mockClientWithStats, phone: stored }} />);
+      const leftPanel = screen.getByTestId('client-card-left-panel');
+      expect(within(leftPanel).getByText(expected)).toBeInTheDocument();
+      expect(expected).toBe(formatPhoneDisplay(stored));
+    },
+  );
 
   it('has "Клиент" tab button', () => {
     render(<ClientCardModal {...defaultProps} />);

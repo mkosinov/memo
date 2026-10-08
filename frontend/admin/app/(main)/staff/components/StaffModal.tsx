@@ -4,6 +4,13 @@ import React, { useState, useEffect, useCallback, useId } from 'react';
 import type { StaffResponse, PositionResponse } from '@memo/api-client';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
+  PhoneField,
+  phoneCompact,
+  phoneIsComplete,
+  type PhoneFieldValue,
+} from '@/app/components/shared/phone/PhoneField';
+import { parseStoredPhone } from '@/app/components/shared/phone/format';
+import {
   PasswordLinkDialog,
   formatLinkExpiry,
   type IssuedPasswordLink,
@@ -63,6 +70,21 @@ export interface StaffModalProps {
 
 const TEXT_INPUT =
   'w-full rounded-lg border px-3 py-2 text-sm transition-colors';
+
+// GH #414 (spec §Форматирование, валидация, хранение): the two messages of
+// the completeness validator — applied to a CHANGED number only. Here they
+// ride the shared validate() (the #348 bullet): validate() runs FIRST in
+// handleSubmit, so an invalid account phone gates the PATCH /users/:id, the
+// account creation and the card PUT alike — no network call ever leaves.
+const PHONE_NO_COUNTRY_ERROR = 'Выберите страну из списка';
+const PHONE_INCOMPLETE_ERROR = 'Проверьте номер телефона — возможно, он введён не полностью';
+
+/** Widget state from a stored string — pristine until the user edits it
+ *  (spec §Инициализация существующих значений; the untouched value never
+ *  re-canonicalizes and never hits the completeness validator). */
+function storedToPhoneValue(stored: string | null | undefined): PhoneFieldValue {
+  return { ...parseStoredPhone(stored), pristine: true };
+}
 
 /** Fixed position-id anchors (D4 #266) → role (GH #263 D10). */
 const POSITION_ROLE_TEMPLATE: Record<string, 'admin' | 'master'> = {
@@ -170,10 +192,16 @@ export function StaffModal({
   // create: the passwordless checkbox section — phone + role, NO password
   // (#348 spec §6). edit: the «Учётка» block over staff.account —
   // null = hidden; is_active=false = read-only («Учётка архивирована»).
+  // GH #414: BOTH phone fields are the PhoneField widget `{country, national,
+  // pristine}` — parsed from the stored string on open; a pristine value
+  // saves verbatim (no PATCH), a CHANGED value is validated for completeness
+  // and stored as the compact «+<код><нац.>».
   const account = mode === 'edit' ? staff?.account ?? null : null;
   const [createUserEnabled, setCreateUserEnabled] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [accountPhone, setAccountPhone] = useState(account?.phone ?? '');
+  const [phone, setPhone] = useState<PhoneFieldValue>(() => storedToPhoneValue(''));
+  const [accountPhone, setAccountPhone] = useState<PhoneFieldValue>(
+    () => storedToPhoneValue(account?.phone),
+  );
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [issuingLink, setIssuingLink] = useState(false);
 
@@ -189,6 +217,25 @@ export function StaffModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const markDirty = useCallback(() => setIsDirty(true), []);
+
+  // Every widget edit flips the dirty flag; the account field also drops a
+  // stale inline (server) error — re-validation happens in validate().
+  const handlePhoneChange = useCallback(
+    (value: PhoneFieldValue) => {
+      setPhone(value);
+      markDirty();
+    },
+    [markDirty],
+  );
+
+  const handleAccountPhoneChange = useCallback(
+    (value: PhoneFieldValue) => {
+      setAccountPhone(value);
+      setPhoneError(null);
+      markDirty();
+    },
+    [markDirty],
+  );
 
   const handleRoleChange = useCallback(
     (next: 'admin' | 'master' | '') => {
@@ -250,30 +297,59 @@ export function StaffModal({
       if (!specialty.trim()) next.specialty = 'Обязательное поле';
       if (!color.trim()) next.color = 'Обязательное поле';
     }
+    // GH #414 (spec §Форматирование — the #348 bullet): the completeness
+    // validator of BOTH phone fields rides the shared validate() — it runs
+    // before any network call and thereby gates the account PATCH, the
+    // account creation and the card PUT. Empty stays the screen's own
+    // required logic (the staff phone is mandatory); completeness applies
+    // to a CHANGED number only (pristine values are never re-validated).
     if (mode === 'create' && createUserEnabled) {
-      if (!phone.trim()) next.phone = 'Обязательное поле';
+      if (phone.national === '') next.phone = 'Обязательное поле';
+      else if (phone.country === null) next.phone = PHONE_NO_COUNTRY_ERROR;
+      else if (!phoneIsComplete(phone)) next.phone = PHONE_INCOMPLETE_ERROR;
+    }
+    if (mode === 'edit' && account !== null && account.is_active && !accountPhone.pristine) {
+      if (accountPhone.national === '') next.account_phone = 'Обязательное поле';
+      else if (accountPhone.country === null) next.account_phone = PHONE_NO_COUNTRY_ERROR;
+      else if (!phoneIsComplete(accountPhone)) next.account_phone = PHONE_INCOMPLETE_ERROR;
     }
     setErrors(next);
     return Object.keys(next).length === 0;
-  }, [firstName, lastName, masterEnabled, specialty, color, mode, createUserEnabled, phone]);
+  }, [
+    firstName,
+    lastName,
+    masterEnabled,
+    specialty,
+    color,
+    mode,
+    createUserEnabled,
+    phone,
+    account,
+    accountPhone,
+  ]);
 
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsSubmitting(true);
     try {
       // #348 (S5): the account phone is a SEPARATE write — PATCH /users/:id,
-      // distinct from the card's own PUT. Only when it actually changed;
-      // the §5 domain codes (PHONE_TAKEN / PHONE_INVALID) render inline
+      // distinct from the card's own PUT. Only when the CHANGED number's
+      // compact actually differs from the stored string (a pristine field,
+      // or an edit that lands back on the stored compact, sends nothing);
+      // the compact «+<код><нац.>» is what goes to the DB (GH #414). The
+      // §5 domain codes (PHONE_TAKEN / PHONE_INVALID) render inline
       // and abort the save.
+      const accountCompact = accountPhone.pristine ? null : phoneCompact(accountPhone);
       if (
         mode === 'edit' &&
         account !== null &&
         account.is_active &&
         onPatchPhone &&
-        accountPhone.trim() !== account.phone
+        accountCompact !== null &&
+        accountCompact !== account.phone
       ) {
         try {
-          await onPatchPhone(account.id, accountPhone.trim());
+          await onPatchPhone(account.id, accountCompact);
           setPhoneError(null);
         } catch (err) {
           // §5 phone-edit domain codes render INLINE (the admin fixes the
@@ -309,10 +385,12 @@ export function StaffModal({
         create_user:
           mode === 'create' && createUserEnabled
             ? {
-                phone: phone.trim(),
+                // GH #414: the compact «+<код><нац.>» — validate() above
+                // guarantees a complete bound number here.
                 // #348: passwordless — {phone, role?} only.
                 // D10: explicit role only when set — absent lets the backend
                 // template decide.
+                phone: phoneCompact(phone),
                 ...(role !== '' ? { role } : {}),
               }
             : false,
@@ -554,14 +632,15 @@ export function StaffModal({
                 <div className="mt-3 space-y-3 pl-6">
                   <div className="flex flex-col gap-1">
                     <Label htmlFor={`${baseId}-phone`}>Телефон *</Label>
-                    <input
+                    {/* GH #414: PhoneField composite — country selector +
+                        grouped national remainder; the completeness error
+                        rides the modal's shared validate() (inline under the
+                        field, the screen's error pattern). */}
+                    <PhoneField
                       id={`${baseId}-phone`}
-                      type="text"
                       value={phone}
-                      onChange={(e) => { setPhone(e.target.value); markDirty(); }}
-                      placeholder="+79990000000"
-                      className={TEXT_INPUT}
-                      style={{ borderColor: errors.phone ? 'var(--danger)' : 'var(--line)', color: 'var(--ink)' }}
+                      onChange={handlePhoneChange}
+                      inputTestId="staff-phone-input"
                     />
                     {errorEl('phone')}
                   </div>
@@ -584,25 +663,20 @@ export function StaffModal({
                 <div className="space-y-3">
                   <div className="flex flex-col gap-1">
                     <Label htmlFor={`${baseId}-account-phone`}>Телефон *</Label>
-                    <input
+                    {/* GH #414: PhoneField widget; ONE inline error slot —
+                        the completeness message from validate() or the §5
+                        server codes (PHONE_TAKEN / PHONE_INVALID) — at most
+                        one is live at a time (the server path only runs
+                        after validate() passed). */}
+                    <PhoneField
                       id={`${baseId}-account-phone`}
-                      type="text"
                       value={accountPhone}
-                      onChange={(e) => {
-                        setAccountPhone(e.target.value);
-                        setPhoneError(null);
-                        markDirty();
-                      }}
-                      placeholder="+79990000000"
-                      className={TEXT_INPUT}
-                      style={{
-                        borderColor: phoneError ? 'var(--danger)' : 'var(--line)',
-                        color: 'var(--ink)',
-                      }}
+                      onChange={handleAccountPhoneChange}
+                      inputTestId="staff-account-phone-input"
                     />
-                    {phoneError && (
+                    {(phoneError ?? errors.account_phone) && (
                       <span className="text-xs" role="alert" style={{ color: 'var(--danger)' }}>
-                        {phoneError}
+                        {phoneError ?? errors.account_phone}
                       </span>
                     )}
                   </div>

@@ -3,7 +3,6 @@ import {
   waitForScheduleReady,
   openAddTab,
   getFirstActivity,
-  phoneMaskDisplay,
   waitForClientsReady,
 } from './fixtures/helpers';
 import {
@@ -46,7 +45,8 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     request,
   }) => {
     const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    // 10 national digits — the AsYouType mask shapes what is stored (WYSIWYG).
+    // 10 national digits — the composite field commits them as the compact
+    // «+7…» (GH #414) when the «+»-string is filled in (paste semantics).
     const nationalDigits = `999${String(Date.now()).slice(-7)}`;
     const testPhone = `+7${nationalDigits}`;
     const clientName = `E2E Клиент ${uid}`;
@@ -83,8 +83,9 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
       await page.locator('[data-testid="btn-create-record"]').click();
       await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
-      // 2. Locate the created client + record (DB polls — masked phone, WYSIWYG).
-      const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
+      // 2. Locate the created client + record (DB polls — GH #414: the
+      // stored phone is the COMPACT «+7…», the fill being a «+»-paste).
+      const expectedStoredPhone = `+7${nationalDigits}`;
       await expect.poll(async () => {
         clientRow = queryDBRow(
           `SELECT id FROM clients WHERE phone='${expectedStoredPhone}' AND is_active=1`,

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { RecordHeader } from '../RecordHeader';
 import type { RecordWithDerived } from '../types';
 import type { ClientResponse, VisitResponse } from '@memo/api-client';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 
 const mockClient: ClientResponse = {
   id: 'c1',
@@ -60,11 +61,32 @@ function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived
   };
 }
 
+// ─── Phone display through the shared formatter (GH #414 Task 9) ───────────
+
+/** Legacy seed-row spellings → the grouped display (spec §Форматирование,
+ *  показ); the second pin locks the header to `formatPhoneDisplay`. */
+const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
+  ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
+  ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
+  ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
+  ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
+];
+
+describe('RecordHeader — phone display (GH #414 Task 9)', () => {
+  it.each(LEGACY_SEED_SPELLINGS)('client phone line renders stored %s as %s', (stored, expected) => {
+    const client: ClientResponse = { ...mockClient, phone: stored };
+    render(<RecordHeader data={makeData({ client })} />);
+    expect(screen.getByTestId('client-phone').textContent).toBe(expected);
+    expect(expected).toBe(formatPhoneDisplay(stored));
+  });
+});
+
 describe('RecordHeader', () => {
   it('renders client name and phone', () => {
     render(<RecordHeader data={makeData()} />);
     expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
-    expect(screen.getByText('+7 (900) 123-45-67')).toBeInTheDocument();
+    // GH #414: the stored '+7 (900) 123-45-67' renders grouped.
+    expect(screen.getByText('+7 900 123 45 67')).toBeInTheDocument();
   });
 
   it('renders "Без имени" when client is null', () => {

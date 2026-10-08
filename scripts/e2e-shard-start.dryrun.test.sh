@@ -163,7 +163,17 @@ printf '#!/bin/sh\nprintf "200"\nexit 0\n' > "$STUBS/curl"
 # lsof stub: every port looks free (never matches the real environment).
 printf '#!/bin/sh\nexit 1\n' > "$STUBS/lsof"
 
-chmod +x "$STUBS/pnpm" "$STUBS/rm" "$STUBS/curl" "$STUBS/lsof"
+# python3 stub (GH #310): the canon generator would run against a DB that
+# does not exist in the staged tree (uv is stubbed, nothing seeds it), so
+# journal the invocation and succeed — the script-level contract under test
+# is "canon generation runs right after seeding", not its SQL output.
+cat > "$STUBS/python3" <<'EOF'
+#!/bin/sh
+printf 'PYTHON3: %s\n' "$*" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
+exit 0
+EOF
+
+chmod +x "$STUBS/pnpm" "$STUBS/rm" "$STUBS/curl" "$STUBS/lsof" "$STUBS/python3"
 
 FAIL=0
 
@@ -271,6 +281,15 @@ if grep -q "FILE_ABSENT" "$CASE1_DIR/run.log"; then
   echo "PASS Case 1: wipe removed the file before uv was invoked"
 else
   echo "FAIL Case 1: expected FILE_ABSENT in log; wipe did not happen or stub did not intercept"
+  FAIL=1
+fi
+
+# GH #310: the canon generator must run (right after the seed step) with the
+# shard DB path and its .canon.sql output path.
+if grep -q '^PYTHON3: .*gen_seed_canon\.py.*\.canon\.sql' "$CASE1_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 1 (#310): canon generator invoked for the shard DB"
+else
+  echo "FAIL Case 1 (#310): expected a gen_seed_canon.py invocation in the journal"
   FAIL=1
 fi
 

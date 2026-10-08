@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { StatusBadge } from '../StatusBadge';
 import { formatSeats } from '@/app/lib/pluralize';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 import type { RecordWithDerived } from './types';
 
 export interface RecordHeaderProps {
@@ -58,7 +59,9 @@ export function RecordHeader({
           </div>
           {client?.phone && (
             <div className="text-xs text-gray-600 dark:text-gray-400" data-testid="client-phone">
-              {client.phone}
+              {/* GH #414 (spec §Форматирование, показ): grouped display via the
+                  shared formatter; unparseable legacy values pass through. */}
+              {formatPhoneDisplay(client.phone)}
             </div>
           )}
         </div>

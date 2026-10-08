@@ -149,10 +149,16 @@ function renderTable() {
   );
 }
 
-/** Render and wait for the server page to load. */
+/** Render and wait for the FULL server page: under parallel-worker load rows
+ *  land in separate React commits, so waiting for one name would let the
+ *  tests' sync getByText assertions on the other rows race (#315). */
 async function renderLoaded() {
   const view = renderTable();
-  await screen.findByText('Студия на Невском');
+  await waitFor(() => {
+    screen.getByText('Студия на Невском');
+    screen.getByText('Гранд Отель Поляна');
+    screen.getByText('Альпика');
+  });
   return view;
 }
 

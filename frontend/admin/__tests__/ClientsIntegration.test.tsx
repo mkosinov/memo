@@ -274,7 +274,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     expect(saveBtn).toBeDisabled();
 
     const phoneInput = screen.getByLabelText('Телефон');
-    fireEvent.change(phoneInput, { target: { value: '+7 (999) 111-22-33' } });
+    fireEvent.change(phoneInput, { target: { value: '9991112233' } });
 
     expect(saveBtn).toBeEnabled();
   });
@@ -336,7 +336,8 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
     await renderModal(mockClient);
 
     fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Новое Имя' } });
-    fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (000) 000-00-00' } });
+    // GH #414: a CHANGED number saves as the compact «+<код><нац.>».
+    fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9990000000' } });
 
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
 
@@ -345,7 +346,7 @@ describe('ClientCardModal ↔ ClientInfoTab integration (real components)', () =
         id: 'c1',
         data: {
           name: 'Новое Имя',
-          phone: '+7 (000) 000-00-00',
+          phone: '+79990000000',
           email: null,
           channel: 'telegram',
         },
@@ -808,8 +809,8 @@ describe('Error scenarios: create client fails', () => {
       </QueryClientProvider></UIProvider>,
     );
 
-    // Change phone
-    fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '+7 (999) 000-00-00' } });
+    // Change phone (GH #414 widget: national remainder, grouped display)
+    fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '9990000000' } });
 
     // Save and fail
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
@@ -821,7 +822,7 @@ describe('Error scenarios: create client fails', () => {
     process.removeListener('unhandledRejection', suppressRejection);
 
     // Phone input should still have the edited value (data not lost)
-    expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('+7 (999) 000-00-00');
+    expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('999 000-00-00');
   });
 
   it('handles duplicate phone (409) gracefully on create', async () => {

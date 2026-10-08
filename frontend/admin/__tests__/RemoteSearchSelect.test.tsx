@@ -423,4 +423,82 @@ describe('RemoteSearchSelect', () => {
       expect(mockSearch).toHaveBeenCalledWith({ phone: '7996' });
     });
   });
+
+  // GH #414 Task 3: optional `prefix` slot — an adornment rendered inside the
+  // field frame before the input (e.g. the phone country selector). Without
+  // the prop the markup and behavior must stay exactly as before; with it,
+  // clicks on the prefix never open the suggestions dropdown (stop click).
+  it('without prefix the input itself remains the framed element (layout unchanged)', () => {
+    renderRemoteSearchSelect();
+    const input = screen.getByRole('textbox');
+
+    // The input still carries the frame itself: border + padding + width.
+    expect(input).toHaveClass('w-full', 'rounded-lg', 'border', 'px-3', 'py-2');
+    // No adornment wrappers were added into the field row.
+    expect(input.parentElement!.childElementCount).toBe(1);
+  });
+
+  it('renders the prefix inside the field frame, before the input', () => {
+    renderRemoteSearchSelect({
+      prefix: <span data-testid="field-prefix">+7</span>,
+    });
+    const input = screen.getByRole('textbox');
+    const marker = screen.getByTestId('field-prefix');
+
+    // The prefix lives in the same frame as the input…
+    const frame = input.parentElement!;
+    expect(frame).toContainElement(marker);
+    // …and precedes the input in DOM order.
+    expect(
+      marker.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The input no longer draws its own border — the frame does.
+    expect(input).not.toHaveClass('border');
+  });
+
+  it('clicking the prefix does not open the dropdown and stops the click', async () => {
+    mockSearch.mockResolvedValue([{ id: 'v1', name: 'Анна Иванова' }]);
+    const onRootClick = vi.fn();
+
+    render(
+      <div onClick={onRootClick}>
+        <RemoteSearchSelect
+          {...defaultProps}
+          prefix={<span data-testid="field-prefix">+7</span>}
+        />
+        <div data-testid="outside">Outside</div>
+      </div>,
+    );
+    const input = screen.getByRole('textbox');
+
+    // Cache results and open the dropdown.
+    act(() => {
+      fireEvent.change(input, { target: { value: 'Ан' } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Анна Иванова')).toBeInTheDocument();
+    });
+
+    // Close via outside click — results stay cached in state.
+    fireEvent.mouseDown(screen.getByTestId('outside'));
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    });
+
+    // Click the prefix: the dropdown must not reopen…
+    fireEvent.click(screen.getByTestId('field-prefix'));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    // …and the click must not escape the prefix slot.
+    expect(onRootClick).not.toHaveBeenCalled();
+
+    // Control: in the same state, focusing the input DOES reopen the
+    // dropdown, so the prefix assertion above is not vacuous.
+    fireEvent.focus(input);
+    await waitFor(() => {
+      expect(screen.getByRole('listbox')).toBeInTheDocument();
+    });
+  });
 });

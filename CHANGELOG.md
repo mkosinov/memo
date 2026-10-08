@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 2026-10-08
 
+### Added
+- **GH #414 — Поле телефона: селектор кода страны + ввод остатка номера (PhoneField во всех
+  точках ввода)** — branch `414-phone-field-country-selector` (14 коммитов `cb65e310..48295aba`,
+  base `5d90a560`; 61 файл, +4373/−442; спека
+  `docs/specs/2026-10-07-phone-field-country-selector-414-design.md` rev3 и план
+  `docs/plans/2026-10-07-phone-field-country-selector-414-plan.md` — 11/11 задач T1–T11 — оба на
+  main, unchanged by IMPL):
+  - **Модуль и виджет (T1–T2):** новый `frontend/admin/app/components/shared/phone/` — словарь
+    9 стран (`countries.ts`, RU первым) и единый TS-дом редукции `format.ts`
+    (`toNationalDigits` переехал из `useRecordMutations`, `compact`, `parseStoredPhone`,
+    `formatPhoneDisplay`); `PhoneField` — селектор кода страны (кнопка «+7 Россия ⌄», listbox,
+    клик-вне/ESC) + инпут остатка (`AsYouType(страна)`, вставка «+…» парсится: страна списка
+    выбирается / вне списка → «без страны») + × (очистка со сбросом к RU); controlled
+    `{country, national, pristine}` + `visible`/`compact`/`isComplete`.
+  - **Точки ввода (T3–T7):** `RemoteSearchSelect` — опциональные `prefix`-слот (клик не открывает
+    подсказки) и generic `displayQuery` (мгновенная перегруппировка при смене страны, девиация
+    спеки — санкционирована); `PhoneInput` записи пересобран на новом движке (порог поиска и
+    `?phone=` — от выбранной страны, якорь `input-phone` на инпуте остатка); `useRecordMutations` —
+    введённая сторона сверки = компакт + защитный гейт `String(20)`; карточка клиента и оба поля
+    сотрудника (`StaffModal`) — PhoneField, валидатор полноты гейтит изменённые номера и PATCH
+    аккаунта #348; pristine-значения уходят в базу как лежали; вставка «+…» вне списка в форме
+    записи блокирует сохранение («Выберите страну из списка» — решение архитектора, пробел спеки).
+  - **Вход (T8):** экран входа — PhoneField без валидатора полноты, отправка компакта при
+    привязанной стране, иначе только цифры; бэкенд — поиск аккаунта: точная строка → при нуле
+    уникальная редукция `to_national_digits` обеих сторон (ровно одно совпадение = вход, ноль/
+    несколько, включая RU/KZ коллизию, = единый отказ «Неверный телефон или пароль»); лестница
+    защиты не менялась.
+  - **Показ и аудит (T9–T10):** `formatPhoneDisplay` (международная группировка; мусор → как
+    есть) в пяти точках — колонка «Телефон», шапка записи, метка клиента, карточка (оба места),
+    краткая карточка; разовый аудит `users.phone` (`scripts/audit_user_phones.py`) — dev-БД 2/2
+    OK, 0 нецифровых (прод-перепроверка перед приёмкой — `docs/status/2026-10-08-user-phones-audit-414.md`).
+  - **Behavioral delta:** хранение не менялось (`clients.phone`/`User.phone` = `String(20)`, без
+    миграций); при вводе в базу уходит компакт `+<код><нац.цифры>`, показ везде группированный;
+    старые написания («+7 999 …», «8…», «999…») остаются рабочими ключами входа.
+  - **Tests:** admin vitest **3015/3015** (182 файла, TZ=UTC), tsc clean; backend auth 25/25
+    точечно (`test_auth_login_phone_reduction.py`), 261/261 auth-wide; e2e — 5 новых спек
+    сценариев 1–7 + якоря составного поля в существующих, shard1 123/124 (1 посторонний флейк
+    records.spec, зелёный на повторе), shard2 функциональные зелёные; 46 локальных пиксель-диффов
+    wave6 — документированный фонт-дрифт контейнера, CI авторитетен; полный e2e-гейт — PR CI.
+  - Status: `docs/status/2026-10-08-phone-field-country-selector-414-impl.md`
+
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch
   `296-remote-search-select-debounce-cleanup` (1 commit `cb1a15f2`, base `9659785f`;

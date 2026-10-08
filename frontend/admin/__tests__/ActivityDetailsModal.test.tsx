@@ -1217,6 +1217,17 @@ describe('NewRecordTab — unpicked completeness guard (GH #221 Task 7)', () => 
   beforeEach(() => {
     guardProps.onSubmit.mockClear();
     guardProps.showToast.mockClear();
+    // Same fake-timer harness as the sibling «picked client» describe: the
+    // phone typing below schedules RemoteSearchSelect's REAL 300 ms debounce,
+    // and a real timer surviving past the environment teardown surfaces as an
+    // unhandled `window is not defined` rejection (aggravated by the GH #414
+    // fix-round tests — the guard block now owns its timers).
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   it('(0) blocks the save on an INCOMPLETE number with the exact message; nothing submitted', () => {
@@ -1238,6 +1249,37 @@ describe('NewRecordTab — unpicked completeness guard (GH #221 Task 7)', () => 
     // with no phone) predates #221 (§10: write paths untouched) and must
     // submit as before.
     render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.showToast).not.toHaveBeenCalled();
+    expect(guardProps.onSubmit).toHaveBeenCalledTimes(1);
+    expect(guardProps.onSubmit.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ kind: 'unpicked', phone: '' }),
+    );
+  });
+
+  it('(0c) out-of-list paste («без страны» with digits) blocks the save with «Выберите страну из списка»; nothing submitted (GH #414 fix)', () => {
+    // The pasted «+1 …» number has no list country: the compact lift is ''
+    // (indistinguishable from empty), so pre-fix the save sailed through and
+    // the hook created a client with phone: '' — silent data loss. The fix
+    // blocks BEFORE the completeness guard with the PhoneField message
+    // (client-card parity, spec §Граничные случаи).
+    render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+1 650 555 1234' } });
+    fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
+    fireEvent.click(screen.getByTestId('btn-create-record'));
+
+    expect(guardProps.onSubmit).not.toHaveBeenCalled();
+    expect(guardProps.showToast).toHaveBeenCalledWith('Выберите страну из списка');
+  });
+
+  it('(0d) clearing the digits after an out-of-list paste lifts the block — empty save proceeds', () => {
+    render(<NewRecordTab {...guardProps} />);
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '+1 650 555 1234' } });
+    // Empty the field — no digits, no «без страны» block (the phone-less
+    // quick-add path stays open).
+    fireEvent.change(screen.getByTestId('input-phone'), { target: { value: '' } });
     fireEvent.change(screen.getByTestId('input-client-name'), { target: { value: 'Кто-то' } });
     fireEvent.click(screen.getByTestId('btn-create-record'));
 

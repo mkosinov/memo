@@ -22,7 +22,11 @@ import { createTestClient, cleanup, cleanupRecord } from './fixtures/factories';
  *   3. BY без дубля — a Belarusian number (country picked by hand, honest
  *      BY placeholder) saves with the compact «+375…»; re-entering the SAME
  *      number without picking the suggestion binds the already-created
- *      client at save time — no duplicate row appears.
+ *      client at save time — no duplicate row appears;
+ *   4. вставка вне списка — an out-of-list international paste («+1 …»)
+ *      enters «без страны» and BLOCKS the save with «Выберите страну из
+ *      списка» (GH #414 fix round): no toast-success, no client row — the
+ *      pre-fix bug silently created a phone-less client.
  *
  * Full Cycle: SETUP seeds a client only where the scenario needs an existing
  * one (2); ACTION goes through the real quick-add form; VERIFY asserts UI
@@ -279,5 +283,49 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
         await cleanup(request, `/api/v1/clients/${clientId}`);
       }
     }
+  });
+
+  // ── Scenario 4: вставка вне списка блокирует сохранение (GH #414 fix) ──
+  test('4. Out-of-list paste enters «без страны» and BLOCKS the save — no client created', async ({
+    page,
+  }) => {
+    const clientName = `E2E-414-C4 ${Date.now()}`;
+
+    // No SETUP — the scenario must create nothing.
+
+    await openAddTab(page);
+    const phoneInput = page.locator('[data-testid="input-phone"]');
+
+    // Paste an out-of-list international number — the widget enters the
+    // «без страны» state: selector unchanged (RU), raw digits, no template.
+    await phoneInput.fill('+1 650 555 1234');
+    await expect(page.getByTestId('phone-country-select')).toContainText('Россия');
+    await expect(phoneInput).toHaveValue('16505551234');
+    await expect(phoneInput).toHaveAttribute('placeholder', '');
+
+    // Save → blocked with the PhoneField message; nothing fetched/created.
+    // (Scoped by text, not waitForToast: dnd-kit also renders a live region
+    // with role="status" earlier in the DOM, which hijacks .first().)
+    await page.locator('[data-testid="input-client-name"]').fill(clientName);
+    await page.locator('[data-testid="btn-create-record"]').click();
+    await expect(
+      page.locator('[role="status"]').filter({ hasText: 'Выберите страну из списка' }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // The modal is still open — no success toast, no record created.
+    await expect(page.locator('text=Запись создана')).toHaveCount(0);
+
+    // VERIFY DB — no client row for the typed name (the pre-fix bug created
+    // one with phone: '' — silent data loss). Poll: a regression would write
+    // the row asynchronously within seconds.
+    await expect
+      .poll(
+        () =>
+          queryDBRow(`SELECT id FROM clients WHERE name='${clientName}'`) === null,
+        { timeout: 5_000, intervals: [500, 1000] },
+      )
+      .toBe(true);
+
+    // CLEANUP — nothing was saved.
   });
 });

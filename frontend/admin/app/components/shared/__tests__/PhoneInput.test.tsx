@@ -214,6 +214,59 @@ describe('PhoneInput — onInputValueChange lifts the compact (GH #414)', () => 
   });
 });
 
+// GH #414 fix round: the «no country with digits» state rides its own lift.
+// The compact is '' there BY DESIGN (indistinguishable from an empty field),
+// so the consumer's save-time block («Выберите страну из списка») needs the
+// flag lifted alongside every compact lift.
+describe('PhoneInput — no-country-with-digits lift (GH #414 fix)', () => {
+  it('lifts blocked=true on an out-of-list paste with digits', () => {
+    const onNoCountryDigits = vi.fn();
+    renderPhoneInput({ onNoCountryDigits });
+    typeValue('+1 650 555 1234');
+    expect(onNoCountryDigits).toHaveBeenLastCalledWith(true);
+  });
+
+  it('lifts blocked=false when a list country is chosen (exit «без страны»)', () => {
+    const onNoCountryDigits = vi.fn();
+    renderPhoneInput({ onNoCountryDigits });
+    typeValue('+1 555 123-45-67');
+    selectCountry('DE');
+    expect(onNoCountryDigits).toHaveBeenLastCalledWith(false);
+  });
+
+  it('lifts blocked=false when the digits are cleared (empty field is a legal save)', () => {
+    const onNoCountryDigits = vi.fn();
+    renderPhoneInput({ onNoCountryDigits });
+    typeValue('+1 555 123-45-67');
+    typeValue('');
+    expect(onNoCountryDigits).toHaveBeenLastCalledWith(false);
+  });
+
+  it('never lifts true for plain RU typing', () => {
+    const onNoCountryDigits = vi.fn();
+    renderPhoneInput({ onNoCountryDigits });
+    typeValue('9991234');
+    expect(onNoCountryDigits).not.toHaveBeenCalledWith(true);
+  });
+
+  it('lifts blocked=false on a pick (no typed number remains)', async () => {
+    const onNoCountryDigits = vi.fn();
+    mockSearch.mockResolvedValue([
+      { id: 'c1', name: 'Анна Иванова', phone: '+79991234567' },
+    ]);
+    renderPhoneInput({ onNoCountryDigits });
+    typeValue('+1 555 123-45-67');
+    typeValue('9991');
+    await advanceDebounce();
+    const rows = await screen.findAllByText('Анна Иванова · +7 999 123 45 67');
+    const row = rows.find((el) => el.closest('li'));
+    act(() => {
+      fireEvent.click(row!);
+    });
+    expect(onNoCountryDigits).toHaveBeenLastCalledWith(false);
+  });
+});
+
 describe('PhoneInput — read-only pick state (GH #221 × #414)', () => {
   it('suggestion rows show «Имя · телефон» via the display formatter; pick freezes the field and the selector; × restores', async () => {
     const onPick = vi.fn();

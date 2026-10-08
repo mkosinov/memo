@@ -63,6 +63,13 @@ export interface PhoneInputProps {
    *  country» state (compact undefined by design). A pick lifts '' — no
    *  typed number remains. */
   onInputValueChange?: (value: string) => void;
+  /** Lifts whether the field holds visible digits WITHOUT a bound list
+   *  country — the «без страны» paste state (GH #414 fix). The compact lift
+   *  is '' there BY DESIGN (indistinguishable from an empty field), so the
+   *  consumer's save-time block («Выберите страну из списка» — client-card
+   *  PhoneField parity) keys off this flag instead. Fired with the same
+   *  events as the compact lift. */
+  onNoCountryDigits?: (blocked: boolean) => void;
   label?: string;
   /** Ignored (GH #414): the honest national template of the selected
    *  country owns the placeholder. Kept for API compatibility. */
@@ -102,6 +109,7 @@ export default function PhoneInput({
   onClear,
   picked,
   onInputValueChange,
+  onNoCountryDigits,
   label = 'Телефон',
 }: PhoneInputProps) {
   // Country binding of the typed remainder — PhoneField's model: `null` is
@@ -122,13 +130,19 @@ export default function PhoneInput({
     setCountry(next);
   }, []);
 
-  const lift = useCallback(
+  // Single lift point (GH #414 fix): the compact and the «без страны with
+  // digits» flag are two projections of the SAME {country, national} pair,
+  // so they must fire together on every event — a split lift would let the
+  // save-block flag go stale (the compact alone cannot carry the state:
+  // '' means both «empty» and «no country» by design).
+  const liftState = useCallback(
     (c: PhoneCountryIso | null, national: string) => {
       // phoneCompact: '' for the «no country» state (compact undefined by
       // design) and for an empty remainder — same derivation as PhoneField.
       onInputValueChange?.(phoneCompact({ country: c, national, pristine: false }));
+      onNoCountryDigits?.(c === null && national !== '');
     },
-    [onInputValueChange],
+    [onInputValueChange, onNoCountryDigits],
   );
 
   // Country pick (mid-entry switch keeps the digits — spec §Виджет): the
@@ -137,9 +151,9 @@ export default function PhoneInput({
     (iso: PhoneCountryIso) => {
       if (iso === countryRef.current) return;
       bindCountry(iso);
-      if (nationalRef.current) lift(iso, nationalRef.current);
+      if (nationalRef.current) liftState(iso, nationalRef.current);
     },
-    [bindCountry, lift],
+    [bindCountry, liftState],
   );
 
   // Keystroke loop: the committed query is DIGITS; grouping happens at
@@ -192,13 +206,14 @@ export default function PhoneInput({
     (value: string) => {
       if (/^\d*$/.test(value)) {
         nationalRef.current = value;
-        lift(countryRef.current, value);
+        liftState(countryRef.current, value);
       } else {
         nationalRef.current = '';
         onInputValueChange?.('');
+        onNoCountryDigits?.(false);
       }
     },
-    [lift, onInputValueChange],
+    [liftState, onInputValueChange, onNoCountryDigits],
   );
 
   const handlePick = useCallback(

@@ -1,11 +1,13 @@
 ---
 name: github-board
-description: Manage GitHub Project board — read the Next Up trajectory, check card statuses, move issue status when starting/finishing work, shift the queue on completion. Invoke whenever the board comes up — session start, the user pastes a board/issue link or picks an issue, workflow finishing.
+description: Manage GitHub Project board — read the board and its Priority trajectory, check card statuses, move issue status when starting/finishing work. Invoke whenever the board comes up — session start, the user pastes a board/issue link or picks an issue, workflow finishing.
 ---
 
 In the container the board is the **@manager's** responsibility, same as the scratchpad. On the host (zcode), the DESIGN session owns its board flips (design-phase §7) — and any other host session that touches the board follows this skill.
 
-**Project:** configure per project — set `PROJECT_ID`/`OWNER`/`NEXT_UP_FIELD` constants in the script (get IDs via `gh api graphql` projectsV2 query).
+This skill is the single source of truth for board mechanics — field semantics, commands, who-flips-what, global board rules. Phase protocols (design-phase, auto-design) reference it and keep only their phase-specific duties; when a board rule changes, it changes HERE only.
+
+**Project:** configure per project — set `PROJECT_ID`/`OWNER` constants in the script (get IDs via `gh api graphql` projectsV2 query).
 **Script:** the script lives **in the project repo** (memo: host `.zcode/scripts/gh_board.py`, container `.opencode/scripts/gh_board.py`) — the board is part of the host/container seam and travels via git. Both canon harness folders ship identical copies (`.zcode/scripts/` + `.opencode/scripts/`); adjust the constants in both when seeding a new project.
 
 ## Model
@@ -13,8 +15,7 @@ In the container the board is the **@manager's** responsibility, same as the scr
 The board = the development trajectory (durable, cross-session). The scratchpad = context of the work chosen in the current session. Do not mix them.
 
 - **Status** — lifecycle stage: `Backlog → In Design → Ready to IMPL → In IMPL → PR (G7) → In-main → deployed`
-- **Priority** — importance (Critical/High/Medium/Low)
-- **Next Up** (1/2/3) — the user's explicit queue: which task to take next. Only the manager changes it, on the user's word.
+- **Priority** — importance AND the trajectory (Critical/High/Medium/Low): the user sets it in the web UI, agents read it and never write it (2026-10-07, replaced the retired Next Up queue). Pickers order Critical → Low first, unset last, ties by the older issue number.
 - **host** — which machine owns the card (single select: `imac` / `macbook` / `hk` / `gcp`). The single ownership source for `In IMPL` / `In Design` cards (2026-09-20, replaced the CLAIM-comment mechanism): stamped automatically on entering those statuses (`status` arg > `GH_BOARD_HOST` env > container label file), cleared automatically on leaving — except the label survives `PR (G7)` (2026-09-21): a card on CI stays visibly owned by its machine (and returns to it if CI is red) while occupying no IMPL slot — the budget counts only `In IMPL` status; the label clears when the card leaves `PR (G7)`. **Sticky progress marker (2026-09-26):** a `Ready to IMPL` card that still carries a host label holds that machine's unfinished session (crash-released run — session resume searches only the local DB, a foreign host would restart from zero); foreign hosts skip such cards in `pick-next`, the label occupies no slot, and ONLY the user clears it (`host N -` — accepting the progress loss) or reassigns it (`host N <label>`). The auto-impl watcher budgets per host (`HOST_BUDGETS` in the script: imac 2 / macbook 1); an In IMPL card with an empty host blocks no one.
 - **gate** — the pending-ask marker (single select: `concept` / `spec` / `plan` / `blocked` / `auto-retry`): a design gate stop or an IMPL blocker awaiting the user. Set via `gh_board.py gate N <value>`, cleared at the user's answer (`gate N none`) and automatically when the card leaves In IMPL/In Design. Empty = nothing awaits the user. Replaced the `gate:*` issue labels (2026-09-20). Since 2026-09-26 `blocked` survives the crash release: the returned `Ready to IMPL` card keeps `blocked` (the awaiting-user marker must stay visible), `pick-next` skips gate=blocked cards (no auto-retry against a user decision), and the user's answer in the opencode session clears the gate — the card re-enters the pipeline. Since 2026-10-06 `auto-retry` = a temporary upstream pause (the #349 frozen week): the watcher stamps it when a wake is skipped on a failed ping and clears it when the ping passes and the wake is sent, with one `AUTO-RETRY:` line in the auto-impl log at pause start — the pipeline self-heals, nobody awaits the user. Since 2026-10-06 `hang` (port of superagents `6edd871`): a machine suspicion of a frozen tool call — `hang_monitor.py` (called `--once` by the watcher each cycle) flags tool parts stuck in `running` with no live process / silent dispatch subtree, stamps `hang` with one evidence comment per episode and auto-clears when the evidence is gone and the chain shows life; monitoring-only, never interrupts, never overwrites `blocked`, ignores fossil parts older than 48h. The Gate column reading: `concept`/`spec`/`plan`/`blocked` = awaits a user decision, `auto-retry`/`hang` = machine states that self-heal.
 
@@ -33,11 +34,8 @@ Statuses are coarse positions; inside `In Design` the pending design gate is the
 ## Commands
 
 ```bash
-python3 .opencode/scripts/gh_board.py next-up                    # show the trajectory (queue 1→3)
-python3 .opencode/scripts/gh_board.py show 176                    # read one card: status + queue position
-python3 .opencode/scripts/gh_board.py show all                    # the whole board as a table
-python3 .opencode/scripts/gh_board.py set-next-up 176 1          # put an issue in the queue (1|2|3); "none" — remove
-python3 .opencode/scripts/gh_board.py shift                      # after Next Up 1 completes: clear it, shift 2→1, 3→2
+python3 .opencode/scripts/gh_board.py show 176                    # read one card: status + priority
+python3 .opencode/scripts/gh_board.py show all                    # the whole board as a table (trajectory = Priority)
 python3 .opencode/scripts/gh_board.py status 176 "In IMPL"       # move a card's status; optional 3rd arg = host value (imac/macbook/hk/gcp)
 python3 .opencode/scripts/gh_board.py host 176                    # read the card's host field (empty when unset)
 python3 .opencode/scripts/gh_board.py host 176 -                  # user-only: clear the sticky progress marker (accepts the progress loss); `host 176 imac` reassigns it
@@ -52,23 +50,23 @@ An issue is automatically added to the board on the first set/status call if it 
 
 | Moment | Action | Who |
 |---|---|---|
-| **Session start, no active workflow** | `gh_board.py next-up` → show the user the trajectory, ask what to take | manager, automatic |
+| **Session start, no active workflow** | `gh_board.py show all` → show the user the board (trajectory = Priority: Critical first, unset last), ask what to take | manager, automatic |
 | **Card status check (pre-flight, triage, "can X run in parallel?")** | `gh_board.py show N` (or `show all`) | manager |
 | **User picked a task** | `status N "In Design" imac` (host arg: design runs on the iMac host; in-container callers resolve their host from the label file automatically) | whoever runs DESIGN — manager in-container; host DESIGN session after the split |
 | **Design stop / gate passed (A/B/C)** | stop → `gate N concept|spec|plan`; user answered → `gate N none`; gate C passed → `status N "Ready to IMPL"` (clears gate automatically) | whoever runs DESIGN |
-| **New issue created (gh issue create)** | add the card in the same breath: `status N "Backlog"` — the user tracks work in the project board and does not see card-less issues; discuss Next Up only when it is upcoming work | manager |
-| **User changes the trajectory** | `set-next-up` per their words | manager |
+| **New issue created (gh issue create)** | add the card in the same breath: `status N "Backlog"` — the user tracks work in the project board and does not see card-less issues | manager |
+| **User changes the trajectory** | the user sets Priority in the GitHub web UI — agents never write it | user |
 | **Plan-only IMPL entry (split): user says «продолжаем траекторию #N», card at `Ready to IMPL`** | verify card + plan on fetched main → `status N "In IMPL"` → dispatch IMPL (plan-only start, no worktree yet — architect's first action). Flip BEFORE the dispatch: the dispatch blocks for the whole marathon (2026-09-13: #262 sat on `Ready to IMPL` through a 15-hour run) | manager, container |
 | **IMPL blocked: spec/plan invalid (return path)** | architect reports BLOCKED → user decides → issue comment + `status N` back to `In Design` (broken plan additionally sets `gate N plan`); scratchpad (v2): section removed if the worktree is discarded, kept while a kept worktree lives — the durable record is the issue comment; worktree keep-vs-discard — user decides | manager, after user decision |
 | **Finishing: PR created** | `status N "PR (G7)"` at the architect's `PR_CREATED` report (finishing Dispatch 1 ends right after PR creation) → immediately re-dispatch the architect for CI watch + merge; `In-main` flip at its DONE | manager |
-| **Workflow finished, PR merged** | `status N "In-main"`; if the issue was Next Up 1 → `shift`; close the issue if still open (`gh issue close N --reason completed` — the PR's `Closes #N` normally auto-closed it at merge; tolerate "already closed"); then `merged N <pr> "<short title>"` (v2 — appends the `## Recently merged` line) and remove your scratchpad section | manager, mandatory finishing step (architect reports `## Board Update Needed`) |
+| **Workflow finished, PR merged** | `status N "In-main"`; close the issue if still open (`gh issue close N --reason completed` — the PR's `Closes #N` normally auto-closed it at merge; tolerate "already closed"); then `merged N <pr> "<short title>"` (v2 — appends the `## Recently merged` line) and remove your scratchpad section | manager, mandatory finishing step (architect reports `## Board Update Needed`) |
 
 ## Rules
 
 - ALL board interaction — reads AND writes — goes through this script only. NEVER hand-write `gh api graphql` against the project: reads waste calls and have historically gone wrong (wrong owner type, nonexistent fields), and field-definition mutations destroy data.
 - Changing the status option list (adding/renaming statuses) is **user-only, via the GitHub web UI**. The agent never runs `updateProjectV2Field`: the mutation replaces the whole option list and detaches every card's value (2026-09-09: 65/69 cards lost Status this way). Need a new status → ask the user to add it in the web UI.
-- Next Up — max 3 positions, no duplicates (the script frees an occupied position automatically).
+- Priority is user-set in the web UI; agents read it for pick ordering and never write it. The old Next Up queue (1/2/3) was retired 2026-10-07 — do not reintroduce it.
 - Every new issue gets its board card (Status=Backlog) immediately at creation — the board mirrors ALL open issues; an off-board issue is invisible to the user (2026-09-14: 28 open issues had silently accumulated off-board this way).
 - Don't move Status on every micro-task — only when the whole task's stage changes.
 - The auto-impl watcher sweeps stale cards every loop (`reconcile`): a closed issue sitting in `In IMPL`/`PR (G7)` gets the lost finishing flip (`In-main`/`Not planned` + `merged` line), a run on the watcher's own host whose opencode sessions have been silent over an hour (stuck/dead dispatch — the run CLI is not a liveness marker) returns to `Ready to IMPL` with a BLOCKED auto-log entry (2026-09-22, the third "closed/dead card in In IMPL" incident). Since 2026-09-26 the crash release PRESERVES the host label on the Ready card (sticky progress marker — only that machine re-claims and resumes its own session; the BLOCKED entry carries the diagnostics: silent minutes + crash number), PRESERVES `gate=blocked` the same way (2026-09-26 second user decision: the silence may be the card waiting for the user, not a dead run — the log entry then says the card awaits the user instead of promising an auto-retry), and the user alone releases the host label (`host N -`) or reassigns it (`host N <label>`). Since 2026-09-27 the sweep also covers orphaned PR (G7) cards and dead-client In IMPL runs wake-first: a card whose sessions are silent and whose client process is dead is woken by the watcher (up to ORPHAN_NUDGES, the NUDGE-<kind> log marker is the counter) before any flip — an In IMPL card then takes the crash release above, a PR (G7) card escalates to `gate=blocked` (visible blocker); a live-but-silent client is never woken (a second driver is worse than a release).
-- FasTP fixes without an issue: don't touch the board. FasTP on an issue: Status In IMPL → In-main as usual.
+- Fast-track fixes without an issue: do NOT create an issue or a board card — don't touch the board. A PR is still required (green-CI merge gate). Fast-track on an existing issue: Status In IMPL → In-main as usual.

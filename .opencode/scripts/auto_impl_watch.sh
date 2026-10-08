@@ -32,9 +32,10 @@
 # (грабли 14.09: открытые окна блокировали конвейер). Заморозка машины без
 # снятия флага: файл /root/.local/state/opencode/auto-impl-max = 0 (читается
 # каждый цикл; env AUTO_IMPL_MAX_SESSIONS больше не используется).
-# Выбор карточки: gh_board.py pick-next "$HOST_LABEL" (Next Up → первая
-# Ready to IMPL; бюджет слотов своей машины по полю host; пропуск карточек
-# со свежими записями и с незакрытыми depends-on из тела issue).
+# Выбор карточки: gh_board.py pick-next "$HOST_LABEL" (Priority → первая
+# Ready to IMPL: Critical first, unset last; бюджет слотов своей машины по
+# полю host; пропуск карточек со свежими записями и с незакрытыми
+# depends-on из тела issue).
 # Сверка стейл-карточек (2026-09-22): раз в цикл, ДО pick-next,
 # gh_board.py reconcile "$HOST_LABEL" чинит два класса: (1) закрытый issue в
 # In IMPL/PR (G7) — потерянный финальный флип → In-main/Not planned + строка

@@ -2,7 +2,7 @@
 name: "plan-reviewer"
 description: "Plan reviewer. Verifies that a plan faithfully and completely expands the approved spec before implementation (gate C, DESIGN). Read-only."
 color: yellow
-model: omniroute/plan-reviewer
+model: builtin:zai-coding-plan/GLM-5.3-Flash
 thoughtLevel: disabled
 tools:
   - Read

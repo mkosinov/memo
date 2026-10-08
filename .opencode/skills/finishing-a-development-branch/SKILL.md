@@ -312,7 +312,6 @@ After a successful merge, the architect does NOT touch the GH Project board — 
 ```
 ## Board Update Needed
 - Issue: #N (or "no issue — FasTP fix without issue")
-- Next Up: was 1|2|3|not in queue
 ```
 
 

@@ -2,7 +2,7 @@ import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
-import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, phoneMaskDisplay } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
 import { searchAndSelect } from './helpers/combobox';
 
 /**
@@ -38,9 +38,11 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     // stored value derives from the digits the field ends up holding.
     const nationalDigits = `999${String(Date.now()).slice(-7)}`;
     const testPhone = `+7${nationalDigits}`;
-    // GH #221 WYSIWYG: the form saves the VISIBLE AsYouType-formatted
-    // string, not the raw typed text — expect the masked form in the DB.
-    const expectedStoredPhone = phoneMaskDisplay(nationalDigits, 'international');
+    // GH #414 storage contract: filling the composite field with a «+»
+    // string is a PASTE — the widget binds RU and commits the national
+    // remainder, and the save stores the COMPACT «+7…» (not the visible
+    // grouped string of the #221 WYSIWYG era).
+    const expectedStoredPhone = `+7${nationalDigits}`;
     const testClientName = `E2E Client ${uid}`;
     const testVisitorName = `E2E Visitor ${uid}`;
 
@@ -75,7 +77,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await expect(page.locator('text=Запись создана')).toBeVisible({ timeout: 10_000 });
 
       // 3. VERIFY DB — client was created (retry until DB commit lands).
-      //    GH #221: the stored phone is the masked visible string (WYSIWYG).
+      //    GH #414: the stored phone is the COMPACT «+7…».
       await expect.poll(async () => {
         clientRow = queryDBRow(`SELECT * FROM clients WHERE phone='${expectedStoredPhone}' AND is_active=1`);
         return clientRow !== null;

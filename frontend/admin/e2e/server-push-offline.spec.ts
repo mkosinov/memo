@@ -193,6 +193,9 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       const today = new Date().toISOString().slice(0, 10);
       await openAddTab(pageA, { date: today });
 
+      // GH #414: the composite phone field treats a «+»-fill as a PASTE —
+      // RU binds, the national remainder commits; the anchor `input-phone`
+      // stays on the remainder input.
       const phone = `+7999${Date.now().toString().slice(-7)}`;
       await pageA.getByTestId('input-phone').fill(phone);
       await pageA.getByTestId('input-client-name').fill(marker);
@@ -372,6 +375,8 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       // ONE action-error toast must appear.
       const today = new Date().toISOString().slice(0, 10);
       await openAddTab(pageA, { date: today });
+      // «+»-fill = paste under GH #414 — the composite field commits the
+      // national remainder; the create chain below stays the same.
       await pageA.getByTestId('input-phone').fill(`+7999${Date.now().toString().slice(-7)}`);
       await pageA.getByTestId('input-client-name').fill(`Push S6 ${uid()}`);
 

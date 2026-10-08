@@ -37,13 +37,13 @@ router = APIRouter(
 @router.get("", response_model=PaginatedResponse[AuditLogResponse])
 async def get_audit_logs(
     session: SessionDep,
-    pagination: PaginationParams = Depends(),  # noqa: B008
+    pagination: PaginationParams = Depends(),
     user_id: str | None = Query(None),
     action: str | None = Query(None),
     entity: str | None = Query(None),
     entity_id: str | None = Query(None),
-    date_from: date | None = Query(None),  # noqa: B008
-    date_to: date | None = Query(None),  # noqa: B008
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> PaginatedResponse[AuditLogResponse]:
     """Return a page of journal rows — ``created_at DESC`` (spec §6).
 

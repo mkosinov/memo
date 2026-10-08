@@ -51,7 +51,7 @@ class TestCorsHeaders:
         monkeypatch.setenv("CORS_ORIGINS", "http://example.com:3000,http://test.com:3000")
 
         # Re-create Settings from env to test parsing, patch the singleton
-        from src.core.config import settings, Settings
+        from src.core.config import Settings, settings
 
         new_settings = Settings()
         monkeypatch.setattr(settings, "CORS_ORIGINS", new_settings.CORS_ORIGINS)

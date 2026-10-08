@@ -22,10 +22,10 @@ Key patterns:
 """
 
 import asyncio
-from pathlib import Path
 import os
 import sqlite3
 import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,9 +80,10 @@ def db_engine(app):
     Yields ``db_manager.engine`` so API routes and tests share the same
     database.  FK enforcement is enabled via a pool checkout-event listener.
     """
-    from alembic import command
     from alembic.config import Config
     from sqlalchemy import event
+
+    from alembic import command
     from src.db import db_manager
 
     # Enable FK enforcement on every connection checkout via pool event listener.
@@ -166,8 +167,8 @@ async def _truncate_all_tables(engine):
     Uses ``PRAGMA foreign_keys=OFF`` to avoid FK violation errors during
     deletion.  ~10x faster than drop+create: ~10-20ms vs 180-330ms per test.
     """
-    from src.db.base import Base
     from src.auth.session import Session  # noqa: F401 — registers sessions with Base.metadata
+    from src.db.base import Base
     from src.models import (  # noqa: F401 — register models with Base.metadata
         Activity,
         Client,
@@ -590,6 +591,7 @@ async def sample_record(api_client, db_session):
     """
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
+
     from src.models.record import Record
 
     master = api_client.post("/api/v1/staff", json={
@@ -653,6 +655,7 @@ async def sample_record_with_visits(api_client, db_session):
     """
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
+
     from src.models.record import Record
 
     master = api_client.post("/api/v1/staff", json={
@@ -697,6 +700,7 @@ async def sample_record_with_visits(api_client, db_session):
 async def sample_activity_with_capacity(api_client, db_session):
     """Create an Activity with capacity=10, no records. Capacity check should pass."""
     from datetime import UTC, datetime, timedelta
+
     from src.models.activity import Activity
 
     master = api_client.post("/api/v1/staff", json={
@@ -731,6 +735,7 @@ async def sample_activity_at_capacity(api_client, db_session):
     """
     import uuid as _local_uuid
     from datetime import UTC, datetime, timedelta
+
     from src.models.activity import Activity
 
     master = api_client.post("/api/v1/staff", json={
@@ -778,6 +783,7 @@ async def sample_visit(api_client, db_session):
     """
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
+
     from src.models.visit import Visit
 
     master = api_client.post("/api/v1/staff", json={
@@ -822,6 +828,7 @@ async def sample_visits(api_client, db_session):
     """Create a Record with 3 active Visit ORM objects. Returns list[Visit]."""
     import uuid as _uuid
     from datetime import UTC, datetime, timedelta
+
     from src.models.visit import Visit
 
     master = api_client.post("/api/v1/staff", json={

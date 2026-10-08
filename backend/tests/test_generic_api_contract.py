@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from src.services.generic import ArchiveService
 from tests.generic_contract import (
     CONTRACT_CONFIG,
     EntityConfig,
@@ -30,8 +31,6 @@ from tests.generic_contract import (
     _search_params,
     _serialized_keys,
 )
-from src.services.generic import ArchiveService
-
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 

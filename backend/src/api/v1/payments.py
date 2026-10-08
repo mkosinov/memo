@@ -109,7 +109,7 @@ async def list_payments(
     record_id: str | None = None,
     # GH #263 T4: scope via payment → record → activity («всё через
     # записи»); conjunctive with the record_id param. Admin → no filter.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[PaymentResponse]:
     """Return payments visible to the caller, optionally filtered by record_id."""
     return await service.list(
@@ -124,7 +124,7 @@ async def get_payment_totals_route(
     record_ids: Annotated[list[str], Query(max_length=200)] = [],
     # GH #263 T4: чужие record_ids молча исключены перед агрегацией
     # (все чужие → 200 {"totals": {}}); admin → без фильтрации.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaymentTotalsResponse:
     """Return per-record payment sums for a list of record IDs."""
     totals = await get_payment_totals(
@@ -139,7 +139,7 @@ async def get_payment(
     service: _ServiceDep,
     session: SessionDep,
     # GH #263 T4: чужой платёж → 404 (single scope-aware query).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaymentResponse:
     """Return a single payment by ID."""
     payment = await service.get_scoped(
@@ -165,7 +165,7 @@ async def create_payment(
     # GH #263 T4: a master may accept payments only on his own records —
     # the parent record's activity must be his (чужая → 404, same code
     # as «родитель не найден»).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaymentResponse:
     """Create a new payment."""
     if scope.master_key is not None:
@@ -179,7 +179,7 @@ async def update_payment(
     data: PaymentUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaymentResponse:
     """Full-update a payment by ID (PUT, not PATCH)."""
     await _payment_scoped_or_404(service, session, payment_id, scope)
@@ -206,7 +206,7 @@ async def patch_payment(
     data: PaymentPatch,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaymentResponse:
     """Partial-update a payment (PATCH)."""
     await _payment_scoped_or_404(service, session, payment_id, scope)
@@ -229,7 +229,7 @@ async def delete_payment(
     session: SessionDep,
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> None:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     leaf subject — mirror of the records/tags routes #285/#318).

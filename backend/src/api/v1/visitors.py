@@ -87,7 +87,7 @@ async def list_visitors(
     q: str | None = Query(None, min_length=2, max_length=100),
     # GH #263 T2: scope via visits → records → activities — a visitor
     # without the master's visits is invisible; ``q`` ANDs with the scope.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[VisitorResponse]:
     """Return all visitors, paginated.
 
@@ -110,7 +110,7 @@ async def get_visitor(
     service: _ServiceDep,
     session: SessionDep,
     # GH #263 T2: чужой посетитель → 404 (single scope-aware query).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitorResponse:
     """Return a single visitor by ID."""
     visitor = await service.get_scoped(
@@ -136,7 +136,7 @@ async def create_visitor(
     # GH #263 T2: a master may create visitors only in the context of his
     # own records — the client must have a record to his activity
     # (чужой/невидимый клиент → 404; admin → unrestricted).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitorResponse:
     """Create a new visitor."""
     if not await service.client_is_scoped_visible(
@@ -158,7 +158,7 @@ async def update_visitor(
     data: VisitorUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitorResponse:
     """Full-update a visitor by ID (PUT, not PATCH)."""
     await _visitor_scoped_or_404(service, session, visitor_id, scope)
@@ -180,7 +180,7 @@ async def patch_visitor(
     data: VisitorPatch,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> VisitorResponse:
     """Partial-update a visitor by ID (PATCH)."""
     await _visitor_scoped_or_404(service, session, visitor_id, scope)
@@ -203,7 +203,7 @@ async def delete_visitor(
     session: SessionDep,
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> None:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     visitor = dependent subject — mirror of the tags route #318 D2).

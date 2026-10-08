@@ -14,12 +14,12 @@ from src.models import (
     Location,
     Master,
     Material,
-    Position,
-    Staff,
     Payment,
     Photo,
+    Position,
     Record,
     Service,
+    Staff,
     Tag,
     Tariff,
     User,
@@ -51,12 +51,12 @@ def _create_all_and_session(engine):
         Location,
         Master,
         Material,
-        Position,
-        Staff,
         Payment,
         Photo,
+        Position,
         Record,
         Service,
+        Staff,
         Tag,
         Tariff,
         User,
@@ -97,8 +97,6 @@ class TestModelImports:
             Location,
             Master,
             Material,
-            Position,
-            Staff,
             Payment,
             Photo,
             Record,
@@ -352,7 +350,7 @@ class TestModelCrud:
         assert fetched.updated_at is not None
 
     def test_activity_crud(self, session: Session):
-        from src.models import Activity, Location, Master, Service
+        from src.models import Activity, Location, Service
         now = self._now()
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -459,7 +457,7 @@ class TestModelCrud:
         assert fetched.is_public is True
 
     def test_record_crud(self, session: Session):
-        from src.models import Activity, Client, Location, Master, Record, Service
+        from src.models import Activity, Client, Location, Record, Service
         now = self._now()
         m_id = _mk_master(session)
         svc = Service(title="S", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -490,7 +488,6 @@ class TestModelCrud:
             Activity,
             Client,
             Location,
-            Master,
             Record,
             Service,
             Visit,
@@ -531,7 +528,6 @@ class TestModelCrud:
             Activity,
             Client,
             Location,
-            Master,
             Payment,
             Record,
             Service,
@@ -634,7 +630,7 @@ class TestModelCrud:
     def test_activity_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from src.models import Activity, Location, Master, Service, Tag, activity_tags
+        from src.models import Activity, Location, Service, Tag, activity_tags
         now = self._now()
         m_id = _mk_master(session)
         svc = Service(title="S3", description="d", image_url="http://x.com/i", specialty="живопись",
@@ -674,7 +670,7 @@ class TestModelCrud:
     def test_master_tags_join(self, session: Session):
         from sqlalchemy import select
 
-        from src.models import Master, Tag, master_tags
+        from src.models import Tag, master_tags
         m_id = _mk_master(session, first_name="Elena", last_name="Sidorova",
                           color="#33FF57")
         tag = Tag(title="pottery-master")

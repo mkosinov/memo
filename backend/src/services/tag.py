@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 
+from src.models.tag import Tag
 from src.repositories.generic import get_base_repository
 from src.repositories.search import SearchField
-from src.models.tag import Tag
 from src.schemas.tag import TagCreate, TagResponse
 from src.services.generic import GenericService
 

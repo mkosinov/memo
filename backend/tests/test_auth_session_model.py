@@ -9,8 +9,8 @@ create_all, round-trip). Covers:
   LOGIC is Task 4 and is deliberately not tested here.
 """
 
-from datetime import datetime, timedelta
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,7 @@ from src.auth.session import (
     new_session,
 )
 from src.db.base import Base
-from src.models import User  # noqa: F401 — registers users with Base.metadata
+from src.models import User
 
 pytestmark = pytest.mark.unit
 
@@ -47,13 +47,13 @@ class TestConstants:
     """Lifetime constants live in the auth package (G1b decision)."""
 
     def test_idle_window_7_days(self) -> None:
-        assert IDLE_WINDOW == timedelta(days=7)
+        assert timedelta(days=7) == IDLE_WINDOW
 
     def test_absolute_cap_30_days(self) -> None:
-        assert ABSOLUTE_CAP == timedelta(days=30)
+        assert timedelta(days=30) == ABSOLUTE_CAP
 
     def test_extension_throttle_1_hour(self) -> None:
-        assert EXTENSION_THROTTLE == timedelta(hours=1)
+        assert timedelta(hours=1) == EXTENSION_THROTTLE
 
 
 class TestNewSessionFactory:

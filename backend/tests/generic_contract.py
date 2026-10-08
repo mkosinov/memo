@@ -8,38 +8,23 @@ from typing import Any, Literal, NamedTuple
 import pytest
 
 # ─── Явные импорты ВСЕХ сервисов — иначе __subclasses__() видит только загруженные модули ───
-import src.services.activity  # noqa: F401
-import src.services.client  # noqa: F401
-import src.services.location  # noqa: F401
-import src.services.material  # noqa: F401
-import src.services.payment  # noqa: F401
-import src.services.photo  # noqa: F401
-import src.services.position  # noqa: F401 — register for __subclasses__ discovery
-import src.services.record  # noqa: F401
-import src.services.service  # noqa: F401
-import src.services.staff  # noqa: F401 — register for __subclasses__ discovery
-import src.services.tag  # noqa: F401
+import src.services.activity
+import src.services.client
+import src.services.location
+import src.services.material
+import src.services.payment
+import src.services.photo
+import src.services.position
+import src.services.record
+import src.services.service
+import src.services.staff
+import src.services.tag
 import src.services.visitor  # noqa: F401
-
-from src.services.generic import GenericService, ArchiveService
-
-# Service classes + factories
-from src.services.activity import ActivityService, get_activity_service
-from src.services.client import ClientService, get_client_service
-from src.services.location import LocationService, get_location_service
-from src.services.material import MaterialService, get_material_service
-from src.services.payment import PaymentService, get_payment_service
-from src.services.photo import PhotoService
-from src.services.record import RecordService
-from src.services.service import ServiceService, get_service_service
-from src.services.tag import TagService, get_tag_service
-from src.services.visitor import VisitorService, get_visitor_service
 
 # Models
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
-from src.models.master import Master
 from src.models.material import Material
 from src.models.payment import Payment
 from src.models.service import Service
@@ -48,45 +33,27 @@ from src.models.tag import Tag
 from src.models.visitor import Visitor
 
 # Schemas — Create
-from src.schemas.activity import ActivityCreate
-from src.schemas.client import ClientCreate
-from src.schemas.location import LocationCreate
-from src.schemas.material import MaterialCreate
-from src.schemas.payment import PaymentCreate
-from src.schemas.service import ServiceCreate
-from src.schemas.tag import TagCreate
-from src.schemas.visitor import VisitorCreate
-
 # Schemas — Patch
-from src.schemas.activity import ActivityPatch
-from src.schemas.client import ClientPatch
-from src.schemas.location import LocationPatch
-from src.schemas.material import MaterialPatch
-from src.schemas.payment import PaymentPatch
-from src.schemas.service import ServicePatch
-from src.schemas.tag import TagPatch
-from src.schemas.visitor import VisitorPatch
-
 # Schemas — Update (PUT full-replace; Tag has no TagUpdate — reuses TagCreate)
-from src.schemas.activity import ActivityUpdate
-from src.schemas.client import ClientUpdate
-from src.schemas.location import LocationUpdate
-from src.schemas.material import MaterialUpdate
-from src.schemas.payment import PaymentUpdate
-from src.schemas.service import ServiceUpdate
-from src.schemas.visitor import VisitorUpdate
-
 # Schemas — Response (HTTP-level contract: exact-keys + model_validate on bodies)
-from src.schemas.activity import ActivityResponse
-from src.schemas.client import ClientResponse
-from src.schemas.location import LocationResponse
-from src.schemas.material import MaterialResponse
-from src.schemas.payment import PaymentResponse
-from src.schemas.service import ServiceResponse
+from src.schemas.activity import ActivityCreate, ActivityPatch, ActivityResponse, ActivityUpdate
+from src.schemas.client import ClientCreate, ClientPatch, ClientResponse, ClientUpdate
+from src.schemas.location import LocationCreate, LocationPatch, LocationResponse, LocationUpdate
+from src.schemas.material import MaterialCreate, MaterialPatch, MaterialResponse, MaterialUpdate
+from src.schemas.payment import PaymentCreate, PaymentPatch, PaymentResponse, PaymentUpdate
+from src.schemas.service import ServiceCreate, ServicePatch, ServiceResponse, ServiceUpdate
 from src.schemas.staff import StaffCreate, StaffPatch, StaffResponse, StaffUpdate
-from src.schemas.tag import TagResponse
-from src.schemas.visitor import VisitorResponse
+from src.schemas.tag import TagCreate, TagPatch, TagResponse
+from src.schemas.visitor import VisitorCreate, VisitorPatch, VisitorResponse, VisitorUpdate
 
+# Service classes + factories
+from src.services.activity import ActivityService, get_activity_service
+from src.services.client import ClientService, get_client_service
+from src.services.generic import ArchiveService, GenericService
+from src.services.location import LocationService, get_location_service
+from src.services.material import MaterialService, get_material_service
+from src.services.payment import PaymentService, get_payment_service
+from src.services.photo import PhotoService
 
 # ─── Исключения: сервисы с override-семантикой одного или нескольких
 # ─── generic-методов (create/get/list/update/patch/delete) ─────────────────────
@@ -102,7 +69,11 @@ from src.schemas.visitor import VisitorResponse
 # ``tests/services/test_staff_service.py`` / ``test_position_service.py``
 # (HTTP-контракт добавит Task 4: api/v1/staff.py + position.py).
 from src.services.position import PositionService
+from src.services.record import RecordService
+from src.services.service import ServiceService, get_service_service
 from src.services.staff import StaffService, get_staff_service
+from src.services.tag import TagService, get_tag_service
+from src.services.visitor import VisitorService, get_visitor_service
 
 GENERIC_CONTRACT_EXCEPTIONS: set[type] = {
     ServiceService, PhotoService, RecordService, ArchiveService,

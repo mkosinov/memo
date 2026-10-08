@@ -24,8 +24,8 @@ from src.repositories.payment import PaymentRepository, get_payment_repository
 from src.repositories.search import search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
-from src.services.generic import GenericService
 from src.services.decorators import transactional
+from src.services.generic import GenericService
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

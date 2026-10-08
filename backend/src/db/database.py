@@ -1,9 +1,8 @@
 """Async database session management for SQLAlchemy 2.0."""
 
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import Depends
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (

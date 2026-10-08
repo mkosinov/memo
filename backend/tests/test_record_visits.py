@@ -41,7 +41,7 @@ async def test_recompute_record_status_derives_from_visits(db_session, sample_re
     from src.domain.record_visits import recompute_record_status
 
     record = await recompute_record_status(db_session, sample_record_with_visits.id)
-    from src.domain.visit_status import compute_record_status, VisitItem
+    from src.domain.visit_status import VisitItem, compute_record_status
     expected = compute_record_status([
         VisitItem(id=v.id, status=v.status)
         for v in sample_record_with_visits.visits
@@ -62,6 +62,7 @@ async def test_check_activity_capacity_passes_when_room(db_session, sample_activ
 async def test_check_activity_capacity_raises_409_when_full(db_session, sample_activity_at_capacity):
     """Scenario 19: check_activity_capacity raises 409 ACTIVITY_AT_CAPACITY when full."""
     from fastapi import HTTPException
+
     from src.domain.record_visits import check_activity_capacity
 
     with pytest.raises(HTTPException) as exc_info:

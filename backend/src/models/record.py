@@ -25,9 +25,9 @@ class Record(AbstractModel):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    visits: Mapped[list["Visit"]] = relationship(
+    visits: Mapped[list[Visit]] = relationship(
         "Visit", back_populates="record", lazy="selectin"
     )
-    tags: Mapped[list["Tag"]] = relationship(
+    tags: Mapped[list[Tag]] = relationship(
         "Tag", secondary="record_tags", back_populates="records"
     )

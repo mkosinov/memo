@@ -47,13 +47,13 @@ class Photo(AbstractModel):
     )
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    client: Mapped["Client | None"] = relationship(
+    client: Mapped[Client | None] = relationship(
         "Client", foreign_keys=[client_id]
     )
-    location: Mapped["Location | None"] = relationship(
+    location: Mapped[Location | None] = relationship(
         "Location", foreign_keys=[location_id]
     )
-    tags: Mapped[list["Tag"]] = relationship(
+    tags: Mapped[list[Tag]] = relationship(
         "Tag", secondary="photo_tags", back_populates="photos"
     )
 

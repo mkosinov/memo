@@ -24,7 +24,6 @@ from src.models.visitor import Visitor
 from src.services.decorators import _TRANSACTIONAL_MARKER
 from src.services.visitor import VisitorService, get_visitor_service
 
-
 pytestmark = pytest.mark.asyncio
 
 

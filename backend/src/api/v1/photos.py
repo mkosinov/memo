@@ -137,7 +137,7 @@ async def list_photos(
     # Admin → master_key=None → no filter (unchanged behaviour). The list
     # is a PUBLIC route (the web gallery rides the same table) —
     # get_optional_scope keeps anonymous requests at 200 (T2 pattern).
-    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_optional_scope),
 ) -> PaginatedResponse[PhotoResponse]:
     """Return a paginated page of photos (admin view, GH #211).
 
@@ -164,7 +164,7 @@ async def get_photo(
     # GH #263 T5: чужое фото (нет своей активности) → 404. Public route —
     # get_optional_scope: anonymous stays 200 (T2 pattern), a logged-in
     # master is narrowed to his own rows.
-    scope: ScopeContext = Depends(get_optional_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_optional_scope),
 ) -> PhotoResponse:
     """Return a single photo by ID."""
     await _photo_scoped_or_404(service, session, photo_id, scope)
@@ -188,7 +188,7 @@ async def create_photo(
     session: SessionDep,
     # GH #263 T5: a master may attach photos only к своей активности —
     # create с чужим activity_id → 404 (same code as «цель не найдена»).
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PhotoResponse:
     """Create a new photo."""
     if scope.master_key is not None and data.activity_id:
@@ -202,7 +202,7 @@ async def update_photo(
     data: PhotoUpdate,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PhotoResponse:
     """Full-update a photo by ID."""
     await _photo_scoped_or_404(service, session, photo_id, scope)
@@ -229,7 +229,7 @@ async def patch_photo(
     data: PhotoPatch,
     service: _ServiceDep,
     session: SessionDep,
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> PhotoResponse:
     """Partial-update a photo by ID (PATCH)."""
     await _photo_scoped_or_404(service, session, photo_id, scope)
@@ -260,7 +260,7 @@ async def delete_photo(
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
     # GH #263 T5: чужое фото не удаляем — 404.
-    scope: ScopeContext = Depends(get_scope),  # noqa: B008
+    scope: ScopeContext = Depends(get_scope),
 ) -> None:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     photo = dependent subject — mirror of the tags route #318 D2).

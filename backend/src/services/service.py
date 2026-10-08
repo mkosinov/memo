@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import delete, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import selectinload
 
 from src.domain.errors import BareListLimitExceededError
 from src.errors import ErrorCode, ErrorDetail
@@ -29,7 +29,7 @@ from src.schemas.service import (
     ServiceUpdate,
 )
 from src.services.decorators import transactional
-from src.services.generic import ArchiveService, BARE_LIST_MAX_ROWS
+from src.services.generic import BARE_LIST_MAX_ROWS, ArchiveService
 
 # GH #344: journaled field set for an explicit service mark (§5.1) — the
 # scalar columns a user action can change; free-text fields

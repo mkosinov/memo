@@ -147,6 +147,16 @@ cd "$BACKEND_DIR" && DATABASE_URL="$DATABASE_URL" PYTHONPATH=src \
   uv run python -m seed.seed
 echo "[shard-$SHARD_ID] Database seeded."
 
+# ── GH #310: snapshot the canonical seed-reset script ──────────────────────
+# The DB holds the pristine seed RIGHT NOW (wipe → schema → seed above), so
+# this is the one moment the canon can be captured. The Playwright side
+# (fixtures/seed-reset.ts) applies this file before every test — total
+# restore of every table except audit_logs/sessions. Generation failure
+# aborts the stack (set -e): a missing canon must fail loudly, and a stale
+# file from a previous stack is removed by the generator itself.
+python3 "$ROOT_DIR/scripts/gen_seed_canon.py" "$ABS_DB_PATH" "$ABS_DB_PATH.canon.sql"
+
+
 # ── Start Next.js frontend ────────────────────────────────────────────────
 cd "$ADMIN_DIR"
 echo "[shard-$SHARD_ID] Starting frontend on :$SHARD_PORT..."

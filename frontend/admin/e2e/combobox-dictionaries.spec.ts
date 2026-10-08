@@ -149,7 +149,6 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
 
   test('US-2: settings tab service searchable by title fragment; age display updates', async ({
     page,
-    request,
   }) => {
     // Same convention as activity-details-modal.spec.ts: the schedule page
     // with activity cards must be loaded before the modal can open. Target
@@ -161,47 +160,28 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
     expect(activity).toBeTruthy();
     const activityId = (activity as { id: string }).id;
 
-    // Read the original service so we can restore it after (avoid leaking a
-    // seed mutation — same pattern as activity-details-modal.spec.ts test 4).
-    const beforeRow = queryDBRow(`SELECT service_id FROM activities WHERE id='${activityId}'`);
-    expect(beforeRow).not.toBeNull();
-    const originalServiceId = beforeRow!.service_id as string;
-
     const serviceTrigger = page.locator(
       '[data-testid="select-service"] [data-testid="combobox-trigger"]',
     );
     await expect(serviceTrigger).toBeVisible();
 
-    try {
-      // Type a title fragment → select the Акварель service
-      await searchAndSelect(page, serviceTrigger, SERVICE_TITLE_FRAGMENT, SERVICE_ID);
+    // GH #310: no manual restore of the seed activity afterwards — the
+    // per-test canonical reset fully restores ev_fixed_0 before the next
+    // test, mutations of seed rows are allowed by policy.
+    // Type a title fragment → select the Акварель service
+    await searchAndSelect(page, serviceTrigger, SERVICE_TITLE_FRAGMENT, SERVICE_ID);
 
-      // Trigger shows the selected service title
-      await expect(serviceTrigger).toContainText(SERVICE_TITLE);
+    // Trigger shows the selected service title
+    await expect(serviceTrigger).toContainText(SERVICE_TITLE);
 
-      // Age display recalcs to the selected service's range (s4: min 6, max 12)
-      await expect(page.locator('[data-testid="age-display"]')).toHaveText(SERVICE_AGE_DISPLAY);
+    // Age display recalcs to the selected service's range (s4: min 6, max 12)
+    await expect(page.locator('[data-testid="age-display"]')).toHaveText(SERVICE_AGE_DISPLAY);
 
-      // VERIFY DB — service_id committed via onUpdate → PATCH (poll until landed)
-      await expect.poll(async () => {
-        const afterRow = queryDBRow(`SELECT service_id FROM activities WHERE id='${activityId}'`);
-        return afterRow?.service_id;
-      }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(SERVICE_ID);
-    } finally {
-      // Restore the original service so the seed activity is left untouched.
-      const modalOpen = await page
-        .locator('[data-testid="activity-details-modal"]')
-        .isVisible()
-        .catch(() => false);
-      if (modalOpen && originalServiceId && originalServiceId !== SERVICE_ID) {
-        const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
-        const servicesJson = await servicesResp.json();
-        const services: Array<{ id: string; title: string }> =
-          servicesJson.items || servicesJson;
-        const origSvc = services.find((s) => s.id === originalServiceId);
-        await searchAndSelect(page, serviceTrigger, origSvc?.title ?? '', originalServiceId);
-      }
-    }
+    // VERIFY DB — service_id committed via onUpdate → PATCH (poll until landed)
+    await expect.poll(async () => {
+      const afterRow = queryDBRow(`SELECT service_id FROM activities WHERE id='${activityId}'`);
+      return afterRow?.service_id;
+    }, { timeout: 30_000, intervals: [200, 500, 1000] }).toBe(SERVICE_ID);
   });
 
   // ── US-3: records filter bar — location + master (swatch), reset ────────

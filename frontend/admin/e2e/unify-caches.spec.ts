@@ -31,6 +31,7 @@ import {
   expectDeepLinkChip,
   expectClientSearchEmpty,
   withUndoWindow,
+  commitDeleteWait,
 } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
@@ -156,20 +157,38 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       expect(targetTestId).toBeTruthy();
       const visitId = targetTestId!.replace('visit-row-', '');
 
-      // Click the × delete button on that row
-      await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      // The undo window under the paused page clock (#417): the 5s commit
+      // window is expired by the wrapper's instant rewind instead of a
+      // real 5.5s sleep (expiry WITHOUT undo — the cache-consistency
+      // part). commitDeleteWait below is registered before the
+      // window-creating click, as the helper contract requires.
+      const commitWait = commitDeleteWait(page, '/api/v1/visits', visitId);
+      await withUndoWindow(page, async () => {
+        // Click the × delete button on that row
+        await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
 
-      // Toast appears
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance needed — the record tab owns its data;
+        // the enqueue churn of PendingActionsContext re-renders the tab,
+        // which re-reads the query cache synchronously (the frozen
+        // notifyManager flush is bypassed — same surface as the US-3
+        // pilot below). LOAD-BEARING: this holds only while that context
+        // value stays unmemoized; a memoization cleanup would reintroduce
+        // the freeze — then add a fastForward(1) micro-advance here.
 
-      // Row is gone from the table (optimistic remove)
-      await expect(
-        page.locator(`[data-testid="visit-row-${visitId}"]`),
-      ).not.toBeVisible({ timeout: 3_000 });
+        // Toast appears
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // 3. Wait for the deferred DELETE to fire (5s + buffer)
-      await page.waitForTimeout(5_500);
+        // Row is gone from the table (optimistic remove)
+        await expect(
+          page.locator(`[data-testid="visit-row-${visitId}"]`),
+        ).not.toBeVisible({ timeout: 3_000 });
+      });
+
+      // 3. Positive sync (#417 step 5): the rewound commit DELETE has
+      //    landed server-side before the tab-switch render and the DB
+      //    read below.
+      await commitWait;
 
       // 4. Switch to the settings tab and back — the row must not reappear
       await page.locator('[data-testid="tab-settings"]').click();
@@ -292,21 +311,37 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
       const targetTestId = await targetRow.getAttribute('data-testid');
       const visitId = targetTestId!.replace('visit-row-', '');
 
-      await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
+      // The undo window under the paused page clock (#417): the × click,
+      // the toast check, AND the modal close all run inside the frozen
+      // window — the close must precede the commit timer, which is exactly
+      // what this test proves. The wrapper's instant rewind expires the
+      // window instead of a real 5.5s sleep. commitDeleteWait below is
+      // registered before the window-creating click, as the helper
+      // contract requires; the page.on('request') tracker above was
+      // registered before it too.
+      const commitWait = commitDeleteWait(page, '/api/v1/visits', visitId);
+      await withUndoWindow(page, async () => {
+        await targetRow.locator(`[data-testid="visit-row-${visitId}-delete"]`).click();
 
-      // Toast appears
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance — record-tab surface, same mechanism
+        // and LOAD-BEARING unmemoized-context caveat as US-2 above.
 
-      // 3. Close the modal BEFORE the 5s timer fires
-      await page.locator('[data-testid="modal-close-btn"]').click();
-      await expect(
-        page.locator('[data-testid="activity-details-modal"]'),
-      ).not.toBeVisible({ timeout: 5_000 });
+        // Toast appears
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
 
-      // 4. Wait for the deferred DELETE to fire (provider is at app level,
-      //    so it survives modal close)
-      await page.waitForTimeout(5_500);
+        // 3. Close the modal BEFORE the 5s timer fires — race-free under
+        //    the paused clock: the commit timer cannot fire mid-window
+        await page.locator('[data-testid="modal-close-btn"]').click();
+        await expect(
+          page.locator('[data-testid="activity-details-modal"]'),
+        ).not.toBeVisible({ timeout: 5_000 });
+      });
+
+      // 4. Positive sync (#417 step 5): the rewound commit DELETE fired
+      //    despite the modal being closed (the provider is at app level,
+      //    so it survives the close) and has landed server-side.
+      await commitWait;
 
       // 5. ASSERT — DELETE was sent
       expect(deleteRequests.length).toBeGreaterThanOrEqual(1);
@@ -486,16 +521,28 @@ test.describe('US-1..US-7: cache unification (GH #127)', () => {
 
       const targetPayment = page.locator(`[data-testid="payment-${payment1.id}"]`);
       await expect(targetPayment).toBeVisible({ timeout: 5_000 });
-      await targetPayment
-        .locator(`[data-testid="payment-${payment1.id}-delete"]`)
-        .click();
+      // The undo window under the paused page clock (#417): expiry
+      // WITHOUT undo — the wrapper's instant rewind expires the commit
+      // window instead of a real 5.5s sleep. commitDeleteWait below is
+      // registered before the window-creating click, as the helper
+      // contract requires.
+      const commitWait = commitDeleteWait(page, '/api/v1/payments', payment1.id);
+      await withUndoWindow(page, async () => {
+        await targetPayment
+          .locator(`[data-testid="payment-${payment1.id}-delete"]`)
+          .click();
 
-      // Toast appears
-      const toast = page.locator('[data-testid="toast-info"]');
-      await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+        // #417: no micro-advance — record-tab surface, same mechanism
+        // and LOAD-BEARING unmemoized-context caveat as US-2 above.
 
-      // 4. Wait for the deferred DELETE to fire
-      await page.waitForTimeout(5_500);
+        // Toast appears
+        const toast = page.locator('[data-testid="toast-info"]');
+        await expect(toast.first()).toContainText('Удалено', { timeout: 3_000 });
+      });
+
+      // 4. Positive sync (#417 step 5): the rewound commit DELETE has
+      //    landed server-side before the DB reads below.
+      await commitWait;
 
       // 5. ASSERT — DB: payment is gone
       const getAfter = await request.get(

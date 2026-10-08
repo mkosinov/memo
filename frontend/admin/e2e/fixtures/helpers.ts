@@ -775,7 +775,6 @@ export async function withUndoWindow<T>(
   }
 }
 
-
 /**
  * Wait for photos page to load with table.
  * Navigates to /photos, waits for heading and table to render.

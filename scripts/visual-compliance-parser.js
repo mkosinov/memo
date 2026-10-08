@@ -16,8 +16,19 @@
  * classifies them as MANUAL_REVIEW instead of failing the gate.
  *
  * CLI: node visual-compliance-parser.js <spec-file> <output.json>
- *  - writes [{ description, targets: [{kind, attr, value, negated}], status }]
+ *  - writes { "applicable": bool, "checks": [{ description, targets:
+ *    [{kind, attr, value, negated}], status }] }
  *  - exit 0 on success (even with 0 checks), 2 on usage error
+ *
+ * APPLICABILITY (GH #311): applicable=false ONLY for the N/A marker section.
+ * Marker grammar (verbatim from the spec canon): the marker line is the sole
+ * content line of the section and, after trimming, equals "N/A" or "- N/A"
+ * (ASCII hyphen only — en/em dashes and other renderings are NOT accepted),
+ * case-insensitive. Prose paragraphs and horizontal rules do not cancel the
+ * marker; any other checklist line does. The rule applies only when the
+ * normal parse produced zero machine hints, and for all three section names.
+ * Everything else — including a prose-only section with zero hints — is
+ * applicable=true with the checks as parsed.
  */
 
 const fs = require('fs');
@@ -25,6 +36,8 @@ const fs = require('fs');
 const SECTION_RE =
     /^##\s+(?:\d+\.\s*|§\s*\d+\s*)*(Visual Compliance Checks|UI Verification|Visual Checks)\b/i;
 const CHECK_RE = /^\s*[-*]\s*(?:\[[ xX]?\]\s*)?(.+)/;
+const FENCE_RE = /^\s*```/;
+const NA_MARKER_RE = /^(?:- )?n\/a$/i;
 const ATTR_RE = /([a-z][a-z0-9_-]*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/gi;
 const BACKTICK_ATTR_RE = /`(aria|data)-[a-z0-9-]+`/gi;
 const QUOTE_RE = /"([^"\n]{1,120})"|'([^'\n]{1,120})'/g;
@@ -91,7 +104,7 @@ function extractTargets(desc) {
     return targets;
 }
 
-/** Parse the spec's visual checks section into a deduplicated check list. */
+/** Parse the spec's visual checks section into a { applicable, checks } result. */
 function parse(content) {
     const lines = content.split('\n');
     let startIdx = -1;
@@ -103,18 +116,33 @@ function parse(content) {
     }
 
     const checks = [];
+    let naMarkerLines = 0; // body lines equal to "N/A" / "- N/A" (marker grammar)
+    let naMarkerItems = 0; // marker lines that also parsed as checklist items
+    let itemLines = 0; // every line parsed as a checklist item (pre-dedup)
     if (startIdx !== -1) {
         // Collect checklist items until the next H2 section.
         // ### subsections inside the section do NOT terminate it.
+        // Fenced code blocks are skipped: their lines are not checks and
+        // never yield machine hints.
+        let inFence = false;
         for (let j = startIdx + 1; j < lines.length; j++) {
             const line = lines[j];
             if (/^##\s/.test(line)) break;
+            if (FENCE_RE.test(line)) {
+                inFence = !inFence;
+                continue;
+            }
+            if (inFence) continue;
             if (/^\s*[-*_]{3,}\s*$/.test(line)) continue; // horizontal rule
             if (/^\s*\*\*/.test(line)) continue; // bold paragraph, not a bullet
+            const isMarker = NA_MARKER_RE.test(line.trim());
+            if (isMarker) naMarkerLines++;
             const match = line.match(CHECK_RE);
             if (match) {
                 const desc = match[1].trim();
                 if (desc && !/^#{1,6}\s/.test(desc)) {
+                    itemLines++;
+                    if (isMarker) naMarkerItems++;
                     checks.push({ description: desc, targets: extractTargets(desc), status: 'pending' });
                 }
             }
@@ -128,7 +156,15 @@ function parse(content) {
         seen.add(c.description);
         unique.push(c);
     }
-    return unique;
+
+    // Not applicable ONLY via the N/A marker: the section exists, the normal
+    // parse gave zero machine hints, and the marker line is the sole
+    // checklist content line (bare "N/A" → 0 items; "- N/A" → exactly itself).
+    const hasMachineHints = checks.some((c) => c.targets.length > 0);
+    const isNaMarkerSection =
+        startIdx !== -1 && !hasMachineHints && naMarkerLines === 1 && itemLines === naMarkerItems;
+
+    return { applicable: !isNaMarkerSection, checks: isNaMarkerSection ? [] : unique };
 }
 
 function main() {
@@ -137,9 +173,13 @@ function main() {
         console.error('Usage: node visual-compliance-parser.js <spec-file> <output.json>');
         process.exit(2);
     }
-    const checks = parse(fs.readFileSync(specFile, 'utf8'));
-    fs.writeFileSync(outFile, JSON.stringify(checks, null, 2));
-    console.log('Parsed ' + checks.length + ' visual checks from spec');
+    const result = parse(fs.readFileSync(specFile, 'utf8'));
+    fs.writeFileSync(outFile, JSON.stringify(result, null, 2));
+    if (result.applicable) {
+        console.log('Parsed ' + result.checks.length + ' visual checks from spec');
+    } else {
+        console.log('Spec section marked N/A — not applicable');
+    }
 }
 
 module.exports = { parse, extractTargets };

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, openModal } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, withUndoWindow } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import { openRecordTab } from './helpers/anonymous-visits';
 import {
@@ -125,24 +125,36 @@ test('S1: delete payment — undo toast, «Отменить» returns the row, n
     };
     page.on('request', onRequest);
 
-    // ACTION: delete the payment.
-    await page.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
+    // The undo window under the paused page clock (#417): the 5s commit
+    // window is expired by the wrapper's instant rewind, not by a real
+    // 5.5s sleep. The DELETE tracker above was registered before the
+    // «×» click, as the helper contract requires.
+    await withUndoWindow(page, async () => {
+      // #417: no micro-advance needed — the record tab owns its data; the
+      // enqueue/undo churn of PendingActionsContext re-renders the tab,
+      // which re-reads the query cache synchronously (the frozen
+      // notifyManager flush is bypassed — same surface as the US-3 pilot).
 
-    // Optimistic removal + the undo toast with the countdown ring.
-    await expect(row).not.toBeVisible({ timeout: 5_000 });
-    const toast = page
-      .locator('[data-testid="toast-info"]')
-      .filter({ hasText: 'Удалено. Отменить' });
-    await expect(toast).toBeVisible();
-    await expect(toast.getByRole('button', { name: 'Отменить' })).toBeVisible();
+      // ACTION: delete the payment.
+      await page.locator(`[data-testid="payment-${payment.id}-delete"]`).click();
 
-    // Undo inside the window: the row returns, the toast hides.
-    await toast.getByRole('button', { name: 'Отменить' }).click();
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await expect(toast).toBeHidden();
+      // Optimistic removal + the undo toast with the countdown ring.
+      await expect(row).not.toBeVisible({ timeout: 5_000 });
+      const toast = page
+        .locator('[data-testid="toast-info"]')
+        .filter({ hasText: 'Удалено. Отменить' });
+      await expect(toast).toBeVisible();
+      await expect(toast.getByRole('button', { name: 'Отменить' })).toBeVisible();
 
-    // Let the full window elapse: no server DELETE may have been sent.
-    await page.waitForTimeout(5_500);
+      // Undo inside the window: the row returns, the toast hides.
+      await toast.getByRole('button', { name: 'Отменить' }).click();
+      await expect(row).toBeVisible({ timeout: 5_000 });
+      await expect(toast).toBeHidden();
+    });
+
+    // The window expired via the wrapper's rewind and the drainMs buffer
+    // already elapsed inside it — no server DELETE may have been sent
+    // (#417 step 5, negative-case sync).
     expect(paymentDeletes).toHaveLength(0);
     page.off('request', onRequest);
 

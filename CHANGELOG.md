@@ -72,6 +72,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `test_lint_budget.py` 33/33; гейт `uv run python scripts/lint_budget.py` exit 0; e2e-шарды —
     гейт PR CI.
   - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave0.md`
+- **GH #306 — mypy-волна services, под-PR 1 (транш 1: record + generic)** — branch
+  `306-mypy-services-1` (2 коммита `e584933b..6371b520`, base `4633001a`; 7 файлов, +120/−58;
+  Refs #306 — multi-wave, не закрывает; план Task 4, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** `src/services/record.py` (37→0) + `src/services/generic.py` (24→0); коллатерал —
+    ложные типы в сигнатурах-источниках (`repositories/search.py`, `domain/sorting.py`,
+    `repositories/generic.py`, `api/v1/locations.py`).
+  - **Пороги:** **mypy 531 → 397** (−134: транш 61 + коллатерал services 32 + api/v1 32 +
+    репо 11), порог в скрипте переснят = факту; ruff 119 per-rule == baseline (B008=0),
+    не менялся.
+  - **Подавления:** точечные с обоснованиями — `type: ignore[override]` ×2 (`record.py`,
+    контракт #171), `[attr-defined]` ×2 (`generic.py`, `.id` на `type[Base]`), `noqa: UP040` ×1
+    (SchemaList→ModelList паттерн); глобальных оверрайдов нет.
+  - **Behavioral delta:** нулевая — аннотации + один LSP-фикс порядка параметров
+    `ArchiveService.list` (все вызовы keyword-only, проверено ревью по 11 роутерам).
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**;
+    `test_lint_budget.py` 33/33; `tests/services` 375p/0f/12s; ревью — комплаенс ✅,
+    качество approved (3 minor исправлены в полиш-коммите).
+  - **Остаток семьи services (транш 2):** 77 — staff 20, client 16, service 15, activity 7,
+    material 6, photo 5, payment 5, visitor 1, visit 1, position 1.
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-1.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

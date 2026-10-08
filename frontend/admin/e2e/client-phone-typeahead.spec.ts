@@ -334,9 +334,10 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
       await openModal(page, { recordId: record.id });
       await clickModalTab(page, `tab-client-${record.id}`);
 
-      // The bound client renders on the record tab (ClientTab header).
-      const header = page.locator('[data-testid="client-tab-header"]');
-      await expect(header).toContainText('Правка E2E-221', { timeout: 10_000 });
+      // The bound client renders on the record tab — in the tab-strip label
+      // (ClientLabelById); the tab content no longer duplicates it.
+      const tabLabel = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await expect(tabLabel).toContainText('Правка E2E-221', { timeout: 10_000 });
 
       // The phone field offers no re-binding in edit mode: the new-record
       // typeahead is only on the "+" tab; the record tab shows the frozen

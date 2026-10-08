@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **GH #417 — e2e окно отмены на управляемых часах (`page.clock` вместо 22×5,5 с реальных
-  ожиданий)** — branch `417-undo-window-page-clock` (9 commits `75827a4a..88baf40a`,
+  ожиданий)** — branch `417-undo-window-page-clock` (10 commits `75827a4a..d90093f5`,
   base `683f55aa`; спека `docs/specs/2026-10-07-undo-window-page-clock-417-design.md` rev3 и
   план `docs/plans/2026-10-07-undo-window-page-clock-417-plan.md` — оба на main, unchanged by
   IMPL; закрывает заодно гонку #291):
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     микро-таймеры (notifyManager, фейд тоста).
   - Особое 23-е место — буфер `WINDOW_MS + 500` в `pending-delete-unload-guard.spec.ts` —
     намеренно осталось реальным ожиданием (стражу ухода нужна настоящая реальность).
-  - Тестовый скоуп: 13 файлов, все `frontend/admin/e2e/`, +742/−301; код приложения, UI и
+  - Тестовый скоуп: 13 файлов, все `frontend/admin/e2e/`, +733/−301; код приложения, UI и
     контракты не менялись.
 
 ## [Unreleased] — 2026-10-04

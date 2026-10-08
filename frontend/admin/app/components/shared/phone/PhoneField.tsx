@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useRef, useCallback } from 'react';
 import { AsYouType, isPossiblePhoneNumber } from 'libphonenumber-js/min';
 import {
   PHONE_COUNTRIES,

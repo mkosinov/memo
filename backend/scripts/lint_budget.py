@@ -52,6 +52,11 @@ TOOL_TIMEOUT_SECONDS = 600
 # 2026-10-08 (GH #306, Task 4 транш 1 — mypy-волна services): mypy
 # 531 → 397 (record.py + generic.py → 0; поддерживающие правки сигнатур:
 # SearchField.column, SortExpr, repositories reorder); ruff-факт не менялся.
+# 2026-10-08 (GH #306, Task 4 транш 2 — остаток семейства services): mypy
+# 397 → 318 — все файлы src/services/ → 0 (78 ошибок; честные сигнатуры
+# list-оверрайдов, ModelList-алиас, классовые _model-аннотации; 4 точечных
+# type: ignore[override] в service.py по прецеденту GH #171); коллатерально
+# api/v1/staff.py 6 → 5 (аннотация order_by). Ruff-факт не менялся.
 RUFF_BUDGET: dict[str, int] = {
     "B006": 1,
     "B011": 2,
@@ -79,7 +84,7 @@ RUFF_BUDGET: dict[str, int] = {
     "W291": 2,
     "W293": 2,
 }
-MYPY_BUDGET: int = 397
+MYPY_BUDGET: int = 318
 
 _MYPY_TOTAL_RE = re.compile(r"^Found (\d+) errors?", re.MULTILINE)
 

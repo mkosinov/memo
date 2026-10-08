@@ -33,7 +33,7 @@ from src.domain.errors import (
     PositionNotFoundError,
     SpecialtyRequiredError,
 )
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -167,6 +167,10 @@ async def list_staff(
     ``q`` (GH #212): substring on first_name/last_name (each separately)
     or exact id on a full UUID.
     """
+    # Explicit annotation: the two branches produce different list types
+    # (literals vs ``apply_sort``), the bare join would degrade to
+    # ``list[object]`` and fail the typed service signatures downstream.
+    order_by: list[SortExpr]
     if sort_by is None:
         # Spec §4.3: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by (as before).

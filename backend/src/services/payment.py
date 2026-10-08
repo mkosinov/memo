@@ -12,23 +12,29 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.payment import Payment
 from src.models.record import Record
 from src.repositories.payment import PaymentRepository, get_payment_repository
-from src.repositories.search import search_predicate
+from src.repositories.search import ids_in_predicate, search_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.domain.sorting import SortExpr
+    from src.repositories.generic import ModelList
 
 
 class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentResponse]):
@@ -65,8 +71,8 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
     def _build_list_stmt(
         self,
         master_key: str | None = None,
-        **filters,
-    ):
+        **filters: Any,
+    ) -> Select[tuple[Payment]]:
         """Assemble the payments-list query (GH #263 T4, pattern #213).
 
         Server scope first: ``master_key`` (the requester's scope) joins
@@ -94,10 +100,11 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         master_key: str | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[PaymentResponse]:
         """Return a paginated page of payments, optionally filtered.
 
@@ -107,10 +114,14 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
         (admin) → no join, no scope filter. The base-generic surface is
         kept intact: ``order_by`` sorts after the count, ``q`` narrows via
         ``search_fields`` (fail-fast like the base repo when a field-less
-        q arrives), and any ``**filters`` (``id=``, ``record_id=``, …)
-        apply as equality predicates conjunctive with the scope.
+        q arrives), ``ids`` (GH #232 §3.1) is the typed ``?id=`` set
+        narrowing, and any ``**filters`` (``record_id=``, …) apply as
+        equality predicates conjunctive with the scope.
         """
         stmt = self._build_list_stmt(master_key=master_key, **filters)
+        id_pred = ids_in_predicate(Payment.id, ids)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         if q is not None:
             if not self.search_fields:
                 raise ValueError("q received without search_fields (fail-fast)")
@@ -196,7 +207,7 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
         mark_changed("payments")
 
     async def delete_by_record_ids(
-        self, db_session: AsyncSession, record_ids: list[str],
+        self, db_session: AsyncSession, record_ids: ModelList[str],
     ) -> None:
         """Remove ALL payments of the given records — WITHOUT committing.
 

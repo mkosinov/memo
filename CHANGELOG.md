@@ -93,6 +93,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Остаток семьи services (транш 2):** 77 — staff 20, client 16, service 15, activity 7,
     material 6, photo 5, payment 5, visitor 1, visit 1, position 1.
   - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-1.md`
+- **GH #306 — mypy-волна services, под-PR 2 (транш 2: остаток семьи → 0)** — branch
+  `306-mypy-services-2` (1 коммит `0538d599`, base `a42edf14`; Refs #306 — multi-wave,
+  не закрывает; план Task 4, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** остаток семьи `src/services/*` → 0 (staff 21, client 16, service 15, activity 7,
+    material 6, photo 5, payment 5, visitor 1, visit 1, position 1 — честный замер
+    `--no-incremental`); коллатерал — `api/v1/staff.py` (1); `decorators.py` не тронут
+    (граница #394, 0 ошибок и до, и после). **Семья services завершена целиком** (под-PR 1+2).
+  - **Пороги:** **mypy 397 → 318** (−79), порог в скрипте переснят = факту; ruff 119 per-rule ==
+    baseline (B008=0), не менялся.
+  - **Подавления:** `type: ignore[override]` ×4 (`services/service.py`, get/create/update/patch —
+    контракт-замена validated-schema → ORM, прецедент GH #171, блок-комментарий); глобальных
+    оверрайдов нет.
+  - **Behavioral delta:** нулевая — комплаенс-ревью проверило все call-sites `order_by`/`ids`
+    (keyword-only), новые точки применения без callers.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**; `tests/services` +
+    `test_lint_budget.py` 408p/0f/12s; ревью — комплаенс ✅, качество approved.
+  - **Метод-факт:** замеры mypy — только `--no-incremental` (устаревший `.mypy_cache` даёт
+    артефакты).
+  - **Остаток mypy-долга 318 по семьям:** admin 148 / api 76 / domain 28 (deletion 26) /
+    seed 26 / repositories 15 (generic.py) / schemas 9 / main.py 7 / models 3 / auth 3 /
+    cli.py 2 / core 1 — следующая волна 2: admin (~148).
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-2.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

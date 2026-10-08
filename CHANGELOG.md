@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-08
+
+### Added
+- **GH #417 — e2e окно отмены на управляемых часах (`page.clock` вместо 22×5,5 с реальных
+  ожиданий)** — branch `417-undo-window-page-clock` (9 commits `75827a4a..88baf40a`,
+  base `683f55aa`; спека `docs/specs/2026-10-07-undo-window-page-clock-417-design.md` rev3 и
+  план `docs/plans/2026-10-07-undo-window-page-clock-417-plan.md` — оба на main, unchanged by
+  IMPL; закрывает заодно гонку #291):
+  - Новый e2e-хелпер `withUndoWindow(page, fn, opts?)` в
+    `frontend/admin/e2e/fixtures/helpers.ts` — колбэк-обёртка «окно под управляемыми часами»:
+    `clock.pauseAt()` → работа с окном (создание, тост, проверки, клик «Отменить») → одна
+    перемотка `fastForward(5500)` → реальный drain 500 мс в Node → `resume()`; per-page офсет
+    фейковых часов — легальные повторные вызовы в одном тесте (S6).
+  - 22 места окна отмены в 12 спеках переведены с литеральных `waitForTimeout(5_500)` на
+    хелпер (пилот unify-caches US-3, семейство deferred-delete 9 мест, tags/clients/payments
+    6 мест, unified-rows + остаток unify-caches 6 мест); ~2 минуты чистого сна за полный
+    прогон уходят, пилотное место ~33,2 с → 8–12,8 с.
+  - Гонка #291 закрыта по построению: на паузированных часах окно не тикает — отмена не может
+    опоздать за тихую границу; санкционированное микропродвижение внутри колбэка
+    (`fastForward(1)`/`fastForward(150)`) только там, где пауза замораживает живые
+    микро-таймеры (notifyManager, фейд тоста).
+  - Особое 23-е место — буфер `WINDOW_MS + 500` в `pending-delete-unload-guard.spec.ts` —
+    намеренно осталось реальным ожиданием (стражу ухода нужна настоящая реальность).
+  - Тестовый скоуп: 13 файлов, все `frontend/admin/e2e/`, +742/−301; код приложения, UI и
+    контракты не менялись.
+
 ## [Unreleased] — 2026-10-04
 
 ### Added

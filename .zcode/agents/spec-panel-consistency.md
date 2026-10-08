@@ -2,7 +2,7 @@
 name: spec-panel-consistency
 description: Spec panel reviewer — consistency perspective. Finds contradictions within the spec and conflicts with existing code, domain rules, and conventions.
 tools: [Read, Bash]
-model: builtin:zai-coding-plan/GLM-5.3-Flash
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: disabled
 ---
 

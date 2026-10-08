@@ -26,6 +26,9 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
+    # GH #306 Task 5 — типы для wtforms (sqladmin тянется к wtforms-полям):
+    # гасит [import-untyped] в src/admin/setup.py честными штампами.
+    "types-WTForms>=3.1.0",
 ]
 
 [build-system]

@@ -57,6 +57,13 @@ TOOL_TIMEOUT_SECONDS = 600
 # list-оверрайдов, ModelList-алиас, классовые _model-аннотации; 4 точечных
 # type: ignore[override] в service.py по прецеденту GH #171); коллатерально
 # api/v1/staff.py 6 → 5 (аннотация order_by). Ruff-факт не менялся.
+# 2026-10-09 (GH #306, Task 5 — mypy-волна admin): mypy 318 → 170 — всё
+# семейство admin (src/admin/setup.py 148 → 0): честные аннотации
+# ClassVar[list[Column]] → ClassVar[Sequence[_AdminAttr]] по объявлениям
+# sqladmin 0.26 (Sequence[MODEL_ATTR]), штампы types-WTForms в dev-extra
+# (гасят [import-untyped] без новых ошибок), data: dict[str, Any],
+# ALL_ADMIN_VIEWS: list[type[ModelView]], setup_admin(app: FastAPI).
+# Ruff-факт не менялся (119).
 RUFF_BUDGET: dict[str, int] = {
     "B006": 1,
     "B011": 2,
@@ -84,7 +91,7 @@ RUFF_BUDGET: dict[str, int] = {
     "W291": 2,
     "W293": 2,
 }
-MYPY_BUDGET: int = 318
+MYPY_BUDGET: int = 170
 
 _MYPY_TOTAL_RE = re.compile(r"^Found (\d+) errors?", re.MULTILINE)
 

@@ -14,12 +14,14 @@ unchanged (the key is dropped so sqladmin skips the column), filled →
 validate + hash.
 """
 
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
-from sqlalchemy import Column, create_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import InstrumentedAttribute
 from starlette.requests import Request
 from wtforms import PasswordField
 from wtforms.validators import Optional
@@ -49,6 +51,13 @@ from src.models.user import User
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 
+# sqladmin 0.26 declares column_*_list as ``Sequence[MODEL_ATTR]`` where
+# ``MODEL_ATTR = Union[str, InstrumentedAttribute]`` (sqladmin/models.py).
+# Every list below holds mapped-class attributes only, so the honest narrow
+# annotation is ``Sequence[_AdminAttr]`` — a covariant subtype of the
+# MODEL_ATTR sequence (Sequence, not list, mirrors the sqladmin base).
+type _AdminAttr = InstrumentedAttribute[Any]
+
 
 class StaffAdmin(ModelView, model=Staff):
     """Staff card view (GH #266): the employee directory row + the master
@@ -57,16 +66,24 @@ class StaffAdmin(ModelView, model=Staff):
 
     # The extension relationship is declared on Staff.master — inline_models
     # accepts the relationship attribute for a ModelView on the parent.
-    inline_models: ClassVar[list] = [Staff.master]
-    column_list: ClassVar[list[Column]] = [
-        Staff.id, Staff.first_name, Staff.last_name, Staff.avatar_url,
-        Staff.sort_order, Staff.is_active,
+    inline_models: ClassVar[list[_AdminAttr]] = [Staff.master]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Staff.id,
+        Staff.first_name,
+        Staff.last_name,
+        Staff.avatar_url,
+        Staff.sort_order,
+        Staff.is_active,
     ]
-    column_searchable_list: ClassVar[list[Column]] = [
-        Staff.first_name, Staff.last_name,
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [
+        Staff.first_name,
+        Staff.last_name,
     ]
-    column_sortable_list: ClassVar[list[Column]] = [
-        Staff.first_name, Staff.last_name, Staff.sort_order, Staff.is_active,
+    column_sortable_list: ClassVar[Sequence[_AdminAttr]] = [
+        Staff.first_name,
+        Staff.last_name,
+        Staff.sort_order,
+        Staff.is_active,
     ]
     name = "Staff"
     name_plural = "Staff"
@@ -78,11 +95,13 @@ class PositionAdmin(ModelView, model=Position):
     (``is_system``) are not deletable — enforced at the API layer
     (``POSITION_IS_SYSTEM``), surfaced here via the flag column."""
 
-    column_list: ClassVar[list[Column]] = [
-        Position.id, Position.title, Position.is_system,
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Position.id,
+        Position.title,
+        Position.is_system,
     ]
-    column_searchable_list: ClassVar[list[Column]] = [Position.title]
-    column_sortable_list: ClassVar[list[Column]] = [Position.title, Position.is_system]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Position.title]
+    column_sortable_list: ClassVar[Sequence[_AdminAttr]] = [Position.title, Position.is_system]
     name = "Position"
     name_plural = "Positions"
     icon = "fa-solid fa-id-badge"
@@ -110,9 +129,7 @@ class SqlAdminAuth(AuthenticationBackend):
         client_ip = request.client.host if request.client else "unknown"
         try:
             async with db_manager.async_session() as session:
-                user, _token = await get_auth_service().login(
-                    session, phone, password, client_ip
-                )
+                user, _token = await get_auth_service().login(session, phone, password, client_ip)
         except HTTPException:
             # 401 invalid credentials / 429 locked out — either way the
             # stock login screen re-renders with its error message.
@@ -131,8 +148,15 @@ class SqlAdminAuth(AuthenticationBackend):
 
 
 class UserAdmin(ModelView, model=User):
-    column_list: ClassVar[list[Column]] = [User.id, User.phone, User.email, User.role, User.staff_id, User.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [User.phone, User.email]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        User.id,
+        User.phone,
+        User.email,
+        User.role,
+        User.staff_id,
+        User.is_active,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [User.phone, User.email]
     # Write-only password field (never populated from the model, never
     # rendered back). NOTE: sqladmin looks form_overrides up by STRING prop
     # name — a Column-object key would silently no-op.
@@ -155,7 +179,7 @@ class UserAdmin(ModelView, model=User):
     icon = "fa-solid fa-user"
 
     async def on_model_change(
-        self, data: dict, model: Any, is_created: bool, request: Request
+        self, data: dict[str, Any], model: Any, is_created: bool, request: Request
     ) -> None:
         """Password semantics (spec §3.9): create — required, validate, hash;
         edit — blank leaves ``password_hash`` unchanged (key dropped so the
@@ -174,96 +198,162 @@ class UserAdmin(ModelView, model=User):
 
 
 class LocationAdmin(ModelView, model=Location):
-    column_list: ClassVar[list[Column]] = [Location.id, Location.title, Location.capacity, Location.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Location.title]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Location.id,
+        Location.title,
+        Location.capacity,
+        Location.is_active,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Location.title]
     name = "Location"
     name_plural = "Locations"
     icon = "fa-solid fa-location-dot"
 
 
 class ServiceAdmin(ModelView, model=Service):
-    column_list: ClassVar[list[Column]] = [Service.id, Service.title, Service.specialty, Service.duration, Service.min_age, Service.max_age]
-    column_searchable_list: ClassVar[list[Column]] = [Service.title]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Service.id,
+        Service.title,
+        Service.specialty,
+        Service.duration,
+        Service.min_age,
+        Service.max_age,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Service.title]
     name = "Service"
     name_plural = "Services"
     icon = "fa-solid fa-palette"
 
 
 class TariffAdmin(ModelView, model=Tariff):
-    column_list: ClassVar[list[Column]] = [Tariff.id, Tariff.service_id, Tariff.title, Tariff.price]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Tariff.id,
+        Tariff.service_id,
+        Tariff.title,
+        Tariff.price,
+    ]
     name = "Tariff"
     name_plural = "Tariffs"
     icon = "fa-solid fa-tag"
 
 
 class TagAdmin(ModelView, model=Tag):
-    column_list: ClassVar[list[Column]] = [Tag.id, Tag.title]
-    column_searchable_list: ClassVar[list[Column]] = [Tag.title]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [Tag.id, Tag.title]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Tag.title]
     name = "Tag"
     name_plural = "Tags"
     icon = "fa-solid fa-hashtag"
 
 
 class ActivityAdmin(ModelView, model=Activity):
-    column_list: ClassVar[list[Column]] = [Activity.id, Activity.master_id, Activity.service_id, Activity.location_id, Activity.start, Activity.duration, Activity.capacity, Activity.is_private]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Activity.id,
+        Activity.master_id,
+        Activity.service_id,
+        Activity.location_id,
+        Activity.start,
+        Activity.duration,
+        Activity.capacity,
+        Activity.is_private,
+    ]
     name = "Activity"
     name_plural = "Activities"
     icon = "fa-solid fa-calendar-day"
 
 
 class ClientAdmin(ModelView, model=Client):
-    column_list: ClassVar[list[Column]] = [Client.id, Client.name, Client.phone, Client.channel, Client.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Client.name, Client.phone]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Client.id,
+        Client.name,
+        Client.phone,
+        Client.channel,
+        Client.is_active,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Client.name, Client.phone]
     name = "Client"
     name_plural = "Clients"
     icon = "fa-solid fa-address-book"
 
 
 class VisitorAdmin(ModelView, model=Visitor):
-    column_list: ClassVar[list[Column]] = [Visitor.id, Visitor.client_id, Visitor.name, Visitor.age]
-    column_searchable_list: ClassVar[list[Column]] = [Visitor.name]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Visitor.id,
+        Visitor.client_id,
+        Visitor.name,
+        Visitor.age,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Visitor.name]
     name = "Visitor"
     name_plural = "Visitors"
     icon = "fa-solid fa-users"
 
 
 class PhotoAdmin(ModelView, model=Photo):
-    column_list: ClassVar[list[Column]] = [Photo.id, Photo.filename, Photo.client_id, Photo.service_id, Photo.activity_id, Photo.location_id]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Photo.id,
+        Photo.filename,
+        Photo.client_id,
+        Photo.service_id,
+        Photo.activity_id,
+        Photo.location_id,
+    ]
     name = "Photo"
     name_plural = "Photos"
     icon = "fa-solid fa-image"
 
 
 class RecordAdmin(ModelView, model=Record):
-    column_list: ClassVar[list[Column]] = [Record.id, Record.activity_id, Record.client_id, Record.status, Record.seats]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Record.id,
+        Record.activity_id,
+        Record.client_id,
+        Record.status,
+        Record.seats,
+    ]
     name = "Record"
     name_plural = "Records"
     icon = "fa-solid fa-clipboard-list"
 
 
 class VisitAdmin(ModelView, model=Visit):
-    column_list: ClassVar[list[Column]] = [Visit.id, Visit.record_id, Visit.visitor_id, Visit.price, Visit.status]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Visit.id,
+        Visit.record_id,
+        Visit.visitor_id,
+        Visit.price,
+        Visit.status,
+    ]
     name = "Visit"
     name_plural = "Visits"
     icon = "fa-solid fa-check"
 
 
 class PaymentAdmin(ModelView, model=Payment):
-    column_list: ClassVar[list[Column]] = [Payment.id, Payment.record_id, Payment.amount, Payment.method]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Payment.id,
+        Payment.record_id,
+        Payment.amount,
+        Payment.method,
+    ]
     name = "Payment"
     name_plural = "Payments"
     icon = "fa-solid fa-credit-card"
 
 
 class MaterialAdmin(ModelView, model=Material):
-    column_list: ClassVar[list[Column]] = [Material.id, Material.title, Material.description, Material.is_active]
-    column_searchable_list: ClassVar[list[Column]] = [Material.title]
+    column_list: ClassVar[Sequence[_AdminAttr]] = [
+        Material.id,
+        Material.title,
+        Material.description,
+        Material.is_active,
+    ]
+    column_searchable_list: ClassVar[Sequence[_AdminAttr]] = [Material.title]
     name = "Material"
     name_plural = "Materials"
     icon = "fa-solid fa-paint-brush"
 
 
-ALL_ADMIN_VIEWS: ClassVar = [
+ALL_ADMIN_VIEWS: list[type[ModelView]] = [
     StaffAdmin,
     PositionAdmin,
     MaterialAdmin,
@@ -282,7 +372,7 @@ ALL_ADMIN_VIEWS: ClassVar = [
 ]
 
 
-def setup_admin(app) -> Admin:
+def setup_admin(app: FastAPI) -> Admin:
     """Mount SQLAdmin at /admin with all model views.
 
     Creates a sync engine from the global db_manager's async engine URL

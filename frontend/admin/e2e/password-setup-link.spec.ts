@@ -143,8 +143,9 @@ test.describe('#348 S2 — install password by link, then log in', () => {
       ).not.toBeNull();
 
       // Login with the phone + the new password — the real /login form
-      // (spec §2: «вход с телефоном и новым паролем»).
-      await page.locator('#login-phone').fill(phone);
+      // (spec §2: «вход с телефоном и новым паролем»). GH #414: the fill is
+      // the RU remainder; the compact rebuilt on submit equals `phone`.
+      await page.locator('#login-phone').fill(phone.replace('+7', ''));
       await page.locator('#login-password').fill(E2E_PASSWORD);
       await page.getByRole('button', { name: 'Войти' }).click();
       await expect(page).toHaveURL(/\/$/);

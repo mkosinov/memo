@@ -101,6 +101,8 @@ test.describe('GH #263 S2 — master creates records', () => {
       ).toBeVisible();
 
       // Typeahead по ПОЛНОМУ номеру → the studio-wide client is suggested.
+      // GH #414: the composite field's «+» typing is ignored — the national
+      // remainder is the query (the «+7…» equivalent of the old field).
       const listResponse = page.waitForResponse(
         (res) =>
           res.url().includes('/api/v1/clients') &&
@@ -108,7 +110,7 @@ test.describe('GH #263 S2 — master creates records', () => {
       );
       await page
         .locator('[data-testid="input-phone"]')
-        .pressSequentially('+79991234567');
+        .pressSequentially('9991234567');
       const resp = await listResponse;
 
       // MASK in the wire data (scoped response, D3): no naked number.
@@ -165,9 +167,11 @@ test.describe('GH #263 S2 — master creates records', () => {
       await openAddTab(page);
 
       // Type an UNKNOWN complete number + a name, save (no suggestion pick).
+      // GH #414: the composite field ignores a typed «+» — the equivalent
+      // of the old «+7…» typing is the national remainder alone.
       await page
         .locator('[data-testid="input-phone"]')
-        .pressSequentially(`+7${typed}`);
+        .pressSequentially(typed);
       await page.locator('[data-testid="input-client-name"]').fill(clientName);
 
       const createWait = page.waitForResponse(
@@ -181,8 +185,8 @@ test.describe('GH #263 S2 — master creates records', () => {
       await createWait;
 
       // VERIFY DB — client created with the typed number (WYSIWYG: the
-      // stored string is the VISIBLE masked value «+7 999 xxx xx xx», so
-      // compare DIGITS) and the record bound to an OWN (m1) activity.
+      // stored string is the COMPACT «+7999…» (GH #414), so compare DIGITS)
+      // and the record bound to an OWN (m1) activity.
       await expect.poll(() => {
         const dbRow = queryDBRow(`SELECT id, phone FROM clients WHERE name = '${clientName}'`);
         if (!dbRow) return false;

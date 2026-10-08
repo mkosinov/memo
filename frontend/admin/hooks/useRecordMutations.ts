@@ -3,6 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import {
+  ApiError,
   createRecord,
   createClient,
   createVisitor,
@@ -29,6 +30,9 @@ import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 import { resolveDefaultTariff } from '@/lib/tariff-resolver';
+// National-digit phone reduction (spec #221 §3 / #414 §Единая редукция цифр)
+// moved to its single TS home — imported here for the save-time check below.
+import { toNationalDigits } from '@/app/components/shared/phone/format';
 
 interface VisitData {
   visitor_id?: string | null;
@@ -54,36 +58,22 @@ interface CreateRecordBase {
 }
 
 /**
- * Booking submit payload (GH #221) — the pick-XOR-phone invariant, encoded:
+ * Booking submit payload (GH #221, re-based onto the compact by GH #414) —
+ * the pick-XOR-phone invariant, encoded:
  * - `kind: 'picked'` — a typeahead suggestion was chosen; `client_id` binds
  *   the record to that client and resolve-or-create is skipped entirely.
- * - `kind: 'unpicked'` — free-typed number; `phone` is the VISIBLE formatted
- *   string (WYSIWYG) and `name` names the possibly-created client. The save
- *   path resolves by a fresh full-digits fetch (spec §6): digits-equality
- *   match binds the existing client, no match creates one, fetch failure
- *   blocks the save (fail closed — never a silent unchecked create).
+ * - `kind: 'unpicked'` — a typed number with NO suggestion picked; `phone`
+ *   is the COMPACT «+<код><нац. цифры>» lifted by PhoneInput (GH #414 —
+ *   the old #221 visible formatted string no longer reaches the hook) and
+ *   `name` names the possibly-created client. The save path resolves by a
+ *   fresh full-digits fetch (spec §Поиск и привязка клиента): reduction
+ *   equality `toNationalDigits(compact) === toNationalDigits(client.phone)`
+ *   binds the existing client, no match creates one WITH THE COMPACT, fetch
+ *   failure blocks the save (fail closed — never a silent unchecked create).
  */
 export type CreateRecordInput =
   | ({ kind: 'picked'; client_id: string } & CreateRecordBase)
   | ({ kind: 'unpicked'; phone: string; name: string; client_id: null } & CreateRecordBase);
-
-/**
- * Spec #221 §3 — national-digit phone reduction, TS mirror of the backend's
- * `to_national_digits` (backend/src/domain/phone_digits.py): strip non-digits;
- * drop the leading 7/8 of an 11-digit RU number. Tolerant by design — never
- * parses, never raises; NULL/empty/no-digits → empty string. The equality
- * check at save time (§6) compares BOTH sides through this same reduction, so
- * any stored format (`+79991234567`, `8 999 123-45-67`) matches the typed one.
- */
-export function toNationalDigits(value: string | null | undefined): string {
-  if (!value) return '';
-  const digits = value.replace(/\D+/g, '');
-  if (!digits) return '';
-  if (digits.length === 11 && (digits[0] === '7' || digits[0] === '8')) {
-    return digits.slice(1);
-  }
-  return digits;
-}
 
 export function useRecordMutations(activityId: string, recordId: string = '') {
   const queryClient = useQueryClient();
@@ -117,18 +107,30 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
     ) => {
       // 1. Resolve or create client.
       //    GH #221: a picked client binds by id — no lookup, no create.
-      //    The unpicked path resolves by a FRESH full-digits fetch (spec §6):
-      //    national digits of the visible string are queried with ?phone=,
-      //    the first row whose national digits equal the typed digits binds
-      //    (first-match parity with the old first-or-404); no match → the
-      //    client is created with the VISIBLE formatted string (WYSIWYG).
-      //    A fetch failure propagates — the save is blocked (fail closed),
-      //    never a silent create of an unchecked client.
+      //    The unpicked path resolves by a FRESH full-digits fetch (spec
+      //    #414 §Поиск и привязка клиента): the reduction of the entered
+      //    COMPACT (lifted by PhoneInput) is queried with ?phone=, the
+      //    first row whose reduction equals it binds (first-match parity
+      //    with the old first-or-404); no match → the client is created
+      //    WITH THE COMPACT (storage contract: a changed number saves as
+      //    «+<код><нац.>»). A fetch failure propagates — the save is
+      //    blocked (fail closed), never a silent create of an unchecked
+      //    client.
       let clientId: string;
       let createdClientId: string | null = null;
       if (input.kind === 'picked') {
         clientId = input.client_id;
       } else {
+        // Defensive String(20) guard (spec #414 §Форматирование, хранение):
+        // a compact of a valid list-country number is ≤16 chars, so a value
+        // past the clients.phone column limit can only be debris a skipped
+        // completeness validator let through — block BEFORE any fetch or
+        // create. ApiError carries the message through the standard
+        // parseApiError toast pipeline (client-side status 0 — StaffTable
+        // precedent).
+        if (input.phone.length > 20) {
+          throw new ApiError(0, 'Слишком длинный номер телефона — проверьте код страны');
+        }
         const national = toNationalDigits(input.phone);
         let clientIdResolved: string | null = null;
         if (national) {

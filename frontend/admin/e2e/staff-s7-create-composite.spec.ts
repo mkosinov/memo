@@ -25,9 +25,14 @@ import { formatLinkExpiry } from '../app/(main)/staff/components/PasswordLinkDia
 const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 let phoneCounter = 0;
+/**
+ * GH #414: the account phone is the PhoneField widget — the test types the
+ * NATIONAL remainder; the compact '+7…' (10-digit RU remainder, possible for
+ * RU) is assembled by the modal and is what reaches the wire and the DB.
+ */
 function uniquePhone(): string {
   phoneCounter += 1;
-  return `+7996${String(Date.now()).slice(-7)}${phoneCounter}`;
+  return `+7996${String(Date.now()).slice(-6)}${phoneCounter}`;
 }
 
 test.describe('S7 — create card with account + master in one scenario', () => {
@@ -57,7 +62,9 @@ test.describe('S7 — create card with account + master in one scenario', () => 
 
       // «Создать учётку» (#348: phone ONLY — no password field on the form).
       await dialog.locator('[data-testid="create-user-checkbox"]').check();
-      await dialog.locator('input[placeholder="+79990000000"]').fill(phone);
+      // GH #414: the widget input — national digits; the compact is asserted
+      // on the wire below.
+      await dialog.locator('[data-testid="staff-phone-input"]').fill(phone.slice(2));
       // The password field is GONE (spec §6 «Парольного поля нет») — the
       // checkbox label says the owner will set the password via the link.
       await expect(dialog.getByText('Создать учётку (телефон, пароль задаст сотрудник)')).toBeVisible();

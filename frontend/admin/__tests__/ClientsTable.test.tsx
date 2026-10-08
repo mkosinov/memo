@@ -135,8 +135,10 @@ describe('ClientsTable', () => {
 
   it('renders client phones', () => {
     render(<ClientsTable onClientClick={vi.fn()} />);
-    expect(screen.getByText('+7 (900) 123-45-67')).toBeTruthy();
-    expect(screen.getByText('+7 (900) 987-65-43')).toBeTruthy();
+    // GH #414 (spec §Форматирование, показ): the stored phones render through
+    // the shared display formatter — grouped, not raw.
+    expect(screen.getByText('+7 900 123 45 67')).toBeTruthy();
+    expect(screen.getByText('+7 900 987 65 43')).toBeTruthy();
   });
 
   it('renders visits count', () => {
@@ -491,7 +493,8 @@ describe('ClientsTable', () => {
 
     // But data should still be in the row (hidden via visibility check, but the td is gone)
     // Since we removed the th, we need to check that the td for phone is also gone
-    expect(screen.queryByText('+7 (900) 123-45-67')).not.toBeInTheDocument();
+    // GH #414: the phone cell now renders grouped via formatPhoneDisplay.
+    expect(screen.queryByText('+7 900 123 45 67')).not.toBeInTheDocument();
   });
 
   it('persists column visibility to localStorage', () => {

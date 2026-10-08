@@ -3,6 +3,7 @@
 import React from 'react';
 import type { ClientWithStats } from '@memo/api-client';
 import type { ColumnDef, RowAction } from '@/app/components/shared/tableTypes';
+import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
 
 // ─── Helpers (verbatim from the pre-#139 ClientsTable) ────────────────────
 
@@ -49,7 +50,10 @@ export const clientColumns = (): ColumnDef<ClientWithStats>[] => [
     label: 'Телефон',
     defaultVisible: true,
     render: (c) => (
-      <span style={{ color: 'var(--ink-mid)' }}>{c.phone || 'Не указан'}</span>
+      // GH #414 (spec §Форматирование, показ): stored phones render through
+      // the shared display formatter — legacy spellings group like compacts,
+      // garbage passes through verbatim; empty → «Не указан» as before.
+      <span style={{ color: 'var(--ink-mid)' }}>{formatPhoneDisplay(c.phone) || 'Не указан'}</span>
     ),
   },
   {

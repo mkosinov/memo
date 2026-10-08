@@ -28,6 +28,11 @@ interface NewRecordTabProps {
 export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordTabProps) {
   const [pickedClient, setPickedClient] = useState<PickedClient | null>(null);
   const [phone, setPhone] = useState('');
+  // «Без страны» with visible digits (out-of-list paste, GH #414 fix):
+  // PhoneInput lifts this flag next to the compact — the compact alone is ''
+  // in that state (indistinguishable from empty) and must not reach the
+  // create path as a silent phone-less client.
+  const [phoneNoCountry, setPhoneNoCountry] = useState(false);
   const [name, setName] = useState('');
   const [notify, setNotify] = useState(false);
   const [channel, setChannel] = useState('telegram');
@@ -47,8 +52,10 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
     setName('');
   }, []);
 
-  // Visible formatted string (WYSIWYG): the unpicked save payload sends it
-  // verbatim, exactly as rendered in the field.
+  // Compact «+<код><нац. цифры>» (GH #414): PhoneInput's onInputValueChange
+  // lifts the compact of the selected country + typed remainder ('' in the
+  // «no country» state and on a pick) — the unpicked save payload carries
+  // it verbatim to the hook's сверка.
   const handlePhoneInput = useCallback((value: string) => {
     setPhone(value);
   }, []);
@@ -107,9 +114,10 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
       }
     }
 
-    // Picked → bind by id; unpicked → the visible formatted string + typed
-    // name name the (possibly new) client (spec §5). The `kind` tag makes
-    // the two branches disjoint payloads, not placeholder empties.
+    // Picked → bind by id; unpicked → the lifted COMPACT «+<код><нац.>» +
+    // typed name name the (possibly new) client (spec #414 §Поиск и
+    // привязка клиента). The `kind` tag makes the two branches disjoint
+    // payloads, not placeholder empties.
     if (pickedClient) {
       onSubmit({
         kind: 'picked',
@@ -120,10 +128,22 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
         seats: seatsCount,
       });
     } else {
-      // Completeness guard (GH #221 spec §2 decision 11, §6 step 2): the
-      // visible value must be a complete valid number before anything is
-      // fetched or created. Picked clients are never validated (stored data).
-      // Same library + same RU default as the AsYouType mask.
+      // «Без страны» with digits (GH #414 fix — architect decision, spec
+      // §Граничные случаи): an out-of-list international paste leaves the
+      // number unbound, and its compact lift is '' BY DESIGN, so the
+      // completeness guard below cannot catch it. Block BEFORE anything is
+      // fetched or created, with the PhoneField message (client-card /
+      // staff parity). An EMPTY field (no digits) stays allowed as today —
+      // the phone-less quick-add predates #221 (spec §10).
+      if (phoneNoCountry) {
+        showToast('Выберите страну из списка');
+        return; // nothing fetched, nothing created
+      }
+      // Completeness guard (GH #221 §2 decision 11 / #414 §Форматирование):
+      // the lifted compact must parse as a complete valid number before
+      // anything is fetched or created (the compact is country-bound by
+      // construction — a '' lift is the no-country/pick state). Picked
+      // clients are never validated (stored data).
       // An EMPTY phone is NOT guarded: the phone-less quick-add predates
       // #221 (spec §10 — write paths untouched) and must keep working; the
       // guard targets TYPED-BUT-INCOMPLETE numbers only (its message says
@@ -143,7 +163,7 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
         seats: seatsCount,
       });
     }
-  }, [phone, name, pickedClient, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
+  }, [phone, phoneNoCountry, name, pickedClient, visitors, notify, channel, seatsCount, onSubmit, showToast, serviceTariffs]);
 
   const inputClass = 'w-full rounded-lg border px-3 py-2 text-sm bg-white';
   const inputStyle = { borderColor: 'var(--line)' };
@@ -157,6 +177,7 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
         onClear={handleClearPick}
         picked={pickedClient}
         onInputValueChange={handlePhoneInput}
+        onNoCountryDigits={setPhoneNoCountry}
       />
 
       {/* Name — editable only for an unpicked (new) client; when a client is

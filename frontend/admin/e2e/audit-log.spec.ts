@@ -391,7 +391,10 @@ test.describe('GH #344 §9 — журнал действий администр�
             r.request().method() === 'PUT'),
         { timeout: 15_000 },
       );
-      await page.locator('#client-phone').fill(newPhone);
+      // GH #414: the card phone is the PhoneField widget — fill the NATIONAL
+      // remainder (the selector owns the +7); the stored compact rebuilds
+      // the same «+7999…» string the assertions below expect.
+      await page.locator('#client-phone').fill(newPhone.slice(2));
       await page.getByRole('button', { name: 'Сохранить' }).click();
       const patch = await patchDone;
       expect(patch.ok()).toBeTruthy();

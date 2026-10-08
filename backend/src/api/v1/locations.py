@@ -16,7 +16,7 @@ from src.domain.deletion import (
     stale_expected_entities,
 )
 from src.domain.errors import BareListLimitExceededError
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
@@ -121,6 +121,10 @@ async def list_locations(
     (scalar mixing, fastapi #12481, prevents the Annotated[Model, Query()]
     shape here).
     """
+    # Annotated for the SortExpr union: the mixed asc() fallback joins to
+    # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
+    # ``Sequence[SortExpr] | None``.
+    order_by: list[SortExpr] | None
     if sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.

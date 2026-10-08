@@ -6,7 +6,7 @@ operations instead of raw ORM model instances.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy import Select, delete, not_, select
@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from src.db.base import Base
+    from src.domain.sorting import SortExpr
     from src.models.abstract import AbstractModelSoftDelete
+    from src.repositories.generic import ModelList
 
 from src.domain.deletion import (
     CASCADE_HANDLERS,
@@ -40,16 +42,6 @@ from src.services.decorators import transactional
 CreateSchemaT = TypeVar("CreateSchemaT", bound=BaseModel)
 UpdateSchemaT = TypeVar("UpdateSchemaT", bound=BaseModel)
 ResponseSchemaT = TypeVar("ResponseSchemaT", bound=BaseModel)
-
-# Alias for the BUILTIN list, used in method annotations below. Inside the
-# class body the name ``list`` resolves to the ``list`` METHOD (name
-# shadowing — the source of the pre-existing [valid-type] mypy errors on
-# ``list``/``ArchiveService.list``); subscripting this alias instead keeps
-# the annotations quirk-free. Same pattern and rationale as ``ModelList``
-# in ``src/repositories/generic.py``: the ``TypeAlias`` form is REQUIRED
-# (mypy rejects subscripting the ``type``-statement alias form), so the
-# ruff UP040 suggestion is a false lead here.
-SchemaList: TypeAlias = list  # noqa: UP040
 
 # Protective limit for bare /all dictionary lists (#205). Enforced in the
 # single shared ``GenericService.list_all`` choke point via a LIMIT+1 probe.
@@ -116,7 +108,7 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by: Sequence[Any] | None = None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
         ids: Sequence[UUID] | None = None,
         **filters: Any,
@@ -146,9 +138,9 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by: Sequence[Any] | None = None,
+        order_by: Sequence[SortExpr] | None = None,
         **filters: Any,
-    ) -> SchemaList[ResponseSchemaT]:
+    ) -> ModelList[ResponseSchemaT]:
         """Unpaginated list for dictionary /all endpoints, capped by BARE_LIST_MAX_ROWS.
 
         Reuses ``_list_stmt(**filters)`` (same equality-filter semantics as
@@ -258,8 +250,8 @@ class GenericService(Generic[CreateSchemaT, UpdateSchemaT, ResponseSchemaT]):
 
     @transactional
     async def reorder(
-        self, db_session: AsyncSession, ids: SchemaList[str]
-    ) -> SchemaList[ResponseSchemaT]:
+        self, db_session: AsyncSession, ids: ModelList[str]
+    ) -> ModelList[ResponseSchemaT]:
         """Reorder records by assigning sort_order based on the order of IDs."""
         orm_list = await self._repository.reorder(db_session, self._model, ids)
         return [self._response_schema.model_validate(o) for o in orm_list]
@@ -413,11 +405,15 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
       knowledge).
     """
 
-    # Narrowed model contract (annotation-only): every ArchiveService heir
-    # maps an ``AbstractModelSoftDelete`` model — the ``is_active``
-    # predicates below and archive/restore depend on the flag, and every
-    # Archive factory injects the matching ``ArchiveRepository``.
+    # Narrowed contracts (annotation-only; same idiom as
+    # ``RecordService._repository``): every ArchiveService heir maps an
+    # ``AbstractModelSoftDelete`` model (the ``is_active`` predicates below
+    # and archive/restore depend on the flag) and every Archive factory
+    # injects ``get_archive_repository()`` — an ``ArchiveRepository`` whose
+    # ``list()`` accepts the ``status=`` kwarg (#206 Task 2 documented the
+    # runtime invariant; the annotations express it without casts).
     _model: type[AbstractModelSoftDelete]
+    _repository: ArchiveRepository
 
     def _list_stmt(
         self,
@@ -437,7 +433,7 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by: Sequence[Any] | None = None,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
         ids: Sequence[UUID] | None = None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
@@ -453,13 +449,13 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         only append optional params after the superclass signature (every
         caller passes it by keyword).
 
-        ``self._repository`` is typed ``BaseRepository`` (inherited from
-        ``GenericService.__init__``), but every Archive factory injects
-        ``get_archive_repository()`` — an ``ArchiveRepository`` whose
-        ``list()`` accepts the ``status=`` kwarg. The cast documents that
-        runtime invariant without touching the factories (#206 Task 2).
+        ``self._repository`` is narrowed to ``ArchiveRepository`` at the
+        class level (annotation-only, see the class attribute block): the
+        inherited ``__init__`` types it ``BaseRepository``, but every
+        Archive factory injects ``get_archive_repository()`` whose
+        ``list()`` accepts the ``status=`` kwarg.
         """
-        items_orm, total = await cast("ArchiveRepository", self._repository).list(
+        items_orm, total = await self._repository.list(
             db_session,
             self._model,
             status=status,
@@ -477,10 +473,10 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
     async def list_all(
         self,
         db_session: AsyncSession,
-        order_by: Sequence[Any] | None = None,
+        order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
         **filters: Any,
-    ) -> SchemaList[ResponseSchemaT]:
+    ) -> ModelList[ResponseSchemaT]:
         """Unpaginated list filtered by archive status (mirrors ``list()``).
 
         Delegates to ``GenericService.list_all`` passing ``status`` through as
@@ -504,12 +500,7 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         re-archiving an already-archived row changes nothing and writes no
         journal row.
         """
-        # Same runtime invariant as ``list()`` above: every Archive factory
-        # injects an ``ArchiveRepository`` — the cast documents it without
-        # touching the factories (#206 Task 2).
-        row = await cast("ArchiveRepository", self._repository).get(
-            db_session, self._model, id
-        )
+        row = await self._repository.get(db_session, self._model, id)
         if row is None or not row.is_active:
             return row is not None
         # LAZY import — the audit module is off-limits at services top
@@ -538,10 +529,7 @@ class ArchiveService(GenericService[CreateSchemaT, UpdateSchemaT, ResponseSchema
         GH #344: mirrored explicit ``restore`` journal row (spec §4.6) —
         restoring an ACTIVE row is a no-op and writes nothing.
         """
-        # Same runtime invariant as ``archive()`` above.
-        row = await cast("ArchiveRepository", self._repository).get(
-            db_session, self._model, id
-        )
+        row = await self._repository.get(db_session, self._model, id)
         if row is None or row.is_active:
             return row is not None
         # LAZY import — cycle hazard (see archive).

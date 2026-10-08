@@ -205,6 +205,15 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
       {/* Contact data group */}
       <div>
         <h4 className="text-xs font-medium text-ink-mid mb-2">Контактные данные</h4>
+        {/* GH #414 visual-gate fix: the composite PhoneField (country
+            selector ~109px + remainder + ×) does not fit a single cell of
+            this grid — at 1280×800 the modal content is 464px and an
+            md:grid-cols-3 cell is 144px, leaving the remainder input ~16px
+            (unreadable digits). The phone takes a dedicated full-width row
+            (span 2 of the 2-col base grid, all 3 on md+) after the plain
+            inputs; col-span-2 at md (304px) would still leave only ~165px,
+            so the full row is the minimal layout that reaches the ≥200px
+            input gate. */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <div>
             <label htmlFor="client-name" className="text-xs font-medium text-ink-mid block mb-1">Имя</label>
@@ -218,23 +227,6 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
                 handleChange();
               }}
             />
-          </div>
-          <div>
-            <label htmlFor="client-phone" className="text-xs font-medium text-ink-mid block mb-1">Телефон</label>
-            {/* GH #414: PhoneField composite — country selector + grouped
-                national remainder; inline completeness error under the field
-                (changed numbers only) per the screen's error pattern. */}
-            <PhoneField
-              id="client-phone"
-              value={phone}
-              onChange={handlePhoneChange}
-              inputTestId="client-phone-input"
-            />
-            {phoneError && (
-              <span role="alert" className="text-xs block mt-1" style={{ color: 'var(--danger)' }}>
-                {phoneError}
-              </span>
-            )}
           </div>
           <div>
             <label htmlFor="client-channel" className="text-xs font-medium text-ink-mid block mb-1">Канал</label>
@@ -266,6 +258,23 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
                 handleChange();
               }}
             />
+          </div>
+          <div className="col-span-2 md:col-span-3">
+            <label htmlFor="client-phone" className="text-xs font-medium text-ink-mid block mb-1">Телефон</label>
+            {/* GH #414: PhoneField composite — country selector + grouped
+                national remainder; inline completeness error under the field
+                (changed numbers only) per the screen's error pattern. */}
+            <PhoneField
+              id="client-phone"
+              value={phone}
+              onChange={handlePhoneChange}
+              inputTestId="client-phone-input"
+            />
+            {phoneError && (
+              <span role="alert" className="text-xs block mt-1" style={{ color: 'var(--danger)' }}>
+                {phoneError}
+              </span>
+            )}
           </div>
         </div>
       </div>

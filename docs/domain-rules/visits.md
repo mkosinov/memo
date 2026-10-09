@@ -9,7 +9,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 | id | string | ✅ | — | — | — | Primary key (response only) |
 | record_id | string | ✅ | — | — | — | FK to Record |
 | visitor_id | string | ❌ | — | — | null | FK to Visitor (null = seat without named guest) |
-| tariff_id | string | ❌ | — | — | null | FK to Tariff |
+| tariff_id | string | ❌ | — | — | null | FK to Tariff (`ondelete=SET NULL` — GH #357: tariff deletion nulls the link; the visit row and its price survive) |
 | price | integer | ✅ | 0 | — | — | Цена посещения (Field(ge=0)) |
 | custom_price | integer | ❌ | — | — | null | Ручная цена (переопределяет тариф) |
 | status | enum | ❌ | — | — | waiting | VisitStatus |
@@ -24,6 +24,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 - record_id must reference existing Record (FK enforced; create returns 404 if parent missing)
 - Seats of parent Record = count of active Visits (always computed, never user-set)
 - Cascade hard-delete: Visit is hard-deleted on parent Record delete
+- price is a creation-time snapshot — never derived from the tariff at read time (GH #357); the `tariff_id` link is informational (badge display + edit-time re-pick), and a Visit survives its tariff's deletion (`ondelete=SET NULL`)
 
 ## Business Logic
 
@@ -53,7 +54,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 ## Relationships
 - Visit → belongs to Record (record_id)
 - Visit → references a Visitor (visitor_id, nullable)
-- Visit → references a Tariff (tariff_id, nullable)
+- Visit → references a Tariff (tariff_id, nullable, `ondelete=SET NULL` — GH #357)
 - Name/age are properties of the **Visitor**, not the Visit — edit them via `PUT /api/v1/visitors/:id`, while tariff/price/status go through `PATCH /api/v1/visits/:id`
 
 ## Enums & Constants

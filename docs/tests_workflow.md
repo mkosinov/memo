@@ -76,14 +76,13 @@ Where each run mode gets its env from:
   (`playwright.config.ts` loads `.env.test` via `process.loadEnvFile`, which
   never overrides already-set variables). No conflict is possible in this mode.
 - **Standalone (`pnpm exec playwright test --project=shard-rest`)**: vars come
-  from your shell plus `frontend/admin/.env.test` defaults. The GH #209
-  conflict error fires only here — when you also set `SHARD_ID` manually while
-  `.env.test` still carries a pre-sharding `TEST_DB_PATH` line. Fix on your
-  machine: delete the stale `TEST_DB_PATH` line from your local
-  `frontend/admin/.env.test` (the file is untracked — every machine owns its
-  own copy). Keep `NEXT_PUBLIC_API_URL` there: it is baked into the Next.js
-  bundle at compile time and must match how you open the page (localhost vs
-  127.0.0.1 cookies — #387).
+  from your shell plus `frontend/admin/.env.test` defaults. The file is
+  tracked (identical on every machine) and keeps only
+  `NEXT_PUBLIC_API_URL` — it is baked into the Next.js bundle at compile
+  time and must match how you open the page (localhost vs 127.0.0.1
+  cookies — #387). The pre-sharding `TEST_DB_PATH` line was dropped from
+  the file (GH #336): the GH #209 conflict error now fires only when you
+  export BOTH vars yourself with different paths — unset one of them.
 
 ## How to run
 

@@ -10,7 +10,7 @@ dry_run/commit fork (spec #324 §4.3); their title stays freely editable
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy import asc
 
 from src.api.v1._delete_family import (
@@ -177,7 +177,7 @@ async def delete_position(
     session: SessionDep,
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     position = dependent subject — mirror of the tags route #318 D2).
 
@@ -235,7 +235,7 @@ async def delete_position(
         deps = await collect_dependencies(session, Position, position_id)
         if deps:
             return dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
@@ -260,3 +260,4 @@ async def delete_position(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not ok:
         raise _not_found()
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

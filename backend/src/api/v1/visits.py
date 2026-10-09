@@ -4,7 +4,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.v1._delete_family import (
@@ -52,7 +52,7 @@ _WRITE_GUARD = [
 ]
 
 
-def _map_visit(visit) -> VisitResponse:
+def _map_visit(visit: Visit) -> VisitResponse:
     """Map a Visit ORM object to VisitResponse."""
 
     def _dt_to_str(dt: datetime | None) -> str:
@@ -248,7 +248,7 @@ async def delete_visit(
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
     scope: ScopeContext = Depends(get_scope),
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     leaf subject — mirror of the records/tags routes #285/#318).
 
@@ -280,7 +280,7 @@ async def delete_visit(
         deps = await collect_dependencies(session, Visit, visit_id)
         if deps:  # defensive — a leaf has no counters wired
             return dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only.
+        return Response(status_code=204)  # preview only.
 
     # Body branch: the deferred-delete commit. Expected verification is
     # a no-op for a leaf (no id-collectors) — the body contract still
@@ -294,6 +294,7 @@ async def delete_visit(
                 message="Visit not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.
 
 
 @router.put("/{visit_id}/status", response_model=VisitResponse, dependencies=_WRITE_GUARD)

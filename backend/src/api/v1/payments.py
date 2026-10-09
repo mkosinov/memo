@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.v1._delete_family import (
@@ -153,7 +153,9 @@ async def get_payment(
                 message="Payment not found",
             ).model_dump(),
         )
-    return payment
+    # ``get_scoped`` returns the ORM row — validate here (the route's
+    # ``response_model`` re-validates anyway; byte-identical output).
+    return PaymentResponse.model_validate(payment)
 
 
 @router.post("", response_model=PaymentResponse, status_code=201,
@@ -230,7 +232,7 @@ async def delete_payment(
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
     scope: ScopeContext = Depends(get_scope),
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     leaf subject — mirror of the records/tags routes #285/#318).
 
@@ -258,7 +260,7 @@ async def delete_payment(
         deps = await collect_dependencies(session, Payment, payment_id)
         if deps:  # defensive — a leaf has no counters wired
             return dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only.
+        return Response(status_code=204)  # preview only.
 
     # Body branch: the deferred-delete commit (expected verification is
     # a no-op for a leaf — the body contract still demands ``{}``).
@@ -271,3 +273,4 @@ async def delete_payment(
                 message="Payment not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

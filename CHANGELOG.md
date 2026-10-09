@@ -164,6 +164,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     repositories/generic 15 / schemas 9 / main.py 7 / models 3 / auth 3 / cli 2 /
     domain/record_visits 2 / core 1 — следующая волна 3: api (~77).
   - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave2-admin.md`
+- **GH #306 — mypy-волна 3 api, Task 6 (семья `src/api/` → 0, одним под-PR)** — branch
+  `306-mypy-api-1` (1 коммит `82ec6133`, base `f2f09896`; 17 файлов, +165/−78; Refs #306 —
+  multi-wave, не закрывает; план Task 6, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** семья `src/api/` = 15 файлов, 76 → 0 (records 13, clients 10,
+    tags/services/materials/activities 6×4, staff/locations 5+5, visitors 4,
+    visits/position/photos/payments 3×4, user_settings 2, `_delete_family` 1); под-PR 2 не
+    нужен — семья завершена целиком одним под-PR.
+  - **Пороги:** **mypy 170 → 94** (−76), порог в скрипте переснят = факту; ruff 119 per-rule
+    == baseline (B008=0), не менялся.
+  - **Подавления:** 6 пар `# type: ignore[misc]`+`[arg-type]` на selfless-сценариях
+    `@transactional` (records ×4, clients ×1, activities ×1; прецедент GH #171, все с
+    обоснованиями); `decorators.py` не тронут (#394), семья services осталась на 0.
+  - **Идиомы вместо подавлений:** delete-family роуты `-> None` → `-> Response` + явный
+    `Response(status_code=204)` (FastAPI 0.141 ассертит 204-без-тела для `Response | None`;
+    комплаенс-ревью: статус/тело/заголовки идентичны, OpenAPI байт-идентичен, контракт-сьют
+    пиннит 204 + `b""`); `deps: list[DependencyNode]`; `Annotated[VisitorService]` вместо
+    `any`; `PaymentResponse.model_validate` (from_attributes).
+  - **Поддерживающее изменение:** `UserSettingsService.update_by_user_id` расширен до
+    `UserSettingsUpdate | UserSettingsPatch` (поля идентичны, call-sites не менялись).
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped** (+33
+    `test_lint_budget`); контракт-сьют 244/0/3; гейты зелёные (mypy 94 == порог, ruff 119);
+    ревью — комплаенс ✅, качество approved.
+  - **Остаток mypy-долга 94 по семьям:** domain/deletion 26 / seed 26 /
+    repositories/generic 15 / schemas 9 / main.py 7 / models 3 / auth 3 /
+    domain/record_visits 2 / cli 2 / core/config 1 — следующая волна 4: хвосты
+    (план Task 7, финальная волна #306).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave3-api.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

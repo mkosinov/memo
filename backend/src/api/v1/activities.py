@@ -4,7 +4,7 @@ from datetime import date
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.auth.scope import ScopeContext, get_optional_scope
 from src.db import SessionDep
 from src.domain.deletion import (
+    DependencyNode,
     collect_dependencies,
     collect_dependency_ids,
     stale_expected_entities,
@@ -60,11 +61,22 @@ _WRITE_GUARD = [
 async def _to_response(
     service: ActivityService,
     db_session: AsyncSession,
-    activity,
+    activity: Activity | ActivityResponse,
 ) -> ActivityResponse:
-    """Single-activity response (computes occupied via one SUM)."""
+    """Single-activity response (computes occupied via one SUM).
+
+    ``activity`` arrives either already validated (``ActivityResponse``
+    from create/update/patch) or as the ORM row (``get_scoped``) — the
+    ORM row is validated HERE so ``occupied`` is set on the response
+    schema in both flows (byte-identical output: the route's
+    ``response_model`` re-validates either way).
+    """
     occupied = await service.sum_active_seats(db_session=db_session, activity_id=activity.id)
-    return _map_response(activity, occupied)
+    return _map_response(
+        activity if isinstance(activity, ActivityResponse)
+        else ActivityResponse.model_validate(activity),
+        occupied,
+    )
 
 
 def _map_response(activity: ActivityResponse, occupied: int) -> ActivityResponse:
@@ -214,7 +226,7 @@ async def partial_update_activity(
     return await _to_response(service, db_session=session, activity=activity)
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}`` —
     mirror of the records route's builder (#285, same pinned shape).
 
@@ -251,7 +263,7 @@ async def delete_activity(
             )
         ),
     ] = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body (#286 D2).
 
     Full mirror of the records route (GH #285 rev7/rev8): the legacy
@@ -330,7 +342,7 @@ async def delete_activity(
         deps = await collect_dependencies(session, Activity, activity_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no delete scenario, no SSE marks.
+        return Response(status_code=204)  # preview only: no delete scenario, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
@@ -343,8 +355,10 @@ async def delete_activity(
     # Match → execution by the usecases scenario (GH #325 Task 4): the
     # records cascade, photo SET NULL, join rows — the selfless call
     # convention, the ``api/v1/records.py`` precedent.
-    deleted = await delete_activity_scenario(
-        None, db_session=session, id=activity_id,
+    deleted = await delete_activity_scenario(  # type: ignore[misc]
+        None,  # type: ignore[arg-type]
+        db_session=session,
+        id=activity_id,
     )
     if not deleted:
         raise HTTPException(
@@ -354,3 +368,4 @@ async def delete_activity(
                 message="Activity not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

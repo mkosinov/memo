@@ -3,13 +3,14 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import (
+    DependencyNode,
     ResolutionError,
     collect_dependencies,
     collect_dependency_ids,
@@ -261,7 +262,7 @@ async def delete_location(
             )
         ),
     ] = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body
     (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2).
 
@@ -337,7 +338,7 @@ async def delete_location(
         deps = await collect_dependencies(session, Location, location_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
@@ -368,9 +369,10 @@ async def delete_location(
                 message="Location not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}``.
 
     Mirror of the tags/records/activities routes' builder (#285/#286/

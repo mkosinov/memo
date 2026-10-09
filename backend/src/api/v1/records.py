@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.auth.scope import ScopeContext, get_optional_scope, get_scope
 from src.db import SessionDep
 from src.domain.deletion import (
+    DependencyNode,
     ResolutionError,
     StaleDependenciesError,
     collect_dependencies,
@@ -186,7 +187,11 @@ async def create_record(
     # master scope through UNCHANGED (scoped access was already gated on
     # the target activity above). Leading None = the @transactional
     # wrapper's unused self slot (selfless-function convention).
-    record = await create_record_scenario(None, db_session=session, data=data)
+    record = await create_record_scenario(  # type: ignore[misc]
+        None,  # type: ignore[arg-type]
+        db_session=session,
+        data=data,
+    )
     return map_record(record)
 
 
@@ -233,8 +238,11 @@ async def update_record(
     # recalculation + capacity re-check) lives in the usecases layer —
     # the route stays transport-only. Leading None = the @transactional
     # wrapper's unused self slot (selfless-function convention).
-    record = await update_record_scenario(
-        None, db_session=session, id=record_id, data=data,
+    record = await update_record_scenario(  # type: ignore[misc]
+        None,  # type: ignore[arg-type]
+        db_session=session,
+        id=record_id,
+        data=data,
     )
     if not record:
         raise HTTPException(
@@ -260,8 +268,11 @@ async def patch_record(
     # Corridor 2 (GH #171 Task 4): the partial-update chain lives in the
     # usecases layer — same convention as PUT above (selfless scenario,
     # keyword args; RecordPatch carries no activity_id → no re-target gate).
-    record = await patch_record_scenario(
-        None, db_session=session, id=record_id, data=data,
+    record = await patch_record_scenario(  # type: ignore[misc]
+        None,  # type: ignore[arg-type]
+        db_session=session,
+        id=record_id,
+        data=data,
     )
     if not record:
         raise HTTPException(
@@ -274,7 +285,7 @@ async def patch_record(
     return map_record(record)
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}``.
 
     ``detail`` distinguishes the two 409s of the deferred-delete contract
@@ -311,7 +322,7 @@ async def delete_record(
         ),
     ] = None,
     scope: ScopeContext = Depends(get_scope),
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body (rev7, #285).
 
     Mirrors the masters/clients routes (GH #139, Addendum 13); #285 rev7
@@ -375,7 +386,7 @@ async def delete_record(
         deps = await collect_dependencies(session, Record, record_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no service.delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no service.delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete — the business chain
     # lives in the usecases scenario (GH #171 Task 5, Corridor 2): the
@@ -384,9 +395,12 @@ async def delete_record(
     # resolutions, and runs the cascade; the ROUTE keeps only transport —
     # the 409 stale_dependencies rendering, the 422 mapping, and 404.
     try:
-        ok = await delete_record_scenario(
-            None, db_session=session, id=record_id,
-            resolutions=resolutions, expected=expected,
+        ok = await delete_record_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
+            db_session=session,
+            id=record_id,
+            resolutions=resolutions,
+            expected=expected,
         )
     except StaleDependenciesError as exc:
         return _dependencies_response(exc.nodes, detail="stale_dependencies")
@@ -400,3 +414,4 @@ async def delete_record(
                 message="Record not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

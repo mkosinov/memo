@@ -98,12 +98,15 @@ pty_read(id="pty_xxx", offset=600, limit=100)
 
 ### Suite durations — SLA for the tester's timeout cap
 
-The tester's timeout cap on a suite = `max(30 min, 2 × expected duration)`. Keep this table
-updated after each run so legitimately long suites are never killed by the cap:
+The tester's timeout cap on a suite = `max(30 min, 2 × expected duration)`, where "expected" is
+the table's WORST case, not the idle number — under concurrent suites a run slows down, and a
+cap sized from the idle time kills a legitimate run (the timeout then masquerades as a test
+failure). Keep this table updated after each run so legitimately long suites are never killed
+by the cap:
 
 | Suite | Command | Expected duration | Notes |
 |---|---|---|---|
-| Backend full (pytest) | `cd backend && uv run pytest` | ~2-5 min | last observed: ~141s / 1138 tests |
+| Backend full (pytest) | `cd backend && uv run pytest` | ~30-40 min | 2026-09 observations: ~29 min under concurrent suites (#338 / PR #334), ~36 min idle (#382); the suite grows — re-measure after big waves; cap ≥ 1 h |
 | Frontend unit (vitest) | `cd frontend/admin && pnpm run test` | ~1-3 min | |
 | Frontend all (vitest + visual) | `cd frontend/admin && npm run test:all` | ~5-10 min | |
 | E2E single/few specs (standalone) | `pnpm exec playwright test e2e/<spec>.ts` | ~2-5 min | + first-hit Next.js route compilation |
@@ -111,6 +114,9 @@ updated after each run so legitimately long suites are never killed by the cap:
 
 Timings are estimates — update the table with measured values after full-suite runs; the cap is
 2×, so a suite listed at 20 min gets a 40-min circuit-breaker, not a 30-min budget.
+When several suites run on the same box at once (e.g. a full backend run plus vitest/e2e
+shards), each runs slower than its idle number: size caps from the worst case and never treat
+a slow-but-alive run as a hang (see the tester's stall probe).
 
 ### When PTY exits
 - Process completes → `<pty_exited>` message arrives

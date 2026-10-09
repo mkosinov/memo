@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-10
+
+### Added
+- **GH #311 — Обязательная секция Visual Compliance Checks в дизайн-спеках (harness-контракт
+  визуального комплаенса)** — branch `311-visual-compliance-section` (11 коммитов
+  `bc57e80e..4b338599`, base `a42edf14`; 13 файлов, +794/−117; спека
+  `docs/specs/2026-10-08-visual-compliance-spec-section-311-design.md` rev4 и план
+  `docs/plans/2026-10-08-visual-compliance-spec-section-311-plan.md` — 10/10 задач; прод-код,
+  контракты API и БД не тронуты):
+  - **Контракт:** каждая дизайн-спека несёт секцию `## Visual Compliance Checks` — чек-лист
+    пунктов с машинными подсказками (`data-testid` / `aria-*` / «цитируемый текст») либо
+    N/A-маркер (`N/A` / `- N/A`, ASCII-дефис, единственная содержательная строка секции,
+    регистронезависимо); парсер (`scripts/visual-compliance-parser.js`) отдаёт
+    `{applicable, checks}`.
+  - **Отказные пути:** секция отсутствует / пуста / без подсказок → **exit 3** —
+    детерминированный возврат карточки в In Design с git-анти-тампер стражем
+    (`scripts/visual-compliance-check.sh`); N/A → «не применимо» + **exit 0** до любых
+    стадий зависимостей/сервера; канон exit-кодов 0/1/2/3 — в шапке скрипта.
+  - **rev4 (решение пользователя 2026-10-09, гейт G4.5 вариант B):** навигационная подсказка
+    `url="/абсолютный/путь"` на пункте чек-листа — Playwright-раннер проверяет не-корневые
+    экраны (проба — `url="/login"` → phone-input).
+  - **Инфра тестов:** parser node-тесты (`scripts/test-visual-compliance-parser.js`) + bash
+    smoke (`scripts/visual-compliance-check.smoke.test.sh`) включены в `scripts/test-all.sh`.
+  - **Доки харнесса:** хост — канон секции в `.zcode/skills/design-phase/SKILL.md` + указатель
+    в `.zcode/skills/auto-design/SKILL.md`; контейнер — маршруты кода 3 в
+    `.opencode/agents/architect.md`, `.opencode/agents/manager.md`,
+    `.opencode/skills/subagent-driven-development/SKILL.md`; зеркально в superagents
+    framework repo (отдельные коммиты `b06217f`, `3ef2c27` — локально, вне ветки).
+  - **Tests:** полный test-all на итоговом дереве — pytest **3179p/15s/0f**, lint и typecheck
+    exit 0, vitest **3013/3013** (TZ=UTC; 3 in-suite load-флейка переподтверждены зелёными
+    изолированно), e2e shard-schedule **116/116**, shard-rest **356/356**, parser node-тесты ✓,
+    VC smoke ✓ (US-2 exit 0 / US-3 exit 3), US-4 canary exit 0 (1 автоматизируемый PASSED,
+    8 пунктов на ручную сверку).
+  - Status: `docs/status/2026-10-10-visual-compliance-section-311.md`
+
 ## [Unreleased] — 2026-10-09
 
 ### Added

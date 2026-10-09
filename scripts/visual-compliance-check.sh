@@ -14,10 +14,22 @@
 #   output-dir       Where to save screenshots (default: /tmp/visual-compliance)
 #   viewport         "mobile" (390x844) or "desktop" (default: mobile)
 #
-# Exit codes:
-#   0  All automatable checks passed (MANUAL_REVIEW items do not fail the gate)
-#   1  One or more automatable checks genuinely failed
-#   2  Usage error, missing dependency, or dev server unreachable
+# Exit codes (single canon of the gate's codes — callers follow this table):
+#   0  Green: all automatable checks passed (MANUAL_REVIEW items do not fail
+#      the gate), OR the spec's visual checks section is marked N/A
+#      (not applicable — the gate exits before dependency, server,
+#      Playwright, and report stages)
+#   1  Red: one or more automatable checks genuinely failed
+#   2  Infrastructure/usage failure: bad arguments, missing dependency,
+#      spec file not found, parser crash, or dev server unreachable
+#   3  Spec gap (return the card to design): the visual checks section is
+#      missing, empty, or contains no machine-usable hints — the spec
+#      section must be (re)designed in the design phase, not patched here
+#
+# Stage order: arguments → spec file exists → parse → branch
+#   (N/A → print verdict, exit 0 immediately) →
+#   (no section / empty / zero machine hints → exit 3) →
+#   (applicable with hints → deps → server pre-flight → Playwright → report)
 #
 # Parsing policy (see visual-compliance-parser.js):
 #   Checkbox prose is NEVER used as a CSS selector or raw text locator.
@@ -25,6 +37,8 @@
 #   machine-usable hint (quoted UI string, data-testid, aria-label/role
 #   attribute, `aria-sort`-style mention). Lines without a hint are reported
 #   as MANUAL_REVIEW and do not affect the exit code.
+#   checks.json shape (parser contract): { "applicable": bool, "checks": [...] }
+#   — applicable=false ⇔ the section carries the N/A marker.
 #
 # Example:
 #   ./visual-compliance-check.sh http://localhost:3000 docs/specs/schedule-design.md /tmp/vc-schedule mobile
@@ -53,6 +67,87 @@ PHASE_NAME=$(basename "$SPEC_FILE" .md | sed 's/-design//g' | sed 's/-spec//g')
 PHASE_DIR="$OUTPUT_DIR/$PHASE_NAME"
 REPORT_FILE="$OUTPUT_DIR/visual-compliance-report.md"
 
+# --- Spec File Check -----------------------------------------------------------
+
+if [ ! -f "$SPEC_FILE" ]; then
+    echo "ERROR: Spec file not found: $SPEC_FILE" >&2
+    exit 2
+fi
+
+# --- Extract Checks from Spec -------------------------------------------------
+# The spec file should contain a "## Visual Compliance Checks" section
+# with checkboxes describing UI elements to verify.
+#
+# Example:
+#   ## Visual Compliance Checks
+#   - [ ] "Сегодня" tab is visible on main page
+#   - [ ] "Завтра" tab is visible on main page
+#   - [ ] "Календарь" tab opens date picker overlay
+#   - [ ] Filter pills are visible below tabs
+#
+# Each check gets a list of machine-usable `targets` (quoted UI strings,
+# data-testid/aria-label/role attributes). Prose-only lines get zero targets
+# and are reported as MANUAL_REVIEW. See visual-compliance-parser.js.
+#
+# The parser writes { "applicable": bool, "checks": [...] }:
+#   applicable=false        ⇔ section carries the N/A marker → gate not applicable
+#   checks=[] (applicable)  ⇔ section missing or empty
+#   zero machine hints      ⇔ prose-only section (no check has a non-empty
+#                             targets array) — needs design, not automation.
+
+echo ""
+echo "--- Parsing spec for visual checks..."
+
+mkdir -p "$PHASE_DIR"
+CHECKS_FILE="$PHASE_DIR/checks.json"
+
+# Overwrite at the START of every run: a stale checks.json from a previous
+# run must never survive this one (especially not past a parser failure).
+: > "$CHECKS_FILE"
+
+# A parser failure is an infrastructure failure (exit 2), never silently
+# ignored and never mistaken for a spec gap.
+set +e
+node "$SCRIPT_DIR/visual-compliance-parser.js" "$SPEC_FILE" "$CHECKS_FILE"
+PARSE_EXIT=$?
+set -e
+if [ "$PARSE_EXIT" -ne 0 ]; then
+    echo "ERROR: Spec parser failed (exit $PARSE_EXIT). Infrastructure failure — no checks were evaluated." >&2
+    exit 2
+fi
+
+# Read the parser verdict: applicability, check count, machine-hint count.
+# Paths go to node as process arguments, never interpolated into JS source.
+PARSE_SUMMARY=$(node -e '
+const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const checks = Array.isArray(j.checks) ? j.checks : [];
+const hints = checks.filter((c) => Array.isArray(c.targets) && c.targets.length > 0).length;
+console.log((j.applicable ? "true" : "false") + " " + checks.length + " " + hints);
+' "$CHECKS_FILE") || { echo "ERROR: Failed to read parser output: $CHECKS_FILE" >&2; exit 2; }
+read -r APPLICABLE CHECKS_COUNT MACHINE_HINTS <<< "$PARSE_SUMMARY"
+
+# --- Branch: applicability verdict (before deps / server / Playwright) --------
+
+if [ "$APPLICABLE" != "true" ]; then
+    echo ""
+    echo "Spec section marked N/A — visual compliance gate not applicable, skipped."
+    exit 0
+fi
+
+if [ "$CHECKS_COUNT" -eq 0 ] || [ "$MACHINE_HINTS" -eq 0 ]; then
+    echo "" >&2
+    if [ "$CHECKS_COUNT" -eq 0 ]; then
+        echo "ERROR (exit 3): Spec '$SPEC_FILE' has no visual checks section (or the section is empty)." >&2
+    else
+        echo "ERROR (exit 3): Spec '$SPEC_FILE' has $CHECKS_COUNT visual check(s) but none carries a machine-usable hint (data-testid / aria-label / quoted UI text)." >&2
+    fi
+    echo "The design spec's visual checks section must be redesigned in the design phase:" >&2
+    echo "return the implementation card to design (In Design). Do not patch the spec from implementation." >&2
+    exit 3
+fi
+
+echo "Found $CHECKS_COUNT visual checks ($MACHINE_HINTS with machine-usable hints)"
+
 # --- Dependencies Check -------------------------------------------------------
 
 if ! command -v npx &>/dev/null; then
@@ -62,11 +157,6 @@ fi
 
 if ! npx playwright --version &>/dev/null 2>&1; then
     echo "ERROR: Playwright not found. Install: npm install -D @playwright/test" >&2
-    exit 2
-fi
-
-if [ ! -f "$SPEC_FILE" ]; then
-    echo "ERROR: Spec file not found: $SPEC_FILE" >&2
     exit 2
 fi
 
@@ -108,37 +198,6 @@ if command -v curl &>/dev/null; then
     echo "Dev server reachable (HTTP $HTTP_CODE)"
 fi
 
-# --- Extract Checks from Spec -------------------------------------------------
-# The spec file should contain a "## Visual Compliance Checks" section
-# with checkboxes describing UI elements to verify.
-#
-# Example:
-#   ## Visual Compliance Checks
-#   - [ ] "Сегодня" tab is visible on main page
-#   - [ ] "Завтра" tab is visible on main page
-#   - [ ] "Календарь" tab opens date picker overlay
-#   - [ ] Filter pills are visible below tabs
-#
-# Each check gets a list of machine-usable `targets` (quoted UI strings,
-# data-testid/aria-label/role attributes). Prose-only lines get zero targets
-# and are reported as MANUAL_REVIEW. See visual-compliance-parser.js.
-
-echo ""
-echo "--- Parsing spec for visual checks..."
-
-CHECKS_FILE="$PHASE_DIR/checks.json"
-
-node "$SCRIPT_DIR/visual-compliance-parser.js" "$SPEC_FILE" "$CHECKS_FILE" || true
-
-if [ ! -f "$CHECKS_FILE" ]; then
-    echo "WARNING: No visual checks found in spec. Add a '## Visual Compliance Checks' section." >&2
-    # Create empty checks array so the script can still run screenshots
-    echo "[]" > "$CHECKS_FILE"
-fi
-
-CHECKS_COUNT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$CHECKS_FILE')).length)")
-echo "Found $CHECKS_COUNT visual checks"
-
 # --- Playwright Script --------------------------------------------------------
 
 PLAYWRIGHT_SCRIPT="$PHASE_DIR/run-checks.js"
@@ -157,7 +216,13 @@ const fs = require('fs');
     const phaseDir = args[2];
     const viewportType = args[3] || 'mobile';
 
-    const checks = JSON.parse(fs.readFileSync(checksFile, 'utf8'));
+    // Parser contract (GH #311): checks.json is an OBJECT
+    // { "applicable": bool, "checks": [...] } — the runner consumes .checks.
+    // rev4: a check may carry an optional top-level `url` (absolute path) —
+    // a navigation hint, never a target (does not make a check automatable);
+    // it only tells the runner which page to evaluate the check on.
+    const payload = JSON.parse(fs.readFileSync(checksFile, 'utf8'));
+    const checks = Array.isArray(payload) ? payload : payload.checks;
     const results = {
         phase: require('path').basename(phaseDir),
         url: devUrl,
@@ -222,6 +287,9 @@ const fs = require('fs');
         await page.goto(devUrl, { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(1000); // let animations settle
         await captureScreenshot('01-initial-load', true);
+        // Navigation cache (rev4): the effective URL the page is on now.
+        // Checks without a `url` hint evaluate on the root, as before.
+        let lastUrl = devUrl;
 
         // 2. Run target checks
         for (const check of checks) {
@@ -249,6 +317,21 @@ const fs = require('fs');
             let screenshotPath = null;
 
             try {
+                // Per-check navigation (rev4): url="/absolute/path" hint makes
+                // the check evaluate on that page instead of the root. Only
+                // automatable checks reach here — MANUAL_REVIEW items
+                // continue()d above and are never navigated. goto fires only
+                // when the effective URL changed (navigation cache); a goto
+                // failure lands in the catch below → this check FAILED, the
+                // run continues (exit 1 at the end, as for any failed check).
+                const effectiveUrl = check.url ? new URL(check.url, devUrl).href : devUrl;
+                if (effectiveUrl !== lastUrl) {
+                    console.log('  Navigating to ' + effectiveUrl + ' (url hint)');
+                    await page.goto(effectiveUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                    await page.waitForTimeout(1000); // let animations settle
+                    lastUrl = effectiveUrl;
+                }
+
                 const perTarget = [];
                 for (const t of targets) {
                     const loc = locatorFor(page, t);
@@ -341,74 +424,79 @@ set -e
 echo ""
 echo "--- Generating report..."
 
-node -e "
-const fs = require('fs');
-const results = JSON.parse(fs.readFileSync('$PHASE_DIR/results.json', 'utf8'));
+# Paths are passed as process arguments (argv), never interpolated into the
+# JS source (node -e hygiene).
+node -e '
+const fs = require("fs");
+const resultsFile = process.argv[1];
+const phaseDir = process.argv[2];
+const reportFile = process.argv[3];
+const results = JSON.parse(fs.readFileSync(resultsFile, "utf8"));
 
-let md = '# Visual Compliance Report\n\n';
-md += '**Phase:** ' + results.phase + '  \n';
-md += '**URL:** ' + results.url + '  \n';
-md += '**Viewport:** ' + results.viewport + '  \n';
-md += '**Timestamp:** ' + results.timestamp + '  \n\n';
+let md = "# Visual Compliance Report\n\n";
+md += "**Phase:** " + results.phase + "  \n";
+md += "**URL:** " + results.url + "  \n";
+md += "**Viewport:** " + results.viewport + "  \n";
+md += "**Timestamp:** " + results.timestamp + "  \n\n";
 
-md += '## Summary\n\n';
-md += '| Metric | Count |\n';
-md += '|--------|-------|\n';
-md += '| Total Checks | ' + results.summary.total + ' |\n';
-md += '| Passed | ' + results.summary.passed + ' |\n';
-md += '| Failed | ' + results.summary.failed + ' |\n';
-md += '| Manual Review | ' + results.summary.manual_review + ' |\n\n';
+md += "## Summary\n\n";
+md += "| Metric | Count |\n";
+md += "|--------|-------|\n";
+md += "| Total Checks | " + results.summary.total + " |\n";
+md += "| Passed | " + results.summary.passed + " |\n";
+md += "| Failed | " + results.summary.failed + " |\n";
+md += "| Manual Review | " + results.summary.manual_review + " |\n\n";
 
 if (results.summary.failed === 0) {
-    md += '\\u2705 **ALL AUTOMATABLE CHECKS PASSED**\n\n';
+    md += "\u2705 **ALL AUTOMATABLE CHECKS PASSED**\n\n";
     if (results.summary.manual_review > 0) {
-        md += '\\u26a0 **' + results.summary.manual_review + ' check(s) require MANUAL REVIEW** \\u2014 human sign-off needed for those items.\n\n';
+        md += "\u26a0 **" + results.summary.manual_review + " check(s) require MANUAL REVIEW** \u2014 human sign-off needed for those items.\n\n";
     }
 } else {
-    md += '\\u274c **' + results.summary.failed + ' AUTOMATABLE CHECK(S) FAILED**\n\n';
+    md += "\u274c **" + results.summary.failed + " AUTOMATABLE CHECK(S) FAILED**\n\n";
 }
 
 if (results.fatalError) {
-    md += '**Fatal Error:** ' + results.fatalError + '\n\n';
+    md += "**Fatal Error:** " + results.fatalError + "\n\n";
 }
 
-md += '## Screenshots\n\n';
-md += '| Name | File |\n';
-md += '|------|------|\n';
+md += "## Screenshots\n\n";
+md += "| Name | File |\n";
+md += "|------|------|\n";
 for (const ss of results.screenshots) {
-    md += '| ' + ss.name + ' | ' + ss.path + ' |\n';
+    md += "| " + ss.name + " | " + ss.path + " |\n";
 }
-md += '\n';
+md += "\n";
 
-md += '## Element Checks\n\n';
-md += '| # | Description | Selector/Text Used | Status | Details | Screenshot |\n';
-md += '|---|-------------|--------------------|--------|---------|------------|\n';
+md += "## Element Checks\n\n";
+md += "| # | Description | Selector/Text Used | Status | Details | Screenshot |\n";
+md += "|---|-------------|--------------------|--------|---------|------------|\n";
 let i = 1;
 for (const check of results.checks) {
-    const statusEmoji = check.status === 'passed' ? '\\u2705' : (check.status === 'failed' ? '\\u274c' : '\\u26a0');
-    md += '| ' + i + ' | ' + check.description + ' | ' + (check.selector || '-') + ' | ' + statusEmoji + ' ' + check.status.toUpperCase() + ' | ' + (check.details || '-') + ' | ' + (check.screenshot ? check.screenshot.replace('$PHASE_DIR/', '') : '-') + ' |\n';
+    const statusEmoji = check.status === "passed" ? "\u2705" : (check.status === "failed" ? "\u274c" : "\u26a0");
+    md += "| " + i + " | " + check.description + " | " + (check.selector || "-") + " | " + statusEmoji + " " + check.status.toUpperCase() + " | " + (check.details || "-") + " | " + (check.screenshot ? check.screenshot.replace(phaseDir + "/", "") : "-") + " |\n";
     i++;
 }
-md += '\n';
+md += "\n";
 
-md += '## Next Steps\n\n';
+md += "## Next Steps\n\n";
 if (results.summary.failed > 0) {
-    md += '**Visual compliance FAILED.**\n\n';
-    md += 'Options:\n';
-    md += '1. **Fix and re-run:** Address the failing checks, then re-run this gate.\n';
-    md += '2. **Override and proceed:** User explicitly approves overriding the failure and continuing to Step 5 (Documentation Commit).\n';
-    md += '3. **Abort:** Stop and reassess the implementation plan.\n\n';
-    md += '**Screenshots saved to:** \`$PHASE_DIR/screenshots/\`\n';
+    md += "**Visual compliance FAILED.**\n\n";
+    md += "Options:\n";
+    md += "1. **Fix and re-run:** Address the failing checks, then re-run this gate.\n";
+    md += "2. **Override and proceed:** User explicitly approves overriding the failure and continuing to Step 5 (Documentation Commit).\n";
+    md += "3. **Abort:** Stop and reassess the implementation plan.\n\n";
+    md += "**Screenshots saved to:** \`" + phaseDir + "/screenshots/\`\n";
 } else {
-    md += '**Visual compliance PASSED.** Proceed to Step 5 (Documentation Commit).\n';
+    md += "**Visual compliance PASSED.** Proceed to Step 5 (Documentation Commit).\n";
     if (results.summary.manual_review > 0) {
-        md += '\\n**Note:** ' + results.summary.manual_review + ' check(s) are marked MANUAL_REVIEW \\u2014 obtain human sign-off for those items as part of the gate review.\n';
+        md += "\n**Note:** " + results.summary.manual_review + " check(s) are marked MANUAL_REVIEW \u2014 obtain human sign-off for those items as part of the gate review.\n";
     }
 }
 
-fs.writeFileSync('$REPORT_FILE', md);
-console.log('Report written to: $REPORT_FILE');
-"
+fs.writeFileSync(reportFile, md);
+console.log("Report written to: " + reportFile);
+' "$PHASE_DIR/results.json" "$PHASE_DIR" "$REPORT_FILE"
 
 # --- Final Output -------------------------------------------------------------
 
@@ -423,10 +511,11 @@ echo "  Report:       $REPORT_FILE"
 echo ""
 
 if [ $EXIT_CODE -eq 0 ]; then
-    SUMMARY_LINE=$(node -e "const r=JSON.parse(require('fs').readFileSync('$PHASE_DIR/results.json')); console.log(r.summary.passed+' passed, '+r.summary.manual_review+' manual review')")
+    SUMMARY_LINE=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1])); console.log(r.summary.passed+" passed, "+r.summary.manual_review+" manual review")' "$PHASE_DIR/results.json")
     echo "  Result: ALL AUTOMATABLE CHECKS PASSED ($SUMMARY_LINE)"
 else
-    echo "  Result: $CHECKS_COUNT checks, $(node -e "const r=JSON.parse(require('fs').readFileSync('$PHASE_DIR/results.json')); console.log(r.summary.passed+' passed, '+r.summary.failed+' failed, '+r.summary.manual_review+' manual review')")"
+    SUMMARY_LINE=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1])); console.log(r.summary.passed+" passed, "+r.summary.failed+" failed, "+r.summary.manual_review+" manual review")' "$PHASE_DIR/results.json")
+    echo "  Result: $CHECKS_COUNT checks, $SUMMARY_LINE"
     echo ""
     echo "  SOFT BLOCK: Do NOT proceed to Step 5 until resolved or user overrides."
 fi

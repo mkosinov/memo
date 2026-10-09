@@ -58,6 +58,33 @@ Each shard's servers start via `scripts/e2e-shard-start.sh`:
 - The master is re-seeded only if missing or has <5 tables (idempotent guard) — see `scripts/test-all.sh` for the exact check
 - E2E tests query the DB directly via `frontend/admin/e2e/fixtures/db-query.ts` (uses `sqlite3` CLI on `TEST_DB_PATH`)
 
+### TEST_DB_PATH resolution (standalone vs shard, GH #336)
+All e2e DB access funnels through the single resolver `e2e/lib/db-path.ts`
+(`resolveTestDbPath`; consumers: `globalSetup`, `db-query`, `factories`,
+`seed-reset`). Contract:
+
+- `SHARD_ID` set → canonical `<root>/backend/test_memo_shard{id}.db`
+- `TEST_DB_PATH` set → used as-is (relative paths resolve against the repo root, never `process.cwd()`)
+- both set and resolving to DIFFERENT files → loud error naming both vars (GH #209)
+- neither set → default `<root>/backend/test_memo.db`
+- `TEST_DB_PATH=''` (empty string) counts as unset — pinned by a unit test in `__tests__/db-path.test.ts`
+
+Where each run mode gets its env from:
+
+- **Full run (`pnpm test:all`)**: `test-all.sh` exports `TEST_DB_PATH` explicitly
+  per shard, and an exported env var always beats a line in `.env.test`
+  (`playwright.config.ts` loads `.env.test` via `process.loadEnvFile`, which
+  never overrides already-set variables). No conflict is possible in this mode.
+- **Standalone (`pnpm exec playwright test --project=shard-rest`)**: vars come
+  from your shell plus `frontend/admin/.env.test` defaults. The GH #209
+  conflict error fires only here — when you also set `SHARD_ID` manually while
+  `.env.test` still carries a pre-sharding `TEST_DB_PATH` line. Fix on your
+  machine: delete the stale `TEST_DB_PATH` line from your local
+  `frontend/admin/.env.test` (the file is untracked — every machine owns its
+  own copy). Keep `NEXT_PUBLIC_API_URL` there: it is baked into the Next.js
+  bundle at compile time and must match how you open the page (localhost vs
+  127.0.0.1 cookies — #387).
+
 ## How to run
 
 ### Quick (specific test type)

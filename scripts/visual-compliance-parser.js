@@ -15,9 +15,17 @@
  * absence check. Lines without any hint produce zero targets → the runner
  * classifies them as MANUAL_REVIEW instead of failing the gate.
  *
+ * URL HINT (GH #311 rev4, user decision 2026-10-09): a check line may carry
+ * a navigation hint token url="/absolute/path" in any position. It lands in
+ * a separate top-level `url` field of the check object and is NEVER a
+ * target: by itself it neither automates the check nor counts as a machine
+ * hint. The value must be an absolute path (leading "/"); a value without
+ * one is softly ignored (per token, like other hints). The first valid
+ * occurrence in the line wins.
+ *
  * CLI: node visual-compliance-parser.js <spec-file> <output.json>
- *  - writes { "applicable": bool, "checks": [{ description, targets:
- *    [{kind, attr, value, negated}], status }] }
+ *  - writes { "applicable": bool, "checks": [{ description,
+ *    targets: [{kind, attr, value, negated}], status, url? }] }
  *  - exit 0 on success (even with 0 checks), 2 on usage error
  *
  * APPLICABILITY (GH #311): applicable=false ONLY for the N/A marker section.
@@ -41,6 +49,7 @@ const NA_MARKER_RE = /^(?:- )?n\/a$/i;
 const ATTR_RE = /([a-z][a-z0-9_-]*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/gi;
 const BACKTICK_ATTR_RE = /`(aria|data)-[a-z0-9-]+`/gi;
 const QUOTE_RE = /"([^"\n]{1,120})"|'([^'\n]{1,120})'/g;
+const URL_RE = /(?<![a-z0-9_-])url\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/gi;
 const ALLOWED_ATTRS = /^(data-|aria-|role|class|id|name)$/i;
 const NEGATION_RE = /(^|[^a-zа-я0-9])(no|not|without|never|absent|don'?t|doesn'?t|не|без)\s*$/i;
 
@@ -56,6 +65,21 @@ function withinNegation(desc, idx) {
 }
 
 /**
+ * Navigation hint: the first url="…" token whose value is an absolute path
+ * (leading "/"). Invalid values (no leading "/") are softly ignored per
+ * token; returns null when no valid token is present.
+ */
+function extractUrl(desc) {
+    URL_RE.lastIndex = 0;
+    let m;
+    while ((m = URL_RE.exec(desc)) !== null) {
+        const raw = m[1].slice(1, -1);
+        if (raw.startsWith('/')) return raw;
+    }
+    return null;
+}
+
+/**
  * Extract machine-usable verification targets from a checkbox description.
  * Returns [] when the line is pure prose (→ MANUAL_REVIEW).
  */
@@ -63,9 +87,16 @@ function extractTargets(desc) {
     const targets = [];
     const consumed = []; // [start, end) spans of attribute values already used
 
+    // 0) url="…" navigation hints are never targets (rev4) — consume their
+    //    spans so the quoted value cannot leak as a text target
+    URL_RE.lastIndex = 0;
+    let m;
+    while ((m = URL_RE.exec(desc)) !== null) {
+        consumed.push([m.index, m.index + m[0].length]);
+    }
+
     // 1) attribute pairs: aria-label="…", data-testid="…", role="…", class="…"
     ATTR_RE.lastIndex = 0;
-    let m;
     while ((m = ATTR_RE.exec(desc)) !== null) {
         const attr = m[1].toLowerCase();
         if (!isAllowedAttr(attr)) continue;
@@ -143,7 +174,10 @@ function parse(content) {
                 if (desc && !/^#{1,6}\s/.test(desc)) {
                     itemLines++;
                     if (isMarker) naMarkerItems++;
-                    checks.push({ description: desc, targets: extractTargets(desc), status: 'pending' });
+                    const check = { description: desc, targets: extractTargets(desc), status: 'pending' };
+                    const url = extractUrl(desc);
+                    if (url !== null) check.url = url;
+                    checks.push(check);
                 }
             }
         }

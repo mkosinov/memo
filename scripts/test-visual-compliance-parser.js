@@ -264,6 +264,66 @@ assert.strictEqual(extractTargets('aria-label="Действия"').length, 1);
     assert.strictEqual(r.checks.length, 2, 'N/A line parses as a plain manual check here');
 }
 
+// --- rev4: url="…" navigation hint (GH #311, user decision 2026-10-09) -----
+// A check line may carry a navigation hint token url="/absolute/path" in any
+// position. It lands in a separate top-level `url` field of the check object,
+// is NEVER a target, and by itself neither automates the check nor counts as
+// a machine hint (selector hints only).
+
+// Existing fixture lines carry no url tokens → no `url` key at all
+assert.ok(
+    checks.every((c) => !('url' in c)),
+    'checks without a url hint must not carry a url field'
+);
+
+// 1) url + selector hint: both land on the check, selector stays the only target
+{
+    const body = '- [ ] Bookings table carries data-testid="bookings-table" url="/bookings"';
+    const r = parse(specWith('## Visual Compliance Checks', body));
+    assert.strictEqual(r.applicable, true, 'rev4: url-bearing section is applicable');
+    assert.strictEqual(r.checks.length, 1);
+    assert.strictEqual(r.checks[0].url, '/bookings', 'rev4: url hint lands in its own field');
+    assert.deepStrictEqual(
+        r.checks[0].targets.map((t) => [t.kind, t.attr, t.value]),
+        [['attr', 'data-testid', 'bookings-table']],
+        'rev4: url hint does not interfere with selector targets'
+    );
+}
+
+// 2) url only: stays MANUAL_REVIEW (empty targets), url still extracted
+{
+    const r = parse(specWith('## UI Verification', '- [ ] Guest landing hero block url="/"'));
+    assert.strictEqual(r.checks.length, 1);
+    assert.strictEqual(r.checks[0].url, '/', 'rev4: root url extracted');
+    assert.deepStrictEqual(r.checks[0].targets, [], 'rev4: url alone is NOT a machine hint');
+}
+
+// 3) value without a leading slash is softly ignored — no url field, and the
+//    quoted value must not leak as a text target either
+{
+    const r = parse(specWith('## Visual Checks', '- [ ] Plain prose line url="bookings" without hints'));
+    assert.strictEqual(r.checks.length, 1);
+    assert.ok(!('url' in r.checks[0]), 'rev4: slash-less url token is silently dropped');
+    assert.deepStrictEqual(r.checks[0].targets, [], 'rev4: dropped url value must not leak as text');
+}
+
+// 4) first occurrence wins when two url tokens are present
+{
+    const r = parse(specWith('## Visual Compliance Checks', '- [ ] Nav row url="/first" and url="/second" both appear'));
+    assert.strictEqual(r.checks[0].url, '/first', 'rev4: first url token wins');
+    assert.deepStrictEqual(r.checks[0].targets, [], 'rev4: second token value must not leak as text');
+}
+
+// Soft-ignore is per token (like other hints): an invalid token does not
+// suppress a later valid one
+{
+    const r = parse(specWith('## UI Verification', '- [ ] Mixed url="no-slash" then url="/valid"'));
+    assert.strictEqual(r.checks[0].url, '/valid', 'rev4: invalid token ignored, next valid wins');
+}
+
+// Synthetic: a url token never becomes a target of any kind
+assert.deepStrictEqual(extractTargets('screen reachable via url="/bookings"'), []);
+
 // --- CLI contract: serialize exactly { applicable, checks } ----------------
 
 {

@@ -218,6 +218,9 @@ const fs = require('fs');
 
     // Parser contract (GH #311): checks.json is an OBJECT
     // { "applicable": bool, "checks": [...] } — the runner consumes .checks.
+    // rev4: a check may carry an optional top-level `url` (absolute path) —
+    // a navigation hint, never a target (does not make a check automatable);
+    // it only tells the runner which page to evaluate the check on.
     const payload = JSON.parse(fs.readFileSync(checksFile, 'utf8'));
     const checks = Array.isArray(payload) ? payload : payload.checks;
     const results = {
@@ -284,6 +287,9 @@ const fs = require('fs');
         await page.goto(devUrl, { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(1000); // let animations settle
         await captureScreenshot('01-initial-load', true);
+        // Navigation cache (rev4): the effective URL the page is on now.
+        // Checks without a `url` hint evaluate on the root, as before.
+        let lastUrl = devUrl;
 
         // 2. Run target checks
         for (const check of checks) {
@@ -311,6 +317,21 @@ const fs = require('fs');
             let screenshotPath = null;
 
             try {
+                // Per-check navigation (rev4): url="/absolute/path" hint makes
+                // the check evaluate on that page instead of the root. Only
+                // automatable checks reach here — MANUAL_REVIEW items
+                // continue()d above and are never navigated. goto fires only
+                // when the effective URL changed (navigation cache); a goto
+                // failure lands in the catch below → this check FAILED, the
+                // run continues (exit 1 at the end, as for any failed check).
+                const effectiveUrl = check.url ? new URL(check.url, devUrl).href : devUrl;
+                if (effectiveUrl !== lastUrl) {
+                    console.log('  Navigating to ' + effectiveUrl + ' (url hint)');
+                    await page.goto(effectiveUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                    await page.waitForTimeout(1000); // let animations settle
+                    lastUrl = effectiveUrl;
+                }
+
                 const perTarget = [];
                 for (const t of targets) {
                     const loc = locatorFor(page, t);

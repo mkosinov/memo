@@ -24,6 +24,9 @@
 #   2 (US-3): spec without the section           → exit 3
 #   3 (US-3): spec with an empty section         → exit 3
 #   4 (US-3): spec with a prose-only section     → exit 3
+#   5 (rev4): url-hint lines without selector hints → exit 3 (a url="…"
+#             navigation hint is NOT a machine-usable hint — the parser
+#             emits it in the separate `url` field with zero targets)
 #
 # Wired into scripts/test-all.sh by a separate task; self-contained here.
 
@@ -139,6 +142,31 @@ if [ "$RUN_EXIT" -eq 3 ]; then
     echo "PASS Case 4 (US-3): prose-only section → exit 3"
 else
     echo "FAIL Case 4 (US-3): expected exit 3, got $RUN_EXIT"
+    FAIL=1
+fi
+
+# ── Case 5 (rev4): url hints but zero selector hints → exit 3 ────────────────
+# A url="/absolute/path" navigation hint is NOT a machine-usable hint: the
+# parser drops it into the separate `url` field and targets stay empty, so
+# the section is still a spec gap (code 3). Regression pin for the runner
+# change: navigation must not soften the exit-3 verdict. If `url` were ever
+# (mis)counted as a hint, the script would run on to deps/server preflight
+# against the discard-port URL and exit 2 — this case would catch it.
+cat > "$WORK/spec-url-only.md" <<'EOF'
+# Design Spec
+
+## Visual Compliance Checks
+- [ ] The schedule screen url="/schedule" matches the approved layout
+- [ ] Booking flow feels consistent url="/booking"
+
+## Next Section
+EOF
+
+run_case "case5-url-only" "$WORK/spec-url-only.md"
+if [ "$RUN_EXIT" -eq 3 ]; then
+    echo "PASS Case 5 (rev4): url-only hints → exit 3 (url is not a machine hint)"
+else
+    echo "FAIL Case 5 (rev4): expected exit 3, got $RUN_EXIT"
     FAIL=1
 fi
 

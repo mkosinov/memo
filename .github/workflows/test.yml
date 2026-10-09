@@ -131,6 +131,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run type-check
+      # Gate #322: api-client test fixtures are invisible to admin's tsc
+      # (not imported anywhere) — check the package itself.
+      - name: Type-check api-client
+        run: pnpm run type-check
+        working-directory: packages/api-client
       - name: z-token guard
         run: python3 scripts/check_z_tokens.py
         working-directory: .

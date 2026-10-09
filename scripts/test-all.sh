@@ -41,6 +41,8 @@ if [ "${SEQUENTIAL:-0}" = "1" ]; then
   pnpm run lint
   echo "  → type-check..."
   (cd frontend/admin && pnpm run type-check)
+  echo "  → type-check (api-client)..."
+  (cd packages/api-client && pnpm run type-check)
   echo "  → vitest..."
   (cd frontend/admin && pnpm run test)
   echo "  → playwright..."
@@ -129,6 +131,17 @@ ALL_PIDS+=($!)
 echo "  → type-check..."
 (
   cd frontend/admin && pnpm run type-check > "$LOG_DIR/typecheck.log" 2>&1
+) &
+ALL_PIDS+=($!)
+
+# ── Type-check (api-client) ────────────────────────────────────────────────
+# admin's tsc checks api-client sources transitively (path-mapped imports)
+# but never its test fixtures — they are imported by nothing. TS2345 in
+# fixtures escaped every gate once (#286/PR #320); this stage closes that.
+# The package tsconfig includes src/**/*, so tests inside src are covered.
+echo "  → type-check (api-client)..."
+(
+  cd packages/api-client && pnpm run type-check > "$LOG_DIR/typecheck-api-client.log" 2>&1
 ) &
 ALL_PIDS+=($!)
 

@@ -36,7 +36,7 @@ class Service(AbstractModelSoftDelete):
     )
 
     @property
-    def materials(self) -> list[dict]:
+    def materials(self) -> list[dict[str, str | None]]:
         """Nested materials payload for ``ServiceResponse`` (spec §3.1/§3.3).
 
         Pydantic ``from_attributes`` reads this property. Python-side sort by

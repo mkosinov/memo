@@ -192,6 +192,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     domain/record_visits 2 / cli 2 / core/config 1 — следующая волна 4: хвосты
     (план Task 7, финальная волна #306).
   - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave3-api.md`
+- **GH #306 — mypy-волна 4 хвосты, Task 7 (МИЛСТОУН: mypy src → 0)** — branch
+  `306-mypy-tails-1` (1 коммит `8edbdba0`, base `452ea658`; 20 файлов, +210/−95; Refs #306 —
+  multi-wave, не закрывает; план Task 7, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** хвосты — 10 семейств, 94 → 0 (domain/deletion 26, seed 26,
+    repositories/generic 15, schemas 9, main.py 7, auth 3, models 3, domain/record_visits 2,
+    cli 2, core/config 1). **МИЛСТОУН: весь `src/` (147 файлов) чист — mypy = 0.**
+  - **Пороги:** **mypy 94 → 0**, порог в скрипте переснят = факту; ruff коллатерально
+    **119 → 117** — TYPE_CHECKING-импорты forward-refs моделей («Activity»/«Visit»)
+    починили F821 ×2, запись F821 удалена из бюджета (= «порог=факту», только вниз);
+    B008 = 0.
+  - **Подавления:** 20, все точечные с обоснованиями — schemas ×8 `[prop-decorator]`
+    (pydantic `@computed_field` над `@property`), repositories/generic ×9 `[attr-defined]`
+    (прецедент #232: `id`/`is_active`/`sort_order` вне TypeVar-базы), cli ×2 (selfless
+    `@transactional`, прецедент #171), core/config ×1 `[call-arg]` (`_env_file` — реальный
+    kwarg pydantic-settings, плагин его теряет; верифицирован по установленному
+    pydantic-settings 2.14.1); в main.py один устаревший ignore снят; strict не ослаблен;
+    `decorators.py` не тронут (#394), семьи services/admin/api остались на 0.
+  - **Идиомы вместо подавлений:** `GenericService[Any, Any, Any]` в реестре хендлеров
+    deletion, честные сигнатуры + PEP-695 `type _ActivityRow` в seed, TYPE_CHECKING
+    forward-refs в models.
+  - **Behavioral delta:** нулевая — аннотации/тайпинг; единственные исполняемые добавки —
+    ассерты-подсветки тикет-кандидата.
+  - **Баг найден, не чинен (тикет-кандидат):** `auth/service.py` `change_password` у
+    passwordless-аккаунта (`password_hash` NULL, #348) дал бы 500 вместо 401 — недостижимо
+    на практике (нет сессии), подсвечено ассертами.
+  - **Tests:** полный pytest-сьют **3184 passed / 0 failed / 15 skipped** (+5 новых
+    `TestZeroMypyBudget` — нулевой режим порога: 0/0 green, факт 1 при пороге 0 red, рост от
+    нулевой базы red); гейты зелёные (mypy 0 == порог, ruff 117 == бюджет); ревью —
+    комплаенс ✅, качество approved.
+  - **Остаток #306:** mypy-долг закрыт целиком (рахет 531 → 0); дальше Task 8 — ruff-хвост
+    117 → 0 (RUF012, F841, RUF001/RUF059, UP042, F811) → Task 9 — финал (пороги 0/0 → снос
+    `lint_budget.py`, джоба зовёт ruff/mypy напрямую; Closes #306).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave4-tails.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

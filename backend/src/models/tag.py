@@ -9,6 +9,7 @@ from src.db.base import Base
 from src.models.abstract import AbstractModel
 
 if TYPE_CHECKING:
+    from src.models.activity import Activity
     from src.models.client import Client
     from src.models.location import Location
     from src.models.master import Master

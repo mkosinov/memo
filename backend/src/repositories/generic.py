@@ -109,7 +109,9 @@ def _stage_auto(
     )
 
 
-def _raw_diff(instance: Any, payload: dict[str, Any]) -> tuple[dict, dict] | None:
+def _raw_diff(
+    instance: Any, payload: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """``(before, after)`` raw dicts for payload fields that CHANGE.
 
     ``before`` is read from the (not-yet-mutated) row — the caller must
@@ -176,14 +178,14 @@ class BaseRepository:
         session: AsyncSession,
         table: type[ModelType],
         *,
-        filters: dict | None = None,
+        filters: dict[str, Any] | None = None,
         q: str | None = None,
         search_fields: Sequence[SearchField] | None = None,
         ids: Sequence[UUID] | None = None,
-        order_by=None,
+        order_by: Sequence[Any] | None = None,
         limit: int | None = None,
         offset: int = 0,
-        options=None,
+        options: Sequence[Any] | None = None,
     ) -> tuple[list[ModelType], int]:
         """Return a paginated page of records plus the total count.
 
@@ -283,7 +285,9 @@ class BaseRepository:
     ) -> ModelType | None:
         """Return a record by ID, or None if not found."""
         result = await session.execute(
-            select(table).where(table.id == id)
+            # ``table.id`` — the AbstractModel UUID PK, same TypeVar-honesty
+            # ignore as the ``list`` id narrowing above.
+            select(table).where(table.id == id)  # type: ignore[attr-defined]
         )
         return result.scalar_one_or_none()
 
@@ -303,7 +307,7 @@ class BaseRepository:
             _stage_auto(
                 table,
                 action="create",
-                entity_id=instance.id,
+                entity_id=instance.id,  # type: ignore[attr-defined]  # AbstractModel UUID PK
                 before=None,
                 after=_raw_snapshot(instance, table),
             )
@@ -328,7 +332,8 @@ class BaseRepository:
         return instance
 
     async def patch(
-        self, session: AsyncSession, table: type[ModelType], id: str, data: dict
+        self,
+        session: AsyncSession, table: type[ModelType], id: str, data: dict[str, Any]
     ) -> ModelType | None:
         """Partial-update a record from a dict of fields. Returns None if not found."""
         instance = await self.get(session, table, id)
@@ -376,9 +381,12 @@ class BaseRepository:
         for idx, record_id in enumerate(ids):
             instance = await self.get(session, table, record_id)
             if instance:
-                if instance.sort_order != idx:
+                # ``sort_order`` is the reorder contract: only models that
+                # carry the column are ever passed here (the TypeVar bound
+                # is Base and does not declare it).
+                if instance.sort_order != idx:  # type: ignore[attr-defined]
                     changed = True
-                instance.sort_order = idx
+                instance.sort_order = idx  # type: ignore[attr-defined]
                 await session.flush()
                 await session.refresh(instance)
                 updated.append(instance)
@@ -407,14 +415,14 @@ class ArchiveRepository(BaseRepository):
         table: type[ModelType],
         *,
         status: ArchiveStatus = ArchiveStatus.ACTIVE,
-        filters: dict | None = None,
+        filters: dict[str, Any] | None = None,
         q: str | None = None,
         search_fields: Sequence[SearchField] | None = None,
         ids: Sequence[UUID] | None = None,
-        order_by=None,
+        order_by: Sequence[Any] | None = None,
         limit: int | None = None,
         offset: int = 0,
-        options=None,
+        options: Sequence[Any] | None = None,
     ) -> tuple[list[ModelType], int]:
         """Return a paginated page filtered by archive status, plus total count.
 
@@ -427,10 +435,13 @@ class ArchiveRepository(BaseRepository):
         stmt = select(table)
         if options:
             stmt = stmt.options(*options)
+        # ``is_active`` — the archive contract (see class docstring: a table
+        # without the column fails loudly by design); the ignore keeps the
+        # TypeVar honest, same as the ``table.id`` narrowing in ``list``.
         if status == ArchiveStatus.ACTIVE:
-            stmt = stmt.where(table.is_active)
+            stmt = stmt.where(table.is_active)  # type: ignore[attr-defined]
         elif status == ArchiveStatus.ARCHIVED:
-            stmt = stmt.where(not_(table.is_active))
+            stmt = stmt.where(not_(table.is_active))  # type: ignore[attr-defined]
         id_pred = ids_in_predicate(table.id, ids)  # type: ignore[attr-defined]
         if id_pred is not None:
             stmt = stmt.where(id_pred)
@@ -463,10 +474,12 @@ class ArchiveRepository(BaseRepository):
         changed = False
         for idx, record_id in enumerate(ids):
             instance = await self.get(session, table, record_id)
-            if instance and instance.is_active:
-                if instance.sort_order != idx:
+            # ``is_active``/``sort_order`` — the archive-reorder contract,
+            # same TypeVar-honesty ignores as BaseRepository.reorder.
+            if instance and instance.is_active:  # type: ignore[attr-defined]
+                if instance.sort_order != idx:  # type: ignore[attr-defined]
                     changed = True
-                instance.sort_order = idx
+                instance.sort_order = idx  # type: ignore[attr-defined]
                 await session.flush()
                 await session.refresh(instance)
                 updated.append(instance)

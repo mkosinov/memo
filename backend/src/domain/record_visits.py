@@ -11,12 +11,13 @@ functions; neither knows about the other.
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.visit_status import (
     ACTIVE_RECORD_STATUSES,
     VisitItem,
+    VisitStatus,
     compute_record_status,
 )
 from src.errors import ErrorCode, ErrorDetail
@@ -70,7 +71,9 @@ async def recompute_record_status(
     )
     active_visits = list(result.scalars().all())
     record.status = compute_record_status([
-        VisitItem(id=v.id, status=v.status)
+        # VisitStatus(...) = the same by-value coercion pydantic itself
+        # applies to VisitItem.status (Visit.status is the raw string column).
+        VisitItem(id=v.id, status=VisitStatus(v.status))
         for v in active_visits
     ]).value
     record.updated_at = datetime.now(UTC)
@@ -78,7 +81,7 @@ async def recompute_record_status(
     return record
 
 
-def active_record_filter(activity_id: str):
+def active_record_filter(activity_id: str) -> tuple[ColumnElement[bool], ColumnElement[bool]]:
     """WHERE conditions for records that occupy a seat in an activity's capacity.
 
     Active = status IN (waiting, visited). Records are hard-deleted, so any

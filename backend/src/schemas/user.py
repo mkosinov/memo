@@ -50,7 +50,10 @@ class UserAccountResponse(BaseModel):
     # Source attribute for the derived flag — never on the wire.
     password_hash: str | None = Field(exclude=True)
 
-    @computed_field
+    # ``@computed_field`` over ``@property`` is pydantic's documented
+    # pattern; mypy cannot type a decorator stacked on @property
+    # (known limitation) — the pin is the honest suppression.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def password_is_set(self) -> bool:
         """True when the account has a password hash (NULL = passwordless)."""

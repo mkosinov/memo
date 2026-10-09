@@ -179,6 +179,33 @@ class TestCheckGrowth:
         ]
 
 
+class TestZeroMypyBudget:
+    """Волна 4 (GH #306 Task 7): mypy-порог = 0 — сравнение и запрет роста
+    обязаны работать в нулевом режиме без special-case-ловушек."""
+
+    def test_fact_zero_threshold_zero_is_green(self) -> None:
+        assert compare_tool("mypy", fact=0, threshold=0) == Verdict(
+            True, "mypy: 0 — в бюджете"
+        )
+
+    def test_fact_one_threshold_zero_is_red_growth(self) -> None:
+        assert compare_tool("mypy", fact=1, threshold=0) == Verdict(
+            False, "mypy: PR добавил ошибок: было 0, стало 1"
+        )
+
+    def test_actual_script_budget_is_zero(self) -> None:
+        # Порог волны 4: 0 (= факту «mypy src = 0 ошибок»).
+        assert MYPY_BUDGET == 0
+
+    def test_growth_from_zero_base_to_zero_is_allowed(self) -> None:
+        assert check_growth(Budgets({}, 0), Budgets({}, 0)) == []
+
+    def test_growth_from_zero_base_to_one_is_violation(self) -> None:
+        assert check_growth(Budgets({}, 1), Budgets({}, 0)) == [
+            "mypy: бюджет не растёт — сначала снеси ошибки (было 0, стало 1)",
+        ]
+
+
 class TestBaseMode:
     def test_pull_request_env(self) -> None:
         env = {"GITHUB_BASE_REF": "main", "GITHUB_EVENT_NAME": "pull_request"}

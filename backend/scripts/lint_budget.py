@@ -75,12 +75,20 @@ TOOL_TIMEOUT_SECONDS = 600
 # [arg-type] на selfless-вызовах сценариев (прецедент staff.py/GH #171);
 # поддерживающее: update_by_user_id принимает Update | Patch (сервис).
 # Ruff-факт не менялся (119).
+# 2026-10-09 (GH #306, Task 7 — mypy-волна 4 хвосты): mypy 94 → 0 — the
+# whole src/ is clean: domain/deletion (GenericService[Any, Any, Any] in
+# the handler registry), seed (honest signatures + PEP-695 _ActivityRow),
+# repositories/generic (targeted attr-defined pins per the #232 precedent:
+# id/is_active/sort_order are outside the TypeVar base), schemas (8
+# prop-decorator pins on pydantic computed_field), main/auth/cli/models/
+# config. Budget = fact: 0. Ruff collateral: F821 2 → 0 (the TYPE_CHECKING
+# imports for models' forward refs "Activity"/"Visit" fixed ruff too) —
+# budget lowered to fact 117.
 RUFF_BUDGET: dict[str, int] = {
     "B006": 1,
     "B011": 2,
     "B905": 1,
     "E712": 1,
-    "F821": 2,
     "F841": 10,
     "RUF001": 9,
     "RUF002": 4,
@@ -102,7 +110,7 @@ RUFF_BUDGET: dict[str, int] = {
     "W291": 2,
     "W293": 2,
 }
-MYPY_BUDGET: int = 94
+MYPY_BUDGET: int = 0
 
 _MYPY_TOTAL_RE = re.compile(r"^Found (\d+) errors?", re.MULTILINE)
 

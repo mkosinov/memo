@@ -1,7 +1,7 @@
 """Pydantic schemas for photos."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -15,7 +15,7 @@ PhotoSortBy = Literal["filename", "is_public", "created_at"]
 OWNER_FIELDS = ("client_id", "service_id", "activity_id", "location_id")
 
 
-def _reject_multiple_owners(values: dict) -> dict:
+def _reject_multiple_owners(values: dict[str, Any]) -> dict[str, Any]:
     """``mode="before"`` validator: at most one non-null owner per payload."""
     owners = [f for f in OWNER_FIELDS if values.get(f) is not None]
     if len(owners) > 1:

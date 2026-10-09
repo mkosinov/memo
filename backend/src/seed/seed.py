@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 # ruff: noqa: RUF001, RUF002, RUF003  -- Cyrillic text is intentional (Russian language app)
 from sqlalchemy import select
@@ -53,9 +54,17 @@ from src.models.photo import photo_tags
 from src.models.position import staff_positions
 from src.models.tag import activity_tags, service_tags
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 # ---------------------------------------------------------------------------
 # Seed data constants
 # ---------------------------------------------------------------------------
+
+# One seeded activity row: (day, master, start_hour, dur_hours, service_name,
+# location, capacity, is_private) — start_hour/dur_hours are float (10.5 etc).
+type _ActivityRow = tuple[int, str, float, float, str, str, int, bool]
+
 
 def _get_week_monday(dt: datetime) -> datetime:
     """Return the Monday of the week containing *dt*."""
@@ -107,7 +116,7 @@ _SERVICE_NAME_TO_ID: dict[str, str] = {
 }
 
 # (day, master, start_hour, dur_hours, service_name, location, capacity, is_private)
-_ACTIVITIES_RAW: list[tuple] = [
+_ACTIVITIES_RAW: list[_ActivityRow] = [
     # ПН (day 0)
     (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
     (0, "m2", 12, 1.5, "Ручная лепка", "alpika", 6, False),
@@ -146,7 +155,7 @@ _ACTIVITIES_RAW: list[tuple] = [
 ]
 
 # Activities for week 2 (June 9-15, 2026)
-_ACTIVITIES_RAW_WEEK2: list[tuple] = [
+_ACTIVITIES_RAW_WEEK2: list[_ActivityRow] = [
     # ПН (day 0) — June 9
     (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
     # ВТ (day 1) — June 10
@@ -165,7 +174,7 @@ _ACTIVITIES_RAW_WEEK2: list[tuple] = [
 ]
 
 # Activities for week 3 (current week — always fresh relative to today)
-_ACTIVITIES_RAW_WEEK3: list[tuple] = [
+_ACTIVITIES_RAW_WEEK3: list[_ActivityRow] = [
     # ПН (day 0)
     (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
     (0, "m4", 14, 2, "Мини-картина акрилом", "p1389", 8, False),
@@ -187,7 +196,7 @@ _ACTIVITIES_RAW_WEEK3: list[tuple] = [
 # Fixed reference week: stable dates for visual regression baselines.
 # Used with page.clock.install({ time: '2026-06-15' }) in visual tests.
 # Records r1-r6 link to activities here (indices 0,1,2,3,5,8).
-_ACTIVITIES_RAW_FIXED: list[tuple] = [
+_ACTIVITIES_RAW_FIXED: list[_ActivityRow] = [
     # day, master, start_h, dur_h, svc_name, location, capacity, is_private
     (0, "m1", 10, 2, "Морской пейзаж", "grand", 8, False),       # ev_fixed_0 → r1
     (0, "m2", 12, 1.5, "Ручная лепка", "alpika", 6, False),      # ev_fixed_1 → r2
@@ -224,7 +233,7 @@ _STAFF_PASSWORDS_HASHED = {
 }
 
 
-async def seed_staff_users(session) -> None:
+async def seed_staff_users(session: AsyncSession) -> None:
     """Seed the demo staff users (GH #247 §3.11) — dev/demo only.
 
     Admin ``+79990000001/admin12345``; master ``+79990000002/master12345``
@@ -260,7 +269,7 @@ async def seed_staff_users(session) -> None:
 # GH #266: former single masters seed is split into staff cards (people) +
 # masters extension rows (schedule) + positions dictionary + links.
 # IDs are unchanged (m1–m5, m7; m6 never existed in the seed).
-_STAFF_RAW: list[dict] = [
+_STAFF_RAW: list[dict[str, str | int]] = [
     {"id": "m1", "first_name": "Ольга", "last_name": "Середа", "sort_order": 0},
     {"id": "m2", "first_name": "Юлия", "last_name": "Большакова", "sort_order": 1},
     {"id": "m3", "first_name": "Анастасия", "last_name": "П.", "sort_order": 2},
@@ -269,7 +278,7 @@ _STAFF_RAW: list[dict] = [
     {"id": "m7", "first_name": "Ирина", "last_name": "Горох", "sort_order": 5},
 ]
 
-_MASTER_EXTENSIONS: list[dict] = [
+_MASTER_EXTENSIONS: list[dict[str, str]] = [
     {"staff_id": "m1", "specialty": "живопись", "color": "#5B8C7A"},
     {"staff_id": "m2", "specialty": "керамика", "color": "#6B7E9C"},
     {"staff_id": "m3", "specialty": "живопись", "color": "#A07060"},
@@ -279,7 +288,7 @@ _MASTER_EXTENSIONS: list[dict] = [
 ]
 
 
-async def _seed_masters(session) -> None:
+async def _seed_masters(session: AsyncSession) -> None:
     """Seed staff cards, positions, master extensions and links (#266)."""
     for s in _STAFF_RAW:
         session.add(Staff(**s))
@@ -302,7 +311,7 @@ async def _seed_masters(session) -> None:
         )
 
 
-async def _seed_locations(session) -> None:
+async def _seed_locations(session: AsyncSession) -> None:
     locations = [
         {"id": "alpika", "title": "Альпика", "address": "Альпика, 1 этаж", "capacity": 10,
          "location_hint": "1 этаж, светлая студия с панорамными окнами", "sort_order": 0},
@@ -315,7 +324,7 @@ async def _seed_locations(session) -> None:
         session.add(Location(**loc))
 
 
-async def _seed_services(session) -> None:
+async def _seed_services(session: AsyncSession) -> None:
     services = [
         {"id": "s1", "title": "Картина маслом", "description": "Масляная живопись на холсте",
          "image_url": "/images/card-seascape.jpg", "specialty": "живопись",
@@ -343,7 +352,7 @@ async def _seed_services(session) -> None:
         session.add(Service(**s))
 
 
-async def _seed_tariffs(session) -> None:
+async def _seed_tariffs(session: AsyncSession) -> None:
     # (service_id, title, price, audience) — GH #284: the audience marker
     # matches the title (kid-titled → kid, adult-titled → adult, the neutral
     # «Индивидуальный» → all), mirroring the migration backfill rule so demo
@@ -390,14 +399,14 @@ async def _seed_tariffs(session) -> None:
         )
 
 
-async def _seed_tags(session) -> None:
+async def _seed_tags(session: AsyncSession) -> None:
     tag_titles = ["новинка", "хит", "для детей", "популярное", "индивидуальное", "сезонное", "гость"]
     for i, title in enumerate(tag_titles, start=1):
         tag_id = f"tag{i}"
         session.add(Tag(id=tag_id, title=title))
 
 
-async def _seed_activities(session) -> None:
+async def _seed_activities(session: AsyncSession) -> None:
     await _seed_activities_for(session, "ev", [
         (WEEK_START, _ACTIVITIES_RAW),
         (WEEK2_START, _ACTIVITIES_RAW_WEEK2),
@@ -410,7 +419,9 @@ async def _seed_activities(session) -> None:
 
 
 async def _seed_activities_for(
-    session, id_prefix: str, weeks: list[tuple],
+    session: AsyncSession,
+    id_prefix: str,
+    weeks: list[tuple[datetime, list[_ActivityRow]]],
 ) -> None:
     """Seed activities for a list of weeks with the given ID prefix."""
     idx = 0
@@ -435,8 +446,11 @@ async def _seed_activities_for(
             ))
 
 
-async def _seed_clients(session) -> None:
-    clients = [
+async def _seed_clients(session: AsyncSession) -> None:
+    # Explicit row type: the literals mix ``email: str`` and ``email: None``,
+    # and mypy's join of dict[str, str] and dict[str, None] is ``object``
+    # (dict invariance) — which would break ``Client(**c)`` below.
+    clients: list[dict[str, str | None]] = [
         {"id": "c1", "name": "Анна Иванова", "phone": "+79001234567", "email": "anna@example.com", "channel": "telegram"},
         {"id": "c2", "name": "Мария Петрова", "phone": "+79002345678", "email": None, "channel": "max"},
         {"id": "c3", "name": "Елена Сидорова", "phone": "+79003456789", "email": None, "channel": "telegram"},
@@ -447,7 +461,7 @@ async def _seed_clients(session) -> None:
         session.add(Client(**c))
 
 
-async def _seed_visitors(session) -> None:
+async def _seed_visitors(session: AsyncSession) -> None:
     visitors = [
         {"id": "vis1", "client_id": "c1", "name": "Анна Иванова", "age": 30},
         {"id": "vis2", "client_id": "c1", "name": "Софья Иванова", "age": 8},
@@ -464,7 +478,7 @@ async def _seed_visitors(session) -> None:
         session.add(Visitor(**v))
 
 
-async def _seed_records(session) -> None:
+async def _seed_records(session: AsyncSession) -> None:
     records = [
         {"id": "r1", "activity_id": "ev_fixed_0", "client_id": "c1", "status": VisitStatus.VISITED, "seats": 2, "comment": None},
         {"id": "r2", "activity_id": "ev_fixed_1", "client_id": "c2", "status": VisitStatus.VISITED, "seats": 2, "comment": None},
@@ -477,7 +491,7 @@ async def _seed_records(session) -> None:
         session.add(Record(**r))
 
 
-async def _seed_visits(session) -> None:
+async def _seed_visits(session: AsyncSession) -> None:
     visits = [
         {"id": "v1", "record_id": "r1", "visitor_id": "vis1", "tariff_id": "t7a", "price": 3500, "status": VisitStatus.VISITED},
         {"id": "v2", "record_id": "r1", "visitor_id": "vis2", "tariff_id": "t7c", "price": 2500, "status": VisitStatus.VISITED},
@@ -494,7 +508,7 @@ async def _seed_visits(session) -> None:
         session.add(Visit(**v))
 
 
-async def _seed_payments(session) -> None:
+async def _seed_payments(session: AsyncSession) -> None:
     payments = [
         {"id": "p1", "record_id": "r1", "amount": 6000, "method": "card"},
         {"id": "p2", "record_id": "r2", "amount": 4000, "method": "card"},
@@ -507,7 +521,7 @@ async def _seed_payments(session) -> None:
         session.add(Payment(**p))
 
 
-async def _seed_service_tags(session) -> None:
+async def _seed_service_tags(session: AsyncSession) -> None:
     """Link services to tags via service_tags join table."""
     links = [
         ("s1", "tag2"),  # хит
@@ -531,7 +545,7 @@ async def _seed_service_tags(session) -> None:
             )
 
 
-async def _seed_service_materials(session) -> None:
+async def _seed_service_materials(session: AsyncSession) -> None:
     """Link services to materials via service_materials (GH #223 §10).
 
     Idiom: ``_seed_service_tags``. Dev/demo data must exercise the feature:
@@ -566,7 +580,7 @@ async def _seed_service_materials(session) -> None:
             )
 
 
-async def _seed_activity_tags(session) -> None:
+async def _seed_activity_tags(session: AsyncSession) -> None:
     """Link activities to tags via activity_tags join table."""
     links = [
         ("ev_0", "tag1"),  # новинка
@@ -585,7 +599,7 @@ async def _seed_activity_tags(session) -> None:
             )
 
 
-async def _seed_photos(session) -> None:
+async def _seed_photos(session: AsyncSession) -> None:
     """Seed 7 photos with mutually exclusive owners (GH #211).
 
     Layout (L1='alpika', T1='tag1', T2='tag2'):
@@ -643,7 +657,7 @@ async def _seed_photos(session) -> None:
             )
 
 
-async def _seed_materials(session) -> None:
+async def _seed_materials(session: AsyncSession) -> None:
     """Seed material references (art techniques)."""
     materials = [
         {"id": "mat1", "title": "Масло", "description": "Масляные краски — классика живописи. Густые, насыщенные, сохнут долго."},

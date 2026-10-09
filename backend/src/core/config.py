@@ -58,4 +58,9 @@ class Settings(BaseSettings):
 
 
 _env_file = os.environ.get("ENV_FILE")
-settings = Settings(_env_file=_env_file)
+# ``_env_file`` is a real pydantic-settings constructor parameter (it picks
+# the dotenv source at instantiation time; the class-level ``env_file`` in
+# SettingsConfigDict would hard-code it), but mypy does not see it — the
+# BaseSettings __init__ signature is invisible to the checker. Known
+# upstream limitation; the runtime kwarg is documented by pydantic-settings.
+settings = Settings(_env_file=_env_file)  # type: ignore[call-arg]

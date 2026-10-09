@@ -102,8 +102,8 @@ async def _run_create_user(database_url: str, args: argparse.Namespace) -> int:
     try:
         async with manager.async_session() as session:
             try:
-                user = await create_user_scenario(
-                    None,  # selfless @transactional slot (usecases convention)
+                user = await create_user_scenario(  # type: ignore[misc]
+                    None,  # type: ignore[arg-type]  # selfless @transactional slot (usecases convention)
                     db_session=session,
                     phone=args.phone,
                     role=args.role,

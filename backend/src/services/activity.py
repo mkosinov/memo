@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
@@ -23,7 +23,7 @@ from src.models.service import Service
 from src.models.staff import Staff
 from src.models.tag import activity_tags
 from src.repositories.generic import BaseRepository, get_base_repository
-from src.repositories.search import SearchField, search_predicate
+from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.activity import (
     ActivityCreate,
     ActivityResponse,
@@ -36,6 +36,12 @@ from src.services.generic import GenericService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from uuid import UUID
+
+    from pydantic import BaseModel
+
+    from src.domain.sorting import SortExpr
+    from src.repositories.generic import ModelList
 
 # Copy-week volume cap (GH #242 spec §4, user decision D3): at most 100 rows
 # may be INSERTED per call; more → 422 COPY_WEEK_SOURCE_TOO_LARGE ("copy in
@@ -101,11 +107,13 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
+        order_by: Sequence[SortExpr] | None = None,
+        q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
-        q: str | None = None,
         service_id: str | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[ActivityResponse]:
         """List activities, paginated, with date/service filters and search.
 
@@ -113,11 +121,18 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         funnel through here (GH #212 spec §5.3): equality filters → day range
         → ``service_id`` → ``q`` predicate (Service join only when q present,
         before the repo's COUNT so ``total`` reflects the filtered count).
+        The base-generic surface stays intact: ``order_by`` and the typed
+        ``ids`` narrowing (GH #232 §3.1) ride the repo core like in
+        ``GenericService.list``.
         """
         stmt = select(Activity)
         for key, value in filters.items():  # equality filters, same as the old super().list path
             if value is not None:
                 stmt = stmt.where(getattr(Activity, key) == value)
+        # GH #232 §3.1: typed ``?id=`` set narrowing (shared helper).
+        id_pred = ids_in_predicate(Activity.id, ids)
+        if id_pred is not None:
+            stmt = stmt.where(id_pred)
         from_dt, to_dt = day_range(date_from, date_to)
         if from_dt is not None:
             stmt = stmt.where(Activity.start >= from_dt)
@@ -130,7 +145,11 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
                 search_predicate(q, self.search_fields)
             )
         items_orm, total = await self._repository.list_entity(
-            db_session, stmt, limit=per_page, offset=(page - 1) * per_page
+            db_session,
+            stmt,
+            order_by=order_by,
+            limit=per_page,
+            offset=(page - 1) * per_page,
         )
         items = [ActivityResponse.model_validate(a) for a in items_orm]
         await self._populate_service_titles(db_session, items, items_orm)
@@ -155,8 +174,8 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
     async def _populate_service_titles(
         self,
         db_session: AsyncSession,
-        items: list[ActivityResponse],
-        items_orm: list[Activity],
+        items: ModelList[ActivityResponse],
+        items_orm: ModelList[Activity],
     ) -> None:
         """Set ``service_title`` on every list item via ONE bounded bulk query.
 
@@ -197,9 +216,14 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         return await super().update(db_session, id, data)
 
     async def patch(
-        self, db_session: AsyncSession, id: str, data
+        self, db_session: AsyncSession, id: str, data: BaseModel
     ) -> ActivityResponse | None:
-        """Partial-update — master_id revalidated when sent (перенос)."""
+        """Partial-update — master_id revalidated when sent (перенос).
+
+        ``data`` keeps the base ``BaseModel`` contract; the optional
+        ``master_id`` probe goes through ``getattr`` (an absent field is
+        simply «not sent»).
+        """
         new_master = getattr(data, "master_id", None)
         if new_master is not None:
             await check_master_active(db_session, new_master)

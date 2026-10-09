@@ -29,6 +29,7 @@ from src.services.decorators import transactional
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.repositories.generic import ModelList
     from src.schemas.record import VisitItem
 
 # GH #344: journal snapshot carriers for a visit row (§5.1) — the
@@ -393,7 +394,7 @@ class VisitService:
             mark_changed("visits")
 
     async def delete_visits_by_record_ids(
-        self, db_session: AsyncSession, record_ids: list[str],
+        self, db_session: AsyncSession, record_ids: ModelList[str],
     ) -> None:
         """Remove ALL visits of the given records — WITHOUT committing, no recalc.
 

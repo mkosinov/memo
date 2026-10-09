@@ -16,14 +16,19 @@ column).
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
-from src.domain.deletion import ResolutionError, StaleDependenciesError, collect_dependencies
+from src.domain.deletion import (
+    DependencyNode,
+    ResolutionError,
+    StaleDependenciesError,
+    collect_dependencies,
+)
 from src.domain.errors import (
     BareListLimitExceededError,
     ColorRequiredError,
@@ -33,7 +38,7 @@ from src.domain.errors import (
     PositionNotFoundError,
     SpecialtyRequiredError,
 )
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
@@ -167,6 +172,10 @@ async def list_staff(
     ``q`` (GH #212): substring on first_name/last_name (each separately)
     or exact id on a full UUID.
     """
+    # Explicit annotation: the two branches produce different list types
+    # (literals vs ``apply_sort``), the bare join would degrade to
+    # ``list[object]`` and fail the typed service signatures downstream.
+    order_by: list[SortExpr]
     if sort_by is None:
         # Spec §4.3: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by (as before).
@@ -358,7 +367,7 @@ async def delete_staff(
             )
         ),
     ] = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body
     (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2 and the
     records transport / #285 rev7-rev9).
@@ -435,7 +444,7 @@ async def delete_staff(
         deps = await collect_dependencies(session, Staff, staff_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete — the business
     # chain lives in the usecases scenario (spec §4.5): ONE
@@ -464,9 +473,10 @@ async def delete_staff(
                 message="Сотрудник не найден",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}``.
 
     Mirror of the tags/records/activities routes' builder (#285/#286/

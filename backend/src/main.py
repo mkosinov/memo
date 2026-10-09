@@ -1,5 +1,6 @@
 """Memo backend — FastAPI application factory."""
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -43,7 +44,7 @@ from src.events.router import router as events_router
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # In test env: conftest handles table creation, skip alembic
     if settings.ENV != "testing":
         await run_alembic_upgrade(str(settings.DATABASE_URL))
@@ -82,7 +83,7 @@ class NoSniffStaticFiles(StaticFiles):
                 headers.append(
                     (b"x-content-type-options", b"nosniff")
                 )
-                message = {**message, "headers": headers}  # type: ignore[arg-type]
+                message = {**message, "headers": headers}
             await send(message)
 
         await super().__call__(scope, receive, send_with_nosniff)
@@ -136,7 +137,9 @@ def create_app() -> FastAPI:
     # Registered BEFORE include_router so they catch errors from all routes.
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    async def http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
         """Convert FastAPI HTTPException → {detail: {code, message}}.
 
         Supports two detail shapes:
@@ -164,7 +167,9 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         """Convert Pydantic validation errors → {detail: {code, message}}.
 
         Takes the first error's msg as the message. Real fix is on the
@@ -183,7 +188,9 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(request: Request, exc: IntegrityError):
+    async def integrity_error_handler(
+        request: Request, exc: IntegrityError
+    ) -> JSONResponse:
         """Convert SQLAlchemy IntegrityError → {detail: {code, message}}."""
         return JSONResponse(
             status_code=422,
@@ -194,7 +201,9 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(UnknownSortKeyError)
-    async def unknown_sort_key_handler(request: Request, exc: UnknownSortKeyError):
+    async def unknown_sort_key_handler(
+        request: Request, exc: UnknownSortKeyError
+    ) -> JSONResponse:
         """Sort key missing from an entity's sort map → 422 VALIDATION_ERROR.
 
         GH #367 spec §4.2 safety net: the main line is the per-entity
@@ -211,7 +220,9 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception):
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         """Catch-all for uncaught exceptions → 500 with INTERNAL_ERROR code.
 
         Logs the exception server-side. Hides internals from client.

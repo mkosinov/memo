@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
-from typing import TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from sqlalchemy import ColumnElement, delete, func, not_, select
+from sqlalchemy import ColumnElement, ScalarSelect, delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.scope import mask_phone
@@ -29,6 +29,12 @@ from src.schemas.client import (
 )
 from src.schemas.common import PaginatedResponse
 from src.services.generic import ArchiveService
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
+    from src.domain.sorting import SortExpr
 
 ResponseT = TypeVar("ResponseT", bound=ClientResponse)
 
@@ -125,11 +131,12 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        order_by=None,
-        status: ArchiveStatus = ArchiveStatus.ACTIVE,
+        order_by: Sequence[SortExpr] | None = None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
+        status: ArchiveStatus = ArchiveStatus.ACTIVE,
         master_key: str | None = None,
-        **filters,
+        **filters: Any,
     ) -> PaginatedResponse[ClientResponse]:
         """Paginated clients with the master scope + contact mask (T3).
 
@@ -141,10 +148,12 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         the request is scoped (``master_key is not None``) — search
         results included: the full number is a search KEY, never response
         data. Both predicates land BEFORE the COUNT, so ``total`` stays
-        honest (generic list contract).
+        honest (generic list contract). ``ids`` (GH #232 §3.1) rides the
+        ``_list_stmt`` typed narrowing — the generic contract, no extra
+        handling here.
         """
         phone = filters.pop("phone", None)
-        stmt = self._list_stmt(status=status, **filters)
+        stmt = self._list_stmt(ids=ids, status=status, **filters)
         if phone is not None:
             stmt = stmt.where(Client.phone == phone)
         if phone is None:
@@ -287,7 +296,7 @@ def get_client_service() -> ClientService:
 # sort map below composes the same builders, making it importable at
 # module level for the CI drift guard (tests/domain/test_sorting.py —
 # Literal == map).
-def _records_count_sq():
+def _records_count_sq() -> ScalarSelect[Any]:
     return (
         select(func.count(Record.id))
         .where(Record.client_id == Client.id)
@@ -296,7 +305,7 @@ def _records_count_sq():
     )
 
 
-def _last_record_sq():
+def _last_record_sq() -> ScalarSelect[Any]:
     return (
         select(func.max(Activity.start))
         .select_from(Record)
@@ -307,7 +316,7 @@ def _last_record_sq():
     )
 
 
-def _missed_records_sq():
+def _missed_records_sq() -> ScalarSelect[Any]:
     return (
         select(func.count(Record.id))
         .where(
@@ -319,7 +328,7 @@ def _missed_records_sq():
     )
 
 
-def _total_paid_sq():
+def _total_paid_sq() -> ScalarSelect[Any]:
     return (
         select(func.coalesce(func.sum(Payment.amount), 0))
         .select_from(Payment)

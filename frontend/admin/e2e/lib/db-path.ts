@@ -16,7 +16,8 @@
  *     SHARD_ID, the derived path, TEST_DB_PATH and the fix hint
  *     ("remove one of the variables");
  *   - both set and matching (a relative view of the same file counts) → pass;
- *   - a single variable (or neither) → legacy behavior.
+ *   - a single variable (or neither) → legacy behavior;
+ *   - TEST_DB_PATH='' (empty string) counts as unset (GH #336).
  */
 import path from 'path';
 

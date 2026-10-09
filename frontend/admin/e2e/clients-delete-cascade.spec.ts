@@ -39,6 +39,7 @@ import {
   undoToast,
   waitForClientsReady,
   waitForPhotosReady,
+  withUndoWindow,
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
@@ -172,19 +173,31 @@ test.describe('S1 — Client deferred delete with nullify + cascade resolutions'
 
       const { bodyDeletes, stop } = trackBodyDeletes(page, '/api/v1/clients', client.id);
 
-      // ACTION — the dry-run 409 opens the dialog; «Отмена» closes it.
+      // ACTION — the dry-run 409 opens the dialog; «Отмена» closes it. The
+      // cancel flow runs under the paused page clock (#417): the guard «no
+      // committing DELETE within a full window after «Отмена»» is proven by
+      // the wrapper's instant rewind (a commit timer a regression might
+      // schedule at the click fires at the rewound window end and surfaces
+      // during the drain), not by a real 5.5s sleep. The tracker above was
+      // registered before the click (helper contract).
       const dropdown = await openRowActionDropdown(row);
-      await clickRowDelete(dropdown);
-      await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
-      await page.locator('[data-testid="delete-dialog-cancel-btn"]').click();
-      await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
+      await withUndoWindow(page, async () => {
+        await clickRowDelete(dropdown);
+        // #417: no micro-advance needed — the dialog opens from the 409
+        // rejection through plain React state (promise microtasks +
+        // MessageChannel render, both unaffected by the paused clock).
+        await expect(page.locator('[data-testid="delete-dialog"]')).toBeVisible();
+        await page.locator('[data-testid="delete-dialog-cancel-btn"]').click();
+        await expect(page.locator('[data-testid="delete-dialog"]')).toHaveCount(0);
 
-      // VERIFY UI — the row stayed visible the whole time.
-      await expect(row).toBeVisible();
+        // VERIFY UI — the row stayed visible the whole time.
+        await expect(row).toBeVisible();
+      });
 
-      // Let the full 5s window elapse: no committing DELETE was sent (the
-      // dry-run preview — postData() === null — does not count).
-      await page.waitForTimeout(5_500);
+      // The wrapper's rewind expired any hypothetical window and the
+      // drainMs buffer already elapsed inside it — no committing DELETE
+      // was sent (the dry-run preview — postData() === null — does not
+      // count; #417 step 5, negative-case sync).
       expect(bodyDeletes).toHaveLength(0);
       stop();
 

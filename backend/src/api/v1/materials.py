@@ -3,20 +3,21 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import asc
 
 from src.auth.permissions import require_permission, verify_fetch_metadata
 from src.db import SessionDep
 from src.domain.deletion import (
+    DependencyNode,
     ResolutionError,
     collect_dependencies,
     collect_dependency_ids,
     stale_expected_entities,
 )
 from src.domain.errors import BareListLimitExceededError
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.material import Material
@@ -92,6 +93,10 @@ async def list_materials(
     ``description`` OR exact id equality for a full UUID; ``total``
     reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
     """
+    # Annotated for the SortExpr union: the mixed asc() fallback joins to
+    # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
+    # ``Sequence[SortExpr] | None`` (locations.py precedent, волна 1).
+    order_by: list[SortExpr] | None
     if sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.
@@ -216,7 +221,7 @@ async def delete_material(
             )
         ),
     ] = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body
     (GH #345 §4.1, one-to-one mirror of the tags route / #318 D2).
 
@@ -286,7 +291,7 @@ async def delete_material(
         deps = await collect_dependencies(session, Material, material_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed; vacuous for Material — no
@@ -315,9 +320,10 @@ async def delete_material(
                 message="Material not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}``.
 
     Mirror of the tags/records/activities routes' builder (#285/#286/

@@ -20,6 +20,7 @@ from typing import Annotated
 from fastapi import Query
 from fastapi.responses import JSONResponse
 
+from src.domain.deletion import DependencyNode
 from src.schemas.common import DeleteBody
 
 #: The ``?dry_run=true`` query param — same declaration as the
@@ -71,7 +72,7 @@ def form_rejection(body: DeleteBody | None, dry_run: bool | None) -> JSONRespons
     return None
 
 
-def dependencies_response(deps: list, detail: str) -> JSONResponse:
+def dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 payload: ``{detail, dependencies}``.
 
     Mirror of the records/activities/tags routes' builder (#285/#286/

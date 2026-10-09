@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { waitForRecordsReady } from './fixtures/helpers';
+import { waitForRecordsReady, withUndoWindow } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import {
@@ -1184,20 +1184,38 @@ test.describe('Records Page — Deferred record delete (#285)', () => {
       };
       page.on('request', onRequest);
 
-      await clickRowDelete(page, row, record.id);
+      // The undo window under the paused page clock (#417): the 5s commit
+      // window is expired by the wrapper's instant rewind, not by a real
+      // 5.5s sleep. The DELETE tracker above was registered before the
+      // «×» click, as the helper contract requires.
+      await withUndoWindow(page, async () => {
+        await clickRowDelete(page, row, record.id);
+        // The toast is plain React state (UIContext) — it renders on the
+        // real macrotask loop and proves the async dry-run resolved and
+        // the enqueue (optimistic remove + notifications) completed.
+        const toast = undoToast(page);
+        await expect(toast).toBeVisible();
+        // #417: TanStack Query v5's notifyManager flushes cache→React
+        // notifications via setTimeout(0) — frozen under the paused page
+        // clock, so the page-level list provider never re-renders. A 1ms
+        // fast-forward releases the batch; React then renders the row's
+        // optimistic removal through its (unfaked) MessageChannel.
+        await page.clock.fastForward(1);
+        await expect(row).toBeHidden();
 
-      // Optimistic removal + undo toast…
-      await expect(row).toBeHidden();
-      const toast = undoToast(page);
-      await expect(toast).toBeVisible();
+        // …undone inside the window: the toast hides (the row returns —
+        // asserted after the wrapper, where the rewind has flushed the
+        // restore notifications; the pilot's #291 order).
+        await toast.getByRole('button', { name: 'Отменить' }).click();
+        await expect(toast).toBeHidden();
+      });
 
-      // …undone inside the window: row returns, toast hides.
-      await toast.getByRole('button', { name: 'Отменить' }).click();
+      // The row is back (undo restore flushed by the wrapper's rewind).
       await expect(row).toBeVisible();
-      await expect(toast).toBeHidden();
 
-      // Let the full window elapse: no committing DELETE may have been sent.
-      await page.waitForTimeout(5_500);
+      // The window expired via the wrapper's rewind and the drainMs buffer
+      // already elapsed inside it — no committing DELETE may have been
+      // sent (#417 step 5, negative-case sync).
       expect(bodyDeletes).toHaveLength(0);
       page.off('request', onRequest);
 

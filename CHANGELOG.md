@@ -42,9 +42,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     8 пунктов на ручную сверку).
   - Status: `docs/status/2026-10-10-visual-compliance-section-311.md`
 
-## [Unreleased] — 2026-10-08
+## [Unreleased] — 2026-10-09
 
 ### Added
+- **GH #417 — e2e окно отмены на управляемых часах (`page.clock` вместо 22×5,5 с реальных
+  ожиданий)** — branch `417-undo-window-page-clock` (10 commits `75827a4a..d90093f5`,
+  base `683f55aa`; спека `docs/specs/2026-10-07-undo-window-page-clock-417-design.md` rev3 и
+  план `docs/plans/2026-10-07-undo-window-page-clock-417-plan.md` — оба на main, unchanged by
+  IMPL; закрывает заодно гонку #291):
+  - Новый e2e-хелпер `withUndoWindow(page, fn, opts?)` в
+    `frontend/admin/e2e/fixtures/helpers.ts` — колбэк-обёртка «окно под управляемыми часами»:
+    `clock.pauseAt()` → работа с окном (создание, тост, проверки, клик «Отменить») → одна
+    перемотка `fastForward(5500)` → реальный drain 500 мс в Node → `resume()`; per-page офсет
+    фейковых часов — легальные повторные вызовы в одном тесте (S6).
+  - 22 места окна отмены в 12 спеках переведены с литеральных `waitForTimeout(5_500)` на
+    хелпер (пилот unify-caches US-3, семейство deferred-delete 9 мест, tags/clients/payments
+    6 мест, unified-rows + остаток unify-caches 6 мест); ~2 минуты чистого сна за полный
+    прогон уходят, пилотное место ~33,2 с → 8–12,8 с.
+  - Гонка #291 закрыта по построению: на паузированных часах окно не тикает — отмена не может
+    опоздать за тихую границу; санкционированное микропродвижение внутри колбэка
+    (`fastForward(1)`/`fastForward(150)`) только там, где пауза замораживает живые
+    микро-таймеры (notifyManager, фейд тоста).
+  - Особое 23-е место — буфер `WINDOW_MS + 500` в `pending-delete-unload-guard.spec.ts` —
+    намеренно осталось реальным ожиданием (стражу ухода нужна настоящая реальность).
+  - Тестовый скоуп: 13 файлов, все `frontend/admin/e2e/`, +733/−301; код приложения, UI и
+    контракты не менялись.
 - **GH #414 — Поле телефона: селектор кода страны + ввод остатка номера (PhoneField во всех
   точках ввода)** — branch `414-phone-field-country-selector` (14 коммитов `cb65e310..48295aba`,
   base `5d90a560`; 61 файл, +4373/−442; спека
@@ -128,6 +150,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Остаток семьи services (транш 2):** 77 — staff 20, client 16, service 15, activity 7,
     material 6, photo 5, payment 5, visitor 1, visit 1, position 1.
   - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-1.md`
+- **GH #306 — mypy-волна services, под-PR 2 (транш 2: остаток семьи → 0)** — branch
+  `306-mypy-services-2` (1 коммит `0538d599`, base `a42edf14`; Refs #306 — multi-wave,
+  не закрывает; план Task 4, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** остаток семьи `src/services/*` → 0 (staff 21, client 16, service 15, activity 7,
+    material 6, photo 5, payment 5, visitor 1, visit 1, position 1 — честный замер
+    `--no-incremental`); коллатерал — `api/v1/staff.py` (1); `decorators.py` не тронут
+    (граница #394, 0 ошибок и до, и после). **Семья services завершена целиком** (под-PR 1+2).
+  - **Пороги:** **mypy 397 → 318** (−79), порог в скрипте переснят = факту; ruff 119 per-rule ==
+    baseline (B008=0), не менялся.
+  - **Подавления:** `type: ignore[override]` ×4 (`services/service.py`, get/create/update/patch —
+    контракт-замена validated-schema → ORM, прецедент GH #171, блок-комментарий); глобальных
+    оверрайдов нет.
+  - **Behavioral delta:** нулевая — комплаенс-ревью проверило все call-sites `order_by`/`ids`
+    (keyword-only), новые точки применения без callers.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**; `tests/services` +
+    `test_lint_budget.py` 408p/0f/12s; ревью — комплаенс ✅, качество approved.
+  - **Метод-факт:** замеры mypy — только `--no-incremental` (устаревший `.mypy_cache` даёт
+    артефакты).
+  - **Остаток mypy-долга 318 по семьям:** admin 148 / api 76 / domain 28 (deletion 26) /
+    seed 26 / repositories 15 (generic.py) / schemas 9 / main.py 7 / models 3 / auth 3 /
+    cli.py 2 / core 1 — следующая волна 2: admin (~148).
+  - Status: `docs/status/2026-10-08-backend-lint-mypy-ratchet-306-wave1-services-2.md`
+- **GH #306 — mypy-волна 2 admin, Task 5 (admin/setup.py → 0, одним под-PR)** — branch
+  `306-mypy-admin-1` (1 коммит `a9064752`, base `8063b940`; 4 файла, +155/−41; Refs #306 —
+  multi-wave, не закрывает; план Task 5, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** семья admin = один файл `src/admin/setup.py` 148 → 0 (90 list-item, 28 type-arg,
+    26 assignment, 2 import-untyped, 1 no-untyped-def, 1 misc); под-PR 2 не нужен — семья
+    завершена целиком одним под-PR.
+  - **Пороги:** **mypy 318 → 170** (−148), порог в скрипте переснят = факту; ruff 119 per-rule
+    == baseline (B008=0), не менялся.
+  - **Подавления:** НОЛЬ — ни `type: ignore`, ни оверрайдов; идиомы вместо подавлений:
+    `ClassVar[Sequence[_AdminAttr]]` + PEP-695 `type _AdminAttr` (контракт sqladmin 0.26
+    `MODEL_ATTR`, ковариантность `Sequence`); `types-WTForms` в dev-зависимостях
+    (−2 import-untyped; CI ставит `uv sync --extra dev`).
+  - **Behavioral delta:** нулевая — runtime AST-идентичен (комплаенс-ревью: все 26 списков
+    element-for-element).
+  - **Баг найден, не чинен (тикет-кандидат):** `inline_models` не существует в sqladmin 0.26.0 —
+    атрибут в `StaffAdmin` молча игнорируется, inline-редактирование master-расширения Staff,
+    вероятно, не работает вовсе (семантика списана с flask-admin); `tests/test_admin.py:55`
+    проверяет только наличие атрибута.
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped**; `test_admin` +
+    `test_lint_budget` 37/37; гейты зелёные (mypy 170 == порог, ruff 119); ревью —
+    комплаенс ✅, качество approved.
+  - **Остаток mypy-долга 170 по семьям:** api/v1 ≈77 / seed 26 / domain/deletion 26 /
+    repositories/generic 15 / schemas 9 / main.py 7 / models 3 / auth 3 / cli 2 /
+    domain/record_visits 2 / core 1 — следующая волна 3: api (~77).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave2-admin.md`
+- **GH #306 — mypy-волна 3 api, Task 6 (семья `src/api/` → 0, одним под-PR)** — branch
+  `306-mypy-api-1` (1 коммит `82ec6133`, base `f2f09896`; 17 файлов, +165/−78; Refs #306 —
+  multi-wave, не закрывает; план Task 6, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** семья `src/api/` = 15 файлов, 76 → 0 (records 13, clients 10,
+    tags/services/materials/activities 6×4, staff/locations 5+5, visitors 4,
+    visits/position/photos/payments 3×4, user_settings 2, `_delete_family` 1); под-PR 2 не
+    нужен — семья завершена целиком одним под-PR.
+  - **Пороги:** **mypy 170 → 94** (−76), порог в скрипте переснят = факту; ruff 119 per-rule
+    == baseline (B008=0), не менялся.
+  - **Подавления:** 6 пар `# type: ignore[misc]`+`[arg-type]` на selfless-сценариях
+    `@transactional` (records ×4, clients ×1, activities ×1; прецедент GH #171, все с
+    обоснованиями); `decorators.py` не тронут (#394), семья services осталась на 0.
+  - **Идиомы вместо подавлений:** delete-family роуты `-> None` → `-> Response` + явный
+    `Response(status_code=204)` (FastAPI 0.141 ассертит 204-без-тела для `Response | None`;
+    комплаенс-ревью: статус/тело/заголовки идентичны, OpenAPI байт-идентичен, контракт-сьют
+    пиннит 204 + `b""`); `deps: list[DependencyNode]`; `Annotated[VisitorService]` вместо
+    `any`; `PaymentResponse.model_validate` (from_attributes).
+  - **Поддерживающее изменение:** `UserSettingsService.update_by_user_id` расширен до
+    `UserSettingsUpdate | UserSettingsPatch` (поля идентичны, call-sites не менялись).
+  - **Tests:** полный pytest-сьют **3179 passed / 0 failed / 15 skipped** (+33
+    `test_lint_budget`); контракт-сьют 244/0/3; гейты зелёные (mypy 94 == порог, ruff 119);
+    ревью — комплаенс ✅, качество approved.
+  - **Остаток mypy-долга 94 по семьям:** domain/deletion 26 / seed 26 /
+    repositories/generic 15 / schemas 9 / main.py 7 / models 3 / auth 3 /
+    domain/record_visits 2 / cli 2 / core/config 1 — следующая волна 4: хвосты
+    (план Task 7, финальная волна #306).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave3-api.md`
+- **GH #306 — mypy-волна 4 хвосты, Task 7 (МИЛСТОУН: mypy src → 0)** — branch
+  `306-mypy-tails-1` (1 коммит `8edbdba0`, base `452ea658`; 20 файлов, +210/−95; Refs #306 —
+  multi-wave, не закрывает; план Task 7, спека
+  `docs/specs/2026-10-08-backend-lint-mypy-ratchet-306-design.md`):
+  - **Транш:** хвосты — 10 семейств, 94 → 0 (domain/deletion 26, seed 26,
+    repositories/generic 15, schemas 9, main.py 7, auth 3, models 3, domain/record_visits 2,
+    cli 2, core/config 1). **МИЛСТОУН: весь `src/` (147 файлов) чист — mypy = 0.**
+  - **Пороги:** **mypy 94 → 0**, порог в скрипте переснят = факту; ruff коллатерально
+    **119 → 117** — TYPE_CHECKING-импорты forward-refs моделей («Activity»/«Visit»)
+    починили F821 ×2, запись F821 удалена из бюджета (= «порог=факту», только вниз);
+    B008 = 0.
+  - **Подавления:** 20, все точечные с обоснованиями — schemas ×8 `[prop-decorator]`
+    (pydantic `@computed_field` над `@property`), repositories/generic ×9 `[attr-defined]`
+    (прецедент #232: `id`/`is_active`/`sort_order` вне TypeVar-базы), cli ×2 (selfless
+    `@transactional`, прецедент #171), core/config ×1 `[call-arg]` (`_env_file` — реальный
+    kwarg pydantic-settings, плагин его теряет; верифицирован по установленному
+    pydantic-settings 2.14.1); в main.py один устаревший ignore снят; strict не ослаблен;
+    `decorators.py` не тронут (#394), семьи services/admin/api остались на 0.
+  - **Идиомы вместо подавлений:** `GenericService[Any, Any, Any]` в реестре хендлеров
+    deletion, честные сигнатуры + PEP-695 `type _ActivityRow` в seed, TYPE_CHECKING
+    forward-refs в models.
+  - **Behavioral delta:** нулевая — аннотации/тайпинг; единственные исполняемые добавки —
+    ассерты-подсветки тикет-кандидата.
+  - **Баг найден, не чинен (тикет-кандидат):** `auth/service.py` `change_password` у
+    passwordless-аккаунта (`password_hash` NULL, #348) дал бы 500 вместо 401 — недостижимо
+    на практике (нет сессии), подсвечено ассертами.
+  - **Tests:** полный pytest-сьют **3184 passed / 0 failed / 15 skipped** (+5 новых
+    `TestZeroMypyBudget` — нулевой режим порога: 0/0 green, факт 1 при пороге 0 red, рост от
+    нулевой базы red); гейты зелёные (mypy 0 == порог, ruff 117 == бюджет); ревью —
+    комплаенс ✅, качество approved.
+  - **Остаток #306:** mypy-долг закрыт целиком (рахет 531 → 0); дальше Task 8 — ruff-хвост
+    117 → 0 (RUF012, F841, RUF001/RUF059, UP042, F811) → Task 9 — финал (пороги 0/0 → снос
+    `lint_budget.py`, джоба зовёт ruff/mypy напрямую; Closes #306).
+  - Status: `docs/status/2026-10-09-backend-lint-mypy-ratchet-306-wave4-tails.md`
 
 ### Fixed
 - **GH #296 — Отмена отложенного поиска при размонтировании RemoteSearchSelect** — branch

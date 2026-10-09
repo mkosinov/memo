@@ -57,7 +57,10 @@ class MasterSectionView(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    @computed_field
+    # ``@computed_field`` over ``@property`` is pydantic's documented
+    # pattern; mypy cannot type a decorator stacked on @property
+    # (known limitation) — the pin is the honest suppression.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def archived(self) -> bool:
         """Schedule-archive flag, inverted like every archive-aware entity."""
@@ -179,7 +182,8 @@ class StaffAccountView(BaseModel):
     password_hash: str | None = Field(exclude=True)
     link_expires_at: datetime | None = None
 
-    @computed_field
+    # Same pydantic-on-@property stacking as MasterSectionView above.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def password_is_set(self) -> bool:
         """True when the account has a password hash (NULL = passwordless)."""
@@ -209,7 +213,8 @@ class StaffResponse(StaffBase):
     updated_at: datetime
     is_active: bool = Field(exclude=True)
 
-    @computed_field
+    # Same pydantic-on-@property stacking as MasterSectionView above.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def archived(self) -> bool:
         return not self.is_active

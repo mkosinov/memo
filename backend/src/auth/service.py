@@ -400,6 +400,14 @@ class AuthService:
             await db_session.execute(select(User).where(User.id == user.id))
         ).scalar_one_or_none()
 
+        # Type narrowing only (no behavior change): an AuthedUser always has
+        # its row — the session token was issued for it — and a passwordless
+        # account (#348, NULL password_hash) can never hold a session because
+        # login refuses it. Both asserts state unreachable invariants; if
+        # ever violated, the branch crashes into the 500 catch-all either way.
+        assert row is not None
+        assert row.password_hash is not None
+
         if not verify_password(current_password, row.password_hash):
             # Timing parity: spend the same Argon2 work as the success
             # branch before rejecting (no cheap 401).

@@ -87,7 +87,10 @@ class MaterialResponse(MaterialBase):
     is_active: bool = Field(..., exclude=True)
     used_in_services_count: int = 0
 
-    @computed_field
+    # ``@computed_field`` over ``@property`` is pydantic's documented
+    # pattern; mypy cannot type a decorator stacked on @property
+    # (known limitation) — the pin is the honest suppression.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def archived(self) -> bool:
         return not self.is_active

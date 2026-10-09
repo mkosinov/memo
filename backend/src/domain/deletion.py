@@ -78,7 +78,7 @@ from __future__ import annotations
 # labels per spec §5 + D9б/в one-line labels in docstrings/comments)
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, select, update
@@ -1903,14 +1903,18 @@ def validate_resolutions(
 # client NULLIFY handlers stay (the scenario dispatches them via
 # ``FK_MATRIX[Client]``/``NULLIFY_HANDLERS``).
 
-type _FkHandlerFn = Callable[["GenericService", AsyncSession, str], Awaitable[None]]
+# The handlers are registry-uniform: one callable shape serves EVERY
+# GenericService parameterization (the executor dispatches ``self`` of
+# whichever concrete service owns the entity) — hence ``Any, Any, Any``
+# for the schema type parameters.
+type _FkHandlerFn = Callable[[GenericService[Any, Any, Any], AsyncSession, str], Awaitable[None]]
 
 
 # ─── nullify handlers ───────────────────────────────────────────────────────────
 
 
 async def _h_nullify_service_photos(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -1921,7 +1925,7 @@ async def _h_nullify_service_photos(
 
 
 async def _h_nullify_client_records(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -1933,7 +1937,7 @@ async def _h_nullify_client_records(
 
 
 async def _h_nullify_client_photos(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -1943,7 +1947,7 @@ async def _h_nullify_client_photos(
 
 
 async def _h_nullify_location_photos(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -1958,7 +1962,7 @@ async def _h_nullify_location_photos(
 
 
 async def _h_cascade_master_users(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -1998,7 +2002,7 @@ async def _h_cascade_master_users(
 
 
 async def _h_cascade_master_extension(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2010,7 +2014,7 @@ async def _h_cascade_master_extension(
 
 
 async def _h_cascade_staff_positions(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2020,7 +2024,7 @@ async def _h_cascade_staff_positions(
 
 
 async def _h_cascade_master_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2029,7 +2033,7 @@ async def _h_cascade_master_tags(
 
 
 async def _h_cascade_location_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2038,7 +2042,7 @@ async def _h_cascade_location_tags(
 
 
 async def _h_cascade_service_tariffs(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2047,7 +2051,7 @@ async def _h_cascade_service_tariffs(
 
 
 async def _h_cascade_service_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2056,7 +2060,7 @@ async def _h_cascade_service_tags(
 
 
 async def _h_cascade_service_materials(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2067,7 +2071,7 @@ async def _h_cascade_service_materials(
 
 
 async def _h_cascade_material_service_materials(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2086,7 +2090,7 @@ async def _h_cascade_material_service_materials(
 
 
 async def _h_cascade_tag_service_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2095,7 +2099,7 @@ async def _h_cascade_tag_service_tags(
 
 
 async def _h_cascade_tag_activity_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2104,7 +2108,7 @@ async def _h_cascade_tag_activity_tags(
 
 
 async def _h_cascade_tag_master_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2113,7 +2117,7 @@ async def _h_cascade_tag_master_tags(
 
 
 async def _h_cascade_tag_location_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2122,7 +2126,7 @@ async def _h_cascade_tag_location_tags(
 
 
 async def _h_cascade_tag_client_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2131,7 +2135,7 @@ async def _h_cascade_tag_client_tags(
 
 
 async def _h_cascade_tag_visitor_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2140,7 +2144,7 @@ async def _h_cascade_tag_visitor_tags(
 
 
 async def _h_cascade_tag_record_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2149,7 +2153,7 @@ async def _h_cascade_tag_record_tags(
 
 
 async def _h_cascade_tag_photo_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2167,7 +2171,7 @@ async def _h_cascade_tag_photo_tags(
 
 
 async def _h_cascade_photo_photo_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2177,7 +2181,7 @@ async def _h_cascade_photo_photo_tags(
 
 
 async def _h_cascade_visitor_visits(
-    self: GenericService,
+    self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2199,7 +2203,7 @@ async def _h_cascade_visitor_visits(
 
 
 async def _h_cascade_visitor_visitor_tags(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:
@@ -2209,7 +2213,7 @@ async def _h_cascade_visitor_visitor_tags(
 
 
 async def _h_cascade_position_staff_positions(
-    _self: GenericService,
+    _self: GenericService[Any, Any, Any],
     session: AsyncSession,
     entity_id: str,
 ) -> None:

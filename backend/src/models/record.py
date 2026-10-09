@@ -11,6 +11,7 @@ from src.models.abstract import AbstractModel
 
 if TYPE_CHECKING:
     from src.models.tag import Tag
+    from src.models.visit import Visit
 
 
 class Record(AbstractModel):

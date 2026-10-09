@@ -400,7 +400,7 @@ describe('CopyLastWeekPopover — copy flow', () => {
     await act(async () => {
       fireEvent.click(confirm);
     });
-    expect(showToast).toHaveBeenCalledWith('Скопировано 2 занятий', 'success');
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Скопировано 2 занятий', 'success'));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -413,10 +413,12 @@ describe('CopyLastWeekPopover — copy flow', () => {
     await act(async () => {
       fireEvent.click(confirm);
     });
-    expect(showToast).toHaveBeenCalledWith(
-      'Скопировано 1 занятий (пропущено 1 — уже есть)\n' +
-        'не скопировано ещё 2 — индивидуальные, архивная локация или без замены мастера',
-      'success',
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'Скопировано 1 занятий (пропущено 1 — уже есть)\n' +
+          'не скопировано ещё 2 — индивидуальные, архивная локация или без замены мастера',
+        'success',
+      ),
     );
   });
 
@@ -429,7 +431,7 @@ describe('CopyLastWeekPopover — copy flow', () => {
     await act(async () => {
       fireEvent.click(confirm);
     });
-    expect(showToast).toHaveBeenCalledWith('Всё уже есть', 'info');
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Всё уже есть', 'info'));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -442,7 +444,7 @@ describe('CopyLastWeekPopover — copy flow', () => {
     await act(async () => {
       fireEvent.click(confirm);
     });
-    expect(showToast).toHaveBeenCalledWith('Нечего копировать', 'info');
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Нечего копировать', 'info'));
   });
 
   it('shows an error toast with the server message and keeps the popup open', async () => {
@@ -452,7 +454,9 @@ describe('CopyLastWeekPopover — copy flow', () => {
     await act(async () => {
       fireEvent.click(confirm);
     });
-    expect(showToast).toHaveBeenCalledWith('Нельзя копировать в ту же неделю', 'error');
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Нельзя копировать в ту же неделю', 'error'),
+    );
     expect(onClose).not.toHaveBeenCalled();
   });
 

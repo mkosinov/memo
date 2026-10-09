@@ -8,7 +8,8 @@
  *     loud error naming both env vars (postmortem #209: the six call sites
  *     previously resolved independently with DIFFERENT precedence — a
  *     silent SHARD_ID × TEST_DB_PATH mismatch);
- *   - matching paths (or a single variable set) resolve quietly.
+ *   - matching paths (or a single variable set) resolve quietly;
+ *   - TEST_DB_PATH='' counts as unset (GH #336).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
@@ -84,5 +85,21 @@ describe('resolveTestDbPath (GH #209 single contract)', () => {
   it('neither set → default <root>/backend/test_memo.db', () => {
     const repoRoot = path.resolve(__dirname, '..', '..', '..');
     expect(resolveTestDbPath({})).toBe(path.join(repoRoot, 'backend', 'test_memo.db'));
+  });
+
+  it("empty-string TEST_DB_PATH counts as unset → default path (GH #336)", () => {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    expect(resolveTestDbPath({ testDbPath: '' })).toBe(
+      path.join(repoRoot, 'backend', 'test_memo.db'),
+    );
+  });
+
+  it("empty-string TEST_DB_PATH + shardId → no conflict, canonical shard path (GH #336)", () => {
+    // '' is unset, so it must NOT trigger the SHARD_ID × TEST_DB_PATH conflict
+    // the way a stale inherited .env.test line would.
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    expect(resolveTestDbPath({ shardId: '1', testDbPath: '' })).toBe(
+      path.join(repoRoot, 'backend', 'test_memo_shard1.db'),
+    );
   });
 });

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
 from src.auth.permissions import (
@@ -14,6 +14,7 @@ from src.auth.permissions import (
 from src.auth.scope import ScopeContext, get_scope
 from src.db import SessionDep
 from src.domain.deletion import (
+    DependencyNode,
     ResolutionError,
     StaleDependenciesError,
     collect_dependencies,
@@ -32,7 +33,7 @@ from src.schemas.client import (
 from src.schemas.common import PaginatedResponse
 from src.schemas.visitor import VisitorResponse
 from src.services.client import ClientService, get_client_service, list_clients_view
-from src.services.visitor import get_visitor_service
+from src.services.visitor import VisitorService, get_visitor_service
 from src.usecases.clients import delete_client as delete_client_scenario
 
 router = APIRouter(
@@ -49,7 +50,7 @@ def _get_client_service() -> ClientService:
 
 
 @lru_cache
-def _get_visitor_service():
+def _get_visitor_service() -> VisitorService:
     """Dependency factory returning a singleton VisitorService."""
     return get_visitor_service()
 
@@ -71,7 +72,7 @@ _ADMIN_WRITE_GUARD = [
     Depends(require_admin),
     Depends(verify_fetch_metadata),
 ]
-_VisitorServiceDep = Annotated[any, Depends(_get_visitor_service)]
+_VisitorServiceDep = Annotated[VisitorService, Depends(_get_visitor_service)]
 
 
 @router.get("/get", response_model=ClientResponse)
@@ -211,7 +212,7 @@ async def delete_client(
             )
         ),
     ] = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run preview flag / commit body
     (GH #345 §4.1, one-to-one mirror of the staff/tags/records family;
     the subset verification runs inside the ``delete_client`` scenario
@@ -284,7 +285,7 @@ async def delete_client(
         deps = await collect_dependencies(session, Client, client_id)
         if deps:
             return _dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete — the business
     # chain lives in the usecases scenario (spec §4.5): ONE
@@ -296,8 +297,8 @@ async def delete_client(
     try:
         # Selfless-scenario call convention: the leading ``None``
         # occupies the wrapper's ``self`` slot (see usecases/clients.py).
-        ok = await delete_client_scenario(
-            None,
+        ok = await delete_client_scenario(  # type: ignore[misc]
+            None,  # type: ignore[arg-type]
             db_session=session,
             id=client_id,
             resolutions=resolutions or {},
@@ -315,9 +316,10 @@ async def delete_client(
                 message="Client not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.
 
 
-def _dependencies_response(deps: list, detail: str) -> JSONResponse:
+def _dependencies_response(deps: list[DependencyNode], detail: str) -> JSONResponse:
     """The unified 409 preview payload: ``{detail, dependencies}``.
 
     Mirror of the staff/tags/records/activities routes' builder (#285/

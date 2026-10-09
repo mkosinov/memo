@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.v1._delete_family import (
@@ -55,7 +55,7 @@ async def _visitor_scoped_or_404(
     session: AsyncSession,
     visitor_id: str,
     scope: ScopeContext,
-) -> Visitor | None:
+) -> VisitorResponse | None:
     """GH #263 T2 — shared owner gate for visitor point ops.
 
     ONE query with the EXISTS visibility predicate (visitor → visits →
@@ -204,7 +204,7 @@ async def delete_visitor(
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
     scope: ScopeContext = Depends(get_scope),
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     visitor = dependent subject — mirror of the tags route #318 D2).
 
@@ -245,7 +245,7 @@ async def delete_visitor(
         deps = await collect_dependencies(session, Visitor, visitor_id)
         if deps:
             return dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
@@ -276,3 +276,4 @@ async def delete_visitor(
                 message="Visitor not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

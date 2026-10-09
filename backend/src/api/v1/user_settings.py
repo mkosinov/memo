@@ -131,7 +131,7 @@ async def delete_settings(
     session: SessionDep,
     body: Annotated[DeleteBody | None, Body()] = None,
     dry_run: DryRunParam = None,
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     leaf subject — mirror of the records/tags routes #285/#318).
 
@@ -165,8 +165,9 @@ async def delete_settings(
         )
 
     if dry_run:
-        return  # 204 — preview only: a leaf never has dependencies.
+        return Response(status_code=204)  # preview only: a leaf never has dependencies.
 
     deleted = await service.delete(session, settings_id)
     if not deleted:
         raise _settings_not_found("Settings not found")
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

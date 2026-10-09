@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -261,7 +261,7 @@ async def delete_photo(
     dry_run: DryRunParam = None,
     # GH #263 T5: чужое фото не удаляем — 404.
     scope: ScopeContext = Depends(get_scope),
-) -> None:
+) -> Response:
     """Unified delete contract — dry-run flag / commit body (#324 §4,
     photo = dependent subject — mirror of the tags route #318 D2).
 
@@ -300,7 +300,7 @@ async def delete_photo(
         deps = await collect_dependencies(session, Photo, photo_id)
         if deps:
             return dependencies_response(deps, detail="has_dependencies")
-        return  # 204 — preview only: no resolve_delete, no SSE marks.
+        return Response(status_code=204)  # preview only: no resolve_delete, no SSE marks.
 
     # Body branch: the commit of the deferred delete. Expected id-set
     # verification FIRST (fail-closed) — a stale commit must 409 BEFORE
@@ -330,3 +330,4 @@ async def delete_photo(
                 message="Photo not found",
             ).model_dump(),
         )
+    return Response(status_code=204)  # the deferred-delete commit succeeded.

@@ -64,6 +64,17 @@ TOOL_TIMEOUT_SECONDS = 600
 # (гасят [import-untyped] без новых ошибок), data: dict[str, Any],
 # ALL_ADMIN_VIEWS: list[type[ModelView]], setup_admin(app: FastAPI).
 # Ruff-факт не менялся (119).
+# 2026-10-09 (GH #306, Task 6 — mypy-волна api): mypy 170 → 94 — всё
+# семейство api (src/api/* 76 → 0): delete-family роуты `-> None` →
+# `-> Response` (early-return JSONResponse из 204-роута; FastAPI 0.141
+# ассертит «204 без тела», Response-аннотация не меняет OpenAPI —
+# проверено), явные `return Response(status_code=204)`,
+# deps: list[DependencyNode], order_by: list[SortExpr] | None (прецедент
+# locations.py), `_to_response` валидирует ORM на границе,
+# Annotated[VisitorService] вместо any; 6 точечных пар type: ignore[misc]/
+# [arg-type] на selfless-вызовах сценариев (прецедент staff.py/GH #171);
+# поддерживающее: update_by_user_id принимает Update | Patch (сервис).
+# Ruff-факт не менялся (119).
 RUFF_BUDGET: dict[str, int] = {
     "B006": 1,
     "B011": 2,
@@ -91,7 +102,7 @@ RUFF_BUDGET: dict[str, int] = {
     "W291": 2,
     "W293": 2,
 }
-MYPY_BUDGET: int = 170
+MYPY_BUDGET: int = 94
 
 _MYPY_TOTAL_RE = re.compile(r"^Found (\d+) errors?", re.MULTILINE)
 

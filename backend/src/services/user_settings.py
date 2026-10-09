@@ -15,6 +15,7 @@ from src.models.user_settings import UserSettings
 from src.repositories.generic import BaseRepository, get_base_repository
 from src.schemas.user_settings import (
     UserSettingsCreate,
+    UserSettingsPatch,
     UserSettingsResponse,
     UserSettingsUpdate,
 )
@@ -194,9 +195,17 @@ class UserSettingsService:
 
     @transactional
     async def update_by_user_id(
-        self, session: AsyncSession, user_id: str, data: UserSettingsUpdate
+        self,
+        session: AsyncSession,
+        user_id: str,
+        data: UserSettingsUpdate | UserSettingsPatch,
     ) -> UserSettingsResponse | None:
-        """Partial-update settings by user_id. Returns None if not found."""
+        """Partial-update settings by user_id. Returns None if not found.
+
+        Accepts both the PUT schema (``UserSettingsUpdate``) and the
+        PATCH schema (``UserSettingsPatch``) — field-identical
+        all-optional shapes consumed via ``model_dump(exclude_unset=True)``.
+        """
         stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         result = await session.execute(stmt)
         orm = result.scalar_one_or_none()

@@ -53,6 +53,25 @@
 # override must live inside the current repo root — it gets staged into
 # $WORK/tree, so an outside path would leave the fixture checks inspecting
 # the wrong tree.
+#
+# Feature #317 (run tag + manual-stack lease, spec §3.1/§3.3):
+#   → Untagged invariant: Cases 1-5 run with SHARD_RUNS_DIR pointed at an
+#     isolated dir — an untagged run must NEVER write a lease (empty tag →
+#     zero behavior change, CI path byte-identical).
+#   → Case 7 (§3.1/§3.3): a tagged run (SHARD_RUN_TAG=6 hex) uses tagged
+#     resource names (NEXT_DIST_DIR=.next-shard-<id>_<tag>, FILES_DIR=
+#     test_files_shard<id>_<tag>), exports SHARD_RUN_TAG to children, and
+#     writes an 8-field manual lease `pid tag SHARD_PORT BACKEND_PORT 0 0
+#     epoch` (PID = the script's own $$ == the pnpm stub's PPID; the two
+#     unused port slots are zero-padded) which is REMOVED on script exit.
+#   → Case 8 (§3.1): an invalid SHARD_RUN_TAG is fatal (exit 1 + clear
+#     message) BEFORE any resource/dir creation — the provided DB file is
+#     left byte-intact, no lease appears.
+#   → Case 9 (§3.3): an ALIVE manual-style lease (2 real ports + two
+#     zeros) consumed by sweep_dead_runs: its 2 REAL ports go to stdout
+#     (busy-protection for the allocator; zeros ride along and are
+#     filtered at the test-all.sh seam), NOTHING is swept — the lease
+#     file survives. Pins existing lib semantics against regressions.
 
 set -euo pipefail
 
@@ -95,6 +114,10 @@ fi
 # Per-run isolated work + stubs dirs
 WORK="$(mktemp -d -t shard-dryrun-XXXXXX)"
 STUBS="$(mktemp -d -t shard-stub-XXXXXX)"
+# #317: isolated run-lease dir — every run under test gets SHARD_RUNS_DIR
+# pointed here, so lease writes/removals are observable and NEVER touch the
+# real ${TMPDIR:-/tmp}/memo-shard-runs.
+RUNS_DIR="$WORK/runs"
 
 # ── Run-scoped staged tree + S5 fixture ───────────────────────────────────
 # Minimal tree the script under test expects relative to itself. The
@@ -106,6 +129,11 @@ NEXT_MARKER="$STAGE/frontend/admin/.next/marker.txt"
 mkdir -p "$STAGE/scripts" "$STAGE/backend" "$STAGE/frontend/admin/.next"
 cp "$SHARD_SCRIPT_SRC" "$SCRIPT_UNDER_TEST"
 chmod +x "$SCRIPT_UNDER_TEST"
+# #317: the script under test sources scripts/lib/shard-helpers.sh relative
+# to its OWN root (write_run_lease/remove_run_lease) — stage the lib next to
+# it, so the staged tree is self-contained.
+mkdir -p "$STAGE/scripts/lib"
+cp "$REPO_ROOT/scripts/lib/shard-helpers.sh" "$STAGE/scripts/lib/shard-helpers.sh"
 printf 'dryrun-fixture-do-not-touch\n' > "$NEXT_MARKER"
 
 cleanup() {
@@ -136,14 +164,22 @@ EOF
 chmod +x "$STUBS/uv"
 
 # pnpm stub: journals the `exec next dev` call site with the env values the
-# script exported (NEXT_DIST_DIR, SHARD_PORT). Anything else: no-op.
+# script exported (NEXT_DIST_DIR, SHARD_PORT; #317: SHARD_RUN_TAG + the
+# stub's PPID == the script's own PID for lease-pid assertions). Anything
+# else: no-op. #317 Case 7: SHARD_DRYRUN_HOLD_S keeps the stub (the
+# "foreground" frontend) alive so the harness can inspect the run lease
+# while the script under test is still running.
 cat > "$STUBS/pnpm" <<'EOF'
 #!/bin/sh
 case "$*" in
   *"exec next dev"*)
-    printf 'PNPM_EXEC_NEXT_DEV argv=[%s] NEXT_DIST_DIR=[%s] SHARD_PORT=[%s]\n' \
+    printf 'PNPM_EXEC_NEXT_DEV argv=[%s] NEXT_DIST_DIR=[%s] SHARD_PORT=[%s] SHARD_RUN_TAG=[%s] PPID=[%s]\n' \
       "$*" "${NEXT_DIST_DIR:-unset}" "${SHARD_PORT:-unset}" \
+      "${SHARD_RUN_TAG:-unset}" "$PPID" \
       >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
+    if [ -n "${SHARD_DRYRUN_HOLD_S:-}" ]; then
+      sleep "$SHARD_DRYRUN_HOLD_S"
+    fi
     ;;
 esac
 exit 0
@@ -188,9 +224,18 @@ run_shard() {
     BACKEND_URL="http://127.0.0.1:$bport" \
     NEXT_PUBLIC_API_URL="http://127.0.0.1:$bport" \
     SHARD_DRYRUN_JOURNAL="$journal" \
+    SHARD_RUNS_DIR="$RUNS_DIR" \
     PATH="$STUBS:$PATH" \
     timeout 15 bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1 || true
   set -e
+}
+
+# is_uint S — true iff S is a non-empty unsigned integer (lease fields)
+is_uint() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  return 0
 }
 
 # journal_has_default_next_rm <journal>
@@ -415,6 +460,233 @@ if [ "$WHITELIST_EXIT" -eq 1 ] && grep -q "must be 1 or 2" "$CASE6_DIR/run.err";
 else
   echo "FAIL Case 6 (#209): expected exit code 1 + 'must be 1 or 2' on stderr for SHARD_ID=rest"
   echo "  exit code: $WHITELIST_EXIT"
+  FAIL=1
+fi
+
+# ── #317 untagged invariant: Cases 1-5 wrote NO lease ──────────────────────
+# They ran untagged with SHARD_RUNS_DIR pointed at RUNS_DIR: an empty tag
+# must produce ZERO lease side effects (spec §3.1 — CI path unchanged).
+if [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
+  echo "PASS (#317 untagged): untagged runs (Cases 1-5) wrote no run lease"
+else
+  echo "FAIL (#317 untagged): untagged runs must not write leases; $RUNS_DIR contains:"
+  ls -A "$RUNS_DIR"
+  FAIL=1
+fi
+
+# ── Case 7 (#317 §3.1/§3.3): tagged run — tagged names + manual lease ──────
+# SHARD_RUN_TAG=ab12cd (valid 6-hex) must produce:
+#   - NEXT_DIST_DIR=.next-shard-1_ab12cd at the pnpm call site;
+#   - FILES_DIR/TEST_FILES_DIR=test_files_shard1_ab12cd (log line + the
+#     wipe's RM journal line), never the untagged test_files_shard1;
+#   - an 8-field manual lease `pid ab12cd 3002 8001 0 0 epoch` in
+#     SHARD_RUNS_DIR — PID is the script's own $$ (== the pnpm stub's
+#     PPID), the two unused port slots ZERO-padded (a manual stack has
+#     only SHARD_PORT + BACKEND_PORT);
+#   - SHARD_RUN_TAG exported (visible to the pnpm child);
+#   - the lease REMOVED after the script exits (its trap).
+# The pnpm stub holds the "foreground" for SHARD_DRYRUN_HOLD_S seconds so
+# the lease can be inspected while the script is still alive.
+CASE7_DIR="$WORK/case7"; mkdir -p "$CASE7_DIR"
+CASE7_DB="$CASE7_DIR/test_memo_shard1_ab12cd.db"
+printf 'seed' > "$CASE7_DB"
+CASE7_TAG=ab12cd
+CASE7_LEASE="$RUNS_DIR/${CASE7_TAG}.run"
+
+set +e
+SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
+  TEST_DB_PATH="$CASE7_DB" \
+  BACKEND_URL=http://127.0.0.1:8001 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+  SHARD_RUN_TAG="$CASE7_TAG" \
+  SHARD_DRYRUN_JOURNAL="$CASE7_DIR/journal" \
+  SHARD_DRYRUN_HOLD_S=3 \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" > "$CASE7_DIR/run.log" 2>&1 &
+CASE7_PID=$!
+set -e
+
+# Poll for the lease while the script is alive (write happens before any
+# server start, so it appears ~instantly; the hold keeps the script up).
+CASE7_LEASE_SEEN=false
+for _i in $(seq 1 20); do
+  if [ -f "$CASE7_LEASE" ]; then
+    CASE7_LEASE_SEEN=true
+    break
+  fi
+  sleep 0.2
+done
+if [ "$CASE7_LEASE_SEEN" = true ]; then
+  echo "PASS Case 7 (#317): run lease written while the tagged stack is alive"
+else
+  echo "FAIL Case 7 (#317): no run lease appeared at $CASE7_LEASE while the script was alive"
+  FAIL=1
+fi
+
+# Lease content: exactly 8 fields `pid tag front back 0 0 epoch`, fresh stamp.
+if [ "$CASE7_LEASE_SEEN" = true ]; then
+  LPID=""; LTAG=""; LP1=""; LP2=""; LP3=""; LP4=""; LSTAMP=""; LEXTRA=""
+  if read -r LPID LTAG LP1 LP2 LP3 LP4 LSTAMP LEXTRA < "$CASE7_LEASE"; then
+    CASE7_NOW="$(date +%s)"
+    if [ "$LTAG" = "$CASE7_TAG" ] && [ "$LP1" = "3002" ] && [ "$LP2" = "8001" ] \
+       && [ "$LP3" = "0" ] && [ "$LP4" = "0" ] && [ -z "$LEXTRA" ] \
+       && [ "$LPID" = "$CASE7_PID" ] && is_uint "$LSTAMP" \
+       && [ "$LSTAMP" -le "$CASE7_NOW" ] \
+       && [ $(( CASE7_NOW - LSTAMP )) -lt 60 ]; then
+      echo "PASS Case 7 (#317): lease line is exact 'pid tag front back 0 0 epoch' (pid=$LPID)"
+    else
+      echo "FAIL Case 7 (#317): bad lease content: '$LPID $LTAG $LP1 $LP2 $LP3 $LP4 $LSTAMP $LEXTRA'"
+      FAIL=1
+    fi
+  else
+    echo "FAIL Case 7 (#317): cannot read a lease line from $CASE7_LEASE"
+    FAIL=1
+  fi
+fi
+
+# Reap the run; the script must exit 0 (stubbed stack) and remove its lease.
+set +e
+wait "$CASE7_PID"
+CASE7_RC=$?
+set -e
+echo "── Case 7 log ──"
+cat "$CASE7_DIR/run.log"
+echo "── Case 7 journal ──"
+cat "$CASE7_DIR/journal" 2>/dev/null || echo "(empty)"
+echo "─────────────────"
+
+if [ "$CASE7_RC" -eq 0 ]; then
+  echo "PASS Case 7 (#317): tagged run exited 0"
+else
+  echo "FAIL Case 7 (#317): tagged run exited $CASE7_RC (expected 0)"
+  FAIL=1
+fi
+if [ ! -e "$CASE7_LEASE" ]; then
+  echo "PASS Case 7 (#317): lease removed on script exit"
+else
+  echo "FAIL Case 7 (#317): lease $CASE7_LEASE still exists after script exit"
+  FAIL=1
+fi
+
+# Tagged resource names at the pnpm call site + tag export + lease pid ==
+# the script's own pid (stub's PPID).
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-1_${CASE7_TAG}]" "$CASE7_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 7 (#317): NEXT_DIST_DIR=.next-shard-1_${CASE7_TAG} at pnpm call site"
+else
+  echo "FAIL Case 7 (#317): expected NEXT_DIST_DIR=[.next-shard-1_${CASE7_TAG}] in pnpm journal"
+  FAIL=1
+fi
+if grep -Fq "SHARD_RUN_TAG=[${CASE7_TAG}]" "$CASE7_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 7 (#317): SHARD_RUN_TAG exported to the pnpm child"
+else
+  echo "FAIL Case 7 (#317): expected SHARD_RUN_TAG=[${CASE7_TAG}] in pnpm journal (export)"
+  FAIL=1
+fi
+if grep -Fq "PPID=[${CASE7_PID}]" "$CASE7_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 7 (#317): pnpm child's PPID is the script pid (positive control)"
+else
+  echo "FAIL Case 7 (#317): expected PPID=[${CASE7_PID}] in pnpm journal"
+  FAIL=1
+fi
+
+# FILES_DIR/TEST_FILES_DIR: tagged name used (log + wipe journal), untagged
+# name never touched.
+if grep -q "Files dir: .*test_files_shard1_${CASE7_TAG}\$" "$CASE7_DIR/run.log" 2>/dev/null; then
+  echo "PASS Case 7 (#317): Files dir log line names test_files_shard1_${CASE7_TAG}"
+else
+  echo "FAIL Case 7 (#317): expected 'Files dir: ...test_files_shard1_${CASE7_TAG}' in run log"
+  FAIL=1
+fi
+if grep -Fq -- "RM: -rf $STAGE/backend/test_files_shard1_${CASE7_TAG}" "$CASE7_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 7 (#317): wipe targeted the tagged files dir"
+else
+  echo "FAIL Case 7 (#317): expected 'RM: -rf .../test_files_shard1_${CASE7_TAG}' in journal"
+  FAIL=1
+fi
+if grep -qE "RM: -rf .*test_files_shard1$" "$CASE7_DIR/journal" 2>/dev/null; then
+  echo "FAIL Case 7 (#317): untagged test_files_shard1 was wiped by a tagged run"
+  FAIL=1
+else
+  echo "PASS Case 7 (#317): untagged test_files_shard1 never touched"
+fi
+
+assert_reached_next_dev "$CASE7_DIR/journal" "Case 7 (positive control)" || FAIL=1
+assert_no_default_next_rm "$CASE7_DIR/journal" "Case 7 (S5)" || FAIL=1
+assert_fixture_intact "Case 7 (S5)" || FAIL=1
+
+# ── Case 8 (#317 §3.1): invalid SHARD_RUN_TAG → fatal before resources ─────
+# A tag that fails ^[0-9a-f]{6}$ must kill the run with exit 1 and a clear
+# message BEFORE any resource/dir creation: the provided DB file stays
+# byte-intact (no wipe), no lease appears.
+CASE8_DIR="$WORK/case8"; mkdir -p "$CASE8_DIR"
+CASE8_DB="$CASE8_DIR/test_memo_shard1.db"
+printf 'seed' > "$CASE8_DB"
+set +e
+SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
+  TEST_DB_PATH="$CASE8_DB" \
+  BACKEND_URL=http://127.0.0.1:8001 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+  SHARD_RUN_TAG="n0hex!" \
+  SHARD_DRYRUN_JOURNAL="$CASE8_DIR/journal" \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  timeout 5 bash "$SCRIPT_UNDER_TEST" > "$CASE8_DIR/run.log" 2>&1
+CASE8_RC=$?
+set -e
+
+echo "── Case 8 log ──"
+cat "$CASE8_DIR/run.log"
+echo "─────────────────"
+
+if [ "$CASE8_RC" -eq 1 ] && grep -q "SHARD_RUN_TAG" "$CASE8_DIR/run.log"; then
+  echo "PASS Case 8 (#317): invalid tag rejected with exit 1 + diagnostic"
+else
+  echo "FAIL Case 8 (#317): expected exit 1 + SHARD_RUN_TAG diagnostic (got exit $CASE8_RC)"
+  FAIL=1
+fi
+if [ "$(cat "$CASE8_DB" 2>/dev/null || true)" = "seed" ]; then
+  echo "PASS Case 8 (#317): no resource touched — DB file byte-intact"
+else
+  echo "FAIL Case 8 (#317): DB file was modified/wiped before the tag check"
+  FAIL=1
+fi
+if [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
+  echo "PASS Case 8 (#317): no lease written for an invalid tag"
+else
+  echo "FAIL Case 8 (#317): $RUNS_DIR not empty after invalid-tag run"
+  FAIL=1
+fi
+
+# ── Case 9 (#317 §3.3): alive manual-style lease — busy-protected ──────────
+# A manual stack leases only SHARD_PORT + BACKEND_PORT, zero-padding the two
+# unused slots (8-field format). Consumed by sweep_dead_runs (the REAL lib,
+# sourced here): an ALIVE manual lease → its 2 REAL ports go to stdout (the
+# busy-args contract — the allocator must bypass them; the zeros ride
+# along and are filtered at the test-all.sh seam) and NOTHING is swept —
+# the lease file survives untouched.
+CASE9_RUNS="$WORK/case9-runs"
+SHARD_RUNS_DIR="$CASE9_RUNS"
+ROOT="$WORK/case9-root"
+mkdir -p "$ROOT/backend" "$ROOT/frontend/admin"
+source "$REPO_ROOT/scripts/lib/shard-helpers.sh"
+if write_run_lease "c0ffee" "$$" 3002 8001 0 0; then
+  echo "  → manual-style lease written: pid=$$ tag=c0ffee ports=3002 8001 0 0"
+  CASE9_OUT="$(sweep_dead_runs)"
+  if [ "$CASE9_OUT" = "3002 8001 0 0" ]; then
+    echo "PASS Case 9 (#317): alive manual lease busy-protects its 2 real ports (stdout: '$CASE9_OUT')"
+  else
+    echo "FAIL Case 9 (#317): sweep stdout was '$CASE9_OUT' (want '3002 8001 0 0')"
+    FAIL=1
+  fi
+  if [ -f "$CASE9_RUNS/c0ffee.run" ]; then
+    echo "PASS Case 9 (#317): nothing swept — alive manual lease survives"
+  else
+    echo "FAIL Case 9 (#317): alive manual lease was removed/swept"
+    FAIL=1
+  fi
+else
+  echo "FAIL Case 9 (#317): write_run_lease refused the manual-style lease"
   FAIL=1
 fi
 

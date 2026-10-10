@@ -92,6 +92,14 @@ echo "  → start-cleanup: sweeping dead runs + auditing orphaned tagged files..
 # sweep_dead_runs stdout carries ONLY the live runs' ports — they go to the
 # allocator as busy args (a live run's ports must never be reused).
 LIVE_RUN_PORTS="$(sweep_dead_runs)"
+# #317 Task 5: manual-stack leases (tagged e2e-shard-start.sh) zero-pad
+# their two unused port slots to keep the 8-field lease format — a literal
+# 0 must never reach the allocator's busy args.
+_live_ports_filtered=""
+for _p in $LIVE_RUN_PORTS; do
+  [ "$_p" = "0" ] || _live_ports_filtered="$_live_ports_filtered $_p"
+done
+LIVE_RUN_PORTS="${_live_ports_filtered# }"
 audit_orphan_tagged ""   # current tag does not exist yet — protect nothing
 
 # ── Phase 2: run identity — tag + dynamic port allocation (#317 §3.1/§3.2) ─

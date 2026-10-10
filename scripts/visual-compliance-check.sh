@@ -406,9 +406,26 @@ PLAYWRIGHT_EOF
 echo ""
 echo "--- Running Playwright checks..."
 
-set +e
-npx playwright install chromium 2>/dev/null
-set -e
+# Guard (#374): `playwright install` prunes "unused" browser builds from the
+# SHARED global cache (~/.cache/ms-playwright). An unconditional install can
+# delete the chromium build a concurrent e2e run is executing on this machine
+# (incident in #301 IMPL: chromium-1223 removed mid-suite). Ask the SAME
+# Playwright installation that runs the checks below (global @playwright/test
+# resolved via NODE_PATH) for the expected chromium executable and skip the
+# install when it already exists. A broken partial download is NOT detected
+# (accepted trade-off: the run then fails loudly with an explicit error).
+CHROMIUM_PATH=$(NODE_PATH=/usr/local/lib/node_modules node -e '
+const { chromium } = require("@playwright/test");
+try { process.stdout.write(chromium.executablePath() || ""); }
+catch (e) { process.stdout.write(""); }
+' 2>/dev/null || true)
+if [ -n "$CHROMIUM_PATH" ] && [ -f "$CHROMIUM_PATH" ]; then
+    echo "--- Chromium already present, skipping playwright install: $CHROMIUM_PATH"
+else
+    set +e
+    npx playwright install chromium 2>/dev/null
+    set -e
+fi
 
 # NODE_PATH makes the globally-installed @playwright/test resolvable by require().
 # @playwright/test is installed in /usr/local/lib/node_modules by the Dockerfile,

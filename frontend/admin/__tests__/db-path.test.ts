@@ -10,6 +10,13 @@
  *     silent SHARD_ID × TEST_DB_PATH mismatch);
  *   - matching paths (or a single variable set) resolve quietly;
  *   - TEST_DB_PATH='' counts as unset (GH #336).
+ *
+ * GH #317 (spec §3.4): an optional SHARD_RUN_TAG (env, 6 lowercase hex,
+ * exported by scripts/test-all.sh) extends the canonical shard path to
+ * test_memo_shard{id}_{tag}.db. Tag mismatch in EITHER direction is a
+ * conflict (tagged path × empty env tag, and vice versa); an invalid tag
+ * value is a loud error (never silently untagged); an empty tag keeps the
+ * byte-identical pre-#317 names (CI).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
@@ -22,6 +29,7 @@ describe('resolveTestDbPath (GH #209 single contract)', () => {
   beforeEach(() => {
     delete process.env.SHARD_ID;
     delete process.env.TEST_DB_PATH;
+    delete process.env.SHARD_RUN_TAG;
   });
 
   afterEach(() => {
@@ -100,6 +108,108 @@ describe('resolveTestDbPath (GH #209 single contract)', () => {
     const repoRoot = path.resolve(__dirname, '..', '..', '..');
     expect(resolveTestDbPath({ shardId: '1', testDbPath: '' })).toBe(
       path.join(repoRoot, 'backend', 'test_memo_shard1.db'),
+    );
+  });
+});
+
+describe('resolveTestDbPath (GH #317 — SHARD_RUN_TAG)', () => {
+  const ORIGINAL = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.SHARD_ID;
+    delete process.env.TEST_DB_PATH;
+    delete process.env.SHARD_RUN_TAG;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it('shardId + valid tag → canonical <root>/backend/test_memo_shard{id}_{tag}.db', () => {
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    expect(resolveTestDbPath({ shardId: '1' })).toBe(
+      path.join(repoRoot, 'backend', 'test_memo_shard1_0f1e2d.db'),
+    );
+  });
+
+  it('shardId + tag + TEST_DB_PATH as a RELATIVE view of the tagged canonical → passes quietly', () => {
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    expect(
+      resolveTestDbPath({ shardId: '2', testDbPath: 'backend/test_memo_shard2_0f1e2d.db' }),
+    ).toBe(path.join(repoRoot, 'backend', 'test_memo_shard2_0f1e2d.db'));
+  });
+
+  it('env tag set but TEST_DB_PATH resolves to the UNTAGGED canonical → conflict names SHARD_RUN_TAG', () => {
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const untagged = path.join(repoRoot, 'backend', 'test_memo_shard1.db');
+    let message = '';
+    try {
+      resolveTestDbPath({ shardId: '1', testDbPath: untagged });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('SHARD_RUN_TAG');
+    expect(message).toContain('0f1e2d');
+  });
+
+  it('TEST_DB_PATH tagged (canonical form) but env tag empty → conflict names SHARD_RUN_TAG', () => {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const tagged = path.join(repoRoot, 'backend', 'test_memo_shard1_deadbe.db');
+    let message = '';
+    try {
+      resolveTestDbPath({ shardId: '1', testDbPath: tagged });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('SHARD_RUN_TAG');
+    expect(message).toContain('deadbe');
+  });
+
+  it('env tag differs from the tag carried by TEST_DB_PATH → conflict', () => {
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const otherTag = path.join(repoRoot, 'backend', 'test_memo_shard1_deadbe.db');
+    expect(() => resolveTestDbPath({ shardId: '1', testDbPath: otherTag })).toThrowError(
+      /SHARD_RUN_TAG/,
+    );
+  });
+
+  it.each(['ABC123', 'abc12', 'abc1234', 'ab/..', 'ab 12'])(
+    'invalid tag %s → loud error naming SHARD_RUN_TAG and the format (never silently untagged)',
+    (badTag) => {
+      process.env.SHARD_RUN_TAG = badTag;
+      let message = '';
+      try {
+        resolveTestDbPath({ shardId: '1' });
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain('SHARD_RUN_TAG');
+      expect(message).toContain('[0-9a-f]{6}');
+      expect(message).toContain(badTag);
+    },
+  );
+
+  it("empty-string tag → untagged canonical, byte-identical to the pre-#317 name", () => {
+    process.env.SHARD_RUN_TAG = '';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    expect(resolveTestDbPath({ shardId: '1' })).toBe(
+      path.join(repoRoot, 'backend', 'test_memo_shard1.db'),
+    );
+  });
+
+  it('tag set + only TEST_DB_PATH (SHARD_ID unset) → legacy single-variable behavior', () => {
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    expect(resolveTestDbPath({ testDbPath: '/tmp/custom.sqlite' })).toBe('/tmp/custom.sqlite');
+  });
+
+  it('invalid tag fails loud even when SHARD_ID is unset (env poisoning is always an error)', () => {
+    process.env.SHARD_RUN_TAG = 'NOTHEX';
+    expect(() => resolveTestDbPath({ testDbPath: '/tmp/custom.sqlite' })).toThrowError(
+      /SHARD_RUN_TAG/,
     );
   });
 });

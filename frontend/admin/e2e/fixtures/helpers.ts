@@ -81,7 +81,9 @@ export async function gotoScheduleDay(
 ): Promise<void> {
   const col = opts?.col ? `&col=${opts.col}` : '';
   await page.goto(`/schedule?view=day&date=${date}${col}`);
-  await page.waitForSelector('[data-testid="day-column-0"]', { timeout: 10_000 });
+  // GH #361: day-view columns carry unique `day-view-column-<id>` testids —
+  // the old shared `day-column-0` no longer exists in the day view.
+  await page.waitForSelector('[data-testid^="day-view-column-"]', { timeout: 10_000 });
 }
 
 /**
@@ -154,10 +156,14 @@ export async function waitForScheduleReady(page: Page) {
  * Wait for the schedule grid to render (day columns present).
  * Works on empty weeks too (GH #258/#259: after T4 the grid renders on
  * empty weeks with a status hint instead of activity cards), and with
- * cards as-is.
+ * cards as-is. View-agnostic (GH #361): week columns use `day-column-<n>`,
+ * day-view columns use `day-view-column-<id>`.
  */
 export async function waitForScheduleGrid(page: Page) {
-  await page.waitForSelector('[data-testid="day-column-0"]', { timeout: 10_000 });
+  await page.waitForSelector(
+    '[data-testid^="day-column-"], [data-testid^="day-view-column-"]',
+    { timeout: 10_000 },
+  );
 }
 
 /**

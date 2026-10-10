@@ -516,6 +516,7 @@ export function DayView() {
               <div key={col.id} className="flex flex-col flex-1" data-testid={`archived-day-column-${col.id}`}>
                 <DayColumn
                   dayIndex={0}
+                  columnId={col.id}
                   date={selectedDay}
                   activities={colActivities}
                   masters={masters}

@@ -8,12 +8,29 @@ import type { Page } from '@playwright/test';
  * week-header date drill-down, zoom popup for cell height and grid frequency.
  *
  * Requires: dev server on :3001, backend on :8000
+ *
+ * GH #361: column testids are UNIQUE per view — week columns are
+ * `day-column-<n>` (n = 0..6), day-view columns are
+ * `day-view-column-<columnId>` (one per master/location column). The old
+ * shared `day-column-0` in the day view resolved to N elements (strict-mode
+ * violation); assertions never hedge with `.first()` on a column testid.
+ * No fixed `waitForTimeout` sleeps — every view-switch assertion is an
+ * auto-waiting expectation (#337/#315 canon).
  */
 
 /** Open the «Вид» dropdown and click one of its options. */
 async function selectView(page: Page, option: 'view-masters' | 'view-locations' | 'view-week') {
   await page.locator('[data-testid="view-selector"]').click();
   await page.locator(`[data-testid="${option}"]`).click();
+}
+
+/** Auto-waiting anchors for the two view modes (GH #361). */
+function weekColumns(page: Page) {
+  return page.locator('[data-testid^="day-column-"]');
+}
+
+function dayViewColumns(page: Page) {
+  return page.locator('[data-testid^="day-view-column-"]');
 }
 
 // ---------------------------------------------------------------------------
@@ -26,40 +43,31 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
   });
 
   test('day option switches from week to day view', async ({ page }) => {
-    // Default is week view — 7 day columns should be visible
+    // Default is week view — exactly 7 day columns should be visible
+    await expect(weekColumns(page)).toHaveCount(7);
     for (let i = 0; i < 7; i++) {
       await expect(page.locator(`[data-testid="day-column-${i}"]`)).toBeVisible();
     }
 
     // Select «День мастеров» in the view dropdown
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
 
-    // Day view should show only 1 day column (day-column-0)
-    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
-
-    // day-column-1 through day-column-6 should NOT be visible
-    for (let i = 1; i < 7; i++) {
-      await expect(page.locator(`[data-testid="day-column-${i}"]`)).not.toBeVisible();
-    }
+    // Day view: per-column testids are unique (day-view-column-<id>); the
+    // week pattern day-column-<n> must be gone entirely.
+    await expect(weekColumns(page)).toHaveCount(0);
+    await expect(dayViewColumns(page).first()).toBeVisible();
   });
 
   test('week option switches from day back to week view', async ({ page }) => {
     // Switch to day view first
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
-
-    // Verify day view
-    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
+    await expect(dayViewColumns(page).first()).toBeVisible();
 
     // Select the week option
     await selectView(page, 'view-week');
-    await page.waitForTimeout(500);
 
-    // Week view should show 7 day columns
-    for (let i = 0; i < 7; i++) {
-      await expect(page.locator(`[data-testid="day-column-${i}"]`)).toBeVisible();
-    }
+    // Week view should show 7 day columns again
+    await expect(weekColumns(page)).toHaveCount(7);
   });
 
   test('selector trigger shows the active option', async ({ page }) => {
@@ -68,7 +76,6 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
 
     // Switch to day by locations
     await selectView(page, 'view-locations');
-    await page.waitForTimeout(500);
 
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
   });
@@ -76,16 +83,11 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
   test('day view shows correct date label in topbar', async ({ page }) => {
     // Switch to day view
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
 
-    // Date nav text should show a date (day label format)
+    // Date nav text should show a non-empty date (day label format)
     const dateText = page.locator('[data-testid="date-nav-text"]');
     await expect(dateText).toBeVisible();
-
-    // Should contain some date info
-    const text = await dateText.textContent();
-    expect(text).toBeTruthy();
-    expect(text!.length).toBeGreaterThan(0);
+    await expect(dateText).toContainText(/\S/);
   });
 });
 
@@ -110,13 +112,12 @@ test.describe('Schedule — View selector dropdown', () => {
 
   test('«День локаций» click switches column mode (client-side only — no API call)', async ({ page }) => {
     await selectView(page, 'view-locations');
-    await page.waitForTimeout(500);
 
     // The trigger now shows the locations option
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
 
-    // Day column should still be visible
-    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
+    // Day columns should still be rendered
+    await expect(dayViewColumns(page).first()).toBeVisible();
   });
 
   test('«День мастеров» click switches column mode back', async ({ page }) => {
@@ -124,7 +125,6 @@ test.describe('Schedule — View selector dropdown', () => {
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
 
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
 
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День мастеров');
   });
@@ -135,11 +135,10 @@ test.describe('Schedule — View selector dropdown', () => {
 
     // Select a day option (client-side only — no API call)
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
 
-    // Should now be in day view (only day-column-0 visible)
-    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid="day-column-6"]')).not.toBeVisible();
+    // Day view: unique per-column testids, no week columns left
+    await expect(weekColumns(page)).toHaveCount(0);
+    await expect(dayViewColumns(page).first()).toBeVisible();
   });
 });
 
@@ -162,15 +161,14 @@ test.describe('Schedule — Week header date click', () => {
     const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
     await page.locator('[data-testid="week-day-header-2"]').click();
-    await page.waitForTimeout(500);
 
     // Day view by locations on the clicked date
-    await expect(page.locator('[data-testid="day-column-0"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid="day-column-6"]')).not.toBeVisible();
+    await expect(weekColumns(page)).toHaveCount(0);
+    await expect(dayViewColumns(page).first()).toBeVisible();
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
-    expect(new URL(page.url()).searchParams.get('view')).toBe('day');
-    expect(new URL(page.url()).searchParams.get('col')).toBe('locations');
-    expect(new URL(page.url()).searchParams.get('date')).toBe(iso(wednesday));
+    await expect(page).toHaveURL(/view=day/);
+    await expect(page).toHaveURL(/col=locations/);
+    await expect(page).toHaveURL(new RegExp(`date=${iso(wednesday)}`));
   });
 });
 
@@ -215,7 +213,6 @@ test.describe('Schedule — Zoom Popup', () => {
 
     // Click "Крупный" (60px) option
     await popup.locator('[data-testid="zoom-option-60"]').click();
-    await page.waitForTimeout(300);
 
     // Popup should close after selection
     await expect(popup).not.toBeVisible();
@@ -232,7 +229,6 @@ test.describe('Schedule — Zoom Popup', () => {
 
     // Click 15 min frequency
     await popup.locator('[data-testid="grid-freq-15"]').click();
-    await page.waitForTimeout(300);
 
     // Schedule should still be visible
     await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible();
@@ -246,7 +242,6 @@ test.describe('Schedule — Zoom Popup', () => {
 
     // Click outside the popup
     await page.click('body', { position: { x: 10, y: 10 } });
-    await page.waitForTimeout(300);
 
     // Popup should close
     await expect(popup).not.toBeVisible();
@@ -272,27 +267,24 @@ test.describe('Schedule — Zoom Popup', () => {
 test.describe('Schedule — Day View Date Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await waitForScheduleReady(page);
-    // Switch to day view
+    // Switch to day view and wait for the grid (auto-wait, no sleep)
     await selectView(page, 'view-masters');
-    await page.waitForTimeout(500);
+    await expect(dayViewColumns(page).first()).toBeVisible();
   });
 
   test('prev/next period buttons navigate days', async ({ page }) => {
+    // GH #361 (2nd flake): the date used to be read synchronously right after
+    // the click — under parallel shard load the label had not updated yet.
+    // Auto-waiting text expectations replace the read-then-compare pairs.
     const dateText = page.locator('[data-testid="date-nav-text"]');
-    const initialDate = await dateText.textContent();
+    const initialDate = (await dateText.textContent()) ?? '';
 
-    // Click next
+    // Click next → the label must change (auto-wait)
     await page.locator('[data-testid="date-nav-next"]').click();
-    await page.waitForTimeout(500);
+    await expect(dateText).not.toHaveText(initialDate);
 
-    const nextDate = await dateText.textContent();
-    expect(nextDate).not.toBe(initialDate);
-
-    // Click prev to go back
+    // Click prev to go back → the label is restored (auto-wait)
     await page.locator('[data-testid="date-nav-prev"]').click();
-    await page.waitForTimeout(500);
-
-    const restoredDate = await dateText.textContent();
-    expect(restoredDate).toBe(initialDate);
+    await expect(dateText).toHaveText(initialDate);
   });
 });

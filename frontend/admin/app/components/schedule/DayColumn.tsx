@@ -53,7 +53,13 @@ interface DayColumnProps {
   /** Grid bounds in minutes from midnight (GH #142). */
   gridStartMinutes?: number;
   gridEndMinutes?: number;
-  /** Column identity (master or location ID) — included in droppable slot data for cross-column DnD. */
+  /**
+   * Column identity (master or location ID) — included in droppable slot data
+   * for cross-column DnD. When set, the column testid becomes
+   * `day-view-column-<id>` (GH #361: unique per column in DayView — the
+   * shared `day-column-0` resolved to N elements under strict mode); the
+   * `day-column-<n>` pattern stays week-view-only, where it is unique.
+   */
   columnId?: string;
   /**
    * GH #267: archived column — slots register no droppable and the stamp
@@ -437,7 +443,7 @@ export function DayColumn({ dayIndex, activities, masters, locations = [], servi
   return (
     <div
       ref={columnRef}
-      data-testid={`day-column-${dayIndex}`}
+      data-testid={columnId !== undefined ? `day-view-column-${columnId}` : `day-column-${dayIndex}`}
       data-day-column={dayIndex}
       className="relative flex-1 border-l border-line"
     >

@@ -48,8 +48,9 @@ test.describe('Schedule URL state — US-1…US-5 (GH #138)', () => {
 
     await page.goto(`/schedule?view=day&date=${date}`);
 
-    // Day grid rendered (day columns exist even without cards).
-    await page.waitForSelector('[data-testid="day-column-0"]', { timeout: 15_000 });
+    // Day grid rendered (day columns exist even without cards); GH #361:
+    // day-view columns carry unique `day-view-column-<id>` testids.
+    await page.waitForSelector('[data-testid^="day-view-column-"]', { timeout: 15_000 });
 
     // The URL is preserved verbatim — the hook did not rewrite valid params.
     expect(new URL(page.url()).searchParams.get('view')).toBe('day');

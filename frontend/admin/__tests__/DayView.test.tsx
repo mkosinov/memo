@@ -61,7 +61,11 @@ vi.mock('@/app/components/schedule/DayColumn', () => ({
     onOpenCreateModal?: (dayIndex: number, startMinutes: number) => void;
   }) => (
     <div
-      data-testid={`day-column-${props.columnId ?? props.dayIndex}`}
+      data-testid={
+        props.columnId !== undefined
+          ? `day-view-column-${props.columnId}`
+          : `day-column-${props.dayIndex}`
+      }
       onClick={() => props.onOpenCreateModal?.(0, 600)}
     />
   ),
@@ -492,7 +496,7 @@ describe('DayView', () => {
     it('opens create modal with slot coordinates when a slot is clicked', () => {
       renderDayView(normalContext);
 
-      fireEvent.click(screen.getByTestId('day-column-m1'));
+      fireEvent.click(screen.getByTestId('day-view-column-m1'));
 
       const modal = screen.getByTestId('activity-details-modal');
       expect(modal).toHaveAttribute('data-mode', 'create');

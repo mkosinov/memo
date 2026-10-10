@@ -72,6 +72,42 @@
 #     (busy-protection for the allocator; zeros ride along and are
 #     filtered at the test-all.sh seam), NOTHING is swept — the lease
 #     file survives. Pins existing lib semantics against regressions.
+#   → Case 10 (Task 8): SHARD_RUN_TAG SET to the EMPTY string → fully
+#     legacy names/wipe, no lease.
+#   → Case 11 (Task 8): tagged SHARD_ID=2 → tagged shard-2 names + lease.
+#
+# ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
+# Every cell carries a LIVE, EXACT assertion (case numbers refer to the
+# blocks below); "names" = NEXT_DIST_DIR + FILES_DIR(=TEST_FILES_DIR) at
+# the pnpm call site, byte-exact including the <root>/backend base-dir
+# composition the product builds:
+#
+#   tag \ id          │ 1                           │ 2
+#   ──────────────────┼─────────────────────────────┼────────────────────────────
+#   unset            │ Case 3: legacy names;       │ Case 4: legacy names;
+#                    │ no lease (group ck after    │ no lease (group ck after
+#                    │ Case 5)                     │ Case 5)
+#   "" (set-empty)   │ Case 10: legacy names +     │ — (note A)
+#                    │ legacy wipe; no lease       │
+#   valid 6-hex      │ Case 7: tagged names;       │ Case 11: tagged names +
+#                    │ lease written (live poll,   │ lease written (log proof,
+#                    │ 8-field content) + removed  │ note B) + removed
+#   invalid non-hex  │ Case 8: fatal pre-resources; no lease; DB intact
+#                    │ (tag validation is id-independent)
+#
+#   SHARD_RUN_TAG re-export is pinned in every names-cell: [<tag>] tagged,
+#   [] (EMPTY string, set — not unset) untagged (Cases 3/4/10/11).
+#   note A: set-empty vs unset only exercises bash "${VAR:-}" defaulting;
+#   after the product's SHARD_RUN_TAG="${SHARD_RUN_TAG:-}" both spellings
+#   are the same empty string, and the <id> interpolation is shared code —
+#   one id per tag-mode covers the generators of the cross-product.
+#   note B: write_run_lease failure is fatal BEFORE any server starts, so
+#   reaching next dev (positive control) + the "Run lease:" log line prove
+#   the write; the 8-field content/pid checks are id-independent (Case 7).
+#   Exports NOT separately journaled, justified: SHARD_ID — lands inside
+#   the asserted names (both ids pinned in both modes); DATABASE_URL /
+#   BACKEND_PORT — pre-#317 surface, pinned via the uv stub + wipe log
+#   (Case 1); TEST_DB_PATH — caller-provided, not composed by the script.
 
 set -euo pipefail
 
@@ -165,17 +201,23 @@ chmod +x "$STUBS/uv"
 
 # pnpm stub: journals the `exec next dev` call site with the env values the
 # script exported (NEXT_DIST_DIR, SHARD_PORT; #317: SHARD_RUN_TAG + the
-# stub's PPID == the script's own PID for lease-pid assertions). Anything
-# else: no-op. #317 Case 7: SHARD_DRYRUN_HOLD_S keeps the stub (the
+# stub's PPID == the script's own PID for lease-pid assertions; #317 Task 8:
+# FILES_DIR + TEST_FILES_DIR — the FULL exported storage strings, pinned
+# byte-exact by the assert matrix below). Fields are append-only so earlier
+# substring greps stay stable. SHARD_RUN_TAG uses ${VAR-<fallback>}
+# expansion (dash, NO colon): the product exports it unconditionally, so an
+# untagged child must journal [] (EMPTY, set) — distinct from UNSET (a
+# failed/missing export). Anything else: no-op. #317 Case 7: SHARD_DRYRUN_HOLD_S keeps the stub (the
 # "foreground" frontend) alive so the harness can inspect the run lease
 # while the script under test is still running.
 cat > "$STUBS/pnpm" <<'EOF'
 #!/bin/sh
 case "$*" in
   *"exec next dev"*)
-    printf 'PNPM_EXEC_NEXT_DEV argv=[%s] NEXT_DIST_DIR=[%s] SHARD_PORT=[%s] SHARD_RUN_TAG=[%s] PPID=[%s]\n' \
+    printf 'PNPM_EXEC_NEXT_DEV argv=[%s] NEXT_DIST_DIR=[%s] SHARD_PORT=[%s] SHARD_RUN_TAG=[%s] PPID=[%s] FILES_DIR=[%s] TEST_FILES_DIR=[%s]\n' \
       "$*" "${NEXT_DIST_DIR:-unset}" "${SHARD_PORT:-unset}" \
-      "${SHARD_RUN_TAG:-unset}" "$PPID" \
+      "${SHARD_RUN_TAG-UNSET}" "$PPID" \
+      "${FILES_DIR:-unset}" "${TEST_FILES_DIR:-unset}" \
       >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
     if [ -n "${SHARD_DRYRUN_HOLD_S:-}" ]; then
       sleep "$SHARD_DRYRUN_HOLD_S"
@@ -290,6 +332,40 @@ assert_fixture_intact() {
   return 0
 }
 
+# assert_storage_exports <journal> <sid> <sfx> <label> — #317 Task 8.
+# Pins the FULL exported storage strings at the pnpm call site:
+# FILES_DIR == TEST_FILES_DIR == <staged-root>/backend/test_files_shard<sid><sfx>
+# — byte-exact, including the /backend base-dir composition the product
+# builds (grep -F: no regex accidents). sfx is "" (legacy names) or
+# "_<tag>" (tagged names). The closing ']' + field adjacency make the
+# match exact — a suffixed/prefix lookalike cannot satisfy it.
+assert_storage_exports() {
+  local journal="$1" sid="$2" sfx="$3" label="$4"
+  local want
+  want="FILES_DIR=[$STAGE/backend/test_files_shard${sid}${sfx}] TEST_FILES_DIR=[$STAGE/backend/test_files_shard${sid}${sfx}]"
+  if grep -Fq "$want" "$journal" 2>/dev/null; then
+    echo "PASS $label: FILES_DIR=TEST_FILES_DIR=[backend/test_files_shard${sid}${sfx}] exported exact"
+    return 0
+  fi
+  echo "FAIL $label: expected '$want' in the pnpm journal"
+  return 1
+}
+
+# assert_tag_export <journal> <want> <label> — #317 Task 8. Pins the
+# SHARD_RUN_TAG re-export at the pnpm call site: [<tag>] for a tagged run,
+# [] (EMPTY string — set, not unset; the product defaults
+# SHARD_RUN_TAG="${SHARD_RUN_TAG:-}" then exports unconditionally) for an
+# untagged one. PPID=[ adjacency bounds the needle on the right.
+assert_tag_export() {
+  local journal="$1" want="$2" label="$3"
+  if grep -Fq "SHARD_RUN_TAG=[$want] PPID=[" "$journal" 2>/dev/null; then
+    echo "PASS $label: SHARD_RUN_TAG re-exported as [${want:-<empty string>}]"
+    return 0
+  fi
+  echo "FAIL $label: expected 'SHARD_RUN_TAG=[$want] PPID=[' in the pnpm journal"
+  return 1
+}
+
 # ── Case 0: meta-test — journal invariant detects violations ──────────────
 # Self-test of journal_has_default_next_rm with a poisoned and a clean
 # journal. Guards the S5 detector against silent regressions.
@@ -381,6 +457,10 @@ else
   echo "FAIL Case 3 (S1): expected NEXT_DIST_DIR=[.next-shard-1] in pnpm journal"
   FAIL=1
 fi
+# #317 Task 8 (matrix: unset × id 1): full legacy storage exports + the
+# empty-string tag re-export.
+assert_storage_exports "$CASE3_DIR/journal" 1 "" "Case 3 (#317)" || FAIL=1
+assert_tag_export "$CASE3_DIR/journal" "" "Case 3 (#317)" || FAIL=1
 assert_no_default_next_rm "$CASE3_DIR/journal" "Case 3 (S5)" || FAIL=1
 assert_fixture_intact "Case 3 (S5)" || FAIL=1
 
@@ -402,6 +482,10 @@ else
   echo "FAIL Case 4 (S1): expected NEXT_DIST_DIR=[.next-shard-2] in pnpm journal"
   FAIL=1
 fi
+# #317 Task 8 (matrix: unset × id 2): full legacy storage exports + the
+# empty-string tag re-export.
+assert_storage_exports "$CASE4_DIR/journal" 2 "" "Case 4 (#317)" || FAIL=1
+assert_tag_export "$CASE4_DIR/journal" "" "Case 4 (#317)" || FAIL=1
 assert_no_default_next_rm "$CASE4_DIR/journal" "Case 4 (S5)" || FAIL=1
 assert_fixture_intact "Case 4 (S5)" || FAIL=1
 
@@ -610,6 +694,9 @@ if grep -qE "RM: -rf .*test_files_shard1$" "$CASE7_DIR/journal" 2>/dev/null; the
 else
   echo "PASS Case 7 (#317): untagged test_files_shard1 never touched"
 fi
+# #317 Task 8 (matrix: tag × id 1): the full tagged storage exports, pinned
+# byte-exact at the child-process boundary (stronger than the log tail above).
+assert_storage_exports "$CASE7_DIR/journal" 1 "_${CASE7_TAG}" "Case 7 (#317)" || FAIL=1
 
 assert_reached_next_dev "$CASE7_DIR/journal" "Case 7 (positive control)" || FAIL=1
 assert_no_default_next_rm "$CASE7_DIR/journal" "Case 7 (S5)" || FAIL=1
@@ -689,6 +776,144 @@ else
   echo "FAIL Case 9 (#317): write_run_lease refused the manual-style lease"
   FAIL=1
 fi
+
+# ── Case 10 (#317 Task 8): EXPLICITLY EMPTY tag → byte-identical legacy ────
+# Matrix cell ("" × id 1). SHARD_RUN_TAG is SET to the empty string (Cases
+# 1-5 leave it UNSET): after the product's SHARD_RUN_TAG="${SHARD_RUN_TAG:-}"
+# defaulting both spellings are the same empty string, so the run must be
+# FULLY legacy — exact legacy names for ALL THREE exports, legacy wipe
+# target, DB wiped, NO lease.
+CASE10_DIR="$WORK/case10"; mkdir -p "$CASE10_DIR"
+CASE10_DB="$CASE10_DIR/test_memo_shard1.db"
+printf 'seed' > "$CASE10_DB"
+set +e
+SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
+  TEST_DB_PATH="$CASE10_DB" \
+  BACKEND_URL=http://127.0.0.1:8001 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+  SHARD_RUN_TAG="" \
+  SHARD_DRYRUN_JOURNAL="$CASE10_DIR/journal" \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  timeout 15 bash "$SCRIPT_UNDER_TEST" > "$CASE10_DIR/run.log" 2>&1
+CASE10_RC=$?
+set -e
+
+echo "── Case 10 log ──"
+cat "$CASE10_DIR/run.log"
+echo "── Case 10 journal ──"
+cat "$CASE10_DIR/journal" 2>/dev/null || echo "(empty)"
+echo "─────────────────"
+
+if [ "$CASE10_RC" -eq 0 ]; then
+  echo "PASS Case 10 (#317): set-empty tag run exited 0 (legacy path)"
+else
+  echo "FAIL Case 10 (#317): set-empty tag run exited $CASE10_RC (expected 0)"
+  FAIL=1
+fi
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-1] SHARD_PORT=[3002]" "$CASE10_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 10 (#317): NEXT_DIST_DIR=.next-shard-1 (exact legacy, no _suffix)"
+else
+  echo "FAIL Case 10 (#317): expected exact legacy NEXT_DIST_DIR=[.next-shard-1] in pnpm journal"
+  FAIL=1
+fi
+assert_storage_exports "$CASE10_DIR/journal" 1 "" "Case 10 (#317)" || FAIL=1
+assert_tag_export "$CASE10_DIR/journal" "" "Case 10 (#317)" || FAIL=1
+# Wipe must target the LEGACY files dir — whole-line match (-Fx): a suffixed
+# lookalike (test_files_shard1_<tag>) must NOT satisfy it.
+if grep -Fxq -- "RM: -rf $STAGE/backend/test_files_shard1" "$CASE10_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 10 (#317): wipe targeted the legacy files dir (whole-line exact)"
+else
+  echo "FAIL Case 10 (#317): expected whole-line 'RM: -rf $STAGE/backend/test_files_shard1' in journal"
+  FAIL=1
+fi
+if grep -q "FILE_ABSENT" "$CASE10_DIR/run.log" 2>/dev/null; then
+  echo "PASS Case 10 (#317): legacy DB wipe still happened (uv saw FILE_ABSENT)"
+else
+  echo "FAIL Case 10 (#317): expected FILE_ABSENT — DB wipe missing on set-empty tag"
+  FAIL=1
+fi
+if [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
+  echo "PASS Case 10 (#317): set-empty tag wrote no lease"
+else
+  echo "FAIL Case 10 (#317): $RUNS_DIR not empty after set-empty-tag run:"
+  ls -A "$RUNS_DIR"
+  FAIL=1
+fi
+assert_reached_next_dev "$CASE10_DIR/journal" "Case 10 (positive control)" || FAIL=1
+assert_no_default_next_rm "$CASE10_DIR/journal" "Case 10 (S5)" || FAIL=1
+assert_fixture_intact "Case 10 (S5)" || FAIL=1
+
+# ── Case 11 (#317 Task 8): tagged run, SHARD_ID=2 → tagged shard-2 names ───
+# Matrix cell (tag × id 2): the CI matrix runs shard 2 too — pin the tagged
+# naming for BOTH ids (Case 7 pins id 1; see note B in the header matrix for
+# why the lease is proven via log + positive control instead of a live poll).
+CASE11_DIR="$WORK/case11"; mkdir -p "$CASE11_DIR"
+CASE11_TAG=feed42
+CASE11_DB="$CASE11_DIR/test_memo_shard2.db"
+printf 'seed' > "$CASE11_DB"
+set +e
+SHARD_ID=2 SHARD_PORT=3003 BACKEND_PORT=8002 \
+  TEST_DB_PATH="$CASE11_DB" \
+  BACKEND_URL=http://127.0.0.1:8002 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8002 \
+  SHARD_RUN_TAG="$CASE11_TAG" \
+  SHARD_DRYRUN_JOURNAL="$CASE11_DIR/journal" \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  timeout 15 bash "$SCRIPT_UNDER_TEST" > "$CASE11_DIR/run.log" 2>&1
+CASE11_RC=$?
+set -e
+
+echo "── Case 11 log ──"
+cat "$CASE11_DIR/run.log"
+echo "── Case 11 journal ──"
+cat "$CASE11_DIR/journal" 2>/dev/null || echo "(empty)"
+echo "─────────────────"
+
+if [ "$CASE11_RC" -eq 0 ]; then
+  echo "PASS Case 11 (#317): tagged shard-2 run exited 0"
+else
+  echo "FAIL Case 11 (#317): tagged shard-2 run exited $CASE11_RC (expected 0)"
+  FAIL=1
+fi
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-2_${CASE11_TAG}] SHARD_PORT=[3003]" "$CASE11_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 11 (#317): NEXT_DIST_DIR=.next-shard-2_${CASE11_TAG} (exact tagged)"
+else
+  echo "FAIL Case 11 (#317): expected NEXT_DIST_DIR=[.next-shard-2_${CASE11_TAG}] in pnpm journal"
+  FAIL=1
+fi
+assert_storage_exports "$CASE11_DIR/journal" 2 "_${CASE11_TAG}" "Case 11 (#317)" || FAIL=1
+assert_tag_export "$CASE11_DIR/journal" "$CASE11_TAG" "Case 11 (#317)" || FAIL=1
+# Lease proof (note B): write failure is fatal before servers start, so the
+# positive control below + this log line prove the write happened.
+if grep -Fq "Run lease: $RUNS_DIR/${CASE11_TAG}.run" "$CASE11_DIR/run.log" 2>/dev/null; then
+  echo "PASS Case 11 (#317): run lease written ($RUNS_DIR/${CASE11_TAG}.run — log line)"
+else
+  echo "FAIL Case 11 (#317): expected 'Run lease: $RUNS_DIR/${CASE11_TAG}.run' in run log"
+  FAIL=1
+fi
+if [ ! -e "$RUNS_DIR/${CASE11_TAG}.run" ]; then
+  echo "PASS Case 11 (#317): lease removed on script exit"
+else
+  echo "FAIL Case 11 (#317): lease $RUNS_DIR/${CASE11_TAG}.run still exists after script exit"
+  FAIL=1
+fi
+if grep -Fxq -- "RM: -rf $STAGE/backend/test_files_shard2_${CASE11_TAG}" "$CASE11_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 11 (#317): wipe targeted the tagged files dir (whole-line exact)"
+else
+  echo "FAIL Case 11 (#317): expected whole-line 'RM: -rf $STAGE/backend/test_files_shard2_${CASE11_TAG}' in journal"
+  FAIL=1
+fi
+if grep -qE "RM: -rf .*test_files_shard2$" "$CASE11_DIR/journal" 2>/dev/null; then
+  echo "FAIL Case 11 (#317): untagged test_files_shard2 was wiped by a tagged run"
+  FAIL=1
+else
+  echo "PASS Case 11 (#317): untagged test_files_shard2 never touched"
+fi
+assert_reached_next_dev "$CASE11_DIR/journal" "Case 11 (positive control)" || FAIL=1
+assert_no_default_next_rm "$CASE11_DIR/journal" "Case 11 (S5)" || FAIL=1
+assert_fixture_intact "Case 11 (S5)" || FAIL=1
 
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"

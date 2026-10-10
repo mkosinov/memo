@@ -99,7 +99,33 @@ function pickTariffApartFrom(
   return alt!;
 }
 
+/**
+ * openRecordTab with navigation hardening: the shared helper's INTERNAL grid
+ * wait caps at 10s (fixtures/helpers.ts gotoScheduleWeek), and a loaded
+ * standalone box bursts past it before the scenario has even started (observed
+ * bursts: load 10-15). A retry re-runs the whole navigation — its page.goto
+ * resets any half-open modal — and never touches the scenario semantics.
+ */
+async function openRecordTabRobust(page: Page, recordId: string, attempts = 3): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await openRecordTab(page, recordId);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 test.describe('Visits PATCH cache consistency — controlled response order (GH #359)', () => {
+  // Canonical-env budget: a standalone run rides a shared dev server whose
+  // first-hit route compilation + a loaded box make the LEANEST of these
+  // scenarios take ~50s (observed: US-3 49.2s) — the default 60s cap is not
+  // a budget but a coin flip. test.slow() triples it (180s); the scenarios'
+  // semantics (held/free response ordering) are untouched by the extra room.
+  test.beforeEach(() => test.slow());
+
   // ── US-1: anonymous row — visitor_id response held, tariff/price free ─────
   //
   // The conversion PATCH {visitor_id} is issued FIRST (issue order pinned via
@@ -122,7 +148,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
       // scenarios need the 60s test budget for the holds and the retries).
       await holdVisitPatchResponses(page, (body) => 'visitor_id' in body);
 
-      await openRecordTab(page, record.id);
+      await openRecordTabRobust(page, record.id);
       const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
       const nameInput = row.locator('input:not([type="number"])').first();
@@ -205,7 +231,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
       // Hold ONLY the status-carrying PATCH; the tariff PATCH passes freely.
       await holdVisitPatchResponses(page, (body) => 'status' in body);
 
-      await openRecordTab(page, record.id);
+      await openRecordTabRobust(page, record.id);
       const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
 
@@ -278,7 +304,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
         return priceEdits === 1;
       });
 
-      await openRecordTab(page, record.id);
+      await openRecordTabRobust(page, record.id);
       const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
       await expect(row).toBeVisible({ timeout: 10_000 });
       const priceInput = row.locator('input[type="number"]');

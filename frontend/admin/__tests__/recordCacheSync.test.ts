@@ -20,6 +20,7 @@ import type {
 
 import {
   patchRecordEverywhere,
+  projectVisitPatch,
   upsertVisit,
   removeVisit,
   upsertPayment,
@@ -352,6 +353,183 @@ describe('removeVisit', () => {
         '2026-01-31',
       ])?.items[0].visits,
     ).toHaveLength(1);
+  });
+});
+
+// ── #359 visit PATCH projection: partial field-level cache write ─────────────
+// Spec §Технические изменения п.1: the field LIST comes from the keys of the
+// SERIALIZED request body (undefined-valued keys are not JSON fields), the
+// VALUES (incl. the implicit always-applied updated_at) come from the flat
+// PATCH response. A visit missing from the cache must NOT be inserted.
+
+describe('projectVisitPatch', () => {
+  it('projects ONLY the body-listed fields (values from the response) + implicit updated_at, in canonical AND list mirrors', () => {
+    qc.setQueryData(['record', recordId], makeRecord(recordId));
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId), makeRecord(otherRecordId)],
+      total: 2,
+      page: 1,
+      per_page: 10,
+    });
+    qc.setQueryData(['records', 'client', 'c1'], [makeRecord(recordId)]);
+
+    const response = makeVisit(visitId, {
+      price: 4200, // server-normalized value differs from the request's
+      status: 'visited', // NOT in the body → must NOT be projected
+      custom_price: 500, // NOT in the body → must NOT be projected
+      updated_at: '2026-05-10T12:00:00',
+    });
+    projectVisitPatch(qc, recordId, visitId, { price: 4000 }, response);
+
+    // Canonical: only the listed field + updated_at are written
+    const visit = qc.getQueryData<RecordResponse>(['record', recordId])?.visits[0];
+    expect(visit?.price).toBe(4200); // response value wins over the request's
+    expect(visit?.status).toBe('waiting');
+    expect(visit?.custom_price).toBeNull();
+    expect(visit?.updated_at).toBe('2026-05-10T12:00:00');
+
+    // Main list (envelope) — same projection, other record untouched
+    const dateList = qc.getQueryData<PaginatedResponse<RecordResponse>>([
+      'records',
+      '2026-01-01',
+      '2026-01-31',
+    ]);
+    expect(dateList?.items.find((r) => r.id === recordId)?.visits[0].price).toBe(
+      4200,
+    );
+    expect(dateList?.items.find((r) => r.id === recordId)?.visits[0].status).toBe(
+      'waiting',
+    );
+    expect(
+      dateList?.items.find((r) => r.id === otherRecordId)?.visits[0].status,
+    ).toBe('waiting');
+
+    // Per-client list
+    expect(
+      qc.getQueryData<RecordResponse[]>(['records', 'client', 'c1'])?.[0]
+        ?.visits[0].price,
+    ).toBe(4200);
+  });
+
+  it('clears the cached field when the request value is null (null IS a serialized field)', () => {
+    qc.setQueryData(
+      ['record', recordId],
+      makeRecord(recordId, {
+        visits: [makeVisit(visitId, { custom_price: 500 })],
+      }),
+    );
+
+    projectVisitPatch(
+      qc,
+      recordId,
+      visitId,
+      { custom_price: null },
+      makeVisit(visitId, { custom_price: null }),
+    );
+
+    expect(
+      qc.getQueryData<RecordResponse>(['record', recordId])?.visits[0]
+        ?.custom_price,
+    ).toBeNull();
+  });
+
+  it('ignores a body key whose value is undefined (not serialized → not a field)', () => {
+    qc.setQueryData(
+      ['record', recordId],
+      makeRecord(recordId, {
+        visits: [makeVisit(visitId, { visitor_id: 'vis-9', price: 3500 })],
+      }),
+    );
+
+    projectVisitPatch(
+      qc,
+      recordId,
+      visitId,
+      { visitor_id: undefined, price: 4500 },
+      makeVisit(visitId, { visitor_id: 'vis-other', price: 4500 }),
+    );
+
+    const visit = qc.getQueryData<RecordResponse>(['record', recordId])?.visits[0];
+    expect(visit?.visitor_id).toBe('vis-9'); // kept — undefined key is no field
+    expect(visit?.price).toBe(4500);
+  });
+
+  it('is a no-op without zombie insert when the visit is missing from the cached record', () => {
+    const seeded = makeRecord(recordId, { visits: [makeVisit(otherVisitId)] });
+    qc.setQueryData(['record', recordId], seeded);
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [seeded],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
+
+    projectVisitPatch(
+      qc,
+      recordId,
+      visitId,
+      { price: 1 },
+      makeVisit(visitId, { price: 1 }),
+    );
+
+    // The deleted row is NOT resurrected anywhere
+    const canonical = qc.getQueryData<RecordResponse>(['record', recordId]);
+    expect(canonical?.visits.map((v) => v.id)).toEqual([otherVisitId]);
+    expect(canonical?.visits).toBe(seeded.visits); // untouched — same reference
+    expect(
+      qc.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-01-01',
+        '2026-01-31',
+      ])?.items[0].visits.map((v) => v.id),
+    ).toEqual([otherVisitId]);
+  });
+
+  it('is a no-op when the canonical record cache is missing (cache reset)', () => {
+    // Lists seeded only — no canonical key
+    qc.setQueryData(['records', '2026-01-01', '2026-01-31'], {
+      items: [makeRecord(recordId)],
+      total: 1,
+      page: 1,
+      per_page: 10,
+    });
+
+    projectVisitPatch(
+      qc,
+      recordId,
+      visitId,
+      { price: 9999 },
+      makeVisit(visitId, { price: 9999 }),
+    );
+
+    expect(
+      qc.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-01-01',
+        '2026-01-31',
+      ])?.items[0].visits[0].price,
+    ).toBe(3500);
+  });
+
+  it('builds NEW object references while untouched siblings keep theirs', () => {
+    const sibling = makeVisit(otherVisitId);
+    const target = makeVisit(visitId);
+    const seeded = makeRecord(recordId, { visits: [sibling, target] });
+    qc.setQueryData(['record', recordId], seeded);
+
+    projectVisitPatch(
+      qc,
+      recordId,
+      visitId,
+      { status: 'visited' },
+      makeVisit(visitId, { status: 'visited', updated_at: '2026-05-11T09:00:00' }),
+    );
+
+    const after = qc.getQueryData<RecordResponse>(['record', recordId]);
+    expect(after).not.toBe(seeded); // new record object
+    expect(after?.visits).not.toBe(seeded.visits); // new visits array
+    expect(after?.visits.find((v) => v.id === visitId)).not.toBe(target); // new visit
+    expect(after?.visits.find((v) => v.id === otherVisitId)).toBe(sibling); // kept
   });
 });
 

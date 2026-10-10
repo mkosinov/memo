@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-10
 
 ### Added
+- **GH #359 — PATCH посещения → кэш записи проекцией полей запроса
+  (last-issued-request-wins)** — branch `359-visits-patch-cache` (4 коммита
+  `0ecc6541..9a49fa52`, base `91ba8fd2`; 5 файлов, +906/−14; спека
+  `docs/specs/2026-10-09-visits-patch-cache-projection-359-design.md` rev2 и план
+  `docs/plans/2026-10-10-visits-patch-cache-projection-359-plan.md` — 4/4 задач; оба
+  на main, unchanged by IMPL; frontend-only — сервер/API/контракты не тронуты):
+  - **Проекция (T1, `0ecc6541`):** helper в `recordCacheSync` применяет ответ PATCH
+    посещения к кэшу записи (обе формы кэша) проекцией — только поля тела запроса +
+    `updated_at`; остальные поля ответа кэш не затирают.
+  - **Guard (T2, `8b03c568`):** счётчик правок и защита применения в
+    `useRecordMutations` — per-field «последний выпущенный запрос побеждает»: ответ
+    устаревшего PATCH не перезаписывает поля, изменённые более поздним запросом;
+    смена статуса дополнительно проектирует своё поле с сохранением инвалидации
+    записи (родительский бейдж).
+  - **E2E (T3, `941dfd51`, `9a49fa52`):** новая спека `visits-patch-consistency.spec.ts`
+    — конкурентные PATCH посещений с управляемым порядком ответов (US-1..US-3, RED
+    верифицирован до-фиксно для US-1/US-3); canonical-env-доводка — бюджет `test.slow`
+    + ретрай навигации.
+  - **Behavioral delta:** гонки конкурентных PATCH посещений больше не оставляют
+    кэш записи в состоянии «чужой ответ затёр свежие поля»; канон visits.md/records.md
+    (правила #359) уже на main.
+  - **Tests:** admin vitest (TZ=UTC) — Task 1 полный прогон **3021p/0f**, таргет-сьюты
+    на ревью 108/108 (Task 2 полный прогон 3019/3026 — 7 load-флейков посторонних
+    table-спек, зелёные изолированно 155/155); новая e2e **3/3 ×2** под
+    canonical-вызовом (`BACKEND_URL`/`NEXT_PUBLIC_API_URL`=`http://127.0.0.1:8000`);
+    регрессии — anonymous-visits 6/7 (US5 FLAKE timeout-класса под нагрузкой, зелёный
+    на реране и через records.spec S1/S2), records S1/S2 2/2; `tsc --noEmit` чист.
+  - Status: `docs/status/2026-10-10-visits-patch-cache-projection-359.md`
 - **GH #311 — Обязательная секция Visual Compliance Checks в дизайн-спеках (harness-контракт
   визуального комплаенса)** — branch `311-visual-compliance-section` (11 коммитов
   `bc57e80e..4b338599`, base `a42edf14`; 13 файлов, +794/−117; спека

@@ -68,7 +68,10 @@
 #     = write time); sweep_dead_runs on a dead-PID lease — TERM-stubborn
 #     masked holder killed via the kill -9 rung, tagged files + lease of the
 #     dead tag removed; live lease, its resources, its pid and the foreign
-#     junk.run untouched; stdout carries ONLY the live lease's ports;
+#     junk.run untouched; an outbound uvicorn-argv CLIENT connected to the
+#     dead-run port (remote endpoint) survives — the port-hold sample is
+#     the one-shot LISTEN sample of §3.3 (local end only), not per-port
+#     `lsof -ti :PORT`; stdout carries ONLY the live lease's ports;
 #     malformed lease removed without a port sweep.
 #   → Case 11 (#317 §3.3): empty runs dir → rc=0, empty stdout (first run);
 #     live lease → masked holder on its port SURVIVES, lease/resources/pid
@@ -337,6 +340,40 @@ spawn_dead_pid() {
   kill -9 "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   printf '%s' "$pid"
+}
+
+# spawn_outbound_client <host> <port> <marker_file> — uvicorn-argv process
+# that CONNECTS to host:port (outbound socket; the checked port is its
+# REMOTE endpoint) and sleeps holding the connection; writes the marker
+# after connect. Discriminates the LISTEN-based port-hold sample (§3.3):
+# `lsof -ti :PORT` matches this socket on both ends (bug), the one-shot
+# `lsof -nP -i TCP -sTCP:LISTEN` sample must not. The sweep must never
+# kill the client. Same two spawn rules as the other holders.
+spawn_outbound_client() {
+  local host="$1" port="$2" marker="$3"
+  (
+    exec -a uvicorn python3 -c '
+import socket, sys, time
+host, port, marker = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+s = socket.socket()
+s.connect((host, port))
+open(marker, "w").write("connected")
+time.sleep(60)
+' "$host" "$port" "$marker"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# wait_marker <marker_file> [timeout_s] — poll until the marker exists
+# (bounded; default 5 s). Proves a spawned fixture reached its milestone.
+wait_marker() {
+  local marker="$1"
+  local deadline=$((SECONDS + ${2:-5}))
+  while [ ! -e "$marker" ]; do
+    [ "$SECONDS" -ge "$deadline" ] && return 1
+    sleep 0.1
+  done
+  return 0
 }
 
 # check_port_survivor <port> <pid> — true iff pid is alive AND still holds
@@ -930,6 +967,18 @@ printf '999999 1 2 3 4 5 6 7\n' > "$SHARD_RUNS_DIR/junk.run"
 H10="$(spawn_term_ignoring_uvicorn_holder "$TEST_BACKEND_PORT_A" "test_memo_shard_$DEAD10_TAG")"
 register_pid "$H10"
 wait_holder_bound "$H10" "$TEST_BACKEND_PORT_A"
+# Outbound CLIENT with uvicorn argv CONNECTED to the dead-run port (remote
+# endpoint): the port-hold sample is LISTEN/local-end only (§3.3) — the
+# client holds no listener, so the sweep must leave it alone (a per-port
+# `lsof -ti :PORT` sample would match its socket and kill it — the bug the
+# one-shot LISTEN sample rules out).
+CLIENT10_MARKER="$WORK/case10.client"
+CLIENT10="$(spawn_outbound_client 127.0.0.1 "$TEST_BACKEND_PORT_A" "$CLIENT10_MARKER")"
+register_pid "$CLIENT10"
+wait_marker "$CLIENT10_MARKER" || {
+  echo "FATAL: Case 10 outbound client never connected" >&2
+  exit 1
+}
 
 # (d) the sweep itself.
 T10=$(date +%s)
@@ -960,16 +1009,24 @@ grep -q "dead run $DEAD10_TAG" "$WORK/case10.err" 2>/dev/null || CASE10_OK=false
 if kill -0 "$LIVE10_PID" 2>/dev/null; then :; else CASE10_OK=false; fi
 # foreign junk file untouched
 [ -e "$SHARD_RUNS_DIR/junk.run" ] || CASE10_OK=false
+# the outbound client (uvicorn argv, checked port as REMOTE endpoint)
+# survives the sweep — LISTEN/local-end-only port-hold sample
+[ -e "$CLIENT10_MARKER" ] || CASE10_OK=false
+if kill -0 "$CLIENT10" 2>/dev/null; then :; else CASE10_OK=false; fi
 
 if $CASE10_OK; then
-  echo "PASS Case 10 (#317): dead lease swept (TERM-stubborn holder killed, tagged files+lease removed); live lease/junk untouched; stdout=live ports only (${EL10}s)"
+  echo "PASS Case 10 (#317): dead lease swept (TERM-stubborn holder killed, tagged files+lease removed); live lease/junk/outbound-client untouched; stdout=live ports only (${EL10}s)"
 else
-  echo "FAIL Case 10 (#317): rc=$SW10_RC elapsed=${EL10}s out='$SW10_OUT'"
+  echo "FAIL Case 10 (#317): rc=$SW10_RC elapsed=${EL10}s out='$SW10_OUT' client=$(kill -0 "$CLIENT10" 2>/dev/null && echo alive || echo dead)"
   echo "── Case 10 sweep stderr ──"
   cat "$WORK/case10.err" 2>/dev/null || true
   echo "─────────────────"
   FAIL=1
 fi
+# 6.5: the client survived on purpose — finish it here (it is our own).
+kill -9 "$CLIENT10" 2>/dev/null || true
+wait "$CLIENT10" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$CLIENT10/}")
 
 # ── Case 11 (#317 §3.3): live lease untouched; ports contract; remove ──────
 echo "── Case 11 (#317 §3.3): live lease untouched, ports → stdout; empty dir; remove_run_lease ──"

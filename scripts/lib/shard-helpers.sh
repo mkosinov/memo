@@ -51,14 +51,45 @@ SHARD_ALLOC_MAX_ATTEMPTS=20
 #   PGPATTERN — pgrep -f шаблон кандидатов (номинация, не приговор);
 #   GATE*     — подстроки, хотя бы одна из которых должна быть в ps args.
 # Выводит (stdout) pid'ы, прошедшие КОНЪЮНКЦИЮ: args содержит маску И pid
-# держит порт из списка. Выборка слушающих — по-портовый `lsof -ti :PORT`
-# (диапазонный синтаксис `lsof -i :a-b` непортабелен и запрещён, §3.3).
-# Чистый finder: сигналов не посылает; pid выводится один раз (первое
-# совпадение порта). bash 3.2-совместимо: имя массива читается через
-# eval-косвенность.
+# держит LISTEN-сокет на одном из проверяемых портов.
+# Выборка слушающих (§3.3) — ОДНОЙ командой на вызов: `lsof -nP -i TCP
+# -sTCP:LISTEN`, из локального адреса берётся порт (после последнего
+# двоеточия: `1.2.3.4:PORT`, `[::]:PORT`, `*:PORT`), затем фильтр
+# «порт ∈ множеству проверяемых». Только LISTEN и только ЛОКАЛЬНЫЙ конец:
+# исходящее соединение с проверяемым портом на УДАЛЁННОМ конце не
+# матчится (в отличие от `lsof -ti :PORT`, который ловит оба конца и
+# не-LISTEN сокеты); диапазонный синтаксис `lsof -i :a-b` не используется.
+# PID берётся правым подсчётом полей (NF-8): COMMAND бывает с пробелами
+# (перетитулованный next-server), левый край строки не фиксирован.
+# Чистый finder: сигналов не посылает; pid выводится один раз. bash 3.2:
+# имя массива читается через eval-косвенность.
 _masked_pids() {
   local ports_var="$1" pgpat="$2"; shift 2
-  local pid args port
+  # Один LISTEN-сэмпл на вызов: строки «pid port» (только локальный конец).
+  local pairs
+  pairs="$(lsof -nP -i TCP -sTCP:LISTEN 2>/dev/null | awk '
+    $(NF) == "(LISTEN)" {
+      name = $(NF - 1); sub(/^.*:/, "", name)
+      if (name ~ /^[0-9]+$/) print $(NF - 8), name
+    }
+  ' || true)"
+  local ports_list
+  ports_list="$(eval "printf '%s ' \"\${${ports_var}[@]}\"")"
+  # Держатели LISTEN-сокетов на проверяемых портах (фильтр «порт ∈ множеству»).
+  local holders=" "
+  local lpid lport
+  while read -r lpid lport; do
+    [ -n "$lpid" ] || continue
+    case " $ports_list " in
+      *" $lport "*)
+        case "$holders" in
+          *" $lpid "*) ;;
+          *) holders="$holders$lpid " ;;
+        esac
+        ;;
+    esac
+  done <<< "$pairs"
+  local pid args
   for pid in $(pgrep -f "$pgpat" 2>/dev/null || true); do
     args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
     local matched=false gate
@@ -68,13 +99,9 @@ _masked_pids() {
       esac
     done
     [ "$matched" = true ] || continue
-    # Индирекция по имени: ports_var указывает на массив портов вызывающего.
-    for port in $(eval "printf '%s\n' \"\${${ports_var}[@]}\""); do
-      if lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; then
-        printf '%s\n' "$pid"
-        break
-      fi
-    done
+    case "$holders" in
+      *" $pid "*) printf '%s\n' "$pid" ;;
+    esac
   done
 }
 

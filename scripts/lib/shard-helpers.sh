@@ -11,8 +11,32 @@
 # arguments — tests override them before sourcing):
 #   SHARD_FRONTEND_PORTS=(3002 3003)
 #   SHARD_BACKEND_PORTS=(8001 8002)
+#
+# Feature #317 (run tag + dynamic shard ports), spec §3.1/§3.2:
+#   gen_run_tag          — unique 6-hex run tag for the current run (stdout)
+#   allocate_shard_ports — 4 pairwise-distinct free ports from the window
+# Both print their RESULT on stdout (callers capture it); diagnostics go
+# to stderr only.
 
 CLEANUP_BUDGET_S=10
+
+# ── Feature #317 constants ─────────────────────────────────────────────────
+# SHARD_RUNS_DIR — run-lease files (${TAG}.run) live here; written/parsed by
+#   test-all.sh (Tasks 2+). gen_run_tag only CHECKS the path for collisions.
+#   Default mirrors the LOG_DIR precedent in test-all.sh (${TMPDIR:-/tmp}).
+# SHARD_PORT_WINDOW_* — the dynamic-port window. 28000-32700 sits BELOW the
+#   Linux kernel ephemeral range 32768-60999 (the kernel never hands these
+#   ports to outgoing connections), below macOS ephemeral (49152+), above
+#   the privileged range, and clear of every repo service port (3000-3003,
+#   8000-8002, 3100, 8101). Capacity: 4701 ports / 4 per run ≈ 1175 parallel
+#   runs. NB: the dryrun harness's own allocate_port_triplet window
+#   (38200-46099) is unrelated test plumbing and is NOT reused.
+# SHARD_ALLOC_MAX_ATTEMPTS — shared bounded-retry budget (tag redraws and
+#   port-allocation draws): every failure mode must terminate, never hang.
+SHARD_RUNS_DIR="${SHARD_RUNS_DIR:-${TMPDIR:-/tmp}/memo-shard-runs}"
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+SHARD_ALLOC_MAX_ATTEMPTS=20
 
 # ── Внутренний хелпер: свип «порт + маска команды» ─────────────────────────
 # Использование: _sweep_masked PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
@@ -189,5 +213,103 @@ cleanup_shards() {
   # GH #262 — remove per-shard avatar dirs (FILES_DIR), same lifecycle as the DB
   rm -rf "$ROOT"/backend/test_files_shard*
 
+  return 0
+}
+
+# ── Feature #317: run tag + dynamic shard ports (spec §3.1/§3.2) ───────────
+
+# _tag_resource_exists TAG → does ANY run resource of this tag exist?
+# Resource families mirror the spec §3.3 audit globs (naming from §3.1):
+# shard DB copies (incl. canon siblings via the trailing *), photo dirs,
+# build dirs, and the lease file. Pure check — creates nothing.
+# bash 3.2: nullglob toggle, no compgen -G.
+_tag_resource_exists() {
+  local tag="$1" f hit=false
+  if [ -e "${SHARD_RUNS_DIR}/${tag}.run" ]; then
+    return 0
+  fi
+  shopt -s nullglob
+  for f in "$ROOT"/backend/test_memo_shard*_"$tag"* \
+           "$ROOT"/backend/test_files_shard*_"$tag" \
+           "$ROOT"/frontend/admin/.next-shard-*_"$tag"; do
+    hit=true
+    break
+  done
+  shopt -u nullglob
+  [ "$hit" = true ]
+}
+
+# gen_run_tag → stdout: a unique 6-hex run tag (e.g. "1a2b3c"); rc 1 on
+# failure. Entropy: `openssl rand -hex 3` = 24 bits ($RANDOM is FORBIDDEN
+# here — 15 bits make tag collisions realistic, and a shared tag means
+# shared DBs/dirs, destroying the isolation guarantee). Fallback:
+# `od -An -N3 -tx3 /dev/urandom`, normalized (od pads with spaces; hex
+# case is platform-dependent — we always emit lowercase). The candidate
+# is validated against ^[0-9a-f]{6}$ BEFORE use: the tag lands in paths
+# and rm-globs, so foreign chars (`/`, `*`, `..`, spaces) are excluded by
+# the format. Regenerated while ANY resource of the tag already exists
+# (leftovers of a dead run with the same tag). Bounded retries
+# (SHARD_ALLOC_MAX_ATTEMPTS), then fail-fast. stdout carries ONLY the
+# tag; diagnostics go to stderr. bash 3.2: ERE via a variable (portable
+# `=~` form — a quoted/inline literal RHS is not).
+gen_run_tag() {
+  local tag attempt=0
+  local hex_re='^[0-9a-f]{6}$'
+  while [ "$attempt" -lt "$SHARD_ALLOC_MAX_ATTEMPTS" ]; do
+    attempt=$((attempt + 1))
+    tag=""
+    if command -v openssl >/dev/null 2>&1; then
+      tag="$(openssl rand -hex 3 2>/dev/null || true)"
+    fi
+    if ! [[ "$tag" =~ $hex_re ]]; then
+      # openssl missing/broken/garbage → od fallback; tr strips the od
+      # padding/newlines and lowercases the hex.
+      tag="$(od -An -N3 -tx3 /dev/urandom 2>/dev/null | tr -d ' \n' | tr 'A-F' 'a-f' || true)"
+    fi
+    [[ "$tag" =~ $hex_re ]] || continue      # bad format → redraw
+    if ! _tag_resource_exists "$tag"; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done
+  echo "❌ gen_run_tag: no unique run tag after $SHARD_ALLOC_MAX_ATTEMPTS attempts (every candidate matched existing resources under $ROOT/backend, $ROOT/frontend/admin or $SHARD_RUNS_DIR). Remove stale test_memo_shard*/test_files_shard*/.next-shard-* leftovers or old ${SHARD_RUNS_DIR}/*.run leases, then re-run." >&2
+  return 1
+}
+
+# allocate_shard_ports [BUSY_PORT ...] → stdout: 4 pairwise-distinct free
+# ports from the window, space-separated on one line (draw order — the
+# ports are equivalent; the caller assigns front1/back1/front2/back2 per
+# spec §3.2); rc 1 on failure. Every candidate is checked with lsof
+# (per-port `lsof -ti :PORT` — range syntax `lsof -i :a-b` is unportable
+# and banned); BUSY_PORT args are treated as occupied without a check —
+# the caller passes live-lease ports there ("порты живых лизов передаются
+# как занятые"). Bounded: at most SHARD_ALLOC_MAX_ATTEMPTS candidate
+# draws, then fail-fast with an actionable message. stdout carries ONLY
+# the ports; diagnostics go to stderr.
+allocate_shard_ports() {
+  local busy_raw="$*"
+  local busy=" $busy_raw "
+  local picked=()
+  local attempt=0 have=0 port ok listed
+  while [ "$have" -lt 4 ]; do
+    if [ "$attempt" -ge "$SHARD_ALLOC_MAX_ATTEMPTS" ]; then
+      echo "❌ allocate_shard_ports: cannot find 4 free pairwise-distinct ports in window $SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH after $SHARD_ALLOC_MAX_ATTEMPTS attempts (got $have of 4; busy args:${busy_raw:+ $busy_raw}). Check listeners with 'lsof -nP -i TCP -sTCP:LISTEN', free the window or re-run test-all." >&2
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    port=$((SHARD_PORT_WINDOW_LOW + RANDOM % (SHARD_PORT_WINDOW_HIGH - SHARD_PORT_WINDOW_LOW + 1)))
+    ok=true
+    case "$busy" in *" $port "*) ok=false ;; esac        # live-lease port
+    listed="${picked[*]:-}"
+    case " $listed " in *" $port "*) ok=false ;; esac    # already picked
+    if [ "$ok" = true ] && lsof -ti :"$port" >/dev/null 2>&1; then
+      ok=false                                          # someone listens
+    fi
+    if [ "$ok" = true ]; then
+      picked+=("$port")
+      have=$((have + 1))
+    fi
+  done
+  printf '%s %s %s %s\n' "${picked[0]}" "${picked[1]}" "${picked[2]}" "${picked[3]}"
   return 0
 }

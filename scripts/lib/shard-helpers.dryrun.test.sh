@@ -42,6 +42,26 @@
 # RED/GREEN: the library already implements the behaviour (Task 3/T3 fix);
 # the RED side of TDD lives in the meta self-checks (Case 0, Case 4 control)
 # and in Case 2, where fail-fast IS the behaviour under test.
+#
+# Spec coverage (Feature #317, run tag + dynamic ports — LIB primitives,
+# docs/specs/2026-10-09-shard-stack-dynamic-ports-317-design.md):
+#   → Case 5 (§3.1): gen_run_tag → exactly one word matching ^[0-9a-f]{6}$
+#     (lowercase hex, never uppercase), rc=0 across repeated draws with the
+#     REAL openssl/od.
+#   → Case 6 (§3.1, stubbed entropy): invalid candidates (bad charset) are
+#     redrawn, never returned; collision with ANY existing tag resource
+#     (lease file, shard DB, canon glob, build dir, photo dir) forces
+#     regeneration; broken openssl → od fallback with padding/case
+#     normalization; unresolvable collision → bounded retries (≤20) end in
+#     fail-fast with an actionable message.
+#   → Case 7 (§3.2): window constants pinned to 28000-32700; allocator
+#     returns 4 pairwise-distinct in-window ports, lsof-free at draw time.
+#   → Case 8 (§3.2): narrowed lsof-verified sub-window + a REAL holder +
+#     a live-lease busy ARG → allocator returns EXACTLY the remaining 4
+#     ports (held and busy ports never in the result).
+#   → Case 9 (§3.2): lsof stub reporting every port held → fail-fast
+#     rc≠0, message names the window and the attempt budget, ≤20 lsof
+#     calls; control with the real lsof succeeds.
 
 set -euo pipefail
 
@@ -217,6 +237,22 @@ spawn_sleep_wrapper() {
 # spawn-helpers note above for why registration cannot live inside spawn).
 register_pid() {
   TEST_OWN_PIDS+=("$1")
+}
+
+# spawn_plain_holder <port> — bind a TEST port and sleep 60 (no signal
+# games; the EXIT-trap registry reaps it with kill -9). For allocator
+# busy-tests (Case 8). Same two spawn rules as above: detached stdio,
+# prints the PID for parent-side registration.
+spawn_plain_holder() {
+  local port="$1"
+  (
+    exec -a memo-dryrun-holder python3 -c '
+import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
+' "$port"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
 }
 
 # ── Case 0: meta self-check — the sweep really detects a violating holder ─
@@ -446,6 +482,271 @@ fi
 SHARD_BACKEND_PIDS=()
 
 # ── Case 4 control is already covered by Case 0 (innocent survived). ──────
+
+# ── Case 5 (#317 §3.1, формат тега): gen_run_tag → ^[0-9a-f]{6}$ ────────────
+echo "── Case 5 (#317 §3.1): gen_run_tag → 6 lowercase hex, single word ──"
+fresh_root "case5"
+SHARD_RUNS_DIR="$WORK/lease-runs-case5"   # isolation from real host leases
+source_lib
+CASE5_OK=true
+TAG_RE='^[0-9a-f]{6}$'
+for i in 1 2 3 4 5; do
+  set +e
+  TAG_OUT=$(gen_run_tag 2>&1); TAG_RC=$?
+  set -e
+  [ "$TAG_RC" -eq 0 ] || CASE5_OK=false
+  # stdout must carry exactly one word — callers capture it raw
+  TAG_WORDS=$(printf '%s' "$TAG_OUT" | wc -w | tr -d ' ')
+  [ "$TAG_WORDS" -eq 1 ] || CASE5_OK=false
+  # lowercase 6-hex only: the regex rejects uppercase A-F and any junk
+  printf '%s' "$TAG_OUT" | grep -Eq "$TAG_RE" || CASE5_OK=false
+done
+if $CASE5_OK; then
+  echo "PASS Case 5 (#317): gen_run_tag → 6 lowercase hex ×5 draws (last: $TAG_OUT), rc=0"
+else
+  echo "FAIL Case 5 (#317): rc=$TAG_RC out='$TAG_OUT' words=$TAG_WORDS"
+  FAIL=1
+fi
+
+# ── Case 6 (#317 §3.1): validation redraw + collision regeneration ─────────
+echo "── Case 6 (#317 §3.1): validation redraw + resource-collision regeneration ──"
+fresh_root "case6"
+SHARD_RUNS_DIR="$WORK/lease-runs-case6"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE6_OK=true
+
+# stateful openssl stub: emits tag candidates in a fixed sequence
+# (seq file reset per sub-case → draw 1 = "abc123", draw 2 = "111222").
+make_seq_openssl() {
+  cat > "$STUBS/openssl" <<EOF
+#!/bin/sh
+n=\$(cat "$STUBS/openssl_seq" 2>/dev/null || echo 0)
+n=\$((n + 1))
+echo "\$n" > "$STUBS/openssl_seq"
+case "\$n" in
+  1) printf 'abc123\n' ;;
+  2) printf '111222\n' ;;
+  3) printf '222333\n' ;;
+  *) printf '333444\n' ;;
+esac
+EOF
+  chmod +x "$STUBS/openssl"
+  rm -f "$STUBS/openssl_seq"
+}
+
+# (a) clean environment → the first candidate is accepted as-is
+make_seq_openssl
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "abc123" ]; } || CASE6_OK=false
+
+# (b) lease file of the candidate exists → regenerate to the next one
+make_seq_openssl
+: > "$SHARD_RUNS_DIR/abc123.run"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "111222" ]; } || CASE6_OK=false
+rm -f "$SHARD_RUNS_DIR/abc123.run"
+
+# (c) shard DB of the candidate exists → regenerate
+make_seq_openssl
+: > "$ROOT/backend/test_memo_shard1_abc123.db"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "111222" ]; } || CASE6_OK=false
+rm -f "$ROOT/backend/test_memo_shard1_abc123.db"
+
+# (d) canon-style glob of the candidate exists → regenerate
+make_seq_openssl
+: > "$ROOT/backend/test_memo_shard2_abc123.canon.sql"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "111222" ]; } || CASE6_OK=false
+rm -f "$ROOT/backend/test_memo_shard2_abc123.canon.sql"
+
+# (e) build dir of the candidate exists → regenerate
+make_seq_openssl
+mkdir -p "$ROOT/frontend/admin/.next-shard-2_abc123"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "111222" ]; } || CASE6_OK=false
+rmdir "$ROOT/frontend/admin/.next-shard-2_abc123"
+
+# (f) photo dir of the candidate exists → regenerate
+make_seq_openssl
+mkdir -p "$ROOT/backend/test_files_shard1_abc123"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "111222" ]; } || CASE6_OK=false
+rmdir "$ROOT/backend/test_files_shard1_abc123"
+
+# (g) invalid candidates (bad charset from BOTH entropy sources) are never
+# returned — redrawn until a valid one appears
+cat > "$STUBS/openssl" <<EOF
+#!/bin/sh
+n=\$(cat "$STUBS/openssl_seq" 2>/dev/null || echo 0)
+n=\$((n + 1))
+echo "\$n" > "$STUBS/openssl_seq"
+case "\$n" in
+  1) printf 'ZZZZ99\n' ;;
+  *) printf 'cab012\n' ;;
+esac
+EOF
+chmod +x "$STUBS/openssl"
+rm -f "$STUBS/openssl_seq"
+cat > "$STUBS/od" <<'EOF'
+#!/bin/sh
+printf '!!\n'
+EOF
+chmod +x "$STUBS/od"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "cab012" ]; } || CASE6_OK=false
+rm -f "$STUBS/od"
+
+# (h) broken openssl → od fallback; od padding/case normalized
+cat > "$STUBS/openssl" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$STUBS/openssl"
+cat > "$STUBS/od" <<'EOF'
+#!/bin/sh
+printf '  1A2B3C\n'
+EOF
+chmod +x "$STUBS/od"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+{ [ "$R6" -eq 0 ] && [ "$T6" = "1a2b3c" ]; } || CASE6_OK=false
+rm -f "$STUBS/od" "$STUBS/openssl"
+
+# (i) every candidate collides → bounded retries, fail-fast + message
+cat > "$STUBS/openssl" <<EOF
+#!/bin/sh
+printf 'x' >> "$STUBS/openssl_calls"
+printf 'abc123\n'
+EOF
+chmod +x "$STUBS/openssl"
+rm -f "$STUBS/openssl_calls"
+: > "$SHARD_RUNS_DIR/abc123.run"
+set +e; T6=$(PATH="$STUBS:$PATH" gen_run_tag 2>&1); R6=$?; set -e
+[ "$R6" -ne 0 ] || CASE6_OK=false
+printf '%s\n' "$T6" | grep -q 'gen_run_tag' || CASE6_OK=false
+printf '%s\n' "$T6" | grep -q 'tag' || CASE6_OK=false
+OPENSSL_N=$(wc -c < "$STUBS/openssl_calls" 2>/dev/null || printf '0')
+OPENSSL_N=$((OPENSSL_N))
+[ "$OPENSSL_N" -le 20 ] || CASE6_OK=false
+rm -f "$STUBS/openssl" "$STUBS/openssl_calls" "$SHARD_RUNS_DIR/abc123.run"
+
+if $CASE6_OK; then
+  echo "PASS Case 6 (#317): validation redraw + collision regeneration (lease/db/canon/build/photo) + od fallback + bounded fail-fast"
+else
+  echo "FAIL Case 6 (#317): last rc=$R6 out='$T6' stub_calls=$OPENSSL_N"
+  FAIL=1
+fi
+
+# ── Case 7 (#317 §3.2): 4 pairwise-distinct ports, default window ──────────
+echo "── Case 7 (#317 §3.2): allocate_shard_ports → 4 distinct ports in 28000-32700 ──"
+fresh_root "case7"
+source_lib
+CASE7_OK=true
+# window constants pinned to the spec (below Linux ephemeral 32768-60999)
+[ "$SHARD_PORT_WINDOW_LOW" -eq 28000 ] || CASE7_OK=false
+[ "$SHARD_PORT_WINDOW_HIGH" -eq 32700 ] || CASE7_OK=false
+for i in 1 2 3; do
+  set +e
+  P7=$(allocate_shard_ports 2>&1); R7=$?
+  set -e
+  [ "$R7" -eq 0 ] || CASE7_OK=false
+  P7_N=$(printf '%s' "$P7" | wc -w | tr -d ' ')
+  [ "$P7_N" -eq 4 ] || CASE7_OK=false
+  P7_U=$(printf '%s\n' $P7 | sort -u | wc -l | tr -d ' ')
+  [ "$P7_U" -eq 4 ] || CASE7_OK=false      # pairwise distinct
+  for p7 in $P7; do
+    [ "$p7" -ge "$SHARD_PORT_WINDOW_LOW" ] || CASE7_OK=false
+    [ "$p7" -le "$SHARD_PORT_WINDOW_HIGH" ] || CASE7_OK=false
+    port_free "$p7" || CASE7_OK=false      # nothing listens on it
+  done
+done
+if $CASE7_OK; then
+  echo "PASS Case 7 (#317): 3 allocations × 4 distinct in-window lsof-free ports (window pinned 28000-32700)"
+else
+  echo "FAIL Case 7 (#317): rc=$R7 out='$P7'"
+  FAIL=1
+fi
+
+# ── Case 8 (#317 §3.2): busy ports (live-lease arg + held listener) avoided ─
+echo "── Case 8 (#317 §3.2): allocator never returns busy-arg or held ports ──"
+fresh_root "case8"
+source_lib
+# Hygiene: pick a fully-free 6-port sub-window INSIDE the spec window
+# (lsof-verified; away from every production port — the whole spec window is).
+SUB_BASE=""
+SUB_TRY=0
+while [ "$SUB_TRY" -lt 20 ]; do
+  SUB_TRY=$((SUB_TRY + 1))
+  SUB_CAND=$((SHARD_PORT_WINDOW_LOW + RANDOM % (SHARD_PORT_WINDOW_HIGH - SHARD_PORT_WINDOW_LOW - 5)))
+  SUB_FREE=true
+  for p8 in $(seq "$SUB_CAND" "$((SUB_CAND + 5))"); do
+    if lsof -ti :"$p8" >/dev/null 2>&1; then SUB_FREE=false; fi
+  done
+  if [ "$SUB_FREE" = true ]; then SUB_BASE="$SUB_CAND"; break; fi
+done
+if [ -z "$SUB_BASE" ]; then
+  echo "FATAL: no free 6-port sub-window inside ${SHARD_PORT_WINDOW_LOW}-${SHARD_PORT_WINDOW_HIGH}" >&2
+  exit 1
+fi
+HELD8=$((SUB_BASE + 5))    # really held by a spawned listener
+BUSY8=$((SUB_BASE + 2))    # live-lease port: passed as a busy ARG only
+H8="$(spawn_plain_holder "$HELD8")"
+register_pid "$H8"
+wait_holder_bound "$H8" "$HELD8"
+SHARD_PORT_WINDOW_LOW="$SUB_BASE"
+SHARD_PORT_WINDOW_HIGH=$((SUB_BASE + 5))
+set +e
+P8=$(allocate_shard_ports "$BUSY8" 2>&1); R8=$?
+set -e
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+# only 4 usable ports remain in the narrowed window → the result set is exact
+GOT8=$(printf '%s\n' $P8 | sort -n | tr '\n' ' ' | sed 's/ $//')
+EXPECT8="$SUB_BASE $((SUB_BASE + 1)) $((SUB_BASE + 3)) $((SUB_BASE + 4))"
+CASE8_OK=true
+[ "$R8" -eq 0 ] || CASE8_OK=false
+[ "$GOT8" = "$EXPECT8" ] || CASE8_OK=false
+if $CASE8_OK; then
+  echo "PASS Case 8 (#317): narrowed window [$SUB_BASE-$((SUB_BASE + 5))]: held $HELD8 + busy arg $BUSY8 avoided, exact set returned"
+else
+  echo "FAIL Case 8 (#317): rc=$R8 got='$GOT8' expect='$EXPECT8'"
+  FAIL=1
+fi
+
+# ── Case 9 (#317 §3.2): window exhausted → bounded fail-fast ────────────────
+echo "── Case 9 (#317 §3.2): fail-fast after ≤20 attempts, actionable message ──"
+fresh_root "case9"
+source_lib
+cat > "$STUBS/lsof" <<EOF
+#!/bin/sh
+printf 'x' >> "$STUBS/lsof_calls"
+exit 0
+EOF
+chmod +x "$STUBS/lsof"
+rm -f "$STUBS/lsof_calls"
+set +e
+P9=$(PATH="$STUBS:$PATH" allocate_shard_ports 2>&1); R9=$?
+set -e
+LSOF_N=$(wc -c < "$STUBS/lsof_calls" 2>/dev/null || printf '0')
+LSOF_N=$((LSOF_N))
+CASE9_OK=true
+[ "$R9" -ne 0 ] || CASE9_OK=false
+printf '%s\n' "$P9" | grep -q "$SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH" || CASE9_OK=false
+printf '%s\n' "$P9" | grep -q "$SHARD_ALLOC_MAX_ATTEMPTS" || CASE9_OK=false
+[ "$LSOF_N" -le "$SHARD_ALLOC_MAX_ATTEMPTS" ] || CASE9_OK=false
+# control: same call with the REAL lsof succeeds (the stub drove the failure)
+set +e
+P9B=$(allocate_shard_ports 2>&1); R9B=$?
+set -e
+[ "$R9B" -eq 0 ] || CASE9_OK=false
+rm -f "$STUBS/lsof" "$STUBS/lsof_calls"
+if $CASE9_OK; then
+  echo "PASS Case 9 (#317): stubbed-held window → rc≠0, message names window+attempts, lsof calls=$LSOF_N ≤ 20; real-lsof control rc=0"
+else
+  echo "FAIL Case 9 (#317): rc=$R9 lsof_calls=$LSOF_N control_rc=$R9B out='$P9'"
+  FAIL=1
+fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
 if [ "$FAIL" -eq 0 ]; then

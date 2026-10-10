@@ -56,9 +56,11 @@
 #     fail-fast with an actionable message.
 #   → Case 7 (§3.2): window constants pinned to 28000-32700; allocator
 #     returns 4 pairwise-distinct in-window ports, lsof-free at draw time.
-#   → Case 8 (§3.2): narrowed lsof-verified sub-window + a REAL holder +
-#     a live-lease busy ARG → allocator returns EXACTLY the remaining 4
-#     ports (held and busy ports never in the result).
+#   → Case 8 (§3.2): narrowed lsof-verified 12-port sub-window + a REAL
+#     holder + 4 live-lease busy ARGS → the returned 4 distinct in-window
+#     ports are a SUBSET of the usable ports (held/busy never returned);
+#     a rare coupon-collector timeout in the narrowed window is retried
+#     (bounded) — flake-free; the fail-fast contract itself is Case 9's.
 #   → Case 9 (§3.2): lsof stub reporting every port held → fail-fast
 #     rc≠0, message names the window and the attempt budget, ≤20 lsof
 #     calls; control with the real lsof succeeds.
@@ -668,49 +670,72 @@ else
   FAIL=1
 fi
 
-# ── Case 8 (#317 §3.2): busy ports (live-lease arg + held listener) avoided ─
+# ── Case 8 (#317 §3.2): busy ports (live-lease args + held listener) avoided ─
 echo "── Case 8 (#317 §3.2): allocator never returns busy-arg or held ports ──"
 fresh_root "case8"
 source_lib
-# Hygiene: pick a fully-free 6-port sub-window INSIDE the spec window
+# Hygiene: pick a fully-free 12-port sub-window INSIDE the spec window
 # (lsof-verified; away from every production port — the whole spec window is).
+# 12 wide on purpose: after removing 1 held + 4 busy-arg ports, 7 usable
+# remain — the allocator collects 4 of them with near-certainty, so the
+# assertion is a SUBSET check, NOT exact-set equality over a minimal
+# window (a 4-of-6 minimal window made the fixed 20-draw budget time out
+# ~15% of runs — coupon collector, not a lib bug — flaky, reviewer #317).
 SUB_BASE=""
 SUB_TRY=0
 while [ "$SUB_TRY" -lt 20 ]; do
   SUB_TRY=$((SUB_TRY + 1))
-  SUB_CAND=$((SHARD_PORT_WINDOW_LOW + RANDOM % (SHARD_PORT_WINDOW_HIGH - SHARD_PORT_WINDOW_LOW - 5)))
+  SUB_CAND=$((SHARD_PORT_WINDOW_LOW + RANDOM % (SHARD_PORT_WINDOW_HIGH - SHARD_PORT_WINDOW_LOW - 11)))
   SUB_FREE=true
-  for p8 in $(seq "$SUB_CAND" "$((SUB_CAND + 5))"); do
+  for p8 in $(seq "$SUB_CAND" "$((SUB_CAND + 11))"); do
     if lsof -ti :"$p8" >/dev/null 2>&1; then SUB_FREE=false; fi
   done
   if [ "$SUB_FREE" = true ]; then SUB_BASE="$SUB_CAND"; break; fi
 done
 if [ -z "$SUB_BASE" ]; then
-  echo "FATAL: no free 6-port sub-window inside ${SHARD_PORT_WINDOW_LOW}-${SHARD_PORT_WINDOW_HIGH}" >&2
+  echo "FATAL: no free 12-port sub-window inside ${SHARD_PORT_WINDOW_LOW}-${SHARD_PORT_WINDOW_HIGH}" >&2
   exit 1
 fi
-HELD8=$((SUB_BASE + 5))    # really held by a spawned listener
-BUSY8=$((SUB_BASE + 2))    # live-lease port: passed as a busy ARG only
+SUB_TOP=$((SUB_BASE + 11))
+HELD8="$SUB_TOP"           # really held by a spawned listener
+# 4 busy args — the shape of ONE real live lease (its 4 ports are busy):
+BUSY8_LIST="$((SUB_BASE + 1)) $((SUB_BASE + 3)) $((SUB_BASE + 5)) $((SUB_BASE + 7))"
 H8="$(spawn_plain_holder "$HELD8")"
 register_pid "$H8"
 wait_holder_bound "$H8" "$HELD8"
 SHARD_PORT_WINDOW_LOW="$SUB_BASE"
-SHARD_PORT_WINDOW_HIGH=$((SUB_BASE + 5))
-set +e
-P8=$(allocate_shard_ports "$BUSY8" 2>&1); R8=$?
-set -e
+SHARD_PORT_WINDOW_HIGH="$SUB_TOP"
+# Bounded retry: a rare coupon-collector timeout inside the narrowed
+# window (rc=1) is retried, not treated as a property violation — the
+# fail-fast CONTRACT is owned by Case 9; THIS case owns the avoidance
+# property, asserted on every successful allocation.
+P8="" R8=1 RETRY8=0
+while [ "$RETRY8" -lt 5 ]; do
+  RETRY8=$((RETRY8 + 1))
+  set +e
+  P8=$(allocate_shard_ports $BUSY8_LIST 2>&1); R8=$?
+  set -e
+  [ "$R8" -eq 0 ] && break
+done
 SHARD_PORT_WINDOW_LOW=28000
 SHARD_PORT_WINDOW_HIGH=32700
-# only 4 usable ports remain in the narrowed window → the result set is exact
-GOT8=$(printf '%s\n' $P8 | sort -n | tr '\n' ' ' | sed 's/ $//')
-EXPECT8="$SUB_BASE $((SUB_BASE + 1)) $((SUB_BASE + 3)) $((SUB_BASE + 4))"
 CASE8_OK=true
 [ "$R8" -eq 0 ] || CASE8_OK=false
-[ "$GOT8" = "$EXPECT8" ] || CASE8_OK=false
+if [ "$R8" -eq 0 ]; then
+  P8_N=$(printf '%s' "$P8" | wc -w | tr -d ' ')
+  P8_U=$(printf '%s\n' $P8 | sort -u | wc -l | tr -d ' ')
+  [ "$P8_N" -eq 4 ] || CASE8_OK=false          # four ports
+  [ "$P8_U" -eq 4 ] || CASE8_OK=false          # pairwise distinct
+  for p8 in $P8; do
+    { [ "$p8" -ge "$SUB_BASE" ] && [ "$p8" -le "$SUB_TOP" ]; } || CASE8_OK=false
+    [ "$p8" -ne "$HELD8" ] || CASE8_OK=false   # never the held port
+    case " $BUSY8_LIST " in *" $p8 "*) CASE8_OK=false ;; esac   # never a busy-arg port
+  done
+fi
 if $CASE8_OK; then
-  echo "PASS Case 8 (#317): narrowed window [$SUB_BASE-$((SUB_BASE + 5))]: held $HELD8 + busy arg $BUSY8 avoided, exact set returned"
+  echo "PASS Case 8 (#317): window [$SUB_BASE-$SUB_TOP]: held $HELD8 + busy args ($BUSY8_LIST) never returned; 4 distinct in-window ports (subset of usable), tries=$RETRY8"
 else
-  echo "FAIL Case 8 (#317): rc=$R8 got='$GOT8' expect='$EXPECT8'"
+  echo "FAIL Case 8 (#317): rc=$R8 tries=$RETRY8 out='$P8'"
   FAIL=1
 fi
 

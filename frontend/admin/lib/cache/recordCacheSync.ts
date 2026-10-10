@@ -24,6 +24,7 @@ import type {
   PaginatedResponse,
   PaymentResponse,
   RecordResponse,
+  VisitPatch,
   VisitResponse,
 } from '@memo/api-client';
 
@@ -147,6 +148,58 @@ export function removeVisit(
   }));
 }
 
+// ── #359 visit PATCH projection: partial field-level cache write ─────────────
+// Spec §Технические изменения п.1. The field LIST comes from the keys of the
+// SERIALIZED request body; the VALUES — including the implicit always-applied
+// `updated_at` — come from the flat PATCH response (the server's authoritative
+// post-state of the row). Reuses patchRecordEverywhere (canonical record key +
+// list mirrors); no separate key registry.
+
+/**
+ * Project a visit PATCH response onto every cached copy of the visit:
+ * overwrite ONLY the fields carried by the request body, so a concurrent
+ * PATCH of other fields of the same row is never clobbered by a whole-object
+ * write. Semantics (spec п.1):
+ * (а) only the listed fields are rewritten;
+ * (б) `updated_at` is always applied from the response (the body never has it);
+ * (в) a visit missing from the cached record is a strict no-op — the row was
+ *     deleted or the cache reset, a refetch brings the truth; zombie-inserting
+ *     the deleted row is forbidden;
+ * (г) immutable rebuild (new record/visits/visit references) — an in-place
+ *     mutation would be swallowed by TanStack structural dedup;
+ * (д) the field list is the keys of the SERIALIZED body: JSON drops
+ *     undefined-valued keys (not fields); null IS a field and clears the
+ *     cached field.
+ * The caller may pass an already-filtered body (fields overridden by a later
+ * request removed) — only the keys present at call time are projected.
+ */
+export function projectVisitPatch(
+  qc: QueryClient,
+  recordId: string,
+  visitId: string,
+  patch: VisitPatch,
+  response: VisitResponse,
+): void {
+  // (д) keys of the serialized body — undefined-valued keys are not fields
+  const fields = (Object.keys(patch) as (keyof VisitPatch)[]).filter(
+    (key) => patch[key] !== undefined,
+  );
+  patchRecordEverywhere(qc, recordId, (record) => {
+    const idx = record.visits.findIndex((v) => v.id === visitId);
+    if (idx === -1) return record; // (в) not cached — no zombie insert
+    const projected: VisitResponse = {
+      ...record.visits[idx],
+      updated_at: response.updated_at, // (б) implicit, always applied
+    };
+    for (const field of fields) {
+      copyVisitColumn(projected, response, field);
+    }
+    const visits = record.visits.slice();
+    visits[idx] = projected;
+    return { ...record, visits }; // (г) new references all the way down
+  });
+}
+
 /** Upsert a payment: canonical per-record key + global ['payments']. */
 export function upsertPayment(
   qc: QueryClient,
@@ -217,6 +270,20 @@ function upsertById<T extends { id: string }>(
   const next = list.slice();
   next.splice(atIndex, 0, row);
   return next;
+}
+
+/**
+ * Correlated column copy `target[key] = source[key]` for #359 projections:
+ * a direct write through a union key (`target[unionKey] = source[unionKey]`)
+ * does not typecheck (TS collapses the writable type to the intersection of
+ * all column types); a generic key keeps both sides the same type parameter.
+ */
+function copyVisitColumn<K extends keyof VisitResponse>(
+  target: VisitResponse,
+  source: VisitResponse,
+  key: K,
+): void {
+  target[key] = source[key];
 }
 
 /** Position hints for a restore: original index per affected cache key. */

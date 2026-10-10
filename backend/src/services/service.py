@@ -27,6 +27,7 @@ from src.schemas.service import (
     ServicePatch,
     ServiceResponse,
     ServiceUpdate,
+    TariffUpdate,
 )
 from src.services.decorators import transactional
 from src.services.generic import BARE_LIST_MAX_ROWS, ArchiveService
@@ -302,6 +303,58 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
                 )
             )
 
+    async def _apply_tariff_diff(
+        self,
+        db_session: AsyncSession,
+        service_id: str,
+        rows: Sequence[TariffUpdate],
+    ) -> None:
+        """Apply the id-keyed tariff diff for one service (GH #357 spec §2).
+
+        Per row: ``id`` found among THIS service's tariffs → ``UPDATE`` in
+        place (id stable); no ``id`` → ``INSERT``; ``id`` not found (foreign
+        or stale) → 422 ``VALIDATION_ERROR`` naming the row index — the same
+        convention as the duplicate-id schema validator (Task 1). Rows
+        absent from the payload → ``DELETE``; empty ``rows`` clears all,
+        which is exactly the PUT-absent-field contract (full replace).
+
+        Ordering: ids are validated BEFORE any mutation, and the whole diff
+        rides the caller's ``@transactional`` boundary — one commit, or one
+        rollback that leaves the stored tariffs untouched on 422. The bulk
+        ``DELETE`` runs before the ORM updates/inserts, so autoflushed
+        fresh id-less rows can never match it. Duplicate ids (schema-
+        rejected upstream, Task 1) cannot blow the diff up: the same row
+        is simply updated twice — last write wins, no duplicate insert.
+        """
+        result = await db_session.execute(select(Tariff).where(Tariff.service_id == service_id))
+        existing = {tariff.id: tariff for tariff in result.scalars().all()}
+        for index, row in enumerate(rows):
+            if row.id is not None and row.id not in existing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=ErrorDetail(
+                        code=ErrorCode.VALIDATION_ERROR,
+                        message=f"tariffs[{index}]: unknown tariff id '{row.id}'",
+                    ).model_dump(),
+                )
+
+        # DELETE branch — rows missing from the payload (empty ``keep_ids``
+        # narrows the predicate to "every row of the service").
+        keep_ids = {row.id for row in rows if row.id is not None}
+        delete_stmt = delete(Tariff).where(Tariff.service_id == service_id)
+        if keep_ids:
+            delete_stmt = delete_stmt.where(Tariff.id.not_in(keep_ids))
+        await db_session.execute(delete_stmt)
+
+        # UPDATE + INSERT branches.
+        for row in rows:
+            if row.id is None:
+                db_session.add(Tariff(service_id=service_id, **row.model_dump(exclude={"id"})))
+            else:
+                tariff = existing[row.id]
+                for key, value in row.model_dump(exclude={"id"}).items():
+                    setattr(tariff, key, value)
+
     @transactional
     # ORM contract — see the ``get`` block above.
     async def create(  # type: ignore[override]
@@ -352,7 +405,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
     async def update(  # type: ignore[override]
         self, db_session: AsyncSession, id: str, data: ServiceUpdate
     ) -> Service | None:
-        """Full-update: replaces attributes, tariffs, tag links, and material links."""
+        """Full-update: replaces attributes, tag links, and material links.
+
+        Tariffs go through the id-keyed diff (GH #357): known id updated
+        in place, id-less inserted, missing deleted; the absent field (=
+        empty list by the schema default) clears all — full replace.
+        """
         service = await self.get(db_session, id)
         if not service:
             return None
@@ -367,17 +425,9 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         for key, value in update_data.items():
             setattr(service, key, value)
 
-        await db_session.execute(
-            delete(Tariff).where(Tariff.service_id == id)
-        )
-        for td in tariff_data:
-            # GH #357 Task 1: ``TariffUpdate.id`` is parsed by the schema but
-            # not consumed yet — the id-keyed diff lands in Task 2. Strip it
-            # so hard-replace keeps minting fresh uuids.
-            tariff = Tariff(
-                service_id=service.id, **td.model_dump(exclude={"id"})
-            )
-            db_session.add(tariff)
+        # GH #357: tariffs — id-keyed diff, one transaction via the
+        # @transactional decorator wrapping this method.
+        await self._apply_tariff_diff(db_session, service.id, tariff_data)
 
         await db_session.execute(
             delete(service_tags).where(service_tags.c.service_id == id)
@@ -415,8 +465,10 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         tag_ids: if sent → hard-replace all tag links (delete + insert).
         If not sent → existing tag links are preserved.
 
-        tariffs: if sent → hard-replace all tariffs (delete + insert).
-        If not sent → existing tariffs are preserved.
+        tariffs: if sent (even if empty list) → id-keyed diff (GH #357:
+        known id updated in place, id-less inserted, missing deleted;
+        [] clears all). If not sent or null → existing tariffs are
+        preserved.
 
         materials (GH #223 spec §4): absent/null → existing links preserved;
         sent (incl. []) → hard-replace; [] → clear all.
@@ -431,9 +483,10 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
         data_dict = data.model_dump(exclude_unset=True)
 
         # Separate tag_ids, tariffs, and materials from scalar fields
-        # (materials MUST be popped: Service.materials is a read-only property)
+        # (tariffs/materials MUST be popped: nested rows are applied via
+        # their own helpers below, never via setattr).
         tag_ids = data_dict.pop("tag_ids", None)
-        tariffs_data = data_dict.pop("tariffs", None)
+        data_dict.pop("tariffs", None)
         data_dict.pop("materials", None)
 
         # Strip NOT NULL fields sent as null
@@ -461,18 +514,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
                         )
                     )
 
-        # Handle tariffs: if sent (even if empty list), hard-replace tariffs
-        if tariffs_data is not None:
-            await db_session.execute(
-                delete(Tariff).where(Tariff.service_id == id)
-            )
-            for td in tariffs_data:
-                # GH #357 Task 1: ``TariffUpdate.id`` is parsed by the schema
-                # but not consumed yet — the id-keyed diff lands in Task 2.
-                # Strip it so hard-replace keeps minting fresh uuids.
-                td.pop("id", None)
-                tariff = Tariff(service_id=service.id, **td)
-                db_session.add(tariff)
+        # Handle tariffs: sent (even if empty list) → id-keyed diff
+        # (GH #357); not sent or null → preserved. ``data.tariffs`` (the
+        # parsed objects, not the popped dump) drives the trigger: the
+        # schema default is None for both the absent and the null field.
+        if data.tariffs is not None:
+            await self._apply_tariff_diff(db_session, id, data.tariffs)
 
         # Handle materials: sent (incl. []) → hard-replace; absent/null → preserve
         if data.materials is not None:

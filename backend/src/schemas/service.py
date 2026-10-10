@@ -1,9 +1,9 @@
 """Pydantic schemas for the services domain."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from src.models.enums import TariffAudience
 
@@ -52,11 +52,46 @@ class TariffBase(BaseModel):
 
 
 class TariffCreate(TariffBase):
-    pass
+    """Create-shape of a nested tariff.
+
+    Deliberately has NO ``id`` (GH #357 spec §«Технические изменения» п.1):
+    the identifier is not accepted at creation — a stray ``id`` in the
+    payload is ignored (extra keys don't parse into the model).
+    """
 
 
 class TariffUpdate(TariffBase):
-    pass
+    """Update-shape of a nested tariff (GH #357 Task 1).
+
+    ``id`` is the diff key on Service update: present → the row with this
+    id is updated in place; absent → a new row is inserted. Duplicate ids
+    inside one list are rejected on the parent Service schema (ambiguous
+    diff key).
+    """
+
+    id: str | None = None
+
+
+def _check_tariff_ids_unique(tariffs: list[TariffUpdate] | None) -> None:
+    """Reject a repeated tariff ``id`` in one request list (GH #357 Task 1).
+
+    A duplicate id is an ambiguous diff key (which row to UPDATE?), so the
+    request is rejected at the schema level — FastAPI maps the pydantic
+    ``ValueError`` to 422 ``VALIDATION_ERROR``. The message names the index
+    of the offending (repeated) row, pydantic-``loc`` style (``tariffs[i]``).
+    ``None`` ids never collide: two id-less rows are two INSERTs.
+    """
+    if not tariffs:
+        return
+    seen: set[str] = set()
+    for index, tariff in enumerate(tariffs):
+        if tariff.id is None:
+            continue
+        if tariff.id in seen:
+            raise ValueError(
+                f"tariffs[{index}]: duplicate tariff id '{tariff.id}'"
+            )
+        seen.add(tariff.id)
 
 
 class TariffResponse(TariffBase):
@@ -100,13 +135,21 @@ class ServiceUpdate(ServiceBase):
     ``is_active`` is NOT accepted (#178 closed by Task 5): it's a lifecycle
     flag owned by the archive/restore POST endpoints (Task 11). A stray
     ``is_active`` is rejected with 422 via ``extra="forbid"``.
+
+    ``tariffs`` rows carry an optional ``id`` — the diff key (GH #357):
+    duplicate ids in one list are rejected with 422 (ambiguous diff key).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    tariffs: list[TariffCreate] = []
+    tariffs: list[TariffUpdate] = []
     tag_ids: list[str] = []
     materials: list[ServiceMaterialLinkIn] = []
+
+    @model_validator(mode="after")
+    def _tariff_ids_unique(self) -> Self:
+        _check_tariff_ids_unique(self.tariffs)
+        return self
 
 
 class ServicePatch(BaseModel):
@@ -116,6 +159,8 @@ class ServicePatch(BaseModel):
 
     ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
     ``tariffs``: if sent → hard-replace all tariffs. If not sent → preserve existing.
+    Rows carry an optional ``id`` diff key (GH #357): duplicate ids in one
+    list are rejected with 422 (ambiguous diff key).
     ``materials`` (GH #223 spec §4): absent/null → preserve existing links;
     sent (incl. ``[]``) → hard-replace; ``[]`` clears all — the same
     exclude_unset idiom as ``tag_ids``.
@@ -136,8 +181,13 @@ class ServicePatch(BaseModel):
     duration: int | None = None
     record_info: str | None = None
     tag_ids: list[str] | None = None
-    tariffs: list[TariffCreate] | None = None
+    tariffs: list[TariffUpdate] | None = None
     materials: list[ServiceMaterialLinkIn] | None = None
+
+    @model_validator(mode="after")
+    def _tariff_ids_unique(self) -> Self:
+        _check_tariff_ids_unique(self.tariffs)
+        return self
 
 
 class ServiceDeleteBody(BaseModel):

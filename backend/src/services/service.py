@@ -371,7 +371,12 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
             delete(Tariff).where(Tariff.service_id == id)
         )
         for td in tariff_data:
-            tariff = Tariff(service_id=service.id, **td.model_dump())
+            # GH #357 Task 1: ``TariffUpdate.id`` is parsed by the schema but
+            # not consumed yet — the id-keyed diff lands in Task 2. Strip it
+            # so hard-replace keeps minting fresh uuids.
+            tariff = Tariff(
+                service_id=service.id, **td.model_dump(exclude={"id"})
+            )
             db_session.add(tariff)
 
         await db_session.execute(
@@ -462,6 +467,10 @@ class ServiceService(ArchiveService[ServiceCreate, ServiceUpdate, ServiceRespons
                 delete(Tariff).where(Tariff.service_id == id)
             )
             for td in tariffs_data:
+                # GH #357 Task 1: ``TariffUpdate.id`` is parsed by the schema
+                # but not consumed yet — the id-keyed diff lands in Task 2.
+                # Strip it so hard-replace keeps minting fresh uuids.
+                td.pop("id", None)
                 tariff = Tariff(service_id=service.id, **td)
                 db_session.add(tariff)
 

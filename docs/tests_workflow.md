@@ -24,37 +24,57 @@
 
 ### E2E (automated)
 The full local suite (`pnpm test:all` via `scripts/test-all.sh`) uses **2 Playwright projects** (per `frontend/admin/playwright.config.ts`):
-- `shard-schedule` (port 3002 / backend 8001) — services, schedule, records, activity-details-modal
-- `shard-rest` (port 3003 / backend 8002) — everything else
+- `shard-schedule` — services, schedule, records, activity-details-modal
+- `shard-rest` — everything else
+
+Where the stacks live depends on the environment (GH #317): **locally** every run gets a unique run tag and 4 dynamic ports from the 28000-32700 window (details in [Run tag & dynamic ports](#run-tag--dynamic-ports-gh-317) below); **in CI** the ports stay fixed (front 3002/3003, back 8001/8002) and the tag is empty — the workflows are untouched.
 
 Each shard stack is orchestrated by `scripts/test-all.sh`:
- 1. Master DB (`test_memo.db`) is seeded if missing or has <5 tables
- 2. Orphaned shard-port listeners are killed, then `frontend/admin/.next-shard-*` dirs are wiped unconditionally (a clean machine with nothing to wipe is a success; a failed wipe of an existing dir is a fail-fast)
- 3. Master DB is copied to per-shard DBs (`test_memo_shard{1,2}.db`)
- 4. Each shard's backend starts (uvicorn on `:8001` / `:8002`)
- 5. Backprop runs (maps API IDs to internal IDs) via shared `test_backprop.csv`
- 6. Each shard's frontend starts (Next.js on `:3002` / `:3003`, building into `.next-shard-N`)
+ 1. Start-cleanup: run leases (`/tmp/memo-shard-runs/*.run`) classify runs as live/dead; dead runs are swept by THEIR 4 ports + command mask, their tagged files and lease removed; a tail audit deletes tagged resources with no live lease (log dirs `run-<tag>` only once the tag has been dead > 24 h)
+ 2. A run tag is generated and 4 pairwise-distinct free ports allocated from the window (live runs' ports passed as busy); the run lease is written, then the «тег/порты прогона» line is printed
+ 3. Stale shard build dirs are wiped — tag-scoped: own `.next-shard-*_${TAG}` plus untagged legacy dirs, the latter only while the legacy ports 3002/3003/8001/8002 are free
+ 4. Master DB (`test_memo.db`) is seeded if missing or has <5 tables (a mkdir-lock serializes same-machine seeds)
+ 5. Master DB is copied to per-shard tagged DBs (`test_memo_shard{1,2}_${TAG}.db`)
+ 6. Each shard's backend starts (uvicorn on its dynamic port), then the frontend (Next.js on its dynamic port, building into `.next-shard-N_${TAG}`)
  7. Playwright runs with `reuseExistingServer: true` (skips the `webServer` config in shard mode — see the `SHARD_ID` conditional in `playwright.config.ts`)
- 8. Cleanup kills all background processes and removes shard DBs
+ 8. Cleanup kills the run's background processes and removes its tagged DBs, build/photo dirs and lease
 
 Each shard's servers start via `scripts/e2e-shard-start.sh`:
-- Sets `SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_DIST_DIR`
+- Sets `SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_DIST_DIR` (and, optional GH #317, `SHARD_RUN_TAG`: a set tag suffixes resource names and writes a manual-stack run lease; unset → exact legacy untagged names — the CI path)
 - Backend starts in background, frontend in foreground
 - Waits for backend health check (Alembic runs migrations automatically during startup)
 - Seeds DB with test data (idempotent — skips if tables already exist)
 - Waits for frontend to respond on its port
 
-**Build isolation (GH #264):** each shard builds into its own `frontend/admin/.next-shard-N` (one per shard, recreated from scratch by every `test-all.sh` run — chunks never leak between shards or into the default `.next`). Contract: `e2e-shard-start.sh` is the sole producer of `NEXT_DIST_DIR` (`.next-shard-${SHARD_ID}`), consumed by `next.config.mjs` (`distDir: process.env.NEXT_DIST_DIR || '.next'`). The default `.next` belongs to the dev stack / standalone e2e — shards never read or wipe it.
+**Build isolation (GH #264):** each shard builds into its own `frontend/admin/.next-shard-N[_${TAG}]` (tag-suffixed locally, plain `.next-shard-N` untagged; one per shard, recreated from scratch by every `test-all.sh` run — chunks never leak between shards or into the default `.next`). Contract: `e2e-shard-start.sh` is the sole producer of `NEXT_DIST_DIR` (`.next-shard-${SHARD_ID}` + `_${SHARD_RUN_TAG}` when a tag is set), consumed by `next.config.mjs` (`distDir: process.env.NEXT_DIST_DIR || '.next'`). The default `.next` belongs to the dev stack / standalone e2e — shards never read or wipe it.
 
-**Cleanup is bounded (GH #122):** the EXIT trap of `test-all.sh` runs `cleanup_shards` (`scripts/lib/shard-helpers.sh`): TERM to shard wrapper PIDs → bounded wait (10 s budget, 0.5 s poll) → `kill -9` survivors → control sweep by port **and** command mask (`next dev -p <port>` / `next-server (v` title / `uvicorn`, each gated on holding a shard port; no bare port kills, no global next-server pkill) → shard DBs removed. Any exit path — including Ctrl-C — finishes in ≤ ~15 s without hanging and without touching unrelated processes.
+**Cleanup is bounded (GH #122):** `cleanup_shards` (`scripts/lib/shard-helpers.sh`) is trapped on `EXIT INT TERM` (GH #317 — Ctrl-C and `kill` run the cleaner too): TERM to shard wrapper PIDs → bounded wait (10 s budget, 0.5 s poll) → `kill -9` survivors → control sweep keyed on the run's **actual (dynamic) ports** and command mask (`next dev -p <port>` / `next-server (v` title / `uvicorn`, each gated on holding one of the run's ports; no bare port kills, no global next-server pkill) → the run's tagged DBs, build/photo dirs and lease removed. Any exit path finishes in ≤ ~15 s without hanging and without touching unrelated processes.
 
 **reuseExistingServer pattern:** When `SHARD_ID` is set, `playwright.config.ts` omits the `webServer` block entirely. This avoids a Playwright edge case where `reuseExistingServer` health check fails under load, causing `EADDRINUSE` when Playwright tries to start a second Next.js on the same port.
 
 **5-shard design (deferred):** The original `scripts/test-all.sh` was designed for 5 shards (services, schedule, records, clients, rest), but `playwright.config.ts` only declares 2. The 5-shard design spec lives in `docs/specs/2026-06-18-e2e-shard-5-projects-design.md` and is deferred until the missing 3 projects are added to `playwright.config.ts`.
 
+### Run tag & dynamic ports (GH #317)
+
+Every local `test-all.sh` run carries a **run tag** — 6 lowercase hex chars from `openssl rand -hex 3` (24 bits of entropy; `$RANDOM` is forbidden — a tag collision would mean shared DBs/dirs). The tag is validated against `[0-9a-f]{6}` and regenerated if any resource of that tag already exists. All run resources are tag-suffixed: DBs `test_memo_shard{N}_${TAG}.db`, build dirs `.next-shard-N_${TAG}`, photo dirs `test_files_shard${N}_${TAG}`, and the per-run log dir `${TMPDIR:-/tmp}/test-all-logs/run-${TAG}`. An empty tag (CI, untagged manual `e2e-shard-start.sh`) keeps the exact legacy untagged names — back-compat without a single workflow edit.
+
+**Port window 28000-32700:** each run allocates 4 pairwise-distinct free ports (frontend + backend per shard) — lsof-checked, 20 attempts, fail-fast. The window sits below the Linux ephemeral range (32768-60999 — the kernel never assigns those ports to outgoing connections) and below macOS ephemeral (49152+), above the privileged range, and clear of every repo service port (dev 3000/3001/8000, legacy shards 3002/3003/8001/8002, playground 3100/8101). Capacity: 4700 ports / 4 per run ≈ **1175 parallel runs**. Occupation is re-checked immediately before each stack starts (narrowing the allocate→bind race).
+
+**The «тег/порты прогона» line:** the first thing a run prints is its identity —
+`🏷 run tag: <tag> | shard 1 → front :P, back :P | shard 2 → front :P, back :P | logs: <dir>`.
+Stack addresses are no longer memorized constants: to debug against a running suite manually, read the ports (and the log dir) from this line — or from the run's lease file.
+
+**Run leases (`/tmp/memo-shard-runs/${TAG}.run`):** written by the run right after port allocation (a manually started tagged `e2e-shard-start.sh` writes the same lease with its own PID) — one line: PID, tag, 4 ports, start timestamp. A lease is **alive** iff its PID answers AND it is fresher than 24 h (`SHARD_LEASE_MAX_AGE_S=86400`; the threshold also covers PID reuse). Live runs' ports are handed to the allocator as busy and are excluded from every sweep. A dead run is swept precisely: its own 4 ports + command mask (`uvicorn` / `next dev` / `next-server`), its tagged files and its lease deleted. The run removes its own lease on exit.
+
+**Tail audit (anti-accumulation):** after processing leases, the startup-clean deletes every tagged resource whose tag matches no live lease and is not the current run's — `test_memo_shard*_<6hex>*`, `.next-shard-*_<6hex>`, `test_files_shard*_<6hex>`: **a tagged file without a live lease is garbage** (lost lease, leftovers of old layouts). Log dirs `run-<tag>` follow the same rule with a grace period: they are deleted only once the tag has been dead > 24 h — a crashed run keeps its logs for a day of diagnostics (the Linux container's `/tmp` does not self-clean).
+
+**Legacy fixed ports — CI/standalone only:** a local run never occupies or cleans 3002/3003/8001/8002 — those belong to CI and standalone Playwright runs (the defaults in `playwright.config.ts`/`globalSetup.ts` stay). Untagged legacy resources (`.next-shard-N`, `test_memo_shardN.db`, …) are wiped by a run only while the legacy ports are free — a live untagged manual stack holding them is thereby protected. The dev stack (3000/3001/8000) and playground (3100/8101) are never touched: their ports are outside the window, the leases and the masks.
+
+**Failures and interrupts:** a failed allocation exits 1 before any run resource is created (no lease, no tagged files, no listeners). `EADDRINUSE` in a stack's start log is fatal by design — «порт X занят между проверкой и стартом; перезапусти test-all» — the answer is to restart `test-all` (no bind-retry: §4 of the spec). Ctrl-C and `kill` are covered too: the cleaner is trapped on `EXIT INT TERM` and removes the run's stacks, tagged files and lease on any exit path.
+
 ### DB conventions
 - Backend tests use `:memory:` SQLite (per-fixture `DBManager`) — fast, isolated, no cleanup needed
-- E2E tests use a shared `test_memo.db` master DB, copied to per-shard `test_memo_shard{1,2}.db`
+- E2E tests use a shared `test_memo.db` master DB, copied to per-shard `test_memo_shard{1,2}[_${TAG}].db` (tag-suffixed in local runs, GH #317; plain names in CI)
 - The master is re-seeded only if missing or has <5 tables (idempotent guard) — see `scripts/test-all.sh` for the exact check
 - E2E tests query the DB directly via `frontend/admin/e2e/fixtures/db-query.ts` (uses `sqlite3` CLI on `TEST_DB_PATH`)
 
@@ -63,16 +83,17 @@ All e2e DB access funnels through the single resolver `e2e/lib/db-path.ts`
 (`resolveTestDbPath`; consumers: `globalSetup`, `db-query`, `factories`,
 `seed-reset`). Contract:
 
-- `SHARD_ID` set → canonical `<root>/backend/test_memo_shard{id}.db`
+- `SHARD_ID` set → canonical `<root>/backend/test_memo_shard{id}[_${SHARD_RUN_TAG}].db` (tag suffix when `SHARD_RUN_TAG` is set, GH #317; empty tag → the exact legacy path)
 - `TEST_DB_PATH` set → used as-is (relative paths resolve against the repo root, never `process.cwd()`)
 - both set and resolving to DIFFERENT files → loud error naming both vars (GH #209)
+- a tagged `TEST_DB_PATH` with no `SHARD_RUN_TAG` in env (or vice versa) → the same loud conflict error (GH #317)
 - neither set → default `<root>/backend/test_memo.db`
 - `TEST_DB_PATH=''` (empty string) counts as unset — pinned by a unit test in `__tests__/db-path.test.ts`
 
 Where each run mode gets its env from:
 
 - **Full run (`pnpm test:all`)**: `test-all.sh` exports `TEST_DB_PATH` explicitly
-  per shard, and an exported env var always beats a line in `.env.test`
+  per shard (plus `SHARD_RUN_TAG`, GH #317), and an exported env var always beats a line in `.env.test`
   (`playwright.config.ts` loads `.env.test` via `process.loadEnvFile`, which
   never overrides already-set variables). No conflict is possible in this mode.
 - **Standalone (`pnpm exec playwright test --project=shard-rest`)**: vars come

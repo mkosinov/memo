@@ -39,6 +39,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 - **Inline editing:** tariff / price / status edited via `PATCH /api/v1/visits/:id`
 - **Name / age NOT edited here** — those belong to the Visitor and go through `PUT /api/v1/visitors/:id`
 - **Optimistic updates** on unified rows
+- **PATCH-response cache application (GH #359):** a visit PATCH response is applied to the record cache by **projection** — only the fields present in the serialized request body (plus `updated_at`) are written into the cached visit row; per field the **last-issued request wins** (a late-arriving response of an earlier request never rolls the field back). Whole-object overwrite of a cached visit from a patch response is forbidden. Visit missing from the cache → no-op (a refetch restores truth; no zombie insert of a deleted row). Status change additionally invalidates the record query — solely to refresh the derived parent Record status.
 
 ## API Endpoints
 | Method | Path | Description | Request | Response |

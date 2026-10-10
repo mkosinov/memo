@@ -26,6 +26,7 @@
  * quick-add picked (seed m1 ev activity or a factory m1 activity) — the
  * DB assertion joins records → activities ON master_id='m1'.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -33,7 +34,7 @@ import { waitForScheduleReady, openAddTab } from './fixtures/helpers';
 import { createTestClient, createTestActivity, createTestRecord, createTestMaster, cleanup, cleanupRecord } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 /** mask_phone backend contract (src/auth/scope.py): all digits except the
  *  LAST 4 → '•', non-digits preserved in place. */

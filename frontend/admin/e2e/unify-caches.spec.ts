@@ -22,6 +22,7 @@
  * #127 (this work) makes these tests pass; if a regression is introduced
  * upstream (T1-T9), the corresponding test goes RED.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import {
@@ -42,7 +43,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * Read the date of the record's activity (YYYY-MM-DD) from the DB.

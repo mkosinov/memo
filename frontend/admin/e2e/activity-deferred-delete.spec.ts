@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page, Request } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -32,7 +33,7 @@ import { clickFabRobust } from './fixtures/server-push';
  * toast → «Обновить» invalidation path is exercised.
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** The undo toast that carries the deferred-delete message (#94 countdown). */
 function undoToast(page: Page) {

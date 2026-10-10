@@ -16,6 +16,7 @@
  * `finally` block PUTs the captured state back — a rename/clear from one run
  * never leaks into the next.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -25,7 +26,7 @@ import {
   waitForToast,
 } from './fixtures/helpers';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Seed service with max_age: null — «Возраст до» must open empty. */
 const NULL_AGE_SEED = { id: 's1' };

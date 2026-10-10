@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay } from './fixtures/helpers';
 
@@ -20,7 +21,7 @@ import { gotoScheduleDay } from './fixtures/helpers';
  * must click the button, not start a header drag).
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const BACKEND = resolveBackendUrl();
 
 // Use a future date that has no seed data — we create our own activities
 const TEST_DATE = '2026-06-20';

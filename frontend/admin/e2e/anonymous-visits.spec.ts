@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -23,7 +24,7 @@ import {
   type IdRef,
 } from './helpers/anonymous-visits';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * E2E for feature #257 «Единая модель посетителей» — anonymous visits.

@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page, Request, Route } from '@playwright/test';
 import {
@@ -7,7 +8,7 @@ import {
   setupAnonymousRecord,
 } from './helpers/anonymous-visits';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * Response hold before the chosen PATCH is passed (spec §User Scenarios,

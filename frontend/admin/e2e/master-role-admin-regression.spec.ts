@@ -16,6 +16,7 @@
  * layer. The default project storageState is the ADMIN session (#247 T14),
  * so this spec simply does NOT call useMasterSession().
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { adminApiContext } from './fixtures/admin-context';
 import { waitForRecordsReady } from './fixtures/helpers';
@@ -25,7 +26,7 @@ import {
   createTestPayment, cleanup, cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('GH #263 S7 — admin regression: no scope, no mask', () => {
   test('S7a: /clients shows unmasked phones (seed + foreign master client)', async ({

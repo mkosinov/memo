@@ -12,6 +12,7 @@
  * typed StaffUpdate — tsc fails on stray fields), so this is an
  * API-level scenario with DB verification.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -22,7 +23,7 @@ import {
 } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Full PUT for each entity (every non-is_active field the schema accepts). */
 function putPayload(entity: string, seed: Record<string, any>): Record<string, unknown> {

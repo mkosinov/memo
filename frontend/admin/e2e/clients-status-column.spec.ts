@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page, APIRequestContext } from '@playwright/test';
 import {
@@ -11,7 +12,7 @@ import {
 import { queryDBRow } from './fixtures/db-query';
 import { createTestClient, cleanup } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * GH #220 Task 3 — E2E for the clients «Статус» column.

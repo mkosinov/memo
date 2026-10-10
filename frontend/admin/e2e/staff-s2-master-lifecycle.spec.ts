@@ -10,6 +10,7 @@
  * the record-history assertions (a record needs an activity on an acting master,
  * which must exist before the section is archived).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -22,7 +23,7 @@ import {
 import { waitForStaffReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 const COLOR = '#3FA796';
 const SPECIALTY = 'S2-специальность';

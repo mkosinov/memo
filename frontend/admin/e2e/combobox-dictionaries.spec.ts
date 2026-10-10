@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page, APIRequestContext } from '@playwright/test';
 import {
@@ -17,7 +18,7 @@ import {
 } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * E2E user scenarios US-1…US-6 (spec §10, GH #214 Task 12) — dictionary

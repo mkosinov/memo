@@ -17,13 +17,14 @@
  * S2 creates BOTH of its materials via API (unique titles) — it archives
  * one mid-test, which must never touch the shared seed rows.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { cleanup, createTestService } from './fixtures/factories';
 import { waitForServicesReady, waitForToast } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 let counter = 0;
 function uid(): string {

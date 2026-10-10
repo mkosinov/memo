@@ -22,6 +22,7 @@
  * DELETE fires — unified-rows 16b), so the delete round waits for the
  * DELETE wire response before asserting the badge.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -34,7 +35,7 @@ import {
   cleanup, cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('GH #263 S3 — master payment CUD recalculates payment status', () => {
   useMasterSession();

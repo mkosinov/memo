@@ -16,8 +16,11 @@ import crypto from "node:crypto";
 import { type APIRequestContext, expect } from "@playwright/test";
 import { sqliteExecWithRetry } from "./sqlite-exec";
 import { resolveTestDbPath } from "../lib/db-path";
+import { resolveBackendUrl } from "../lib/backend-url";
 
-const BACKEND = process.env.BACKEND_URL || "http://127.0.0.1:8000";
+// GH #387: single resolver — no silent :8000 default; the guard errors
+// carry the canonical standalone recipe.
+const BACKEND = resolveBackendUrl();
 
 let testCounter = 0;
 function uid(): string {

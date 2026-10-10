@@ -12,13 +12,14 @@
  *      such an account is refused with the ordinary invalid-credentials
  *      error (spec §4 — no passwordless-specific message).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type APIRequestContext } from '@playwright/test';
 import { cleanup, E2E_PASSWORD } from './fixtures/factories';
 import { waitForStaffReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 let phoneCounter = 0;
 /**

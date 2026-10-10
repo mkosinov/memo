@@ -6,12 +6,17 @@ name: Update Snapshots (shard-rest)
 # environment where the `e2e-tests` job runs, avoiding font-render drift.
 #
 # It mirrors the `e2e-tests` job in test.yml (shard-rest matrix entry:
-# SHARD_ID=2, SHARD_PORT=3003, BACKEND_PORT=8002) but adds `--update-snapshots`
-# and uploads the regenerated snapshot PNGs as an artifact.
+# SHARD_ID=2, SHARD_PORT=3003, BACKEND_PORT=8002) but adds `--update-snapshots`.
+#
+# Regenerated PNGs are committed and pushed back to the dispatched branch
+# automatically (#316): one dispatch → baselines committed exactly once;
+# an empty diff skips the commit. The artifact upload stays as a manual
+# fallback (e.g. if the push fails). Dispatches on the same branch are
+# serialized by the `concurrency` group — no parallel double-triggers.
 #
 # Usage:
 #   gh workflow run update-snapshots.yml --ref feat-ci-green
-# Then download the `updated-snapshots-shard-rest` artifact and commit the PNGs.
+# Baselines land on that branch as a bot commit — no manual step.
 #
 # `mode` (default `changed`) maps to `playwright --update-snapshots=<mode>`:
 # `changed` rewrites only failing comparisons (a test passing within
@@ -26,6 +31,18 @@ on:
         type: choice
         options: [changed, all]
         default: changed
+
+# Write-back (#316): the workflow pushes the baseline commit itself.
+permissions:
+  contents: write
+
+# Serialize dispatches on the same branch (#316): a second dispatch waits
+# for the running one instead of racing it (cancel-in-progress is off —
+# killing a 20-minute run mid-flight would waste it; both runs are safe
+# sequentially since each checks out the ref fresh at job start).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   update-snapshots:
@@ -135,6 +152,23 @@ jobs:
           TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard2.db
           BACKEND_URL: http://127.0.0.1:8002
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
+
+      # #316: commit the regenerated PNGs and push them to the dispatched
+      # branch. Empty diff (nothing regenerated / all within maxDiffPixels)
+      # → clean skip. On push failure the step fails and the artifact below
+      # remains the manual fallback.
+      - name: Commit and push regenerated snapshots
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- 'frontend/admin/e2e/**/*-snapshots/**'
+          if git diff --cached --quiet; then
+            echo "No snapshot changes — nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore(snapshots): regenerate shard-rest baselines (mode=${{ inputs.mode }}, run ${{ github.run_number }})"
+          git push
 
       - name: Upload updated snapshots
         if: always()

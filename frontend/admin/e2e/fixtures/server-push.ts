@@ -255,7 +255,7 @@ export async function clickFabRobust(page: Page, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
 
   for (;;) {
-    await expect(fab).toBeVisible({ timeout: 5_000 });
+    await expect(fab).toBeVisible({ timeout: Math.max(1, deadline - Date.now()) });
     if ((await toasts.count()) > 0) {
       // Overlay present — let it die (toast life ~4.5s), then re-check.
       await toasts

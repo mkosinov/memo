@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import {
   ApiError,
   createRecord,
@@ -19,8 +19,9 @@ import {
   patchVisit as apiPatchVisit,
   deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
-import type { RecordResponse, PaymentResponse, VisitPatch } from '@memo/api-client';
+import type { RecordResponse, PaymentResponse, VisitPatch, VisitResponse } from '@memo/api-client';
 import {
+  projectVisitPatch,
   removePayment,
   removeVisit,
   upsertPayment,
@@ -48,6 +49,15 @@ export type RecordPatchData = Partial<
     visits?: Array<{ visitor_id?: string | null; tariff_id?: string | null; name?: string; age?: number; price: number; custom_price?: number | null; status?: string }>;
   }
 >;
+
+/**
+ * One issued visit edit (#359, spec §Технические изменения п.2): the request's
+ * monotonic per-visit sequence number and its serialized field set.
+ */
+interface VisitEditRecord {
+  seq: number;
+  fields: string[];
+}
 
 /** Shared non-client fields of a booking submit (GH #221). */
 interface CreateRecordBase {
@@ -97,6 +107,50 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       queryClient.invalidateQueries({ queryKey: qk.record(recordId) });
     }
   }, [queryClient, recordId]);
+
+  // ── #359 visit edit ledger (spec §Технические изменения п.2) ────────────
+  // Per-visit MONOTONIC edit counter. Every outgoing visit PATCH / status
+  // request registers its sequence number and its serialized field set
+  // BEFORE the API call; a successful response may only project the fields
+  // no LATER issued request for the same visit carries — «побеждает
+  // последний выпущенный запрос, а не последний прибывший ответ». Projection
+  // runs on success only — the error path (toasts/rollback, the anon-row
+  // verification GET) is unchanged. The ledger lives per hook instance:
+  // every edit surface routes its requests through one instance;
+  // cross-instance overlap is an accepted residual window (spec
+  // §Допущения и риски) — no extra machinery.
+  const visitEdits = useRef(new Map<string, VisitEditRecord[]>());
+
+  /** Register an issued request: next monotonic seq for the visit + its field set. */
+  const registerVisitEdit = useCallback((visitId: string, fields: string[]) => {
+    const log = visitEdits.current.get(visitId) ?? [];
+    const entry = { seq: log.length + 1, fields };
+    log.push(entry);
+    visitEdits.current.set(visitId, log);
+    return entry;
+  }, []);
+
+  /**
+   * Project a successful response through the recordCacheSync helper,
+   * restricted to the fields NOT overridden by a later issued request.
+   * The filtered set may be empty — the helper still applies the implicit
+   * `updated_at` (spec п.1(б)).
+   */
+  const projectVisitResponse = useCallback(
+    (visitId: string, edit: VisitEditRecord, patch: VisitPatch, response: VisitResponse) => {
+      const laterFields = (visitEdits.current.get(visitId) ?? [])
+        .filter((e) => e.seq > edit.seq)
+        .flatMap((e) => e.fields);
+      const guarded: Record<string, unknown> = {};
+      for (const field of edit.fields) {
+        if (!laterFields.includes(field)) {
+          guarded[field] = (patch as Record<string, unknown>)[field];
+        }
+      }
+      projectVisitPatch(queryClient, recordId, visitId, guarded as VisitPatch, response);
+    },
+    [queryClient, recordId],
+  );
 
   // ── Record-level mutations ─────────────────────────────────────────────
 
@@ -322,11 +376,19 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   const updateVisitStatus = useCallback(
     async (visitId: string, status: string) => {
-      await apiUpdateVisitStatus(visitId, status);
+      // #359: the status mutation registers in the same per-visit ledger as
+      // field PATCHes — its serialized body carries exactly one field.
+      const edit = registerVisitEdit(visitId, ['status']);
+      const visit = await apiUpdateVisitStatus(visitId, status);
+      // The mutation's own field, projected from the response, ON TOP of the
+      // retained invalidation — the refetch is still needed for the PARENT
+      // record's status badge (spec п.2). The body value is nominal: the
+      // helper copies VALUES from the response, using only field NAMES here.
+      projectVisitResponse(visitId, edit, { status: visit.status } as VisitPatch, visit);
       // Reader: ScheduleActivityCard (['records',df,dt]) + RecordModal (['record',id])
       invalidateRecordAndLists();
     },
-    [invalidateRecordAndLists],
+    [invalidateRecordAndLists, projectVisitResponse, registerVisitEdit],
   );
 
   // ── Fine-grained visit mutations (use cacheSync helpers) ─────────────
@@ -357,13 +419,21 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
 
   const patchVisit = useCallback(
     async (visitId: string, data: VisitPatch) => {
+      // #359: fields = keys of the SERIALIZED body — an undefined-valued key
+      // never reaches JSON and is not a field (spec п.1(д)).
+      const fields = (Object.keys(data) as (keyof VisitPatch)[]).filter(
+        (key) => data[key] !== undefined,
+      );
+      const edit = registerVisitEdit(visitId, fields);
       const visit = await apiPatchVisit(visitId, data);
-      // Optimistic cache update via helper — syncs canonical + every list.
-      // Reader: ScheduleActivityCard + RecordModal
-      upsertVisit(queryClient, recordId, visit);
+      // Projection instead of the whole-row overwrite (#359): a concurrent
+      // edit of OTHER fields of the same row is never clobbered, and a
+      // stale out-of-order response cannot regress a field a later issued
+      // request already wrote.
+      projectVisitResponse(visitId, edit, data, visit);
       return visit;
     },
-    [recordId, queryClient],
+    [registerVisitEdit, projectVisitResponse],
   );
 
   // ── #257 unified visitors model: anonymous seats are visits with visitor_id = null ──

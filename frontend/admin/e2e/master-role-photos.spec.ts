@@ -17,6 +17,7 @@
  * photo absent. Creation rides the modal: filename string + «Активность»
  * search (canonical label) → 201 → row visible.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -27,7 +28,7 @@ import {
   createTestService, cleanup,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('GH #263 S5 — master photos scoped to own activities', () => {
   useMasterSession();

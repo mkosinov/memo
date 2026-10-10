@@ -25,8 +25,11 @@
  */
 import { request as standaloneRequest, type APIRequestContext } from '@playwright/test';
 import { resolveAuthStatePath } from './auth-state';
+import { resolveBackendUrl } from '../lib/backend-url';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+// GH #387: single resolver — no silent :8001 default (bare runs used to
+// piggyback a foreign shard stack).
+const BACKEND = resolveBackendUrl();
 
 export async function adminApiContext(): Promise<APIRequestContext> {
   return standaloneRequest.newContext({

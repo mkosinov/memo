@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page, Request } from '@playwright/test';
 import {
@@ -38,7 +39,7 @@ import { queryDBRow, queryDBRows } from './fixtures/db-query';
  * → DB asserts (SQLite) → cleanup in finally.
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** The client-card modal (click a clients-table row to open). */
 function clientCard(page: Page) {

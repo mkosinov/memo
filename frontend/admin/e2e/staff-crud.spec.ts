@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { waitForStaffReady } from './fixtures/helpers';
 import { createTestMaster, cleanup } from './fixtures/factories';
@@ -13,7 +14,7 @@ import { createTestMaster, cleanup } from './fixtures/factories';
 // Tests — Staff Page
 // ---------------------------------------------------------------------------
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 test.describe('Staff — Table and Navigation', () => {
   test('navigates to staff page and renders table', async ({ page }) => {

@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page, Request } from '@playwright/test';
 import {
@@ -40,7 +41,7 @@ import { queryDBRow, queryDBRows } from './fixtures/db-query';
  * SQL (record_tags has no API writer — same as backend tests).
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** The undo toast that carries the deferred-delete message (#94 ring). */
 function undoToast(page: Page) {

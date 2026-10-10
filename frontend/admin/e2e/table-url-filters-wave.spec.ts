@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { createTestTag, cleanup } from './fixtures/factories';
 import type { APIRequestContext } from '@playwright/test';
@@ -22,7 +23,7 @@ import type { APIRequestContext } from '@playwright/test';
  * `/api/v1/positions/<id>` — and /audit-logs/authors — are not list traffic).
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 interface WavePage {
   /** Route pathname, e.g. /positions. */

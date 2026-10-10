@@ -9,6 +9,7 @@
 import { test, expect } from './test';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
 import { waitForScheduleReady, openAddTab } from './helpers';
+import { resolveBackendUrl } from '../lib/backend-url';
 
 /** Spec §6 — "within seconds". 10s = один цикл реконнекта `retry: 5000`
  *  (SSE-сервер шлёт retry:5000 — оборвавшееся соединение переподключается
@@ -21,8 +22,9 @@ export const PUSH_WINDOW = 10_000;
 /** Reconnect convergence budget (spec §6 С5 — "within ~10s of back online"). */
 export const RECONNECT_WINDOW = 10_000;
 
-/** Direct backend base for bare-API cleanup (same default as factories). */
-export const API_BASE = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+/** Direct backend base for bare-API cleanup (GH #387: single resolver, no
+ *  silent default port). */
+export const API_BASE = resolveBackendUrl();
 
 /** Unique marker prefix so parallel specs never collide. */
 export function uid(): string {

@@ -21,12 +21,13 @@
  * cookie (session rotation would kill the shared admin session — the
  * staff-s7 lesson).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type APIRequestContext, type Browser } from '@playwright/test';
 import { cleanup, E2E_PASSWORD } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 let phoneCounter = 0;
 function uniquePhone(): string {

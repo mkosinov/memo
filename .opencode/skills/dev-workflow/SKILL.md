@@ -149,8 +149,13 @@ Two modes, controlled by the `SHARD_ID` env var (see `frontend/admin/playwright.
 - Playwright's `webServer` auto-starts `pnpm exec next dev -p 3002` with
   `reuseExistingServer: true` — so if a dev server is already on :3002 it reuses it,
   otherwise it starts one.
-- The frontend still needs a BACKEND. Standalone falls back to `.env.test`
-  (backend :8000). Start the backend first: `cd backend && ENV_FILE=.env.test uv run uvicorn src.main:app --port 8000`.
+- The frontend still needs a BACKEND, and the backend URL is NOT defaulted:
+  `e2e/lib/backend-url.ts` refuses a bare run unless BOTH `BACKEND_URL` and
+  `NEXT_PUBLIC_API_URL` are exported with the SAME host (GH #387/#463 — a
+  silent default could piggyback a foreign stack, and a `localhost` API
+  origin against the `127.0.0.1` baseURL drops the SameSite=Lax session
+  cookie). The full standalone recipe (stack + pinned run) is §4 below;
+  canonical narrative: `docs/tests_workflow.md` ("How to run").
 
 **Shard mode** (`SHARD_ID` set) — canonical CI/pre-push path via `scripts/test-all.sh`:
 - 2 isolated stacks (`scripts/e2e-shard-start.sh`): per-shard SQLite DB
@@ -180,19 +185,32 @@ caused by a stale stack.
 
 ### 4. Run a SINGLE spec / a few specs locally (simplest reliable path)
 
-Use standalone mode. Start backend once, then let Playwright's webServer handle Next.js:
+Use standalone mode. Set the stack up ONCE per DB lifetime (redo after a week
+rollover or a seed change), then run as many specs as you like:
 
 ```bash
-# terminal/PTY 1: backend on :8000 (leave running)
-cd backend && ENV_FILE=.env.test PYTHONPATH=src uv run uvicorn src.main:app --port 8000
+# ── Stack (once per DB lifetime) ──────────────────────────────────────────
+cd backend && rm -f test_memo.db test_memo.db-shm test_memo.db-wal
+# new PTY, keep running — Alembic recreates the schema on boot:
+ENV_FILE=.env.test PYTHONPATH=src uv run uvicorn src.main:app --port 8000
+# seed — EXPLICIT absolute DATABASE_URL (4 slashes): the seeder reads
+# os.environ, not ENV_FILE, so a relative URL silently targets a wrong DB:
+cd backend && DATABASE_URL="sqlite+aiosqlite:////$(pwd)/test_memo.db" PYTHONPATH=src uv run python -m seed.seed
+# snapshot the canonical reset script (#310):
+python3 scripts/gen_seed_canon.py backend/test_memo.db backend/test_memo.db.canon.sql
 
-# then run specs (webServer auto-starts Next.js on :3002, reuses if already up):
-cd frontend/admin && pnpm exec playwright test e2e/<name>.spec.ts
-cd frontend/admin && pnpm exec playwright test e2e/foo.spec.ts e2e/bar.spec.ts
-cd frontend/admin && pnpm exec playwright test -g "test title substring"
+# ── Spec runs (repeatable) ─────────────────────────────────────────────────
+# SHARD_PORT is REQUIRED and must be OFF the shard ports (3002/3003): the
+# default :3002 belongs to shard 1, and a running full run would be silently
+# reused (reuseExistingServer) with ITS baked API origin (GH #387).
+# webServer auto-starts Next.js on the pinned port and reuses one already up.
+cd frontend/admin && SHARD_PORT=3005 BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 pnpm exec playwright test e2e/<name>.spec.ts
 ```
 
-For a specific shard project: `pnpm exec playwright test --project=shard-rest --workers=1`.
+Changed the API host between runs? Remove `frontend/admin/.next` first —
+`NEXT_PUBLIC_API_URL` is baked into the bundle at compile time.
+
+For a specific shard project: `pnpm exec playwright test --project=shard-rest --workers=1` (shard mode, pins come from the stack script).
 
 ### 5. ALWAYS use PTY for E2E
 
@@ -202,7 +220,7 @@ Run them via `pty_spawn`, never `bash`-with-timeout (see PTY rule above).
 ```python
 pty_spawn(
     command="bash",
-    args=["-c", "cd frontend/admin && pnpm exec playwright test e2e/foo.spec.ts"],
+    args=["-c", "cd frontend/admin && SHARD_PORT=3005 BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 pnpm exec playwright test e2e/foo.spec.ts"],
     description="Run single E2E spec"
 )
 ```

@@ -23,6 +23,7 @@
  * API — services-materials.spec.ts precedent), UI action in the browser,
  * verify UI + verify API, cleanup in finally.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -36,7 +37,7 @@ import {
 import { waitForScheduleReady, waitForServicesReady, waitForToast } from './fixtures/helpers';
 import { openRecordTab } from './helpers/anonymous-visits';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 // ─── Local fixtures ──────────────────────────────────────────────────────────
 

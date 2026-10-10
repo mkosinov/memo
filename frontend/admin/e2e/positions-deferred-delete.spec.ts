@@ -8,6 +8,7 @@ import {
   withUndoWindow,
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
+import { resolveBackendUrl } from './lib/backend-url';
 
 /**
  * GH #324 §9.5–§9.6 — deferred POSITION delete through the dictionary.
@@ -62,7 +63,7 @@ test.describe('Deferred position delete (GH #324 §9.5–§9.6)', () => {
     // only it; the other keeps a seed built-in beside it — the delete must
     // strip the target link and leave the built-in intact).
     const title = `§9.5 Должность ${Date.now()}`;
-    const created = await request.post(`${process.env.BACKEND_URL || 'http://127.0.0.1:8000'}/api/v1/positions`, {
+    const created = await request.post(`${resolveBackendUrl()}/api/v1/positions`, {
       data: { title },
     });
     expect(created.status()).toBe(201);

@@ -223,8 +223,10 @@ import { createTestClient, createTestActivity, createTestRecord, cleanup }
 import { waitForScheduleReady, openModal, openAddTab, waitForToast }
   from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
+import { resolveBackendUrl } from './lib/backend-url';
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+// GH #387: single resolver — never a per-file silent default port.
+const BACKEND = resolveBackendUrl();
 
 test.describe('Feature Name', () => {
   test.beforeEach(async ({ page }) => {
@@ -401,26 +403,21 @@ DB_PATH resolves as: `process.env.TEST_DB_PATH || 'backend/test_memo.db'`
 
 ## Running Tests
 
-```bash
-cd frontend/admin
+This skill owns HOW TO WRITE tests; HOW TO RUN them is canonical in the
+`dev-workflow` skill ("Playwright E2E" §2–§4) and `docs/tests_workflow.md`
+("How to run"). In short:
 
+```bash
 # Unit tests
-npm run test          # single pass (~2s)
-npm run test:watch    # watch mode
+cd frontend/admin && pnpm test          # single pass
 
-# E2E tests (start backend first locally)
-npm run test:e2e      # headless (~60s)
-npm run test:e2e:ui   # with browser UI
+# E2E — sharded full run:
+pnpm test:all   # from repo root (scripts/test-all.sh)
 
-# All
-npm run test:all      # vitest run && playwright test
+# E2E — one spec, standalone: see the canonical recipe in dev-workflow §4
+# (stack: wipe DB → uvicorn :8000 → seed → canon; run: SHARD_PORT + both
+# URL vars pinned — GH #387, bare runs fail loudly with the recipe).
 ```
-
-**Local E2E:** start backend before running:
-```bash
-cd backend && uv run uvicorn src.main:app --port 8000 &
-```
-**CI:** both servers started automatically via `webServer` in `playwright.config.ts`.
 
 ---
 

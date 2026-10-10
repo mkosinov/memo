@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay, waitForScheduleReady } from './fixtures/helpers';
 
@@ -12,7 +13,7 @@ import { gotoScheduleDay, waitForScheduleReady } from './fixtures/helpers';
  * 5. Location filter controls location columns
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const BACKEND = resolveBackendUrl();
 const DEV_USER_ID = 'dev-user-001';
 
 // ---------------------------------------------------------------------------

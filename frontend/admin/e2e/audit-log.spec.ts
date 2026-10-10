@@ -27,6 +27,7 @@
  * The #239 invariant neighbours (server-push specs) are untouched; this
  * spec only READS journal rows and mutates through ordinary entity UIs.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import {
@@ -43,7 +44,7 @@ import { openRecordTab } from './helpers/anonymous-visits';
 import { masterAuthStatePath } from './fixtures/auth-state';
 import type { Page } from '@playwright/test';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Marker prefix — unique per run/test so journal assertions never
  * collide with rows left by sibling specs (audit_logs are NOT wiped by

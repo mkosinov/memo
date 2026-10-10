@@ -12,6 +12,7 @@
  * Scenario B: uncheck the ACCOUNT box → login stays permitted; the master is
  * archived (its box stays checked).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -26,7 +27,7 @@ import {
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 let phoneCounter = 0;
 function uniquePhone(): string {

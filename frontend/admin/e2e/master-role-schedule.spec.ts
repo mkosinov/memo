@@ -27,6 +27,7 @@ import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { createTestActivity, createTestMaster, cleanup } from './fixtures/factories';
+import { resolveBackendUrl } from './lib/backend-url';
 
 test.describe('GH #263 S1 — master schedule shows only own activities', () => {
   useMasterSession();
@@ -51,7 +52,7 @@ test.describe('GH #263 S1 — master schedule shows only own activities', () => 
       // The API surface is already scoped — the schedule data fetch must
       // never return the foreign activity (master session, NOT admin).
       const listResp = await request.get(
-        `${process.env.BACKEND_URL || 'http://127.0.0.1:8001'}/api/v1/activities`,
+        `${resolveBackendUrl()}/api/v1/activities`,
       );
       expect(listResp.ok()).toBeTruthy();
       const list = await listResp.json();

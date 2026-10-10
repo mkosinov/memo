@@ -19,8 +19,9 @@ import {
   cleanupRecord,
 } from '../fixtures/factories';
 import { openModal } from '../fixtures/helpers';
+import { resolveBackendUrl } from '../lib/backend-url';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

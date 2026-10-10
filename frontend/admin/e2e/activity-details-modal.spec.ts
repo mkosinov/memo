@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -18,7 +19,7 @@ import { searchAndSelect } from './helpers/combobox';
  * Requires: dev server on :3001, backend on :8000
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 // ---------------------------------------------------------------------------
 // Tests — Full User Scenarios with DB Verification

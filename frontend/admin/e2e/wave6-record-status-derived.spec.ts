@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal, waitForClientsReady } from './fixtures/helpers';
 import {
@@ -8,7 +9,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * Wave 6 — Record status derived from visits.

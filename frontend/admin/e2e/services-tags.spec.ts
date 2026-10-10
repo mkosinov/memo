@@ -36,11 +36,12 @@
  * seed-contract asserts above each mutation (no sqlite reads — the GET
  * body carries the eager-loaded `tags`, spec §2.6).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { waitForServicesReady, waitForToast } from './fixtures/helpers';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Seed tag titles (seed.py `_seed_tags`: tag1..tag7). */
 const TAG_TITLES = {

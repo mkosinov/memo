@@ -64,6 +64,22 @@
 #   → Case 9 (§3.2): lsof stub reporting every port held → fail-fast
 #     rc≠0, message names the window and the attempt budget, ≤20 lsof
 #     calls; control with the real lsof succeeds.
+#   → Case 10 (#317 §3.3): write_run_lease format (one 8-field line, stamp
+#     = write time); sweep_dead_runs on a dead-PID lease — TERM-stubborn
+#     masked holder killed via the kill -9 rung, tagged files + lease of the
+#     dead tag removed; live lease, its resources, its pid and the foreign
+#     junk.run untouched; stdout carries ONLY the live lease's ports;
+#     malformed lease removed without a port sweep.
+#   → Case 11 (#317 §3.3): empty runs dir → rc=0, empty stdout (first run);
+#     live lease → masked holder on its port SURVIVES, lease/resources/pid
+#     intact, 4 ports printed for the allocator; remove_run_lease removes
+#     and is idempotent on a missing file.
+#   → Case 12 (#317 §3.3): aging — live PID + stamp older than 24 h = dead:
+#     TERM-logging holder gets the TERM rung (marker file proves it),
+#     resources swept, empty stdout; threshold pinned to 86400 s.
+#   → Case 13 (#317 §3.3): playground/dev ports 3100/8101/3001 are outside
+#     every lease and mask match-set → masked holders on them survive a
+#     FULL sweep (with a dead lease actively swept — non-vacuous).
 
 set -euo pipefail
 
@@ -255,6 +271,79 @@ s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
 ' "$port"
   ) >/dev/null 2>&1 </dev/null &
   printf '%s' "$!"
+}
+
+# spawn_uvicorn_holder <port> <marker_file|-> — TERM-SENSITIVE holder with
+# uvicorn argv (command-mask match), binds the TEST port. When marker_file
+# is not "-", a SIGTERM handler writes the file BEFORE exiting — proving
+# the TERM rung of a sweep ladder fired (kill -9 leaves no marker). Same
+# two spawn rules: detached stdio, PID printed for parent-side registration.
+spawn_uvicorn_holder() {
+  local port="$1" marker="$2"
+  (
+    exec -a uvicorn python3 -c '
+import signal, socket, sys, time
+marker = sys.argv[2]
+def on_term(signum, frame):
+    if marker != "-":
+        open(marker, "w").write("term")
+    sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
+' "$port" "$marker"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# spawn_named_holder <argv0> <port> — TERM-sensitive plain holder with a
+# custom argv[0] (e.g. "next-server (v99.1.1)", "next dev -p 3001"):
+# command-mask fodder for never-touched-port proofs. Binds the given port.
+spawn_named_holder() {
+  local argv0="$1" port="$2"
+  (
+    exec -a "$argv0" python3 -c '
+import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1); time.sleep(60)
+' "$port"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# extra_free_port [EXCLUDE ...] — one lsof-verified free test port (window
+# 38200-46099, same hygiene as allocate_port_triplet) distinct from the
+# exclusion list (triplet + earlier extras). Bounded retries.
+extra_free_port() {
+  local p tries=0
+  while :; do
+    tries=$((tries + 1))
+    [ "$tries" -gt 40 ] && {
+      echo "FATAL: extra_free_port: no free port after $tries tries" >&2
+      exit 1
+    }
+    p=$((38200 + RANDOM % 7900))
+    case " $* " in *" $p "*) continue ;; esac
+    if ! lsof -ti :"$p" >/dev/null 2>&1; then printf '%s' "$p"; return 0; fi
+  done
+}
+
+# spawn_dead_pid — a spawned-then-REAPED pid: kill -9 + wait inside the
+# substitution subshell, so kill -0 on the result FAILS for the lifetime
+# of the case (a zombie would still answer kill -0; reaping removes it).
+spawn_dead_pid() {
+  sleep 60 >/dev/null 2>&1 </dev/null &
+  local pid=$!
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  printf '%s' "$pid"
+}
+
+# check_port_survivor <port> <pid> — true iff pid is alive AND still holds
+# the port (Case 13: never-touched ports keep their holders through a sweep).
+check_port_survivor() {
+  kill -0 "$2" 2>/dev/null || return 1
+  lsof -ti :"$1" 2>/dev/null | grep -qx "$2"
 }
 
 # ── Case 0: meta self-check — the sweep really detects a violating holder ─
@@ -770,6 +859,311 @@ if $CASE9_OK; then
   echo "PASS Case 9 (#317): stubbed-held window → rc≠0, message names window+attempts, lsof calls=$LSOF_N ≤ 20; real-lsof control rc=0"
 else
   echo "FAIL Case 9 (#317): rc=$R9 lsof_calls=$LSOF_N control_rc=$R9B out='$P9'"
+  FAIL=1
+fi
+
+# ── Case 10 (#317 §3.3): lease format + dead run swept, live run kept ──────
+echo "── Case 10 (#317 §3.3): dead-PID lease swept (TERM-stubborn holder); live lease/resources/junk kept ──"
+fresh_root "case10"
+SHARD_RUNS_DIR="$WORK/lease-runs-case10"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE10_OK=true
+EXTRA10="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+DEAD10_TAG="aa1010"
+LIVE10_TAG="bb2020"
+DEAD10_PID="$(spawn_dead_pid)"
+if kill -0 "$DEAD10_PID" 2>/dev/null; then
+  echo "FATAL: Case 10 dead-pid fixture is alive" >&2
+  exit 1
+fi
+
+# (a) write_run_lease — format contract: one line, exactly 8 fields
+# (pid tag p1 p2 p3 p4 stamp), stamp = write time ±10 s, stdout silent.
+set +e
+W10_OUT=$(write_run_lease "$DEAD10_TAG" "$DEAD10_PID" \
+  "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$EXTRA10" 2>&1); W10_RC=$?
+set -e
+NOW10=$(date +%s)
+L10_PID="" L10_TAG="" L10_P1="" L10_P2="" L10_P3="" L10_P4="" L10_STAMP="" L10_EXTRA=""
+read -r L10_PID L10_TAG L10_P1 L10_P2 L10_P3 L10_P4 L10_STAMP L10_EXTRA \
+  < "$SHARD_RUNS_DIR/$DEAD10_TAG.run" || true
+[ "$W10_RC" -eq 0 ] || CASE10_OK=false
+[ -z "$W10_OUT" ] || CASE10_OK=false                 # writer is stdout-silent
+[ -z "$L10_EXTRA" ] || CASE10_OK=false               # exactly 8 fields
+[ "$L10_PID" = "$DEAD10_PID" ] || CASE10_OK=false
+[ "$L10_TAG" = "$DEAD10_TAG" ] || CASE10_OK=false
+[ "$L10_P1" = "$TEST_FRONTEND_PORT" ] || CASE10_OK=false
+[ "$L10_P2" = "$TEST_BACKEND_PORT_A" ] || CASE10_OK=false
+[ "$L10_P3" = "$TEST_BACKEND_PORT_B" ] || CASE10_OK=false
+[ "$L10_P4" = "$EXTRA10" ] || CASE10_OK=false
+case "$L10_STAMP" in
+  ''|*[!0-9]*) CASE10_OK=false ;;
+  *)
+    [ "$L10_STAMP" -le $((NOW10 + 10)) ] || CASE10_OK=false
+    [ "$L10_STAMP" -ge $((NOW10 - 10)) ] || CASE10_OK=false
+    ;;
+esac
+
+# (b) fixtures: dead-tag file resources + a live lease with its resources.
+mkdir -p "$ROOT/backend/test_files_shard1_$DEAD10_TAG" "$ROOT/frontend/admin/.next-shard-1_$DEAD10_TAG"
+printf 'db'    > "$ROOT/backend/test_memo_shard1_${DEAD10_TAG}.db"
+printf 'sql'   > "$ROOT/backend/test_memo_shard2_${DEAD10_TAG}.canon.sql"
+printf 'file'  > "$ROOT/backend/test_files_shard1_${DEAD10_TAG}/avatar.png"
+printf 'chunk' > "$ROOT/frontend/admin/.next-shard-1_${DEAD10_TAG}/x.js"
+LIVE10_PID="$(spawn_sleep_wrapper)"
+register_pid "$LIVE10_PID"
+LIVE10_PORTS="29111 29112 29113 29114"   # unbound in-window values — busy-list only
+set +e
+write_run_lease "$LIVE10_TAG" "$LIVE10_PID" $LIVE10_PORTS 2>/dev/null; W10B_RC=$?
+set -e
+[ "$W10B_RC" -eq 0 ] || CASE10_OK=false
+mkdir -p "$ROOT/backend/test_files_shard1_$LIVE10_TAG" "$ROOT/frontend/admin/.next-shard-2_$LIVE10_TAG"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${LIVE10_TAG}.db"
+# malformed lease (garbage line) — removed, no port sweep from it
+printf 'not a lease line\n' > "$SHARD_RUNS_DIR/cc3030.run"
+# foreign non-6-hex lease file — NEVER touched (unvalidated tags must not
+# reach rm-globs); the valid-looking line inside must not be parsed either.
+printf '999999 1 2 3 4 5 6 7\n' > "$SHARD_RUNS_DIR/junk.run"
+
+# (c) TERM-stubborn masked holder on a DEAD-tag port → the kill -9 rung.
+H10="$(spawn_term_ignoring_uvicorn_holder "$TEST_BACKEND_PORT_A" "test_memo_shard_$DEAD10_TAG")"
+register_pid "$H10"
+wait_holder_bound "$H10" "$TEST_BACKEND_PORT_A"
+
+# (d) the sweep itself.
+T10=$(date +%s)
+set +e
+SW10_OUT=$(sweep_dead_runs 2>"$WORK/case10.err"); SW10_RC=$?
+set -e
+EL10=$(( $(date +%s) - T10 ))
+
+# (e) assertions.
+[ "$SW10_RC" -eq 0 ] || CASE10_OK=false
+[ "$SW10_OUT" = "$LIVE10_PORTS" ] || CASE10_OK=false    # stdout = live ports ONLY
+[ "$EL10" -le 25 ] || CASE10_OK=false                   # TERM-immune → full budget, bounded
+wait_pid_gone "$H10" 15 || CASE10_OK=false
+port_free "$TEST_BACKEND_PORT_A" || CASE10_OK=false
+grep -q "dead run $DEAD10_TAG" "$WORK/case10.err" 2>/dev/null || CASE10_OK=false
+# dead-tag resources + both garbage leases gone
+[ ! -e "$ROOT/backend/test_memo_shard1_${DEAD10_TAG}.db" ] || CASE10_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard2_${DEAD10_TAG}.canon.sql" ] || CASE10_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1_$DEAD10_TAG" ] || CASE10_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_${DEAD10_TAG}" ] || CASE10_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$DEAD10_TAG.run" ] || CASE10_OK=false
+[ ! -e "$SHARD_RUNS_DIR/cc3030.run" ] || CASE10_OK=false
+# live-tag resources + lease + pid INTACT
+[ -e "$ROOT/backend/test_memo_shard1_${LIVE10_TAG}.db" ] || CASE10_OK=false
+[ -e "$ROOT/backend/test_files_shard1_$LIVE10_TAG" ] || CASE10_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-2_$LIVE10_TAG" ] || CASE10_OK=false
+[ -e "$SHARD_RUNS_DIR/$LIVE10_TAG.run" ] || CASE10_OK=false
+if kill -0 "$LIVE10_PID" 2>/dev/null; then :; else CASE10_OK=false; fi
+# foreign junk file untouched
+[ -e "$SHARD_RUNS_DIR/junk.run" ] || CASE10_OK=false
+
+if $CASE10_OK; then
+  echo "PASS Case 10 (#317): dead lease swept (TERM-stubborn holder killed, tagged files+lease removed); live lease/junk untouched; stdout=live ports only (${EL10}s)"
+else
+  echo "FAIL Case 10 (#317): rc=$SW10_RC elapsed=${EL10}s out='$SW10_OUT'"
+  echo "── Case 10 sweep stderr ──"
+  cat "$WORK/case10.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 11 (#317 §3.3): live lease untouched; ports contract; remove ──────
+echo "── Case 11 (#317 §3.3): live lease untouched, ports → stdout; empty dir; remove_run_lease ──"
+fresh_root "case11"
+SHARD_RUNS_DIR="$WORK/lease-runs-case11"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE11_OK=true
+
+# (a) empty runs dir (first run ever): rc 0, EMPTY stdout.
+set +e
+SW11A=$(sweep_dead_runs 2>"$WORK/case11a.err"); SW11A_RC=$?
+set -e
+[ "$SW11A_RC" -eq 0 ] || CASE11_OK=false
+[ -z "$SW11A" ] || CASE11_OK=false
+
+# (b) live lease: pid alive, fresh stamp (write_run_lease stamps now).
+LIVE11_TAG="ab1100"
+LIVE11_PID="$(spawn_sleep_wrapper)"
+register_pid "$LIVE11_PID"
+EXTRA11="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+EXTRA11B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$EXTRA11")"
+LIVE11_PORTS="$TEST_FRONTEND_PORT $TEST_BACKEND_PORT_B $EXTRA11 $EXTRA11B"
+# masked holder on ONE of the live lease's ports — must SURVIVE the sweep
+# (alive-lease ports are excluded from every sweep, not just marked busy).
+H11="$(spawn_uvicorn_holder "$TEST_BACKEND_PORT_B" -)"
+register_pid "$H11"
+wait_holder_bound "$H11" "$TEST_BACKEND_PORT_B"
+set +e
+write_run_lease "$LIVE11_TAG" "$LIVE11_PID" $LIVE11_PORTS 2>/dev/null; W11_RC=$?
+set -e
+[ "$W11_RC" -eq 0 ] || CASE11_OK=false
+mkdir -p "$ROOT/frontend/admin/.next-shard-1_$LIVE11_TAG"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${LIVE11_TAG}.db"
+
+set +e
+SW11B=$(sweep_dead_runs 2>"$WORK/case11b.err"); SW11B_RC=$?
+set -e
+[ "$SW11B_RC" -eq 0 ] || CASE11_OK=false
+[ "$SW11B" = "$LIVE11_PORTS" ] || CASE11_OK=false     # 4 busy ports for the allocator
+if check_port_survivor "$TEST_BACKEND_PORT_B" "$H11"; then :; else CASE11_OK=false; fi
+[ -e "$SHARD_RUNS_DIR/$LIVE11_TAG.run" ] || CASE11_OK=false
+[ -e "$ROOT/backend/test_memo_shard1_${LIVE11_TAG}.db" ] || CASE11_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-1_$LIVE11_TAG" ] || CASE11_OK=false
+if kill -0 "$LIVE11_PID" 2>/dev/null; then :; else CASE11_OK=false; fi
+
+# (c) remove_run_lease: removes the run's own lease; idempotent when gone.
+set +e
+remove_run_lease "$LIVE11_TAG"; R11=$?
+set -e
+[ "$R11" -eq 0 ] || CASE11_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$LIVE11_TAG.run" ] || CASE11_OK=false
+set +e
+remove_run_lease "$LIVE11_TAG"; R11B=$?
+set -e
+[ "$R11B" -eq 0 ] || CASE11_OK=false
+
+if $CASE11_OK; then
+  echo "PASS Case 11 (#317): empty dir no-op; live lease untouched (holder on its port survived), ports '$SW11B' → stdout; remove_run_lease idempotent"
+else
+  echo "FAIL Case 11 (#317): empty_rc=$SW11A_RC live_rc=$SW11B_RC out='$SW11B' remove_rc=$R11/$R11B"
+  echo "── Case 11 sweep stderr ──"
+  cat "$WORK/case11b.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 12 (#317 §3.3): aging — live PID + stale stamp = dead ──────────────
+echo "── Case 12 (#317 §3.3): aging — live PID + stamp older than 24 h = dead ──"
+fresh_root "case12"
+SHARD_RUNS_DIR="$WORK/lease-runs-case12"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE12_OK=true
+[ "$SHARD_LEASE_MAX_AGE_S" -eq 86400 ] || CASE12_OK=false   # threshold pinned (24 h)
+
+STALE12_TAG="cc1200"
+STALE12_PID="$(spawn_sleep_wrapper)"   # ALIVE — the age must override liveness
+register_pid "$STALE12_PID"
+EXTRA12="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+MARKER12="$WORK/case12.term"
+# Lease in the DOCUMENTED format, stamp 24 h + 5 min in the past — also
+# cross-validates the parser against a hand-written line.
+STALE12_STAMP=$(( $(date +%s) - SHARD_LEASE_MAX_AGE_S - 300 ))
+printf '%s %s %s %s %s %s %s %s\n' "$STALE12_PID" "$STALE12_TAG" \
+  "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$EXTRA12" \
+  "$STALE12_STAMP" > "$SHARD_RUNS_DIR/$STALE12_TAG.run"
+mkdir -p "$ROOT/backend/test_files_shard1_$STALE12_TAG"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${STALE12_TAG}.db"
+# TERM-SENSITIVE masked holder with a marker file: proves the TERM rung of
+# the ladder fired (a kill -9-only sweep would leave no marker).
+H12="$(spawn_uvicorn_holder "$TEST_BACKEND_PORT_A" "$MARKER12")"
+register_pid "$H12"
+wait_holder_bound "$H12" "$TEST_BACKEND_PORT_A"
+
+T12=$(date +%s)
+set +e
+SW12_OUT=$(sweep_dead_runs 2>"$WORK/case12.err"); SW12_RC=$?
+set -e
+EL12=$(( $(date +%s) - T12 ))
+
+[ "$SW12_RC" -eq 0 ] || CASE12_OK=false
+[ -z "$SW12_OUT" ] || CASE12_OK=false            # stale lease → NO busy ports
+[ -e "$MARKER12" ] || CASE12_OK=false            # TERM rung fired
+wait_pid_gone "$H12" 5 || CASE12_OK=false
+port_free "$TEST_BACKEND_PORT_A" || CASE12_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$STALE12_TAG.run" ] || CASE12_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${STALE12_TAG}.db" ] || CASE12_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1_$STALE12_TAG" ] || CASE12_OK=false
+if kill -0 "$STALE12_PID" 2>/dev/null; then :; else CASE12_OK=false; fi  # pid itself: no port, no mask → alive
+[ "$EL12" -le 15 ] || CASE12_OK=false            # TERM-sensitive → budget exits early
+
+if $CASE12_OK; then
+  echo "PASS Case 12 (#317): aged lease (live pid, stamp −24h05m) treated dead: TERM rung fired (marker), resources swept (${EL12}s)"
+else
+  echo "FAIL Case 12 (#317): rc=$SW12_RC elapsed=${EL12}s marker=$([ -e "$MARKER12" ] && echo yes || echo no)"
+  echo "── Case 12 sweep stderr ──"
+  cat "$WORK/case12.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 13 (#317 §3.3): playground/dev ports never touched ────────────────
+echo "── Case 13 (#317 §3.3): 3100/8101/3001 masked holders survive a full sweep ──"
+fresh_root "case13"
+SHARD_RUNS_DIR="$WORK/lease-runs-case13"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE13_OK=true
+# A REAL dead lease so the sweep has active work (non-vacuous proof).
+DEAD13_TAG="dd1300"
+DEAD13_PID="$(spawn_dead_pid)"
+EXTRA13="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+set +e
+write_run_lease "$DEAD13_TAG" "$DEAD13_PID" \
+  "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$EXTRA13" 2>/dev/null; W13_RC=$?
+set -e
+[ "$W13_RC" -eq 0 ] || CASE13_OK=false
+# This masked holder on a DEAD-lease port MUST die — proves the sweep ran.
+H13_DIE="$(spawn_uvicorn_holder "$TEST_BACKEND_PORT_A" -)"
+register_pid "$H13_DIE"
+wait_holder_bound "$H13_DIE" "$TEST_BACKEND_PORT_A"
+
+# For each never-touched port: when it is FREE, spawn OUR masked holder
+# (argv per port: uvicorn — gate matches, port never in a lease;
+# "next-server (v…" — gate matches; "next dev -p 3001" — nomination
+# matches, gate port never matches). When a FOREIGN service already holds
+# it (playground/dev live on a dev box — e.g. a real uvicorn on :8101),
+# THAT holder becomes the subject: either way, whatever held the port
+# before the sweep must still hold it after — untouched. On CI all three
+# ports are free → all holders are ours (fully deterministic).
+P13_PORTS=(3100 8101 3001)
+P13_ARGV=("uvicorn" "next-server (v99.1.1)" "next dev -p 3001")
+P13_PIDS=()
+P13_KINDS=()
+cover_never_port() {
+  local port="$1" argv0="$2" holder foreign
+  foreign="$(lsof -ti :"$port" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$foreign" ]; then
+    P13_PIDS+=("$foreign")     # foreign holder — observed, never registered
+    P13_KINDS+=("foreign")
+  else
+    holder="$(spawn_named_holder "$argv0" "$port")"
+    register_pid "$holder"
+    wait_holder_bound "$holder" "$port"
+    P13_PIDS+=("$holder")
+    P13_KINDS+=("own")
+  fi
+}
+cover_never_port 3100 "uvicorn"
+cover_never_port 8101 "next-server (v99.1.1)"
+cover_never_port 3001 "next dev -p 3001"
+
+set +e
+SW13_OUT=$(sweep_dead_runs 2>"$WORK/case13.err"); SW13_RC=$?
+set -e
+
+[ "$SW13_RC" -eq 0 ] || CASE13_OK=false
+[ -z "$SW13_OUT" ] || CASE13_OK=false
+wait_pid_gone "$H13_DIE" 10 || CASE13_OK=false          # the sweep really swept
+I13=0
+while [ "$I13" -lt "${#P13_PIDS[@]}" ]; do
+  if check_port_survivor "${P13_PORTS[$I13]}" "${P13_PIDS[$I13]}"; then :; else CASE13_OK=false; fi
+  I13=$((I13 + 1))
+done
+[ ! -e "$SHARD_RUNS_DIR/$DEAD13_TAG.run" ] || CASE13_OK=false
+
+if $CASE13_OK; then
+  echo "PASS Case 13 (#317): full sweep killed the dead-lease holder; holders on 3100/8101/3001 survived untouched (kinds: ${P13_KINDS[*]})"
+else
+  echo "FAIL Case 13 (#317): rc=$SW13_RC out='$SW13_OUT' die_holder=$(kill -0 "$H13_DIE" 2>/dev/null && echo alive || echo dead)"
+  echo "── Case 13 sweep stderr ──"
+  cat "$WORK/case13.err" 2>/dev/null || true
+  echo "─────────────────"
   FAIL=1
 fi
 

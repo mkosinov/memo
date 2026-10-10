@@ -17,6 +17,13 @@
 #   allocate_shard_ports — 4 pairwise-distinct free ports from the window
 # Both print their RESULT on stdout (callers capture it); diagnostics go
 # to stderr only.
+#
+# Feature #317, spec §3.3 (run leases + start-cleanup):
+#   write_run_lease TAG PID P1 P2 P3 P4 — atomic one-line lease file
+#   remove_run_lease TAG                — delete the run's own lease
+#   sweep_dead_runs                     — start-cleanup: sweep dead-run
+#     resources, report live-run ports on stdout (feed them to
+#     allocate_shard_ports as busy args: allocate_shard_ports $(sweep_dead_runs)).
 
 CLEANUP_BUDGET_S=10
 
@@ -38,16 +45,18 @@ SHARD_PORT_WINDOW_LOW=28000
 SHARD_PORT_WINDOW_HIGH=32700
 SHARD_ALLOC_MAX_ATTEMPTS=20
 
-# ── Внутренний хелпер: свип «порт + маска команды» ─────────────────────────
-# Использование: _sweep_masked PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
+# ── Внутренний хелпер: выборка «порт + маска команды» ───────────────────────
+# Использование: _masked_pids PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
 #   PORTS_VAR — имя глобала-массива портов (SHARD_FRONTEND_PORTS/...);
 #   PGPATTERN — pgrep -f шаблон кандидатов (номинация, не приговор);
 #   GATE*     — подстроки, хотя бы одна из которых должна быть в ps args.
-# Убийство только при конъюнкции: args содержит маску И pid держит порт из
-# списка. Голый lsof-килл без маски в уборщике запрещён (гонка с невиновным
-# займётом порта); держатели без порта и порты без маски не трогаются.
-# bash 3.2-совместимо: имя массива читается через eval-косвенность.
-_sweep_masked() {
+# Выводит (stdout) pid'ы, прошедшие КОНЪЮНКЦИЮ: args содержит маску И pid
+# держит порт из списка. Выборка слушающих — по-портовый `lsof -ti :PORT`
+# (диапазонный синтаксис `lsof -i :a-b` непортабелен и запрещён, §3.3).
+# Чистый finder: сигналов не посылает; pid выводится один раз (первое
+# совпадение порта). bash 3.2-совместимо: имя массива читается через
+# eval-косвенность.
+_masked_pids() {
   local ports_var="$1" pgpat="$2"; shift 2
   local pid args port
   for pid in $(pgrep -f "$pgpat" 2>/dev/null || true); do
@@ -62,10 +71,22 @@ _sweep_masked() {
     # Индирекция по имени: ports_var указывает на массив портов вызывающего.
     for port in $(eval "printf '%s\n' \"\${${ports_var}[@]}\""); do
       if lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"; then
-        kill -9 "$pid" 2>/dev/null || true
+        printf '%s\n' "$pid"
         break
       fi
     done
+  done
+}
+
+# _sweep_masked PORTS_VAR PGPATTERN GATE1 [GATE2 ...] — kill -9 каждому,
+# кого выбрал _masked_pids. Убийство только при конъюнкции: args содержит
+# маску И pid держит порт из списка. Голый lsof-килл без маски в уборщике
+# запрещён (гонка с невиновным займётом порта); держатели без порта и порты
+# без маски не трогаются.
+_sweep_masked() {
+  local pid
+  for pid in $(_masked_pids "$@"); do
+    kill -9 "$pid" 2>/dev/null || true
   done
 }
 
@@ -311,5 +332,171 @@ allocate_shard_ports() {
     fi
   done
   printf '%s %s %s %s\n' "${picked[0]}" "${picked[1]}" "${picked[2]}" "${picked[3]}"
+  return 0
+}
+
+# ── Feature #317, spec §3.3: run leases + start-cleanup (sweep_dead_runs) ───
+
+# Порог старения лиза: штамп старше этого = мёртвый прогон, даже если PID
+# отвечает (закрывает PID-перезанятие — реальный test-all не живёт сутки).
+# Штамп ставит пишущий лиз (write_run_lease), формат — epoch-секунды.
+SHARD_LEASE_MAX_AGE_S=86400
+
+# Номинация процессов-ресурсов мёртвого прогона (НЕ приговор: решение —
+# конъюнкция ps-args-гейта и держания порта, см. _masked_pids). Покрывает
+# все три маски команды из §3.3: uvicorn-бэкенды, `next dev`-родителей и
+# перетитулованного next-server-внука.
+SHARD_DEAD_RUN_PGPAT='uvicorn|next dev|next-server'
+
+# write_run_lease TAG PID P1 P2 P3 P4 → записать ${SHARD_RUNS_DIR}/${TAG}.run:
+# ОДНА строка `pid tag port1 port2 port3 port4 started_epoch` (§3.3). Штамп
+# ставится ЗДЕСЬ (пишущим), = `date +%s`. Атомарность: запись в скрытый
+# tmp-файл + mv (rename внутри того же каталога) — параллельный читатель
+# не видит частичную строку; tmp-имя с точкой не матчится glob'ом *.run.
+# Валидация: TAG — 6 строчных hex (тег попадает в пути и rm-glob'ы — чужие
+# символы исключены форматом), PID/порты — числовые, портов ровно 4; при
+# нарушении rc 1 + сообщение в stderr. stdout пуст (контракт генератора,
+# как у gen_run_tag). bash 3.2: ERE через переменную.
+write_run_lease() {
+  local tag="$1" rpid="$2"
+  shift 2
+  local hex_re='^[0-9a-f]{6}$' num_re='^[0-9]+$'
+  if ! [[ "$tag" =~ $hex_re ]]; then
+    echo "❌ write_run_lease: bad tag '$tag' (want 6 lowercase hex)" >&2
+    return 1
+  fi
+  if ! [[ "$rpid" =~ $num_re ]]; then
+    echo "❌ write_run_lease: bad pid '$rpid'" >&2
+    return 1
+  fi
+  if [ "$#" -ne 4 ]; then
+    echo "❌ write_run_lease: want exactly 4 ports, got $#: $*" >&2
+    return 1
+  fi
+  local p
+  for p in "$@"; do
+    if ! [[ "$p" =~ $num_re ]]; then
+      echo "❌ write_run_lease: bad port '$p'" >&2
+      return 1
+    fi
+  done
+  mkdir -p "$SHARD_RUNS_DIR" 2>/dev/null || true
+  local tmp="${SHARD_RUNS_DIR}/.${tag}.run.$$"
+  if printf '%s %s %s %s %s %s %s %s\n' "$rpid" "$tag" "$1" "$2" "$3" "$4" \
+       "$(date +%s)" > "$tmp" 2>/dev/null \
+     && mv -f "$tmp" "${SHARD_RUNS_DIR}/${tag}.run" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null || true
+  echo "❌ write_run_lease: cannot write ${SHARD_RUNS_DIR}/${tag}.run" >&2
+  return 1
+}
+
+# remove_run_lease TAG → удалить ${SHARD_RUNS_DIR}/${TAG}.run — свой лиз
+# убирает сам прогон на выходе (§3.3). Best-effort: rc 0 и когда файла уже
+# нет (идемпотентно); TAG валидируется как в write_run_lease — непровали-
+# дированная строка никогда не доходит до rm-пути (rc 1 + stderr).
+remove_run_lease() {
+  local tag="$1"
+  local hex_re='^[0-9a-f]{6}$'
+  if ! [[ "$tag" =~ $hex_re ]]; then
+    echo "❌ remove_run_lease: bad tag '$tag' (want 6 lowercase hex)" >&2
+    return 1
+  fi
+  rm -f "${SHARD_RUNS_DIR}/${tag}.run" 2>/dev/null || true
+  return 0
+}
+
+# sweep_dead_runs → старт-чистка (§3.3 «Старт-чистка»; будущая замена
+# kill_port_orphans — переподключение вызывающих сторон в Task 4). Читает
+# все ${SHARD_RUNS_DIR}/*.run:
+#   живой   = PID отвечает (kill -0) И штамп свежее SHARD_LEASE_MAX_AGE_S;
+#   мёртвый = всё остальное (PID мёртв; перезанятие PID закрыто старением).
+# Живой прогон → его 4 порта печатаются в stdout (разделители-пробелы;
+# вызывающий передаёт их аллокатору как занятые:
+#   allocate_shard_ports $(sweep_dead_runs)
+# — контракт busy-args из §3.2) и полностью исключаются из любого свипа.
+# Мёртвый прогон → лестница TERM → бюджет (CLEANUP_BUDGET_S, то же, что у
+# cleanup_shards) → kill -9 через _sweep_masked по ЕГО 4 портам И маске
+# команды (uvicorn / `next dev -p <port>` / `next-server (v`), затем —
+# удаление тегированных файловых ресурсов тега и самого лиза.
+# Порты вне лизов (dev 3000/3001/8000, playground 3100/8101, легаси
+# 3002/3003/8001/8002) не входят ни в один лиз → не свипаются никогда.
+# Битый/нечитаемый лиз → удаляется только файл лиза (порты неизвестны —
+# свип невозможен); чужие *.run с не-6-hex тегом игнорируются нетронутыми
+# (непровалидированный тег не доходит до rm-glob'ов). Пустой/отсутствующий
+# каталог лизов (первый прогон) → no-op. Best-effort: rc 0; stdout несёт
+# ТОЛЬКО порты живых лизов, диагностика — в stderr. bash 3.2: простые
+# массивы + eval-косвенность (см. _masked_pids).
+sweep_dead_runs() {
+  local f tag now age
+  local lpid ltag lp1 lp2 lp3 lp4 lstamp extra
+  local hex_re='^[0-9a-f]{6}$' num_re='^[0-9]+$'
+  now="$(date +%s 2>/dev/null || printf '%s' 0)"
+  shopt -s nullglob
+  for f in "$SHARD_RUNS_DIR"/*.run; do
+    tag="${f##*/}"
+    tag="${tag%.run}"
+    if ! [[ "$tag" =~ $hex_re ]]; then
+      echo "  ⚠️ sweep_dead_runs: ignoring foreign file $f (tag not 6-hex)" >&2
+      continue
+    fi
+    lpid=""; ltag=""; lp1=""; lp2=""; lp3=""; lp4=""; lstamp=""; extra=""
+    if ! read -r lpid ltag lp1 lp2 lp3 lp4 lstamp extra < "$f" 2>/dev/null \
+       || [ -z "$lpid" ] || [ -z "$lp1" ] || [ -z "$lp2" ] || [ -z "$lp3" ] \
+       || [ -z "$lp4" ] || [ -z "$lstamp" ] || [ -n "$extra" ] \
+       || ! [[ "$lpid" =~ $num_re ]] || ! [[ "$lp1" =~ $num_re ]] \
+       || ! [[ "$lp2" =~ $num_re ]] || ! [[ "$lp3" =~ $num_re ]] \
+       || ! [[ "$lp4" =~ $num_re ]] || ! [[ "$lstamp" =~ $num_re ]]; then
+      echo "  ⚠️ sweep_dead_runs: malformed lease $f — removing the lease only (no port sweep)" >&2
+      rm -f "$f" 2>/dev/null || true
+      continue
+    fi
+    age=$(( now - lstamp ))
+    if kill -0 "$lpid" 2>/dev/null && [ "$age" -lt "$SHARD_LEASE_MAX_AGE_S" ]; then
+      # Живой прогон: порта → busy-лист аллокатора; прогон не трогается.
+      printf '%s %s %s %s\n' "$lp1" "$lp2" "$lp3" "$lp4"
+      echo "  → live run $tag (pid=$lpid age=${age}s): ports $lp1 $lp2 $lp3 $lp4 bypassed" >&2
+      continue
+    fi
+    echo "  → dead run $tag (pid=$lpid age=${age}s): sweeping ports $lp1 $lp2 $lp3 $lp4" >&2
+    DEAD_RUN_PORTS=("$lp1" "$lp2" "$lp3" "$lp4")
+    local p
+    local gates=("uvicorn" "next-server (v")
+    for p in "${DEAD_RUN_PORTS[@]}"; do
+      gates+=("next dev -p $p")
+    done
+    # Лестница: TERM → бюджет → kill -9 (механика cleanup_shards, §3.3).
+    # Список TERM-нутых фиксируется один раз; бюджет ждёт только их смерть
+    # (kill -0 по списку, без перевыборки lsof в цикле); опоздавшие/выжившие
+    # достаются контрольному _sweep_masked ниже.
+    local termed=()
+    local tp
+    for tp in $(_masked_pids DEAD_RUN_PORTS "$SHARD_DEAD_RUN_PGPAT" "${gates[@]}"); do
+      kill "$tp" 2>/dev/null || true
+      termed+=("$tp")
+    done
+    local deadline=$(( SECONDS + CLEANUP_BUDGET_S ))
+    local still=false
+    while :; do
+      still=false
+      for tp in "${termed[@]}"; do
+        if kill -0 "$tp" 2>/dev/null; then
+          still=true
+        fi
+      done
+      [ "$still" = false ] && break
+      [ "$SECONDS" -ge "$deadline" ] && break
+      sleep 0.5
+    done
+    _sweep_masked DEAD_RUN_PORTS "$SHARD_DEAD_RUN_PGPAT" "${gates[@]}"
+    # Тегированные файловые ресурсы мёртвого тега + сам лиз (хвостовой *
+    # покрывает canon.sql-собрата; путь — от корня репо, как в cleanup_shards).
+    rm -f  "$ROOT"/backend/test_memo_shard*_"$tag"* 2>/dev/null || true
+    rm -rf "$ROOT"/backend/test_files_shard*_"$tag" 2>/dev/null || true
+    rm -rf "$ROOT"/frontend/admin/.next-shard-*_"$tag" 2>/dev/null || true
+    rm -f  "$f" 2>/dev/null || true
+  done
+  shopt -u nullglob
   return 0
 }

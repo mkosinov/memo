@@ -10,7 +10,7 @@ license: MIT
 compatibility: 'Node 20+, vitest 2+, @testing-library/react, Playwright 1.40+'
 metadata:
   author: platform-team
-  version: '2.0.0'
+  version: '2.1.0'
   sdlc-phase: testing
 allowed-tools: Read Edit Write Bash(npm:*) Bash(npx:*) Bash(vitest:*) Bash(playwright:*)
 context: fork
@@ -298,6 +298,49 @@ clickModalTab(page, tabTestId) // clicks [data-testid="{tabTestId}"]
 
 ---
 
+## Waiting & Time Discipline (canon since 2026-10-10, #386)
+
+Every wait belongs to exactly one of three classes — pick the class BEFORE
+writing the wait.
+
+### 1. Positive waits — waiting for something to APPEAR
+
+Element shows up, becomes actionable, state updates. Budget-based:
+
+- The global expect timeout (10 s, `playwright.config.ts` → `expect.timeout`)
+  is the default budget — rely on it, do not restate it inline.
+- Inside a helper with its own `timeoutMs` budget, inner waits derive from
+  the REMAINING budget (`Math.max(1, deadline - Date.now())`), never a fixed
+  inner cap. The #386 flake was exactly this trap: a hard 5 s `toBeVisible`
+  inside `clickFabRobust`'s 15 s budget killed the wait before the budget
+  was ever consulted.
+- Slow first paint under CI load is normal (dev server compiles on demand);
+  size budgets for a loaded runner, not a warm laptop.
+
+### 2. Negative waits — asserting something does NOT appear
+
+`toBeHidden`, `toHaveCount(0)`, "toast never came". A short window is
+deliberate and correct: raising it slows the suite and weakens the
+assertion. Never "fix" flakes here by growing timeouts.
+
+### 3. Semantic time — the FEATURE is a timer
+
+Undo window, cache staleTime, SSE reconnect backoff. Never wait real
+seconds; control the clock:
+
+- E2E: `withUndoWindow(page, fn)` (`e2e/fixtures/helpers.ts`, #417) —
+  pauses the page clock, runs `fn`, fast-forwards past the window, drains,
+  resumes. For a new time-based constant, extend this pattern (a
+  staleTime-style helper) instead of writing a `waitForTimeout`.
+- Unit: `vi.useFakeTimers()` + `vi.advanceTimersByTime()` — test the timer
+  mechanism ONCE where it lives (e.g. `PendingActionsContext`); every other
+  test asserts outcomes (deleted / undone), never durations.
+- `waitForTimeout()` is allowed ONLY when elapsed seconds are themselves the
+  semantics (the unload-guard real-time exception, #417) — then mirror the
+  app constant and name it in a comment.
+
+---
+
 ## DB Verification Decision Table
 
 | What to check | Use API | Use SQL |
@@ -349,7 +392,7 @@ DB_PATH resolves as: `process.env.TEST_DB_PATH || 'backend/test_memo.db'`
 | 3 | Trusting HTTP 200 without verifying state | Follow up with API GET or SQL query |
 | 4 | Hardcoded IDs in E2E tests | Use factories (`createTestActivity`, etc.) |
 | 5 | No `finally` block for E2E cleanup | Data leaks between test runs |
-| 6 | `page.waitForTimeout()` for async sync | Use `expect(locator).toBeVisible({ timeout })` |
+| 6 | `page.waitForTimeout()` for async sync | Use `expect(locator).toBeVisible({ timeout })`; timer features — clock control, see **Waiting & Time Discipline** |
 | 7 | Mocking transitive dependencies in unit tests | Mock only direct `@/contexts/*` dependencies |
 | 8 | Using `renderWithProviders` when context mocks suffice | Use `renderWithProviders` only when testing real provider interactions |
 | 9 | Treating a local screenshot e2e pixel-diff as a regression | Local runs do not collect visual specs at all (#278): `playwright.config.ts` skips them outside CI, so a red "visual" local run only happens under the deliberate `E2E_VISUAL=1` opt-in (`pnpm run test:e2e:visual`) — and there diffs are expected font-stack drift (container Debian ≠ runner ubuntu), not regressions. CI is the authority (`shard-rest` in `test.yml`); a narrow manual verdict on a branch: `gh workflow run visual-check.yml --ref <branch>`. Baselines are recorded in CI via `update-snapshots.yml` only. See `docs/tests_workflow.md` → "Known caveats" (#278 measurement: 46/71 local failures on a CI-green commit). |

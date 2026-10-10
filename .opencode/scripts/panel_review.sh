@@ -44,6 +44,13 @@ git -C "$MAIN_CLONE" fetch origin --prune -q || echo "WARN: main-clone fetch fai
 git -C "$CLONE" fetch origin -q
 git -C "$CLONE" reset --hard -q origin/main
 git -C "$CLONE" clean -fdq
+# 1b. Strip sibling specs/plans from the review clone — the submitted inputs
+#     are the ONLY documents under review. Tracked docs/specs + docs/plans in
+#     the clone act as decoys: 2026-10-10 (#359 run), a consistency reviewer
+#     left the submitted spec and reviewed the freshly-pushed #357 spec from
+#     docs/ instead. Code and docs/domain-rules stay — reviewers verify
+#     against them.
+rm -rf "$CLONE/docs/specs" "$CLONE/docs/plans"
 echo "sync: $CLONE at $(git -C "$CLONE" rev-parse --short origin/main)"
 
 # 2. Copy review inputs into the clone.
@@ -60,7 +67,7 @@ for A in "${AGENTS[@]}"; do
       --agent "$A" \
       --dir "$CLONE" \
       --title "panel-$RUN_ID-$A" \
-      "Review inputs are in $IN_TARGET — read every file there first. Hard limit: 15 tool calls. Produce your findings report as the final message." \
+      "The files in $IN_TARGET are the ONLY documents under review — read every file there first; everything else in the repo is reference material, never the review subject. Hard limit: 15 tool calls. Produce your findings report as the final message." \
       > "$OUT/$A.md" 2> "$OUT/$A.err"
     echo "$A rc=$? seconds=$(( $(date +%s) - S ))" >> "$OUT/_summary.txt"
   ) &

@@ -105,6 +105,36 @@
 #     OWN lease (guarded by file presence), never a foreign one; no-tag
 #     caller shape touches no lease at all; kill_port_orphans is GONE
 #     (unmasked port kills banned — startup cleaning is sweep_dead_runs').
+#   → Case 17 (#317 Task 7): _legacy_ports_free — the single lsof-based
+#     gate on ports {3002,3003,8001,8002} (overridable via SHARD_LEGACY_PORTS
+#     for deterministic fake-holder steering); free → rc 0, one holder →
+#     rc 1, holder gone → rc 0 again.
+#   → Case 18 (#317 Task 7, §3.3 wipe, US-1/US-4/US-5/US-7): tagged wipe —
+#     own .next-shard-*_<tag> always removed; untagged legacy + lookalikes
+#     (.next-shard-N / .next-shard-stale / invalid-suffix) removed only
+#     when the legacy ports are all free, kept when a fake holder occupies
+#     one; foreign tagged NEVER touched; EMPTY tag → byte-identical
+#     unconditional legacy glob (everything dies, incl. foreign-tagged);
+#     INVALID tag → stderr warning + legacy fallback.
+#   → Case 19 (#317 Task 7, §3.3 cleanup, US-1/US-4/US-6/US-7): tagged
+#     cleanup file tail — own db+canon+photo+build dirs and own lease
+#     removed; foreign tagged files+lease kept; untagged db/photo removed
+#     only when the legacy ports are free; untagged BUILD dirs never
+#     (wipe's business); EMPTY tag → today's masks exactly (test_memo_
+#     shard*.db + test_files_shard*; canon.sql and .next-shard-* survive;
+#     no lease side effects).
+#   → Case 20 (#317 Task 7): frontend control sweep keyed on the ACTUAL
+#     SHARD_FRONTEND_PORTS — `next dev -p <port>` and `next-server (v`
+#     holders on the run's own dynamic ports die; argv-matching holders
+#     on foreign ports survive (port-hold discriminator).
+#   → Case 21 (#317 Task 7, US-6): INT and TERM to a child wired like
+#     test-all.sh (trap EXIT/INT/TERM → cleanup_shards) run the cleaner:
+#     exit 128+sig, wrapper dead (TERM rung), own tagged resources + own
+#     lease + gate-open untagged db removed, foreign tagged + lease intact.
+#   → Case 22 (#317 Task 7/Task 5): zero-port lease slots (manual stacks)
+#     skip the sweep ladder naturally — dead manual lease (front back 0 0):
+#     holder on a REAL lease port killed via the ladder, masked innocent
+#     on an unrelated port survives, tagged files + lease removed.
 
 set -euo pipefail
 
@@ -1496,6 +1526,495 @@ if $CASE16_OK; then
   echo "PASS Case 16 (#317 Task 4): own lease removed (guard by file presence); foreign kept; no-tag mode inert; kill_port_orphans absent"
 else
   echo "FAIL Case 16 (#317 Task 4): write=$W16F_RC/$W16O_RC cleanup_rc=$C16A_RC/$C16B_RC/$C16C_RC own=$([ ! -e "$SHARD_RUNS_DIR/$OWN16_TAG.run" ] && echo gone || echo present) foreign=$([ -e "$SHARD_RUNS_DIR/$FOREIGN16_TAG.run" ] && echo kept || echo gone)"
+  FAIL=1
+fi
+
+# ── Case 17 (#317 Task 7): legacy-ports gate — one lsof helper, fake holders ─
+echo "── Case 17 (#317 Task 7): _legacy_ports_free — deterministic via fake holders ──"
+fresh_root "case17"
+source_lib
+CASE17_OK=true
+declare -F _legacy_ports_free >/dev/null 2>&1 || CASE17_OK=false
+LG17_A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+LG17_B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A")"
+LG17_C="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B")"
+LG17_D="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B" "$LG17_C")"
+SHARD_LEGACY_PORTS=("$LG17_A" "$LG17_B" "$LG17_C" "$LG17_D")
+# (a) all four gate ports free → rc 0 (untagged removal allowed)
+set +e; _legacy_ports_free; R17A=$?; set -e
+[ "$R17A" -eq 0 ] || CASE17_OK=false
+# (b) one fake holder on a gate port → rc 1 (live untagged stack blocks)
+H17="$(spawn_plain_holder "$LG17_C")"
+register_pid "$H17"
+wait_holder_bound "$H17" "$LG17_C"
+set +e; _legacy_ports_free; R17B=$?; set -e
+[ "$R17B" -ne 0 ] || CASE17_OK=false
+# (c) holder gone → rc 0 again (gate re-opens; LISTEN socket dies with pid)
+kill -9 "$H17" 2>/dev/null || true
+wait "$H17" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$H17/}")
+set +e; _legacy_ports_free; R17C=$?; set -e
+[ "$R17C" -eq 0 ] || CASE17_OK=false
+SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+if $CASE17_OK; then
+  echo "PASS Case 17 (#317 Task 7): legacy gate free → busy (holder on $LG17_C) → free; single helper, overridden ports"
+else
+  echo "FAIL Case 17 (#317 Task 7): helper_defined=$(declare -F _legacy_ports_free >/dev/null 2>&1 && echo yes || echo no) rc=$R17A/$R17B/$R17C"
+  FAIL=1
+fi
+
+# ── Case 18 (#317 Task 7): wipe_shard_dirs — tag-scoped contract ────────────
+echo "── Case 18 (#317 Task 7): wipe — own tag always; untagged gated by legacy ports; foreign tagged never ──"
+CASE18_OK=true
+OWN18="ab1899"
+FOE18="f0e1d2"
+mk18_fixtures() {
+  mkdir -p "$ROOT/frontend/admin/.next-shard-1_$OWN18" \
+           "$ROOT/frontend/admin/.next-shard-stale" \
+           "$ROOT/frontend/admin/.next-shard-9_badtag" \
+           "$ROOT/frontend/admin/.next-shard-2_$FOE18" \
+           "$ROOT/frontend/admin/.next-shard-1"
+  printf 'c' > "$ROOT/frontend/admin/.next-shard-1_$OWN18/x.js"
+  printf 'c' > "$ROOT/frontend/admin/.next-shard-1/y.js"
+  printf 'c' > "$ROOT/frontend/admin/.next-shard-stale/z.js"
+  printf 'c' > "$ROOT/frontend/admin/.next-shard-9_badtag/w.js"
+  printf 'c' > "$ROOT/frontend/admin/.next-shard-2_$FOE18/v.js"
+}
+LG18_A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B" "$LG17_C" "$LG17_D")"
+LG18_B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B" "$LG17_C" "$LG17_D" "$LG18_A")"
+LG18_C="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B" "$LG17_C" "$LG17_D" "$LG18_A" "$LG18_B")"
+LG18_D="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG17_A" "$LG17_B" "$LG17_C" "$LG17_D" "$LG18_A" "$LG18_B" "$LG18_C")"
+
+# (a) tagged wipe, legacy gate OPEN: own + untagged (legacy + lookalikes)
+#     die; foreign tagged survives.
+fresh_root "case18a"
+SHARD_LEGACY_PORTS=("$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D")
+source_lib
+mk18_fixtures
+SHARD_RUN_TAG="$OWN18"
+set +e; W18A=$(wipe_shard_dirs 2>"$WORK/case18a.err"); W18A_RC=$?; set -e
+[ "$W18A_RC" -eq 0 ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$OWN18" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-9_badtag" ] || CASE18_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-2_$FOE18" ] || CASE18_OK=false
+unset SHARD_RUN_TAG
+
+# (b) tagged wipe, legacy gate BUSY (fake holder): untagged survive, own
+#     still dies, foreign survives, stderr names the busy gate.
+fresh_root "case18b"
+SHARD_LEGACY_PORTS=("$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D")
+source_lib
+mk18_fixtures
+H18="$(spawn_plain_holder "$LG18_B")"
+register_pid "$H18"
+wait_holder_bound "$H18" "$LG18_B"
+SHARD_RUN_TAG="$OWN18"
+set +e; W18B=$(wipe_shard_dirs 2>"$WORK/case18b.err"); W18B_RC=$?; set -e
+[ "$W18B_RC" -eq 0 ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$OWN18" ] || CASE18_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE18_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE18_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-9_badtag" ] || CASE18_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-2_$FOE18" ] || CASE18_OK=false
+grep -q 'legacy ports busy' "$WORK/case18b.err" 2>/dev/null || CASE18_OK=false
+unset SHARD_RUN_TAG
+kill -9 "$H18" 2>/dev/null || true
+wait "$H18" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$H18/}")
+
+# (c) EMPTY tag → byte-identical legacy glob: EVERYTHING .next-shard-* dies
+#     (incl. foreign-tagged and lookalikes) — the pre-#317 contract (US-7).
+fresh_root "case18c"
+SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+source_lib
+mk18_fixtures
+set +e; W18C=$(wipe_shard_dirs 2>&1); W18C_RC=$?; set -e
+[ "$W18C_RC" -eq 0 ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$OWN18" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-9_badtag" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-2_$FOE18" ] || CASE18_OK=false
+
+# (d) INVALID tag → stderr warning + legacy fallback (unvalidated strings
+#     never enter rm-globs; the behavior is the empty-tag one).
+fresh_root "case18d"
+source_lib
+mk18_fixtures
+SHARD_RUN_TAG="n0hex!"
+set +e; W18D=$(wipe_shard_dirs 2>"$WORK/case18d.err"); W18D_RC=$?; set -e
+[ "$W18D_RC" -eq 0 ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$OWN18" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE18_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-2_$FOE18" ] || CASE18_OK=false
+grep -q 'SHARD_RUN_TAG' "$WORK/case18d.err" 2>/dev/null || CASE18_OK=false
+unset SHARD_RUN_TAG
+SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+
+if $CASE18_OK; then
+  echo "PASS Case 18 (#317 Task 7): wipe — own always; untagged gated (free: removed / busy: kept); foreign tagged kept; empty/invalid tag → legacy glob"
+else
+  echo "FAIL Case 18 (#317 Task 7): rc=$W18A_RC/$W18B_RC/$W18C_RC/$W18D_RC"
+  echo "── Case 18 stderr (a/b) ──"
+  cat "$WORK/case18a.err" "$WORK/case18b.err" "$WORK/case18d.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 19 (#317 Task 7): cleanup_shards file tail — tag-scoped ────────────
+echo "── Case 19 (#317 Task 7): cleanup tail — own tag + gated untagged; foreign kept; empty tag → today's masks ──"
+CASE19_OK=true
+OWN19="cd1976"
+FOE19="f0e1d2"
+mk19_fixtures() {
+  mkdir -p "$ROOT/backend/test_files_shard1_$OWN19" \
+           "$ROOT/backend/test_files_shard2_$FOE19" \
+           "$ROOT/backend/test_files_shard1" \
+           "$ROOT/frontend/admin/.next-shard-1_$OWN19" \
+           "$ROOT/frontend/admin/.next-shard-2_$FOE19" \
+           "$ROOT/frontend/admin/.next-shard-1"
+  printf 'db'  > "$ROOT/backend/test_memo_shard1_${OWN19}.db"
+  printf 'sql' > "$ROOT/backend/test_memo_shard2_${OWN19}.canon.sql"
+  printf 'db'  > "$ROOT/backend/test_memo_shard1.db"
+  printf 'db'  > "$ROOT/backend/test_memo_shard1_${FOE19}.db"
+  printf 'f'   > "$ROOT/backend/test_files_shard1_${OWN19}/a.png"
+  printf 'f'   > "$ROOT/backend/test_files_shard2_${FOE19}/b.png"
+  printf 'c'   > "$ROOT/frontend/admin/.next-shard-1_${OWN19}/x.js"
+  printf 'c'   > "$ROOT/frontend/admin/.next-shard-2_${FOE19}/y.js"
+}
+LG19_A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D")"
+LG19_B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D" "$LG19_A")"
+LG19_C="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D" "$LG19_A" "$LG19_B")"
+LG19_D="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG18_A" "$LG18_B" "$LG18_C" "$LG18_D" "$LG19_A" "$LG19_B" "$LG19_C")"
+
+# (a) tagged cleanup, legacy gate OPEN: own db+canon+photo+build+lease gone;
+#     foreign files+lease kept; untagged db+photo gone; untagged BUILD dir
+#     kept (cleanup never wipes build dirs — wipe's business).
+fresh_root "case19a"
+SHARD_RUNS_DIR="$WORK/lease-runs-case19a"
+mkdir -p "$SHARD_RUNS_DIR"
+SHARD_LEGACY_PORTS=("$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D")
+source_lib
+mk19_fixtures
+write_run_lease "$OWN19" $$ 29401 29402 29403 29404 2>/dev/null
+write_run_lease "$FOE19" 999999 29411 29412 29413 29414 2>/dev/null
+SHARD_RUN_TAG="$OWN19"
+SHARD_BACKEND_PIDS=()
+set +e; C19A=$(cleanup_shards 2>"$WORK/case19a.err"); C19A_RC=$?; set -e
+[ "$C19A_RC" -eq 0 ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${OWN19}.db" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard2_${OWN19}.canon.sql" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1_$OWN19" ] || CASE19_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$OWN19" ] || CASE19_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$OWN19.run" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_memo_shard1_${FOE19}.db" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_files_shard2_$FOE19" ] || CASE19_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-2_$FOE19" ] || CASE19_OK=false
+[ -e "$SHARD_RUNS_DIR/$FOE19.run" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1.db" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1" ] || CASE19_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE19_OK=false
+unset SHARD_RUN_TAG
+
+# (b) tagged cleanup, legacy gate BUSY: own still removed; untagged db+photo
+#     survive; foreign survives; stderr names the busy gate.
+fresh_root "case19b"
+SHARD_RUNS_DIR="$WORK/lease-runs-case19b"
+mkdir -p "$SHARD_RUNS_DIR"
+SHARD_LEGACY_PORTS=("$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D")
+source_lib
+mk19_fixtures
+write_run_lease "$OWN19" $$ 29421 29422 29423 29424 2>/dev/null
+H19="$(spawn_plain_holder "$LG19_C")"
+register_pid "$H19"
+wait_holder_bound "$H19" "$LG19_C"
+SHARD_RUN_TAG="$OWN19"
+SHARD_BACKEND_PIDS=()
+set +e; C19B=$(cleanup_shards 2>"$WORK/case19b.err"); C19B_RC=$?; set -e
+[ "$C19B_RC" -eq 0 ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${OWN19}.db" ] || CASE19_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$OWN19.run" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_memo_shard1.db" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_files_shard1" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_memo_shard1_${FOE19}.db" ] || CASE19_OK=false
+grep -q 'legacy ports busy' "$WORK/case19b.err" 2>/dev/null || CASE19_OK=false
+unset SHARD_RUN_TAG
+kill -9 "$H19" 2>/dev/null || true
+wait "$H19" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$H19/}")
+
+# (c) EMPTY tag → masks EXACTLY as today: test_memo_shard*.db (canon.sql
+#     and .db-journal survive; the glob spans tagged names too — pre-#317
+#     semantics) + test_files_shard*; build dirs untouched; no lease side
+#     effects (US-7 / DoD §7 (d)).
+fresh_root "case19c"
+SHARD_RUNS_DIR="$WORK/lease-runs-case19c"
+mkdir -p "$SHARD_RUNS_DIR"
+SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+source_lib
+mkdir -p "$ROOT/backend/test_files_shard1" "$ROOT/backend/test_files_shard2_$FOE19" \
+         "$ROOT/frontend/admin/.next-shard-1"
+printf 'db'  > "$ROOT/backend/test_memo_shard1.db"
+printf 'sql' > "$ROOT/backend/test_memo_shard2.canon.sql"
+printf 'db'  > "$ROOT/backend/test_memo_shard1_${FOE19}.db"
+printf 'f'   > "$ROOT/backend/test_files_shard1/a.png"
+write_run_lease "$FOE19" 999999 29431 29432 29433 29434 2>/dev/null
+SHARD_BACKEND_PIDS=()
+set +e; C19C=$(cleanup_shards 2>"$WORK/case19c.err"); C19C_RC=$?; set -e
+[ "$C19C_RC" -eq 0 ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1.db" ] || CASE19_OK=false
+[ -e "$ROOT/backend/test_memo_shard2.canon.sql" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${FOE19}.db" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1" ] || CASE19_OK=false
+[ ! -e "$ROOT/backend/test_files_shard2_$FOE19" ] || CASE19_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-1" ] || CASE19_OK=false
+[ -e "$SHARD_RUNS_DIR/$FOE19.run" ] || CASE19_OK=false
+SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+
+if $CASE19_OK; then
+  echo "PASS Case 19 (#317 Task 7): cleanup tail — own tag (db/canon/photo/build/lease) removed; untagged gated; foreign kept; empty tag → today's masks (canon.sql + build dirs survive)"
+else
+  echo "FAIL Case 19 (#317 Task 7): rc=$C19A_RC/$C19B_RC/$C19C_RC"
+  echo "── Case 19 stderr (a/b) ──"
+  cat "$WORK/case19a.err" "$WORK/case19b.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 20 (#317 Task 7): frontend sweep keyed on ACTUAL dynamic ports ─────
+echo "── Case 20 (#317 Task 7): dynamic-port frontend sweep — dev-form + title-form die; foreign-port argv twins survive ──"
+fresh_root "case20"
+F20A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D")"
+F20B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D" "$F20A")"
+I20A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D" "$F20A" "$F20B")"
+I20B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG19_A" "$LG19_B" "$LG19_C" "$LG19_D" "$F20A" "$F20B" "$I20A")"
+SHARD_FRONTEND_PORTS=("$F20A" "$F20B")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")
+SHARD_BACKEND_PIDS=()
+source_lib
+# Own holders on the run's ACTUAL frontend ports — both mask forms.
+H20A="$(spawn_named_holder "next dev -p $F20A" "$F20A")"
+register_pid "$H20A"
+wait_holder_bound "$H20A" "$F20A"
+H20B="$(spawn_named_holder "next-server (v21.3.1-canary)" "$F20B")"
+register_pid "$H20B"
+wait_holder_bound "$H20B" "$F20B"
+# Innocents: argv NAMES one of our ports but BINDS a foreign port — the
+# port-hold discriminator (not the pgrep nomination) must spare them.
+IN20A="$(spawn_named_holder "next dev -p $F20A" "$I20A")"
+register_pid "$IN20A"
+wait_holder_bound "$IN20A" "$I20A"
+IN20B="$(spawn_named_holder "next-server (v20.0.0)" "$I20B")"
+register_pid "$IN20B"
+wait_holder_bound "$IN20B" "$I20B"
+set +e; C20=$(cleanup_shards 2>&1); C20_RC=$?; set -e
+CASE20_OK=true
+[ "$C20_RC" -eq 0 ] || CASE20_OK=false
+wait_pid_gone "$H20A" 5 || CASE20_OK=false
+wait_pid_gone "$H20B" 5 || CASE20_OK=false
+port_free "$F20A" || CASE20_OK=false
+port_free "$F20B" || CASE20_OK=false
+check_port_survivor "$I20A" "$IN20A" || CASE20_OK=false
+check_port_survivor "$I20B" "$IN20B" || CASE20_OK=false
+# 6.5: the innocents survived on purpose — finish them here (they are ours).
+kill -9 "$IN20A" "$IN20B" 2>/dev/null || true
+wait "$IN20A" 2>/dev/null || true
+wait "$IN20B" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$IN20A/}")
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$IN20B/}")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+if $CASE20_OK; then
+  echo "PASS Case 20 (#317 Task 7): sweep killed dev-form + next-server holders on $F20A/$F20B; argv-twin holders on foreign ports survived"
+else
+  echo "FAIL Case 20 (#317 Task 7): rc=$C20_RC dev_form=$(kill -0 "$H20A" 2>/dev/null && echo alive || echo dead) title_form=$(kill -0 "$H20B" 2>/dev/null && echo alive || echo dead)"
+  echo "── Case 20 output ──"
+  printf '%s\n' "$C20"
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 21 (#317 Task 7, US-6): INT/TERM to a test-all-wired child runs the cleaner ──
+echo "── Case 21 (#317 Task 7): trap INT/TERM → cleanup_shards — own trace removed, foreign intact ──"
+CASE21_OK=true
+OWN21="21ab37"
+FOE21="f0e1d2"
+F21A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F20A" "$F20B" "$I20A" "$I20B")"
+F21B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F20A" "$F20B" "$I20A" "$I20B" "$F21A")"
+B21A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F20A" "$F20B" "$I20A" "$I20B" "$F21A" "$F21B")"
+B21B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F20A" "$F20B" "$I20A" "$I20B" "$F21A" "$F21B" "$B21A")"
+LG21_A="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F21A" "$F21B" "$B21A" "$B21B")"
+LG21_B="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F21A" "$F21B" "$B21A" "$B21B" "$LG21_A")"
+LG21_C="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F21A" "$F21B" "$B21A" "$B21B" "$LG21_A" "$LG21_B")"
+LG21_D="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$F21A" "$F21B" "$B21A" "$B21B" "$LG21_A" "$LG21_B" "$LG21_C")"
+
+# Fixtures root + foreign resources survive BOTH child runs.
+fresh_root "case21"
+ROOT21="$ROOT"
+RUNS21="$WORK/lease-runs-case21"
+mkdir -p "$RUNS21" "$ROOT21/backend/test_files_shard2_$FOE21" \
+         "$ROOT21/frontend/admin/.next-shard-2_$FOE21"
+printf 'db' > "$ROOT21/backend/test_memo_shard1_${FOE21}.db"
+printf 'f'  > "$ROOT21/backend/test_files_shard2_${FOE21}/b.png"
+printf 'c'  > "$ROOT21/frontend/admin/.next-shard-2_${FOE21}/y.js"
+printf '%s %s %s %s %s %s %s %s\n' 999999 "$FOE21" 29501 29502 29503 29504 "$(date +%s)" \
+  > "$RUNS21/$FOE21.run"
+
+# The child replicates test-all.sh's signal wiring (trap EXIT INT TERM →
+# on_signal → cleanup_shards) against THIS library, with the run's own
+# dynamic ports, tag and a real wrapper to TERM. Values come via C21_* env.
+CHILD21="$WORK/case21-child.sh"
+cat > "$CHILD21" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$C21_ROOT"
+SHARD_RUNS_DIR="$C21_RUNS"
+SHARD_RUN_TAG="$C21_TAG"
+read -r -a SHARD_FRONTEND_PORTS <<< "$C21_FRONTS"
+read -r -a SHARD_BACKEND_PORTS <<< "$C21_BACKS"
+read -r -a SHARD_LEGACY_PORTS <<< "$C21_LEGACY"
+source "$C21_LIB"
+on_signal() {
+  trap - EXIT
+  cleanup_shards
+  exit $((128 + $1))
+}
+trap 'cleanup_shards' EXIT
+trap 'on_signal 2' INT
+trap 'on_signal 15' TERM
+sleep 60 &
+WRAP=$!
+SHARD_BACKEND_PIDS=("$WRAP")
+printf '%s' "$WRAP" > "$C21_WRAPF"
+write_run_lease "$SHARD_RUN_TAG" "$$" \
+  "${SHARD_FRONTEND_PORTS[0]}" "${SHARD_BACKEND_PORTS[0]}" \
+  "${SHARD_FRONTEND_PORTS[1]}" "${SHARD_BACKEND_PORTS[1]}"
+touch "$C21_READY"
+wait || true
+EOF
+
+run_case21_child() {
+  local sig="$1" want_rc="$2"
+  # Own + gate-open-untagged fixtures are consumed by each run — recreate.
+  mkdir -p "$ROOT21/backend/test_files_shard1_$OWN21" \
+           "$ROOT21/frontend/admin/.next-shard-1_$OWN21"
+  printf 'db'  > "$ROOT21/backend/test_memo_shard1_${OWN21}.db"
+  printf 'sql' > "$ROOT21/backend/test_memo_shard2_${OWN21}.canon.sql"
+  printf 'f'   > "$ROOT21/backend/test_files_shard1_${OWN21}/a.png"
+  printf 'c'   > "$ROOT21/frontend/admin/.next-shard-1_${OWN21}/x.js"
+  printf 'db'  > "$ROOT21/backend/test_memo_shard1.db"
+  rm -f "$WORK/case21.ready" "$WORK/case21.wrap"
+  # Job control ON for the spawn: a non-interactive shell without -m
+  # starts `&` children with SIGINT SIG_IGN (POSIX async-list rule), and a
+  # signal ignored at exec entry cannot be trapped — the child's INT trap
+  # would silently never fire and the case would hang for the wrapper's
+  # full sleep. Real test-all.sh runs in the foreground (INT deliverable);
+  # `set -m` gives the fixture the same default INT disposition.
+  set -m
+  C21_ROOT="$ROOT21" C21_RUNS="$RUNS21" C21_TAG="$OWN21" \
+    C21_FRONTS="$F21A $F21B" C21_BACKS="$B21A $B21B" \
+    C21_LEGACY="$LG21_A $LG21_B $LG21_C $LG21_D" \
+    C21_LIB="$SHARD_LIB_UNDER_TEST" \
+    C21_WRAPF="$WORK/case21.wrap" C21_READY="$WORK/case21.ready" \
+    bash "$CHILD21" >/dev/null 2>&1 &
+  local cpid=$!
+  set +m
+  register_pid "$cpid"
+  wait_marker "$WORK/case21.ready" 10 || return 1
+  local wrap
+  wrap="$(cat "$WORK/case21.wrap" 2>/dev/null || true)"
+  [ -n "$wrap" ] && register_pid "$wrap"
+  kill -0 "$wrap" 2>/dev/null || return 1
+  local t0 rc el
+  t0=$(date +%s)
+  kill -"$sig" "$cpid" 2>/dev/null || true
+  set +e; wait "$cpid"; rc=$?; set -e
+  el=$(( $(date +%s) - t0 ))
+  # Signal path asserts: exit code, bounded time, wrapper TERM'd by the
+  # cleaner, own trace gone, foreign trace intact.
+  [ "$rc" -eq "$want_rc" ] || return 1
+  [ "$el" -le 15 ] || return 1
+  wait_pid_gone "$wrap" 5 || return 1
+  [ ! -e "$RUNS21/$OWN21.run" ] || return 1
+  [ ! -e "$ROOT21/backend/test_memo_shard1_${OWN21}.db" ] || return 1
+  [ ! -e "$ROOT21/backend/test_memo_shard2_${OWN21}.canon.sql" ] || return 1
+  [ ! -e "$ROOT21/backend/test_files_shard1_$OWN21" ] || return 1
+  [ ! -e "$ROOT21/frontend/admin/.next-shard-1_$OWN21" ] || return 1
+  [ ! -e "$ROOT21/backend/test_memo_shard1.db" ] || return 1
+  [ -e "$RUNS21/$FOE21.run" ] || return 1
+  [ -e "$ROOT21/backend/test_memo_shard1_${FOE21}.db" ] || return 1
+  [ -e "$ROOT21/backend/test_files_shard2_$FOE21" ] || return 1
+  [ -e "$ROOT21/frontend/admin/.next-shard-2_$FOE21" ] || return 1
+  return 0
+}
+
+if run_case21_child INT 130; then
+  echo "PASS Case 21 (#317 Task 7): SIGINT path — cleaner ran (exit 130): own tag+lease+gate-open untagged removed, wrapper TERM'd, foreign intact"
+else
+  echo "FAIL Case 21 (#317 Task 7): SIGINT child did not fulfil the cleaner contract"
+  FAIL=1
+fi
+if run_case21_child TERM 143; then
+  echo "PASS Case 21 (#317 Task 7): SIGTERM path — cleaner ran (exit 143), same contract"
+else
+  echo "FAIL Case 21 (#317 Task 7): SIGTERM child did not fulfil the cleaner contract"
+  FAIL=1
+fi
+
+# ── Case 22 (#317 Task 7/Task 5): zero-port lease slots skip naturally ──────
+echo "── Case 22 (#317 Task 7): dead manual lease (front back 0 0) — ladder skips zero slots ──"
+fresh_root "case22"
+SHARD_RUNS_DIR="$WORK/lease-runs-case22"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE22_OK=true
+TAG22="0c22aa"
+DEAD22_PID="$(spawn_dead_pid)"
+if kill -0 "$DEAD22_PID" 2>/dev/null; then
+  echo "FATAL: Case 22 dead-pid fixture is alive" >&2
+  exit 1
+fi
+F22="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG21_A" "$LG21_B" "$LG21_C" "$LG21_D")"
+B22="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG21_A" "$LG21_B" "$LG21_C" "$LG21_D" "$F22")"
+U22="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B" "$LG21_A" "$LG21_B" "$LG21_C" "$LG21_D" "$F22" "$B22")"
+write_run_lease "$TAG22" "$DEAD22_PID" "$F22" "$B22" 0 0 2>/dev/null
+mkdir -p "$ROOT/backend/test_files_shard1_$TAG22" "$ROOT/frontend/admin/.next-shard-1_$TAG22"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${TAG22}.db"
+printf 'f'  > "$ROOT/backend/test_files_shard1_${TAG22}/a.png"
+printf 'c'  > "$ROOT/frontend/admin/.next-shard-1_${TAG22}/x.js"
+# TERM-stubborn masked holder on the manual stack's REAL backend port →
+# the kill -9 rung of the ladder; masked innocent on an UNRELATED port
+# (not in the lease, and not 0) must survive — zero slots widen nothing.
+H22="$(spawn_term_ignoring_uvicorn_holder "$B22" "test_memo_shard_$TAG22")"
+register_pid "$H22"
+wait_holder_bound "$H22" "$B22"
+IN22="$(spawn_uvicorn_holder "$U22" -)"
+register_pid "$IN22"
+wait_holder_bound "$IN22" "$U22"
+T22=$(date +%s)
+set +e; SW22_OUT=$(sweep_dead_runs 2>"$WORK/case22.err"); SW22_RC=$?; set -e
+EL22=$(( $(date +%s) - T22 ))
+[ "$SW22_RC" -eq 0 ] || CASE22_OK=false
+[ -z "$SW22_OUT" ] || CASE22_OK=false
+wait_pid_gone "$H22" 15 || CASE22_OK=false
+port_free "$B22" || CASE22_OK=false
+check_port_survivor "$U22" "$IN22" || CASE22_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$TAG22.run" ] || CASE22_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${TAG22}.db" ] || CASE22_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1_$TAG22" ] || CASE22_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$TAG22" ] || CASE22_OK=false
+[ "$EL22" -le 25 ] || CASE22_OK=false
+kill -9 "$IN22" 2>/dev/null || true
+wait "$IN22" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$IN22/}")
+if $CASE22_OK; then
+  echo "PASS Case 22 (#317 Task 7): zero-port lease slots skipped naturally — real-port holder killed via the ladder (${EL22}s), unrelated masked holder untouched"
+else
+  echo "FAIL Case 22 (#317 Task 7): rc=$SW22_RC elapsed=${EL22}s out='$SW22_OUT' holder=$(kill -0 "$H22" 2>/dev/null && echo alive || echo dead)"
+  echo "── Case 22 sweep stderr ──"
+  cat "$WORK/case22.err" 2>/dev/null || true
+  echo "─────────────────"
   FAIL=1
 fi
 

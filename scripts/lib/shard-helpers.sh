@@ -55,6 +55,16 @@ SHARD_LOGS_DIR="${SHARD_LOGS_DIR:-${TMPDIR:-/tmp}/test-all-logs}"
 SHARD_PORT_WINDOW_LOW=28000
 SHARD_PORT_WINDOW_HIGH=32700
 SHARD_ALLOC_MAX_ATTEMPTS=20
+# SHARD_LEGACY_PORTS — pre-#317 fixed shard ports. A #317 run never
+# occupies or cleans them (§3.3); they matter only as the GATE for
+# removing UNTAGGED legacy resources (wipe of untagged .next-shard-*
+# build dirs, cleanup of untagged shard DBs/photo dirs): a live untagged
+# manual stack (CI-like local run) holds them, so its files must survive.
+# Array or space-joined scalar both work; the dryrun harness overrides it
+# with test ports and steers the gate deterministically via fake holders.
+if [ -z "${SHARD_LEGACY_PORTS:-}" ]; then
+  SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
+fi
 
 # ── Внутренний хелпер: выборка «порт + маска команды» ───────────────────────
 # Использование: _masked_pids PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
@@ -128,6 +138,45 @@ _sweep_masked() {
   done
 }
 
+# _legacy_ports_free → rc 0 ⇔ НИ один порт из SHARD_LEGACY_PORTS
+# ({3002,3003,8001,8002}) не занят слушателем. ЕДИНЫЙ lsof-хелпер,
+# переиспользуемый вайпом и уборщиком (§3.3: «легаси-нетегированные —
+# при свободных легаси-портах (то же правило, что у вайпа)»). Проверка —
+# по одному `lsof -ti :PORT` на порт (диапазонный синтаксис запрещён);
+# нечисловые токены пропускаются; недоступный/ошибающийся lsof трактуется
+# как «свободно» (поза отказобезопасности как в allocate_shard_ports).
+# Детерминизм тестов — переопределением SHARD_LEGACY_PORTS на тест-порты
+# с фейк-держателями.
+_legacy_ports_free() {
+  local p
+  for p in ${SHARD_LEGACY_PORTS[*]:-}; do
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    if lsof -ti :"$p" >/dev/null 2>&1; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# _run_tag_or_empty → stdout: SHARD_RUN_TAG, если это валидные 6 строчных
+# hex, иначе пусто. Валидация — ВНУТРИ потребителей тега (вайп/уборщик):
+# непровалидированная строка никогда не доходит до rm-glob'ов (жёсткое
+# правило #317 Task 7). Установленный, но невалидный тег → предупреждение
+# в stderr + ПУСТО (падение в легаси-контракт без тега — поведение до
+# #317, а не маска с мусором внутри). stdout пуст/тег; rc всегда 0.
+_run_tag_or_empty() {
+  local tag="${SHARD_RUN_TAG:-}"
+  local hex_re='^[0-9a-f]{6}$'
+  if [ -n "$tag" ]; then
+    if [[ "$tag" =~ $hex_re ]]; then
+      printf '%s\n' "$tag"
+    else
+      echo "⚠️ invalid SHARD_RUN_TAG '$tag' (want 6 lowercase hex) — using the untagged legacy contract" >&2
+    fi
+  fi
+  return 0
+}
+
 # ── Kill orphan processes from previous runs ───────────────────────────────
 # Pre-#317 this was kill_port_orphans (unmasked `lsof -ti :PORT | kill -9`
 # on the fixed legacy ports). REMOVED by #317 Task 4: startup cleaning is
@@ -135,16 +184,61 @@ _sweep_masked() {
 # the legacy ports 3002/3003/8001/8002 are never occupied or cleaned by
 # a run anymore.
 
-# ── Remove stale shard build dirs (unconditional, fail-fast) ──────────────
-# Each shard compiles into frontend/admin/.next-shard-N (NEXT_DIST_DIR).
+# ── Remove stale shard build dirs (fail-fast) ──────────────────────────────
+# Each shard compiles into frontend/admin/.next-shard-<id>[_<tag>] (NEXT_DIST_DIR).
 # Wiping them on every start makes the run deterministic: chunks are never
-# inherited across runs. Unconditional — independent of port state (shards
-# own these dirs exclusively; nobody else can hold them). Empty match set
-# (clean machine, first run) is SUCCESS — nothing to remove.
+# inherited across runs. Empty match set (clean machine, first run) is
+# SUCCESS — nothing to remove.
+#
+# #317 Task 7 (spec §3.3 «Вайп каталогов сборки») — контракт тегирован,
+# когда SHARD_RUN_TAG — валидные 6 hex (валидация внутри, не на доверии):
+#   (a) свои .next-shard-*_${TAG} — вытираются ВСЕГДА;
+#   (b) все .next-shard-* БЕЗ валидного суффикса _<6hex> (легаси
+#       .next-shard-N и lookalike'ы вида .next-shard-stale — «существующий
+#       ассерт dryrun Case 1 остаётся зелёным» для пустого тега) — только
+#       при свободных легаси-портах 3002/3003/8001/8002 (живой ручной
+#       нетегированный стек держит свои каталоги сборки);
+#   (c) ЧУЖИЕ тегированные (валидный _<6hex> ≠ свой тег) — НИКОГДА (их
+#       прибирают старт-чистка мёртвых лизов и хвостовой аудит, §3.3).
+# ПУСТОЙ тег → поведение байт-в-байт как до #317: безусловный глоб
+# .next-shard-* (включая lookalike'и и чужие тегированные — в нетегиро-
+# ванном прогоне тегированных не существует). Невалидный тег → stderr-
+# предупреждение + поведение пустого (_run_tag_or_empty).
 wipe_shard_dirs() {
-  local wiped=false dir
+  local tag dir base t wiped=false
+  tag="$(_run_tag_or_empty)"
+  if [ -z "$tag" ]; then
+    shopt -s nullglob
+    for dir in "$ROOT"/frontend/admin/.next-shard-*; do
+      wiped=true
+      if ! rm -rf "$dir"; then
+        shopt -u nullglob
+        echo "❌ Failed to remove stale shard build dir: $dir" >&2
+        exit 1
+      fi
+    done
+    shopt -u nullglob
+    if [ "$wiped" = false ]; then
+      echo "  → no shard build dirs to wipe (clean run)"
+    fi
+    return 0
+  fi
+  local untagged_ok=false
+  if _legacy_ports_free; then
+    untagged_ok=true
+  else
+    echo "  → legacy ports busy — keeping untagged .next-shard-* dirs (live untagged stack?)" >&2
+  fi
   shopt -s nullglob
   for dir in "$ROOT"/frontend/admin/.next-shard-*; do
+    base="${dir##*/}"
+    t="$(_tag_of_entry "$base")"
+    if [ -n "$t" ] && [ "$t" != "$tag" ]; then
+      continue                                  # чужой тегированный — никогда
+    fi
+    if [ -z "$t" ] && [ "$untagged_ok" = false ]; then
+      continue                                  # нетегированный — гейт закрыт
+    fi
     wiped=true
     if ! rm -rf "$dir"; then
       shopt -u nullglob
@@ -156,15 +250,31 @@ wipe_shard_dirs() {
   if [ "$wiped" = false ]; then
     echo "  → no shard build dirs to wipe (clean run)"
   fi
+  return 0
 }
 
-# ── Cleanup function for shard stacks (EXIT trap) ─────────────────────────
+# ── Cleanup function for shard stacks (EXIT/INT/TERM trap) ─────────────────
 # Bounded ladder: TERM wrappers → budgeted wait → KILL survivors →
 # port+cmdline sweep → remove shard DBs. Every step is bounded; nothing in
 # the trap can hang the run.
+#
+# #317 Task 7 (spec §3.3 «Уборщик на выходе»): лестница keyed на
+# ФАКТИЧЕСКИЕ порты прогона — SHARD_FRONTEND_PORTS/SHARD_BACKEND_PORTS
+# (динамические с Task 4; легаси-значения 3002/3003 дают прежнее
+# поведение), pgrep-маска `next dev -p <port>` генерируется из фактических
+# портов + принимается форма `next-server (v`. Файловый хвост тегирован:
+# только свои маски + свой лиз; легаси-нетегированные БД/фото-каталоги —
+# при свободных легаси-портах (тот же гейт, что у вайпа); чужие
+# тегированные ресурсы — никогда. Пустой тег → маски в точности как до
+# #317 (CI байт-в-байт).
 cleanup_shards() {
   echo ""
   echo "Cleaning up shard stacks..."
+
+  # Тег прогона: валидируется здесь же (невалидный → легаси-контракт +
+  # предупреждение; непровалидированная строка не доходит до rm-glob'ов).
+  local tag
+  tag="$(_run_tag_or_empty)"
 
   # TERM the wrappers (SHARD_BACKEND_PIDS holds the background subshell PIDs
   # from test-all.sh). TERM to the wrapper cascade-TERMs its tracked children
@@ -217,38 +327,71 @@ cleanup_shards() {
   # Frontends: the socket-holding orphan grandchild rewrites its process
   # title (`process.title = "next-server (vX)"`) BEFORE server.listen(), so
   # its args contain NO "next dev" — the mask must also accept the title
-  # form. Candidates come from both pgrep patterns; the gate for the dev-form
-  # is derived from the port list (ps args contain `next dev -p <port>`),
-  # so it matches real argv and honours test-override ports. The port hold
-  # (lsof on a shard port) is the discriminator — a next-server holding NO
-  # shard port is never touched. NEVER `pkill -f "next-server"` — a blanket
-  # kill would take down every Next.js dev server, incl. :3000/:3001.
-  local fgate=()
-  for port in "${SHARD_FRONTEND_PORTS[@]}"; do
+  # form. The dev-form NOMINATION pattern and the ps-args gate are both
+  # GENERATED from the run's ACTUAL ports (dynamic since #317; replaces the
+  # hardcoded `next dev -p 300[2-3]`): alternation `next dev -p P1|next dev
+  # -p P2`, matching real argv. The port hold (lsof on a run port) is the
+  # discriminator — a next-server holding NO run port is never touched.
+  # NEVER `pkill -f "next-server"` — a blanket kill would take down every
+  # Next.js dev server, incl. :3000/:3001. Empty/zero port slots (manual-
+  # stack shapes) skip naturally: no pattern → no sweep call, and nothing
+  # ever LISTENs on port 0.
+  local fgate=() pg_f=""
+  for port in ${SHARD_FRONTEND_PORTS[*]:-}; do
+    case "$port" in ''|*[!0-9]*) continue ;; esac
     fgate+=("next dev -p $port")
+    if [ -n "$pg_f" ]; then pg_f="$pg_f|next dev -p $port"; else pg_f="next dev -p $port"; fi
   done
   fgate+=("next-server (v")
-  _sweep_masked SHARD_FRONTEND_PORTS "next dev -p 300[2-3]" "${fgate[@]}"
-  _sweep_masked SHARD_FRONTEND_PORTS "next-server" "${fgate[@]}"
+  if [ -n "$pg_f" ]; then
+    _sweep_masked SHARD_FRONTEND_PORTS "$pg_f" "${fgate[@]}"
+    _sweep_masked SHARD_FRONTEND_PORTS "next-server" "${fgate[@]}"
+  fi
 
   # Backends: real shard backends run as `uv run uvicorn src.main:app ...`;
   # the test DB name lives in DATABASE_URL env, not in argv — so argv cannot
   # discriminate shard uvicorns from any other, and the port hold is the
   # discriminator (shard backends listen on SHARD_BACKEND_PORTS only).
-  _sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+  if [ -n "${SHARD_BACKEND_PORTS[*]:-}" ]; then
+    _sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+  fi
 
-  # Remove per-shard DB copies (master DB is kept)
-  rm -f "$ROOT"/backend/test_memo_shard*.db
-  # GH #262 — remove per-shard avatar dirs (FILES_DIR), same lifecycle as the DB
-  rm -rf "$ROOT"/backend/test_files_shard*
-
-  # #317 Task 4 minimal seam (Task 7 extends cleanup to the full tagged
-  # resource set): remove THIS run's lease on exit, guarded by file
-  # presence — the lease exists only after a successful write_run_lease,
-  # so pre-#317 callers (no SHARD_RUN_TAG) and double cleanups are no-ops.
-  # Foreign leases are never touched (US-6: own trace only).
-  if [ -n "${SHARD_RUN_TAG:-}" ] && [ -e "${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run" ]; then
-    remove_run_lease "$SHARD_RUN_TAG"
+  # File tail. TAGGED run → ONLY own masks: `test_memo_shard*_${TAG}*`
+  # (хвост `*` покрывает canon.sql/db-journal), `test_files_shard*_${TAG}`,
+  # `.next-shard-*_${TAG}` + свой лиз; легаси-нетегированные БД/фото-каталоги
+  # — при свободных легаси-портах (тот же гейт, что у вайпа; нетегированные
+  # каталоги сборки — дело вайпа, не уборщика); чужие тегированные — никогда.
+  # EMPTY tag → маски в точности как до #317: `test_memo_shard*.db` +
+  # `test_files_shard*` (canon.sql и каталоги сборки не трогаются), лиз-файлы
+  # не трогаются (нетега нет и лиза нет).
+  local e
+  if [ -n "$tag" ]; then
+    rm -f  "$ROOT"/backend/test_memo_shard*_"$tag"*
+    rm -rf "$ROOT"/backend/test_files_shard*_"$tag"
+    rm -rf "$ROOT"/frontend/admin/.next-shard-*_"$tag"
+    if _legacy_ports_free; then
+      shopt -s nullglob
+      for e in "$ROOT"/backend/test_memo_shard*.db; do
+        [ -z "$(_tag_of_entry "${e##*/}")" ] || continue   # tagged — not ours to remove
+        rm -f "$e"
+      done
+      for e in "$ROOT"/backend/test_files_shard*; do
+        [ -z "$(_tag_of_entry "${e##*/}")" ] || continue
+        rm -rf "$e"
+      done
+      shopt -u nullglob
+    else
+      echo "  → legacy ports busy — keeping untagged shard DB/photo dirs (live untagged stack?)" >&2
+    fi
+    # Свой лиз (guard по presence: лиз есть только после успешного
+    # write_run_lease — двойные уборки и до-лизные вызовы no-op; чужие
+    # лизы — никогда, US-6).
+    if [ -e "${SHARD_RUNS_DIR}/${tag}.run" ]; then
+      remove_run_lease "$tag"
+    fi
+  else
+    rm -f "$ROOT"/backend/test_memo_shard*.db
+    rm -rf "$ROOT"/backend/test_files_shard*
   fi
 
   return 0

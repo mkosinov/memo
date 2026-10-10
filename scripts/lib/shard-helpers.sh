@@ -18,12 +18,15 @@
 # Both print their RESULT on stdout (callers capture it); diagnostics go
 # to stderr only.
 #
-# Feature #317, spec §3.3 (run leases + start-cleanup):
+# Feature #317, spec §3.3 (run leases + start-cleanup + tail audit):
 #   write_run_lease TAG PID P1 P2 P3 P4 — atomic one-line lease file
 #   remove_run_lease TAG                — delete the run's own lease
 #   sweep_dead_runs                     — start-cleanup: sweep dead-run
 #     resources, report live-run ports on stdout (feed them to
 #     allocate_shard_ports as busy args: allocate_shard_ports $(sweep_dead_runs)).
+#   audit_orphan_tagged [CURRENT_TAG]   — tail audit (anti-accumulation):
+#     tagged file resources with no live lease = garbage (removed, no
+#     grace); log dirs run-<tag> only when the tag is dead > 24 h.
 
 CLEANUP_BUDGET_S=10
 
@@ -31,6 +34,10 @@ CLEANUP_BUDGET_S=10
 # SHARD_RUNS_DIR — run-lease files (${TAG}.run) live here; written/parsed by
 #   test-all.sh (Tasks 2+). gen_run_tag only CHECKS the path for collisions.
 #   Default mirrors the LOG_DIR precedent in test-all.sh (${TMPDIR:-/tmp}).
+# SHARD_LOGS_DIR — root of per-run log dirs ${SHARD_LOGS_DIR}/run-<tag>
+#   (§3.1: ${TMPDIR:-/tmp}/test-all-logs — the same path test-all.sh keeps
+#   in LOG_DIR). The tail audit removes only run-<tag> subdirs of tags dead
+#   longer than 24 h (§3.3); it never creates or removes the root itself.
 # SHARD_PORT_WINDOW_* — the dynamic-port window. 28000-32700 sits BELOW the
 #   Linux kernel ephemeral range 32768-60999 (the kernel never hands these
 #   ports to outgoing connections), below macOS ephemeral (49152+), above
@@ -41,6 +48,7 @@ CLEANUP_BUDGET_S=10
 # SHARD_ALLOC_MAX_ATTEMPTS — shared bounded-retry budget (tag redraws and
 #   port-allocation draws): every failure mode must terminate, never hang.
 SHARD_RUNS_DIR="${SHARD_RUNS_DIR:-${TMPDIR:-/tmp}/memo-shard-runs}"
+SHARD_LOGS_DIR="${SHARD_LOGS_DIR:-${TMPDIR:-/tmp}/test-all-logs}"
 SHARD_PORT_WINDOW_LOW=28000
 SHARD_PORT_WINDOW_HIGH=32700
 SHARD_ALLOC_MAX_ATTEMPTS=20
@@ -375,6 +383,43 @@ SHARD_LEASE_MAX_AGE_S=86400
 # перетитулованного next-server-внука.
 SHARD_DEAD_RUN_PGPAT='uvicorn|next dev|next-server'
 
+# _read_run_lease FILE → разбор+валидация ОДНОЙ строки лиза (формат
+# write_run_lease: `pid tag p1 p2 p3 p4 started_epoch`). ЕДИНЫЙ парсер для
+# sweep_dead_runs и audit_orphan_tagged — правило «жив/мёртв» обязано
+# означать одно и то же в обоих (§3.3); вторая расходящаяся копия парсера
+# запрещена. Успех → rc 0, поля в глобалах _RL_PID/_RL_TAG/_RL_P1.._RL_P4/
+# _RL_STAMP (bash 3.2 без nameref'ов — глобалы с префиксом _RL_);
+# неудача (файл не читается, пусто, ≠8 полей, pid/порты/штамп не числовые)
+# → rc 1. Побочных эффектов нет — файл не трогается.
+_read_run_lease() {
+  local extra=""
+  local num_re='^[0-9]+$'
+  _RL_PID=""; _RL_TAG=""; _RL_P1=""; _RL_P2=""; _RL_P3=""; _RL_P4=""; _RL_STAMP=""
+  if ! read -r _RL_PID _RL_TAG _RL_P1 _RL_P2 _RL_P3 _RL_P4 _RL_STAMP extra \
+       < "$1" 2>/dev/null \
+     || [ -z "$_RL_PID" ] || [ -z "$_RL_P1" ] || [ -z "$_RL_P2" ] \
+     || [ -z "$_RL_P3" ] || [ -z "$_RL_P4" ] || [ -z "$_RL_STAMP" ] \
+     || [ -n "$extra" ] \
+     || ! [[ "$_RL_PID" =~ $num_re ]] || ! [[ "$_RL_P1" =~ $num_re ]] \
+     || ! [[ "$_RL_P2" =~ $num_re ]] || ! [[ "$_RL_P3" =~ $num_re ]] \
+     || ! [[ "$_RL_P4" =~ $num_re ]] || ! [[ "$_RL_STAMP" =~ $num_re ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# _run_lease_alive NOW → rc 0 ⇔ лиз, разобранный последним успешным
+# _read_run_lease, ЖИВ: PID отвечает (kill -0) И возраст штампа
+# (NOW − stamp) < SHARD_LEASE_MAX_AGE_S. Единственное правило живости
+# (§3.3) — порог старения закрывает PID-перезанятие; им же пользуется
+# sweep_dead_runs И audit_orphan_tagged (общий парсер — общая семантика).
+_run_lease_alive() {
+  local now="$1" age
+  kill -0 "$_RL_PID" 2>/dev/null || return 1
+  age=$(( now - _RL_STAMP ))
+  [ "$age" -lt "$SHARD_LEASE_MAX_AGE_S" ]
+}
+
 # write_run_lease TAG PID P1 P2 P3 P4 → записать ${SHARD_RUNS_DIR}/${TAG}.run:
 # ОДНА строка `pid tag port1 port2 port3 port4 started_epoch` (§3.3). Штамп
 # ставится ЗДЕСЬ (пишущим), = `date +%s`. Атомарность: запись в скрытый
@@ -436,7 +481,9 @@ remove_run_lease() {
 
 # sweep_dead_runs → старт-чистка (§3.3 «Старт-чистка»; будущая замена
 # kill_port_orphans — переподключение вызывающих сторон в Task 4). Читает
-# все ${SHARD_RUNS_DIR}/*.run:
+# все ${SHARD_RUNS_DIR}/*.run (разбор строки и правило живости — ОБЩИЕ с
+# audit_orphan_tagged: _read_run_lease + _run_lease_alive, расходящийся
+# парсер запрещён):
 #   живой   = PID отвечает (kill -0) И штамп свежее SHARD_LEASE_MAX_AGE_S;
 #   мёртвый = всё остальное (PID мёртв; перезанятие PID закрыто старением).
 # Живой прогон → его 4 порта печатаются в stdout (разделители-пробелы;
@@ -456,9 +503,8 @@ remove_run_lease() {
 # ТОЛЬКО порты живых лизов, диагностика — в stderr. bash 3.2: простые
 # массивы + eval-косвенность (см. _masked_pids).
 sweep_dead_runs() {
-  local f tag now age
-  local lpid ltag lp1 lp2 lp3 lp4 lstamp extra
-  local hex_re='^[0-9a-f]{6}$' num_re='^[0-9]+$'
+  local f tag now
+  local hex_re='^[0-9a-f]{6}$'
   now="$(date +%s 2>/dev/null || printf '%s' 0)"
   shopt -s nullglob
   for f in "$SHARD_RUNS_DIR"/*.run; do
@@ -468,26 +514,19 @@ sweep_dead_runs() {
       echo "  ⚠️ sweep_dead_runs: ignoring foreign file $f (tag not 6-hex)" >&2
       continue
     fi
-    lpid=""; ltag=""; lp1=""; lp2=""; lp3=""; lp4=""; lstamp=""; extra=""
-    if ! read -r lpid ltag lp1 lp2 lp3 lp4 lstamp extra < "$f" 2>/dev/null \
-       || [ -z "$lpid" ] || [ -z "$lp1" ] || [ -z "$lp2" ] || [ -z "$lp3" ] \
-       || [ -z "$lp4" ] || [ -z "$lstamp" ] || [ -n "$extra" ] \
-       || ! [[ "$lpid" =~ $num_re ]] || ! [[ "$lp1" =~ $num_re ]] \
-       || ! [[ "$lp2" =~ $num_re ]] || ! [[ "$lp3" =~ $num_re ]] \
-       || ! [[ "$lp4" =~ $num_re ]] || ! [[ "$lstamp" =~ $num_re ]]; then
+    if ! _read_run_lease "$f"; then
       echo "  ⚠️ sweep_dead_runs: malformed lease $f — removing the lease only (no port sweep)" >&2
       rm -f "$f" 2>/dev/null || true
       continue
     fi
-    age=$(( now - lstamp ))
-    if kill -0 "$lpid" 2>/dev/null && [ "$age" -lt "$SHARD_LEASE_MAX_AGE_S" ]; then
+    if _run_lease_alive "$now"; then
       # Живой прогон: порта → busy-лист аллокатора; прогон не трогается.
-      printf '%s %s %s %s\n' "$lp1" "$lp2" "$lp3" "$lp4"
-      echo "  → live run $tag (pid=$lpid age=${age}s): ports $lp1 $lp2 $lp3 $lp4 bypassed" >&2
+      printf '%s %s %s %s\n' "$_RL_P1" "$_RL_P2" "$_RL_P3" "$_RL_P4"
+      echo "  → live run $tag (pid=$_RL_PID age=$(( now - _RL_STAMP ))s): ports $_RL_P1 $_RL_P2 $_RL_P3 $_RL_P4 bypassed" >&2
       continue
     fi
-    echo "  → dead run $tag (pid=$lpid age=${age}s): sweeping ports $lp1 $lp2 $lp3 $lp4" >&2
-    DEAD_RUN_PORTS=("$lp1" "$lp2" "$lp3" "$lp4")
+    echo "  → dead run $tag (pid=$_RL_PID age=$(( now - _RL_STAMP ))s): sweeping ports $_RL_P1 $_RL_P2 $_RL_P3 $_RL_P4" >&2
+    DEAD_RUN_PORTS=("$_RL_P1" "$_RL_P2" "$_RL_P3" "$_RL_P4")
     local p
     local gates=("uvicorn" "next-server (v")
     for p in "${DEAD_RUN_PORTS[@]}"; do
@@ -525,5 +564,169 @@ sweep_dead_runs() {
     rm -f  "$f" 2>/dev/null || true
   done
   shopt -u nullglob
+  return 0
+}
+
+# ── Feature #317, spec §3.3: хвостовой аудит (анти-накопление) ──────────────
+
+# _tag_of_entry BASENAME → stdout: 6-hex тег тегированного файлового
+# ресурса, либо пусто. Тег — сегмент после ПОСЛЕДНЕГО `_`, усечённый до
+# первой `.`: test_memo_shard1_aa1010.db / …_aa1010.canon.sql /
+# …_aa1010.db-journal, test_files_shard1_aa1010, .next-shard-2_aa1010 →
+# aa1010. Имя без валидного 6-hex суффикса (легаси без тега, lookalike с
+# произвольным суффиксом) → пусто: НЕ цель аудита (lookalike'ы — дело
+# вайпа, не аудита). Сама функция ничего не удаляет.
+_tag_of_entry() {
+  local tail="${1##*_}" tag
+  local hex_re='^[0-9a-f]{6}$'
+  tag="${tail%%.*}"
+  if [[ "$tag" =~ $hex_re ]]; then
+    printf '%s\n' "$tag"
+  fi
+  return 0
+}
+
+# _tag_of_run_dir BASENAME → stdout: тег каталога логов run-<6hex> (имя из
+# §3.1) либо пусто — ТОЧНОЕ совпадение имени: run-notes, run-12345,
+# run-ABCDEF (hex — только строчный), run-<tag>.log не являются целями.
+_tag_of_run_dir() {
+  local tag="${1#run-}"
+  local hex_re='^[0-9a-f]{6}$'
+  if [[ "$tag" =~ $hex_re ]]; then
+    printf '%s\n' "$tag"
+  fi
+  return 0
+}
+
+# _dir_mtime PATH → stdout: mtime PATH в epoch-секундах. Портабельный
+# выбор форм: BSD `stat -f %m` (macOS) → GNU `stat -c %Y` (Linux);
+# ветвление — по ВАЛИДНОСТИ ВЫВОДА (числовая проверка), а не по uname:
+# GNU stat с `-f %m` успешно печатает mount point (не число) — числовой
+# фильтр это отсеивает и переключает на GNU-форму. Обе формы недоступны →
+# rc 1 + пустой stdout; вызывающий трактует как «часы смерти неизвестны»
+# и каталог НЕ удаляет (безопасная сторона льготы).
+_dir_mtime() {
+  local out
+  out="$(stat -f %m "$1" 2>/dev/null || true)"
+  case "$out" in ''|*[!0-9]*) out="$(stat -c %Y "$1" 2>/dev/null || true)" ;; esac
+  case "$out" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$out"
+}
+
+# audit_orphan_tagged [CURRENT_TAG] → хвостовой аудит (§3.3 «Хвостовой
+# аудит (анти-накопление)»); вызывается ПОСЛЕ обработки лизов. Правило:
+# тегированный файл без живого лиза = мусор.
+#   CURRENT_TAG — тег текущего прогона; может быть ПУСТЫМ (на момент
+#     аудита test-all.sh тег может быть ещё не сгенерирован — ресурсов
+#     несгенерированного тега не существует: gen_run_tag перегенерирует
+#     при коллизии); пустой → ничто не защищено как «своё»; невалидный —
+#     тоже (с предупреждением в stderr; непровалидированная строка не
+#     участвует в решениях об удалении).
+# Живость тега — ТО ЖЕ правило, что у sweep_dead_runs (PID жив И штамп
+# < SHARD_LEASE_MAX_AGE_S; общий парсер _read_run_lease/_run_lease_alive —
+# второй расходящийся парсер запрещён). Тег лиза = ИМЯ файла (как в свипе).
+# ФАЗЫ ПРОГОНА ЗАФИКСИРОВАНЫ (чистка/аудит → аллокация → лиз → старт): на
+# момент аудита у чужого нового прогона нет ни лиза, ни тегированных
+# файлов — гонка исключена по построению (см. комментарий-контракт в
+# scripts/test-all.sh).
+# Файловые ресурсы тега (§3.1/§3.3): backend/test_memo_shard*_<tag>*,
+# backend/test_files_shard*_<tag>, frontend/admin/.next-shard-*_<tag> —
+# тег без живого лиза и не свой → удаляются БЕЗ льготы. Лог-каталоги
+# ${SHARD_LOGS_DIR}/run-<tag> — тем же правилом, но с порогом 24 ч
+# (падение прогона получает сутки на диагностику по логам): часы смерти
+# тега = started_epoch мёртвого лиза, если файл лиза ещё существует; иначе
+# mtime каталога (_dir_mtime). Удаление при now − часы > 86400.
+# Лиз-файлы аудит НЕ трогает (это дело свипа); чужие *.run с не-6-hex
+# тегом, имена без валидного 6-hex суффикса и не-каталоги run-* — не цели.
+# Пустой/отсутствующий каталог лизов → аудит всё равно проходит по ФАЙЛОВЫМ
+# ресурсам (первый прогон собирает брошенное). Best-effort: rc 0; stdout
+# ПУСТ (диагностика — только stderr); недоступный mtime → каталог не
+# удаляется. bash 3.2: индексированные массивы; живые теги — строка через
+# пробел (тег = 6 hex, пробелы исключены форматом).
+audit_orphan_tagged() {
+  local hex_re='^[0-9a-f]{6}$'
+  local own_tag="${1:-}"
+  if [ -n "$own_tag" ] && ! [[ "$own_tag" =~ $hex_re ]]; then
+    echo "  ⚠️ audit_orphan_tagged: invalid current tag '$own_tag' — protecting nothing as own" >&2
+    own_tag=""
+  fi
+  local now
+  now="$(date +%s 2>/dev/null || printf '%s' 0)"
+
+  # Фаза 1: живые теги + часы смерти мёртвых — из лизов, общим парсером.
+  local live_list=" " f tag i
+  local dead_tags=() dead_stamps=()
+  shopt -s nullglob
+  for f in "$SHARD_RUNS_DIR"/*.run; do
+    tag="${f##*/}"
+    tag="${tag%.run}"
+    [[ "$tag" =~ $hex_re ]] || continue      # чужой не-6-hex файл — мимо
+    _read_run_lease "$f" || continue         # битый лиз — дело свипа
+    if _run_lease_alive "$now"; then
+      case "$live_list" in
+        *" $tag "*) ;;
+        *) live_list="$live_list$tag " ;;
+      esac
+    else
+      dead_tags+=("$tag")
+      dead_stamps+=("$_RL_STAMP")
+    fi
+  done
+
+  # Фаза 2: файловые ресурсы тегов-сирот — БЕЗ льготы (rm по НАЙДЕННОМУ
+  # glob-entry; тег в rm-маску не подставляется).
+  local e t removed=0
+  for e in "$ROOT"/backend/test_memo_shard*_* \
+           "$ROOT"/backend/test_files_shard*_* \
+           "$ROOT"/frontend/admin/.next-shard-*_*; do
+    t="$(_tag_of_entry "${e##*/}")"
+    [ -n "$t" ] || continue
+    case "$live_list" in *" $t "*) continue ;; esac
+    if [ "$t" = "$own_tag" ]; then continue; fi
+    echo "  → audit: removing ownerless $e (tag $t has no live lease)" >&2
+    rm -rf "$e" 2>/dev/null || true
+    removed=$((removed + 1))
+  done
+
+  # Фаза 3: лог-каталоги run-<tag> — льгота 24 ч по часам смерти тега.
+  local d clock age logs_removed=0
+  for d in "$SHARD_LOGS_DIR"/run-*; do
+    [ -d "$d" ] || continue
+    t="$(_tag_of_run_dir "${d##*/}")"
+    [ -n "$t" ] || continue
+    case "$live_list" in *" $t "*) continue ;; esac
+    if [ "$t" = "$own_tag" ]; then continue; fi
+    clock=""
+    i=0
+    while [ "$i" -lt "${#dead_tags[@]}" ]; do
+      if [ "${dead_tags[$i]}" = "$t" ]; then
+        clock="${dead_stamps[$i]}"
+        break
+      fi
+      i=$((i + 1))
+    done
+    if [ -z "$clock" ]; then
+      # лиза нет → часы смерти = mtime каталога
+      clock="$(_dir_mtime "$d" 2>/dev/null || true)"
+    fi
+    case "$clock" in
+      ''|*[!0-9]*)
+        echo "  → audit: keeping $d (death clock unknown — not removing)" >&2
+        continue
+        ;;
+    esac
+    age=$(( now - clock ))
+    if [ "$age" -gt "$SHARD_LEASE_MAX_AGE_S" ]; then
+      echo "  → audit: removing expired log dir $d (tag $t dead ${age}s > ${SHARD_LEASE_MAX_AGE_S}s)" >&2
+      rm -rf "$d" 2>/dev/null || true
+      logs_removed=$((logs_removed + 1))
+    else
+      echo "  → audit: keeping recent log dir $d (tag $t dead ${age}s ≤ ${SHARD_LEASE_MAX_AGE_S}s grace)" >&2
+    fi
+  done
+  shopt -u nullglob
+  if [ "$removed" -eq 0 ] && [ "$logs_removed" -eq 0 ]; then
+    echo "  → audit: no orphan tagged resources" >&2
+  fi
   return 0
 }

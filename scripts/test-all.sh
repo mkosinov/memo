@@ -67,6 +67,14 @@ SHARD_BACKEND_PORTS=(8001 8002)
 SHARD_FRONTEND_PORTS=(3002 3003)
 source "$ROOT/scripts/lib/shard-helpers.sh"
 
+# ── Phase-order contract (#317 spec §3.3) ───────────────────────────────────
+# Run phases are strictly ordered: cleanup/audit → port allocation → lease
+# write → stack start (first tagged files created last). At audit time a
+# brand-new foreign run has NEITHER a lease NOR tagged files, so the orphan
+# audit can never mistake it for garbage — the race is excluded by
+# construction. Rewiring the call sites to the #317 primitives
+# (sweep_dead_runs / audit_orphan_tagged) is Task 4; this comment only
+# fixes the contract.
 echo "  → cleaning up orphan processes on shard ports..."
 kill_port_orphans
 

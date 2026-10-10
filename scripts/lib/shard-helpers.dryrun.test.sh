@@ -83,6 +83,24 @@
 #   → Case 13 (#317 §3.3): playground/dev ports 3100/8101/3001 are outside
 #     every lease and mask match-set → masked holders on them survive a
 #     FULL sweep (with a dead lease actively swept — non-vacuous).
+#   → Case 14 (#317 §3.3 tail audit): tag without a live lease = garbage —
+#     all three file families (DB + canon sibling, photo dir, build dir)
+#     of an orphan tag removed with NO grace; lookalikes without a valid
+#     6-hex suffix (untagged legacy names, 12-hex, non-hex suffixes)
+#     untouched; own-tag protection (valid tag shields, empty tag shields
+#     nothing, INVALID tag shields nothing + stderr warning); log dir of
+#     an orphan tag KEPT while fresh (grace is log-only); SHARD_LOGS_DIR
+#     default pins to ${TMPDIR:-/tmp}/test-all-logs; audit runs with a
+#     NONEXISTENT lease dir (first run collects abandoned files); rc=0,
+#     stdout silent.
+#   → Case 15 (#317 §3.3 tail audit): live lease of a manual stack
+#     protects its file resources + log dir + pid; dead lease → file
+#     resources removed immediately (no grace) but the LEASE FILE itself
+#     is sweep's business (untouched); log-dir death clock: dead lease
+#     started_epoch WINS over a fresh dir mtime (stale stamp + fresh mtime
+#     → removed; fresh stamp → kept), no-lease dirs judged by mtime
+#     (touch -t old → removed, fresh → kept); non-dir/hex-invalid run-*
+#     entries untouched.
 
 set -euo pipefail
 
@@ -1220,6 +1238,195 @@ else
   echo "FAIL Case 13 (#317): rc=$SW13_RC out='$SW13_OUT' die_holder=$(kill -0 "$H13_DIE" 2>/dev/null && echo alive || echo dead)"
   echo "── Case 13 sweep stderr ──"
   cat "$WORK/case13.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 14 (#317 §3.3): tail audit — orphan tag without lease = garbage ────
+echo "── Case 14 (#317 §3.3): tag without live lease removed; lookalikes/own tag kept ──"
+fresh_root "case14"
+# NONEXISTENT lease dir — decision: audit still runs over file resources
+# (first run collects abandoned files; spec §3.3 «Пустой каталог лиз-файлов —
+# аудит всё равно проходит»).
+SHARD_RUNS_DIR="$WORK/lease-runs-case14-absent"
+# Pin the log-root DEFAULT: SHARD_LOGS_DIR must resolve from TMPDIR exactly
+# like the spec's ${TMPDIR:-/tmp}/test-all-logs (evaluated at source time,
+# same override pattern as SHARD_RUNS_DIR). Redirect TMPDIR into WORK so the
+# fake run-<tag> dirs live in the harness temp tree (EXIT trap reaps them).
+TMPDIR14_SAVED="${TMPDIR:-}"
+TMPDIR="$WORK/tmpdir-case14"
+mkdir -p "$TMPDIR"
+unset SHARD_LOGS_DIR
+source_lib
+CASE14_OK=true
+[ "${SHARD_LOGS_DIR:-}" = "$WORK/tmpdir-case14/test-all-logs" ] || CASE14_OK=false
+TMPDIR="$TMPDIR14_SAVED"
+[ -n "$TMPDIR" ] || unset TMPDIR
+# Fixture root for the rest of the case (the pin assert above already
+# checked the lib's source-time default; pre-implementation RED runs need
+# the var defined under set -u as well).
+SHARD_LOGS_DIR="${SHARD_LOGS_DIR:-$WORK/tmpdir-case14/test-all-logs}"
+
+# Orphan tag AA — no lease anywhere: ALL THREE file families are garbage.
+ORPH14="aa1400"
+mkdir -p "$ROOT/backend/test_files_shard1_$ORPH14" "$ROOT/frontend/admin/.next-shard-1_$ORPH14"
+printf 'db'    > "$ROOT/backend/test_memo_shard1_${ORPH14}.db"
+printf 'sql'   > "$ROOT/backend/test_memo_shard2_${ORPH14}.canon.sql"
+printf 'file'  > "$ROOT/backend/test_files_shard1_${ORPH14}/avatar.png"
+printf 'chunk' > "$ROOT/frontend/admin/.next-shard-1_${ORPH14}/x.js"
+# Own tag — valid current tag shields its resources (no lease needed:
+# at audit time in test-all.sh the run's OWN lease may not exist yet).
+OWN14="bb1421"
+mkdir -p "$ROOT/backend/test_files_shard1_$OWN14" "$ROOT/frontend/admin/.next-shard-2_$OWN14"
+printf 'db'    > "$ROOT/backend/test_memo_shard1_${OWN14}.db"
+# Lookalikes WITHOUT a valid 6-hex suffix — NOT audit targets (Task 7's
+# wipe / legacy rules own them): untagged legacy names, 12-hex, non-hex.
+printf 'db'  > "$ROOT/backend/test_memo_shard1.db"
+printf 'sql' > "$ROOT/backend/test_memo_shard2.canon.sql"
+mkdir -p "$ROOT/backend/test_files_shard1" "$ROOT/frontend/admin/.next-shard-stale" \
+         "$ROOT/frontend/admin/.next-shard-9_badtag"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${ORPH14}${ORPH14}.db"   # 12 hex — not 6
+# Log dirs: orphan tag but FRESH mtime → KEPT (grace is log-only, §3.3);
+# own tag → KEPT.
+mkdir -p "$SHARD_LOGS_DIR/run-$ORPH14" "$SHARD_LOGS_DIR/run-$OWN14"
+printf 'log' > "$SHARD_LOGS_DIR/run-$ORPH14/pytest.log"
+
+set +e
+A14_OUT=$(audit_orphan_tagged "$OWN14" 2>"$WORK/case14.err"); A14_RC=$?
+set -e
+
+[ "$A14_RC" -eq 0 ] || CASE14_OK=false
+[ -z "$A14_OUT" ] || CASE14_OK=false            # audit is stdout-silent
+# orphan tag: every family removed, no grace
+[ ! -e "$ROOT/backend/test_memo_shard1_${ORPH14}.db" ] || CASE14_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard2_${ORPH14}.canon.sql" ] || CASE14_OK=false
+[ ! -e "$ROOT/backend/test_files_shard1_$ORPH14" ] || CASE14_OK=false
+[ ! -e "$ROOT/frontend/admin/.next-shard-1_$ORPH14" ] || CASE14_OK=false
+# own tag: shielded
+[ -e "$ROOT/backend/test_memo_shard1_${OWN14}.db" ] || CASE14_OK=false
+[ -e "$ROOT/backend/test_files_shard1_$OWN14" ] || CASE14_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-2_$OWN14" ] || CASE14_OK=false
+# lookalikes: untouched
+[ -e "$ROOT/backend/test_memo_shard1.db" ] || CASE14_OK=false
+[ -e "$ROOT/backend/test_memo_shard2.canon.sql" ] || CASE14_OK=false
+[ -e "$ROOT/backend/test_files_shard1" ] || CASE14_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-stale" ] || CASE14_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-9_badtag" ] || CASE14_OK=false
+[ -e "$ROOT/backend/test_memo_shard1_${ORPH14}${ORPH14}.db" ] || CASE14_OK=false
+# log dirs: fresh orphan KEPT (grace), own KEPT
+[ -d "$SHARD_LOGS_DIR/run-$ORPH14" ] || CASE14_OK=false
+[ -d "$SHARD_LOGS_DIR/run-$OWN14" ] || CASE14_OK=false
+
+# Invalid current tag shields NOTHING: resources of a lease-less tag die,
+# the previously-own resources die too (nothing is "own"), stderr warns.
+set +e
+A14B_OUT=$(audit_orphan_tagged "ZZZZZZ" 2>"$WORK/case14b.err"); A14B_RC=$?
+set -e
+[ "$A14B_RC" -eq 0 ] || CASE14_OK=false
+[ -z "$A14B_OUT" ] || CASE14_OK=false
+[ ! -e "$ROOT/backend/test_memo_shard1_${OWN14}.db" ] || CASE14_OK=false
+grep -q 'audit_orphan_tagged' "$WORK/case14b.err" 2>/dev/null || CASE14_OK=false
+
+if $CASE14_OK; then
+  echo "PASS Case 14 (#317): orphan tag removed (3 families, no grace); lookalikes + own tag kept; fresh orphan log dir kept; invalid/empty-tag protection semantics pinned"
+else
+  echo "FAIL Case 14 (#317): rc=$A14_RC/$A14B_RC out='$A14_OUT/$A14B_OUT'"
+  echo "── Case 14 audit stderr ──"
+  cat "$WORK/case14.err" "$WORK/case14b.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 15 (#317 §3.3): tail audit — live lease shields; death clock ───────
+echo "── Case 15 (#317 §3.3): live lease protected; log-dir death clock (stamp|mtime) + 24h grace ──"
+fresh_root "case15"
+SHARD_RUNS_DIR="$WORK/lease-runs-case15"
+SHARD_LOGS_DIR="$WORK/logs-case15"
+mkdir -p "$SHARD_RUNS_DIR" "$SHARD_LOGS_DIR"
+source_lib
+CASE15_OK=true
+
+# LIVE lease (manual-stack shape: alive pid + fresh stamp): resources,
+# log dir and the pid itself all survive.
+LIVE15_TAG="dd1500"
+LIVE15_PID="$(spawn_sleep_wrapper)"
+register_pid "$LIVE15_PID"
+set +e
+write_run_lease "$LIVE15_TAG" "$LIVE15_PID" 29201 29202 29203 29204 2>/dev/null; W15_RC=$?
+set -e
+[ "$W15_RC" -eq 0 ] || CASE15_OK=false
+mkdir -p "$ROOT/backend/test_files_shard1_$LIVE15_TAG" "$ROOT/frontend/admin/.next-shard-1_$LIVE15_TAG" \
+         "$SHARD_LOGS_DIR/run-$LIVE15_TAG"
+printf 'db' > "$ROOT/backend/test_memo_shard1_${LIVE15_TAG}.db"
+
+# DEAD lease, FRESH stamp: file resources die immediately (no grace), but
+# the log dir survives (death clock = started_epoch ≈ now) and the LEASE
+# FILE itself is sweep's business — audit leaves it in place.
+DEAD15_TAG="ee1510"
+DEAD15_PID="$(spawn_dead_pid)"
+if kill -0 "$DEAD15_PID" 2>/dev/null; then
+  echo "FATAL: Case 15 dead-pid fixture is alive" >&2
+  exit 1
+fi
+set +e
+write_run_lease "$DEAD15_TAG" "$DEAD15_PID" 29211 29212 29213 29214 2>/dev/null; W15B_RC=$?
+set -e
+[ "$W15B_RC" -eq 0 ] || CASE15_OK=false
+mkdir -p "$ROOT/backend/test_files_shard2_$DEAD15_TAG" "$SHARD_LOGS_DIR/run-$DEAD15_TAG"
+printf 'db' > "$ROOT/backend/test_memo_shard2_${DEAD15_TAG}.db"
+
+# DEAD lease, STALE stamp (24 h + 1 h ago): the log dir dies EVEN THOUGH its
+# mtime is fresh — started_epoch of the dead lease WINS over mtime (the
+# discriminating assert for the death-clock source).
+STALE15_TAG="ff1520"
+STALE15_PID="$(spawn_dead_pid)"
+STALE15_STAMP=$(( $(date +%s) - SHARD_LEASE_MAX_AGE_S - 3600 ))
+printf '%s %s %s %s %s %s %s %s\n' "$STALE15_PID" "$STALE15_TAG" \
+  29221 29222 29223 29224 "$STALE15_STAMP" > "$SHARD_RUNS_DIR/$STALE15_TAG.run"
+mkdir -p "$SHARD_LOGS_DIR/run-$STALE15_TAG"
+
+# NO lease at all → mtime is the death clock: old-mtime dir dies,
+# fresh-mtime dir lives.
+mkdir -p "$SHARD_LOGS_DIR/run-0a1530" "$SHARD_LOGS_DIR/run-0b1540"
+touch -t 202001010000 "$SHARD_LOGS_DIR/run-0a1530"
+# hex-invalid / non-dir run-* entries — never audit targets.
+mkdir -p "$SHARD_LOGS_DIR/run-12345" "$SHARD_LOGS_DIR/run-ABCDEF"
+printf 'x' > "$SHARD_LOGS_DIR/run-$LIVE15_TAG.log"
+
+set +e
+A15_OUT=$(audit_orphan_tagged "" 2>"$WORK/case15.err"); A15_RC=$?
+set -e
+
+[ "$A15_RC" -eq 0 ] || CASE15_OK=false
+[ -z "$A15_OUT" ] || CASE15_OK=false
+# live lease: everything of it survives
+[ -e "$ROOT/backend/test_memo_shard1_${LIVE15_TAG}.db" ] || CASE15_OK=false
+[ -e "$ROOT/backend/test_files_shard1_$LIVE15_TAG" ] || CASE15_OK=false
+[ -e "$ROOT/frontend/admin/.next-shard-1_$LIVE15_TAG" ] || CASE15_OK=false
+[ -d "$SHARD_LOGS_DIR/run-$LIVE15_TAG" ] || CASE15_OK=false
+[ -e "$SHARD_RUNS_DIR/$LIVE15_TAG.run" ] || CASE15_OK=false
+if kill -0 "$LIVE15_PID" 2>/dev/null; then :; else CASE15_OK=false; fi
+# dead-fresh: files gone (no grace), log dir KEPT, lease file KEPT
+[ ! -e "$ROOT/backend/test_memo_shard2_${DEAD15_TAG}.db" ] || CASE15_OK=false
+[ ! -e "$ROOT/backend/test_files_shard2_$DEAD15_TAG" ] || CASE15_OK=false
+[ -d "$SHARD_LOGS_DIR/run-$DEAD15_TAG" ] || CASE15_OK=false
+[ -e "$SHARD_RUNS_DIR/$DEAD15_TAG.run" ] || CASE15_OK=false
+# dead-stale: log dir REMOVED despite fresh mtime (stamp wins)
+[ ! -d "$SHARD_LOGS_DIR/run-$STALE15_TAG" ] || CASE15_OK=false
+# no-lease dirs: old mtime removed, fresh kept
+[ ! -d "$SHARD_LOGS_DIR/run-0a1530" ] || CASE15_OK=false
+[ -d "$SHARD_LOGS_DIR/run-0b1540" ] || CASE15_OK=false
+# hex-invalid entries untouched
+[ -d "$SHARD_LOGS_DIR/run-12345" ] || CASE15_OK=false
+[ -d "$SHARD_LOGS_DIR/run-ABCDEF" ] || CASE15_OK=false
+[ -e "$SHARD_LOGS_DIR/run-$LIVE15_TAG.log" ] || CASE15_OK=false
+
+if $CASE15_OK; then
+  echo "PASS Case 15 (#317): live lease shielded (files+log+pid); dead lease → files gone, lease kept; death clock stamp>mtime; mtime fallback; hex-invalid kept"
+else
+  echo "FAIL Case 15 (#317): rc=$A15_RC out='$A15_OUT'"
+  echo "── Case 15 audit stderr ──"
+  cat "$WORK/case15.err" 2>/dev/null || true
   echo "─────────────────"
   FAIL=1
 fi

@@ -34,7 +34,7 @@ export interface TariffLike {
 export type SelectedAge = number | 'adult' | null | undefined;
 
 export function resolveDefaultTariff<T extends TariffLike>(
-  tariffs: T[],
+  tariffs: readonly T[],
   age: SelectedAge,
 ): T | null {
   const first = tariffs[0];

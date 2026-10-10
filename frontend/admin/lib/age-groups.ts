@@ -16,6 +16,9 @@ export const KIDS_AGE_MIN = 3;
 /** Inclusive upper bound of the «Дети» age group (12+ = «Подростки»). */
 export const KIDS_AGE_MAX = 11;
 
+/** Inclusive upper bound of the «Подростки» age group (18+ = «Взрослый» sentinel). */
+export const TEEN_AGE_MAX = 17;
+
 /** AgeSelect sentinel for «Взрослый» — a string, not an age. */
 export const ADULT_AGE_SENTINEL = 'adult';
 
@@ -23,7 +26,7 @@ export const ADULT_AGE_SENTINEL = 'adult';
 export const KIDS_AGES: number[] = range(KIDS_AGE_MIN, KIDS_AGE_MAX);
 
 /** All ages of the «Подростки» group, ascending: 12..17. */
-export const TEEN_AGES: number[] = range(KIDS_AGE_MAX + 1, 17);
+export const TEEN_AGES: number[] = range(KIDS_AGE_MAX + 1, TEEN_AGE_MAX);
 
 /** True when `age` falls inside the «Дети» range (3–11 inclusive). */
 export function isKidsAge(age: number): boolean {

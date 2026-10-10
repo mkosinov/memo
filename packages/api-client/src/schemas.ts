@@ -592,6 +592,9 @@ export type VisitorUpdate = z.infer<typeof VisitorUpdateSchema>;
 // ─── TariffCreate (request body) ─────────────────────────────────────────
 
 export const TariffCreateSchema = z.object({
+  // GH #357: diff key on service update — known id → row updated in place,
+  // no id → new row. Absent on pure create.
+  id: z.string().optional(),
   title: z.string(),
   description: z.string().optional().default(''),
   price: z.number().min(0),

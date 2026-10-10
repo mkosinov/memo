@@ -244,7 +244,7 @@ The `Expected?` column marks the relations whose ids a **deferred** commit carri
 
 | Сервис | Override | Тесты |
 |--------|----------|-------|
-| `ServiceService` | `tag_ids` — hard-replace; `tariffs` — пересоздаются | `test_api_services.py` |
+| `ServiceService` | `tag_ids` — hard-replace; `tariffs` — id-diff (GH #357: UPDATE по id, INSERT без id, DELETE отсутствующих, чужой/дублирующий id → 422) | `test_api_services.py` |
 | `PhotoService` | `tag_ids` — hard-replace | `test_api_photos.py` |
 | `RecordService` | `visits`/`seats`/`status` — пересчитываются автоматически | `test_api_records.py` |
 

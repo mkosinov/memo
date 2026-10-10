@@ -30,6 +30,49 @@ async def test_service_service_list_paginated(db_session):
     assert hasattr(result.items[0], "tags")
 
 
+# ─── GH #357 Task 2: the tariff diff must tolerate duplicate ids ──────────
+
+
+async def test_patch_duplicate_tariff_ids_do_not_blow_up_diff(db_session):
+    """Duplicate tariff ids are a schema-level 422 (Task 1), so the diff
+    never sees them via the API. If one nonetheless reaches the service
+    (validation bypassed — ``model_construct`` here), the id-keyed diff
+    degrades gracefully: the same row is updated twice, last row wins,
+    no crash, no duplicate insert.
+    """
+    from src.models.tariff import Tariff
+    from src.schemas.service import ServicePatch, TariffUpdate
+
+    service = Service(
+        title="S",
+        description="d",
+        image_url="http://x",
+        specialty="s",
+        min_age=5,
+        duration=60,
+        record_info="r",
+    )
+    db_session.add(service)
+    await db_session.flush()
+    tariff = Tariff(service_id=service.id, title="T", price=100)
+    db_session.add(tariff)
+    await db_session.flush()
+
+    # model_construct bypasses the model_validator (duplicates are a
+    # schema-level 422); the diff itself must stay safe.
+    data = ServicePatch.model_construct(
+        tariffs=[
+            TariffUpdate(id=tariff.id, title="First", price=100),
+            TariffUpdate(id=tariff.id, title="Second", price=200),
+        ]
+    )
+    result = await get_service_service().patch(db_session, service.id, data)
+    assert result is not None
+    [row] = result.tariffs
+    assert row.id == tariff.id  # updated in place, not duplicated
+    assert row.title == "Second"  # last write wins
+
+
 # #207 Task 13 Part B3: the ``TestServiceIsActiveContract`` class + its
 # exclusive helpers (``_SERVICE_UPDATE_FIELDS``, ``_seed_service``) were deleted.
 # The class pinned the OLD #178 canonical-PUT contract (``is_active`` required

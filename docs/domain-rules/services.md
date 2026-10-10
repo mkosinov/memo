@@ -21,7 +21,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 ## Tariff (nested)
 | Field | Type | Required | Min | Description |
 |-------|------|----------|-----|-------------|
-| id | string | ❌ | — | Diff key on update (GH #357): known id → same row updated in place; unknown/foreign id → 422; no id → new row. Always present in responses |
+| id | string | ❌ | — | Diff key on update (GH #357): known id → same row updated in place; no id → new row; row absent from the payload → deleted; unknown/foreign id → 422 (row index); duplicate id in one list → 422 (ambiguous diff key, schema-level check). Always present in responses |
 | title | string | ✅ | 1 | Название тарифа |
 | audience | string | ✅ | — | Возрастная группа: `kid` / `adult` / `all` (enum `TariffAudience`, DB NOT NULL, default `all`); UI-подписи строчными: «детский»/«взрослый»/«единый» — GH #284 |
 | description | string | ❌ | — | Описание |
@@ -32,12 +32,12 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 
 ## Invariants
 - Services can be hard-deleted via `DELETE /{id}` with the dependency-resolution mechanism; archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore`. See `_overview.md` → "Hard-delete FK dependency matrix".
-- Tariffs are updated in place by id on Service update (GH #357): matched rows keep their id (UPDATE), id-less rows are INSERTed, rows missing from the payload are DELETEd; deleting a tariff referenced by visits nulls `visits.tariff_id` (the visit row and its price snapshot survive)
+- Tariffs are updated in place by id on Service update (GH #357): matched rows keep their id (UPDATE), id-less rows are INSERTed, rows missing from the payload are DELETEd, unknown/foreign id → 422; deleting a tariff referenced by visits nulls `visits.tariff_id` (the visit row and its price snapshot survive)
 
 ## Business Logic
 
 ### Backend
-- **Tariffs:** Managed atomically with Service (one transaction). Update = id-keyed diff (GH #357): known id → UPDATE in place; no id → INSERT; unknown/foreign id → 422; missing from payload → DELETE (referencing visits get `tariff_id` nulled via FK SET NULL). Absent `tariffs` field: PUT = clear all (full replace, as before), PATCH = preserve. Empty list `[]` is legal (service without tariffs, same as create).
+- **Tariffs:** Managed atomically with Service (one transaction). Update = id-keyed diff (GH #357): known id → UPDATE in place; no id → INSERT; unknown/foreign id → 422 with row index; duplicate id in one list → 422 (schema-level check, ambiguous diff key); missing from payload → DELETE (referencing visits get `tariff_id` nulled via FK SET NULL). Absent `tariffs` field: PUT = clear all (full replace, as before), PATCH absent/null = preserve. Empty list `[]` is legal (service without tariffs, same as create).
 - **Tariff audience (GH #284):** classifies who the price is for. NO uniqueness or service-shape validation — several `kid` (or `adult`) tariffs on one service are legal (e.g. same age group split by a second axis: canvas size). One-time migration backfill by exact case-insensitive title match: «детский» → `kid`, «взрослый» → `adult`, everything else (incl. «единый») → `all`.
 - **Tags:** Same pattern — DELETE all links → INSERT new.
 - **Materials (GH #223, landed):** same hard-replace pattern, but each link carries `note: Text NULL`; ids are pre-validated (unknown material_id → 422) — deliberate deviation from tags (which rely on the DB FK violation). `ServiceResponse.materials` = `[{id, title, description, note}]` ordered `title ASC, id ASC`.
@@ -57,7 +57,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | GET | /api/v1/services/{id} | Get with tariffs |
 | POST | /api/v1/services | Create with tariffs |
 | PUT | /api/v1/services/{id} | Full update (tariffs replaced via id-keyed diff — GH #357; absent field = clear all) |
-| PATCH | /api/v1/services/{id} | Partial update (tariffs id-diff when sent, preserved when absent — GH #357; tag_ids hard-replace when sent; materials hard-replace when sent, preserved when absent — GH #223, landed) |
+| PATCH | /api/v1/services/{id} | Partial update (tariffs id-diff when sent, absent/null = untouched — GH #357; tag_ids hard-replace when sent; materials hard-replace when sent, preserved when absent — GH #223, landed) |
 | DELETE | /api/v1/services/{id} | Hard delete with resolutions (no body + 0 deps → 204; no body + deps → 409 dry-run; body `{"resolutions": {...}}` → 204 on success / 422 on invalid) — spec GH #207 |
 | POST | /api/v1/services/{id}/archive | Archive (sets `archived: true`, HTTP 200 with body) — GH #207 |
 | POST | /api/v1/services/{id}/restore | Restore (sets `archived: false`, HTTP 200 with body) — GH #207 |

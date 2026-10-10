@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from src.schemas.service import (
     ServiceCreate,
@@ -111,6 +112,10 @@ _BASE_REQUIRED = {
     "record_info": "info",
 }
 
+# Tariff row payloads (GH #357 Task 1 tests).
+_TARIFF_A = {"title": "Детский", "price": 1000}
+_TARIFF_B = {"title": "Взрослый", "price": 1500}
+
 
 class TestServiceMaterialLinkInSchema:
     """``ServiceMaterialLinkIn`` + ``materials`` field on write schemas (GH #223 Task 4, spec §4)."""
@@ -153,3 +158,75 @@ class TestServiceMaterialLinkInSchema:
         patch = ServicePatch(materials=[])
         assert patch.materials == []
         assert "materials" in patch.model_fields_set
+
+
+class TestTariffUpdateIdSchema:
+    """``TariffUpdate.id`` — the tariff diff key (GH #357 Task 1, spec §«Технические изменения» п.1).
+
+    Update verbs (``ServiceUpdate`` for PUT, ``ServicePatch`` for PATCH)
+    accept an optional per-row ``id``; a repeated ``id`` in one list is an
+    ambiguous diff key → pydantic ``ValueError`` → 422 VALIDATION_ERROR
+    naming the offending row index. ``ServiceCreate`` stays on
+    ``TariffCreate`` — an ``id`` sent at creation is not accepted into
+    the parsed model.
+    """
+
+    @pytest.mark.pure_unit
+    def test_update_accepts_tariff_id(self) -> None:
+        upd = ServiceUpdate(
+            **_BASE_REQUIRED, tariffs=[dict(_TARIFF_A, id="t-1")]
+        )
+        assert upd.tariffs[0].id == "t-1"
+
+    @pytest.mark.pure_unit
+    def test_update_tariff_id_defaults_to_none(self) -> None:
+        """A row without ``id`` = INSERT (new row) — the key is optional."""
+        upd = ServiceUpdate(**_BASE_REQUIRED, tariffs=[_TARIFF_A])
+        assert upd.tariffs[0].id is None
+
+    @pytest.mark.pure_unit
+    def test_patch_accepts_tariff_id(self) -> None:
+        patch = ServicePatch(tariffs=[dict(_TARIFF_A, id="t-1")])
+        assert patch.tariffs is not None
+        assert patch.tariffs[0].id == "t-1"
+
+    @pytest.mark.pure_unit
+    def test_update_rejects_duplicate_tariff_id_naming_row_index(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            ServiceUpdate(**_BASE_REQUIRED, tariffs=[
+                dict(_TARIFF_A, id="t-1"),
+                dict(_TARIFF_B, id="t-2"),
+                dict(_TARIFF_B, id="t-1"),
+            ])
+        message = str(exc_info.value)
+        assert "tariffs[2]" in message
+        assert "t-1" in message
+
+    @pytest.mark.pure_unit
+    def test_patch_rejects_duplicate_tariff_id_naming_row_index(self) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            ServicePatch(tariffs=[
+                dict(_TARIFF_A, id="t-1"),
+                dict(_TARIFF_B, id="t-1"),
+            ])
+        message = str(exc_info.value)
+        assert "tariffs[1]" in message
+        assert "t-1" in message
+
+    @pytest.mark.pure_unit
+    def test_update_allows_two_rows_without_id(self) -> None:
+        """Two id-less rows are two INSERTs — no uniqueness among None."""
+        upd = ServiceUpdate(
+            **_BASE_REQUIRED, tariffs=[_TARIFF_A, _TARIFF_B]
+        )
+        assert [t.id for t in upd.tariffs] == [None, None]
+
+    @pytest.mark.pure_unit
+    def test_create_does_not_accept_tariff_id(self) -> None:
+        """``ServiceCreate`` stays on ``TariffCreate`` — a stray ``id`` is
+        not part of the parsed model (identifier is not accepted at creation)."""
+        svc = ServiceCreate(
+            **_BASE_REQUIRED, tariffs=[dict(_TARIFF_A, id="t-1")]
+        )
+        assert "id" not in svc.tariffs[0].model_dump()
+        assert svc.tariffs[0].title == "Детский"

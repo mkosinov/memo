@@ -415,6 +415,58 @@ describe('ServiceModal — tariff audience select (GH #284)', () => {
   });
 });
 
+// ─── GH #357: prefilled tariff ids survive the submit payload ───────────────
+
+describe('ServiceModal — prefilled tariff ids survive submit (GH #357)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('submit with prefilled tariffs sends them with their original ids (nested-list rebuild does not strip id)', async () => {
+    const { onSubmit } = renderModal({
+      service: {
+        ...NULL_AGE_SERVICE,
+        tariffs: [
+          { id: 't-1', service_id: 'svc-null', title: 'Базовый', description: null, price: 2000, audience: 'all' },
+          { id: 't-2', service_id: 'svc-null', title: 'Взрослый', description: null, price: 3000, audience: 'adult' },
+        ],
+      },
+    });
+
+    // Editing a tariff field forces the NestedList updateItem rebuild of the
+    // whole items array — the path where a naive rebuild could drop extra
+    // keys (id, service_id) that no item-field input owns.
+    changeValue(inputByLabel(/^Цена/), '2500');
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    const tariffs = payload.tariffs as Record<string, unknown>[];
+    // The wire keeps the original ids — the backend diffs tariffs by id
+    // (GH #357); stripped ids would delete+recreate every tariff on save.
+    expect(tariffs.map((t) => t.id)).toEqual(['t-1', 't-2']);
+    // The edit landed alongside the retained ids.
+    expect(tariffs[0].price).toBe(2500);
+    expect(tariffs[1].price).toBe(3000);
+  });
+
+  it('submit without touching the tariffs also keeps their ids', async () => {
+    const { onSubmit } = renderModal();
+
+    clickSave();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    const tariffs = payload.tariffs as Record<string, unknown>[];
+    expect(tariffs.map((t) => t.id)).toEqual(['t-1']);
+  });
+});
+
 // ─── Submit normalization: '' → null ONLY for max_age ───────────────────────
 
 describe('ServiceModal — submit normalization (GH #203 §2 п.3)', () => {

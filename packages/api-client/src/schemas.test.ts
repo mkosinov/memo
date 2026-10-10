@@ -1610,6 +1610,19 @@ describe('TariffCreateSchema', () => {
     const data = { title: 'Стандарт', price: 2000, audience: 'senior' };
     expect(() => TariffCreateSchema.parse(data)).toThrow();
   });
+
+  // ─── GH #357: optional tariff id on the write shape (diff key on update) ───
+
+  it('preserves id through parse so it reaches the request', () => {
+    const data = { ...validTariffCreate, id: 'tariff-42' };
+    const result = TariffCreateSchema.parse(data);
+    expect(result.id).toBe('tariff-42');
+  });
+
+  it('still parses without id (create flow) and leaves it undefined', () => {
+    const result = TariffCreateSchema.parse(validTariffCreate);
+    expect(result.id).toBeUndefined();
+  });
 });
 
 // ─── ServiceCreateSchema ─────────────────────────────────────────────────

@@ -86,7 +86,7 @@ async function fetchServiceTariffs(
 /** A tariff with a price different from the seeded visit's (kid-audience
  *  preferred — the tariff a re-pick by age would substitute, GH #284). */
 function pickTariffApartFrom(
-  tariffs: Array<{ id: string; price: number; audience?: string }>,
+  tariffs: Array<{ id: string; title: string; price: number; audience?: string }>,
   price: number,
 ): { id: string; title: string; price: number; audience?: string } {
   const alt =
@@ -100,17 +100,27 @@ function pickTariffApartFrom(
 }
 
 /**
- * openRecordTab with navigation hardening: the shared helper's INTERNAL grid
- * wait caps at 10s (fixtures/helpers.ts gotoScheduleWeek), and a loaded
- * standalone box bursts past it before the scenario has even started (observed
- * bursts: load 10-15). A retry re-runs the whole navigation — its page.goto
- * resets any half-open modal — and never touches the scenario semantics.
+ * openRecordTab with navigation + data-landing hardening. The shared helper
+ * waits for the visits-table WRAPPER, which renders even when the record
+ * detail query has not landed yet (empty shell: «Нет посетителей»,
+ * «Invalid Date») — and its INTERNAL grid wait caps at 10s, which a loaded
+ * standalone box bursts past. A retry re-runs the whole navigation — its
+ * page.goto resets any half-open modal and re-queries — and never touches
+ * the scenario semantics. Returns the visit ROW locator, data-verified.
  */
-async function openRecordTabRobust(page: Page, recordId: string, attempts = 3): Promise<void> {
+async function openRecordTabWithRow(
+  page: Page,
+  recordId: string,
+  visitId: string,
+  attempts = 3,
+): Promise<ReturnType<Page['locator']>> {
+  const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      return await openRecordTab(page, recordId);
+      await openRecordTab(page, recordId);
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      return row;
     } catch (err) {
       lastError = err;
     }
@@ -148,9 +158,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
       // scenarios need the 60s test budget for the holds and the retries).
       await holdVisitPatchResponses(page, (body) => 'visitor_id' in body);
 
-      await openRecordTabRobust(page, record.id);
-      const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
-      await expect(row).toBeVisible({ timeout: 10_000 });
+      const row = await openRecordTabWithRow(page, record.id, visitId);
       const nameInput = row.locator('input:not([type="number"])').first();
       const priceInput = row.locator('input[type="number"]');
       const summary = page.locator('[data-testid="record-summary"]');
@@ -231,9 +239,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
       // Hold ONLY the status-carrying PATCH; the tariff PATCH passes freely.
       await holdVisitPatchResponses(page, (body) => 'status' in body);
 
-      await openRecordTabRobust(page, record.id);
-      const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
-      await expect(row).toBeVisible({ timeout: 10_000 });
+      const row = await openRecordTabWithRow(page, record.id, visitId);
 
       // ACTION 1 — tariff pick → its PATCH response lands immediately.
       const tariffPatchLanded = page.waitForResponse(
@@ -304,9 +310,7 @@ test.describe('Visits PATCH cache consistency — controlled response order (GH 
         return priceEdits === 1;
       });
 
-      await openRecordTabRobust(page, record.id);
-      const row = page.locator(`[data-testid="visit-row-${visitId}"]`);
-      await expect(row).toBeVisible({ timeout: 10_000 });
+      const row = await openRecordTabWithRow(page, record.id, visitId);
       const priceInput = row.locator('input[type="number"]');
       await expect(priceInput).toHaveValue('1000');
 

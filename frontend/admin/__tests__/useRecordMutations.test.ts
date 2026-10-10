@@ -56,9 +56,15 @@ import {
   createVisit,
   patchVisit,
   deleteVisit,
+  updateVisitStatus,
 } from '@memo/api-client';
 import { useRecordMutations } from '../hooks/useRecordMutations';
-import type { PaginatedResponse, RecordResponse, PaymentResponse } from '@memo/api-client';
+import type {
+  PaginatedResponse,
+  RecordResponse,
+  PaymentResponse,
+  VisitResponse,
+} from '@memo/api-client';
 
 const mockCreateRecord = vi.mocked(createRecord);
 const mockCreateClient = vi.mocked(createClient);
@@ -75,6 +81,7 @@ const mockDeleteVisitor = vi.mocked(deleteVisitor);
 const mockCreateVisit = vi.mocked(createVisit);
 const mockPatchVisit = vi.mocked(patchVisit);
 const mockDeleteVisit = vi.mocked(deleteVisit);
+const mockUpdateVisitStatus = vi.mocked(updateVisitStatus);
 
 function createQueryClientWrapper() {
   const queryClient = new QueryClient({
@@ -85,6 +92,15 @@ function createQueryClientWrapper() {
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: queryClient }, children),
   };
+}
+
+/** Minimal deferred — lets a test resolve a mocked API promise in chosen order (#359). */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 const activityId = 'a1';
@@ -192,6 +208,7 @@ describe('useRecordMutations', () => {
     mockCreateVisit.mockResolvedValue(mockVisitResponse as never);
     mockPatchVisit.mockResolvedValue(mockVisitResponse as never);
     mockDeleteVisit.mockResolvedValue(undefined as never);
+    mockUpdateVisitStatus.mockResolvedValue(mockVisitResponse as never);
     mockGetRecord.mockResolvedValue(mockRecordResponse as never);
   });
 
@@ -931,7 +948,7 @@ describe('useRecordMutations', () => {
       expect(returned).toEqual(mockVisitResponse);
     });
 
-    it('syncs patched visit into canonical AND list caches via upsertVisit helper', async () => {
+    it('syncs patched visit into canonical AND list caches via the projection helper (#359)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const existingVisit = {
         id: 'visit-1',
@@ -976,6 +993,197 @@ describe('useRecordMutations', () => {
       expect(listCache?.items[0]?.visits[0].price).toBe(4000);
       // r2 untouched
       expect(listCache?.items[1]?.id).toBe('r2');
+    });
+  });
+
+  // ─── #359: per-visit edit counter + apply-guard (spec §Технические изменения п.2) ───
+  // "Побеждает последний выпущенный запрос, а не последний прибывший ответ":
+  // every issued request registers its seq + serialized field set BEFORE the
+  // API call; a response may only project fields no LATER issued request
+  // carries. Projection on success only — the error path is unchanged.
+
+  describe('visit edit counter + response projection guard (#359)', () => {
+    const seededVisit: VisitResponse = {
+      id: 'visit-1',
+      record_id: recordId,
+      visitor_id: 'vis-1',
+      tariff_id: 't1',
+      price: 3500,
+      custom_price: null,
+      status: 'waiting',
+      created_at: '',
+      updated_at: '',
+    };
+
+    /** Seed canonical + main-list caches with the record holding seededVisit. */
+    function seedCanonicalWithVisit(queryClient: QueryClient) {
+      queryClient.setQueryData(['record', recordId], {
+        ...mockRecordResponse,
+        visits: [seededVisit],
+      });
+      queryClient.setQueryData(['records', '2026-06-10', '2026-06-10'], {
+        items: [{ ...mockRecordResponse, visits: [seededVisit] }],
+        total: 1,
+        page: 1,
+        per_page: 10,
+      });
+    }
+
+    it('a same-field response overridden by a LATER issued request is not written', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCanonicalWithVisit(queryClient);
+      const d1 = deferred<VisitResponse>();
+      const d2 = deferred<VisitResponse>();
+      mockPatchVisit
+        .mockImplementationOnce(() => d1.promise)
+        .mockImplementationOnce(() => d2.promise);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let first: Promise<unknown> = Promise.resolve();
+      let second: Promise<unknown> = Promise.resolve();
+      act(() => {
+        first = result.current.patchVisit('visit-1', { price: 4000 });
+        second = result.current.patchVisit('visit-1', { price: 5000 });
+      });
+
+      // Later request answers FIRST — its price lands.
+      await act(async () => {
+        d2.resolve({ ...seededVisit, price: 5000, updated_at: '2026-05-10T12:00:00' });
+        await second;
+      });
+      expect(
+        queryClient.getQueryData<RecordResponse>(['record', recordId])?.visits[0].price,
+      ).toBe(5000);
+
+      // Early request's response arrives LAST — its price must NOT regress.
+      await act(async () => {
+        d1.resolve({ ...seededVisit, price: 4000, updated_at: '2026-05-10T10:00:00' });
+        await first;
+      });
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits[0].price).toBe(5000);
+      // List mirror agrees — the stale response reached no copy.
+      const listCache = queryClient.getQueryData<PaginatedResponse<RecordResponse>>([
+        'records',
+        '2026-06-10',
+        '2026-06-10',
+      ]);
+      expect(listCache?.items[0]?.visits[0].price).toBe(5000);
+    });
+
+    it('a late response of an early request for ANOTHER field still writes its own field', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCanonicalWithVisit(queryClient);
+      const d1 = deferred<VisitResponse>();
+      const d2 = deferred<VisitResponse>();
+      mockPatchVisit
+        .mockImplementationOnce(() => d1.promise)
+        .mockImplementationOnce(() => d2.promise);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let first: Promise<unknown> = Promise.resolve();
+      let second: Promise<unknown> = Promise.resolve();
+      act(() => {
+        first = result.current.patchVisit('visit-1', { tariff_id: 't2' }); // issued first
+        second = result.current.patchVisit('visit-1', { price: 5000 }); // issued second
+      });
+
+      // price lands from the newer request.
+      await act(async () => {
+        d2.resolve({ ...seededVisit, price: 5000, updated_at: '2026-05-10T12:00:00' });
+        await second;
+      });
+      // tariff answer arrives LAST, carrying a stale price column — its OWN
+      // field must still be written, the foreign column must not.
+      await act(async () => {
+        d1.resolve({ ...seededVisit, tariff_id: 't2', updated_at: '2026-05-10T10:00:00' });
+        await first;
+      });
+
+      const canonical = queryClient.getQueryData<RecordResponse>(['record', recordId]);
+      expect(canonical?.visits[0].tariff_id).toBe('t2');
+      expect(canonical?.visits[0].price).toBe(5000);
+    });
+
+    it('projects ONLY the body fields — other response columns do not clobber the cache', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCanonicalWithVisit(queryClient);
+      mockPatchVisit.mockResolvedValue({
+        ...seededVisit,
+        price: 4000,
+        custom_price: 500, // NOT in the body → must NOT be written
+        status: 'visited', // NOT in the body → must NOT be written
+        updated_at: '2026-05-10T12:00:00',
+      } as never);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.patchVisit('visit-1', { price: 4000 });
+      });
+
+      const visit = queryClient.getQueryData<RecordResponse>(['record', recordId])?.visits[0];
+      expect(visit?.price).toBe(4000);
+      expect(visit?.custom_price).toBeNull();
+      expect(visit?.status).toBe('waiting');
+      expect(visit?.updated_at).toBe('2026-05-10T12:00:00'); // implicit, always applied
+    });
+
+    it('updateVisitStatus projects its status field and KEEPS the invalidation', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCanonicalWithVisit(queryClient);
+      mockUpdateVisitStatus.mockResolvedValue({
+        ...seededVisit,
+        status: 'visited',
+        custom_price: 999, // foreign column — must NOT be written
+      } as never);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.updateVisitStatus('visit-1', 'visited');
+      });
+
+      const visit = queryClient.getQueryData<RecordResponse>(['record', recordId])?.visits[0];
+      expect(visit?.status).toBe('visited');
+      expect(visit?.custom_price).toBeNull();
+      // The invalidation stays (spec п.2 — ради статуса родительской записи).
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['record', recordId] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['records'] });
+    });
+
+    it('a later updateVisitStatus blocks an earlier patchVisit(status) late response (shared ledger)', async () => {
+      const { queryClient, wrapper } = createQueryClientWrapper();
+      seedCanonicalWithVisit(queryClient);
+      const d1 = deferred<VisitResponse>();
+      const d2 = deferred<VisitResponse>();
+      mockPatchVisit.mockImplementationOnce(() => d1.promise);
+      mockUpdateVisitStatus.mockImplementationOnce(() => d2.promise);
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      let first: Promise<unknown> = Promise.resolve();
+      let second: Promise<unknown> = Promise.resolve();
+      act(() => {
+        first = result.current.patchVisit('visit-1', { status: 'visited' }); // issued first
+        second = result.current.updateVisitStatus('visit-1', 'missed'); // issued second
+      });
+
+      // The status mutation answers FIRST — its status lands.
+      await act(async () => {
+        d2.resolve({ ...seededVisit, status: 'missed', updated_at: '2026-05-10T12:00:00' });
+        await second;
+      });
+      expect(
+        queryClient.getQueryData<RecordResponse>(['record', recordId])?.visits[0].status,
+      ).toBe('missed');
+
+      // The older field PATCH answers LAST — its status must NOT regress.
+      await act(async () => {
+        d1.resolve({ ...seededVisit, status: 'visited', updated_at: '2026-05-10T10:00:00' });
+        await first;
+      });
+      expect(
+        queryClient.getQueryData<RecordResponse>(['record', recordId])?.visits[0].status,
+      ).toBe('missed');
     });
   });
 
@@ -1094,7 +1302,7 @@ describe('useRecordMutations', () => {
       );
     });
 
-    it('patchVisit uses upsertVisit helper (canonical + list keys)', async () => {
+    it('patchVisit uses the projection helper — canonical + list keys (#359)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
       const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
       const setQueriesDataSpy = vi.spyOn(queryClient, 'setQueriesData');
@@ -1697,12 +1905,18 @@ describe('useRecordMutations', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['visitors', 'c1'] });
     });
 
-    it('syncs the patched visit into the canonical cache via upsertVisit', async () => {
+    it('syncs the patched visit into the canonical cache via the projection helper (#359)', async () => {
       const { queryClient, wrapper } = createQueryClientWrapper();
-      queryClient.setQueryData(['record', recordId], {
+      // Both the seeded cache AND the mocked getRecord (fetched fresh by the
+      // conversion flow) must hold the anonymous visit — the server record
+      // contains it. #359 forbids zombie-inserting a visit missing from the
+      // cache, so a visits:[] getRecord mock would (correctly) no-op.
+      const recordWithAnonVisit = {
         ...mockRecordResponse,
         visits: [mockAnonymousVisitResponse],
-      });
+      };
+      queryClient.setQueryData(['record', recordId], recordWithAnonVisit);
+      mockGetRecord.mockResolvedValue(recordWithAnonVisit as never);
       // The backend returns the visit with the visitor bound.
       mockPatchVisit.mockResolvedValue({ ...mockAnonymousVisitResponse, visitor_id: 'vis-new' } as never);
       const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });

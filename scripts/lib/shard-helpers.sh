@@ -364,20 +364,25 @@ cleanup_shards() {
   # EMPTY tag → маски в точности как до #317: `test_memo_shard*.db` +
   # `test_files_shard*` (canon.sql и каталоги сборки не трогаются), лиз-файлы
   # не трогаются (нетега нет и лиза нет).
+  # Fix B (smoke run3): каждый rm хвоста вооружён `2>/dev/null || true` —
+  # под set -e callers ОДИН неудачный rm (например, «Directory not empty»
+  # от гонки с выжившим next-server, который пересоздаёт файлы) обрывал
+  # уборщик ДО удаления лиза. Идиома — как у file-хвоста sweep_dead_runs;
+  # лиз удаляется ПОСЛЕДНИМ и всегда. Happy path не меняется.
   local e
   if [ -n "$tag" ]; then
-    rm -f  "$ROOT"/backend/test_memo_shard*_"$tag"*
-    rm -rf "$ROOT"/backend/test_files_shard*_"$tag"
-    rm -rf "$ROOT"/frontend/admin/.next-shard-*_"$tag"
+    rm -f  "$ROOT"/backend/test_memo_shard*_"$tag"* 2>/dev/null || true
+    rm -rf "$ROOT"/backend/test_files_shard*_"$tag" 2>/dev/null || true
+    rm -rf "$ROOT"/frontend/admin/.next-shard-*_"$tag" 2>/dev/null || true
     if _legacy_ports_free; then
       shopt -s nullglob
       for e in "$ROOT"/backend/test_memo_shard*.db; do
         [ -z "$(_tag_of_entry "${e##*/}")" ] || continue   # tagged — not ours to remove
-        rm -f "$e"
+        rm -f "$e" 2>/dev/null || true
       done
       for e in "$ROOT"/backend/test_files_shard*; do
         [ -z "$(_tag_of_entry "${e##*/}")" ] || continue
-        rm -rf "$e"
+        rm -rf "$e" 2>/dev/null || true
       done
       shopt -u nullglob
     else
@@ -385,13 +390,13 @@ cleanup_shards() {
     fi
     # Свой лиз (guard по presence: лиз есть только после успешного
     # write_run_lease — двойные уборки и до-лизные вызовы no-op; чужие
-    # лизы — никогда, US-6).
+    # лизы — никогда, US-6). ПОСЛЕДНИЙ шаг хвоста — выполняется всегда.
     if [ -e "${SHARD_RUNS_DIR}/${tag}.run" ]; then
       remove_run_lease "$tag"
     fi
   else
-    rm -f "$ROOT"/backend/test_memo_shard*.db
-    rm -rf "$ROOT"/backend/test_files_shard*
+    rm -f "$ROOT"/backend/test_memo_shard*.db 2>/dev/null || true
+    rm -rf "$ROOT"/backend/test_files_shard* 2>/dev/null || true
   fi
 
   return 0

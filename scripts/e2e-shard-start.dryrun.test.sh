@@ -75,6 +75,10 @@
 #   → Case 10 (Task 8): SHARD_RUN_TAG SET to the EMPTY string → fully
 #     legacy names/wipe, no lease.
 #   → Case 11 (Task 8): tagged SHARD_ID=2 → tagged shard-2 names + lease.
+#   → Case 12 (Fix A): SHARD_MANAGED_STACK=1 (set by test-all.sh around
+#     BOTH shard stacks it starts) → the orchestrator owns the tag's
+#     4-port lease: the managed stack writes NO lease and removes NONE on
+#     exit; a pre-existing orchestrator lease survives byte-intact.
 #
 # ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
 # Every cell carries a LIVE, EXACT assertion (case numbers refer to the
@@ -104,6 +108,15 @@
 #   note B: write_run_lease failure is fatal BEFORE any server starts, so
 #   reaching next dev (positive control) + the "Run lease:" log line prove
 #   the write; the 8-field content/pid checks are id-independent (Case 7).
+#
+#   Managed-stack overlay (Fix A, #317 §3.3 lease ownership): with
+#   SHARD_MANAGED_STACK=1 + a valid tag (how test-all.sh starts BOTH
+#   shards) the lease is the ORCHESTRATOR's — Case 12: no lease written
+#   while alive, none removed after (nothing existed), a pre-existing
+#   4-port orchestrator lease SURVIVES byte-intact; tagged names/exports
+#   unchanged (NEXT_DIST_DIR pinned). Flag absent → manual mode,
+#   byte-identical (Cases 7/11 pin the manual lease lifecycle).
+#
 #   Exports NOT separately journaled, justified: SHARD_ID — lands inside
 #   the asserted names (both ids pinned in both modes); DATABASE_URL /
 #   BACKEND_PORT — pre-#317 surface, pinned via the uv stub + wipe log
@@ -914,6 +927,162 @@ fi
 assert_reached_next_dev "$CASE11_DIR/journal" "Case 11 (positive control)" || FAIL=1
 assert_no_default_next_rm "$CASE11_DIR/journal" "Case 11 (S5)" || FAIL=1
 assert_fixture_intact "Case 11 (S5)" || FAIL=1
+
+# ── Case 12 (Fix A, #317 §3.3): SHARD_MANAGED_STACK=1 → the lease is the ────
+# orchestrator's — a managed stack neither writes nor removes it. test-all.sh
+# writes the 4-port lease for ITS tag, then starts both e2e-shard-start.sh
+# stacks with SHARD_MANAGED_STACK=1; a managed stack writing its own 2-port
+# lease would CLOBBER the orchestrator's (last-writer-wins) and shrink
+# concurrent-run busy-protection from 4 ports to 2, and its exit trap must
+# not remove the orchestrator's lease either. Two runs:
+#   (a) NO pre-existing lease: while the stack is alive PAST the legacy
+#       write point (poll the journal to the pnpm call site — the pre-fix
+#       lease write is strictly BEFORE it, so absence there is decisive,
+#       not timing luck) no lease file exists; after exit the runs dir is
+#       still empty (nothing was created, nothing needed removing);
+#   (b) a pre-existing ORCHESTRATOR lease for the tag (4 real ports, this
+#       harness's alive pid): byte-intact through the whole lifecycle —
+#       not clobbered while alive, not removed after exit.
+# Manual mode (flag absent) stays byte-identical — Cases 7/11 pin it; the
+# tagged NEXT_DIST_DIR grep in (a) pins that managed mode changes ONLY the
+# lease lifecycle, never the resource naming.
+CASE12_DIR="$WORK/case12"; mkdir -p "$CASE12_DIR"
+CASE12_TAG=dec0de
+CASE12_LEASE="$RUNS_DIR/${CASE12_TAG}.run"
+CASE12_DB="$CASE12_DIR/test_memo_shard1.db"
+printf 'seed' > "$CASE12_DB"
+
+set +e
+SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
+  TEST_DB_PATH="$CASE12_DB" \
+  BACKEND_URL=http://127.0.0.1:8001 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+  SHARD_RUN_TAG="$CASE12_TAG" \
+  SHARD_MANAGED_STACK=1 \
+  SHARD_DRYRUN_JOURNAL="$CASE12_DIR/journal" \
+  SHARD_DRYRUN_HOLD_S=3 \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" > "$CASE12_DIR/run-a.log" 2>&1 &
+CASE12A_PID=$!
+set -e
+
+# Deterministic "past the legacy write point": poll the journal until the
+# pnpm call site fires (or the run dies — then every absence assert below
+# would be vacuous, so treat it as a failure).
+CASE12_REACHED=false
+for _i in $(seq 1 50); do
+  if grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE12_DIR/journal" 2>/dev/null; then
+    CASE12_REACHED=true
+    break
+  fi
+  if ! kill -0 "$CASE12A_PID" 2>/dev/null; then break; fi
+  sleep 0.2
+done
+if [ "$CASE12_REACHED" = true ] && [ ! -e "$CASE12_LEASE" ]; then
+  echo "PASS Case 12 (Fix A): managed stack alive past the write point — no lease file created"
+else
+  echo "FAIL Case 12 (Fix A): reached=$CASE12_REACHED lease=$([ -e "$CASE12_LEASE" ] && echo present || echo absent) — a managed stack must not write a lease"
+  FAIL=1
+fi
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-1_${CASE12_TAG}]" "$CASE12_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 12 (Fix A): tagged build-dir name unchanged in managed mode"
+else
+  echo "FAIL Case 12 (Fix A): expected NEXT_DIST_DIR=[.next-shard-1_${CASE12_TAG}] in the managed run's journal"
+  FAIL=1
+fi
+
+set +e
+wait "$CASE12A_PID"
+CASE12A_RC=$?
+set -e
+echo "── Case 12a log ──"
+cat "$CASE12_DIR/run-a.log"
+echo "── Case 12a journal ──"
+cat "$CASE12_DIR/journal" 2>/dev/null || echo "(empty)"
+echo "─────────────────"
+
+if [ "$CASE12A_RC" -eq 0 ] && [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
+  echo "PASS Case 12 (Fix A): managed run exited 0; runs dir still empty after exit (nothing removed — there was nothing)"
+else
+  echo "FAIL Case 12 (Fix A): rc=$CASE12A_RC; runs dir after exit:"
+  ls -A "$RUNS_DIR" 2>/dev/null || true
+  FAIL=1
+fi
+
+# (b) pre-existing orchestrator lease survives byte-intact (alive + exit).
+CASE12B_TAG=beef00
+CASE12B_LEASE="$RUNS_DIR/${CASE12B_TAG}.run"
+CASE12B_LINE="$(printf '%s %s 31101 31102 31103 31104 %s' "$$" "$CASE12B_TAG" "$(date +%s)")"
+printf '%s\n' "$CASE12B_LINE" > "$CASE12B_LEASE"
+CASE12B_DB="$CASE12_DIR/test_memo_shard1_b.db"
+printf 'seed' > "$CASE12B_DB"
+
+set +e
+SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
+  TEST_DB_PATH="$CASE12B_DB" \
+  BACKEND_URL=http://127.0.0.1:8001 \
+  NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+  SHARD_RUN_TAG="$CASE12B_TAG" \
+  SHARD_MANAGED_STACK=1 \
+  SHARD_DRYRUN_JOURNAL="$CASE12_DIR/journal-b" \
+  SHARD_DRYRUN_HOLD_S=3 \
+  SHARD_RUNS_DIR="$RUNS_DIR" \
+  PATH="$STUBS:$PATH" \
+  bash "$SCRIPT_UNDER_TEST" > "$CASE12_DIR/run-b.log" 2>&1 &
+CASE12B_PID=$!
+set -e
+
+CASE12B_REACHED=false
+for _i in $(seq 1 50); do
+  if grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE12_DIR/journal-b" 2>/dev/null; then
+    CASE12B_REACHED=true
+    break
+  fi
+  if ! kill -0 "$CASE12B_PID" 2>/dev/null; then break; fi
+  sleep 0.2
+done
+if [ "$CASE12B_REACHED" = true ] \
+   && [ "$(cat "$CASE12B_LEASE" 2>/dev/null || true)" = "$CASE12B_LINE" ]; then
+  echo "PASS Case 12 (Fix A): orchestrator lease byte-intact while the managed stack is alive (no clobber)"
+else
+  echo "FAIL Case 12 (Fix A): reached=$CASE12B_REACHED; lease while alive:"
+  cat "$CASE12B_LEASE" 2>/dev/null || echo "(gone)"
+  FAIL=1
+fi
+
+set +e
+wait "$CASE12B_PID"
+CASE12B_RC=$?
+set -e
+echo "── Case 12b log ──"
+cat "$CASE12_DIR/run-b.log"
+echo "── Case 12b journal ──"
+cat "$CASE12_DIR/journal-b" 2>/dev/null || echo "(empty)"
+echo "─────────────────"
+
+if [ "$CASE12B_RC" -eq 0 ]; then
+  echo "PASS Case 12 (Fix A): managed run over a pre-existing lease exited 0"
+else
+  echo "FAIL Case 12 (Fix A): managed run over a pre-existing lease exited $CASE12B_RC (expected 0)"
+  FAIL=1
+fi
+if [ "$(cat "$CASE12B_LEASE" 2>/dev/null || true)" = "$CASE12B_LINE" ]; then
+  echo "PASS Case 12 (Fix A): orchestrator lease SURVIVED the managed stack's exit byte-intact"
+else
+  echo "FAIL Case 12 (Fix A): orchestrator lease was removed/clobbered by the managed stack's exit"
+  FAIL=1
+fi
+CASE12_DIRLIST="$(ls -A "$RUNS_DIR" 2>/dev/null || true)"
+if [ "$CASE12_DIRLIST" = "${CASE12B_TAG}.run" ]; then
+  echo "PASS Case 12 (Fix A): runs dir holds exactly the orchestrator's lease (no new files)"
+else
+  echo "FAIL Case 12 (Fix A): unexpected runs dir content: $CASE12_DIRLIST"
+  FAIL=1
+fi
+assert_reached_next_dev "$CASE12_DIR/journal-b" "Case 12 (positive control)" || FAIL=1
+assert_no_default_next_rm "$CASE12_DIR/journal-b" "Case 12 (S5)" || FAIL=1
+assert_fixture_intact "Case 12 (S5)" || FAIL=1
 
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"

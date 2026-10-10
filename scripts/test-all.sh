@@ -36,6 +36,9 @@ set -euo pipefail
 # Pre-push hook runs in non-TTY context (git push is not interactive).
 export CI=true
 
+# CI runners are UTC; local parity keeps date-sensitive tests deterministic.
+export TZ=UTC
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -382,6 +385,7 @@ for i in $(seq 0 1); do
 
   (
     cd "$ROOT"
+    # Fix A (#317 §3.3): SHARD_MANAGED_STACK=1 — the orchestrator owns the tag's 4-port lease; managed stacks neither write nor remove it.
     SHARD_ID="$SHARD_NUM" \
     SHARD_RUN_TAG="$SHARD_RUN_TAG" \
     SHARD_PORT="$FRONTEND_PORT" \
@@ -389,6 +393,7 @@ for i in $(seq 0 1); do
     TEST_DB_PATH="$ROOT/$SHARD_DB" \
     BACKEND_URL="$BACKEND_URL" \
     NEXT_PUBLIC_API_URL="$BACKEND_URL" \
+    SHARD_MANAGED_STACK=1 \
       bash scripts/e2e-shard-start.sh
   ) > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
 

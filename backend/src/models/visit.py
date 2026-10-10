@@ -19,7 +19,7 @@ class Visit(AbstractModel):
 
     record_id: Mapped[str] = mapped_column(String(36), ForeignKey("records.id"))
     visitor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("visitors.id", ondelete="CASCADE"), nullable=True)
-    tariff_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tariffs.id"), nullable=True)
+    tariff_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tariffs.id", ondelete="SET NULL"), nullable=True)
     price: Mapped[int] = mapped_column(Integer)
     custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20))

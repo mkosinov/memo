@@ -8,9 +8,12 @@
 # library code.
 #
 # Functions read shard ports from the caller's globals (no function
-# arguments — tests override them before sourcing):
-#   SHARD_FRONTEND_PORTS=(3002 3003)
-#   SHARD_BACKEND_PORTS=(8001 8002)
+# arguments — tests override them before sourcing). Since #317 the
+# orchestrator fills them from allocate_shard_ports (dynamic window
+# 28000-32700); they are declared empty before sourcing and filled
+# before the first call that reads them (cleanup_shards — trap-time):
+#   SHARD_FRONTEND_PORTS=("$front1" "$front2")
+#   SHARD_BACKEND_PORTS=("$back1" "$back2")
 #
 # Feature #317 (run tag + dynamic shard ports), spec §3.1/§3.2:
 #   gen_run_tag          — unique 6-hex run tag for the current run (stdout)
@@ -126,41 +129,11 @@ _sweep_masked() {
 }
 
 # ── Kill orphan processes from previous runs ───────────────────────────────
-# Previous pre-push runs may have left Next.js/uvicorn processes on shard
-# ports. Kill them to avoid EADDRINUSE and corrupted state.
-kill_port_orphans() {
-  for port in "${SHARD_FRONTEND_PORTS[@]}" "${SHARD_BACKEND_PORTS[@]}"; do
-    # Find PIDs listening on this port and kill them
-    local pids
-    pids=$(lsof -ti :"$port" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-      echo "    killing orphan processes on port $port: $pids"
-      kill -9 $pids 2>/dev/null || true
-    fi
-  done
-  sleep 2
-
-  # Also kill any orphan shard-stack processes from previous runs (worktrees
-  # etc.). Shard frontends run `next dev -p 3002/3003`; the forked next-server
-  # child loses the port from its cmdline (process title overwrites it with
-  # "next-server (vX)"), so match the parent chain and kill its children.
-  # NEVER `pkill -f "next-server"` — it matches EVERY Next.js dev server,
-  # including the dev stack on :3000/:3001 and unrelated host instances.
-  # ps-args gate: pkill -P fires only for PIDs whose args really contain the
-  # shard mask, so a stray pgrep match (e.g. an editor grep buffer) never
-  # gets its children murdered here.
-  local pid args
-  for pid in $(pgrep -f "next dev -p 300[2-3]" 2>/dev/null || true); do
-    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-    case "$args" in
-      *"next dev -p 300"[2-3]*)
-        pkill -9 -P "$pid" 2>/dev/null || true   # forked next-server child
-        kill -9 "$pid" 2>/dev/null || true       # pnpm wrapper / next dev parent
-        ;;
-    esac
-  done
-  sleep 1
-}
+# Pre-#317 this was kill_port_orphans (unmasked `lsof -ti :PORT | kill -9`
+# on the fixed legacy ports). REMOVED by #317 Task 4: startup cleaning is
+# sweep_dead_runs' business (§3.3) — masked, lease-driven, dynamic ports;
+# the legacy ports 3002/3003/8001/8002 are never occupied or cleaned by
+# a run anymore.
 
 # ── Remove stale shard build dirs (unconditional, fail-fast) ──────────────
 # Each shard compiles into frontend/admin/.next-shard-N (NEXT_DIST_DIR).
@@ -268,6 +241,15 @@ cleanup_shards() {
   rm -f "$ROOT"/backend/test_memo_shard*.db
   # GH #262 — remove per-shard avatar dirs (FILES_DIR), same lifecycle as the DB
   rm -rf "$ROOT"/backend/test_files_shard*
+
+  # #317 Task 4 minimal seam (Task 7 extends cleanup to the full tagged
+  # resource set): remove THIS run's lease on exit, guarded by file
+  # presence — the lease exists only after a successful write_run_lease,
+  # so pre-#317 callers (no SHARD_RUN_TAG) and double cleanups are no-ops.
+  # Foreign leases are never touched (US-6: own trace only).
+  if [ -n "${SHARD_RUN_TAG:-}" ] && [ -e "${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run" ]; then
+    remove_run_lease "$SHARD_RUN_TAG"
+  fi
 
   return 0
 }
@@ -479,8 +461,8 @@ remove_run_lease() {
   return 0
 }
 
-# sweep_dead_runs → старт-чистка (§3.3 «Старт-чистка»; будущая замена
-# kill_port_orphans — переподключение вызывающих сторон в Task 4). Читает
+# sweep_dead_runs → старт-чистка (§3.3 «Старт-чистка»; заменила kill_port_orphans —
+# вызывающая сторона test-all.sh переподключена в #317 Task 4). Читает
 # все ${SHARD_RUNS_DIR}/*.run (разбор строки и правило живости — ОБЩИЕ с
 # audit_orphan_tagged: _read_run_lease + _run_lease_alive, расходящийся
 # парсер запрещён):

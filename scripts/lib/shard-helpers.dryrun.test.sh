@@ -101,6 +101,10 @@
 #     → removed; fresh stamp → kept), no-lease dirs judged by mtime
 #     (touch -t old → removed, fresh → kept); non-dir/hex-invalid run-*
 #     entries untouched.
+#   → Case 16 (#317 Task 4, US-6 seam): cleanup_shards removes the run's
+#     OWN lease (guarded by file presence), never a foreign one; no-tag
+#     caller shape touches no lease at all; kill_port_orphans is GONE
+#     (unmasked port kills banned — startup cleaning is sweep_dead_runs').
 
 set -euo pipefail
 
@@ -1428,6 +1432,70 @@ else
   echo "── Case 15 audit stderr ──"
   cat "$WORK/case15.err" 2>/dev/null || true
   echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 16 (#317 Task 4): cleanup_shards releases the run's own lease ─────
+echo "── Case 16 (#317 Task 4): cleanup removes own lease (presence guard); foreign kept; no-tag inert; kill_port_orphans gone ──"
+fresh_root "case16"
+SHARD_RUNS_DIR="$WORK/lease-runs-case16"
+mkdir -p "$SHARD_RUNS_DIR"
+source_lib
+CASE16_OK=true
+
+OWN16_TAG="1616af"
+FOREIGN16_TAG="f0e1d2"
+
+# (a) foreign lease (valid line, alien pid) — never cleanup's business.
+set +e
+write_run_lease "$FOREIGN16_TAG" 999999 29301 29302 29303 29304 2>/dev/null; W16F_RC=$?
+set -e
+[ "$W16F_RC" -eq 0 ] || CASE16_OK=false
+
+# (b) pre-#317 caller shape (no SHARD_RUN_TAG): cleanup must not touch ANY
+#     lease — the lifecycle belongs to the orchestrator that wrote it.
+set +e
+( unset SHARD_RUN_TAG
+  cleanup_shards ) >/dev/null 2>&1; C16A_RC=$?
+set -e
+[ "$C16A_RC" -eq 0 ] || CASE16_OK=false
+[ -e "$SHARD_RUNS_DIR/$FOREIGN16_TAG.run" ] || CASE16_OK=false
+
+# (c) tagged run shape: own lease exists → removed; foreign lease kept
+#     (US-6: the run's own trace, never a foreign one).
+set +e
+write_run_lease "$OWN16_TAG" $$ 29311 29312 29313 29314 2>/dev/null; W16O_RC=$?
+set -e
+[ "$W16O_RC" -eq 0 ] || CASE16_OK=false
+SHARD_RUN_TAG="$OWN16_TAG"
+set +e
+cleanup_shards >/dev/null 2>&1; C16B_RC=$?
+set -e
+[ "$C16B_RC" -eq 0 ] || CASE16_OK=false
+[ ! -e "$SHARD_RUNS_DIR/$OWN16_TAG.run" ] || CASE16_OK=false
+[ -e "$SHARD_RUNS_DIR/$FOREIGN16_TAG.run" ] || CASE16_OK=false
+
+# (d) own lease already gone (idempotent second cleanup): rc 0, no side
+#     effects on the foreign lease.
+set +e
+cleanup_shards >/dev/null 2>&1; C16C_RC=$?
+set -e
+[ "$C16C_RC" -eq 0 ] || CASE16_OK=false
+[ -e "$SHARD_RUNS_DIR/$FOREIGN16_TAG.run" ] || CASE16_OK=false
+unset SHARD_RUN_TAG
+
+# (e) kill_port_orphans must NOT be defined anymore (Task 4 removal): the
+#     unmasked `lsof -ti :PORT | kill -9` ladder is banned by §3.3 —
+#     startup cleaning is sweep_dead_runs' business (masked, lease-driven).
+if declare -F kill_port_orphans >/dev/null 2>&1; then
+  CASE16_OK=false
+  echo "  (kill_port_orphans is still defined)"
+fi
+
+if $CASE16_OK; then
+  echo "PASS Case 16 (#317 Task 4): own lease removed (guard by file presence); foreign kept; no-tag mode inert; kill_port_orphans absent"
+else
+  echo "FAIL Case 16 (#317 Task 4): write=$W16F_RC/$W16O_RC cleanup_rc=$C16A_RC/$C16B_RC/$C16C_RC own=$([ ! -e "$SHARD_RUNS_DIR/$OWN16_TAG.run" ] && echo gone || echo present) foreign=$([ -e "$SHARD_RUNS_DIR/$FOREIGN16_TAG.run" ] && echo kept || echo gone)"
   FAIL=1
 fi
 

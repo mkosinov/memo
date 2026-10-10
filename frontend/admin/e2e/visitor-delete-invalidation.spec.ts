@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import type { Locator, Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
   cleanup,
   cleanupRecord,
@@ -89,6 +89,67 @@ function cell(row: Locator, idx: number): Locator {
   return row.locator('td').nth(idx);
 }
 
+/** The shared US-1/US-2 setup shape (loosely typed factory payloads). */
+interface DeleteTarget {
+  client: { id: string; name: string };
+  activity: { id: string };
+  record: { id: string };
+  visitor: { id: string };
+  visitorName: string;
+  /** The actor page's visitor row — the × delete surface. */
+  visitorRow: Locator;
+}
+
+/** Shared head of US-1/US-2: the factory chain (a record whose ONLY
+ *  visitor is the delete target, 2 visits 3000 + 3500 → guests 2 / total
+ *  6 500₽, after the delete max(1,0)=1 / 0₽) + DB pre-asserts + the ACTOR
+ *  page's open client card with the visitor row visible. The
+ *  clientCard()/visitorRow() locator pattern of visitors-deferred-delete,
+ *  lifted one level to cover the whole duplicated setup block. */
+async function openCardWithVisitTarget(
+  page: Page,
+  request: APIRequestContext,
+  scenario: 'US-1' | 'US-2',
+): Promise<DeleteTarget> {
+  const client = await createTestClient(request, {
+    name: `${scenario} Клиент ${uid()}`,
+  });
+  const activity = await createTestActivity(request);
+  const record = await createTestRecord(request, activity.id, client.id, {
+    visits: [],
+  });
+  const visitorName = `${scenario} Посетитель ${uid()}`;
+  const visitor = await createTestVisitor(request, client.id, {
+    name: visitorName,
+  });
+  await createTestVisit(request, record.id, visitor.id, { price: 3000 });
+  await createTestVisit(request, record.id, visitor.id, { price: 3500 });
+  expect(
+    queryDBRows(`SELECT id FROM visits WHERE visitor_id='${visitor.id}'`),
+  ).toHaveLength(2);
+  expect(
+    queryDBRow(`SELECT seats FROM records WHERE id='${record.id}'`),
+  ).toMatchObject({ seats: 2 });
+
+  // ACTOR page first (heavy navigation) — the observer page is created by
+  // the caller BEFORE this call but navigates LAST, so its cache stays
+  // young when the delete commits.
+  await waitForClientsReady(page, { waitForName: client.name });
+  await page
+    .locator('table tbody tr')
+    .filter({ hasText: client.name })
+    .click();
+  await expect(
+    page.locator('[data-testid="client-card-modal"]'),
+  ).toBeVisible({ timeout: 10_000 });
+  const visitorRow = page
+    .locator('[data-testid="visitor-row"]')
+    .filter({ hasText: visitorName });
+  await expect(visitorRow).toBeVisible({ timeout: 10_000 });
+
+  return { client, activity, record, visitor, visitorName, visitorRow };
+}
+
 test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US-3)', () => {
   // Two pages of one context + the client-card flow + push windows. On a
   // loaded box (sibling worktree stacks) the first-hit dev compilation of
@@ -101,11 +162,13 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
   // /clients//records compile outruns it — the first test then dies inside
   // waitForClientsReady's fixed 60s waitForResponse (observed: US-1/US-2
   // red, US-3 green once the routes were warm). Warming here decouples the
-  // spec from cold-cache compile latency; it touches no data.
+  // spec from cold-cache compile latency; it touches no data. Each fetch
+  // is capped at 110s so BOTH fit the hook's inherited 240s budget — a
+  // timeout here must not kill the file it exists to protect.
   test.beforeAll(async () => {
     const base = `http://127.0.0.1:${process.env.SHARD_PORT || '3002'}`;
     for (const route of ['/clients', '/records']) {
-      await fetch(`${base}${route}`, { signal: AbortSignal.timeout(150_000) }).catch(
+      await fetch(`${base}${route}`, { signal: AbortSignal.timeout(110_000) }).catch(
         () => {},
       );
     }
@@ -117,46 +180,12 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
     page,
     request,
   }) => {
-    // 1. SETUP — a record whose ONLY visitor is the delete target:
-    // 2 visits (3000 + 3500) → guests 2, total 6 500₽ → after the delete
-    // the honest recompute lands at max(1,0)=1 guests and 0₽.
-    const client = await createTestClient(request, {
-      name: `US-1 Клиент ${uid()}`,
-    });
-    const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id, {
-      visits: [],
-    });
-    const visitorName = `US-1 Посетитель ${uid()}`;
-    const visitor = await createTestVisitor(request, client.id, {
-      name: visitorName,
-    });
-    await createTestVisit(request, record.id, visitor.id, { price: 3000 });
-    await createTestVisit(request, record.id, visitor.id, { price: 3500 });
-    expect(
-      queryDBRows(`SELECT id FROM visits WHERE visitor_id='${visitor.id}'`),
-    ).toHaveLength(2);
-    expect(
-      queryDBRow(`SELECT seats FROM records WHERE id='${record.id}'`),
-    ).toMatchObject({ seats: 2 });
-
+    // 1. SETUP + ACTOR — the shared US-1/US-2 head (factories, DB
+    // pre-asserts, the open client card with the visitor row).
     const observer = await page.context().newPage();
+    const { client, activity, record, visitor, visitorRow } =
+      await openCardWithVisitTarget(page, request, 'US-1');
     try {
-      // ACTOR page first (heavy navigation), observer LAST — its records
-      // fetch stays young when the delete commits.
-      await waitForClientsReady(page, { waitForName: client.name });
-      await page
-        .locator('table tbody tr')
-        .filter({ hasText: client.name })
-        .click();
-      await expect(
-        page.locator('[data-testid="client-card-modal"]'),
-      ).toBeVisible({ timeout: 10_000 });
-      const visitorRow = page
-        .locator('[data-testid="visitor-row"]')
-        .filter({ hasText: visitorName });
-      await expect(visitorRow).toBeVisible({ timeout: 10_000 });
-
       // OBSERVER PRE-STATE — the open «Записи» table shows the seats.
       await waitForRecordsReady(observer);
       const row = observer
@@ -233,41 +262,12 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
     page,
     request,
   }) => {
-    // 1. SETUP — same shape as US-1: the client's single record holds the
-    // target visitor's 2 visits.
-    const client = await createTestClient(request, {
-      name: `US-2 Клиент ${uid()}`,
-    });
-    const activity = await createTestActivity(request);
-    const record = await createTestRecord(request, activity.id, client.id, {
-      visits: [],
-    });
-    const visitorName = `US-2 Посетитель ${uid()}`;
-    const visitor = await createTestVisitor(request, client.id, {
-      name: visitorName,
-    });
-    await createTestVisit(request, record.id, visitor.id, { price: 3000 });
-    await createTestVisit(request, record.id, visitor.id, { price: 3500 });
-    expect(
-      queryDBRows(`SELECT id FROM visits WHERE visitor_id='${visitor.id}'`),
-    ).toHaveLength(2);
-
+    // 1. SETUP + ACTOR — the shared US-1/US-2 head (same shape: the
+    // client's single record holds the target visitor's 2 visits).
     const observer = await page.context().newPage();
+    const { client, activity, record, visitor, visitorRow } =
+      await openCardWithVisitTarget(page, request, 'US-2');
     try {
-      // ACTOR page — the client card with the visitor row.
-      await waitForClientsReady(page, { waitForName: client.name });
-      await page
-        .locator('table tbody tr')
-        .filter({ hasText: client.name })
-        .click();
-      await expect(
-        page.locator('[data-testid="client-card-modal"]'),
-      ).toBeVisible({ timeout: 10_000 });
-      const visitorRow = page
-        .locator('[data-testid="visitor-row"]')
-        .filter({ hasText: visitorName });
-      await expect(visitorRow).toBeVisible({ timeout: 10_000 });
-
       // OBSERVER PRE-STATE — the client card open ON the records tab
       // (records-side ClientQuickCard): the «Гостей» stat and the record
       // price are visit-derived.
@@ -288,7 +288,9 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
       );
       await expect(historyPrice).toHaveText(priceRe(6500));
 
-      // 2. ACTION — the §9.3 dialog delete on the actor page.
+      // 2. ACTION — the §9.3 dialog delete on the actor page (US-1 keeps
+      // the inline checkbox+confirm for its disabled-button contract;
+      // here the shared confirmDeleteDialog helper suffices).
       const commitWait = commitDeleteWait(page, '/api/v1/visitors', visitor.id);
       await withUndoWindow(page, async () => {
         await visitorRow
@@ -299,10 +301,7 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
         await expect(
           page.locator('[data-testid="dep-visits"] li'),
         ).toHaveCount(2);
-        await page
-          .locator('[data-testid="delete-dialog-confirm-checkbox"]')
-          .check();
-        await page.locator('[data-testid="delete-dialog-confirm-btn"]').click();
+        await confirmDeleteDialog(page);
         await expect(dialog).toHaveCount(0);
         await expect(visitorRow).not.toBeVisible();
         await expect(undoToast(page)).toBeVisible();
@@ -424,10 +423,13 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
       expect(
         queryDBRow(`SELECT id FROM clients WHERE id='${client.id}'`),
       ).toBeNull();
-      expect(
-        queryDBRow(`SELECT client_id FROM records WHERE id='${record.id}'`)!
-          .client_id,
-      ).toBeNull();
+      // The nullified record row must SURVIVE — assert it before reading
+      // client_id so a vanished row fails readably, not as a TypeError.
+      const nullifiedRow = queryDBRow(
+        `SELECT client_id FROM records WHERE id='${record.id}'`,
+      );
+      expect(nullifiedRow, 'nullified record must survive the cascade').not.toBeNull();
+      expect(nullifiedRow?.client_id).toBeNull();
       expect(
         queryDBRows(`SELECT id FROM visits WHERE record_id='${record.id}'`),
       ).toHaveLength(0);

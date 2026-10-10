@@ -542,11 +542,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     f"update_row: existing row id {existing.id!r} does "
                     f"not match the requested id {id!r}"
                 )
-            record = existing
+            record: Record | None = existing
         else:
             record = await self.get(db_session, id)
-            if not record:
-                return None
+        if not record:
+            return None
 
         record.activity_id = activity_id
         record.client_id = client_id
@@ -592,11 +592,11 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
                     f"patch_row: existing row id {existing.id!r} does "
                     f"not match the requested id {id!r}"
                 )
-            record = existing
+            record: Record | None = existing
         else:
             record = await self.get(db_session, id)
-            if not record:
-                return None
+        if not record:
+            return None
 
         # Per-key value types come from ``RecordPatch`` (comment is
         # ``str | None``, custom_price is ``int | None``); the dict-level

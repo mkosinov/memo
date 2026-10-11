@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -106,6 +107,19 @@ class PhotoListParams(SortParams[PhotoSortBy], PaginationParams):
     )
     sort_by: PhotoSortBy = "created_at"
     sort_order: SortOrder = "desc"
+
+
+class PhotoWebListParams(BaseModel):
+    """Query parameters for the public gallery GET /api/v1/photos/web.
+
+    GH #371 §4.2: the single ``activity_id`` filter, moved from the scalar
+    signature into a one-field model (uniform model-as-query entry; no
+    scalar query siblings — fastapi PR #12481). The field is UUID-typed:
+    garbage → 422 (uuid_parsing), valid UUIDs → same wire as before
+    (unknown UUID → 200 + empty list).
+    """
+
+    activity_id: UUID | None = None
 
 
 class PhotoResponse(BaseModel):

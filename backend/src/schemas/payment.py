@@ -52,6 +52,18 @@ class PaymentResponse(PaymentBase):
     updated_at: datetime
 
 
+class PaymentTotalsParams(BaseModel):
+    """Query parameters for GET /api/v1/payments/totals (GH #371 §4.2).
+
+    The repeatable ``record_ids`` keys (plain strings — same as the scalar
+    signature before the uniform conversion), capped at 200 (too_long →
+    422). Injected as ``Annotated[PaymentTotalsParams, Query()]`` — no
+    scalar query siblings (fastapi PR #12481; domain rule 8, #371).
+    """
+
+    record_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
 class PaymentTotalsResponse(BaseModel):
     """Response schema for the batch aggregate totals endpoint."""
 

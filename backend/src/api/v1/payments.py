@@ -23,6 +23,7 @@ from src.schemas.payment import (
     PaymentCreate,
     PaymentPatch,
     PaymentResponse,
+    PaymentTotalsParams,
     PaymentTotalsResponse,
     PaymentUpdate,
 )
@@ -121,14 +122,16 @@ async def list_payments(
 @router.get("/totals", response_model=PaymentTotalsResponse)
 async def get_payment_totals_route(
     session: SessionDep,
-    record_ids: Annotated[list[str], Query(max_length=200)] = [],
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the 200-cap (too_long → 422) lives in the model.
+    params: Annotated[PaymentTotalsParams, Query()],
     # GH #263 T4: чужие record_ids молча исключены перед агрегацией
     # (все чужие → 200 {"totals": {}}); admin → без фильтрации.
     scope: ScopeContext = Depends(get_scope),
 ) -> PaymentTotalsResponse:
     """Return per-record payment sums for a list of record IDs."""
     totals = await get_payment_totals(
-        db_session=session, record_ids=record_ids, master_key=scope.master_key
+        db_session=session, record_ids=params.record_ids, master_key=scope.master_key
     )
     return PaymentTotalsResponse(totals=totals)
 

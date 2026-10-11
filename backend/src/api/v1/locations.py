@@ -21,7 +21,7 @@ from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.location import Location
-from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse, SortOrder
 from src.schemas.location import (
     LocationCreate,
     LocationDeleteBody,
@@ -147,7 +147,9 @@ async def list_locations(
 async def list_all_locations(
     service: _ServiceDep,
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[LocationResponse]:
     """Return all locations as a bare JSON array (GH #205).
 
@@ -158,7 +160,7 @@ async def list_all_locations(
     try:
         return await service.list_all(
             db_session=session,
-            status=status,
+            status=params.status,
             order_by=[asc(Location.sort_order), asc(Location.title), asc(Location.id)],
         )
     except BareListLimitExceededError as exc:

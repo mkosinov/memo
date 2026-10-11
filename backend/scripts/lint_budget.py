@@ -84,8 +84,11 @@ TOOL_TIMEOUT_SECONDS = 600
 # config. Budget = fact: 0. Ruff collateral: F821 2 → 0 (the TYPE_CHECKING
 # imports for models' forward refs "Activity"/"Visit" fixed ruff too) —
 # budget lowered to fact 117.
+# 2026-10-11 (GH #371 Task 1 — singles into query models): ruff 117 → 116 —
+# B006 1 → 0: the /payments/totals mutable-arg default (``record_ids = []``)
+# moved into the PaymentTotalsParams pydantic Field(default_factory=list).
 RUFF_BUDGET: dict[str, int] = {
-    "B006": 1,
+    "B006": 0,
     "B011": 2,
     "B905": 1,
     "E712": 1,

@@ -23,7 +23,7 @@ from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.service import Service
 from src.models.tariff import Tariff
-from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse, SortOrder
 from src.schemas.pagination import PaginationParams
 from src.schemas.service import (
     ServiceCreate,
@@ -133,7 +133,9 @@ async def list_services(
 async def list_all_services(
     service: _ServiceDep,
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[ServiceResponse]:
     """Return all services as a bare JSON array (GH #205).
 
@@ -145,7 +147,7 @@ async def list_all_services(
     try:
         return await service.list_all(
             db_session=session,
-            status=status,
+            status=params.status,
             order_by=[asc(Service.title), asc(Service.id)],
         )
     except BareListLimitExceededError as exc:

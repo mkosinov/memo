@@ -30,6 +30,7 @@ from src.schemas.photo import (
     PhotoPatch,
     PhotoResponse,
     PhotoUpdate,
+    PhotoWebListParams,
 )
 from src.services.photo import (
     PhotoService,
@@ -113,7 +114,11 @@ async def _activity_scoped_or_404(
 @router.get("/web", response_model=list[PhotoResponse])
 async def list_public_photos(
     session: SessionDep,
-    activity_id: str | None = Query(None),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). ``activity_id`` is UUID-typed in the model:
+    # garbage → 422; the column is String(36), so the validated UUID is
+    # stringified for the SQL comparison.
+    params: Annotated[PhotoWebListParams, Query()],
 ) -> list[PhotoResponse]:
     """Return public photos (is_public=true). Optionally filter by activity_id."""
     stmt = (
@@ -121,8 +126,8 @@ async def list_public_photos(
         .where(Photo.is_public == True)
         .options(selectinload(Photo.tags))
     )
-    if activity_id:
-        stmt = stmt.where(Photo.activity_id == activity_id)
+    if params.activity_id is not None:
+        stmt = stmt.where(Photo.activity_id == str(params.activity_id))
     result = await session.execute(stmt)
     photos = result.scalars().all()
     return [PhotoResponse.model_validate(p) for p in photos]

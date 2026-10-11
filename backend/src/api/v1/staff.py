@@ -43,7 +43,7 @@ from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.models.staff import Staff
-from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse, SortOrder
 from src.schemas.pagination import PaginationParams
 from src.schemas.staff import (
     StaffArchiveRequest,
@@ -207,7 +207,9 @@ async def list_staff(
 async def list_all_staff(
     service: _ServiceDep,
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[StaffResponse]:
     """Bare array of staff cards (GH #205), capped by ``BARE_LIST_MAX_ROWS``.
 
@@ -217,7 +219,7 @@ async def list_all_staff(
     try:
         return await service.list_all(
             db_session=session,
-            status=status,
+            status=params.status,
             order_by=[asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)],
         )
     except BareListLimitExceededError as exc:

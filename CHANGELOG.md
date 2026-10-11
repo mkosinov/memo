@@ -7,9 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-10-10
+## [Unreleased] — 2026-10-11
 
 ### Added
+- **GH #380 — Дедуп before-read SELECT в visitor/records путях (невидимый рефактор)**
+  — branch `380-visitor-records-dedup` (4 коммита `29205322..5b3ba89d` + merge main
+  `4d65fe8b`, base `816efac2`; 3 файла, +119/−36; спека
+  `docs/specs/2026-10-10-visitor-records-dedup-before-read-design.md` рев.1, план
+  `docs/plans/2026-10-10-visitor-records-dedup-before-read-plan.md` — 4/4 задач):
+  - **Полное обновление записи (T1, `29205322`):** `RecordService.update_row` принимает
+    прочитанную строку необязательным keyword-параметром `existing` (при приёме — сверка
+    id, расхождение → `ValueError`; без параметра читает сам, как раньше) — сценарий
+    `usecases/records.py` читает строку один раз, второй before-read SELECT убран.
+  - **Частичное обновление записи (T2, `216ff4c9`):** тот же контракт для
+    `RecordService.patch_row` (US-3).
+  - **Одиночное удаление посетителя (T3, `8dbc3aad` + mypy-фикс `5b3ba89d`):**
+    `VisitorService._delete_cascade` принимает прочитанную строку (`visitor`) и
+    дополнительно проверяет rowcount удаления строки посетителя (0 строк → `False` —
+    паритет с прежним «перечитал — нет строки — `False`»); двухаргументный вызов из
+    каскада клиента (`usecases/clients.py`) сохранён.
+  - **Behavioral delta:** отсутствует — минус один SELECT на запрос в трёх путях; ответы
+    API, журнал действий (байт-в-байт), UI прежние. Новых тестов нет (тесты подсчёта
+    запросов отклонены пользователем на Gate B 2026-10-10; приёмка — ревью диффа).
+  - **Tests:** guard-сьюты `test_audit_explicit` + `test_api_records` **153/0** до и
+    после каждой правки; пост-мерж затронутые сьюты **202/0**; mypy 0, ruff 117/117;
+    полный backend pytest **3208p/0f/15s** (US-1..US-5 зелёные, US-5 =
+    `delete_family_full_contract` — каскад клиента не задет).
+  - Status: `docs/status/2026-10-11-visitor-records-dedup-380.md`
 - **GH #375 — Метка `visits` в событийной сетке удалений: открытые экраны обновляются сами
   после удаления посетителя и каскада клиента** — branch `375-visits-event-mark`
   (3 коммита `71b1c870..62526072`, base `9071fd7c`; 8 файлов, +551/−50; спека

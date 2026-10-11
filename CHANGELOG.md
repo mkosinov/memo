@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (вкл. `ClientPhoneLookupParams` на `/clients/get`); скалярные query-сиблинги и
     Depends-инъекция параметров списков запрещены — канон правило 8 в
     `docs/domain-rules/service-layer.md`, per-entity one-liners синхронизированы
-    в 9 файлах domain-rules.
+    в 10 файлах domain-rules.
   - **Три сервисных зазора `?id=` (T5–T7, `dd107278`..`fa8da9cb`):** сужение по набору id (#232)
     заработало там, где ids не доходили до запроса — staff join-ветка (`list_join_masters`,
     до join/счёта), visits (после `record_id`, до счётного подзапроса), audit-logs

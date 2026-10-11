@@ -80,6 +80,7 @@ Staff — карточка каждого сотрудника студии (м�
 ## List contract (GH #205 — переезжает с /masters на /staff)
 
 - Paginated `GET /api/v1/staff`: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `name, specialty, color, avatar, status`; position исключена — M2M), `sort_order` (asc|desc). Default order: `sort_order ASC, first_name ASC, id ASC`.
+- **`?id=` (GH #232, uniform entry form GH #371)**: повторные ключи, UUID-only (мусор → 422), ≤100 различных после дедупа (>100 → 422 `too_long`); сужение `id IN (…)` через `ids_in_predicate`, конъюнктивно `status`/`q`; валидный-но-несуществующий → 200 + пусто. Сужает ОБЕ сервисные ветки — обычный список (ядро репозитория) и join-ветку мастеров (`list_join_masters`: предикат в базовой выборке staff ДО join, размножающего строки, и ДО счётного подзапроса — зазор 1, GH #371 §4.3; сужённая карточка исчезает вместе со своей секцией). Entry form (GH #371): одна модель `StaffListParams(SortParams[StaffSortBy], PaginationParams)` как `Annotated[..., Query()]` — скалярных query-сиблингов нет (`status`/`q` едут внутри модели 1:1).
 - Bare `GET /api/v1/staff/all`: без конверта, `BARE_LIST_MAX_ROWS` guard сохраняется.
 - Consumers: таблица сотрудников = server-paginated; выпадающие списки = `/all`.
 - Search `?q=` (GH #212): substring по `first_name` + `last_name` (каждое отдельно) + exact `id` при полном UUID — прежний контракт мастеров, теперь на staff.

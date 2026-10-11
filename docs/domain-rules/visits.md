@@ -33,6 +33,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 - **Cascade to parent Record:** Visit create / update / patch / delete recompute the parent Record's seats + status (Phase 1: `domain/record_visits.py` → `recompute_record_seats` + `recompute_record_status`)
 - **Batch block (GH #324):** `VisitService.delete_visits_by_visitor` removes ALL visits of one visitor (single bulk DELETE) and recomputes EVERY affected record (seats + status — the same `recompute_record_*` hooks as the single path; invariant «визит удалён → запись пересчитана»). Consumers: the Visitor executor (`(Visitor, "visits")` cascade handler), the standalone `VisitorService.delete` and the `delete_client` scenario (#327; both deletion paths ride the parameter default since GH #375 — the former `mark_visits=False` suppression is lifted). Empty visitor → full no-op (no idle recompute). SSE markers: `visits` + `records` (the recomputed parents). Event grids (GH #375, mark by dispatch fact — named even at zero rows): the standalone `VisitorService.delete` publishes `{visitors, visits}` (+ `records` when the recompute ran); the `delete_client` execute package carries `{clients, records, photos, visitors, client_tags, visits}` (a clean client included). The `mark_visits=False` parameter and its contract remain for callers that own their grid themselves.
 - Filtered by record_id on list
+- **`?id=` narrowing (GH #371, #232 contract):** repeated query keys on `GET /api/v1/visits`, UUID-only (garbage → 422), ≤100 distinct after dedup (>100 → 422 `too_long`); typed `id IN (…)` narrowing via `ids_in_predicate`, ANDs conjunctively with `record_id` and the master scope (a foreign id in the set stays absent — narrowing never expands visibility); valid-but-unknown → 200 + empty. Entry form (GH #371): one `VisitListParams(PaginationParams)` model as `Annotated[..., Query()]` — no scalar query siblings (`record_id` stays `str` — pre-conversion annotation kept); the master scope stays a `Depends(get_scope)` sibling, NOT a query field. The predicate lands AFTER `record_id` and BEFORE the count subquery (`VisitService.list` is a custom list outside `GenericService` — the explicit call site), so items and `total` narrow consensually.
 - **PATCH** merges only provided fields. Null-policy: `null` on NOT NULL fields (`price`, `status`) is ignored ("don't change"); `null` on nullable fields (`visitor_id`, `tariff_id`, `custom_price`) is applied and clears the field. Empty body (no fields set) → full no-op (`updated_at` unchanged, no Record cascade).
 
 ### Frontend
@@ -44,7 +45,7 @@ A Visit is the attendance record of a single Visitor within a Record. Each seat 
 ## API Endpoints
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | /api/v1/visits?record_id=X | List active visits (optionally by record) | — | VisitResponse[] |
+| GET | /api/v1/visits?record_id=X | List active visits (optionally by record), `?id=` narrowing via `VisitListParams` (GH #371) | — | PaginatedResponse[VisitResponse] |
 | GET | /api/v1/visits/{id} | Get single visit | — | VisitResponse |
 | POST | /api/v1/visits | Create (record_id + price required) | VisitCreate | VisitResponse (201) |
 | PUT | /api/v1/visits/{id} | Full-replace update | VisitUpdate | VisitResponse |

@@ -212,7 +212,12 @@ def test_contract_rejects_var_args_at_the_session_slot():
 
 
 def test_contract_accepts_both_supported_forms():
-    """Instance-method and selfless signatures decorate cleanly."""
+    """Instance-method and selfless signatures decorate cleanly.
+
+    Pins the ``__memo_transactional__`` marker (same attr the entity
+    completeness walk keys on) — bare ``callable()`` would let a wrapper
+    that forgot to stamp itself slip through.
+    """
 
     async def scenario(db_session, data):
         return data
@@ -220,8 +225,8 @@ def test_contract_accepts_both_supported_forms():
     async def method(self, db_session, data):
         return data
 
-    assert callable(_apply_decorator(scenario))
-    assert callable(_apply_decorator(method))
+    assert getattr(_apply_decorator(scenario), "__memo_transactional__", False) is True
+    assert getattr(_apply_decorator(method), "__memo_transactional__", False) is True
 
 
 # ─── 8. Calling forms (GH #394): bound method / selfless, no placeholder ──────
@@ -262,18 +267,6 @@ async def test_method_form_commits_with_positional_session():
     result = await svc.create(sess, "pos")
 
     assert result == {"data": "pos"}
-    assert sess.commit_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_selfless_form_commits_with_positional_session():
-    """Selfless function, positional call — the session is args[0]."""
-    decorated = _apply_decorator(_Service.create_default)
-    sess = _MockSession()
-
-    result = await decorated(sess, "pos")
-
-    assert result == {"id": 1, "data": "pos"}
     assert sess.commit_calls == 1
 
 

@@ -7,7 +7,8 @@
  * IMPORTANT: DB_PATH must point to the SAME database the backend uses.
  *
  * Per-shard mode (via test-all.sh):
- *   SHARD_ID is set → uses test_memo_shard{id}.db
+ *   SHARD_ID is set → uses test_memo_shard{id}.db, plus an optional
+ *   _${SHARD_RUN_TAG} suffix when the run tag is set (#317)
  *
  * Standalone mode:
  *   Falls back to TEST_DB_PATH or default test_memo.db.

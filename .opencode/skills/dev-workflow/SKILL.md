@@ -22,6 +22,8 @@ description: Development environment — dev.sh, test execution, pnpm, ports, PT
 | Web (Next.js) | :3000 | ✅ |
 | Admin (Next.js) | :3001 | Only with `--admin` |
 | API docs | :8000/docs | (with backend) |
+| E2E shard stacks (local `test-all.sh`) | :28000-32700 window — 4 dynamic ports per run, tag-suffixed resources | On demand (`pnpm test:all`) |
+| E2E shard ports (legacy, fixed) | :3002/:3003 (front), :8001/:8002 (back) | CI / standalone Playwright only — never a local `test-all` run |
 
 ### Behavior
 - Seeds DB if `backend/memo.db` doesn't exist
@@ -110,7 +112,7 @@ by the cap:
 | Frontend unit (vitest) | `cd frontend/admin && pnpm run test` | ~1-3 min | |
 | Frontend all (vitest + visual) | `cd frontend/admin && npm run test:all` | ~5-10 min | |
 | E2E single/few specs (standalone) | `pnpm exec playwright test e2e/<spec>.ts` | ~2-5 min | + first-hit Next.js route compilation |
-| E2E full suite (shard mode) | `bash scripts/test-all.sh` | ~15-30 min | 2 shards, isolated stacks :8001-8002/:3002-3003 |
+| E2E full suite (shard mode) | `bash scripts/test-all.sh` | ~15-30 min | 2 shards, 4 dynamic ports from the 28000-32700 window (run-tagged; see §3) |
 
 Timings are estimates — update the table with measured values after full-suite runs; the cap is
 2×, so a suite listed at 20 min gets a 40-min circuit-breaker, not a 30-min budget.
@@ -159,7 +161,9 @@ Two modes, controlled by the `SHARD_ID` env var (see `frontend/admin/playwright.
 
 **Shard mode** (`SHARD_ID` set) — canonical CI/pre-push path via `scripts/test-all.sh`:
 - 2 isolated stacks (`scripts/e2e-shard-start.sh`): per-shard SQLite DB
-  (`test_memo_shard{1,2}.db`), FastAPI :8001-8002, Next.js :3002-3003.
+  (`test_memo_shard{1,2}.db`), FastAPI :8001-8002, Next.js :3002-3003 —
+  these fixed ports are CI facts; a LOCAL `test-all.sh` run instead gets a
+  6-hex run tag + 4 dynamic ports from the 28000-32700 window (see §3).
 - `webServer` config is SKIPPED (`...(process.env.SHARD_ID ? {} : {...})`);
   the shard stack pre-starts the server and Playwright connects to it.
 - Run the whole suite: `pnpm test:all` (or `bash scripts/test-all.sh`).
@@ -178,10 +182,25 @@ tr '\0' '\n' < /proc/<PID>/environ | grep -E '^(SHARD_ID|DATABASE_URL|NEXT_DIST_
 ```
 
 Check that `SHARD_ID`, `DATABASE_URL`, and `NEXT_DIST_DIR` match what YOUR run
-expects (see shard table above: shard 1 → `test_memo_shard1.db`/:8001/:3002,
+expects (legacy/CI mapping: shard 1 → `test_memo_shard1.db`/:8001/:3002,
 shard 2 → `test_memo_shard2.db`/:8002/:3003). **When in any doubt — kill it and
 start a fresh stack.** A 30-second restart is cheaper than debugging failures
 caused by a stale stack.
+
+This port check is for MANUAL stacks (standalone `:3002`, untagged
+`e2e-shard-start.sh`). A `test-all.sh` run is identified by its run TAG, not
+by ports (GH #317): ports are dynamic (28000-32700 window), so never guess
+them — read the «тег/порты прогона» line the run printed at start
+(`🏷 run tag: <tag> | shard 1 → front :P, back :P | shard 2 → … | logs: <dir>`)
+or the lease file `/tmp/memo-shard-runs/<tag>.run`.
+
+Starting a manual `e2e-shard-start.sh` NEXT to running test-all runs? Set your
+own `SHARD_RUN_TAG` (6 lowercase hex, e.g. `SHARD_RUN_TAG=a1b2c3`): a tagged
+stack writes a run lease, so parallel runs see it as alive and never touch its
+ports or its tag-suffixed resources. Without a tag the stack holds no lease —
+its untagged resources are protected only while the legacy ports
+3002/3003/8001/8002 are busy (a test-all run finding them free wipes untagged
+`.next-shard-*` dirs and shard DBs — conditional protection).
 
 ### 4. Run a SINGLE spec / a few specs locally (simplest reliable path)
 

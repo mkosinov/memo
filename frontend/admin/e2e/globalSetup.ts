@@ -2,7 +2,9 @@
  * globalSetup.ts — Clean test data before each E2E run.
  *
  * Per-shard mode (via test-all.sh):
- *   SHARD_ID is set → uses test_memo_shard{1,2}.db
+ *   SHARD_ID is set → uses test_memo_shard{1,2}.db, plus an optional
+ *   _${SHARD_RUN_TAG} suffix when the run tag is set (#317: test-all.sh
+ *   tags every run's DB/files/build dirs for parallel-run isolation)
  *
  * Standalone mode (manual playwright test):
  *   SHARD_ID not set → uses TEST_DB_PATH or default test_memo.db

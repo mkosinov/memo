@@ -12,6 +12,22 @@
 #   BACKEND_URL       Backend URL for E2E factories (e.g. http://127.0.0.1:8001)
 #   NEXT_PUBLIC_API_URL  Backend URL for browser (same as BACKEND_URL)
 #
+#   SHARD_RUN_TAG     Optional (#317): 6-lowercase-hex run tag. Set → all
+#                    run resources get tag-suffixed names
+#                    (.next-shard-<id>_<tag>, test_files_shard<id>_<tag>)
+#                    and the script writes a manual-stack run lease (spec
+#                    §3.3) removed on exit. Empty/unset (CI) → exact legacy
+#                    names, no lease, zero behavior change.
+#   SHARD_MANAGED_STACK  Optional (#317 Fix A): set non-empty by test-all.sh
+#                    when IT starts this script (both shards). The
+#                    orchestrator already wrote the 4-port run lease for
+#                    the tag — a managed stack must NOT write its own
+#                    2-port lease (last-writer-wins would clobber the
+#                    orchestrator's, shrinking busy-protection to 2 of 4
+#                    ports) and must NOT remove the orchestrator's lease
+#                    on exit. Absent → manual mode, byte-identical lease
+#                    behavior.
+#
 # Usage:
 #   SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
 #     TEST_DB_PATH=backend/test_memo_shard1.db \
@@ -50,20 +66,54 @@ case "$SHARD_ID" in
     ;;
 esac
 
+# ── #317: optional run tag (spec §3.1) ──────────────────────────────────────
+# Empty/unset (CI, legacy manual runs) → exact legacy resource names, no
+# lease, zero behavior change. Set → must be 6 LOWERCASE hex chars: the tag
+# lands in paths and the cleaners' rm-globs, so foreign chars (`/`, `*`,
+# `..`, spaces) are excluded by format — the same ^[0-9a-f]{6}$ regex
+# write_run_lease enforces. Fatal BEFORE any resource/dir creation.
+SHARD_RUN_TAG="${SHARD_RUN_TAG:-}"
+if [ -n "$SHARD_RUN_TAG" ]; then
+  _run_tag_re='^[0-9a-f]{6}$'
+  if ! [[ "$SHARD_RUN_TAG" =~ $_run_tag_re ]]; then
+    echo "ERROR: SHARD_RUN_TAG must be 6 lowercase hex chars ([0-9a-f]{6}); got '$SHARD_RUN_TAG'" >&2
+    exit 1
+  fi
+fi
+
+# #317 Fix A: non-empty → MANAGED stack — the run-lease lifecycle for this
+# tag belongs to the orchestrator (test-all.sh wrote the 4-port lease and
+# removes it in its own EXIT trap). Checked at the lease write below and in
+# remove_own_lease. Children inherit the flag via env; no consumer exists
+# downstream (manual mode never sets it).
+SHARD_MANAGED_STACK="${SHARD_MANAGED_STACK:-}"
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 ADMIN_DIR="$ROOT_DIR/frontend/admin"
 
 export PATH="/root/.npm-global/bin:$PATH"
 
-# Export env vars so child processes (uvicorn, next dev) inherit them
-export SHARD_ID SHARD_PORT BACKEND_PORT TEST_DB_PATH BACKEND_URL NEXT_PUBLIC_API_URL
+# Export env vars so child processes (uvicorn, next dev, Playwright later)
+# inherit them; #317: SHARD_RUN_TAG too (spec §3.4 — the TS side reads it).
+export SHARD_ID SHARD_PORT BACKEND_PORT TEST_DB_PATH BACKEND_URL NEXT_PUBLIC_API_URL SHARD_RUN_TAG
+
+# #317: run-lease helpers (write_run_lease/remove_run_lease, spec §3.3).
+# Definitions-only at source time — the lease calls below are gated on a
+# non-empty SHARD_RUN_TAG, so untagged (CI) runs get zero extra behavior.
+source "$ROOT_DIR/scripts/lib/shard-helpers.sh"
 
 # Isolated build dir per shard (#264): next.config.mjs reads NEXT_DIST_DIR for
 # its distDir, so each shard compiles into its own build dir. This script is
 # the SOLE producer of NEXT_DIST_DIR — shards never touch the default build
 # dir, so no wipe or port-guard for it is needed here.
-export NEXT_DIST_DIR=".next-shard-${SHARD_ID}"
+# #317 (spec §3.1): a tagged run appends _${SHARD_RUN_TAG}; an empty tag
+# keeps the EXACT legacy name — the CI path is byte-identical.
+if [ -n "$SHARD_RUN_TAG" ]; then
+  export NEXT_DIST_DIR=".next-shard-${SHARD_ID}_${SHARD_RUN_TAG}"
+else
+  export NEXT_DIST_DIR=".next-shard-${SHARD_ID}"
+fi
 
 # Resolve TEST_DB_PATH to absolute path for the seed script
 ABS_DB_PATH="$TEST_DB_PATH"
@@ -78,10 +128,53 @@ export DATABASE_URL="sqlite+aiosqlite:///$ABS_DB_PATH"
 # Shards must NOT share the dev ./files dir or each other's (cross-shard
 # avatar leaks + a wipe racing a live upload). Cwd-relative like DATABASE_URL;
 # uvicorn runs from $BACKEND_DIR, so resolve to an absolute path.
-ABS_FILES_DIR="$ROOT_DIR/backend/test_files_shard${SHARD_ID}"
+# #317 (spec §3.1): a tagged run uses test_files_shard<id>_<tag>; an empty
+# tag keeps the EXACT legacy name (CI byte-identical).
+if [ -n "$SHARD_RUN_TAG" ]; then
+  ABS_FILES_DIR="$ROOT_DIR/backend/test_files_shard${SHARD_ID}_${SHARD_RUN_TAG}"
+else
+  ABS_FILES_DIR="$ROOT_DIR/backend/test_files_shard${SHARD_ID}"
+fi
 export FILES_DIR="$ABS_FILES_DIR"
 export TEST_FILES_DIR="$ABS_FILES_DIR"
 echo "[shard-$SHARD_ID] Files dir: $ABS_FILES_DIR"
+
+# ── #317: manual-stack run lease (spec §3.3) ───────────────────────────────
+# A tagged MANUAL stack writes the same 8-field lease test-all.sh writes,
+# zero-padding the two port slots it does not use (a manual stack has only
+# SHARD_PORT + BACKEND_PORT): `pid tag SHARD_PORT BACKEND_PORT 0 0 epoch`.
+# PID is our own $$ — this script lives as long as the stack (the frontend
+# runs in foreground), so lease liveness == stack liveness for
+# sweep_dead_runs/audit_orphan_tagged. Written after env validation (incl.
+# the tag check above) but BEFORE any server starts; removed on exit by
+# remove_own_lease (wired into the traps below — idempotent).
+# Fix A: a MANAGED stack (SHARD_MANAGED_STACK set by test-all.sh) touches
+# NO lease in either direction — the orchestrator's 4-port lease for this
+# tag already exists, and this stack's own 2-port write would clobber it
+# (last-writer-wins) while its exit trap would remove the orchestrator's
+# lease mid-run.
+if [ -n "$SHARD_RUN_TAG" ] && [ -z "$SHARD_MANAGED_STACK" ]; then
+  if ! write_run_lease "$SHARD_RUN_TAG" "$$" "$SHARD_PORT" "$BACKEND_PORT" 0 0; then
+    echo "[shard-$SHARD_ID] ERROR: cannot write run lease ${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run — aborting before servers start" >&2
+    exit 1
+  fi
+  echo "[shard-$SHARD_ID] Run lease: ${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run (pid $$, ports $SHARD_PORT $BACKEND_PORT 0 0)"
+elif [ -n "$SHARD_RUN_TAG" ]; then
+  echo "[shard-$SHARD_ID] Managed stack (SHARD_MANAGED_STACK set) — lease ${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run is the orchestrator's; not writing it"
+fi
+
+# #317: remove THIS run's own lease on exit — idempotent (file-presence
+# guard makes untagged runs, double trap fires and already-removed leases
+# no-ops); foreign leases are never touched. Fix A: a managed stack owns
+# NO lease — early return (the orchestrator removes its own).
+remove_own_lease() {
+  if [ -n "${SHARD_MANAGED_STACK:-}" ]; then
+    return 0
+  fi
+  if [ -n "${SHARD_RUN_TAG:-}" ] && [ -e "${SHARD_RUNS_DIR}/${SHARD_RUN_TAG}.run" ]; then
+    remove_run_lease "$SHARD_RUN_TAG"
+  fi
+}
 
 echo "[shard-$SHARD_ID] Starting stack: frontend=:$SHARD_PORT backend=:$BACKEND_PORT db=$ABS_DB_PATH"
 
@@ -120,6 +213,7 @@ cleanup() {
   echo "[shard-$SHARD_ID] Shutting down (backend PID: $BACKEND_PID)..."
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
+  remove_own_lease
 }
 trap cleanup EXIT INT TERM
 
@@ -171,6 +265,7 @@ _orig_cleanup() {
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$FRONTEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
+  remove_own_lease
 }
 trap _orig_cleanup EXIT INT TERM
 

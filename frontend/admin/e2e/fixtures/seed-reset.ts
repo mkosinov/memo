@@ -27,14 +27,15 @@ import fs from 'fs';
 import path from 'path';
 
 import { sqliteExecWithRetry } from './sqlite-exec';
-import { resolveTestDbPath } from '../lib/db-path';
+import { readShardRunTag, resolveTestDbPath } from '../lib/db-path';
 
 /**
  * Resolve the test DB path AT CALL TIME — never at module load (env vars
  * are set by the shard script / test runner and may change between
  * import and call). Delegates to the shared GH #209 resolver
  * (e2e/lib/db-path.ts): SHARD_ID → canonical shard DB; a SHARD_ID ×
- * TEST_DB_PATH conflict is a loud error (no silent precedence).
+ * TEST_DB_PATH conflict is a loud error (no silent precedence). #317: a
+ * set SHARD_RUN_TAG extends the canonical to test_memo_shard{id}_{tag}.db.
  */
 export function resolveSeedDbPath(): string {
   return resolveTestDbPath({
@@ -56,7 +57,8 @@ export function resolveSeedCanonPath(): string {
  * GH #262 §6 (E2E infra) — resolve the TEST-SCOPED `FILES_DIR` root at call
  * time, mirroring {@link resolveSeedDbPath}'s shard/env/default rules so the
  * Playwright process and the shard backend agree on the SAME avatars dir:
- *   SHARD_ID set          → backend/test_files_shard{id}
+ *   SHARD_ID set          → backend/test_files_shard{id} (+ _{SHARD_RUN_TAG}
+ *                            when the tag is set, #317 spec §3.4)
  *   else TEST_FILES_DIR    → as-is, relative resolved against process CWD
  *   else FILES_DIR         → as-is (the env the backend reads, config.py)
  *   else                  → backend/files (backend default `./files` from the
@@ -64,12 +66,18 @@ export function resolveSeedCanonPath(): string {
  *
  * `scripts/e2e-shard-start.sh` exports FILES_DIR to the shard-scoped path so
  * the backend serves uploads from there; this resolver reproduces that path
- * for the wipe below WITHOUT importing the backend settings.
+ * for the wipe below WITHOUT importing the backend settings. The tagged
+ * form is string-identical to the bash producer (`test_files_shard${id}_`
+ * + tag); an empty tag keeps the pre-#317 name (CI).
  */
 export function resolveTestFilesDir(): string {
   const shardId = process.env.SHARD_ID;
   if (shardId) {
-    return path.resolve(__dirname, `../../../../backend/test_files_shard${shardId}`);
+    const runTag = readShardRunTag();
+    return path.resolve(
+      __dirname,
+      `../../../../backend/test_files_shard${shardId}${runTag ? `_${runTag}` : ''}`,
+    );
   }
   const fromEnv = process.env.TEST_FILES_DIR || process.env.FILES_DIR;
   if (fromEnv) return path.resolve(fromEnv);

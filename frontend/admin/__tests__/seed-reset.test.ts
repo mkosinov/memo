@@ -136,6 +136,7 @@ describe('resolveSeedDbPath (call-time resolution)', () => {
   beforeEach(() => {
     delete process.env.SHARD_ID;
     delete process.env.TEST_DB_PATH;
+    delete process.env.SHARD_RUN_TAG;
   });
 
   afterEach(() => {
@@ -176,6 +177,29 @@ describe('resolveSeedDbPath (call-time resolution)', () => {
     process.env.TEST_DB_PATH = '/tmp/custom-test-db.sqlite';
     expect(resolveSeedCanonPath()).toBe('/tmp/custom-test-db.sqlite.canon.sql');
   });
+
+  it('SHARD_RUN_TAG set → tagged canonical test_memo_shard{id}_{tag}.db (GH #317 spec §3.4)', () => {
+    process.env.SHARD_ID = '3';
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
+    expect(resolveSeedDbPath()).toBe(path.join(repoBackend, 'test_memo_shard3_0f1e2d.db'));
+  });
+
+  it('SHARD_RUN_TAG set + matching tagged TEST_DB_PATH → passes quietly, tagged canon path', () => {
+    process.env.SHARD_ID = '3';
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    process.env.TEST_DB_PATH = path.resolve(
+      __dirname, '..', '..', '..', 'backend', 'test_memo_shard3_0f1e2d.db',
+    );
+    expect(resolveSeedDbPath()).toBe(process.env.TEST_DB_PATH);
+    expect(resolveSeedCanonPath()).toBe(`${process.env.TEST_DB_PATH}.canon.sql`);
+  });
+
+  it('invalid SHARD_RUN_TAG → loud error naming the variable and format (GH #317)', () => {
+    process.env.SHARD_ID = '3';
+    process.env.SHARD_RUN_TAG = 'XYZ12/';
+    expect(() => resolveSeedDbPath()).toThrowError(/SHARD_RUN_TAG[\s\S]*\[0-9a-f\]\{6\}/);
+  });
 });
 
 describe('resetToSeed (canon-based, against a real temp SQLite DB)', () => {
@@ -190,6 +214,7 @@ describe('resetToSeed (canon-based, against a real temp SQLite DB)', () => {
     pollute(dbPath);
     process.env.SHARD_ID = '';
     delete process.env.SHARD_ID;
+    delete process.env.SHARD_RUN_TAG;
     process.env.TEST_DB_PATH = dbPath;
   });
 
@@ -279,6 +304,7 @@ describe('resolveTestFilesDir (call-time resolution, GH #262)', () => {
     delete process.env.SHARD_ID;
     delete process.env.TEST_FILES_DIR;
     delete process.env.FILES_DIR;
+    delete process.env.SHARD_RUN_TAG;
   });
 
   afterEach(() => {
@@ -290,6 +316,28 @@ describe('resolveTestFilesDir (call-time resolution, GH #262)', () => {
     process.env.TEST_FILES_DIR = '/tmp/should-be-ignored';
     const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
     expect(resolveTestFilesDir()).toBe(path.join(repoBackend, 'test_files_shard2'));
+  });
+
+  it('SHARD_ID + SHARD_RUN_TAG → test_files_shard{id}_{tag}, string-identical to the bash producer (GH #317)', () => {
+    // scripts/e2e-shard-start.sh builds backend/test_files_shard${SHARD_ID}_${SHARD_RUN_TAG}
+    // when the tag is set — the TS mirror must produce the very same string.
+    process.env.SHARD_ID = '2';
+    process.env.SHARD_RUN_TAG = '0f1e2d';
+    const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
+    expect(resolveTestFilesDir()).toBe(path.join(repoBackend, 'test_files_shard2_0f1e2d'));
+  });
+
+  it('SHARD_ID + empty-string SHARD_RUN_TAG → untagged dir, byte-identical to pre-#317 (CI)', () => {
+    process.env.SHARD_ID = '2';
+    process.env.SHARD_RUN_TAG = '';
+    const repoBackend = path.resolve(__dirname, '..', '..', '..', 'backend');
+    expect(resolveTestFilesDir()).toBe(path.join(repoBackend, 'test_files_shard2'));
+  });
+
+  it('invalid SHARD_RUN_TAG → loud error naming the variable and format (GH #317)', () => {
+    process.env.SHARD_ID = '2';
+    process.env.SHARD_RUN_TAG = 'TOOBIGTAG';
+    expect(() => resolveTestFilesDir()).toThrowError(/SHARD_RUN_TAG[\s\S]*\[0-9a-f\]\{6\}/);
   });
 
   it('TEST_FILES_DIR is used when SHARD_ID is unset', () => {
@@ -314,6 +362,7 @@ describe('wipeAvatarsDir (GH #262 §6)', () => {
 
   beforeEach(() => {
     delete process.env.SHARD_ID;
+    delete process.env.SHARD_RUN_TAG;
     filesRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'files-dir-test-'));
     process.env.TEST_FILES_DIR = filesRoot;
   });

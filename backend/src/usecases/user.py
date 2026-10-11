@@ -35,16 +35,15 @@ phone edit of an existing account:
 * SESSIONS ARE NOT REVOKED (spec §4: cookie sessions are not tied to
   the phone — contrast ``set_password_by_link``, S8).
 
-CALLING CONVENTION: the ``@transactional`` wrapper's signature is
-``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
-MUST be called with an explicit leading ``None`` (the unused ``self``
-slot) and keyword arguments::
+CALLING CONVENTION: a scenario is called NATURALLY with its own
+declared arguments — keyword pass-through, no placeholder slot, no
+leading ``None``::
 
-    user = await create_user(None, db_session=session, phone=..., ...)
+    user = await create_user(db_session=session, phone=..., ...)
 
-A bare positional call would bind the session to the wrapper's ``self``
-slot and shift every argument — that misdirection fails loudly
-(TypeError), never silently (see ``src/usecases/records.py``).
+The session is the first parameter (any name — here ``db_session``);
+the wrapper's signature is inspected ONCE, at decoration time
+(``src/services/decorators.py``).
 """
 
 from __future__ import annotations
@@ -86,8 +85,8 @@ async def create_user(
     taken and ``PasswordPolicyError`` when the password fails the policy
     (in which case nothing is inserted).
 
-    NOTE: call as ``create_user(None, db_session=..., ...)`` — see the
-    module docstring for why.
+    NOTE: call as ``create_user(db_session=..., ...)`` — see the
+    module docstring for the calling convention.
     """
     # Own-entity mark — the selfless @transactional path seeds an EMPTY
     # accumulator (no auto-mark), so user creation surfaces "users"
@@ -131,8 +130,8 @@ async def update_user_phone(
     number never enters the snapshot); sessions stay (cookie sessions
     are not tied to the phone).
 
-    NOTE: call as ``update_user_phone(None, db_session=..., user_id=...,
-    phone=...)`` — see the module docstring for why.
+    NOTE: call as ``update_user_phone(db_session=..., user_id=...,
+    phone=...)`` — see the module docstring for the calling convention.
     """
     user_service = get_user_service()
     user = await user_service.get_by_id(db_session, user_id)

@@ -18,14 +18,12 @@ transport of the tags/records/staff family (§4.1 forms: bare DELETE →
 422 ``expected_state_required``, ``?dry_run=true`` preview,
 ``dry_run_with_resolutions_forbidden``).
 
-CALLING CONVENTION (mirror of ``usecases/records.py``): the
-``@transactional`` wrapper's signature is ``wrapper(self, *args,
-**kwargs)`` — a module-level scenario therefore MUST be called with an
-explicit leading ``None`` (the unused ``self`` slot) and keyword
-arguments::
+CALLING CONVENTION (mirror of ``usecases/records.py``): a scenario is
+called NATURALLY with its own declared arguments — keyword
+pass-through, no placeholder slot, no leading ``None``::
 
     ok = await delete_client(
-        None, db_session=session, id=..., resolutions=..., expected=...,
+        db_session=session, id=..., resolutions=..., expected=...,
     )
 
 The selfless path opens the accumulator EMPTY — no auto entity-mark —
@@ -157,8 +155,9 @@ async def delete_client(
     test monkeypatches ``VisitorService._delete_cascade`` on the
     singleton, and the scenario must see the patched method.
 
-    NOTE: call as ``delete_client(None, db_session=..., id=...,
-    resolutions=..., expected=...)`` — see the module docstring for why.
+    NOTE: call as ``delete_client(db_session=..., id=...,
+    resolutions=..., expected=...)`` — see the module docstring for the
+    calling convention.
     """
     # ── Phase 0: existence probe (route → 404 on miss) ───────────────
     client_service = get_client_service()

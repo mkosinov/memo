@@ -8,14 +8,16 @@ and domain functions only — no RUNTIME ORM-model imports here (the
 model descriptor comes from the loaded row: ``type(loaded)``, the
 ``usecases.records`` precedent).
 
-CALLING CONVENTION: the ``@transactional`` wrapper's signature is
-``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
-MUST be called with an explicit leading ``None`` (the unused ``self``
-slot) and keyword arguments::
+CALLING CONVENTION: a scenario is called NATURALLY with its own
+declared arguments — keyword pass-through, no placeholder slot, no
+leading ``None``::
 
-    deleted = await delete_activity(None, db_session=session, id=...)
+    deleted = await delete_activity(db_session=session, id=...)
 
-The selfless path opens the accumulator EMPTY — no auto entity-mark —
+The session is the first parameter (any name — here ``db_session``);
+the wrapper's signature is inspected ONCE, at decoration time
+(``src/services/decorators.py``). The selfless path opens the
+accumulator EMPTY — no auto entity-mark —
 so the scenario marks its OWN entity explicitly
 (``mark_changed("activities")``) to keep the published event grid
 byte-identical to the former bound-method ``ActivityService.delete``
@@ -81,8 +83,8 @@ async def delete_activity(db_session: AsyncSession, id: str) -> bool:
     selfless wrapper starts with an EMPTY accumulator (the former
     bound-method decorator seeded it).
 
-    NOTE: call as ``delete_activity(None, db_session=..., id=...)`` —
-    see the module docstring for why.
+    NOTE: call as ``delete_activity(db_session=..., id=...)`` — see
+    the module docstring for the calling convention.
     """
     # ── Existence probe (route → 404 on False). ``get_scoped`` with
     #    ``master_key=None`` is the same unfiltered point-get the route

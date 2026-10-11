@@ -21,20 +21,19 @@ are byte-identical to the pre-refactor flow; spec §Behavioral Delta:
 до = после). ``restore`` stays a decorated ``StaffService`` method
 (Corridor 1 — one table, own endpoint).
 
-CALLING CONVENTION: the ``@transactional`` wrapper's signature is
-``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
-MUST be called with an explicit leading ``None`` (the unused ``self``
-slot) and keyword arguments::
+CALLING CONVENTION: a scenario is called NATURALLY with its own
+declared arguments — keyword pass-through, no placeholder slot, no
+leading ``None``::
 
-    card = await create_staff(None, db_session=session, data=data)
+    card = await create_staff(db_session=session, data=data)
 
-A bare positional call would bind the session to the wrapper's ``self``
-slot and shift every argument — that misdirection fails loudly
-(TypeError), never silently. The selfless path opens the accumulator
-EMPTY — no auto entity-mark — so every scenario marks its OWN entity
-explicitly (``mark_changed("staff")``), keeping the published event
-grid byte-identical to the former method-based flows (the decorated
-``StaffService`` methods auto-marked "staff").
+The session is the first parameter (any name — here ``db_session``);
+the wrapper's signature is inspected ONCE, at decoration time
+(``src/services/decorators.py``). The selfless path opens the
+accumulator EMPTY — no auto entity-mark — so every scenario marks its
+OWN entity explicitly (``mark_changed("staff")``), keeping the
+published event grid byte-identical to the former method-based flows
+(the decorated ``StaffService`` methods auto-marked "staff").
 
 EVENT GRID (GH #239) — "staff" ALWAYS; conditional marks fire by FACT
 OF CHANGE inside the owner blocks (row written / rowcount > 0), pinned
@@ -195,8 +194,8 @@ async def create_staff(db_session: AsyncSession, data: StaffCreate) -> StaffResp
        — composed HERE: the users row owner writes no foreign tables,
        canon rule 1).
 
-    NOTE: call as ``create_staff(None, db_session=..., data=...)`` — see
-    the module docstring for why.
+    NOTE: call as ``create_staff(db_session=..., data=...)`` — see
+    the module docstring for the calling convention.
     """
     # Own-entity mark — the selfless @transactional path seeds an EMPTY
     # accumulator (no auto-mark), so publish parity with the former
@@ -278,7 +277,7 @@ async def update_staff(
        account follows the D10 template unless the body carries an
        explicit role).
 
-    NOTE: call as ``update_staff(None, db_session=..., id=..., data=...)``.
+    NOTE: call as ``update_staff(db_session=..., id=..., data=...)``.
     """
     mark_changed("staff")
 
@@ -346,7 +345,7 @@ async def patch_staff(
        WITHOUT the set → manual override only;
     5. response assembly.
 
-    NOTE: call as ``patch_staff(None, db_session=..., id=..., data=...)``.
+    NOTE: call as ``patch_staff(db_session=..., id=..., data=...)``.
     """
     mark_changed("staff")
 
@@ -430,7 +429,7 @@ async def archive_staff(
     — one row"). No-op guard: re-archiving an already-archived card
     writes no journal row (§4.6).
 
-    NOTE: call as ``archive_staff(None, db_session=..., id=...,
+    NOTE: call as ``archive_staff(db_session=..., id=...,
     archive_master=..., archive_user=...)``.
     """
     mark_changed("staff")
@@ -525,8 +524,9 @@ async def delete_staff(
     Failure branches raise BEFORE any write — the decorator aborts
     without publishing.
 
-    NOTE: call as ``delete_staff(None, db_session=..., id=...,
-    resolutions=..., expected=...)`` — see the module docstring for why.
+    NOTE: call as ``delete_staff(db_session=..., id=...,
+    resolutions=..., expected=...)`` — see the module docstring for the
+    calling convention.
     """
     # Own-entity mark — selfless @transactional parity: the decorated
     # resolve_delete auto-marked "staff" via resolve_entity_name; the

@@ -10,20 +10,19 @@ are built by the owning services — GH #171 Task 3 fix: the visit batch
 is passed to ``VisitService.create_visits_bulk`` as ``VisitItem``
 VALUES, never as transient ORM rows).
 
-CALLING CONVENTION: the ``@transactional`` wrapper's signature is
-``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
-MUST be called with an explicit leading ``None`` (the unused ``self``
-slot) and keyword arguments::
+CALLING CONVENTION: a scenario is called NATURALLY with its own
+declared arguments — keyword pass-through, no placeholder slot, no
+leading ``None``::
 
-    record = await create_record(None, db_session=session, data=data)
+    record = await create_record(db_session=session, data=data)
 
-A bare positional call ``create_record(session, data)`` would bind the
-session to the wrapper's ``self`` slot and shift every argument —
-that misdirection fails loudly (TypeError), never silently. The
-selfless path opens the accumulator EMPTY — no auto entity-mark — so
-the scenario marks its OWN entity explicitly
-(``mark_changed("records")``) to keep the published event grid
-byte-identical to the former method-based ``RecordService.create``.
+The session is the first parameter (any name — here ``db_session``);
+the wrapper's signature is inspected ONCE, at decoration time
+(``src/services/decorators.py``). The selfless path opens the
+accumulator EMPTY — no auto entity-mark — so the scenario marks its
+OWN entity explicitly (``mark_changed("records")``) to keep the
+published event grid byte-identical to the former method-based
+``RecordService.create``.
 
 Behavior-preserving extraction of the former ``RecordService.create`` /
 ``RecordService.update`` / ``RecordService.patch`` chains (step order and
@@ -150,8 +149,8 @@ async def create_record(
     5. ONE bulk visit insert (marks "visits");
     6. recalculate seats then status from the persisted visits, refresh.
 
-    NOTE: call as ``create_record(None, db_session=..., data=...)`` —
-    see the module docstring for why.
+    NOTE: call as ``create_record(db_session=..., data=...)`` — see
+    the module docstring for the calling convention.
     """
     # Own-entity mark — the selfless @transactional path seeds an EMPTY
     # accumulator (no auto-mark), so publish parity with the former
@@ -266,8 +265,8 @@ async def update_record(
     additionally ONLY on a non-empty replacement list (a field-only
     update — empty list — keeps the pre-refactor {"records"} grid).
 
-    NOTE: call as ``update_record(None, db_session=..., id=..., data=...)``
-    — see the module docstring for why.
+    NOTE: call as ``update_record(db_session=..., id=..., data=...)`` —
+    see the module docstring for the calling convention.
     """
     # Own-entity mark — selfless @transactional parity (see create_record).
     mark_changed("records")
@@ -360,8 +359,8 @@ async def patch_record(
     additionally ONLY on a non-empty replacement list (a comment/
     custom_price-only patch keeps the pre-refactor {"records"} grid).
 
-    NOTE: call as ``patch_record(None, db_session=..., id=..., data=...)``
-    — see the module docstring for why.
+    NOTE: call as ``patch_record(db_session=..., id=..., data=...)`` —
+    see the module docstring for the calling convention.
     """
     # Own-entity mark — selfless @transactional parity (see create_record).
     mark_changed("records")
@@ -478,8 +477,9 @@ async def delete_record(
     ``{"records", "visits", "payments"}`` — the pre-refactor grid of
     ``RecordService.delete``; every failure branch publishes nothing.
 
-    NOTE: call as ``delete_record(None, db_session=..., id=...,
-    resolutions=..., expected=...)`` — see the module docstring for why.
+    NOTE: call as ``delete_record(db_session=..., id=...,
+    resolutions=..., expected=...)`` — see the module docstring for the
+    calling convention.
     """
     # ── Existence probe (route → 404 on None). The loaded row's class is
     #    the model descriptor the deletion domain is keyed on — the

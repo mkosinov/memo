@@ -87,6 +87,10 @@ TOOL_TIMEOUT_SECONDS = 600
 # 2026-10-11 (GH #371 Task 1 — singles into query models): ruff 117 → 116 —
 # B006 1 → 0: the /payments/totals mutable-arg default (``record_ids = []``)
 # moved into the PaymentTotalsParams pydantic Field(default_factory=list).
+# 2026-10-11 (GH #371 Task 5 — staff list into StaffListParams): ruff
+# 116 → 115 — TC001 1 → 0 in schemas/staff.py: the enums import line
+# gained a runtime-used name (ArchiveStatus default), so the UserRole
+# type-only sibling no longer flags as movable.
 RUFF_BUDGET: dict[str, int] = {
     "B006": 0,
     "B011": 2,
@@ -103,7 +107,7 @@ RUFF_BUDGET: dict[str, int] = {
     "RUF100": 3,
     "SIM115": 2,
     "SIM118": 2,
-    "TC001": 6,
+    "TC001": 5,
     "TC002": 14,
     "TC003": 8,
     "UP040": 1,

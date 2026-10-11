@@ -288,6 +288,36 @@ def create_master(api_client):
 
 
 @pytest.fixture
+def create_staff(api_client):
+    """Factory: creates a staff card via API (GH #371 list matrix, С5).
+
+    Complements ``create_master`` (which returns a masters-view dict):
+    this one returns the STAFF card response as-is — ``master`` section
+    (when requested via the ``master=`` override), ``position_ids``,
+    account block included.
+
+    Usage::
+        staff = create_staff()
+        staff = create_staff(first_name="Анна")
+        staff = create_staff(master={"specialty": "скульптура", "color": "#222222"})
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "first_name": f"Test_{_counter}",
+            "last_name": "Staff",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/staff", json=payload)
+        assert resp.status_code == 201, f"create_staff failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_service(api_client):
     """Factory: creates a service via API.
 

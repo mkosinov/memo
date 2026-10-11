@@ -6,12 +6,14 @@ injected as ``Annotated[XListParams, Query()]`` — scalar query siblings
 are banned (fastapi PR #12481), and the ``id`` field inherited from
 ``PaginationParams`` (#232) makes ``?id=X&id=Y`` narrowing work uniformly.
 
-THE MATRIX COVERS ALL EIGHT converted endpoints (§4.1): the three
+THE MATRIX COVERS ALL NINE converted endpoints (§4.1): the three
 dictionary sort lists (services, materials, tags — Task 2), the four
-simple lists (visitors, activities, payments, positions — Task 3) and
+simple lists (visitors, activities, payments, positions — Task 3),
 locations (Task 4 — the hybrid: ``?id=`` narrowing ALREADY worked there
 via the ``#232`` sibling param, so the matrix is a pure REGRESSION pin
-that the model conversion keeps the wire intact) — all in the SAME
+that the model conversion keeps the wire intact) and staff (Task 5 —
+its own sort whitelist/status/q; the plain branch here, the masters-
+join branch in TestStaffBothBranchesIdNarrowing) — all in the SAME
 ``ENDPOINTS`` list (no test-body changes needed: everything is
 parametrized by descriptors carrying the route URL + the conftest
 factory name).
@@ -108,6 +110,20 @@ ENDPOINTS = [
     ListEndpoint(
         route="/api/v1/locations",
         factory="create_location",
+        query_params=(
+            "id", "page", "per_page", "sort_by", "sort_order",
+            "status", "q",
+        ),
+    ),
+    # GH #371 Task 5 — staff: its own sort whitelist (name/specialty/
+    # color/avatar/status), ``status`` and ``q`` (2..100). The row pins
+    # the PLAIN branch (no ``sort_by`` → ``StaffService.list``); the
+    # join branch (``sort_by=specialty|color`` → ``list_join_masters``,
+    # the §4.3 gap-1) is arbitrated by TestStaffBothBranchesIdNarrowing
+    # below — the matrix descriptor stays branch-agnostic on purpose.
+    ListEndpoint(
+        route="/api/v1/staff",
+        factory="create_staff",
         query_params=(
             "id", "page", "per_page", "sort_by", "sort_order",
             "status", "q",
@@ -412,3 +428,100 @@ class TestScopeSmokeIdNarrowing:
         assert resp.status_code == 200, resp.text
         assert resp.json()["items"] == []
         assert resp.json()["total"] == 0
+
+
+class TestStaffBothBranchesIdNarrowing:
+    """С5 — BOTH staff list branches narrow rows AND total under ``?id=``.
+
+    The staff route branches on the sort value (``params.sort_by`` after
+    the #371 conversion): plain sorts (None/name/avatar/status) →
+    ``StaffService.list`` (the repository core applies
+    ``ids_in_predicate``); extension sorts (specialty/color) →
+    ``StaffService.list_join_masters`` — the spec §4.3 GAP-1 branch:
+    ``ids`` must reach the join query with the predicate in the BASE
+    staff selection, BEFORE the masters LEFT JOIN can multiply rows and
+    BEFORE the count subquery, so items and total narrow consensually —
+    a narrowed-out SECTIONED card disappears ENTIRELY (its section must
+    not leak rows into the page nor inflate ``total``).
+
+    RED design: pre-conversion the join branch has NO ``ids`` plumbing
+    at all (full list under ``?id=``) and the plain branch's route never
+    forwards ``ids`` — both fail on rows+total; the fan-out arbiter
+    (sculptor, the sectioned victim) catches a predicate placed after
+    the join or applied to rows only (``total`` would stay 3).
+    """
+
+    @pytest.fixture
+    def staff_world(self, create_staff) -> dict:
+        """Three cards: two WITH master sections (join fan-out), one bare.
+
+        ``sculptor`` is the narrowing VICTIM — every request below asks
+        for painter+bare, so the sectioned sculptor must vanish from
+        rows AND ``total`` on BOTH branches.
+        """
+        painter = create_staff(
+            first_name="А", master={"specialty": "живопись", "color": "#111111"}
+        )
+        sculptor = create_staff(
+            first_name="Б", master={"specialty": "скульптура", "color": "#222222"}
+        )
+        bare = create_staff(first_name="В")
+        return {"painter": painter, "sculptor": sculptor, "bare": bare}
+
+    def test_plain_branch_narrows_rows_and_total(
+        self, api_client, staff_world
+    ) -> None:
+        """Default order (``list`` branch): ?id=painter&id=bare → exactly those."""
+        w = staff_world
+        resp = api_client.get("/api/v1/staff", params=[
+            ("id", w["painter"]["id"]), ("id", w["bare"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(i["id"] for i in body["items"]) == sorted(
+            [w["painter"]["id"], w["bare"]["id"]]
+        )
+        assert body["total"] == 2
+
+    @pytest.mark.parametrize("join_sort", ["specialty", "color"])
+    def test_join_branch_narrows_rows_and_total(
+        self, api_client, staff_world, join_sort
+    ) -> None:
+        """Extension sort (``list_join_masters``): rows AND total narrow;
+        the sectioned victim disappears entirely, sections still assemble."""
+        w = staff_world
+        resp = api_client.get("/api/v1/staff", params=[
+            ("sort_by", join_sort),
+            ("id", w["painter"]["id"]), ("id", w["bare"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        ids = [i["id"] for i in body["items"]]
+        # Rows: exactly the asked pair — the sectioned sculptor is gone…
+        assert sorted(ids) == sorted([w["painter"]["id"], w["bare"]["id"]])
+        assert w["sculptor"]["id"] not in ids
+        # …and total narrows WITH the rows (count subquery sees the
+        # predicate: 2, not 3 — the fan-out divergence arbiter, §4.3).
+        assert body["total"] == 2
+        # Composite assembly on narrowed rows: the kept section is filled.
+        sections = {i["id"]: i["master"] for i in body["items"]}
+        assert sections[w["painter"]["id"]] is not None
+        assert sections[w["painter"]["id"]]["specialty"] == "живопись"
+        assert sections[w["bare"]["id"]] is None
+
+    def test_join_branch_single_id_total_is_one(
+        self, api_client, staff_world
+    ) -> None:
+        """?id=<sectioned> alone on the join branch: total == 1 — the
+        narrowest form of the arbiter (one card, one section, one row)."""
+        w = staff_world
+        resp = api_client.get("/api/v1/staff", params=[
+            ("sort_by", "specialty"), ("id", w["sculptor"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [i["id"] for i in body["items"]] == [w["sculptor"]["id"]]
+        assert body["total"] == 1

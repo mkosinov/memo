@@ -19,8 +19,8 @@ docs/domain-rules/auth.md «Одноразовая ссылка установк
   the hard level-3 lock), revokes every session; NO audit row (public
   call, no author).
 
-Calling convention: selfless ``@transactional`` scenarios — leading
-``None`` + keyword arguments (``usecases/user.py`` docstring).
+Calling convention: selfless ``@transactional`` scenarios — plain
+keyword arguments (``usecases/user.py`` docstring).
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ class TestIssuePasswordLink:
         before = datetime.utcnow()
 
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
 
         assert link is not None
@@ -155,7 +155,7 @@ class TestIssuePasswordLink:
         before = datetime.utcnow()
 
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"],
+            db_session=db_session, user_id=user["id"],
             ttl=timedelta(hours=2),
         )
 
@@ -176,7 +176,7 @@ class TestIssuePasswordLink:
         _seed_token(user["id"], "b" * 64, used=True)           # consumed
 
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
 
@@ -203,7 +203,7 @@ class TestIssuePasswordLink:
 
         with pytest.raises(AccountDeactivatedError):
             await issue_password_link(
-                None, db_session=db_session, user_id=user["id"]
+                db_session=db_session, user_id=user["id"]
             )
 
         # No partial writes: the seeded token survives, no audit row.
@@ -214,7 +214,7 @@ class TestIssuePasswordLink:
         from src.usecases.password_setup import issue_password_link
 
         link = await issue_password_link(
-            None, db_session=db_session, user_id="no-such-user"
+            db_session=db_session, user_id="no-such-user"
         )
         assert link is None
         assert _token_rows() == []
@@ -224,7 +224,7 @@ class TestIssuePasswordLink:
 
         user = insert_user("+79990008805", "x", role="master")
         await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
 
         rows = _audit_rows()
@@ -246,7 +246,7 @@ class TestIssuePasswordLink:
 
         user = insert_user("+79990008806", "x", role="master")
         await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert _audit_rows() == []
         assert _token_rows(), "the action itself must still run"
@@ -268,12 +268,12 @@ class TestSetPasswordByLink:
         await db_session.commit()
 
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
 
         await set_password_by_link(
-            None, db_session=db_session,
+            db_session=db_session,
             raw_token=link.raw_token, password="  newpass-123  ",
         )
 
@@ -302,17 +302,17 @@ class TestSetPasswordByLink:
 
         user = insert_user("+79990008812", "x", role="master")
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
 
         await set_password_by_link(
-            None, db_session=db_session,
+            db_session=db_session,
             raw_token=link.raw_token, password="first-pass-1",
         )
         with pytest.raises(PasswordLinkInvalidError):
             await set_password_by_link(
-                None, db_session=db_session,
+                db_session=db_session,
                 raw_token=link.raw_token, password="second-pass-2",
             )
 
@@ -324,7 +324,7 @@ class TestSetPasswordByLink:
 
         with pytest.raises(PasswordLinkInvalidError):
             await set_password_by_link(
-                None, db_session=db_session,
+                db_session=db_session,
                 raw_token="totally-unknown-token", password="some-pass-123",
             )
 
@@ -337,14 +337,14 @@ class TestSetPasswordByLink:
 
         user = insert_user("+79990008813", "x", role="master")
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
         _expire_token(hashlib.sha256(link.raw_token.encode()).hexdigest())
 
         with pytest.raises(PasswordLinkInvalidError):
             await set_password_by_link(
-                None, db_session=db_session,
+                db_session=db_session,
                 raw_token=link.raw_token, password="some-pass-123",
             )
 
@@ -357,14 +357,14 @@ class TestSetPasswordByLink:
 
         user = insert_user("+79990008814", "x", role="master")
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
         _deactivate(user["id"])
 
         with pytest.raises(PasswordLinkInvalidError):
             await set_password_by_link(
-                None, db_session=db_session,
+                db_session=db_session,
                 raw_token=link.raw_token, password="some-pass-123",
             )
 
@@ -380,13 +380,13 @@ class TestSetPasswordByLink:
 
         user = insert_user("+79990008815", "x", role="master")
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
 
         with pytest.raises(PasswordPolicyError):
             await set_password_by_link(
-                None, db_session=db_session,
+                db_session=db_session,
                 raw_token=link.raw_token, password="short",
             )
         # The policy check runs BEFORE any DB work — the token is untouched.
@@ -402,14 +402,14 @@ class TestSetPasswordByLink:
 
         user = insert_user("+79990008816", "x", role="master")
         link = await issue_password_link(
-            None, db_session=db_session, user_id=user["id"]
+            db_session=db_session, user_id=user["id"]
         )
         assert link is not None
         before = _audit_rows()
         assert len(before) == 1, "the issue mark must be the only row so far"
 
         await set_password_by_link(
-            None, db_session=db_session,
+            db_session=db_session,
             raw_token=link.raw_token, password="some-pass-123",
         )
         assert _audit_rows() == before, (

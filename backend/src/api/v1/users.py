@@ -79,13 +79,9 @@ async def patch_user(
     (``PHONE_INVALID``), probes exact-string uniqueness (``PHONE_TAKEN``),
     journals the masked diff and skips a same-string no-op. Sessions are
     NOT revoked (cookie sessions are not tied to the phone).
-
-    Selfless-scenario convention (``usecases/records.py``): the leading
-    ``None`` fills the ``@transactional`` wrapper's unused ``self`` slot.
     """
     try:
-        user = await update_user_phone(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        user = await update_user_phone(
             db_session=session,
             user_id=user_id,
             phone=data.phone,
@@ -114,8 +110,7 @@ async def issue_link(
     page origin (``{origin}/password-setup#token=…``, spec §5).
     """
     try:
-        link = await issue_password_link(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        link = await issue_password_link(
             db_session=session,
             user_id=user_id,
         )

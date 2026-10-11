@@ -29,8 +29,8 @@ Edit side — the ``update_user_phone`` scenario (S5):
 The CLI ``create_user`` scenario keeps its password — the dev surface
 is untouched (spec §7; guarded by tests/usecases/test_user_create.py).
 
-Calling convention: selfless ``@transactional`` scenarios — leading
-``None`` + keyword arguments (``usecases/user.py`` docstring).
+Calling convention: selfless ``@transactional`` scenarios — plain
+keyword arguments (``usecases/user.py`` docstring).
 """
 
 from __future__ import annotations
@@ -197,7 +197,6 @@ class TestCompositeCreatePasswordless:
         from src.usecases.staff import create_staff
 
         created = await create_staff(
-            None,
             db_session=db_session,
             data=StaffCreate(
                 first_name="Ольга",
@@ -236,7 +235,7 @@ class TestUpdateUserPhone:
 
         assert (
             await update_user_phone(
-                None, db_session=db_session, user_id="no-such-user",
+                db_session=db_session, user_id="no-such-user",
                 phone=_PHONE_B,
             )
             is None
@@ -250,7 +249,7 @@ class TestUpdateUserPhone:
         user = insert_user(_PHONE_A, "x", role="master")
 
         updated = await update_user_phone(
-            None, db_session=db_session, user_id=user["id"],
+            db_session=db_session, user_id=user["id"],
             phone=f"  {_PHONE_B}  ",
         )
 
@@ -275,7 +274,7 @@ class TestUpdateUserPhone:
         await db_session.commit()
 
         await update_user_phone(
-            None, db_session=db_session, user_id=user["id"], phone=_PHONE_B,
+            db_session=db_session, user_id=user["id"], phone=_PHONE_B,
         )
 
         rows = query_db(
@@ -294,7 +293,7 @@ class TestUpdateUserPhone:
 
         with pytest.raises(PhoneTakenError):
             await update_user_phone(
-                None, db_session=db_session, user_id=user["id"],
+                db_session=db_session, user_id=user["id"],
                 phone=_PHONE_B,
             )
 
@@ -314,7 +313,7 @@ class TestUpdateUserPhone:
         user = insert_user(_PHONE_A, "x", role="master")
 
         updated = await update_user_phone(
-            None, db_session=db_session, user_id=user["id"],
+            db_session=db_session, user_id=user["id"],
             phone=f"  {_PHONE_A}  ",  # same string, padded
         )
 
@@ -332,7 +331,7 @@ class TestUpdateUserPhone:
 
         with pytest.raises(PhoneInvalidError):
             await update_user_phone(
-                None, db_session=db_session, user_id=user["id"],
+                db_session=db_session, user_id=user["id"],
                 phone="+7" + "9" * 19,  # 21 chars after trim
             )
 
@@ -350,7 +349,7 @@ class TestUpdateUserPhone:
 
         user = insert_user(_PHONE_A, "x", role="master")
         await update_user_phone(
-            None, db_session=db_session, user_id=user["id"], phone=_PHONE_B,
+            db_session=db_session, user_id=user["id"], phone=_PHONE_B,
         )
 
         rows = _audit_rows()
@@ -375,7 +374,7 @@ class TestUpdateUserPhone:
 
         user = insert_user(_PHONE_A, "x", role="master")
         await update_user_phone(
-            None, db_session=db_session, user_id=user["id"], phone=_PHONE_B,
+            db_session=db_session, user_id=user["id"], phone=_PHONE_B,
         )
 
         assert _audit_rows() == []

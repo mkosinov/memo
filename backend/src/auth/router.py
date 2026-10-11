@@ -293,8 +293,7 @@ async def password_setup(
         raise lock
 
     try:
-        await set_password_by_link(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        await set_password_by_link(
             db_session=db_session,
             raw_token=payload.token,
             password=payload.password,

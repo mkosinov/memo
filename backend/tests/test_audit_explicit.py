@@ -192,7 +192,7 @@ class TestStaffArchiveAudit:
         from tests.conftest import query_db
 
         _insert_staff_card("staff-arch", "Иван", "Иванов")
-        ok = await archive_staff(None, db_session=db_session, id="staff-arch")
+        ok = await archive_staff(db_session=db_session, id="staff-arch")
         assert ok is True
         rows = audit_rows()
         # ONE row for the person; the D6 checkbox cascades (masters/users
@@ -220,8 +220,8 @@ class TestStaffArchiveAudit:
         from src.usecases.staff import archive_staff
 
         _insert_staff_card("staff-noop", "Пётр", "Петров")
-        await archive_staff(None, db_session=db_session, id="staff-noop")
-        ok = await archive_staff(None, db_session=db_session, id="staff-noop")
+        await archive_staff(db_session=db_session, id="staff-noop")
+        ok = await archive_staff(db_session=db_session, id="staff-noop")
         assert ok is True
         rows = audit_rows()
         assert len(rows) == 1
@@ -234,7 +234,7 @@ class TestStaffArchiveAudit:
         from src.usecases.staff import archive_staff
 
         _insert_staff_card("staff-res", "Сидор", "Сидоров")
-        await archive_staff(None, db_session=db_session, id="staff-res")
+        await archive_staff(db_session=db_session, id="staff-res")
         ok = await get_staff_service().restore(db_session, "staff-res")
         assert ok is True
         rows = audit_rows()
@@ -296,7 +296,6 @@ class TestRecordScenariosAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud",
@@ -320,7 +319,6 @@ class TestRecordScenariosAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud",
@@ -330,7 +328,6 @@ class TestRecordScenariosAudit:
         )
         before = len(audit_rows())
         updated = await update_record(
-            None,
             db_session=db_session,
             id=record.id,
             data=RecordUpdate(
@@ -354,7 +351,6 @@ class TestRecordScenariosAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud",
@@ -364,7 +360,6 @@ class TestRecordScenariosAudit:
         )
         before = len(audit_rows())
         patched = await patch_record(
-            None,
             db_session=db_session,
             id=record.id,
             data=RecordPatch(comment="Только комментарий"),
@@ -384,7 +379,6 @@ class TestRecordScenariosAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud",
@@ -395,7 +389,6 @@ class TestRecordScenariosAudit:
         )
         before = len(audit_rows())
         patched = await patch_record(
-            None,
             db_session=db_session,
             id=record.id,
             data=RecordPatch(),  # nothing sent
@@ -415,7 +408,6 @@ class TestRecordScenariosAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud",
@@ -434,7 +426,6 @@ class TestRecordScenariosAudit:
         await db_session.commit()
         before = len(audit_rows())
         ok = await delete_record(
-            None,
             db_session=db_session,
             id=record.id,
             resolutions={"visits": "cascade", "payments": "cascade"},
@@ -469,7 +460,6 @@ class TestVisitServiceAudit:
 
         _seed_record_chain()
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-aud", client_id="cl-aud", visits=[]
@@ -677,7 +667,7 @@ class TestStaffCompositeAudit:
         from src.usecases.staff import create_staff
 
         card = await create_staff(
-            None, db_session=db_session,
+            db_session=db_session,
             data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         rows = audit_rows()
@@ -706,7 +696,6 @@ class TestStaffCompositeAudit:
         from src.usecases.staff import create_staff
 
         card = await create_staff(
-            None,
             db_session=db_session,
             data=StaffCreate(
                 first_name="Пётр",
@@ -731,12 +720,11 @@ class TestStaffCompositeAudit:
         from src.usecases.staff import create_staff, update_staff
 
         card = await create_staff(
-            None, db_session=db_session,
+            db_session=db_session,
             data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
         updated = await update_staff(
-            None,
             db_session=db_session,
             id=card.id,
             data=StaffUpdate(first_name="Ян", last_name="Иванов"),
@@ -757,12 +745,12 @@ class TestStaffCompositeAudit:
         from src.usecases.staff import create_staff, patch_staff
 
         card = await create_staff(
-            None, db_session=db_session,
+            db_session=db_session,
             data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
         patched = await patch_staff(
-            None, db_session=db_session, id=card.id,
+            db_session=db_session, id=card.id,
             data=StaffPatch(first_name="Иоанн"),
         )
         assert patched is not None
@@ -778,12 +766,12 @@ class TestStaffCompositeAudit:
         from src.usecases.staff import create_staff, patch_staff
 
         card = await create_staff(
-            None, db_session=db_session,
+            db_session=db_session,
             data=StaffCreate(first_name="Иван", last_name="Иванов"),
         )
         before = len(audit_rows())
         patched = await patch_staff(
-            None, db_session=db_session, id=card.id, data=StaffPatch(),
+            db_session=db_session, id=card.id, data=StaffPatch(),
         )
         assert patched is not None
         assert audit_rows()[before:] == []
@@ -1248,7 +1236,7 @@ class TestVisitorServiceAudit:
         _insert_visitor("vis-casc", "cl-casc", "Борис")
         before = len(audit_rows())
         ok = await delete_client(
-            None, db_session=db_session, id="cl-casc",
+            db_session=db_session, id="cl-casc",
             resolutions={"visitors": "cascade"},
             expected={"visitors": ["vis-casc"]},  # GH #345: confirmed state
         )
@@ -1336,7 +1324,7 @@ class TestActivityDeleteAudit:
 
         _seed_record_chain()
         before = len(audit_rows())
-        ok = await delete_activity(None, db_session=db_session, id="act-aud")
+        ok = await delete_activity(db_session=db_session, id="act-aud")
         assert ok is True
         rows = audit_rows()[before:]
         # ONE activity delete row; the cascaded records/visits/payments/
@@ -1350,7 +1338,7 @@ class TestActivityDeleteAudit:
     ) -> None:
         from src.usecases.activities import delete_activity
 
-        ok = await delete_activity(None, db_session=db_session, id="act-none")
+        ok = await delete_activity(db_session=db_session, id="act-none")
         assert ok is False
         assert audit_rows() == []
 

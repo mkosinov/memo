@@ -170,11 +170,10 @@ async def _create_staff_via_scenario(db_session: Any, input_schema: Any) -> Any:
     """GH #326 Task 3: seed a staff card through the ``create_staff``
     scenario (the composite create chain left ``StaffService``). Returns
     the composite ``StaffResponse`` — the harness reads only ``.id``.
-    Selfless call with the leading ``None`` + keyword args (the
-    usecases convention)."""
+    Selfless call — plain keyword args (the usecases convention)."""
     from src.usecases.staff import create_staff
 
-    return await create_staff(None, db_session=db_session, data=input_schema)
+    return await create_staff(db_session=db_session, data=input_schema)
 
 
 # ─── Per-service config ──────────────────────────────────────────────────────────

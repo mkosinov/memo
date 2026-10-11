@@ -325,7 +325,6 @@ class TestClientCascadeInheritsRecompute:
         await db_session.commit()
 
         ok = await delete_client(
-            None,
             db_session=db_session,
             id=client.id,
             resolutions={"records": "nullify", "visitors": "cascade"},

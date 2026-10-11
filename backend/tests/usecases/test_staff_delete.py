@@ -36,7 +36,7 @@ scenario level:
 - atomicity: a mid-cascade failure rolls back EVERYTHING and publishes
   nothing.
 
-CALLING CONVENTION: selfless function — leading ``None`` + keyword
+CALLING CONVENTION: selfless function — plain keyword
 arguments (see ``src/usecases/staff.py``).
 """
 
@@ -198,7 +198,7 @@ async def test_scenario_calls_the_core_not_the_decorated_method(
     staff = await _add_staff(db_session)
 
     ok = await staff_module.delete_staff(
-        None, db_session=db_session, id=staff.id, resolutions={},
+        db_session=db_session, id=staff.id, resolutions={},
     )
     assert ok is True
     assert calls == ["_resolve_delete_core"], (
@@ -213,7 +213,7 @@ async def test_delete_missing_returns_false(db_session) -> None:
     from src.usecases.staff import delete_staff
 
     assert await delete_staff(
-        None, db_session=db_session, id="ghost", resolutions={},
+        db_session=db_session, id="ghost", resolutions={},
     ) is False
 
 
@@ -226,7 +226,7 @@ async def test_delete_bare_clean_removes_row(db_session) -> None:
     staff_id = staff.id
 
     ok = await delete_staff(
-        None, db_session=db_session, id=staff_id, resolutions={},
+        db_session=db_session, id=staff_id, resolutions={},
     )
     assert ok is True
     assert await db_session.get(Staff, staff_id) is None
@@ -249,7 +249,7 @@ async def test_delete_with_resolutions_cascades_all(db_session) -> None:
     staff_id = staff.id
 
     ok = await delete_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         resolutions={"masters": "cascade"},
     )
     assert ok is True
@@ -302,7 +302,7 @@ async def test_delete_blocked_by_activities_raises(db_session, subscriber) -> No
 
     with pytest.raises(BlockingDepsError):
         await delete_staff(
-            None, db_session=db_session, id=staff_id, resolutions={},
+            db_session=db_session, id=staff_id, resolutions={},
             expected={"activities": [activity.id]},  # confirmed → blocked fires
         )
 
@@ -341,7 +341,7 @@ async def test_delete_stale_expected_raises_before_blocking(db_session) -> None:
     # ``expected: {}`` — the mid-window race: the activity is NOT confirmed.
     with pytest.raises(StaleDependenciesError) as exc_info:
         await delete_staff(
-            None, db_session=db_session, id=staff_id, resolutions={},
+            db_session=db_session, id=staff_id, resolutions={},
             expected={},
         )
 
@@ -361,7 +361,7 @@ async def test_delete_missing_returns_false_before_collectors(
     from src.usecases.staff import delete_staff
 
     assert await delete_staff(
-        None, db_session=db_session, id="ghost", resolutions={},
+        db_session=db_session, id="ghost", resolutions={},
         expected={"activities": ["some-id"]},
     ) is False
 
@@ -384,7 +384,7 @@ async def test_grid_bare_clean(db_session, subscriber) -> None:
     _drain(subscriber)
 
     ok = await delete_staff(
-        None, db_session=db_session, id=staff_id, resolutions={},
+        db_session=db_session, id=staff_id, resolutions={},
     )
     assert ok is True
 
@@ -414,7 +414,7 @@ async def test_grid_full_cascade_marks_every_dispatched_dep(
     _drain(subscriber)
 
     ok = await delete_staff(
-        None, db_session=db_session, id=staff_id, resolutions={},
+        db_session=db_session, id=staff_id, resolutions={},
     )
     assert ok is True
 
@@ -455,7 +455,7 @@ async def test_atomicity_mid_cascade_failure_rolls_back_everything(
 
     with pytest.raises(StepBoomError):
         await delete_staff(
-            None, db_session=db_session, id=staff_id, resolutions={},
+            db_session=db_session, id=staff_id, resolutions={},
         )
 
     await db_session.rollback()

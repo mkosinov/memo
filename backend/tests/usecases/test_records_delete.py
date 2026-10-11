@@ -23,9 +23,8 @@ These tests pin the new shape:
   now the scenario's explicit ``mark_changed``; the visit/payment
   helpers mark THEIRS).
 
-CALLING CONVENTION: scenarios are selfless functions, so the
-``@transactional`` wrapper binds the first positional arg as ``self`` —
-they are invoked with KEYWORD arguments (see the module docstring in
+CALLING CONVENTION: scenarios are selfless functions — invoked with
+KEYWORD arguments (see the module docstring in
 ``src/usecases/records.py``).
 """
 
@@ -108,7 +107,7 @@ async def test_delete_missing_returns_none(db_session, create_activity):
     from src.usecases.records import delete_record
 
     assert await delete_record(
-        None, db_session=db_session, id="nonexistent",
+        db_session=db_session, id="nonexistent",
         resolutions=None, expected={},
     ) is None
 
@@ -133,7 +132,7 @@ async def test_delete_stale_expected_raises_and_keeps_rows(
     # The caller confirmed NOTHING (empty expected) — the payment is stale.
     with pytest.raises(StaleDependenciesError) as exc_info:
         await delete_record(
-            None, db_session=db_session, id=record_id,
+            db_session=db_session, id=record_id,
             resolutions={"visits": "cascade", "payments": "cascade"},
             expected={},
         )
@@ -175,7 +174,7 @@ async def test_delete_invalid_resolutions_raises_and_keeps_rows(
 
     with pytest.raises(InvalidResolutionError):
         await delete_record(
-            None, db_session=db_session, id=record_id,
+            db_session=db_session, id=record_id,
             resolutions={"visits": "archive"},  # not an allowed action
             expected={"visits": visit_ids},
         )
@@ -205,7 +204,7 @@ async def test_delete_cascades_and_returns_true(db_session, create_activity):
     payment_ids = await _ids(db_session, select(Payment.id).where(Payment.record_id == record.id))
 
     result = await delete_record(
-        None, db_session=db_session, id=record.id,
+        db_session=db_session, id=record.id,
         resolutions={"visits": "cascade", "payments": "cascade"},
         expected={"visits": visit_ids, "payments": payment_ids},
     )
@@ -231,7 +230,7 @@ async def test_delete_clean_path_resolutions_none(db_session, create_activity):
     record = await _seed_record(db_session, activity, [])  # NO visits — clean
 
     result = await delete_record(
-        None, db_session=db_session, id=record.id,
+        db_session=db_session, id=record.id,
         resolutions=None, expected={},
     )
     assert result is True
@@ -281,7 +280,7 @@ async def test_delete_success_grid_is_records_visits_payments(
     _drain(subscriber)
 
     result = await delete_record(
-        None, db_session=db_session, id=record_id,
+        db_session=db_session, id=record_id,
         resolutions={"visits": "cascade", "payments": "cascade"},
         expected={"visits": visit_ids, "payments": payment_ids},
     )

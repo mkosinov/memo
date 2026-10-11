@@ -598,7 +598,7 @@ class TestDeleteUsesScenario:
         activity = create_activity()
         calls: list[str] = []
 
-        async def spy_scenario(self, db_session, id):
+        async def spy_scenario(db_session, id):
             calls.append(f"scenario:{id}")
             return True
 

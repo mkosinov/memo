@@ -115,7 +115,6 @@ class TestMain:
                 await conn.run_sync(Base.metadata.create_all)
             async with manager.async_session() as session:
                 await create_user_scenario(
-                    None,
                     db_session=session,
                     phone="+79990000099",
                     role="admin",

@@ -23,6 +23,7 @@ import type {
   PasswordLinkResponse,
   PaginatedResponse,
   StaffResponse,
+  ResolveDeleteEntityPayload,
 } from '@memo/api-client';
 import {
   createRowSnapshotSync,
@@ -121,13 +122,6 @@ function invalidateAfterDelete(qc: QueryClient): void {
   invalidateEntities(qc, ['staff']);
 }
 
-/** Payload type for the execute path — `expected` is mandatory on the new
- *  contract (T5), resolutions optional (all-auto staff trees send {}). */
-type ResolveDeleteStaffPayload = {
-  expected: Record<string, string[]>;
-  resolutions?: Record<string, string>;
-};
-
 /** Toast shower type derived from the UI context (the hook consumes useUI). */
 type ShowToast = ReturnType<typeof useUI>['showToast'];
 
@@ -149,7 +143,7 @@ interface PendingActionShape {
 async function commitDeferredDelete(
   qc: QueryClient,
   staffId: string,
-  payload: ResolveDeleteStaffPayload,
+  payload: ResolveDeleteEntityPayload,
   snapshots: RowSnapshot[],
 ): Promise<void> {
   await resolveDeleteStaff(staffId, payload);
@@ -169,7 +163,7 @@ async function commitDeferredDelete(
 function buildDeferredDeleteAction(
   qc: QueryClient,
   staff: StaffResponse,
-  payload: ResolveDeleteStaffPayload,
+  payload: ResolveDeleteEntityPayload,
   snapshots: RowSnapshot[],
   showToast: ShowToast,
 ): PendingActionShape {

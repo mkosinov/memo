@@ -18,6 +18,7 @@ import type {
   MaterialResponse,
   DependencyNode,
   PaginatedResponse,
+  ResolveDeleteEntityPayload,
 } from '@memo/api-client';
 import {
   createRowSnapshotSync,
@@ -118,13 +119,6 @@ function invalidateAfterDelete(qc: QueryClient): void {
   invalidateEntities(qc, ['materials']);
 }
 
-/** Payload type for the execute path — `expected` is mandatory on the new
- *  contract (T5), resolutions optional (all-auto material trees send {}). */
-type ResolveDeleteMaterialPayload = {
-  expected: Record<string, string[]>;
-  resolutions?: Record<string, string>;
-};
-
 /** Toast shower type derived from the UI context (the hook consumes useUI). */
 type ShowToast = ReturnType<typeof useUI>['showToast'];
 
@@ -146,7 +140,7 @@ interface PendingActionShape {
 async function commitDeferredDelete(
   qc: QueryClient,
   materialId: string,
-  payload: ResolveDeleteMaterialPayload,
+  payload: ResolveDeleteEntityPayload,
   snapshots: RowSnapshot[],
 ): Promise<void> {
   await resolveDeleteMaterial(materialId, payload);
@@ -166,7 +160,7 @@ async function commitDeferredDelete(
 function buildDeferredDeleteAction(
   qc: QueryClient,
   material: Pick<MaterialResponse, 'id'>,
-  payload: ResolveDeleteMaterialPayload,
+  payload: ResolveDeleteEntityPayload,
   snapshots: RowSnapshot[],
   showToast: ShowToast,
 ): PendingActionShape {

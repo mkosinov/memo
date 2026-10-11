@@ -6,14 +6,16 @@ injected as ``Annotated[XListParams, Query()]`` — scalar query siblings
 are banned (fastapi PR #12481), and the ``id`` field inherited from
 ``PaginationParams`` (#232) makes ``?id=X&id=Y`` narrowing work uniformly.
 
-THE MATRIX COVERS ALL NINE converted endpoints (§4.1): the three
+THE MATRIX COVERS ALL TEN converted endpoints (§4.1): the three
 dictionary sort lists (services, materials, tags — Task 2), the four
 simple lists (visitors, activities, payments, positions — Task 3),
 locations (Task 4 — the hybrid: ``?id=`` narrowing ALREADY worked there
 via the ``#232`` sibling param, so the matrix is a pure REGRESSION pin
-that the model conversion keeps the wire intact) and staff (Task 5 —
+that the model conversion keeps the wire intact), staff (Task 5 —
 its own sort whitelist/status/q; the plain branch here, the masters-
-join branch in TestStaffBothBranchesIdNarrowing) — all in the SAME
+join branch in TestStaffBothBranchesIdNarrowing) and visits (Task 6 —
+the §4.3 gap-2 custom list; the ``record_id``+``id`` conjunction is
+arbitrated by TestVisitRecordIdPlusIdNarrowing) — all in the SAME
 ``ENDPOINTS`` list (no test-body changes needed: everything is
 parametrized by descriptors carrying the route URL + the conftest
 factory name).
@@ -128,6 +130,18 @@ ENDPOINTS = [
             "id", "page", "per_page", "sort_by", "sort_order",
             "status", "q",
         ),
+    ),
+    # GH #371 Task 6 — visits: the §4.3 gap-2 list (custom hand-rolled
+    # ``VisitService.list`` outside GenericService — the ``ids``
+    # predicate lives IN the service, right after the ``record_id``
+    # filter and before the count subquery). The matrix row pins the
+    # generic contract (С1/С3/OpenAPI); the ``record_id``+``id``
+    # CONJUNCTION (С6) is arbitrated by TestVisitRecordIdPlusIdNarrowing
+    # below.
+    ListEndpoint(
+        route="/api/v1/visits",
+        factory="create_visit",
+        query_params=("id", "page", "per_page", "record_id"),
     ),
 ]
 
@@ -525,3 +539,77 @@ class TestStaffBothBranchesIdNarrowing:
         body = resp.json()
         assert [i["id"] for i in body["items"]] == [w["sculptor"]["id"]]
         assert body["total"] == 1
+
+
+class TestVisitRecordIdPlusIdNarrowing:
+    """С6 — visits narrow ``?id=`` ON TOP of the existing ``record_id`` filter.
+
+    ``GET /api/v1/visits`` is the spec §4.3 GAP-2 list: a hand-rolled
+    ``VisitService.list`` OUTSIDE ``GenericService`` — the ``ids`` set
+    must reach the service and its ``ids_in_predicate`` must land in the
+    SAME WHERE as ``record_id``, BEFORE the count subquery, so rows and
+    ``total`` narrow consensually.
+
+    RED design: pre-conversion the route injects pagination via the
+    Depends shape (which silently drops the list-typed ``id`` field —
+    schemas/pagination.py caveat) and the service has no ``ids``
+    plumbing at all: ``?record_id=R&id=X`` returns ALL of R's visits —
+    the rows/total assertions fail. The foreign-visit case catches an
+    OR-style (visibility-expanding) predicate: a valid visit id from
+    ANOTHER record must stay absent under ``record_id=R``.
+    """
+
+    @pytest.fixture
+    def visit_world(self, api_client, create_record) -> dict:
+        """One record R with three visits + one visit on a foreign record.
+
+        ``first``/``third`` are the narrowing targets; ``second`` is the
+        VICTIM (asked-for-never); ``foreign`` sits outside ``record_id=R``
+        — the conjunctivity probe.
+        """
+        record = create_record(visits=[
+            {"name": "Первый", "price": 100, "status": "waiting"},
+            {"name": "Второй", "price": 100, "status": "waiting"},
+            {"name": "Третий", "price": 100, "status": "waiting"},
+        ])
+        foreign_record = create_record()  # default single guest visit
+        return {
+            "record_id": record["id"],
+            "visits": [v["id"] for v in record["visits"]],
+            "foreign_visit_id": foreign_record["visits"][0]["id"],
+        }
+
+    def test_record_id_with_id_pair_narrows_rows_and_total(
+        self, api_client, visit_world
+    ) -> None:
+        """``?record_id=R&id=<first>&id=<third>`` → exactly first+third, total 2."""
+        w = visit_world
+        resp = api_client.get("/api/v1/visits", params=[
+            ("record_id", w["record_id"]),
+            ("id", w["visits"][0]), ("id", w["visits"][2]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert sorted(i["id"] for i in body["items"]) == sorted(
+            [w["visits"][0], w["visits"][2]]
+        )
+        # total narrows WITH the rows (the count subquery sees the
+        # predicate: 2, not 3 — placement arbiter, §4.3 gap 2).
+        assert body["total"] == 2
+
+    def test_record_id_with_foreign_visit_id_stays_empty(
+        self, api_client, visit_world
+    ) -> None:
+        """A valid visit id from ANOTHER record under ``record_id=R`` →
+        200 + empty (intersection, never replacement/expansion)."""
+        w = visit_world
+        resp = api_client.get("/api/v1/visits", params=[
+            ("record_id", w["record_id"]),
+            ("id", w["foreign_visit_id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0

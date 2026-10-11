@@ -422,6 +422,31 @@ def create_payment(api_client, create_record):
 
 
 @pytest.fixture
+def create_visit(api_client, create_record):
+    """Factory: creates a visit via API (GH #371 list matrix, Task 6).
+
+    Composes the full record chain (a visit requires ``record_id``);
+    the fresh record's default guest visit is NOT returned — only the
+    newly posted one.
+    Usage::
+        visit = create_visit()
+        visit = create_visit(price=1500, status="waiting")
+    """
+    def factory(**overrides):
+        record = create_record()
+        payload = {
+            "record_id": record["id"],
+            "price": 1000,
+            "status": "waiting",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/visits", json=payload)
+        assert resp.status_code == 201, f"create_visit failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_position(api_client):
     """Factory: creates a position via API (GH #371 list matrix).
 

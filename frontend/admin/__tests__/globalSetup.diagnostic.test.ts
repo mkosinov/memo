@@ -52,6 +52,11 @@ describe('globalSetup #152 diagnostics', () => {
     vi.stubEnv('SHARD_PORT', '3003');
     vi.stubEnv('BACKEND_PORT', '8002');
     delete process.env.SHARD_ID;
+    // GH #387: globalSetup resolves the backend base via the backend-url
+    // guard — both URL vars must be present with the same host, else the
+    // run dies at the guard instead of reaching the diagnostics under test.
+    vi.stubEnv('BACKEND_URL', 'http://127.0.0.1:8001');
+    vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://127.0.0.1:8001');
 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'globalsetup-diag-'));
     const dbPath = path.join(tmpDir, 'test_memo_diag.db');

@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -16,7 +17,7 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * Saved payment ROW locator (scenario 15b). The naive

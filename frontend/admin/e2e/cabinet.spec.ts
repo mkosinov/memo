@@ -29,6 +29,7 @@
  * decodes the url param to prove the underlying served path, then a direct
  * backend GET proves the file is stored and served.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type Page } from '@playwright/test';
 import {
@@ -40,7 +41,7 @@ import {
 import { waitForStaffReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 // Minimal valid-by-magic-bytes PNG (services/files.py sniffs only the 8-byte
 // signature; it never decodes). Stays far under the 5 MB cap.

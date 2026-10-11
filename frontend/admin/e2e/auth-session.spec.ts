@@ -12,9 +12,10 @@
  * precondition: the spec proves a LIVE cookie works, then proves logout
  * kills it.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('User Scenario 4 — logout', () => {
   test.use({ storageState: { cookies: [], origins: [] } });

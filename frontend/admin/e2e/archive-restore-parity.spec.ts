@@ -9,6 +9,7 @@
  * row leaves the active list and appears in the archived view; restore →
  * POST /{id}/restore → 200 `archived: false`; row returns to the active list.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import {
@@ -32,7 +33,7 @@ import {
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Filter by archive status on the entity page (staff/locations/services/materials). */
 async function setStatusFilter(page: Page, status: 'active' | 'archived'): Promise<void> {

@@ -12,6 +12,7 @@
  * «передайте ссылку сотруднику»); the DB row keeps NO password hash and
  * the raw token only as its SHA-256 digest.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest } from '@playwright/test';
 import crypto from 'node:crypto';
@@ -22,7 +23,7 @@ import { queryDBRow } from './fixtures/db-query';
 // «Действует до …» line, no hand-copied duplicate in this spec.
 import { formatLinkExpiry } from '../app/(main)/staff/components/PasswordLinkDialog';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 let phoneCounter = 0;
 /**

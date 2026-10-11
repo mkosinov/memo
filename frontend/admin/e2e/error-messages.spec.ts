@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -30,10 +31,11 @@ import {
  * Scenarios 2, 3, 4, 5, 6 use page.route() to mock API error responses
  * with the new structured error shape: {detail: {code, message}}.
  *
- * Requires: backend on :8005, admin on :3005
+ * Requires: the stack pinned via BACKEND_URL + NEXT_PUBLIC_API_URL
+ * (GH #387 — resolveBackendUrl() refuses bare runs with the recipe).
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8005';
+const BACKEND = resolveBackendUrl();
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
@@ -136,7 +137,7 @@ test.describe('Services — Create Modal', () => {
 // dependencies), so the fixture is factory-built per run.
 // ---------------------------------------------------------------------------
 
-const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Tariff shape on GET /api/v1/services/{id} (fields the scenarios assert). */
 interface TariffPayload {

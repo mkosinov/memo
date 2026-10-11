@@ -22,6 +22,7 @@
  * seed-reset fixture) guarantee test 1 runs before test 2 in this worker, so
  * the module-level id hand-off is reliable.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -33,7 +34,7 @@ import {
 } from './fixtures/factories';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Seed staff ids preserved by the migration (m6 never existed). */
 const SEED_STAFF = ['m1', 'm2', 'm3', 'm4', 'm5', 'm7'];

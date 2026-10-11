@@ -24,6 +24,7 @@
  * logged-in user cookie — same write the frontend's patchUserSettings
  * makes; the decorational `memo-theme` localStorage is UIContext's).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import {
@@ -33,7 +34,7 @@ import {
 } from './fixtures/factories';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 let phoneCounter = 0;
 /** A unique 11-digit RU phone per call (no collision across tests/shards). */

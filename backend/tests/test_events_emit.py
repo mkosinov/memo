@@ -8,7 +8,8 @@ asserting the published ``(entities, origin)`` payloads:
 * own entity — auto-mark of the service's ``entity_name`` (spec §3.3);
 * cascades — the binding §3.3 table sets (visit hooks, activity delete,
   record delete via the ``delete_record`` scenario, record create nested,
-  resolve_delete executor, master archive/restore user cascade);
+  resolve_delete executor, standalone visitor delete (GH #375), master
+  archive/restore user cascade);
 * origin — ``X-Memo-Tab-Id`` on mutating requests becomes the origin
   envelope; absent header → ``None`` (spec §2.4/§4.2).
 
@@ -229,12 +230,43 @@ class TestResolveDeleteExecutor:
         # marks dep.entity for EVERY dispatched handler regardless of count
         # (extra invalidations are cheap/correct, spec §2.7). Join-table
         # names ("client_tags") are published as-is — unknown names are
-        # skipped silently by consumers (spec §5). NB (rebase #324/#327):
-        # the route executes the ``delete_client`` scenario, which runs the
-        # visits brick with ``mark_visits=False`` — the recompute-inside
-        # brick re-marks "records" (already in the set), "visits" stays
-        # suppressed (spec §8 parity).
-        assert events == [({"clients", "records", "visitors", "client_tags", "photos"}, None)]
+        # skipped silently by consumers (spec §5). GH #375: the route
+        # executes the ``delete_client`` scenario, which now publishes
+        # "visits" too — the #327 §8 suppression is lifted, the erased
+        # visits are named in the package (the recompute-inside brick
+        # re-marks "records", already in the set).
+        assert events == [(
+            {"clients", "records", "visitors", "client_tags", "photos", "visits"},
+            None,
+        )]
+
+
+class TestVisitorDeleteCascade:
+    async def test_standalone_delete_marks_visitors_and_visits(
+        self, db_session, api_client, create_client, subscriber
+    ) -> None:
+        """GH #375: the standalone ``VisitorService.delete`` publishes
+        ``{visitors, visits}``. The visits-deletion brick is dispatched
+        unconditionally, so its entity marks by dispatch fact — a
+        visit-less visitor still names ``visits`` (the brick itself
+        early-exits at zero rows; pre-#375 the mark was suppressed
+        entirely and the grid was ``{visitors}`` only)."""
+        from src.services.visitor import get_visitor_service
+
+        client = create_client()
+        visitor = api_client.post("/api/v1/visitors", json={
+            "client_id": client["id"], "name": "Виктор", "age": 30,
+        })
+        assert visitor.status_code == 201, visitor.text
+        _drain(subscriber)  # discard setup noise
+
+        ok = await get_visitor_service().delete(
+            db_session=db_session, id=visitor.json()["id"]
+        )
+        assert ok is True
+
+        events = _drain(subscriber)
+        assert events == [({"visitors", "visits"}, None)]
 
 
 class TestStaffArchiveCascade:

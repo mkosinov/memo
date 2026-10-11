@@ -9,12 +9,13 @@
  *
  * API/SQL for the view + tables, UI for the schedule filter dropdown.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { cleanup, createTestStaff } from './fixtures/factories';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 test.describe('S1 — SMM employee without a master section', () => {
   test('absent from /api/v1/masters and from the schedule master filter', async ({ page, request }) => {

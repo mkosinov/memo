@@ -75,26 +75,56 @@ Where each run mode gets its env from:
   per shard, and an exported env var always beats a line in `.env.test`
   (`playwright.config.ts` loads `.env.test` via `process.loadEnvFile`, which
   never overrides already-set variables). No conflict is possible in this mode.
-- **Standalone (`pnpm exec playwright test --project=shard-rest`)**: vars come
-  from your shell plus `frontend/admin/.env.test` defaults. The file is
-  tracked (identical on every machine) and keeps only
-  `NEXT_PUBLIC_API_URL` — it is baked into the Next.js bundle at compile
-  time and must match how you open the page (localhost vs 127.0.0.1
-  cookies — #387). The pre-sharding `TEST_DB_PATH` line was dropped from
-  the file (GH #336): the GH #209 conflict error now fires only when you
-  export BOTH vars yourself with different paths — unset one of them.
+- **Standalone (`pnpm exec playwright test <spec>`)**: the backend URL is NOT
+  defaulted anymore — `e2e/lib/backend-url.ts` (`resolveBackendUrl()`, the
+  single resolver every spec and fixture reads) throws with the canonical
+  recipe unless BOTH `BACKEND_URL` and `NEXT_PUBLIC_API_URL` are exported
+  with the SAME host (GH #387/#463: silent per-file defaults `:8000/:8001`
+  let bare runs piggyback a foreign shard stack, and a `localhost` API
+  origin against the `127.0.0.1` baseURL silently dropped the SameSite=Lax
+  session cookie). The tracked `frontend/admin/.env.test` keeps only
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` — the browser-bundle default,
+  same host as the baseURL; ports may differ between the two vars, hosts
+  may not. The pre-sharding `TEST_DB_PATH` line was dropped from the file
+  (GH #336): the GH #209 conflict error now fires only when you export
+  BOTH vars yourself with different paths — unset one of them.
+
+**Canonical standalone invocation** (the recipe the guard error prints;
+`SHARD_PORT` pins the page off the shard ports — the default `:3002`
+belongs to shard 1, and a running full run would be silently reused by
+`reuseExistingServer` with ITS baked API origin):
+
+```bash
+# ── Stack: once per DB lifetime (redo after a week rollover or a seed change) ──
+cd backend && rm -f test_memo.db test_memo.db-shm test_memo.db-wal
+# new terminal, keep running — Alembic recreates the schema on boot:
+ENV_FILE=.env.test PYTHONPATH=src uv run uvicorn src.main:app --port 8000
+# seed (EXPLICIT absolute DATABASE_URL, 4 slashes — the seeder reads
+# os.environ, not ENV_FILE; a relative URL silently targets the wrong DB):
+cd backend && DATABASE_URL="sqlite+aiosqlite:////$(pwd)/test_memo.db" PYTHONPATH=src uv run python -m seed.seed
+# snapshot the canonical reset script (#310):
+python3 scripts/gen_seed_canon.py backend/test_memo.db backend/test_memo.db.canon.sql
+
+# ── Run ──
+cd frontend/admin && SHARD_PORT=3005 BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 pnpm exec playwright test e2e/<spec>.ts
+```
+
+`NEXT_PUBLIC_API_URL` is baked into the Next.js bundle at compile time: if
+you change the API host between runs, remove `frontend/admin/.next` first
+(same poisoning `test-all.sh` guards against). Sharded/CI runs are
+unaffected — `test-all.sh`, `e2e-shard-start.sh` and every CI workflow
+already export both vars with the same host, so the guard is a no-op there.
 
 ## How to run
 
 ### Quick (specific test type)
 - Just backend: `cd backend && uv run pytest -k test_name -v`
-- Just one frontend spec: `cd frontend/admin && pnpm exec playwright test spec_name.spec.ts`
 - Just one vitest: `cd frontend/admin && pnpm test -- -t "test name"`
-- Standalone Playwright (single server, not sharded):
-  ```bash
-  cd frontend/admin && pnpm exec playwright test --project=shard-rest
-  ```
-  This uses `webServer` in config to auto-start Next.js on `:3002` (reads `.env.test` defaults).
+- Just one frontend spec (standalone): the full canonical recipe lives
+  right above ("Canonical standalone invocation") — stack (backend + seed
+  + canon) then the pinned run with `SHARD_PORT` off the shard ports.
+  Bare runs without the pins fail LOUDLY with that exact recipe
+  (`e2e/lib/backend-url.ts`).
 
 ### Full (on demand)
 - `pnpm test:all` (from repo root) — runs `scripts/test-all.sh` which orchestrates all stages in parallel

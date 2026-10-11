@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForRecordsReady, openModal } from './fixtures/helpers';
@@ -17,7 +18,7 @@ import {
 } from './fixtures/factories';
 import { queryDB } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * GH #213 — composite read endpoint GET /api/v1/records/view (US-1..US-6).

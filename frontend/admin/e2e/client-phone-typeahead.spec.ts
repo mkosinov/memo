@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -10,7 +11,7 @@ import {
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, cleanup, cleanupRecord } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /**
  * Delete every record bound to the client FIRST, then the client itself.

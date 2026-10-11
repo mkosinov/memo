@@ -1,3 +1,4 @@
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -34,7 +35,7 @@ import { waitForScheduleReady, gotoScheduleDay } from './fixtures/helpers';
  * from the defaults: masters ON, locations OFF.
  */
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 const TOPBAR = '[data-testid="center-content"]';
 
 /**

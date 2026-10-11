@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
 import { resolveAuthStatePath } from './e2e/fixtures/auth-state';
+import { resolveBackendUrl } from './e2e/lib/backend-url';
 
 // ── Per-shard environment variables ────────────────────────────────────────
 // When run via test-all.sh, each shard sets:
@@ -19,6 +20,12 @@ try {
 } catch {
   // .env.test not found — rely on environment variables (CI)
 }
+
+// GH #387: the EARLIEST fence — refuse a bare run before the webServer even
+// starts. A silent default port let bare runs piggyback a foreign stack
+// (#463); both vars must be present and share one host (SameSite cookies).
+// Shard/CI modes export both vars already — a no-op there.
+resolveBackendUrl();
 
 const SHARD_PORT = process.env.SHARD_PORT || '3002';
 

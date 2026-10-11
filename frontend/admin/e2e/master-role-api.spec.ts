@@ -20,6 +20,7 @@
  * test_master_scope_payments.py, test_master_scope_photos.py); this spec is
  * the acceptance layer per plan T10.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -29,7 +30,7 @@ import {
   cleanup, cleanupRecord,
 } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 /** D3 mask invariant: for every digit position except the last four
  *  digits, the char is «•»; separators/plus survive in place. */

@@ -43,14 +43,15 @@ off its probe because ``RecordService.get`` returns an ORM row, while
 import never builds ORM rows; every table write goes through owner
 services.
 
-EVENT GRID (GH #239), byte-parity with the pre-refactor executor:
-success publishes EXACTLY ``{"clients", "records", "photos",
-"visitors", "client_tags"}`` — the dependency marks are UNCONDITIONAL
-(by dispatch fact, not row count; a clean client with empty
-resolutions ``{}`` publishes the same set). ``"visits"`` is
-deliberately NOT published (the pre-refactor hole, spec §8 — closing
-it is #375). The 404 branch publishes ``{"clients"}``; the 422/409
-branches (validation + stale exceptions) publish NOTHING (the
+EVENT GRID (GH #239; GH #375 lifted the ``"visits"`` suppression — a
+deliberate contract change, no longer byte-parity with the
+pre-refactor executor): success publishes EXACTLY ``{"clients",
+"records", "photos", "visitors", "client_tags", "visits"}`` — the
+dependency marks are UNCONDITIONAL (by dispatch fact, not row count;
+a clean client with empty resolutions ``{}`` publishes the same set);
+``"visits"`` rides the phase-7 dispatch (the erased visits are named
+in the package, #375). The 404 branch publishes ``{"clients"}``; the
+422/409 branches (validation + stale exceptions) publish NOTHING (the
 accumulator resets).
 
 AUDIT (GH #344 §4.5): the deferred-delete COMMIT journals ONE
@@ -133,13 +134,16 @@ async def delete_client(
     7. visitors cascade — ``VisitorService.list_by_client(...,
        master_key=None)`` (admin mode, no scope predicate); per
        visitor: the owner visit brick
-       ``delete_visits_by_visitor(..., mark_visits=False)`` then
+       ``delete_visits_by_visitor(...)`` (its ``mark_visits`` default
+       publishes "visits" when rows die — GH #375) then
        ``VisitorService._delete_cascade`` (visitor_tags + row; visits
        BEFORE the visitor row — FK). After the loop
        ``mark_changed("visitors")`` unconditionally, even on an empty
-       list. The visits are removed by their OWNER service (canon rule
-       1), replacing the DB-level ``ondelete=CASCADE`` reliance of the
-       interim state — net DB effects identical;
+       list, and ``mark_changed("visits")`` by the same dispatch-fact
+       rule (a clean client names "visits" too, #375). The visits are
+       removed by their OWNER service (canon rule 1), replacing the
+       DB-level ``ondelete=CASCADE`` reliance of the interim state —
+       net DB effects identical;
     8. audit journal row (§4.5) — the client's own ``delete`` row with
        the label + before-snapshot captured from the probe;
     9. the client row via the own-edge brick
@@ -215,15 +219,21 @@ async def delete_client(
         db_session, client_id=id, master_key=None
     )
     for visitor in visitors:
-        # Visits BEFORE the visitor row (FK) — the owner service brick,
-        # mark suppressed: the grid owner is this scenario (parity).
+        # Visits BEFORE the visitor row (FK) — the owner service brick.
+        # GH #375: its ``mark_visits`` default publishes "visits" when
+        # rows die; the dispatch-fact mark below covers the zero-row case.
         await get_visit_service().delete_visits_by_visitor(
-            db_session, visitor.id, mark_visits=False
+            db_session, visitor.id
         )
         await visitor_service._delete_cascade(db_session, visitor.id)
     # Unconditional — the executor marked the dispatched visitors dep
     # even when the loop found zero rows.
     mark_changed("visitors")
+    # GH #375: same dispatch-fact rule for the visits the loop erased —
+    # the brick marks only when rows die (an empty visitor early-exits),
+    # but the DISPATCH is unconditional, so a clean client names "visits"
+    # too (mark by dispatch fact, like the nullify marks above).
+    mark_changed("visits")
 
     # ── Phase 8: audit journal row (§4.5) — next to the disappearance ─
     # LAZY audit import — cycle discipline (usecases sit inside the

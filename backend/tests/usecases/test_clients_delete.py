@@ -18,9 +18,11 @@ new shape:
   ``False``) → collect deps → blocking check → resolutions validation
   → nullify phase → visitors cascade → client row;
 - success grid is EXACTLY ``{"clients", "records", "photos",
-  "visitors", "client_tags"}`` byte-for-byte — dependency marks are
+  "visitors", "client_tags", "visits"}`` — dependency marks are
   UNCONDITIONAL (by dispatch fact, not row count; also with EMPTY
-  resolutions ``{}`` on a dep-free client);
+  resolutions ``{}`` on a dep-free client). GH #375 added ``"visits"``
+  (the #327 §8 suppression is lifted — the phase-7 dispatch of the
+  visits brick marks its entity like every other dispatched dep);
 - 404 → exactly ``{"clients"}``; 422 branches (validation exceptions)
   → NO batch (accumulator reset on exception);
 - atomicity: a mid-cascade failure (2nd visitor's ``_delete_cascade``
@@ -380,9 +382,10 @@ async def test_grid_full_family_byte_for_byte(
     db_session, create_activity, subscriber
 ) -> None:
     """Success grid on a fully-loaded client: EXACTLY
-    ``{"clients", "records", "photos", "visitors", "client_tags"}``,
-    ONE batch — the pre-refactor ``resolve_delete`` grid (dependency
-    marks unconditional by dispatch fact)."""
+    ``{"clients", "records", "photos", "visitors", "client_tags",
+    "visits"}``, ONE batch — dependency marks unconditional by dispatch
+    fact; GH #375 added ``"visits"`` (the erased visits are named in the
+    package — the #327 §8 suppression is lifted)."""
     from src.usecases.clients import delete_client
 
     activity_id = await _orm_activity(db_session, create_activity)
@@ -406,7 +409,7 @@ async def test_grid_full_family_byte_for_byte(
     events = _drain(subscriber)
     assert len(events) == 1, f"ONE event batch expected, got {events}"
     assert events[0][0] == {
-        "clients", "records", "photos", "visitors", "client_tags",
+        "clients", "records", "photos", "visitors", "client_tags", "visits",
     }, f"success grid mismatch: {events}"
     assert events[0][1] is None  # direct scenario call — no origin envelope
 
@@ -414,9 +417,9 @@ async def test_grid_full_family_byte_for_byte(
 async def test_grid_empty_resolutions_on_clean_client(db_session, subscriber) -> None:
     """Execute with EMPTY resolutions ``{}`` on a dep-free client — the
     dependency marks are UNCONDITIONAL (by dispatch fact, not row
-    count): the grid is still the full five-entity set (parity with
-    today's executor, which dispatches every matrix handler on the
-    clean path too)."""
+    count): the grid is still the full six-entity set (GH #375 — the
+    phase-7 visits-deletion dispatch marks ``"visits"`` even when the
+    loop found zero visitors, like the nullify marks)."""
     from src.usecases.clients import delete_client
 
     client = await _add_client(db_session)
@@ -433,13 +436,15 @@ async def test_grid_empty_resolutions_on_clean_client(db_session, subscriber) ->
     events = _drain(subscriber)
     assert len(events) == 1, f"ONE event batch expected, got {events}"
     assert events[0][0] == {
-        "clients", "records", "photos", "visitors", "client_tags",
+        "clients", "records", "photos", "visitors", "client_tags", "visits",
     }, f"clean-client grid mismatch: {events}"
 
 
-async def test_grid_no_visits_mark(db_session, create_activity, subscriber) -> None:
-    """The deliberately UNPUBLISHED entity: ``"visits"`` is NOT in the
-    grid (spec §8 — the pre-refactor hole is preserved; #375)."""
+async def test_grid_marks_visits(db_session, create_activity, subscriber) -> None:
+    """GH #375 — the formerly suppressed entity: ``"visits"`` IS in the
+    grid. The phase-7 visits brick now publishes (its ``mark_visits``
+    default applies — the explicit suppression was the #327 §8
+    pre-refactor hole, closed by #375)."""
     from src.usecases.clients import delete_client
 
     activity_id = await _orm_activity(db_session, create_activity)
@@ -458,8 +463,8 @@ async def test_grid_no_visits_mark(db_session, create_activity, subscriber) -> N
     assert ok is True
 
     events = _drain(subscriber)
-    assert "visits" not in events[0][0], (
-        f"'visits' must NOT be published (pre-refactor hole, spec §8): {events}"
+    assert "visits" in events[0][0], (
+        f"'visits' must be published (GH #375 closed the #327 §8 hole): {events}"
     )
 
 

@@ -31,13 +31,14 @@
  * tests (the per-test reset does not restore is_active; same convention as
  * update-rejects-is-active.spec.ts).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { createTestActivity } from './fixtures/factories';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 // ─── Seed anchor weeks (resolved from the DB — see header) ──────────────────
 

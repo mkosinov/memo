@@ -12,6 +12,7 @@
  * view and returns via the archived filter. "Вернуть из архива" → restore
  * → `archived: false` (the PERSON only — master/user flags are explicit, D3).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { cleanup, createTestActivity, createTestMaster } from './fixtures/factories';
 import {
@@ -24,7 +25,7 @@ import {
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 test.describe('S4 — Staff delete blocked by activities → archive instead', () => {
   test('dry-run 409 → Mode B dialog blocks delete; archive and restore round-trip', async ({ page, request }) => {

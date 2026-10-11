@@ -13,10 +13,11 @@
  * The scenario keeps its intent (master writes are LIMITED) via D7: client
  * mutations (PATCH /clients/{id}) stay admin-only → 403 AUTH_FORBIDDEN.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('User Scenario 2 — master signs in (role menu)', () => {
   test.use({ storageState: { cookies: [], origins: [] } });

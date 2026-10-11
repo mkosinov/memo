@@ -9,10 +9,11 @@
  * auth-session.spec.ts (page.request shares the context's storageState
  * cookies and correct fetch metadata).
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
+const BACKEND = resolveBackendUrl();
 
 test.describe('GH #263 T8 — master session smoke', () => {
   useMasterSession();

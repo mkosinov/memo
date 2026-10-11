@@ -11,6 +11,7 @@
  * UI-driven for the creation picker (StampPanel — the мастер selector of the
  * «create activity» flow), API/SQL for the view contract and the TOCTOU guard.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -21,7 +22,7 @@ import { waitForScheduleReady } from './fixtures/helpers';
 import { openCombobox } from './helpers/combobox';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 const SPECIALTY = 'S4-специальность';
 const COLOR = '#4A7C59';

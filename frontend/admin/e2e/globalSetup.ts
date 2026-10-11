@@ -17,6 +17,7 @@
 import path from 'path';
 import fs from 'fs';
 import { resolveTestDbPath } from './lib/db-path';
+import { resolveBackendUrl } from './lib/backend-url';
 import { masterAuthStatePath, resolveAuthStatePath } from './fixtures/auth-state';
 import { resetToSeed, resolveSeedCanonPath, wipeAvatarsDir } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
@@ -199,11 +200,12 @@ export default async function globalSetup() {
   }
 
   // (b) Current-week activities check (with 5×1s retry for 503 race)
-  // #153: use BACKEND_URL (exported by test-all.sh:181 and test.yml:152 as
+  // #153: use BACKEND_URL (exported by test-all.sh and test.yml as
   // http://127.0.0.1:8001/8002). Do NOT use SHARD_PORT — that's the Next.js
   // frontend port; /api/v1/* returns 404 from Next.js dev server.
-  const backendBase = process.env.BACKEND_URL
-    || `http://localhost:${process.env.BACKEND_PORT || '8001'}`;
+  // GH #387: single resolver — no silent default port, host must match
+  // NEXT_PUBLIC_API_URL (loud error with the standalone recipe otherwise).
+  const backendBase = resolveBackendUrl();
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7)); // Mon=0

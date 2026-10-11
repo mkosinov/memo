@@ -7,6 +7,7 @@
  * contract violation now — 422 `expected_state_required` BEFORE any DB
  * access (unknown id included). No rows must change on failed attempts.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -19,7 +20,7 @@ import {
 } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 test.describe('S6 — Client delete commit-contract validation', () => {
   test('wrong action 422, missing dep 422, correct resolutions+expected 204', async ({ request }) => {

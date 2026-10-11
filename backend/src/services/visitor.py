@@ -259,14 +259,14 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         ``@transactional`` transaction.
 
         Composition (GH #327 Task 2): the owner-service visit brick runs
-        FIRST (``get_visit_service().delete_visits_by_visitor(...,
-        mark_visits=False)`` — visits are removed before the visitor row
-        disappears), then the own-edge ``_delete_cascade`` core (tags +
-        row). Net DB effects and the event grid — the decorator's auto
-        ``"visitors"`` mark, NO ``"visits"`` mark — are identical to the
-        pre-#327 shape; ``mark_visits=False`` keeps the grid owner the
-        orchestrator (canon rule 3: decorated thin method over the
-        non-transactional cores).
+        FIRST (``get_visit_service().delete_visits_by_visitor(...)``
+        — visits are removed before the visitor row disappears), then
+        the own-edge ``_delete_cascade`` core (tags + row). Net DB
+        effects are identical to the pre-#327 shape. Event grid (GH
+        #375): the decorator's auto ``"visitors"`` mark PLUS
+        ``"visits"`` — the brick's ``mark_visits`` default (rows died)
+        and the dispatch-fact mark below (zero rows included) both
+        name it; with visits present the recompute adds ``"records"``.
 
         GH #344 (§4.3): the standalone delete journals ONE ``delete`` row
         with the deleted visitor's label + before-snapshot (§9 scenario 6)
@@ -291,9 +291,11 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         )
         from src.services.visit import get_visit_service
 
-        await get_visit_service().delete_visits_by_visitor(
-            db_session, id, mark_visits=False
-        )
+        await get_visit_service().delete_visits_by_visitor(db_session, id)
+        # GH #375: mark by dispatch fact — the brick publishes "visits"
+        # only when rows die (a visit-less visitor early-exits), but the
+        # dispatch itself is unconditional, so every delete names it.
+        mark_changed("visits")
         # GH #380 ("one read per mutation"): the row read above for the
         # journal mark is handed DOWN to the core — no second SELECT
         # inside ``_delete_cascade``.

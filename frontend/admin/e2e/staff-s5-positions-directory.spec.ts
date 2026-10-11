@@ -10,12 +10,13 @@
  * is asserted against the read-only /masters view + the schedule filter
  * dropdown, which is what a position write could have leaked into.
  */
+import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { cleanup } from './fixtures/factories';
 import { waitForPositionsReady, waitForScheduleReady, waitForToast } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
-const BACKEND = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+const BACKEND = resolveBackendUrl();
 
 /** Open the ⋯ menu on a position row. */
 async function openPositionRowMenu(page: import('@playwright/test').Page, id: string) {

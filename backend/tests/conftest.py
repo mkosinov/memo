@@ -288,6 +288,36 @@ def create_master(api_client):
 
 
 @pytest.fixture
+def create_staff(api_client):
+    """Factory: creates a staff card via API (GH #371 list matrix, С5).
+
+    Complements ``create_master`` (which returns a masters-view dict):
+    this one returns the STAFF card response as-is — ``master`` section
+    (when requested via the ``master=`` override), ``position_ids``,
+    account block included.
+
+    Usage::
+        staff = create_staff()
+        staff = create_staff(first_name="Анна")
+        staff = create_staff(master={"specialty": "скульптура", "color": "#222222"})
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "first_name": f"Test_{_counter}",
+            "last_name": "Staff",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/staff", json=payload)
+        assert resp.status_code == 201, f"create_staff failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_service(api_client):
     """Factory: creates a service via API.
 
@@ -314,6 +344,192 @@ def create_service(api_client):
         }
         resp = api_client.post("/api/v1/services", json=payload)
         assert resp.status_code == 201, f"create_service failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_material(api_client):
+    """Factory: creates a material via API (GH #371 list matrix).
+
+    Usage::
+        material = create_material()
+        material = create_material(title="Холст", description="Прочный")
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "title": f"Test Material {_counter}",
+            "description": "Test material description",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/materials", json=payload)
+        assert resp.status_code == 201, f"create_material failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_visitor(api_client, create_client):
+    """Factory: creates a visitor via API (GH #371 list matrix).
+
+    Composes the parent client (visitors require NOT NULL ``client_id``).
+    Usage::
+        visitor = create_visitor()
+        visitor = create_visitor(name="Анна", age=30)
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        client = create_client()
+        payload = {
+            "client_id": client["id"],
+            "name": f"Test Visitor {_counter}",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/visitors", json=payload)
+        assert resp.status_code == 201, f"create_visitor failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_payment(api_client, create_record):
+    """Factory: creates a payment via API (GH #371 list matrix).
+
+    Composes the full record chain (payment requires ``record_id``).
+    Usage::
+        payment = create_payment()
+        payment = create_payment(amount=1500, method="cash")
+    """
+    def factory(**overrides):
+        record = create_record()
+        payload = {
+            "record_id": record["id"],
+            "amount": 3000,
+            "method": "card",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/payments", json=payload)
+        assert resp.status_code == 201, f"create_payment failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_visit(api_client, create_record):
+    """Factory: creates a visit via API (GH #371 list matrix, Task 6).
+
+    Composes the full record chain (a visit requires ``record_id``);
+    the fresh record's default guest visit is NOT returned — only the
+    newly posted one.
+    Usage::
+        visit = create_visit()
+        visit = create_visit(price=1500, status="waiting")
+    """
+    def factory(**overrides):
+        record = create_record()
+        payload = {
+            "record_id": record["id"],
+            "price": 1000,
+            "status": "waiting",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/visits", json=payload)
+        assert resp.status_code == 201, f"create_visit failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_audit_log():
+    """Factory: inserts ONE journal row via direct SQL (GH #371 matrix, Task 7).
+
+    The journal has NO write API (rows land exclusively via the
+    accumulator inside ``@transactional``, GH #344 spec §4) — reading
+    tests seed rows directly, mirroring the SQL precedent of
+    ``test_api_audit_logs.py``. ``created_at`` defaults to a unique,
+    strictly increasing microsecond-precision timestamp (fixed day +
+    call counter) so ``created_at DESC`` stays stable; pass explicit
+    ``created_at``/``user_id``/``action``/``entity``/``entity_id``
+    overrides for filter scenarios (C7).
+
+    Usage::
+        row = create_audit_log()
+        row = create_audit_log(action="update", entity="services",
+                               created_at="2026-03-02 10:00:00.000000")
+    """
+    import json as _json
+    import uuid as _uuid
+
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        row = {
+            "user_id": None,
+            "user_role": "admin",
+            "action": "create",
+            "entity": "clients",
+            "entity_id": None,
+            "entity_label": f"Row {_counter}",
+            "changes": None,
+            # Unique per call (counter in the microseconds) — the fixed
+            # base day keeps DESC ordering deterministic across rows.
+            "created_at": f"2026-03-01 12:00:00.{_counter:06d}",
+            **overrides,
+        }
+        log_id = str(_uuid.uuid4())
+        query_db_params(
+            "INSERT INTO audit_logs (id, user_id, user_role, action, entity, "
+            "entity_id, entity_label, changes, created_at) VALUES "
+            "(:id, :uid, :role, :action, :entity, :eid, :elabel, :changes, :created)",
+            {
+                "id": log_id,
+                "uid": row["user_id"],
+                "role": row["user_role"],
+                "action": row["action"],
+                "entity": row["entity"],
+                "eid": row["entity_id"],
+                "elabel": row["entity_label"],
+                "changes": (
+                    _json.dumps(row["changes"])
+                    if row["changes"] is not None
+                    else None
+                ),
+                "created": row["created_at"],
+            },
+        )
+        return {"id": log_id, **row}
+
+    return factory
+
+
+@pytest.fixture
+def create_position(api_client):
+    """Factory: creates a position via API (GH #371 list matrix).
+
+    Usage::
+        position = create_position()
+        position = create_position(title="Старший мастер")
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "title": f"Test Position {_counter}",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/positions", json=payload)
+        assert resp.status_code == 201, f"create_position failed: {resp.status_code}: {resp.text}"
         return resp.json()
     return factory
 

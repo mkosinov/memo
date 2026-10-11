@@ -4,6 +4,8 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
+from src.models.enums import ArchiveStatus
+
 ItemT = TypeVar("ItemT", bound=BaseModel)
 
 # Sort direction for list endpoints (#205 Task 3). Shared across all
@@ -29,13 +31,28 @@ class SortParams(BaseModel, Generic[SortByT]):
     * photos — ``sort_by: PhotoSortBy = "created_at"``, ``"desc"`` preserved;
     * clients — ``sort_by: ClientSortBy = "name"``, ``sort_order = "asc"``.
 
-    The ``sort_by=None`` semantics (entity-specific fallback order) live ONLY
-    at the scalar dictionary routes (``sort_by: XSortBy | None = Query(None)``)
-    — see ``schemas/pagination.py`` for why those cannot inherit a model.
+    The ``sort_by=None`` semantics (entity-specific fallback order) live
+    at the LIST routes (GH #371: every dictionary list sorts through this
+    brick — scalar query routes are gone — and falls back in the route
+    when ``sort_by`` arrives unset).
     """
 
     sort_by: SortByT | None = None
     sort_order: SortOrder = "asc"
+
+
+class ArchiveStatusParams(BaseModel):
+    """Query params for the bare dictionary ``/all`` routes (GH #371 §4.2).
+
+    One shared single-field model for the five dictionary ``/all`` routes
+    (services, materials, locations, staff, masters): the same ``status``
+    filter with the same ACTIVE default each route declared as a scalar
+    ``Query(ArchiveStatus.ACTIVE)`` before the uniform conversion.
+    Injected as ``Annotated[ArchiveStatusParams, Query()]`` — scalar query
+    siblings are banned (fastapi PR #12481; domain rule 8, #371).
+    """
+
+    status: ArchiveStatus = ArchiveStatus.ACTIVE
 
 
 class PaginatedResponse(BaseModel, Generic[ItemT]):

@@ -17,12 +17,31 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from src.models.enums import UserRole
+from src.models.enums import ArchiveStatus, UserRole
+from src.schemas.common import SortParams
+from src.schemas.pagination import PaginationParams
 
 # Sort whitelist for GET /api/v1/staff (#266 «API (после)»): position is
 # EXCLUDED — a person holds several positions (M2M), server-side sort over
 # the join is ambiguous. Keys = the StaffTable column keys.
 StaffSortBy = Literal["name", "specialty", "color", "avatar", "status"]
+
+
+class StaffListParams(SortParams[StaffSortBy], PaginationParams):
+    """Query parameters for GET /api/v1/staff (GH #371 §4.1).
+
+    Composed of the live bricks: ``SortParams[StaffSortBy]`` (mechanics
+    #367 — no fixed default here, the ``sort_by=None`` fallback order
+    stays at the route) + ``PaginationParams`` (``page``/``per_page``
+    and the ``id`` set filter, #232). The router's former scalar query
+    siblings ride along 1:1: ``status`` (ACTIVE default), ``q`` (2..100
+    — substring on first_name/last_name or exact full-UUID id).
+    Injected as ``Annotated[StaffListParams, Query()]`` — scalar query
+    siblings are banned (fastapi PR #12481; domain rule 8, #371).
+    """
+
+    status: ArchiveStatus = ArchiveStatus.ACTIVE
+    q: str | None = Field(default=None, min_length=2, max_length=100)
 
 
 class MasterSection(BaseModel):

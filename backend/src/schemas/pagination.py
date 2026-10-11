@@ -3,7 +3,6 @@
 from typing import Annotated, TypeVar
 from uuid import UUID
 
-from fastapi import Query
 from pydantic import BaseModel, BeforeValidator, Field
 
 # GH #232 §3.1: one canonical ceiling for BOTH list-size caps — the
@@ -17,47 +16,28 @@ _T = TypeVar("_T")
 def _dedup_ids(v: list[_T] | None) -> list[_T] | None:
     """Order-preserving dedup of repeated ``?id=`` values (#232).
 
-    Field-level BeforeValidator, NOT a model validator: this model is
-    injected via ``Depends()`` and FastAPI validates each query field
-    through its own TypeAdapter — field-level validators run there and
-    map ValueError → 422, while model-level validators only fire at
-    model construction inside solve_dependencies, uncaught → 500 (canon:
+    Field-level BeforeValidator, NOT a model validator: FastAPI
+    validates each query field of a params model through its own
+    TypeAdapter — field-level validators run there and map ValueError
+    → 422, while model-level validators only fire at model
+    construction inside solve_dependencies, uncaught → 500 (canon:
     the ``phone`` field comment in ``schemas/client.py``).
     """
     if v is None:
         return None
     return list(dict.fromkeys(v))
 
-# GH #232 §3.1 Task 2 review: the ONE canonical ``?id=`` query contract —
-# UUID-only values (garbage → 422 via uuid_parsing), the shared
-# MAX_LIST_IDS ceiling (>100 DISTINCT values after dedup → 422 too_long),
-# and order-preserving dedup of repeats BEFORE the cap. Both injection
-# shapes reuse this alias so the contract cannot drift between them:
-#   * ``Annotated[ClientListParams, Query()]`` model field (clients…):
-#     the ``id`` field below carries the SAME validator + max_length;
-#   * sibling scalar-style param (locations — scalar mixing with the
-#     Depends() pagination model forbids the model shape, fastapi #12481):
-#     ``IdListQuery`` in ``api/v1/locations.py`` wraps this alias.
-# Query constraints ride INSIDE the Annotated (default outside) — the
-# canonical FastAPI shape.
-IdQueryParam = Annotated[
-    list[UUID] | None,
-    BeforeValidator(_dedup_ids),
-    Query(max_length=MAX_LIST_IDS),
-]
-
 
 class PaginationParams(BaseModel):
     """page/per_page (+ ``id`` set filter, #232) query params for list endpoints.
 
-    Injected in routers as ``pagination: PaginationParams = Depends()``
-    (Depends, not ``Annotated[..., Query()]``: a query-param model cannot
-    coexist with other scalar query params in one handler — fastapi PR
-    #12481 — and 8 of 9 list routers mix pagination with filters/sort).
-    CAVEAT (#232): list-typed fields (``id`` below) are classified as
-    BODY params and silently dropped under the Depends shape — routers
-    that must enforce the ``?id=`` contract inject the model as
-    ``Annotated[Params, Query()]`` instead (clients/records/photos).
+    The base brick of every ``XListParams`` (#371 §4.1): composed with
+    ``SortParams[...]`` and the entity's own filter fields, and injected
+    in routers ONLY as ``Annotated[XListParams, Query()]`` — scalar query
+    siblings and Depends-injection of list params are banned (fastapi PR
+    #12481; domain rule 8, #371). Guards: an OpenAPI test pins the ``id``
+    contract on every paginated list, a structural test bans the old
+    entry shapes (tests/test_list_id_uniform_guards.py).
     """
 
     page: int = Field(default=1, ge=1)
@@ -71,10 +51,7 @@ class PaginationParams(BaseModel):
     # (BeforeValidator runs ahead of field constraints). max_length, not
     # le: pydantic 2 applies le to the whole list object and raises
     # TypeError (→ 500); max_length is the list-length constraint
-    # (too_long → 422). The element type + validator mirror the shared
-    # ``IdQueryParam`` alias above (the Depends shape re-declares them as
-    # a field because FastAPI ignores a Query() inside a model field's
-    # Annotated — only the constraints below reach validation).
+    # (too_long → 422).
     id: Annotated[list[UUID] | None, BeforeValidator(_dedup_ids)] = Field(
         default=None, max_length=MAX_LIST_IDS
     )

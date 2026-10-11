@@ -15,22 +15,31 @@ hard-delete resolves to ``{id: None, label: None}`` — the row itself
 stays.
 """
 
-from datetime import date
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from sqlalchemy import asc, desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from src.domain.dates import day_range
 from src.models.audit_log import AuditLog
 from src.models.staff import Staff
 from src.models.user import User
+from src.repositories.search import ids_in_predicate
 from src.schemas.audit_log import (
     AuditLogAuthorResponse,
     AuditLogResponse,
     AuditLogUserRef,
 )
 from src.schemas.common import PaginatedResponse
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from datetime import date
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
 
 
 def _author_label() -> ColumnElement[str | None]:
@@ -50,6 +59,7 @@ async def list_audit_logs(
     *,
     page: int = 1,
     per_page: int = 20,
+    ids: Sequence[UUID] | None = None,
     user_id: str | None = None,
     action: str | None = None,
     entity: str | None = None,
@@ -70,6 +80,13 @@ async def list_audit_logs(
     payments/records). ``id`` is the secondary sort key so equal
     timestamps stay stable across pages. Count runs on the unordered
     statement (the ``list_custom`` precondition, kept here).
+
+    GH #371 §4.3 gap 3: ``ids`` narrows via ``ids_in_predicate`` —
+    the shared #232 helper — conjunctively with the filters above and
+    BEFORE the count query, so items/``total`` narrow consensually
+    (free reading function outside ``GenericService``, hence the
+    explicit call site; a valid id outside the filters' reach →
+    200 + empty, narrowing never expands visibility).
     """
     stmt = (
         select(
@@ -93,6 +110,12 @@ async def list_audit_logs(
         stmt = stmt.where(AuditLog.created_at >= from_dt)
     if to_dt is not None:
         stmt = stmt.where(AuditLog.created_at <= to_dt)
+    # The shared narrowing helper (#232), conjunctive with the filters
+    # above and ahead of the count subquery — one call, same as every
+    # other list consumer.
+    ids_pred = ids_in_predicate(AuditLog.id, ids)
+    if ids_pred is not None:
+        stmt = stmt.where(ids_pred)
 
     total = (
         await db_session.execute(

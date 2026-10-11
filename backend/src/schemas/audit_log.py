@@ -6,10 +6,35 @@ written exclusively by the accumulator inside ``@transactional``
 return.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel
+
+from src.schemas.pagination import PaginationParams
+
+
+class AuditLogListParams(PaginationParams):
+    """Query parameters for GET /api/v1/audit-logs (GH #371 §4.1).
+
+    Composed of the ``PaginationParams`` brick (``page``/``per_page`` and
+    the ``id`` set filter, #232 — ``?id=`` starts working on the journal
+    via the §4.3 gap-3 predicate in ``list_audit_logs``). The router's
+    former scalar query siblings ride along 1:1 (spec §4.1 keeps the
+    annotations, scenario 8 wire parity — no tightening, no losses):
+    ``user_id``/``action``/``entity``/``entity_id`` (``str | None`` —
+    the journal stores free-form filter strings) and the whole-day
+    ``date_from``/``date_to`` pair (``date | None``, the shared
+    ``day_range`` canon). Injected as ``Annotated[AuditLogListParams,
+    Query()]`` — scalar query siblings are banned (fastapi PR #12481).
+    """
+
+    user_id: str | None = None
+    action: str | None = None
+    entity: str | None = None
+    entity_id: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
 
 
 class AuditLogUserRef(BaseModel):

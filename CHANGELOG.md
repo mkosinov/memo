@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-11
 
 ### Added
+- **GH #371 — Единый вход GET-списков: одна модель-как-query на всех GET с query-параметрами
+  + `?id=` на всех 16 пагинированных списках**
+  — branch `371-list-id-uniform` (8 коммитов `9939b101..5a358cea`, base `ef09b65e`;
+  47 файлов, +1941/−269; спека `docs/specs/2026-10-10-list-id-uniform-371-design.md` rev4
+  и план `docs/plans/2026-10-10-list-id-uniform-371-plan.md` — оба на main, unchanged by
+  IMPL; backend-only — фронтенд и api-client не тронуты):
+  - **19 конверсий на единую форму (T1–T4, `9939b101`..`0943f680`):** вход любого GET-маршрута
+    с query-параметрами — одна pydantic-модель через `Annotated[<Model>, Query()]`:
+    11 пагинированных списков (services/materials/tags — справочники сортировки в `XListParams`;
+    visitors/activities/payments/positions; locations — гибрид `Depends`+сиблинг свёрнут
+    в `LocationListParams`; staff; visits; audit-logs) + 8 одиночных скалярных GET
+    (вкл. `ClientPhoneLookupParams` на `/clients/get`); скалярные query-сиблинги и
+    Depends-инъекция параметров списков запрещены — канон правило 8 в
+    `docs/domain-rules/service-layer.md`, per-entity one-liners синхронизированы
+    в 10 файлах domain-rules.
+  - **Три сервисных зазора `?id=` (T5–T7, `dd107278`..`fa8da9cb`):** сужение по набору id (#232)
+    заработало там, где ids не доходили до запроса — staff join-ветка (`list_join_masters`,
+    до join/счёта), visits (после `record_id`, до счётного подзапроса), audit-logs
+    (конъюнктивно фильтрам, до счётного запроса); итого `?id=` работает на всех 16
+    пагинированных списках.
+  - **Чистка + стражи (T8, `5a358cea`):** `IdQueryParam`/`IdListQuery` удалены (вкл. исторические
+    упоминания), докстринги pagination/common/location(s) переписаны под единую форму;
+    два CI-стража — OpenAPI-тест контракта (`id` во всех 16 пагинированных GET, пин числа)
+    и структурный греп `src` (запрет старых имён и Depends-пагинации в любой форме;
+    RED-доказан деградацией); 401-пин audit-logs.
+  - **Tests:** все задачи RED→GREEN; финальный таргет-прогон **269/269**
+    (guards+matrix+singles+pagination); lint-рахет ruff **115/115** (бюджет снижен дважды
+    осознанно: B006 1→0, TC001 6→5), mypy **0**; DoD спеки §8 выполнен целиком
+    (обе staff-ветки, 422-пины одиночных, 5 нетронутых списков не изменены).
 - **GH #380 — Дедуп before-read SELECT в visitor/records путях (невидимый рефактор)**
   — branch `380-visitor-records-dedup` (4 коммита `29205322..5b3ba89d` + merge main
   `4d65fe8b`, base `816efac2`; 3 файла, +119/−36; спека

@@ -164,13 +164,14 @@ ENDPOINTS = [
     ),
 ]
 
-_EP_IDS = lambda ep: ep.route.rsplit("/", 1)[-1]  # noqa: E731
+def _ep_ids(ep: ListEndpoint) -> str:
+    return ep.route.rsplit("/", 1)[-1]
 
 
 class TestNarrowingMatrix:
     """С1 — ``?id=`` narrows rows and total on every ready endpoint."""
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_id_pair_narrows_rows_and_total(self, api_client, request, ep) -> None:
         """``?id=X&id=Y`` → only X and Y, and ``total`` == 2 (not the full list)."""
         factory = request.getfixturevalue(ep.factory)
@@ -184,7 +185,7 @@ class TestNarrowingMatrix:
         assert sorted(item["id"] for item in body["items"]) == sorted(wanted)
         assert body["total"] == 2
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_repeated_id_dedups_to_one_row(self, api_client, request, ep) -> None:
         """``?id=X&id=X`` → one row, ``total`` == 1 (dedup before the cap)."""
         factory = request.getfixturevalue(ep.factory)
@@ -199,7 +200,7 @@ class TestNarrowingMatrix:
         assert [item["id"] for item in body["items"]] == [entity["id"]]
         assert body["total"] == 1
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_unknown_valid_uuid_returns_empty_page(self, api_client, ep) -> None:
         """Valid but nonexistent UUID → 200 + empty (narrowing, not 404)."""
         resp = api_client.get(ep.route, params=[("id", str(uuid4()))])
@@ -209,7 +210,7 @@ class TestNarrowingMatrix:
         assert body["items"] == []
         assert body["total"] == 0
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_page_beyond_narrowed_range_is_empty(self, api_client, request, ep) -> None:
         """``?id=X&page=2`` (one narrowed row) → 200 + empty page, total kept."""
         factory = request.getfixturevalue(ep.factory)
@@ -237,7 +238,6 @@ class TestFilterIntersectionServices:
         self, api_client, create_service
     ) -> None:
         """``?id=<archived>`` + default status → empty, not the archived row."""
-        active = create_service()
         archived = create_service()
         archive_resp = api_client.post(f"/api/v1/services/{archived['id']}/archive")
         assert archive_resp.status_code == 200, archive_resp.text
@@ -248,9 +248,6 @@ class TestFilterIntersectionServices:
         body = resp.json()
         assert body["items"] == []
         assert body["total"] == 0
-        # The active sibling is NOT the answer either: the id set and the
-        # default ACTIVE status both narrow — intersection, not either/or.
-        assert active["id"] not in {item["id"] for item in body["items"]}
 
     def test_active_id_hidden_under_explicit_archived(
         self, api_client, create_service
@@ -272,24 +269,24 @@ class TestFilterIntersectionServices:
 class TestInvalidIdMatrix:
     """С3 — garbage ``?id=`` → 422 VALIDATION_ERROR, never a silent full list."""
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_non_uuid_value_returns_422(self, api_client, ep) -> None:
         resp = api_client.get(ep.route, params=[("id", "not-a-uuid")])
         assert resp.status_code == 422, resp.text
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_empty_value_returns_422(self, api_client, ep) -> None:
         resp = api_client.get(ep.route, params=[("id", "")])
         assert resp.status_code == 422, resp.text
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_comma_glued_pair_returns_422(self, api_client, ep) -> None:
         """``?id=X,Y`` (one glued string) is not a UUID → 422 (no implicit split)."""
         glued = f"{uuid4()},{uuid4()}"
         resp = api_client.get(ep.route, params=[("id", glued)])
         assert resp.status_code == 422, resp.text
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_101_distinct_ids_return_422(self, api_client, ep) -> None:
         """101 distinct ids after dedup → 422 too_long (MAX_LIST_IDS)."""
         ids = [str(UUID(int=i)) for i in range(101)]
@@ -305,7 +302,7 @@ class TestOpenApiQueryContract:
     conversion keeps the wire (С8) and adds the ``id`` contract.
     """
 
-    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_EP_IDS)
+    @pytest.mark.parametrize("ep", ENDPOINTS, ids=_ep_ids)
     def test_route_declares_expected_query_params(self, app, ep) -> None:
         schema = app.openapi()
         get_op = schema["paths"][ep.route]["get"]

@@ -23,14 +23,12 @@ class LocationListParams(SortParams[LocationSortBy], PaginationParams):
     Composed of the live bricks: ``SortParams[LocationSortBy]`` (mechanics
     #367 — no fixed default here, the ``sort_by=None`` fallback order
     stays at the route) + ``PaginationParams`` (``page``/``per_page`` and
-    the ``id`` set filter, #232). The former ``#232`` sibling param
-    (``IdListQuery`` in the router) is DELETED: ``id`` arrives by
-    inheritance with the same contract (UUID-only values, dedup of
-    repeats before the ≤MAX_LIST_IDS cap → 422). The router's former
-    scalar query siblings ride along 1:1: ``status`` (ACTIVE default),
-    ``q`` (2..100). Injected as ``Annotated[LocationListParams,
-    Query()]`` — scalar query siblings are banned (fastapi PR #12481;
-    domain rule 8, #371).
+    the ``id`` set filter, #232: UUID-only values, dedup of repeats
+    before the ≤MAX_LIST_IDS cap → 422). The router's former scalar
+    query siblings ride along 1:1: ``status`` (ACTIVE default), ``q``
+    (2..100). Injected as ``Annotated[LocationListParams, Query()]`` —
+    scalar query siblings are banned (fastapi PR #12481; domain rule
+    8, #371).
     """
 
     status: ArchiveStatus = ArchiveStatus.ACTIVE

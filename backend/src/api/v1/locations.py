@@ -69,11 +69,9 @@ _LOCATION_SORT_KEYS: SortKeyMap = {
 }
 
 
-# GH #232 §3.1 first pinned the typed ``?id=`` contract for the locations
-# list via a sibling param; GH #371 §4.1 moves it into the model — the
-# sibling alias (``IdListQuery``) is deleted, ``id`` rides inheritance
-# from ``PaginationParams`` with the SAME contract (UUID-only,
-# MAX_LIST_IDS ceiling, dedup of repeats BEFORE the cap).
+# The typed ``?id=`` contract (UUID-only, MAX_LIST_IDS ceiling, dedup of
+# repeats BEFORE the cap) rides inheritance from ``PaginationParams``
+# (#232 contract, #371 §4.1 shape: one model-as-query entry).
 
 
 @router.get("", response_model=PaginatedResponse[LocationResponse])

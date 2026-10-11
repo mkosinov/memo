@@ -31,9 +31,10 @@ class SortParams(BaseModel, Generic[SortByT]):
     * photos — ``sort_by: PhotoSortBy = "created_at"``, ``"desc"`` preserved;
     * clients — ``sort_by: ClientSortBy = "name"``, ``sort_order = "asc"``.
 
-    The ``sort_by=None`` semantics (entity-specific fallback order) live ONLY
-    at the scalar dictionary routes (``sort_by: XSortBy | None = Query(None)``)
-    — see ``schemas/pagination.py`` for why those cannot inherit a model.
+    The ``sort_by=None`` semantics (entity-specific fallback order) live
+    at the LIST routes (GH #371: every dictionary list sorts through this
+    brick — scalar query routes are gone — and falls back in the route
+    when ``sort_by`` arrives unset).
     """
 
     sort_by: SortByT | None = None

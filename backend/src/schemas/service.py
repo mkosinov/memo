@@ -2,10 +2,13 @@
 
 from datetime import datetime
 from typing import Literal, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-from src.models.enums import TariffAudience
+from src.models.enums import ArchiveStatus, TariffAudience
+from src.schemas.common import SortParams
+from src.schemas.pagination import PaginationParams
 
 # Sort whitelist for GET /api/v1/services (#205 Task 3, spec §4.5).
 # ``material_hint`` removed by GH #223 Task 13 (spec §10) — retired field.
@@ -13,6 +16,24 @@ ServiceSortBy = Literal[
     "title", "duration", "age", "tariffs",
     "specialty", "archived", "created_at",
 ]
+
+
+class ServiceListParams(SortParams[ServiceSortBy], PaginationParams):
+    """Query parameters for GET /api/v1/services (GH #371 §4.1).
+
+    Composed of the live bricks: ``SortParams[ServiceSortBy]`` (mechanics
+    #367 — no fixed default here, the ``sort_by=None`` fallback order
+    stays at the route) + ``PaginationParams`` (``page``/``per_page`` and
+    the ``id`` set filter, #232). The router's former scalar query
+    siblings ride along 1:1: ``status`` (ACTIVE default), ``q`` (2..100),
+    ``material_id`` (UUID). Injected as
+    ``Annotated[ServiceListParams, Query()]`` — scalar query siblings are
+    banned (fastapi PR #12481; domain rule 8, #371).
+    """
+
+    status: ArchiveStatus = ArchiveStatus.ACTIVE
+    q: str | None = Field(default=None, min_length=2, max_length=100)
+    material_id: UUID | None = None
 
 
 class TagResponse(BaseModel):

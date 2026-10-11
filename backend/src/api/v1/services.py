@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
@@ -20,17 +19,15 @@ from src.domain.deletion import (
 from src.domain.errors import BareListLimitExceededError
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
-from src.models.enums import ArchiveStatus
 from src.models.service import Service
 from src.models.tariff import Tariff
-from src.schemas.common import ArchiveStatusParams, PaginatedResponse, SortOrder
-from src.schemas.pagination import PaginationParams
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.service import (
     ServiceCreate,
     ServiceDeleteBody,
+    ServiceListParams,
     ServicePatch,
     ServiceResponse,
-    ServiceSortBy,
     ServiceUpdate,
 )
 from src.services.service import ServiceService, get_service_service
@@ -81,12 +78,11 @@ _SERVICE_SORT_KEYS: SortKeyMap = {
 async def list_services(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
-    sort_by: ServiceSortBy | None = Query(None),
-    sort_order: SortOrder = Query("asc"),
-    q: str | None = Query(None, min_length=2, max_length=100),
-    material_id: UUID | None = Query(None),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The bricks carry page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here), sort (#367) and
+    # the former filters 1:1; service deps stay Depends() — legal.
+    params: Annotated[ServiceListParams, Query()],
 ) -> PaginatedResponse[ServiceResponse]:
     """Return services filtered by archive status with tariffs and tags.
 
@@ -103,29 +99,39 @@ async def list_services(
     ``description`` OR exact id equality for a full UUID; ``total``
     reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
 
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with every other filter (an archived id
+    under the default ACTIVE status stays empty), ≤100 distinct after
+    dedup, garbage → 422.
+
     ``material_id`` (GH #223 spec §5): filter to services linked to the
     material via ``service_materials``. Invalid UUID → 422 (param type
     validation); valid-but-unknown → 200 with an empty page (filter
     semantics — the same shape as a ``q`` no-match).
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
-    # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
+    # ``list[object]`` otherwise, and ``ServiceService.list`` takes
     # ``Sequence[SortExpr] | None`` (locations.py precedent, волна 1).
     order_by: list[SortExpr] | None
-    if sort_by is None:
+    if params.sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.
         order_by = [asc(Service.title), asc(Service.id)]
     else:
-        order_by = apply_sort(_SERVICE_SORT_KEYS, sort_by, sort_order, Service.id)
+        order_by = apply_sort(
+            _SERVICE_SORT_KEYS, params.sort_by, params.sort_order, Service.id
+        )
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        status=status,
+        page=params.page,
+        per_page=params.per_page,
+        status=params.status,
         order_by=order_by,
-        q=q,
-        material_id=str(material_id) if material_id is not None else None,
+        q=params.q,
+        material_id=(
+            str(params.material_id) if params.material_id is not None else None
+        ),
+        ids=params.id,
     )
 
 

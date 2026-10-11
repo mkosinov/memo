@@ -319,6 +319,30 @@ def create_service(api_client):
 
 
 @pytest.fixture
+def create_material(api_client):
+    """Factory: creates a material via API (GH #371 list matrix).
+
+    Usage::
+        material = create_material()
+        material = create_material(title="Холст", description="Прочный")
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "title": f"Test Material {_counter}",
+            "description": "Test material description",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/materials", json=payload)
+        assert resp.status_code == 201, f"create_material failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_location(api_client):
     """Factory: creates a location via API.
 

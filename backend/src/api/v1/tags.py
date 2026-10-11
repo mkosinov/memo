@@ -20,14 +20,13 @@ from src.domain.errors import BareListLimitExceededError
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
 from src.models.tag import Tag
-from src.schemas.common import PaginatedResponse, SortOrder
-from src.schemas.pagination import PaginationParams
+from src.schemas.common import PaginatedResponse
 from src.schemas.tag import (
     TagCreate,
     TagDeleteBody,
+    TagListParams,
     TagPatch,
     TagResponse,
-    TagSortBy,
 )
 from src.services.tag import TagService, get_tag_service
 
@@ -63,10 +62,11 @@ _TAG_SORT_KEYS: SortKeyMap = {
 async def list_tags(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    sort_by: TagSortBy | None = Query(None),
-    sort_order: SortOrder = Query("asc"),
-    q: str | None = Query(None, min_length=2, max_length=100),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The bricks carry page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here), sort (#367) and
+    # the former ``q`` filter 1:1; service deps stay Depends() — legal.
+    params: Annotated[TagListParams, Query()],
 ) -> PaginatedResponse[TagResponse]:
     """Return all tags, paginated.
 
@@ -78,23 +78,28 @@ async def list_tags(
     ``q`` (GH #212): case-insensitive substring on ``title`` OR exact id
     equality for a full UUID; ``total`` reflects the filtered count.
     len<2 / len>100 → 422 VALIDATION_ERROR.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with every other filter, ≤100 distinct
+    after dedup, garbage → 422.
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``GenericService.list`` takes
     # ``Sequence[SortExpr] | None`` (locations.py precedent, волна 1).
     order_by: list[SortExpr] | None
-    if sort_by is None:
+    if params.sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.
         order_by = [asc(Tag.title), asc(Tag.id)]
     else:
-        order_by = apply_sort(_TAG_SORT_KEYS, sort_by, sort_order, Tag.id)
+        order_by = apply_sort(_TAG_SORT_KEYS, params.sort_by, params.sort_order, Tag.id)
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
+        page=params.page,
+        per_page=params.per_page,
         order_by=order_by,
-        q=q,
+        q=params.q,
+        ids=params.id,
     )
 
 

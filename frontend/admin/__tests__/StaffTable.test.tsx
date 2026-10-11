@@ -480,7 +480,6 @@ describe('StaffTable', () => {
 
   it('Mode A confirm enqueues the deferred delete (resolutions {} + the FULL tree)', async () => {
     const removeStaffResolved = vi.fn().mockResolvedValue(undefined);
-    setupDeleteConflict(DEPS_AUTO);
     mockUseDeleteStaff.mockReturnValue({
       removeStaff: vi.fn().mockRejectedValue(conflictError(DEPS_AUTO)),
       removeStaffResolved,

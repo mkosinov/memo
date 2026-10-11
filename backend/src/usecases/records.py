@@ -246,9 +246,10 @@ async def update_record(
     identical to the pre-refactor flow:
 
     0. mark the own entity ("records") — selfless @transactional parity;
-    1. ``RecordService.update_row`` — load the row (missing id → None; the
-       route maps that to 404) and apply the PUT scalar writes +
-       ``updated_at``;
+    1. read the row once (missing id → None; the route maps that to 404)
+       and take the journal "before"-snapshot, then hand the SAME row to
+       ``RecordService.update_row`` (#380 "one read per mutation") for
+       the PUT scalar writes + ``updated_at``;
     2. DELETE the record's own visits (so they don't self-count);
     3. recompute seats (→ 0) — CRITICAL interleaving: the capacity check
        sums the stored ``seats`` COLUMN, so without this reset the sum
@@ -275,6 +276,8 @@ async def update_record(
     # GH #344 (§4.2 invariant): the "before" half of the update diff is
     # fixed BEFORE the first in-session mutation — read the tracked
     # fields off the current row, then let update_row write.
+    # GH #380 ("one read per mutation"): the row read here for _old is
+    # handed DOWN to update_row — no second SELECT inside the method.
     record_service = get_record_service()
     existing = await record_service.get(db_session, id)
     if not existing:
@@ -287,6 +290,7 @@ async def update_record(
         client_id=data.client_id,
         comment=data.comment,
         custom_price=data.custom_price,
+        existing=existing,
     )
     if not record:
         return None
@@ -339,9 +343,11 @@ async def patch_record(
     are identical to the pre-refactor flow:
 
     0. mark the own entity ("records") — selfless @transactional parity;
-    1. ``RecordService.patch_row`` — load the row (missing id → None; the
-       route maps that to 404) and apply ONLY the sent scalar fields
-       (``comment`` / ``custom_price``) + ``updated_at``;
+    1. read the row once (missing id → None; the route maps that to 404)
+       and take the journal "before"-snapshot, then hand the SAME row to
+       ``RecordService.patch_row`` (#380 "one read per mutation") to
+       apply ONLY the sent scalar fields (``comment`` / ``custom_price``)
+       + ``updated_at``;
     2. when ``visits`` is provided (``seats_changed``): delete → recompute
        seats → capacity check (same interleaving as update_record) — a
        patch of only comment/custom_price skips the capacity query;
@@ -368,12 +374,16 @@ async def patch_record(
     # ── Scalar writes (own-entity row op; missing id → None) ────────
     # GH #344 (§4.2 invariant): the "before" half of the diff is fixed
     # BEFORE the first in-session mutation (see update_record).
+    # GH #380 ("one read per mutation"): the row read here for _old is
+    # handed DOWN to patch_row — no second SELECT inside the method.
     record_service = get_record_service()
     existing = await record_service.get(db_session, id)
     if not existing:
         return None
     _old = {f: getattr(existing, f) for f in _RECORD_DIFF_FIELDS}
-    record = await record_service.patch_row(db_session, id, scalar_fields)
+    record = await record_service.patch_row(
+        db_session, id, scalar_fields, existing=existing,
+    )
     if not record:
         return None
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import delete, func, select
 
@@ -184,7 +184,13 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         result = await db_session.execute(stmt)
         return list(result.scalars().all())
 
-    async def _delete_cascade(self, db_session: AsyncSession, visitor_id: str) -> bool:
+    async def _delete_cascade(
+        self,
+        db_session: AsyncSession,
+        visitor_id: str,
+        *,
+        visitor: Visitor | None = None,
+    ) -> bool:
         """Own-edge delete: visitor_tags join rows + the Visitor row — on
         the GIVEN session, WITHOUT committing (GH #327 Task 2).
 
@@ -196,11 +202,15 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         the future ``usecases.clients.delete_client`` scenario does the
         same inside its visitor-cascade loop.
 
-        The name and signature are kept EXACTLY as-is: the structural
-        test (``hasattr`` + no-commit) and the atomicity test's
-        monkeypatch point ride on this method (spec §3, §8). The name no
-        longer reflects the full cascade shape — that price is
-        documented in spec §8; the role lives in this docstring.
+        GH #380 ("one read per mutation"): the optional keyword-only
+        ``visitor`` — the service's OWN row, already read in the same
+        session/transaction by the caller (the standalone ``delete``
+        reads it once for the journal label + before-snapshot, #344
+        §4.1). Omitted/``None`` → the method loads the row itself,
+        exactly as before (the client-cascade loop calls it two-arg).
+        The name still does not reflect the full cascade shape — that
+        price stays documented in #327 spec §8; the role lives in this
+        docstring.
 
         GH #324 §5 (rebase): the brick now RECOMPUTES the affected
         records (seats/status) — every brick caller inherits the
@@ -213,16 +223,35 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         Photos are NOT touched: since GH #211 a photo is never
         visitor-owned (4-owner model: client|service|activity|location).
 
-        Returns False if the visitor does not exist. Does NOT commit —
-        the caller owns the transaction boundary.
+        Returns False if the visitor does not exist — either missing
+        at the (self-performed) load, or, per the GH #380 rowcount
+        parity, the visitor-row DELETE reported 0 affected rows (the
+        row vanished between the caller's read and this core inside
+        the same transaction window — the same False → 404 outcome
+        the re-read used to produce). Does NOT commit — the caller
+        owns the transaction boundary.
+
+        Raises:
+            ValueError: ``visitor`` is passed but its ``id`` does not
+                match the requested ``visitor_id`` — a caller
+                programming error (the row belongs to another
+                visitor), not user input.
         """
-        visitor = await self._repository.get(db_session, Visitor, visitor_id)
-        if not visitor:
-            return False
+        if visitor is not None:
+            if visitor.id != visitor_id:
+                raise ValueError(
+                    f"_delete_cascade: visitor row id {visitor.id!r} does "
+                    f"not match the requested visitor_id {visitor_id!r}"
+                )
+        else:
+            visitor = await self._repository.get(db_session, Visitor, visitor_id)
+            if not visitor:
+                return False
 
         await db_session.execute(delete(visitor_tags).where(visitor_tags.c.visitor_id == visitor_id))
-        await db_session.execute(delete(Visitor).where(Visitor.id == visitor_id))
-        return True
+        result = await db_session.execute(delete(Visitor).where(Visitor.id == visitor_id))
+        rowcount = int(cast("Any", result).rowcount)
+        return rowcount > 0
 
     @transactional
     async def delete(self, db_session: AsyncSession, id: str) -> bool:
@@ -267,7 +296,10 @@ class VisitorService(GenericService[VisitorCreate, VisitorUpdate, VisitorRespons
         # only when rows die (a visit-less visitor early-exits), but the
         # dispatch itself is unconditional, so every delete names it.
         mark_changed("visits")
-        return await self._delete_cascade(db_session, id)
+        # GH #380 ("one read per mutation"): the row read above for the
+        # journal mark is handed DOWN to the core — no second SELECT
+        # inside ``_delete_cascade``.
+        return await self._delete_cascade(db_session, id, visitor=visitor)
 
     # ── GH #171 Task 2 — scenario building block (no transaction) ───────
 

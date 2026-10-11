@@ -268,15 +268,10 @@ async def create_staff(
     unknown position, password policy) → 422 with their codes.
 
     Corridor 2 (GH #326 Task 3): the composite chain lives in the
-    usecases layer — the route stays transport-only. Leading ``None`` =
-    the @transactional wrapper's unused self slot (selfless-function
-    convention).
+    usecases layer — the route stays transport-only.
     """
     try:
-        # Selfless-scenario convention (usecases/records.py): the leading
-        # None fills the @transactional wrapper's unused ``self`` slot.
-        return await create_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        return await create_staff_scenario(
             db_session=session,
             data=data,
         )
@@ -297,13 +292,10 @@ async def update_staff(
     D7). ``position_ids`` is a full replace. One transaction.
 
     Corridor 2 (GH #326 Task 3): the chain lives in the usecases layer
-    (selfless scenario, keyword args — the records-route convention).
+    (keyword args — the records-route convention).
     """
     try:
-        # Selfless-scenario convention (usecases/records.py): the leading
-        # None fills the @transactional wrapper's unused ``self`` slot.
-        staff = await update_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        staff = await update_staff_scenario(
             db_session=session,
             id=staff_id,
             data=data,
@@ -338,9 +330,7 @@ async def patch_staff(
     Corridor 2 (GH #326 Task 3): same convention as PUT above.
     """
     try:
-        # Selfless-scenario convention — see POST above.
-        staff = await patch_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        staff = await patch_staff_scenario(
             db_session=session,
             id=staff_id,
             data=data,
@@ -463,8 +453,7 @@ async def delete_staff(
     # the ROUTE keeps only transport — the 409 stale_dependencies
     # rendering, the 422 mapping, and 404.
     try:
-        ok = await delete_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        ok = await delete_staff_scenario(
             db_session=session,
             id=staff_id,
             resolutions=resolutions or {},
@@ -525,8 +514,7 @@ async def archive_staff(
     Corridor 2 (GH #326 Task 3): the dismissal chain lives in the
     ``archive_staff`` scenario (usecases).
     """
-    ok = await archive_staff_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    ok = await archive_staff_scenario(
         db_session=session,
         id=staff_id,
         archive_master=(checkboxes.archive_master if checkboxes else True),

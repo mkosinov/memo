@@ -56,14 +56,11 @@ existence; here the branch point sits after the fixed cost, which is
 the same equalization outcome — the task brief's «dummy argon run» is
 paid unconditionally.)
 
-CALLING CONVENTION: the ``@transactional`` wrapper's signature is
-``wrapper(self, *args, **kwargs)`` — a module-level scenario therefore
-MUST be called with an explicit leading ``None`` (the unused ``self``
-slot) and keyword arguments::
+CALLING CONVENTION: a scenario is called NATURALLY with its own
+declared arguments — keyword pass-through, no placeholder slot, no
+leading ``None``::
 
-    link = await issue_password_link(
-        None, db_session=session, user_id=...
-    )
+    link = await issue_password_link(db_session=session, user_id=...)
 """
 
 from __future__ import annotations
@@ -127,8 +124,9 @@ async def issue_password_link(
     write. The audit row (``password_link_issued``) lands in the same
     transaction — author = the staged actor.
 
-    NOTE: call as ``issue_password_link(None, db_session=...,
-    user_id=...)`` — see the module docstring for why.
+    NOTE: call as ``issue_password_link(db_session=...,
+    user_id=...)`` — see the module docstring for the calling
+    convention.
     """
     user = await get_user_service().get_by_id(db_session, user_id)
     if user is None:
@@ -187,7 +185,7 @@ async def set_password_by_link(
     .apply_password_reset``) and session revocation (``AuthService
     .revoke_user_sessions``). No audit row (public call — no author).
 
-    NOTE: call as ``set_password_by_link(None, db_session=...,
+    NOTE: call as ``set_password_by_link(db_session=...,
     raw_token=..., password=...)``.
     """
     # ── fixed pre-transaction cost (spec §4: hash before the write tx) ─

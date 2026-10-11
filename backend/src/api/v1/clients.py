@@ -298,10 +298,7 @@ async def delete_client(
     # the ROUTE keeps only transport — the 409 stale_dependencies
     # rendering, the 422 mapping, and 404.
     try:
-        # Selfless-scenario call convention: the leading ``None``
-        # occupies the wrapper's ``self`` slot (see usecases/clients.py).
-        ok = await delete_client_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        ok = await delete_client_scenario(
             db_session=session,
             id=client_id,
             resolutions=resolutions or {},

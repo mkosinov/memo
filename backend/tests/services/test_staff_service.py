@@ -113,7 +113,7 @@ async def test_restore_returns_person_only(db_session) -> None:
     await _add_user(db_session, staff.id)
     staff_id = staff.id
     ok = await archive_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         archive_master=True, archive_user=True,
     )
     assert ok is True

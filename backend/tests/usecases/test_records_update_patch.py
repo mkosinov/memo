@@ -16,9 +16,8 @@ docs/domain-rules/service-layer.md rule 2). These tests pin the new shape:
   (empty PUT list / PATCH without visits) and ``{"records", "visits"}``
   when it is (non-empty replacement list) — the pre-refactor grid.
 
-CALLING CONVENTION: scenarios are selfless functions, so the
-``@transactional`` wrapper binds the first positional arg as ``self`` —
-they are invoked with KEYWORD arguments (see the module docstring in
+CALLING CONVENTION: scenarios are selfless functions — invoked with
+KEYWORD arguments (see the module docstring in
 ``src/usecases/records.py``).
 """
 
@@ -97,7 +96,7 @@ async def test_update_replaces_visits(db_session, create_activity):
         visits=[VisitItem(price=200), VisitItem(price=300)],
     )
     updated = await update_record(
-        None, db_session=db_session, id=record.id, data=data,
+        db_session=db_session, id=record.id, data=data,
     )
 
     assert updated is not None
@@ -124,7 +123,7 @@ async def test_update_missing_returns_none(db_session, create_activity):
         visits=[VisitItem(price=100)],
     )
     assert await update_record(
-        None, db_session=db_session, id="nonexistent", data=data,
+        db_session=db_session, id="nonexistent", data=data,
     ) is None
 
 
@@ -146,7 +145,7 @@ async def test_update_over_capacity_rolls_back(db_session, create_activity):
         visits=[VisitItem(price=100), VisitItem(price=200), VisitItem(price=300)],
     )
     with pytest.raises(HTTPException) as exc_info:
-        await update_record(None, db_session=db_session, id=record_id, data=data)
+        await update_record(db_session=db_session, id=record_id, data=data)
     assert exc_info.value.status_code == 409
 
     # Roll back the aborted transaction — the old visits must be intact.
@@ -180,7 +179,7 @@ async def test_update_shrink_does_not_409(db_session, create_activity):
         visits=[VisitItem(price=100)],
     )
     updated = await update_record(
-        None, db_session=db_session, id=record.id, data=data,
+        db_session=db_session, id=record.id, data=data,
     )
     assert updated is not None
     assert updated.seats == 1
@@ -197,7 +196,7 @@ async def test_patch_visits_replaces_and_recomputes(db_session, create_activity)
         visits=[VisitItem(price=150), VisitItem(price=250)],
     )
     patched = await patch_record(
-        None, db_session=db_session, id=record.id, data=data,
+        db_session=db_session, id=record.id, data=data,
     )
     assert patched is not None
     assert patched.seats == 2
@@ -221,7 +220,7 @@ async def test_patch_comment_only_leaves_visits(db_session, create_activity):
 
     data = RecordPatch(comment="just a note")
     patched = await patch_record(
-        None, db_session=db_session, id=record.id, data=data,
+        db_session=db_session, id=record.id, data=data,
     )
     assert patched is not None
     assert patched.comment == "just a note"
@@ -239,7 +238,7 @@ async def test_patch_missing_returns_none(db_session, create_activity):
     from src.usecases.records import patch_record
 
     assert await patch_record(
-        None, db_session=db_session, id="nonexistent", data=RecordPatch(comment="x"),
+        db_session=db_session, id="nonexistent", data=RecordPatch(comment="x"),
     ) is None
 
 
@@ -257,7 +256,7 @@ async def test_patch_over_capacity_rolls_back(db_session, create_activity):
 
     data = RecordPatch(visits=[VisitItem(price=1), VisitItem(price=2)])
     with pytest.raises(HTTPException) as exc_info:
-        await patch_record(None, db_session=db_session, id=record_id, data=data)
+        await patch_record(db_session=db_session, id=record_id, data=data)
     assert exc_info.value.status_code == 409
 
     await db_session.rollback()
@@ -326,7 +325,7 @@ async def test_update_patch_event_grid_is_records_and_visits(
     ) if scenario == "update" else RecordPatch(visits=[VisitItem(price=200)])
 
     scenario_fn = update_record if scenario == "update" else patch_record
-    updated = await scenario_fn(None, db_session=db_session, id=record_id, data=data)
+    updated = await scenario_fn(db_session=db_session, id=record_id, data=data)
     assert updated is not None
 
     events = _drain(subscriber)
@@ -365,7 +364,7 @@ async def test_update_patch_empty_visits_grid_is_records_only(
     )
 
     scenario_fn = update_record if scenario == "update" else patch_record
-    updated = await scenario_fn(None, db_session=db_session, id=record_id, data=data)
+    updated = await scenario_fn(db_session=db_session, id=record_id, data=data)
     assert updated is not None
     assert updated.seats == 0  # empty replacement → no visits remain
 

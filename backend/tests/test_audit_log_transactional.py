@@ -270,9 +270,9 @@ class TestTransactionalInsert:
     async def test_selfless_scenario_owns_insertion(
         self, db_session, actor, audit_rows
     ) -> None:
-        # Module-level scenario convention: explicit leading None (unused
-        # self slot) + keyword args (see src/usecases/records.py docstring).
-        tag_id = await _scenario_write(None, db_session=db_session)
+        # Module-level scenario convention: plain keyword args
+        # (see src/usecases/records.py docstring).
+        tag_id = await _scenario_write(db_session=db_session)
 
         rows = audit_rows()
         assert len(rows) == 1

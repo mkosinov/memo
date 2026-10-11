@@ -11,7 +11,7 @@ demolition; the scenarios must stay behavior-identical (spec
   sent-sets, null-stripping via ``NOT_NULL_FIELDS`` ({first_name,
   last_name, sort_order} — client intent "don't change", not "set null").
 
-CALLING CONVENTION: selfless scenario — leading ``None`` + keyword args.
+CALLING CONVENTION: selfless scenario — plain keyword args.
 
 Authorization negative case (master role → 403 on PUT/PATCH) is covered
 by ``tests/test_master_scope_contract.py`` — not duplicated here.
@@ -134,7 +134,7 @@ async def test_update_card_fields_and_response(db_session) -> None:
     staff = await _add_staff(db_session)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="Ольга2", last_name="Иванова2",
             avatar_url="http://x", sort_order=7,
@@ -159,7 +159,7 @@ async def test_update_section_upsert_then_change(db_session) -> None:
     staff = await _add_staff(db_session)
 
     added = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
             master={"specialty": "живопись", "color": "#111111"},
@@ -169,7 +169,7 @@ async def test_update_section_upsert_then_change(db_session) -> None:
     assert added.master.specialty == "живопись"
 
     changed = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
             master={"specialty": "керамика", "color": "#222222"},
@@ -191,7 +191,7 @@ async def test_update_null_master_removes_section(db_session) -> None:
     await _add_master_ext(db_session, staff.id)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", master=None),
     )
     assert updated is not None and updated.master is None
@@ -226,7 +226,7 @@ async def test_update_null_master_blocked_by_activities(db_session) -> None:
 
     with pytest.raises(BlockingDepsError):
         await update_staff(
-            None, db_session=db_session, id=staff_id,
+            db_session=db_session, id=staff_id,
             data=StaffUpdate(first_name="А", last_name="Б", master=None),
         )
     await db_session.rollback()
@@ -245,7 +245,7 @@ async def test_update_replaces_positions_full_set(db_session) -> None:
     await _link_position(db_session, staff.id, drop.id)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", position_ids=[keep.id]),
     )
     assert updated is not None and updated.position_ids == [keep.id]
@@ -268,20 +268,20 @@ async def test_update_position_set_applies_role_template(db_session) -> None:
     await _add_user(db_session, staff.id, role="admin")
 
     await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
     )
     assert await _role_of(db_session, staff.id) == "master"
 
     await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", position_ids=["master", "admin"]),
     )
     assert await _role_of(db_session, staff.id) == "admin"
 
     # Non-anchored set (СММ) — losing the anchors is NOT a downgrade.
     await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", position_ids=[smm.id]),
     )
     assert await _role_of(db_session, staff.id) == "admin"
@@ -295,7 +295,7 @@ async def test_update_explicit_role_beats_template(db_session) -> None:
     await _add_user(db_session, staff.id, role="admin")
 
     await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
             position_ids=["master"], role="admin",
@@ -313,7 +313,7 @@ async def test_update_without_user_template_is_noop(db_session) -> None:
     staff = await _add_staff(db_session)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="А", last_name="Б", position_ids=["master"]),
     )
     assert updated is not None
@@ -323,7 +323,7 @@ async def test_update_missing_returns_none(db_session) -> None:
     from src.usecases.staff import update_staff
 
     assert await update_staff(
-        None, db_session=db_session, id="ghost",
+        db_session=db_session, id="ghost",
         data=StaffUpdate(first_name="А", last_name="Б"),
     ) is None
 
@@ -340,7 +340,7 @@ async def test_patch_sent_fields_only_keeps_sections(db_session) -> None:
     await _link_position(db_session, staff.id, pos.id)
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(first_name="Патч"),
+        db_session=db_session, id=staff.id, data=StaffPatch(first_name="Патч"),
     )
     assert patched is not None
     assert patched.first_name == "Патч"
@@ -360,7 +360,7 @@ async def test_patch_null_stripping_not_null_fields(db_session) -> None:
     staff = await _add_staff(db_session, first_name="Имя", sort_order=5)
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffPatch(first_name=None, last_name=None, sort_order=None),
     )
     assert patched is not None
@@ -381,7 +381,7 @@ async def test_patch_avatar_null_applied(db_session) -> None:
     staff = await _add_staff(db_session, avatar_url="http://old")
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(avatar_url=None),
+        db_session=db_session, id=staff.id, data=StaffPatch(avatar_url=None),
     )
     assert patched is not None
     assert patched.avatar_url is None
@@ -394,7 +394,7 @@ async def test_patch_absent_master_keeps_section(db_session) -> None:
     await _add_master_ext(db_session, staff.id)
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
+        db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
     )
     assert patched is not None
     assert patched.master is not None
@@ -408,7 +408,7 @@ async def test_patch_null_master_removes_section(db_session) -> None:
     await _add_master_ext(db_session, staff.id)
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(master=None),
+        db_session=db_session, id=staff.id, data=StaffPatch(master=None),
     )
     assert patched is not None and patched.master is None
     assert (await db_session.execute(
@@ -423,7 +423,7 @@ async def test_patch_master_payload_upserts(db_session) -> None:
     await _add_master_ext(db_session, staff.id, specialty="старая", color="#111111")
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffPatch(master={"specialty": "новая", "color": "#222222"}),
     )
     assert patched is not None and patched.master is not None
@@ -439,7 +439,7 @@ async def test_patch_position_set_applies_role_template(db_session) -> None:
     await _add_user(db_session, staff.id, role="master")
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffPatch(position_ids=["admin"]),
     )
     assert patched is not None
@@ -457,7 +457,7 @@ async def test_patch_explicit_role_without_positions_applies(db_session) -> None
     await _add_user(db_session, staff.id, role="admin")
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(role="master"),
+        db_session=db_session, id=staff.id, data=StaffPatch(role="master"),
     )
     assert patched is not None
     assert patched.position_ids == ["master"]  # untouched
@@ -471,7 +471,7 @@ async def test_patch_without_role_keys_keeps_role(db_session) -> None:
     await _add_user(db_session, staff.id, role="admin")
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
+        db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
     )
     assert patched is not None
     assert await _role_of(db_session, staff.id) == "admin"
@@ -481,7 +481,7 @@ async def test_patch_missing_returns_none(db_session) -> None:
     from src.usecases.staff import patch_staff
 
     assert await patch_staff(
-        None, db_session=db_session, id="ghost", data=StaffPatch(first_name="x"),
+        db_session=db_session, id="ghost", data=StaffPatch(first_name="x"),
     ) is None
 
 
@@ -500,7 +500,7 @@ async def test_update_grid_card_only(db_session, subscriber) -> None:
     _drain(subscriber)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(first_name="Нов", last_name="Б", position_ids=[]),
     )
     assert updated is not None
@@ -526,7 +526,7 @@ async def test_update_grid_full_replacement(db_session, subscriber) -> None:
     _drain(subscriber)
 
     updated = await update_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
             master={"specialty": "живопись", "color": "#111111"},
@@ -548,7 +548,7 @@ async def test_patch_grid_card_only_is_staff(db_session, subscriber) -> None:
     _drain(subscriber)
 
     patched = await patch_staff(
-        None, db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
+        db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
     )
     assert patched is not None
 
@@ -569,7 +569,7 @@ async def test_grid_failure_publishes_nothing(db_session, subscriber) -> None:
 
     with pytest.raises(PositionNotFoundError):
         await update_staff(
-            None, db_session=db_session, id=staff.id,
+            db_session=db_session, id=staff.id,
             data=StaffUpdate(
                 first_name="А", last_name="Б", position_ids=["ghost-id"],
             ),
@@ -606,7 +606,7 @@ async def test_update_atomicity_position_boom_keeps_pre_state(
 
     with pytest.raises(StepBoomError):
         await staff_module.update_staff(
-            None, db_session=db_session, id=staff_id,
+            db_session=db_session, id=staff_id,
             data=StaffUpdate(
                 first_name="После", last_name="Б",
                 master={"specialty": "живопись", "color": "#111111"},
@@ -648,7 +648,7 @@ async def test_patch_atomicity_section_boom_keeps_pre_state(
 
     with pytest.raises(StepBoomError):
         await staff_module.patch_staff(
-            None, db_session=db_session, id=staff_id,
+            db_session=db_session, id=staff_id,
             data=StaffPatch(
                 first_name="После",
                 master={"specialty": "живопись", "color": "#111111"},

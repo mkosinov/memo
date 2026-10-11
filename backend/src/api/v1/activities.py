@@ -359,10 +359,9 @@ async def delete_activity(
         return _dependencies_response(deps, detail="stale_dependencies")
 
     # Match → execution by the usecases scenario (GH #325 Task 4): the
-    # records cascade, photo SET NULL, join rows — the selfless call
-    # convention, the ``api/v1/records.py`` precedent.
-    deleted = await delete_activity_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    # records cascade, photo SET NULL, join rows (the
+    # ``api/v1/records.py`` precedent).
+    deleted = await delete_activity_scenario(
         db_session=session,
         id=activity_id,
     )

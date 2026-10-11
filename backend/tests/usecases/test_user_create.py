@@ -15,10 +15,8 @@ in the DB. The seed-path guard lands in Task 4.
 Scenario semantics below are the former ``cli.create_user`` suite
 (behavior-preserving move — the CLI is rewired onto the scenario).
 
-CALLING CONVENTION: scenarios are selfless functions, so the
-``@transactional`` wrapper binds the first positional arg as ``self`` —
-invoke with a leading ``None`` and KEYWORD arguments (see
-``src/usecases/records.py``).
+CALLING CONVENTION: scenarios are selfless functions — invoke with
+KEYWORD arguments (see ``src/usecases/records.py``).
 """
 
 from __future__ import annotations
@@ -46,7 +44,6 @@ class TestCreateUserScenario:
         from src.usecases.user import create_user
 
         user = await create_user(
-            None,
             db_session=db_session,
             phone="+79990000099",
             role="admin",
@@ -68,7 +65,6 @@ class TestCreateUserScenario:
         from src.usecases.user import DuplicatePhoneError, create_user
 
         await create_user(
-            None,
             db_session=db_session,
             phone="+79990000099",
             role="admin",
@@ -76,7 +72,6 @@ class TestCreateUserScenario:
         )
         with pytest.raises(DuplicatePhoneError):
             await create_user(
-                None,
                 db_session=db_session,
                 phone="+79990000099",
                 role="master",
@@ -88,7 +83,6 @@ class TestCreateUserScenario:
 
         with pytest.raises(PasswordPolicyError):
             await create_user(
-                None,
                 db_session=db_session,
                 phone="+79990000010",
                 role="admin",
@@ -103,7 +97,6 @@ class TestCreateUserScenario:
         from src.usecases.user import create_user
 
         user = await create_user(
-            None,
             db_session=db_session,
             phone="+79990000011",
             role="admin",

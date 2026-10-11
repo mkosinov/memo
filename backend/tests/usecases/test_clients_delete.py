@@ -200,7 +200,7 @@ async def test_delete_missing_returns_false(db_session, subscriber) -> None:
     _drain(subscriber)
 
     ok = await delete_client(
-        None, db_session=db_session, id="ghost", resolutions={}, expected={},
+        db_session=db_session, id="ghost", resolutions={}, expected={},
     )
 
     assert ok is False
@@ -218,7 +218,7 @@ async def test_delete_missing_returns_false_before_collectors(
     from src.usecases.clients import delete_client
 
     assert await delete_client(
-        None, db_session=db_session, id="ghost", resolutions={},
+        db_session=db_session, id="ghost", resolutions={},
         expected={"records": ["some-id"]},
     ) is False
 
@@ -249,7 +249,7 @@ async def test_delete_stale_expected_raises_before_validation(
 
     with pytest.raises(StaleDependenciesError) as exc_info:
         await delete_client(
-            None, db_session=db_session, id=client_id,
+            db_session=db_session, id=client_id,
             resolutions={"records": "nullify", "visitors": "cascade"},
             expected={},  # nothing confirmed — every dep is "new"
         )
@@ -290,7 +290,7 @@ async def test_delete_expected_visitor_appeared_blocks(
 
     with pytest.raises(StaleDependenciesError):
         await delete_client(
-            None, db_session=db_session, id=client_id,
+            db_session=db_session, id=client_id,
             resolutions={"visitors": "cascade"},
             expected={"visitors": [now_boris]},  # misses «Алиса»
         )
@@ -313,7 +313,7 @@ async def test_delete_expected_disappeared_dep_does_not_block(
     # The confirmed set carries a ghost id PLUS the live one — a superset
     # of the current id-set (the ghost "disappeared" mid-window).
     ok = await delete_client(
-        None, db_session=db_session, id=client_id,
+        db_session=db_session, id=client_id,
         resolutions={"visitors": "cascade"},
         expected={"visitors": ["ghost-id", visitor_id]},
     )
@@ -338,7 +338,7 @@ async def test_422_wrong_action_publishes_nothing(
 
     with pytest.raises(InvalidResolutionError):
         await delete_client(
-            None, db_session=db_session, id=client_id,
+            db_session=db_session, id=client_id,
             resolutions={"records": "cascade", "visitors": "cascade"},
             # GH #345: expected confirmed (the stale gate passes) so the
             # INVALID ACTION branch is what fires (order: stale → validate).
@@ -366,7 +366,7 @@ async def test_422_missing_visitors_resolution_publishes_nothing(
 
     with pytest.raises(InvalidResolutionError):
         await delete_client(
-            None, db_session=db_session, id=client_id, resolutions={},
+            db_session=db_session, id=client_id, resolutions={},
             expected={"visitors": [visitor.id]},  # confirmed — validation fires
         )
 
@@ -400,7 +400,7 @@ async def test_grid_full_family_byte_for_byte(
     _drain(subscriber)
 
     ok = await delete_client(
-        None, db_session=db_session, id=client_id,
+        db_session=db_session, id=client_id,
         resolutions={"records": "nullify", "visitors": "cascade"},
         expected={"records": [record.id], "visitors": [visitor.id]},
     )
@@ -428,7 +428,7 @@ async def test_grid_empty_resolutions_on_clean_client(db_session, subscriber) ->
     _drain(subscriber)
 
     ok = await delete_client(
-        None, db_session=db_session, id=client_id, resolutions={},
+        db_session=db_session, id=client_id, resolutions={},
         expected={},  # GH #345: the clean commit declares the empty state
     )
     assert ok is True
@@ -456,7 +456,7 @@ async def test_grid_marks_visits(db_session, create_activity, subscriber) -> Non
     _drain(subscriber)
 
     ok = await delete_client(
-        None, db_session=db_session, id=client.id,
+        db_session=db_session, id=client.id,
         resolutions={"records": "nullify", "visitors": "cascade"},
         expected={"records": [record.id], "visitors": [visitor.id]},
     )
@@ -497,7 +497,7 @@ async def test_full_cascade_effects(db_session, create_activity) -> None:
     )
 
     ok = await delete_client(
-        None, db_session=db_session, id=client_id,
+        db_session=db_session, id=client_id,
         resolutions={"records": "nullify", "visitors": "cascade"},
         expected={"records": [record_id], "visitors": [visitor_id]},
     )
@@ -561,7 +561,7 @@ async def test_atomicity_mid_cascade_failure_rolls_back_everything(
 
     with pytest.raises(StepBoomError):
         await delete_client(
-            None, db_session=db_session, id=client_id,
+            db_session=db_session, id=client_id,
             resolutions={"records": "nullify", "visitors": "cascade"},
             expected={
                 "records": [record_id],

@@ -211,7 +211,6 @@ class TestValidateEndpoint:
 
         user = insert_user(_PHONE, "x", role="master")
         link = await issue_password_link(
-            None,
             db_session=db_session,
             user_id=user["id"],
             ttl=timedelta(seconds=-1),

@@ -96,7 +96,7 @@ async def test_delete_record_scenario_removes_visits_and_payments(db_session, cr
     )).scalars().all())
 
     result = await delete_record(
-        None, db_session=db_session, id=record_id,
+        db_session=db_session, id=record_id,
         resolutions={"visits": "cascade", "payments": "cascade"},
         expected={"visits": visit_ids, "payments": payment_ids},
     )
@@ -140,7 +140,7 @@ async def test_delete_record_scenario_cleans_record_tags_join_rows(db_session, c
     )).scalars().all())
 
     result = await delete_record(
-        None, db_session=db_session, id=record.id,
+        db_session=db_session, id=record.id,
         resolutions={"visits": "cascade"},
         expected={"visits": visit_ids},
     )

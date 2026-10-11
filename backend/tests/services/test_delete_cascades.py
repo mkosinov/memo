@@ -171,7 +171,7 @@ async def test_activity_delete_cascades_to_records_visits_payments_and_nullifies
     photo = await _insert_photo(db_session, activity_id=activity.id)
     record_ids = {r1.id, r2.id}
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
 
     assert result is True
     # Activity gone
@@ -198,7 +198,7 @@ async def test_activity_delete_with_no_records_or_photos_succeeds(db_session):
     """An activity with no records and no photos deletes cleanly."""
     activity = await _insert_activity(db_session)
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
 
     assert result is True
     assert await _await_scalar(db_session, select(Activity).where(Activity.id == activity.id)) is None
@@ -292,7 +292,7 @@ async def test_activity_delete_is_atomic_on_partial_failure(db_session, monkeypa
     monkeypatch.setattr(PaymentRepository, "delete_by_record_ids", boom)
 
     with pytest.raises(RuntimeError, match="simulated payments-delete failure"):
-        await delete_activity(None, db_session=db_session, id=activity.id)
+        await delete_activity(db_session=db_session, id=activity.id)
 
     # @transactional did NOT commit (exception propagated). Roll back the open
     # transaction so the uncommitted in-progress visits delete is undone and
@@ -343,7 +343,7 @@ async def test_activity_delete_cleans_activity_tags_and_record_tags_join_rows(db
     )
     await db_session.commit()
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
 
     assert result is True
     from tests.conftest import query_db

@@ -1,4 +1,4 @@
-"""GH #371 Task 2 — the list matrix: ``?id=`` narrowing on model-as-query lists.
+"""GH #371 Tasks 2+3 — the list matrix: ``?id=`` narrowing on model-as-query lists.
 
 Spec ``docs/specs/2026-10-10-list-id-uniform-371-design.md`` §4.1: every
 paginated list gets its ``XListParams(SortParams[...], PaginationParams)``
@@ -6,12 +6,12 @@ injected as ``Annotated[XListParams, Query()]`` — scalar query siblings
 are banned (fastapi PR #12481), and the ``id`` field inherited from
 ``PaginationParams`` (#232) makes ``?id=X&id=Y`` narrowing work uniformly.
 
-THE MATRIX IS DESIGNED FOR ALL SEVEN service-ready endpoints (§4.1): the
-three dictionary sort lists here (services, materials, tags) — the first
-conversions of the eleven (§4.6 checkpoint) — plus visitors, activities,
-payments, positions, which Task 3 appends to the SAME ``ENDPOINTS`` list
-(no test-body changes needed: everything is parametrized by descriptors
-carrying the route URL + the conftest factory name).
+THE MATRIX COVERS ALL SEVEN service-ready endpoints (§4.1): the three
+dictionary sort lists (services, materials, tags — Task 2) plus the
+four simple lists (visitors, activities, payments, positions — Task 3)
+in the SAME ``ENDPOINTS`` list (no test-body changes needed: everything
+is parametrized by descriptors carrying the route URL + the conftest
+factory name).
 
 Scenarios (spec §2/§6):
 
@@ -51,8 +51,9 @@ class ListEndpoint:
     query_params: tuple[str, ...]
 
 
-# Task 3 appends visitors / activities / payments / positions here —
-# the same classes below then cover them with zero test-body edits.
+# GH #371 Task 3 — the four simple lists join the SAME matrix: visitors,
+# activities, payments, positions (no sort brick; scope, where present,
+# stays a Depends sibling — see TestScopeSmokeIdNarrowing below).
 ENDPOINTS = [
     ListEndpoint(
         route="/api/v1/services",
@@ -74,6 +75,28 @@ ENDPOINTS = [
         route="/api/v1/tags",
         factory="create_tag",
         query_params=("id", "page", "per_page", "sort_by", "sort_order", "q"),
+    ),
+    ListEndpoint(
+        route="/api/v1/visitors",
+        factory="create_visitor",
+        query_params=("id", "page", "per_page", "q"),
+    ),
+    ListEndpoint(
+        route="/api/v1/activities",
+        factory="create_activity",
+        query_params=(
+            "id", "page", "per_page", "date_from", "date_to", "q", "service_id",
+        ),
+    ),
+    ListEndpoint(
+        route="/api/v1/payments",
+        factory="create_payment",
+        query_params=("id", "page", "per_page", "record_id"),
+    ),
+    ListEndpoint(
+        route="/api/v1/positions",
+        factory="create_position",
+        query_params=("id", "page", "per_page"),
     ),
 ]
 
@@ -225,3 +248,152 @@ class TestOpenApiQueryContract:
         names = {p["name"] for p in get_op["parameters"] if p["in"] == "query"}
         missing = set(ep.query_params) - names
         assert not missing, f"{ep.route}: query params missing from OpenAPI: {missing}"
+
+
+class TestScopeSmokeIdNarrowing:
+    """§4.6 checkpoint — ``?id=`` narrowing COMBINED with the master scope.
+
+    Task 3 converts the first scope-carrying lists (visitors/activities;
+    payments rides along — same ``Depends(get_scope)`` shape): the smoke
+    pins that the id set narrows INSIDE the scope and never expands
+    visibility — a foreign id in the set is silently absent (narrowing
+    semantics #232), an all-foreign set → 200 + empty.
+
+    Scope travels exactly like the existing scope suites: the master's
+    session cookie (``make_master()`` + ``master["client"]``), i.e. the
+    ``Depends(get_scope)`` sibling — NOT a query field (spec §4.1).
+
+    RED design: each world seeds TWO own rows + one foreign row; the
+    narrowing request asks for own#1 + foreign. If ``id`` were ignored
+    (pre-conversion), the master would see BOTH own rows → the
+    ``total == 1`` / single-row assertions fail.
+    """
+
+    @pytest.fixture
+    def scoped_world(self, api_client, make_master, create_master,
+                      create_activity, create_client):
+        """Two own + one foreign entity for visitors/activities/payments.
+
+        ``own`` rows sit on the scoped master's activities (visitors via
+        record visits, payments via record), ``foreign`` on a second
+        real master's activity — invisible in the first master's scope.
+        """
+        master = make_master()
+        foreign_master = create_master()
+        own_act = create_activity(master_id=master["staff_id"])
+        second_own_act = create_activity(master_id=master["staff_id"])
+        foreign_act = create_activity(master_id=foreign_master["id"])
+
+        own_rec = api_client.post("/api/v1/records", json={
+            "activity_id": own_act["id"],
+            "client_id": create_client()["id"],
+            "visits": [
+                {"name": "Свой первый", "price": 100, "status": "waiting"},
+                {"name": "Свой второй", "price": 100, "status": "waiting"},
+            ],
+        }).json()
+        foreign_rec = api_client.post("/api/v1/records", json={
+            "activity_id": foreign_act["id"],
+            "client_id": create_client()["id"],
+            "visits": [{"name": "Чужой", "price": 100, "status": "waiting"}],
+        }).json()
+
+        def _payment(record_id: str, amount: int) -> dict:
+            resp = api_client.post("/api/v1/payments", json={
+                "record_id": record_id, "amount": amount, "method": "card",
+            })
+            assert resp.status_code == 201, resp.text
+            return resp.json()
+
+        return {
+            "master": master,
+            "activities": {
+                "own": [own_act, second_own_act],
+                "foreign": foreign_act,
+            },
+            "visitors": {
+                "own": [v["visitor_id"] for v in own_rec["visits"]],
+                "foreign": foreign_rec["visits"][0]["visitor_id"],
+            },
+            "payments": {
+                "own": [_payment(own_rec["id"], 500), _payment(own_rec["id"], 600)],
+                "foreign": _payment(foreign_rec["id"], 700),
+            },
+        }
+
+    # ── visitors (scope: visits → records → activities) ────────────────
+
+    def test_visitors_id_narrows_inside_scope(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        own_ids = scoped_world["visitors"]["own"]
+
+        resp = mc.get("/api/v1/visitors", params=[
+            ("id", own_ids[0]), ("id", scoped_world["visitors"]["foreign"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [own_ids[0]]
+        assert body["total"] == 1
+
+    def test_visitors_foreign_id_alone_stays_empty(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+
+        resp = mc.get("/api/v1/visitors", params=[
+            ("id", scoped_world["visitors"]["foreign"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0
+
+    # ── activities (scope: master_id equality, optional) ───────────────
+
+    def test_activities_id_narrows_inside_scope(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        own_acts = scoped_world["activities"]["own"]
+
+        resp = mc.get("/api/v1/activities", params=[
+            ("id", own_acts[0]["id"]),
+            ("id", scoped_world["activities"]["foreign"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [own_acts[0]["id"]]
+        assert body["total"] == 1
+
+    def test_activities_foreign_id_alone_stays_empty(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+
+        resp = mc.get("/api/v1/activities", params=[
+            ("id", scoped_world["activities"]["foreign"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0
+
+    def test_payments_id_narrows_inside_scope(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+        own_pays = scoped_world["payments"]["own"]
+
+        resp = mc.get("/api/v1/payments", params=[
+            ("id", own_pays[0]["id"]), ("id", scoped_world["payments"]["foreign"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [own_pays[0]["id"]]
+        assert body["total"] == 1
+
+    def test_payments_foreign_id_alone_stays_empty(self, scoped_world) -> None:
+        mc = scoped_world["master"]["client"]
+
+        resp = mc.get("/api/v1/payments", params=[
+            ("id", scoped_world["payments"]["foreign"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0

@@ -10,6 +10,22 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.pagination import PaginationParams
+
+
+class PositionListParams(PaginationParams):
+    """Query parameters for GET /api/v1/positions (GH #371 §4.1).
+
+    Positions have no filters of their own (spec §4.1 row «—») — the
+    subclass carries ONLY the inherited brick fields (``page``/
+    ``per_page`` and the ``id`` set filter, #232 — ``?id=`` starts
+    working on positions). The class still exists so the route reads
+    ONE model like every list (uniform entry, domain rule 8, #371);
+    the fixed ``title ASC, id ASC`` fallback order stays at the route
+    (no SortParams brick — #205 never reached the dictionary). Injected
+    as ``Annotated[PositionListParams, Query()]``.
+    """
+
 
 class PositionBase(BaseModel):
     """Shared fields for position creation and updates."""

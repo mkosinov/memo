@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.enums import PaymentMethod
+from src.schemas.pagination import PaginationParams
 
 
 class PaymentBase(BaseModel):
@@ -50,6 +51,23 @@ class PaymentResponse(PaymentBase):
     id: str
     created_at: datetime
     updated_at: datetime
+
+
+class PaymentListParams(PaginationParams):
+    """Query parameters for GET /api/v1/payments (GH #371 §4.1).
+
+    Composed of the ``PaginationParams`` brick (``page``/``per_page`` and
+    the ``id`` set filter, #232 — ``?id=`` starts working on payments).
+    The router's former scalar query sibling rides along 1:1:
+    ``record_id`` (``str`` — the pre-conversion annotation, no UUID
+    tightening: spec §4.1 keeps the annotations, scenario 8 wire
+    parity). The master scope is NOT a query field — it stays a
+    Depends sibling (``get_scope``; domain rule 8, #371). Injected as
+    ``Annotated[PaymentListParams, Query()]`` — scalar query siblings
+    are banned (fastapi PR #12481).
+    """
+
+    record_id: str | None = None
 
 
 class PaymentTotalsParams(BaseModel):

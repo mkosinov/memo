@@ -2,7 +2,24 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.schemas.pagination import PaginationParams
+
+
+class VisitorListParams(PaginationParams):
+    """Query parameters for GET /api/v1/visitors (GH #371 §4.1).
+
+    Composed of the ``PaginationParams`` brick (``page``/``per_page`` and
+    the ``id`` set filter, #232 — ``?id=`` starts working on visitors).
+    The router's former scalar query sibling rides along 1:1: ``q``
+    (2..100). The master scope is NOT a query field — it stays a
+    ``Depends(get_scope)`` sibling (domain rule 8, #371: Depends beside
+    a query model is legal). Injected as ``Annotated[VisitorListParams,
+    Query()]`` — scalar query siblings are banned (fastapi PR #12481).
+    """
+
+    q: str | None = Field(default=None, min_length=2, max_length=100)
 
 
 class VisitorBase(BaseModel):

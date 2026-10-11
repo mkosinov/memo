@@ -25,6 +25,7 @@ A Payment is a financial transaction for a Record. Payments track how much a cli
 - **Amount must be positive** (Pydantic `Field(gt=0)` — enforced on both POST and PATCH)
 - **Optional `created_at`** on POST: client may supply a timestamp (e.g. from an editable datetime-local input); if omitted, the service defaults to `datetime.now()`. This allows backdating payments.
 - Filtered by record_id
+- **`?id=` narrowing (GH #371, #232 contract):** repeated query keys on `GET /api/v1/payments`, UUID-only (garbage → 422), ≤100 distinct after dedup (>100 → 422 `too_long`); typed `id IN (…)` narrowing via `ids_in_predicate`, ANDs conjunctively with `record_id` and the master scope (a foreign id in the set stays absent — narrowing never expands visibility); valid-but-unknown → 200 + empty. Entry form (GH #371): one `PaymentListParams(PaginationParams)` model as `Annotated[..., Query()]` — no scalar query siblings (`record_id` stays `str` — pre-conversion annotation kept); the master scope stays a `Depends(get_scope)` sibling, NOT a query field.
 - Hard-deleted on Record delete (cascade)
 
 ### Frontend

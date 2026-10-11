@@ -343,6 +343,78 @@ def create_material(api_client):
 
 
 @pytest.fixture
+def create_visitor(api_client, create_client):
+    """Factory: creates a visitor via API (GH #371 list matrix).
+
+    Composes the parent client (visitors require NOT NULL ``client_id``).
+    Usage::
+        visitor = create_visitor()
+        visitor = create_visitor(name="Анна", age=30)
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        client = create_client()
+        payload = {
+            "client_id": client["id"],
+            "name": f"Test Visitor {_counter}",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/visitors", json=payload)
+        assert resp.status_code == 201, f"create_visitor failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_payment(api_client, create_record):
+    """Factory: creates a payment via API (GH #371 list matrix).
+
+    Composes the full record chain (payment requires ``record_id``).
+    Usage::
+        payment = create_payment()
+        payment = create_payment(amount=1500, method="cash")
+    """
+    def factory(**overrides):
+        record = create_record()
+        payload = {
+            "record_id": record["id"],
+            "amount": 3000,
+            "method": "card",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/payments", json=payload)
+        assert resp.status_code == 201, f"create_payment failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
+def create_position(api_client):
+    """Factory: creates a position via API (GH #371 list matrix).
+
+    Usage::
+        position = create_position()
+        position = create_position(title="Старший мастер")
+    """
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        payload = {
+            "title": f"Test Position {_counter}",
+            **overrides,
+        }
+        resp = api_client.post("/api/v1/positions", json=payload)
+        assert resp.status_code == 201, f"create_position failed: {resp.status_code}: {resp.text}"
+        return resp.json()
+    return factory
+
+
+@pytest.fixture
 def create_location(api_client):
     """Factory: creates a location via API.
 

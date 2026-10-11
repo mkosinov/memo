@@ -4,6 +4,29 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.pagination import PaginationParams
+
+
+class ActivityListParams(PaginationParams):
+    """Query parameters for GET /api/v1/activities (GH #371 §4.1).
+
+    Composed of the ``PaginationParams`` brick (``page``/``per_page`` and
+    the ``id`` set filter, #232 — ``?id=`` starts working on activities).
+    The router's former scalar query siblings ride along 1:1:
+    ``date_from``/``date_to`` (date), ``q`` (2..100), ``service_id``
+    (``str`` — the pre-conversion annotation, no UUID tightening: spec
+    §4.1 keeps the annotations, scenario 8 wire parity). The optional
+    master scope is NOT a query field — it stays a Depends sibling
+    (``get_optional_scope``; domain rule 8, #371). Injected as
+    ``Annotated[ActivityListParams, Query()]`` — scalar query siblings
+    are banned (fastapi PR #12481).
+    """
+
+    date_from: date | None = None
+    date_to: date | None = None
+    q: str | None = Field(default=None, min_length=2, max_length=100)
+    service_id: str | None = None
+
 
 class ActivityBase(BaseModel):
     """Shared fields for activity creation and updates."""

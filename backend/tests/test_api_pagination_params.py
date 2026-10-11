@@ -12,22 +12,27 @@ ENDPOINTS = [
     "/api/v1/records",
 ]
 
-# #232 Task 1: endpoints that ENFORCE the shared ``id`` filter contract.
-# Both use the Annotated[Params, Query()] injection shape — under the
-# Depends-with-model shape FastAPI 0.141 classifies list-typed model
-# fields as body params and silently drops them (see clients.py
-# list_clients comment). clients = the #232 target (ClientListParams),
-# records = sibling schema (RecordListParams) proving inheritance.
+# Endpoints that ENFORCE the shared ``?id=`` filter contract. #232
+# introduced it on clients + records (the ``Annotated[Params, Query()]``
+# injection shape); #371 §6 consciously extends the list with the ten
+# converted endpoints (services, materials, tags, visitors, activities,
+# payments, positions, staff, visits, audit-logs) and folds locations
+# in — its former #232 sibling-param spelling is deleted (§4.4), every
+# paginated list now rides the ONE model shape (domain rule 8).
 ID_FILTER_ENDPOINTS = [
     "/api/v1/clients",
     "/api/v1/records",
-]
-
-# #232 Task 2: locations carry the ``id`` set via a sibling Query param
-# (scalar mixing with the Depends() pagination model forbids the
-# Annotated[Model, Query()] shape there — fastapi #12481).
-ID_FILTER_QUERY_ENDPOINTS = [
+    "/api/v1/services",
+    "/api/v1/materials",
+    "/api/v1/tags",
+    "/api/v1/visitors",
+    "/api/v1/activities",
+    "/api/v1/payments",
+    "/api/v1/positions",
     "/api/v1/locations",
+    "/api/v1/staff",
+    "/api/v1/visits",
+    "/api/v1/audit-logs",
 ]
 
 
@@ -79,33 +84,11 @@ def test_id_filter_valid_repeated_keys_ok(api_client, endpoint):
     assert resp.status_code == 200
 
 
-@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
-def test_id_filter_sibling_query_invalid_uuid_returns_422(api_client, endpoint):
-    # locations: the id set rides a sibling Query param — same 422 contract.
-    resp = api_client.get(endpoint, params=[("id", "garbage")])
-    assert resp.status_code == 422
-
-
-@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
-def test_id_filter_sibling_query_over_100_values_returns_422(api_client, endpoint):
-    ids = [str(UUID(int=i)) for i in range(101)]
-    resp = api_client.get(endpoint, params=[("id", v) for v in ids])
-    assert resp.status_code == 422
-
-
-# Repeat-parity: dedup runs BEFORE the MAX_LIST_IDS cap on BOTH injection
-# shapes — ?id=X repeated 101 times is ONE distinct id → 200, not 422.
-# Guards the shared-contract reuse (#232 review Task 2): the sibling-Query
-# shape must not restate the cap without the shared _dedup_ids validator.
+# Repeat-parity: dedup runs BEFORE the MAX_LIST_IDS cap — ?id=X repeated
+# 101 times is ONE distinct id → 200, not 422. Guards the shared
+# _dedup_ids validator (#232 review Task 2): no endpoint may restate
+# the cap without the dedup.
 @pytest.mark.parametrize("endpoint", ID_FILTER_ENDPOINTS)
 def test_id_filter_repeated_keys_over_100_dedup_before_cap_ok(api_client, endpoint):
-    resp = api_client.get(endpoint, params=[("id", str(UUID(int=1)))] * 101)
-    assert resp.status_code == 200
-
-
-@pytest.mark.parametrize("endpoint", ID_FILTER_QUERY_ENDPOINTS)
-def test_id_filter_sibling_query_repeated_keys_over_100_dedup_before_cap_ok(
-    api_client, endpoint,
-):
     resp = api_client.get(endpoint, params=[("id", str(UUID(int=1)))] * 101)
     assert resp.status_code == 200

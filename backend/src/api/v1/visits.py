@@ -4,7 +4,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.v1._delete_family import (
@@ -19,9 +19,9 @@ from src.domain.deletion import collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.visit import Visit
 from src.schemas.common import DeleteBody, PaginatedResponse
-from src.schemas.pagination import PaginationParams
 from src.schemas.visit import (
     VisitCreate,
+    VisitListParams,
     VisitPatch,
     VisitResponse,
     VisitStatusUpdate,
@@ -109,16 +109,26 @@ async def _visit_scoped_or_404(
 async def list_visits(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    record_id: str | None = None,
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The brick carries page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here, §4.3 gap 2);
+    # the former ``record_id`` filter rides along 1:1 (str, not UUID —
+    # the pre-conversion annotation kept).
+    params: Annotated[VisitListParams, Query()],
     # GH #263 T2: scope via visit → record → activity («всё через записи»);
     # conjunctive with the record_id param. Admin → no filter.
     scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[VisitResponse]:
-    """List active visits, optionally filtered by record_id."""
+    """List active visits, optionally filtered by record_id.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with the record_id filter and the
+    master scope (narrowing never expands visibility: a foreign id
+    stays absent), ≤100 distinct after dedup, garbage → 422.
+    """
     return await service.list(
-        db_session=session, page=pagination.page, per_page=pagination.per_page,
-        record_id=record_id, master_key=scope.master_key,
+        db_session=session, page=params.page, per_page=params.per_page,
+        record_id=params.record_id, ids=params.id, master_key=scope.master_key,
     )
 
 

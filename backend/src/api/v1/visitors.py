@@ -23,8 +23,13 @@ from src.domain.deletion import (
 from src.errors import ErrorCode, ErrorDetail
 from src.models.visitor import Visitor
 from src.schemas.common import DeleteBody, PaginatedResponse
-from src.schemas.pagination import PaginationParams
-from src.schemas.visitor import VisitorCreate, VisitorPatch, VisitorResponse, VisitorUpdate
+from src.schemas.visitor import (
+    VisitorCreate,
+    VisitorListParams,
+    VisitorPatch,
+    VisitorResponse,
+    VisitorUpdate,
+)
 from src.services.visitor import VisitorService, get_visitor_service
 
 router = APIRouter(
@@ -83,10 +88,14 @@ async def _visitor_scoped_or_404(
 async def list_visitors(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    q: str | None = Query(None, min_length=2, max_length=100),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The brick carries page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here); the former ``q``
+    # filter rides along 1:1.
+    params: Annotated[VisitorListParams, Query()],
     # GH #263 T2: scope via visits → records → activities — a visitor
-    # without the master's visits is invisible; ``q`` ANDs with the scope.
+    # without the master's visits is invisible; ``q``/``id`` AND with the
+    # scope (a Depends sibling beside a query model is legal, rule 8).
     scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[VisitorResponse]:
     """Return all visitors, paginated.
@@ -94,12 +103,18 @@ async def list_visitors(
     ``q`` (GH #212): case-insensitive substring on ``name`` OR exact id
     equality for a full UUID; ``total`` reflects the filtered count.
     len<2 / len>100 → 422 VALIDATION_ERROR.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with the scope and every other filter
+    (narrowing never expands visibility: a foreign id stays absent),
+    ≤100 distinct after dedup, garbage → 422.
     """
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        q=q,
+        page=params.page,
+        per_page=params.per_page,
+        q=params.q,
+        ids=params.id,
         master_key=scope.master_key,
     )
 

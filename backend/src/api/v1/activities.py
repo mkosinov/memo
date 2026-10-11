@@ -1,6 +1,5 @@
 """FastAPI router for activity CRUD endpoints with date filtering."""
 
-from datetime import date
 from functools import lru_cache
 from typing import Annotated
 
@@ -23,13 +22,13 @@ from src.schemas.activity import (
     ActivityCopyWeekRequest,
     ActivityCreate,
     ActivityDeleteBody,
+    ActivityListParams,
     ActivityPatch,
     ActivityResponse,
     ActivityUpdate,
     CopyWeekResult,
 )
 from src.schemas.common import PaginatedResponse
-from src.schemas.pagination import PaginationParams
 from src.services.activity import (
     ActivityService,
     get_activity_service,
@@ -89,15 +88,16 @@ def _map_response(activity: ActivityResponse, occupied: int) -> ActivityResponse
 async def list_activities(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    date_from: date | None = Query(None),
-    date_to: date | None = Query(None),
-    q: str | None = Query(None, min_length=2, max_length=100),
-    service_id: str | None = Query(None),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The brick carries page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here); the former
+    # date/service/q filters ride along 1:1.
+    params: Annotated[ActivityListParams, Query()],
     # GH #263 T2 (D1): the route stays PUBLIC, but a logged-in master
     # sees only his own activities — master_key (or the empty-scope
     # sentinel) becomes the ``master_id`` equality kwarg; anonymous /
-    # admin → master_key=None → no filter (unchanged behaviour).
+    # admin → master_key=None → no filter (unchanged behaviour). A
+    # Depends sibling beside a query model is legal (rule 8).
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range and service.
@@ -108,10 +108,16 @@ async def list_activities(
     VALIDATION_ERROR. List items carry ``service_title`` (single-item
     endpoints leave it None). Master role (GH #263): server-side scope —
     only ``master_id == master_key`` rows; empty scope → empty result.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with the scope and every other filter
+    (narrowing never expands visibility: a foreign id stays absent),
+    ≤100 distinct after dedup, garbage → 422.
     """
     result = await service.list(
-        db_session=session, page=pagination.page, per_page=pagination.per_page,
-        date_from=date_from, date_to=date_to, q=q, service_id=service_id,
+        db_session=session, page=params.page, per_page=params.per_page,
+        date_from=params.date_from, date_to=params.date_to, q=params.q,
+        service_id=params.service_id, ids=params.id,
         master_id=scope.master_key,
     )
     occupied_map = await sum_active_seats_bulk(

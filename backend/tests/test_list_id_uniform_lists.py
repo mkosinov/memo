@@ -6,11 +6,14 @@ injected as ``Annotated[XListParams, Query()]`` — scalar query siblings
 are banned (fastapi PR #12481), and the ``id`` field inherited from
 ``PaginationParams`` (#232) makes ``?id=X&id=Y`` narrowing work uniformly.
 
-THE MATRIX COVERS ALL SEVEN service-ready endpoints (§4.1): the three
-dictionary sort lists (services, materials, tags — Task 2) plus the
-four simple lists (visitors, activities, payments, positions — Task 3)
-in the SAME ``ENDPOINTS`` list (no test-body changes needed: everything
-is parametrized by descriptors carrying the route URL + the conftest
+THE MATRIX COVERS ALL EIGHT converted endpoints (§4.1): the three
+dictionary sort lists (services, materials, tags — Task 2), the four
+simple lists (visitors, activities, payments, positions — Task 3) and
+locations (Task 4 — the hybrid: ``?id=`` narrowing ALREADY worked there
+via the ``#232`` sibling param, so the matrix is a pure REGRESSION pin
+that the model conversion keeps the wire intact) — all in the SAME
+``ENDPOINTS`` list (no test-body changes needed: everything is
+parametrized by descriptors carrying the route URL + the conftest
 factory name).
 
 Scenarios (spec §2/§6):
@@ -97,6 +100,18 @@ ENDPOINTS = [
         route="/api/v1/positions",
         factory="create_position",
         query_params=("id", "page", "per_page"),
+    ),
+    # GH #371 Task 4 — locations, the last sort-carrying hybrid: the row
+    # pins the REGRESSION (С4): narrowing/422/OpenAPI behaved correctly
+    # BEFORE the conversion (the #232 sibling contract) and must stay
+    # green AFTER it (``id`` inherited from ``PaginationParams``).
+    ListEndpoint(
+        route="/api/v1/locations",
+        factory="create_location",
+        query_params=(
+            "id", "page", "per_page", "sort_by", "sort_order",
+            "status", "q",
+        ),
     ),
 ]
 

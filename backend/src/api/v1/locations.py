@@ -19,19 +19,17 @@ from src.domain.deletion import (
 from src.domain.errors import BareListLimitExceededError
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
-from src.models.enums import ArchiveStatus
 from src.models.location import Location
-from src.schemas.common import ArchiveStatusParams, PaginatedResponse, SortOrder
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.location import (
     LocationCreate,
     LocationDeleteBody,
+    LocationListParams,
     LocationPatch,
     LocationResponse,
-    LocationSortBy,
     LocationUpdate,
     ReorderRequest,
 )
-from src.schemas.pagination import IdQueryParam, PaginationParams
 from src.services.location import LocationService, get_location_service
 
 router = APIRouter(tags=["locations"])
@@ -71,30 +69,22 @@ _LOCATION_SORT_KEYS: SortKeyMap = {
 }
 
 
-# GH #232 §3.1: typed ``?id=`` list for the locations list — the shared
-# canonical contract (``IdQueryParam`` in schemas/pagination.py: UUID-only,
-# MAX_LIST_IDS ceiling, dedup of repeats BEFORE the cap). The sibling-param
-# shape is required by upstream fastapi #12481 (scalar query params mixed
-# with the Depends() pagination model forbid the ``Annotated[Model,
-# Query()]`` form) — only the CONTRACT is shared, not the injection shape.
-IdListQuery = IdQueryParam
+# GH #232 §3.1 first pinned the typed ``?id=`` contract for the locations
+# list via a sibling param; GH #371 §4.1 moves it into the model — the
+# sibling alias (``IdListQuery``) is deleted, ``id`` rides inheritance
+# from ``PaginationParams`` with the SAME contract (UUID-only,
+# MAX_LIST_IDS ceiling, dedup of repeats BEFORE the cap).
 
 
 @router.get("", response_model=PaginatedResponse[LocationResponse])
 async def list_locations(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
-    sort_by: LocationSortBy | None = Query(None),
-    sort_order: SortOrder = Query("asc"),
-    q: str | None = Query(None, min_length=2, max_length=100),
-    # GH #232 §3.1: the Depends() pagination model silently drops
-    # list-typed fields (FastAPI body-classification quirk), so the ``id``
-    # set rides a sibling scalar-style Query param — the shared
-    # IdListQuery contract (UUID-only, dedup of repeats BEFORE the
-    # ≤MAX_LIST_IDS cap; row-level dedup follows from SQL IN).
-    id: IdListQuery = None,
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The bricks carry page/per_page + the ``id``
+    # set filter (#232), sort (#367) and the former filters 1:1; service
+    # deps stay Depends() — legal.
+    params: Annotated[LocationListParams, Query()],
 ) -> PaginatedResponse[LocationResponse]:
     """Return locations filtered by archive status (default: active),
     sorted by sort_order, then title.
@@ -114,32 +104,32 @@ async def list_locations(
     string only, partial URLs never match); ``total`` reflects the filtered
     count. len<2 / len>100 → 422 VALIDATION_ERROR.
 
-    ``?id=`` (GH #232 §3.1): typed set narrowing through the universal
-    ``ArchiveService`` path. NOTE: the Depends() pagination model cannot
-    carry list-typed query fields (FastAPI drops them as body params), so
-    the ``id`` list is read via the router-level ``Query`` alias
-    (``IdListQuery`` above) — the pagination model keeps page/per_page
-    (scalar mixing, fastapi #12481, prevents the Annotated[Model, Query()]
-    shape here).
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with every other filter (an archived id
+    under the default ACTIVE status stays empty), ≤100 distinct after
+    dedup, garbage → 422. Inherited by ``LocationListParams`` from
+    ``PaginationParams`` — same contract as the former ``#232`` sibling.
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
     # ``Sequence[SortExpr] | None``.
     order_by: list[SortExpr] | None
-    if sort_by is None:
+    if params.sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.
         order_by = [asc(Location.sort_order), asc(Location.title), asc(Location.id)]
     else:
-        order_by = apply_sort(_LOCATION_SORT_KEYS, sort_by, sort_order, Location.id)
+        order_by = apply_sort(
+            _LOCATION_SORT_KEYS, params.sort_by, params.sort_order, Location.id
+        )
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        status=status,
+        page=params.page,
+        per_page=params.per_page,
+        status=params.status,
         order_by=order_by,
-        q=q,
-        ids=id,
+        q=params.q,
+        ids=params.id,
     )
 
 

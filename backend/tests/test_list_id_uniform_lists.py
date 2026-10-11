@@ -6,16 +6,20 @@ injected as ``Annotated[XListParams, Query()]`` — scalar query siblings
 are banned (fastapi PR #12481), and the ``id`` field inherited from
 ``PaginationParams`` (#232) makes ``?id=X&id=Y`` narrowing work uniformly.
 
-THE MATRIX COVERS ALL TEN converted endpoints (§4.1): the three
+THE MATRIX COVERS ALL ELEVEN converted endpoints (§4.1 — the full
+list): the three
 dictionary sort lists (services, materials, tags — Task 2), the four
 simple lists (visitors, activities, payments, positions — Task 3),
 locations (Task 4 — the hybrid: ``?id=`` narrowing ALREADY worked there
 via the ``#232`` sibling param, so the matrix is a pure REGRESSION pin
 that the model conversion keeps the wire intact), staff (Task 5 —
 its own sort whitelist/status/q; the plain branch here, the masters-
-join branch in TestStaffBothBranchesIdNarrowing) and visits (Task 6 —
+join branch in TestStaffBothBranchesIdNarrowing), visits (Task 6 —
 the §4.3 gap-2 custom list; the ``record_id``+``id`` conjunction is
-arbitrated by TestVisitRecordIdPlusIdNarrowing) — all in the SAME
+arbitrated by TestVisitRecordIdPlusIdNarrowing) and audit-logs
+(Task 7 — the §4.3 gap-3 free reading function, the LAST conversion;
+the combined filter narrowing is arbitrated by
+TestAuditLogCombinedNarrowing) — all in the SAME
 ``ENDPOINTS`` list (no test-body changes needed: everything is
 parametrized by descriptors carrying the route URL + the conftest
 factory name).
@@ -142,6 +146,21 @@ ENDPOINTS = [
         route="/api/v1/visits",
         factory="create_visit",
         query_params=("id", "page", "per_page", "record_id"),
+    ),
+    # GH #371 Task 7 — audit-logs: the LAST of the eleven conversions
+    # (§4.3 gap-3 list — a free reading function, corridor 3: the
+    # ``ids`` predicate lands in the same WHERE as the journal filters,
+    # before the count query). The row pins the generic contract
+    # (С1/С3/OpenAPI); the COMBINED narrowing with the journal's own
+    # filters (С7) is arbitrated by TestAuditLogCombinedNarrowing below.
+    ListEndpoint(
+        route="/api/v1/audit-logs",
+        factory="create_audit_log",
+        query_params=(
+            "id", "page", "per_page",
+            "user_id", "action", "entity", "entity_id",
+            "date_from", "date_to",
+        ),
     ),
 ]
 
@@ -613,3 +632,187 @@ class TestVisitRecordIdPlusIdNarrowing:
         body = resp.json()
         assert body["items"] == []
         assert body["total"] == 0
+
+
+class TestAuditLogCombinedNarrowing:
+    """С7 — the journal narrows ``?id=`` IN COMBINATION with its filters.
+
+    ``GET /api/v1/audit-logs`` is the spec §4.3 GAP-3 list: a free
+    reading function (corridor 3) outside ``GenericService`` — the
+    ``ids`` set must reach ``list_audit_logs`` and its
+    ``ids_in_predicate`` must land in the SAME WHERE as the journal
+    filters (author / action / entity / entity_id / whole-day dates),
+    BEFORE the count query, so rows and ``total`` narrow consensually.
+
+    RED design: pre-conversion the route injects pagination via the
+    Depends shape (which silently drops the list-typed ``id`` field —
+    schemas/pagination.py caveat) and the service has no ``ids``
+    plumbing at all: ``?user_id=U&id=X`` returns ALL of U's rows —
+    the rows/total assertions fail. Each case includes an id that does
+    NOT match the sibling filter: an OR-style (bypassing) predicate
+    would leak it, shrinking the set to the INTERSECTION is the only
+    way green.
+    """
+
+    @pytest.fixture
+    def journal_world(self, create_audit_log) -> dict:
+        """Four journal rows by two authors over three days.
+
+        ``a1``/``a2`` belong to ``u1``, ``a3``/``a4`` to ``u2``; actions
+        and entities cross both authors so every filter dimension has a
+        matching AND a non-matching row inside any id pair.
+        """
+        u1 = str(uuid4())  # author ids are plain strings on the journal
+        u2 = str(uuid4())
+        rows = {
+            "a1": create_audit_log(
+                user_id=u1, user_role="master",
+                action="create", entity="locations", entity_id="loc-1",
+                created_at="2026-03-01 10:00:00.000000",
+            ),
+            "a2": create_audit_log(
+                user_id=u1, user_role="master",
+                action="update", entity="services", entity_id="svc-1",
+                created_at="2026-03-02 10:00:00.000000",
+            ),
+            "a3": create_audit_log(
+                user_id=u2, user_role="admin",
+                action="create", entity="services", entity_id="svc-1",
+                created_at="2026-03-02 12:00:00.000000",
+            ),
+            "a4": create_audit_log(
+                user_id=u2, user_role="admin",
+                action="delete", entity="locations", entity_id="loc-1",
+                created_at="2026-03-03 10:00:00.000000",
+            ),
+        }
+        return {"u1": u1, "u2": u2, "rows": rows}
+
+    def test_user_id_with_id_pair_narrows_rows_and_total(
+        self, api_client, journal_world
+    ) -> None:
+        """``?user_id=u1&id=<a1>&id=<a3>`` → only a1 (a3 is u2's), total 1."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("user_id", w["u1"]),
+            ("id", w["rows"]["a1"]["id"]), ("id", w["rows"]["a3"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a1"]["id"]]
+        assert body["total"] == 1
+
+    def test_user_id_with_foreign_id_stays_empty(
+        self, api_client, journal_world
+    ) -> None:
+        """``?user_id=u1&id=<a4>`` (u2's row) → 200 + empty — the id set
+        cannot bypass the author filter (intersection, never expansion)."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("user_id", w["u1"]),
+            ("id", w["rows"]["a4"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
+
+    def test_action_with_id_pair_narrows_rows_and_total(
+        self, api_client, journal_world
+    ) -> None:
+        """``?action=create&id=<a2>&id=<a3>`` → only a3 (a2 is update), total 1."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("action", "create"),
+            ("id", w["rows"]["a2"]["id"]), ("id", w["rows"]["a3"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a3"]["id"]]
+        assert body["total"] == 1
+
+    def test_entity_with_id_pair_narrows_rows_and_total(
+        self, api_client, journal_world
+    ) -> None:
+        """``?entity=services&id=<a1>&id=<a2>`` → only a2, total 1."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("entity", "services"),
+            ("id", w["rows"]["a1"]["id"]), ("id", w["rows"]["a2"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a2"]["id"]]
+        assert body["total"] == 1
+
+    def test_entity_id_with_id_pair_narrows_rows_and_total(
+        self, api_client, journal_world
+    ) -> None:
+        """``?entity_id=loc-1&id=<a2>&id=<a4>`` → only a4, total 1."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("entity_id", "loc-1"),
+            ("id", w["rows"]["a2"]["id"]), ("id", w["rows"]["a4"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a4"]["id"]]
+        assert body["total"] == 1
+
+    def test_date_from_with_id_pair_narrows_rows_and_total(
+        self, api_client, journal_world
+    ) -> None:
+        """``?date_from=2026-03-02&id=<a1>&id=<a4>`` → only a4 (a1 is
+        03-01, outside the whole-day window), total 1."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("date_from", "2026-03-02"),
+            ("id", w["rows"]["a1"]["id"]), ("id", w["rows"]["a4"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a4"]["id"]]
+        assert body["total"] == 1
+
+    def test_date_to_with_id_stays_empty(
+        self, api_client, journal_world
+    ) -> None:
+        """``?date_to=2026-03-01&id=<a3>`` (03-02 row) → 200 + empty."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("date_to", "2026-03-01"),
+            ("id", w["rows"]["a3"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
+
+    def test_all_filters_with_ids_narrow_to_intersection(
+        self, api_client, journal_world
+    ) -> None:
+        """Every dimension at once: ``user_id``+``action``+``entity``+
+        ``entity_id``+``date_from`` over an id pair → exactly a2, total 1
+        (a3 shares action/entity/entity_id/date but belongs to u2 — the
+        author conjunct prunes it)."""
+        w = journal_world
+        resp = api_client.get("/api/v1/audit-logs", params=[
+            ("user_id", w["u1"]),
+            ("action", "update"),
+            ("entity", "services"),
+            ("entity_id", "svc-1"),
+            ("date_from", "2026-03-02"),
+            ("id", w["rows"]["a2"]["id"]), ("id", w["rows"]["a3"]["id"]),
+        ])
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [item["id"] for item in body["items"]] == [w["rows"]["a2"]["id"]]
+        assert body["total"] == 1

@@ -447,6 +447,71 @@ def create_visit(api_client, create_record):
 
 
 @pytest.fixture
+def create_audit_log():
+    """Factory: inserts ONE journal row via direct SQL (GH #371 matrix, Task 7).
+
+    The journal has NO write API (rows land exclusively via the
+    accumulator inside ``@transactional``, GH #344 spec §4) — reading
+    tests seed rows directly, mirroring the SQL precedent of
+    ``test_api_audit_logs.py``. ``created_at`` defaults to a unique,
+    strictly increasing microsecond-precision timestamp (fixed day +
+    call counter) so ``created_at DESC`` stays stable; pass explicit
+    ``created_at``/``user_id``/``action``/``entity``/``entity_id``
+    overrides for filter scenarios (C7).
+
+    Usage::
+        row = create_audit_log()
+        row = create_audit_log(action="update", entity="services",
+                               created_at="2026-03-02 10:00:00.000000")
+    """
+    import json as _json
+    import uuid as _uuid
+
+    _counter = 0
+
+    def factory(**overrides):
+        nonlocal _counter
+        _counter += 1
+        row = {
+            "user_id": None,
+            "user_role": "admin",
+            "action": "create",
+            "entity": "clients",
+            "entity_id": None,
+            "entity_label": f"Row {_counter}",
+            "changes": None,
+            # Unique per call (counter in the microseconds) — the fixed
+            # base day keeps DESC ordering deterministic across rows.
+            "created_at": f"2026-03-01 12:00:00.{_counter:06d}",
+            **overrides,
+        }
+        log_id = str(_uuid.uuid4())
+        query_db_params(
+            "INSERT INTO audit_logs (id, user_id, user_role, action, entity, "
+            "entity_id, entity_label, changes, created_at) VALUES "
+            "(:id, :uid, :role, :action, :entity, :eid, :elabel, :changes, :created)",
+            {
+                "id": log_id,
+                "uid": row["user_id"],
+                "role": row["user_role"],
+                "action": row["action"],
+                "entity": row["entity"],
+                "eid": row["entity_id"],
+                "elabel": row["entity_label"],
+                "changes": (
+                    _json.dumps(row["changes"])
+                    if row["changes"] is not None
+                    else None
+                ),
+                "created": row["created_at"],
+            },
+        )
+        return {"id": log_id, **row}
+
+    return factory
+
+
+@pytest.fixture
 def create_position(api_client):
     """Factory: creates a position via API (GH #371 list matrix).
 

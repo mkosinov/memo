@@ -18,10 +18,18 @@ import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  SEED_STAFF_IDS = ['Середа', 'Большакова', 'П.', 'Тюльпина', 'В.', 'Горох'].map(
+    (last_name) => seedId('staff', 'last_name', last_name),
+  );
+});
+
+
 // Seed staff ids resolved by business key (GH #491 — seed ids are UUIDs).
-const SEED_STAFF_IDS = ['Середа', 'Большакова', 'П.', 'Тюльпина', 'В.', 'Горох'].map(
-  (last_name) => seedId('staff', 'last_name', last_name),
-);
+let SEED_STAFF_IDS: string[] = [];
 
 test.describe('S1 — SMM employee without a master section', () => {
   test('absent from /api/v1/masters and from the schedule master filter', async ({ page, request }) => {

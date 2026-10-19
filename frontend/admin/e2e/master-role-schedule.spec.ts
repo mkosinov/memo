@@ -28,10 +28,17 @@ import { adminApiContext } from './fixtures/admin-context';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { createTestActivity, createTestMaster, cleanup } from './fixtures/factories';
 import { resolveBackendUrl } from './lib/backend-url';
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
 import { seedId } from './fixtures/seed-ids';
 
-// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
-const M1 = seedId('staff', 'last_name', 'Середа');
+let M1 = '';
 
 test.describe('GH #263 S1 — master schedule shows only own activities', () => {
   useMasterSession();

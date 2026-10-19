@@ -15,8 +15,15 @@ import { useMasterSession } from './fixtures/master-session';
 import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
-// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
-const M1 = seedId('staff', 'last_name', 'Середа');
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+let M1 = '';
 
 test.describe('GH #263 T8 — master session smoke', () => {
   useMasterSession();

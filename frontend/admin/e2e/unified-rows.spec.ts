@@ -20,9 +20,17 @@ import { seedFixedWeekRecordId, seedRecordIdByClientName } from './fixtures/seed
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  R3 = seedRecordIdByClientName('Елена Сидорова');
+});
+
+
 // Seed record anchors by business key (GH #491 — seed ids are UUIDs):
 // R3 = «Елена Сидорова»'s seed record (former alias r3).
-const R3 = seedRecordIdByClientName('Елена Сидорова');
+let R3 = '';
 
 /**
  * Saved payment ROW locator (scenario 15b). The naive

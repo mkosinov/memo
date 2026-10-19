@@ -6,10 +6,13 @@
  * that pin seed rows resolve them by business keys (title / name / sort
  * order) HERE — one SQL implementation per key shape, no per-spec copies.
  *
- * Safe at module scope: seed rows (and their ids) are constant across the
- * whole stack run — the per-test canonical reset restores the same canon
- * dump, and globalSetup guarantees the DB is seeded before workers import
- * spec modules.
+ * Seed rows (and their ids) are constant across the whole stack run — the
+ * per-test canonical reset restores the same canon dump.
+ *
+ * IMPORT-TIME RULE: never call these at module scope. CI's
+ * `playwright --list` collects specs BEFORE the shard stack seeds the DB,
+ * so import-time DB access dies with "no such table". Resolve in
+ * `test.beforeAll` (or inside test bodies) instead.
  */
 import { queryDBRow } from './db-query';
 

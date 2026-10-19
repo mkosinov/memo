@@ -140,17 +140,33 @@ test.describe('Services — Create Modal', () => {
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  S5 = seedId('services', 'title', 'Ручная лепка');
+  S7 = seedId('services', 'title', 'Морской пейзаж');
+  R2 = seedRecordIdByClientName('Мария Петрова');
+  T5A = seedTariffId('Ручная лепка', 'Взрослый');
+  T5C = seedTariffId('Ручная лепка', 'Детский');
+  T5I = seedTariffId('Ручная лепка', 'Индивидуальный');
+  T7A = seedTariffId('Морской пейзаж', 'Взрослый');
+  T7C = seedTariffId('Морской пейзаж', 'Детский');
+  T7I = seedTariffId('Морской пейзаж', 'Индивидуальный');
+});
+
+
 // GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
 // per worker (seed rows are constant across the run; reset restores the canon).
-const S5 = seedId('services', 'title', 'Ручная лепка');
-const S7 = seedId('services', 'title', 'Морской пейзаж');
-const R2 = seedRecordIdByClientName('Мария Петрова');
-const T5A = seedTariffId('Ручная лепка', 'Взрослый');
-const T5C = seedTariffId('Ручная лепка', 'Детский');
-const T5I = seedTariffId('Ручная лепка', 'Индивидуальный');
-const T7A = seedTariffId('Морской пейзаж', 'Взрослый');
-const T7C = seedTariffId('Морской пейзаж', 'Детский');
-const T7I = seedTariffId('Морской пейзаж', 'Индивидуальный');
+let S5 = '';
+let S7 = '';
+let R2 = '';
+let T5A = '';
+let T5C = '';
+let T5I = '';
+let T7A = '';
+let T7C = '';
+let T7I = '';
 
 /** Tariff shape on GET /api/v1/services/{id} (fields the scenarios assert). */
 interface TariffPayload {

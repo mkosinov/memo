@@ -26,12 +26,13 @@ import type { APIRequestContext } from '@playwright/test';
 
 const BACKEND = resolveBackendUrl();
 
-// GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
-// per worker (seed rows are constant across the run; reset restores the canon).
-const TAG_NEWS = seedId('tags', 'title', 'новинка');
-const TAG_HIT = seedId('tags', 'title', 'хит');
-const TAG_GUEST = seedId('tags', 'title', 'гость');
-const GRAND_ID = seedId('locations', 'title', 'Гранд Отель Поляна');
+// GH #491: seed ids are UUIDs, resolved by business keys at TEST runtime
+// (beforeAll) — the module stays DB-free at import: CI's `playwright --list`
+// collects specs before the shard stack seeds the DB.
+let TAG_NEWS = '';
+let TAG_HIT = '';
+let TAG_GUEST = '';
+let GRAND_ID = '';
 
 interface WavePage {
   /** Route pathname, e.g. /positions. */
@@ -63,6 +64,28 @@ async function seedAuditRow(request: APIRequestContext): Promise<() => Promise<v
   const tag = await createTestTag(request, { title: `audit-wave-${Date.now()}` });
   return () => cleanup(request, `/api/v1/tags/${tag.id}`);
 }
+
+// GH #491: inject the resolved seed ids into the registration-time data
+// before any test runs (the module itself stays DB-free at import).
+test.beforeAll(() => {
+  TAG_NEWS = seedId('tags', 'title', 'новинка');
+  TAG_HIT = seedId('tags', 'title', 'хит');
+  TAG_GUEST = seedId('tags', 'title', 'гость');
+  GRAND_ID = seedId('locations', 'title', 'Гранд Отель Поляна');
+
+  const photos = WAVE_PAGES.find((p) => p.route === '/photos');
+  if (photos) {
+    photos.linkWithFilters = `/photos?q=guest&tag_id=${TAG_GUEST}&page=1&per_page=50`;
+    photos.expectedWireParams = {
+      q: 'guest',
+      tag_id: TAG_GUEST,
+      page: '1',
+      per_page: '50',
+    };
+  }
+  RECORDS_LINK =
+    `/records?from=2026-06-01&to=2026-06-30&q=%D0%90%D0%BD%D0%BD%D0%B0&status=visited&location_id=${GRAND_ID}&sort_by=client&sort_order=desc&page=1&per_page=50`;
+});
 
 const WAVE_PAGES: WavePage[] = [
   {
@@ -144,10 +167,10 @@ const WAVE_PAGES: WavePage[] = [
     // match the seed photos guest-1/guest-2.jpg (both carry it).
     route: '/photos',
     listPath: '/api/v1/photos',
-    linkWithFilters: `/photos?q=guest&tag_id=${TAG_GUEST}&page=1&per_page=50`,
+    // tag_id injected in beforeAll (seed id resolved at test runtime)
+    linkWithFilters: '/photos?q=guest&page=1&per_page=50',
     expectedWireParams: {
       q: 'guest',
-      tag_id: TAG_GUEST,
       page: '1',
       per_page: '50',
     },
@@ -385,8 +408,7 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
   // has two visited records at location «Гранд Отель Поляна» — the combined
   // link below yields exactly those rows deterministically (GH #491: the
   // location id is resolved by title — ids are UUIDs).
-  const RECORDS_LINK =
-    `/records?from=2026-06-01&to=2026-06-30&q=%D0%90%D0%BD%D0%BD%D0%B0&status=visited&location_id=${GRAND_ID}&sort_by=client&sort_order=desc&page=1&per_page=50`;
+  let RECORDS_LINK = '';
 
   test('US-1/US-5: link restores period in the date inputs + filters, exactly one list request', async ({
     page,

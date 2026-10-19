@@ -29,10 +29,19 @@ import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  NULL_AGE_SEED = { id: seedId('services', 'title', 'Картина маслом') };
+  AGE12_SEED = { id: seedId('services', 'title', 'Акварель'), title: 'Акварель' };
+});
+
+
 /** Seed service with max_age: null — «Возраст до» must open empty. */
-const NULL_AGE_SEED = { id: seedId('services', 'title', 'Картина маслом') };
+let NULL_AGE_SEED = { id: '' };
 /** Seed service with max_age: 12 — the only non-null in the seed. */
-const AGE12_SEED = { id: seedId('services', 'title', 'Акварель'), title: 'Акварель' };
+let AGE12_SEED = { id: '', title: 'Акварель' };
 
 /** Full service row as the GET endpoint returns it (fields we restore). */
 interface ServiceRow {

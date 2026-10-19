@@ -45,10 +45,17 @@ import { masterAuthStatePath } from './fixtures/auth-state';
 import type { Page } from '@playwright/test';
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
 import { seedId } from './fixtures/seed-ids';
 
-// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
-const M1 = seedId('staff', 'last_name', 'Середа');
+let M1 = '';
 
 /** Marker prefix — unique per run/test so journal assertions never
  * collide with rows left by sibling specs (audit_logs are NOT wiped by

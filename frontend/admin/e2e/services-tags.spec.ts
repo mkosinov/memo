@@ -44,6 +44,22 @@ import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  S1 = seedId('services', 'title', 'Картина маслом');
+  S4 = seedId('services', 'title', 'Акварель');
+  TAG_ID = {
+    news: seedId('tags', 'title', TAG_TITLES.news),
+    hit: seedId('tags', 'title', TAG_TITLES.hit),
+    kids: seedId('tags', 'title', TAG_TITLES.kids),
+    popular: seedId('tags', 'title', TAG_TITLES.popular),
+    seasonal: seedId('tags', 'title', TAG_TITLES.seasonal),
+  };
+});
+
+
 /** Seed tag titles (seed.py `_seed_tags`: former aliases tag1..tag7). */
 const TAG_TITLES = {
   news: 'новинка', // tag1
@@ -55,15 +71,15 @@ const TAG_TITLES = {
 
 // GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
 // per worker (seed rows are constant across the run; reset restores the canon).
-const S1 = seedId('services', 'title', 'Картина маслом');
-const S4 = seedId('services', 'title', 'Акварель');
-const TAG_ID = {
-  news: seedId('tags', 'title', TAG_TITLES.news),
-  hit: seedId('tags', 'title', TAG_TITLES.hit),
-  kids: seedId('tags', 'title', TAG_TITLES.kids),
-  popular: seedId('tags', 'title', TAG_TITLES.popular),
-  seasonal: seedId('tags', 'title', TAG_TITLES.seasonal),
-} as const;
+let S1 = '';
+let S4 = '';
+let TAG_ID = {
+  news: '',
+  hit: '',
+  kids: '',
+  popular: '',
+  seasonal: '',
+};
 
 /** Full service row as the GET endpoint returns it (fields we restore). */
 interface ServiceRow {

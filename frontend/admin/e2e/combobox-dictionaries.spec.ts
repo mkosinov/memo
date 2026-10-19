@@ -20,6 +20,16 @@ import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  MASTER_ID = seedId('staff', 'last_name', 'Большакова');
+  SERVICE_ID = seedId('services', 'title', SERVICE_TITLE);
+  LOCATION_ID = seedId('locations', 'title', LOCATION_NAME);
+});
+
+
 /**
  * E2E user scenarios US-1…US-6 (spec §10, GH #214 Task 12) — dictionary
  * Comboboxes on every migrated surface: record tab, settings tab, records
@@ -37,19 +47,19 @@ const BACKEND = resolveBackendUrl();
 import { seedId, seedFixedWeekRecordId } from './fixtures/seed-ids';
 
 /** m2: Юлия Большакова — unique surname fragment «Больша». Label «Фамилия Имя». */
-const MASTER_ID = seedId('staff', 'last_name', 'Большакова');
+let MASTER_ID = '';
 const MASTER_LABEL = 'Большакова Юлия';
 const MASTER_SURNAME_FRAGMENT = 'Больша';
 
 /** «Акварель» — the only seed service with max_age → range display «6–12». */
 const SERVICE_TITLE = 'Акварель';
-const SERVICE_ID = seedId('services', 'title', SERVICE_TITLE);
+let SERVICE_ID = '';
 const SERVICE_TITLE_FRAGMENT = 'Акв';
 const SERVICE_AGE_DISPLAY = '6–12';
 
 /** Location «Альпика» — fragment «Альп» is unique among seed locations. */
 const LOCATION_NAME = 'Альпика';
-const LOCATION_ID = seedId('locations', 'title', LOCATION_NAME);
+let LOCATION_ID = '';
 const LOCATION_NAME_FRAGMENT = 'Альп';
 
 /** Unique name to avoid collisions between parallel runs (clients.spec.ts). */

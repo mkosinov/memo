@@ -24,13 +24,24 @@ import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  MASTER_A = seedId('staff', 'last_name', 'Середа');
+  MASTER_B = seedId('staff', 'last_name', 'Большакова');
+  LOCATION = seedId('locations', 'title', 'Альпика');
+  SERVICE = seedId('services', 'title', 'Картина маслом');
+});
+
+
 // Use a fixed date — we create our own activities there (GH #491: seed ids
 // are UUIDs; staff/location/service resolve by business keys).
 const TEST_DATE = '2026-06-20';
-const MASTER_A = seedId('staff', 'last_name', 'Середа');
-const MASTER_B = seedId('staff', 'last_name', 'Большакова');
-const LOCATION = seedId('locations', 'title', 'Альпика');
-const SERVICE = seedId('services', 'title', 'Картина маслом');
+let MASTER_A = '';
+let MASTER_B = '';
+let LOCATION = '';
+let SERVICE = '';
 
 async function createActivity(
   request: import('@playwright/test').APIRequestContext,

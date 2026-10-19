@@ -23,10 +23,17 @@ import { openCombobox } from './helpers/combobox';
 import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
 import { seedId } from './fixtures/seed-ids';
 
-// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
-const M1 = seedId('staff', 'last_name', 'Середа');
+let M1 = '';
 
 const SPECIALTY = 'S4-специальность';
 const COLOR = '#4A7C59';

@@ -46,20 +46,13 @@ const BACKEND = resolveBackendUrl();
 
 // ─── Seed anchors by business key (GH #491 — ids are UUIDs) ─────────────────
 
-const ALPIKA = seedId('locations', 'title', 'Альпика');
-const GRAND = seedId('locations', 'title', 'Гранд Отель Поляна');
-const P1389 = seedId('locations', 'title', 'Поляна 1389');
-const M1 = seedId('staff', 'last_name', 'Середа');
-const M2 = seedId('staff', 'last_name', 'Большакова');
-const M3 = seedId('staff', 'last_name', 'П.');
-const M4 = seedId('staff', 'last_name', 'Тюльпина');
-const M5 = seedId('staff', 'last_name', 'В.');
-const M7 = seedId('staff', 'last_name', 'Горох');
-const S2 = seedId('services', 'title', 'Картина акрилом');
-const S3 = seedId('services', 'title', 'Мини-картина акрилом');
-const S5 = seedId('services', 'title', 'Ручная лепка');
-const S6 = seedId('services', 'title', 'Роспись одежды');
-const S7 = seedId('services', 'title', 'Морской пейзаж');
+// GH #491: resolved at test runtime (beforeAll) — the module stays DB-free
+// at import: CI's `playwright --list` collects specs before the shard stack
+// seeds the DB.
+let ALPIKA = ''; let GRAND = ''; let P1389 = '';
+let M1 = ''; let M2 = ''; let M3 = ''; let M4 = ''; let M5 = ''; let M7 = '';
+let S2 = ''; let S3 = ''; let S5 = ''; let S6 = ''; let S7 = '';
+let SEED_MASTER_SECTIONS: Record<string, { specialty: string; color: string }> = {};
 
 /** All seed rows share the seed transaction's created_at, which precedes
  * every test-created row — MIN(records.created_at) is the canonical guard
@@ -83,6 +76,30 @@ function mondayOf(dateStr: string): string {
 }
 
 test.beforeAll(() => {
+  // Seed ids by business key (GH #491 — ids are UUIDs; no DB at import).
+  ALPIKA = seedId('locations', 'title', 'Альпика');
+  GRAND = seedId('locations', 'title', 'Гранд Отель Поляна');
+  P1389 = seedId('locations', 'title', 'Поляна 1389');
+  M1 = seedId('staff', 'last_name', 'Середа');
+  M2 = seedId('staff', 'last_name', 'Большакова');
+  M3 = seedId('staff', 'last_name', 'П.');
+  M4 = seedId('staff', 'last_name', 'Тюльпина');
+  M5 = seedId('staff', 'last_name', 'В.');
+  M7 = seedId('staff', 'last_name', 'Горох');
+  S2 = seedId('services', 'title', 'Картина акрилом');
+  S3 = seedId('services', 'title', 'Мини-картина акрилом');
+  S5 = seedId('services', 'title', 'Ручная лепка');
+  S6 = seedId('services', 'title', 'Роспись одежды');
+  S7 = seedId('services', 'title', 'Морской пейзаж');
+  SEED_MASTER_SECTIONS = {
+    [M1]: { specialty: 'живопись', color: '#5B8C7A' },
+    [M2]: { specialty: 'керамика', color: '#6B7E9C' },
+    [M3]: { specialty: 'живопись', color: '#A07060' },
+    [M4]: { specialty: 'керамика', color: '#7A6E9C' },
+    [M5]: { specialty: 'живопись', color: '#8A7840' },
+    [M7]: { specialty: 'керамика', color: '#9A5870' },
+  };
+
   // Latest SEED activity day lands in the current seed week (the fixed
   // reference week ended 2026-06-21, long before any relative week).
   const row = queryDBRow(
@@ -239,15 +256,8 @@ async function delayActivitiesGETs(page: Page, ms: number): Promise<void> {
   });
 }
 
-/** Seed master sections (specialty/color) — for the S6 restore PATCH. */
-const SEED_MASTER_SECTIONS: Record<string, { specialty: string; color: string }> = {
-  [M1]: { specialty: 'живопись', color: '#5B8C7A' },
-  [M2]: { specialty: 'керамика', color: '#6B7E9C' },
-  [M3]: { specialty: 'живопись', color: '#A07060' },
-  [M4]: { specialty: 'керамика', color: '#7A6E9C' },
-  [M5]: { specialty: 'живопись', color: '#8A7840' },
-  [M7]: { specialty: 'керамика', color: '#9A5870' },
-};
+/** Seed master sections (specialty/color) — for the S6 restore PATCH.
+ * (Built in beforeAll together with the resolved staff ids.) */
 
 /** Restore a seed master through the штатный path: person + master section. */
 async function restoreSeedMaster(request: APIRequestContext, id: string): Promise<void> {

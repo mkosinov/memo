@@ -89,7 +89,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('') // canon application (.read)
       .mockReturnValueOnce('activities\nrecords') // schema tables for sanity
-      .mockReturnValueOnce('{"activities":10,"records":0,"visits":0,"payments":0}'); // seeded volume → below thresholds → missing
+      .mockReturnValueOnce('[{"activities":10,"records":0,"visits":0,"payments":0}]'); // seeded volume → below thresholds → missing
 
     await expect(globalSetupFunc()).rejects.toThrow(/Seed data is missing/);
   });
@@ -98,7 +98,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('{"activities":55,"records":6,"visits":10,"payments":6}'); // seeded volume present
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]'); // seeded volume present
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [],
@@ -112,7 +112,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('{"activities":55,"records":6,"visits":10,"payments":6}');
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]');
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],
@@ -129,7 +129,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('{"activities":55,"records":6,"visits":10,"payments":6}');
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],

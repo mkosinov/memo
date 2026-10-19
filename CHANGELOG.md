@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     зелёные локально, US-2 — верифицируется на PR CI, US-4 (CI на Node 26) —
     PENDING PR CI (finishing leg); пост-мерж — закрытие поглощённых #403/#460 и
     пост-условие в #389.
+  - **Rev.4 (19.10, решение пользователя, до мержа PR):** (1) e2e-ассерт адреса
+    после входа в `auth-login.spec.ts` / `auth-roles.spec.ts` /
+    `password-setup-link.spec.ts` принимает оба легитимных состояния
+    (`/\/(schedule)?$/`): оптимистичный корень при мягкой навигации либо
+    разрешившийся серверный пересыл корня на `/schedule` — на Node 26 холодный
+    dev-сервер стабильно доводил пересыл, прежний ассерт переходного состояния
+    падал дважды идентично (PR CI run 38128103495, 15/16 чеков зелёные);
+    (2) пин `.nvmrc` распространён на `web-checks.yml`, `visual-check.yml`,
+    `update-snapshots.yml` — версия Node едина во всех семи setup-node CI,
+    единственный источник `.nvmrc`. Спека рев.4 (расширение скоупа + резолюция
+    риска e2e) едет этим же PR.
   - Status: `docs/status/2026-10-11-vitest-local-env-389.md`
 - **GH #380 — Дедуп before-read SELECT в visitor/records путях (невидимый рефактор)**
   — branch `380-visitor-records-dedup` (4 коммита `29205322..5b3ba89d` + merge main

@@ -3,6 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.domain.visit_status import VisitStatus
+from src.schemas.pagination import PaginationParams
 
 
 class VisitBase(BaseModel):
@@ -48,6 +49,24 @@ class VisitStatusUpdate(BaseModel):
     """Request schema for updating a visit's status."""
 
     status: VisitStatus
+
+
+class VisitListParams(PaginationParams):
+    """Query parameters for GET /api/v1/visits (GH #371 §4.1).
+
+    Composed of the ``PaginationParams`` brick (``page``/``per_page`` and
+    the ``id`` set filter, #232 — ``?id=`` starts working on visits via
+    the §4.3 gap-2 service predicate). The router's former scalar query
+    sibling rides along 1:1: ``record_id`` (``str`` — the pre-conversion
+    annotation, no UUID tightening: spec §4.1 keeps the annotations,
+    scenario 8 wire parity; same architect's decision as payments'
+    identically-shaped ``record_id``, Task 3). The master scope is NOT a
+    query field — it stays a Depends sibling (``get_scope``; domain rule
+    8, #371). Injected as ``Annotated[VisitListParams, Query()]`` —
+    scalar query siblings are banned (fastapi PR #12481).
+    """
+
+    record_id: str | None = None
 
 
 class VisitResponse(BaseModel):

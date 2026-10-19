@@ -12,9 +12,8 @@ pre-refactor ``RecordService.create`` — these tests pin the new shape:
 - capacity overflow still raises 409 (domain rule, same as before),
   and the caller's session rolls back to a clean pre-call state.
 
-CALLING CONVENTION: scenarios are selfless functions, so the
-``@transactional`` wrapper binds the first positional arg as ``self`` —
-they are invoked with KEYWORD arguments (see the module docstring in
+CALLING CONVENTION: scenarios are selfless functions — invoked with
+plain keyword arguments (see the module docstring in
 ``src/usecases/records.py``).
 """
 
@@ -122,7 +121,7 @@ async def test_scenario_creates_client_visitor_record_visits(db_session, create_
         visits=[VisitItem(name="Мария", price=1000)],
         comment="scenario test",
     )
-    record = await create_record(None, db_session=db_session, data=data)
+    record = await create_record(db_session=db_session, data=data)
 
     # Record row exists with derived seats/status.
     stored = await db_session.get(Record, record.id)
@@ -181,7 +180,7 @@ async def test_scenario_capacity_overflow_rolls_back(db_session, create_activity
         ],
     )
     with pytest.raises(HTTPException) as exc_info:
-        await create_record(None, db_session=db_session, data=data)
+        await create_record(db_session=db_session, data=data)
     assert exc_info.value.status_code == 409
 
     # The test session still holds the pending find-or-create add —
@@ -200,25 +199,3 @@ async def test_scenario_capacity_overflow_rolls_back(db_session, create_activity
         .all()
     )
     assert records == []
-
-
-async def test_scenario_positional_call_fails_loud(db_session, create_activity):
-    """A positional call must fail LOUDLY, never misdirect the session.
-
-    The @transactional wrapper binds the first positional arg as its
-    ``self`` slot — the ``None, kwargs`` convention (module docstring)
-    is mandatory.
-    """
-    from src.usecases.records import create_record
-
-    activity = await _orm_activity(db_session, create_activity)
-    data = RecordCreate(
-        activity_id=activity.id,
-        phone="+79995006060",
-        visits=[VisitItem(name="X", price=100)],
-    )
-    # No leading None → the session lands in the wrapper's self slot and
-    # the remaining args shift — TypeError (fail-loud), never a wrong
-    # session silently committed.
-    with pytest.raises(TypeError):
-        await create_record(db_session, data)  # type: ignore[call-arg]

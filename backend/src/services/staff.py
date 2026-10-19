@@ -44,7 +44,7 @@ from src.models.position import Position, staff_positions
 from src.models.staff import Staff
 from src.models.user import User
 from src.repositories.generic import get_archive_repository
-from src.repositories.search import SearchField
+from src.repositories.search import SearchField, ids_in_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.staff import (
     StaffAccountView,
@@ -314,6 +314,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         order_by: Sequence[SortExpr] | None = None,
         status: ArchiveStatus | None = None,
         q: str | None = None,
+        ids: Sequence[UUID] | None = None,
         **filters: Any,
     ) -> PaginatedResponse[StaffResponse]:
         """Extension-sort variant of ``list`` — LEFT JOIN on masters.
@@ -323,6 +324,12 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         (NULL) stay in the result and sort LAST (the router bakes
         ``nullslast`` into ``order_by``). Same GH #205 envelope + the same
         GH #212 search matrix as the plain list.
+
+        GH #371 §4.3 gap 1: ``ids`` narrows via ``ids_in_predicate``
+        placed in the BASE staff selection — BEFORE the masters join can
+        multiply rows and BEFORE the count subquery — so items and
+        ``total`` narrow consensually (a narrowed-out card vanishes with
+        its section; no fan-out divergence).
         """
         from src.models.enums import ArchiveStatus
         from src.repositories.search import search_predicate
@@ -337,6 +344,11 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         if q is not None:
             assert self.search_fields is not None  # class attribute (narrow for mypy)
             stmt = stmt.where(search_predicate(q, self.search_fields))
+        # The shared narrowing helper (#232), conjunctive with the filters
+        # above — one call, same as every other list consumer.
+        ids_pred = ids_in_predicate(Staff.id, ids)
+        if ids_pred is not None:
+            stmt = stmt.where(ids_pred)
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(Staff, key) == value)

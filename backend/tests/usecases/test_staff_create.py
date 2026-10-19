@@ -13,10 +13,9 @@ non-transactional building blocks of the owners:
 - masters extension — ``MasterService`` (Task 2);
 - account — ``UserService`` + ``resolve_account_role`` (Task 1).
 
-CALLING CONVENTION: the scenario is a selfless function — the
-``@transactional`` wrapper binds the first positional arg as ``self``, so
-it is invoked with a leading ``None`` and keyword arguments (see the
-module docstring of ``src/usecases/records.py``).
+CALLING CONVENTION: the scenario is a selfless function — invoked with
+plain keyword arguments (see the module docstring of
+``src/usecases/records.py``).
 
 Authorization negative case (role ``master`` → 403 on every mutating
 staff endpoint) is ALREADY covered by ``tests/test_master_scope_contract.py``
@@ -152,7 +151,7 @@ async def test_plain_card_creates_staff_row_only(db_session) -> None:
     """S1: bare card — one staff row, no masters row, no user, no links."""
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload())
+    created = await create_staff(db_session=db_session, data=_create_payload())
 
     assert created.first_name == "Ольга"
     assert created.last_name == "Иванова"
@@ -175,7 +174,7 @@ async def test_with_master_section_creates_active_extension(db_session) -> None:
     specialty/color; the response echoes the section."""
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "керамика", "color": "#FF0000"},
     ))
 
@@ -193,7 +192,7 @@ async def test_with_archived_section_creates_inactive_extension(db_session) -> N
     """T8 Gap A: ``archived=True`` on create → the section is BORN archived."""
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "с", "color": "#112233", "archived": True},
     ))
 
@@ -213,7 +212,7 @@ async def test_with_positions_links_and_dedupes(db_session) -> None:
     p1 = await _add_position(db_session, id="master", title="Мастер", is_system=True)
     p2 = await _add_position(db_session)
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         position_ids=[p1.id, p2.id, p2.id],
     ))
 
@@ -232,7 +231,7 @@ async def test_with_user_creates_linked_passwordless_account(db_session) -> None
     from src.usecases.staff import create_staff
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "живопись", "color": "#5B8C7A"},
         create_user={"phone": phone},
     ))
@@ -255,7 +254,7 @@ async def test_with_user_guarantees_settings_row(db_session) -> None:
     from src.models.user_settings import UserSettings
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         create_user={
             "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
@@ -276,7 +275,7 @@ async def test_with_user_guarantees_settings_row(db_session) -> None:
 async def test_user_without_section_gets_admin_fallback(db_session) -> None:
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         create_user={
             "phone": f"+7999{_uuid.uuid4().hex[:7]}",
         },
@@ -297,7 +296,7 @@ async def test_user_position_template_roles(db_session) -> None:
     await _add_position(db_session, id="admin", title="Админ", is_system=True)
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         position_ids=["master"],
         create_user={"phone": phone},
     ))
@@ -307,7 +306,7 @@ async def test_user_position_template_roles(db_session) -> None:
     assert role == UserRole.MASTER.value
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         position_ids=["admin"],
         create_user={"phone": phone},
     ))
@@ -317,7 +316,7 @@ async def test_user_position_template_roles(db_session) -> None:
     assert role == UserRole.ADMIN.value
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         position_ids=["master", "admin"],
         create_user={"phone": phone},
     ))
@@ -328,7 +327,7 @@ async def test_user_position_template_roles(db_session) -> None:
 
     # Explicit role beats the template (master position, manual admin).
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         position_ids=["master"],
         create_user={
             "phone": phone, "role": "admin",
@@ -347,7 +346,7 @@ async def test_blank_specialty_raises(db_session) -> None:
     from src.usecases.staff import create_staff
 
     with pytest.raises(SpecialtyRequiredError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             master={"specialty": "   ", "color": "#FF0000"},
         ))
 
@@ -356,7 +355,7 @@ async def test_blank_color_raises(db_session) -> None:
     from src.usecases.staff import create_staff
 
     with pytest.raises(ColorRequiredError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             master={"specialty": "живопись", "color": "  "},
         ))
 
@@ -365,7 +364,7 @@ async def test_unknown_position_raises(db_session) -> None:
     from src.usecases.staff import create_staff
 
     with pytest.raises(PositionNotFoundError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             position_ids=["ghost-id"],
         ))
 
@@ -377,12 +376,12 @@ async def test_duplicate_account_phone_raises_domain_error(db_session) -> None:
     from src.usecases.staff import create_staff
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
-    await create_staff(None, db_session=db_session, data=_create_payload(
+    await create_staff(db_session=db_session, data=_create_payload(
         create_user={"phone": phone},
     ))
 
     with pytest.raises(PhoneTakenError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             create_user={"phone": phone},
         ))
 
@@ -395,7 +394,7 @@ async def test_invalid_account_phone_raises_domain_error(db_session) -> None:
     from src.usecases.staff import create_staff
 
     with pytest.raises(PhoneInvalidError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             create_user={"phone": "   "},
         ))
 
@@ -406,7 +405,7 @@ async def test_invalid_account_phone_raises_domain_error(db_session) -> None:
 async def test_grid_plain_card_is_staff_only(db_session, subscriber) -> None:
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload())
+    created = await create_staff(db_session=db_session, data=_create_payload())
     assert created is not None
 
     events = _drain(subscriber)
@@ -424,7 +423,7 @@ async def test_grid_full_composite(db_session, subscriber) -> None:
     from src.usecases.staff import create_staff
 
     await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "живопись", "color": "#5B8C7A"},
         position_ids=["master"],
         create_user={
@@ -444,7 +443,7 @@ async def test_grid_empty_positions_not_marked(db_session, subscriber) -> None:
     data.position_ids`)."""
     from src.usecases.staff import create_staff
 
-    created = await create_staff(None, db_session=db_session, data=_create_payload(
+    created = await create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "живопись", "color": "#5B8C7A"},
     ))
     assert created is not None
@@ -457,7 +456,7 @@ async def test_grid_failure_publishes_nothing(db_session, subscriber) -> None:
     from src.usecases.staff import create_staff
 
     with pytest.raises(PositionNotFoundError):
-        await create_staff(None, db_session=db_session, data=_create_payload(
+        await create_staff(db_session=db_session, data=_create_payload(
             master={"specialty": "живопись", "color": "#5B8C7A"},
             position_ids=["ghost-id"],
         ))
@@ -505,7 +504,7 @@ async def test_step_order_card_section_positions_user(
     ))
 
     await _add_position(db_session, id="master", title="Мастер", is_system=True)
-    await staff_module.create_staff(None, db_session=db_session, data=_create_payload(
+    await staff_module.create_staff(db_session=db_session, data=_create_payload(
         master={"specialty": "живопись", "color": "#5B8C7A"},
         position_ids=["master"],
         create_user={
@@ -549,7 +548,7 @@ async def test_atomicity_user_boom_rolls_back_everything(
 
     with pytest.raises(StepBoomError):
         await staff_module.create_staff(
-            None, db_session=db_session,
+            db_session=db_session,
             data=_create_payload(
                 master={"specialty": "живопись", "color": "#5B8C7A"},
                 position_ids=["master"],

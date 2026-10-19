@@ -21,9 +21,8 @@ from sqlalchemy import ColumnElement, asc
 from src.auth.permissions import require_permission
 from src.db import SessionDep
 from src.domain.errors import BareListLimitExceededError
-from src.models.enums import ArchiveStatus
 from src.models.staff import Staff
-from src.schemas.common import PaginatedResponse
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.master import MasterViewResponse
 from src.schemas.pagination import PaginationParams
 from src.services.master import list_all_masters_view, list_masters_view
@@ -70,7 +69,10 @@ async def list_masters(
 @router.get("/all", response_model=list[MasterViewResponse], dependencies=_READ_GUARD)
 async def list_all_masters(
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry (the shared dictionary
+    # ArchiveStatusParams) — no scalar query siblings (fastapi PR
+    # #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[MasterViewResponse]:
     """Bare array of masters (GH #205), capped by BARE_LIST_MAX_ROWS.
 
@@ -87,7 +89,7 @@ async def list_all_masters(
         return await list_all_masters_view(
             db_session=session,
             order_by=_DEFAULT_ORDER,
-            status=status,
+            status=params.status,
         )
     except BareListLimitExceededError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

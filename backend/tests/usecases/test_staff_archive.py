@@ -14,7 +14,7 @@ Control pin (US-5): ``restore`` stays a decorated ``StaffService``
 method (Corridor 1 — one table, own endpoint) and is NOT touched by the
 demolition; asserted here so the demolition cannot silently eat it.
 
-CALLING CONVENTION: selfless function — leading ``None`` + keyword
+CALLING CONVENTION: selfless function — plain keyword
 arguments (see ``src/usecases/records.py``).
 """
 
@@ -142,7 +142,7 @@ async def test_archive_default_flags_all_three(db_session) -> None:
     await _add_user(db_session, staff.id)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         archive_master=True, archive_user=True,
     )
     assert ok is True
@@ -160,7 +160,7 @@ async def test_archive_unchecked_master_keeps_schedule(db_session) -> None:
     await _add_user(db_session, staff.id)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         archive_master=False, archive_user=True,
     )
     assert ok is True
@@ -177,7 +177,7 @@ async def test_archive_unchecked_user_keeps_login(db_session) -> None:
     await _add_user(db_session, staff.id)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         archive_master=True, archive_user=False,
     )
     assert ok is True
@@ -193,7 +193,7 @@ async def test_archive_skips_missing_and_already_archived_links(db_session) -> N
     staff = await _add_staff(db_session)  # no master ext, no user
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         archive_master=True, archive_user=True,
     )
     assert ok is True  # bare card archives fine
@@ -201,7 +201,7 @@ async def test_archive_skips_missing_and_already_archived_links(db_session) -> N
     staff2 = await _add_staff(db_session, last_name="В")
     await _add_master_ext(db_session, staff2.id, is_active=False)
     ok = await archive_staff(
-        None, db_session=db_session, id=staff2.id,
+        db_session=db_session, id=staff2.id,
         archive_master=True, archive_user=True,
     )
     assert ok is True
@@ -215,7 +215,7 @@ async def test_archive_missing_returns_false(db_session) -> None:
     from src.usecases.staff import archive_staff
 
     assert await archive_staff(
-        None, db_session=db_session, id="ghost",
+        db_session=db_session, id="ghost",
         archive_master=True, archive_user=True,
     ) is False
 
@@ -236,7 +236,7 @@ async def test_grid_default_all_active_links(db_session, subscriber) -> None:
     _drain(subscriber)  # discard setup noise
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         archive_master=True, archive_user=True,
     )
     assert ok is True
@@ -256,7 +256,7 @@ async def test_grid_bare_card_staff_only(db_session, subscriber) -> None:
     _drain(subscriber)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         archive_master=True, archive_user=True,
     )
     assert ok is True
@@ -279,7 +279,7 @@ async def test_grid_already_archived_links_staff_only(db_session, subscriber) ->
     _drain(subscriber)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         archive_master=True, archive_user=True,
     )
     assert ok is True
@@ -302,7 +302,7 @@ async def test_grid_unchecked_master_no_masters_mark(db_session, subscriber) -> 
     _drain(subscriber)
 
     ok = await archive_staff(
-        None, db_session=db_session, id=staff_id,
+        db_session=db_session, id=staff_id,
         archive_master=False, archive_user=True,
     )
     assert ok is True
@@ -336,7 +336,7 @@ async def test_grid_failure_publishes_nothing(db_session, subscriber, monkeypatc
 
     with pytest.raises(StepBoomError):
         await staff_module.archive_staff(
-            None, db_session=db_session, id=staff_id,
+            db_session=db_session, id=staff_id,
             archive_master=True, archive_user=True,
         )
 
@@ -385,7 +385,7 @@ async def test_step_order_card_master_user(db_session, monkeypatch) -> None:
     await _add_user(db_session, staff.id)
 
     await staff_module.archive_staff(
-        None, db_session=db_session, id=staff.id,
+        db_session=db_session, id=staff.id,
         archive_master=True, archive_user=True,
     )
 
@@ -428,7 +428,7 @@ async def test_atomicity_user_boom_keeps_all_flags(db_session, monkeypatch) -> N
 
     with pytest.raises(StepBoomError):
         await staff_module.archive_staff(
-            None, db_session=db_session, id=staff_id,
+            db_session=db_session, id=staff_id,
             archive_master=True, archive_user=True,
         )
 

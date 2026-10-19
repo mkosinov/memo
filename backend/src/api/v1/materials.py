@@ -19,18 +19,16 @@ from src.domain.deletion import (
 from src.domain.errors import BareListLimitExceededError
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
-from src.models.enums import ArchiveStatus
 from src.models.material import Material
-from src.schemas.common import PaginatedResponse, SortOrder
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.material import (
     MaterialCreate,
     MaterialDeleteBody,
+    MaterialListParams,
     MaterialPatch,
     MaterialResponse,
-    MaterialSortBy,
     MaterialUpdate,
 )
-from src.schemas.pagination import PaginationParams
 from src.services.material import MaterialService, get_material_service
 
 router = APIRouter(
@@ -72,11 +70,11 @@ _MATERIAL_SORT_KEYS: SortKeyMap = {
 async def list_materials(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
-    sort_by: MaterialSortBy | None = Query(None),
-    sort_order: SortOrder = Query("asc"),
-    q: str | None = Query(None, min_length=2, max_length=100),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The bricks carry page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here), sort (#367) and
+    # the former filters 1:1; service deps stay Depends() — legal.
+    params: Annotated[MaterialListParams, Query()],
 ) -> PaginatedResponse[MaterialResponse]:
     """Return materials filtered by archive status (default: active).
 
@@ -92,24 +90,32 @@ async def list_materials(
     ``q`` (GH #212): case-insensitive substring on ``title`` OR
     ``description`` OR exact id equality for a full UUID; ``total``
     reflects the filtered count. len<2 / len>100 → 422 VALIDATION_ERROR.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with every other filter (an archived id
+    under the default ACTIVE status stays empty), ≤100 distinct after
+    dedup, garbage → 422.
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
     # ``Sequence[SortExpr] | None`` (locations.py precedent, волна 1).
     order_by: list[SortExpr] | None
-    if sort_by is None:
+    if params.sort_by is None:
         # Spec §4.3/§4.4: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by.
         order_by = [asc(Material.title), asc(Material.id)]
     else:
-        order_by = apply_sort(_MATERIAL_SORT_KEYS, sort_by, sort_order, Material.id)
+        order_by = apply_sort(
+            _MATERIAL_SORT_KEYS, params.sort_by, params.sort_order, Material.id
+        )
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        status=status,
+        page=params.page,
+        per_page=params.per_page,
+        status=params.status,
         order_by=order_by,
-        q=q,
+        q=params.q,
+        ids=params.id,
     )
 
 
@@ -117,7 +123,9 @@ async def list_materials(
 async def list_all_materials(
     service: _ServiceDep,
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[MaterialResponse]:
     """Return all materials as a bare JSON array (GH #205).
 
@@ -128,7 +136,7 @@ async def list_all_materials(
     try:
         return await service.list_all(
             db_session=session,
-            status=status,
+            status=params.status,
             order_by=[asc(Material.title), asc(Material.id)],
         )
     except BareListLimitExceededError as exc:

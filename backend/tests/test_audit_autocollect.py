@@ -480,7 +480,6 @@ class TestAutoCollectEndToEnd:
             query_db(sql)
 
         record = await create_record(
-            None,
             db_session=db_session,
             data=RecordCreate(
                 activity_id="act-scen",

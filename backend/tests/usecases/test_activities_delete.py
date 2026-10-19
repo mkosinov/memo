@@ -12,7 +12,7 @@ scenario runs; not re-done here).
 These tests pin the new shape:
 
 - the scenario is decorated ``@transactional`` (ONE transaction + ONE
-  event batch) and is called selfless: ``delete_activity(None,
+  event batch) and is called selfless: ``delete_activity(
   db_session=..., id=...)``;
 - a missing id → ``False`` (the route maps that to 404);
 - success: records (with their visits/payments/record_tags links),
@@ -125,7 +125,7 @@ async def test_delete_activity_missing_returns_false(db_session):
     """A missing id → False (the route maps that to 404)."""
     from src.usecases.activities import delete_activity
 
-    assert await delete_activity(None, db_session=db_session, id="nonexistent") is False
+    assert await delete_activity(db_session=db_session, id="nonexistent") is False
 
 
 # ─── Cascade (activity WITH records) ──────────────────────────────────────────
@@ -154,7 +154,7 @@ async def test_delete_activity_cascades_hard_deletes_and_unlinks(
     record_ids = [r1.id, r2.id]
     photo_id = photo.id
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
 
     assert result is True
     assert await db_session.get(Activity, activity.id) is None
@@ -214,7 +214,7 @@ async def test_delete_activity_with_records_grid(
     # own batches (staff/masters, services, locations, activities).
     _drain(subscriber)
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
     assert result is True
 
     events = _drain(subscriber)
@@ -250,7 +250,7 @@ async def test_delete_clean_activity_grid_is_photos_tags_activities(
 
     _drain(subscriber)
 
-    result = await delete_activity(None, db_session=db_session, id=activity.id)
+    result = await delete_activity(db_session=db_session, id=activity.id)
     assert result is True
 
     # The clean path still unlinks photos (unconditional helper)

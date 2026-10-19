@@ -185,10 +185,8 @@ async def create_record(
     # Corridor 2 (GH #171): the multi-entity booking chain lives in the
     # usecases layer — the route stays transport-only and passes the
     # master scope through UNCHANGED (scoped access was already gated on
-    # the target activity above). Leading None = the @transactional
-    # wrapper's unused self slot (selfless-function convention).
-    record = await create_record_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    # the target activity above).
+    record = await create_record_scenario(
         db_session=session,
         data=data,
     )
@@ -236,10 +234,8 @@ async def update_record(
     await _activity_scoped_or_404(session, data.activity_id, scope)
     # Corridor 2 (GH #171 Task 4): the full-update chain (visits replace +
     # recalculation + capacity re-check) lives in the usecases layer —
-    # the route stays transport-only. Leading None = the @transactional
-    # wrapper's unused self slot (selfless-function convention).
-    record = await update_record_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    # the route stays transport-only.
+    record = await update_record_scenario(
         db_session=session,
         id=record_id,
         data=data,
@@ -266,10 +262,9 @@ async def patch_record(
     """Partial-update a record by ID (PATCH). Only sent fields are changed."""
     await _scoped_or_404(service, session, record_id, scope)
     # Corridor 2 (GH #171 Task 4): the partial-update chain lives in the
-    # usecases layer — same convention as PUT above (selfless scenario,
-    # keyword args; RecordPatch carries no activity_id → no re-target gate).
-    record = await patch_record_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    # usecases layer — same convention as PUT above (keyword args;
+    # RecordPatch carries no activity_id → no re-target gate).
+    record = await patch_record_scenario(
         db_session=session,
         id=record_id,
         data=data,
@@ -395,8 +390,7 @@ async def delete_record(
     # resolutions, and runs the cascade; the ROUTE keeps only transport —
     # the 409 stale_dependencies rendering, the 422 mapping, and 404.
     try:
-        ok = await delete_record_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        ok = await delete_record_scenario(
             db_session=session,
             id=record_id,
             resolutions=resolutions,

@@ -26,6 +26,7 @@ from src.schemas.client import (
     ClientDeleteBody,
     ClientListParams,
     ClientPatch,
+    ClientPhoneLookupParams,
     ClientResponse,
     ClientUpdate,
     ClientViewResponse,
@@ -79,7 +80,9 @@ _VisitorServiceDep = Annotated[VisitorService, Depends(_get_visitor_service)]
 async def get_client_by_phone(
     service: _ServiceDep,
     session: SessionDep,
-    phone: str = Query(..., min_length=3),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the required + min-3 contract lives in the model.
+    params: Annotated[ClientPhoneLookupParams, Query()],
     # GH #263 T3 (D4): the phone lookup is scope-free — ALL active studio
     # clients — but the scoped (master) response is still MASKED (D3):
     # the number is a search key, not response data.
@@ -87,7 +90,7 @@ async def get_client_by_phone(
 ) -> ClientResponse:
     """Get an active client by exact phone (GH #212; was /clients/search)."""
     result = await service.list(
-        db_session=session, phone=phone, master_key=scope.master_key
+        db_session=session, phone=params.phone, master_key=scope.master_key
     )
     if not result.items:
         raise HTTPException(
@@ -295,10 +298,7 @@ async def delete_client(
     # the ROUTE keeps only transport — the 409 stale_dependencies
     # rendering, the 422 mapping, and 404.
     try:
-        # Selfless-scenario call convention: the leading ``None``
-        # occupies the wrapper's ``self`` slot (see usecases/clients.py).
-        ok = await delete_client_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        ok = await delete_client_scenario(
             db_session=session,
             id=client_id,
             resolutions=resolutions or {},

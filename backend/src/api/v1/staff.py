@@ -40,18 +40,16 @@ from src.domain.errors import (
 )
 from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.errors import ErrorCode, ErrorDetail
-from src.models.enums import ArchiveStatus
 from src.models.master import Master
 from src.models.staff import Staff
-from src.schemas.common import PaginatedResponse, SortOrder
-from src.schemas.pagination import PaginationParams
+from src.schemas.common import ArchiveStatusParams, PaginatedResponse
 from src.schemas.staff import (
     StaffArchiveRequest,
     StaffCreate,
     StaffDeleteBody,
+    StaffListParams,
     StaffPatch,
     StaffResponse,
-    StaffSortBy,
     StaffUpdate,
 )
 from src.services.staff import StaffService, get_staff_service
@@ -158,11 +156,11 @@ def _map_domain_error(exc: Exception) -> HTTPException:
 async def list_staff(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
-    sort_by: StaffSortBy | None = Query(None),
-    sort_order: SortOrder = Query("asc"),
-    q: str | None = Query(None, min_length=2, max_length=100),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The bricks carry page/per_page + the ``id``
+    # set filter (#232), sort (#367) and the former filters 1:1; the
+    # specialty/color branching reads ``params.sort_by``.
+    params: Annotated[StaffListParams, Query()],
 ) -> PaginatedResponse[StaffResponse]:
     """Paginated staff list (GH #205 contract, moved from /masters).
 
@@ -171,35 +169,44 @@ async def list_staff(
     specialty/color sort via the masters extension with NULLs last.
     ``q`` (GH #212): substring on first_name/last_name (each separately)
     or exact id on a full UUID.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with every other filter, ≤100 distinct
+    after dedup, garbage → 422; both service branches (plain list and
+    the masters-join one) receive the set.
     """
     # Explicit annotation: the two branches produce different list types
     # (literals vs ``apply_sort``), the bare join would degrade to
     # ``list[object]`` and fail the typed service signatures downstream.
     order_by: list[SortExpr]
-    if sort_by is None:
+    if params.sort_by is None:
         # Spec §4.3: entity fallback, never passed to the resolver;
         # ``sort_order`` is IGNORED without an explicit sort_by (as before).
         order_by = [asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)]
     else:
-        order_by = apply_sort(_STAFF_SORT_KEYS, sort_by, sort_order, Staff.id)
-    if sort_by in ("specialty", "color"):
+        order_by = apply_sort(
+            _STAFF_SORT_KEYS, params.sort_by, params.sort_order, Staff.id
+        )
+    if params.sort_by in ("specialty", "color"):
         # Extension sort needs the join so NULL cards (no master section)
         # stay in the result set while sorting after sectioned ones.
         return await service.list_join_masters(
             db_session=session,
-            page=pagination.page,
-            per_page=pagination.per_page,
-            status=status,
-            q=q,
+            page=params.page,
+            per_page=params.per_page,
+            status=params.status,
+            q=params.q,
             order_by=order_by,
+            ids=params.id,
         )
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        status=status,
-        q=q,
+        page=params.page,
+        per_page=params.per_page,
+        status=params.status,
+        q=params.q,
         order_by=order_by,
+        ids=params.id,
     )
 
 
@@ -207,7 +214,9 @@ async def list_staff(
 async def list_all_staff(
     service: _ServiceDep,
     session: SessionDep,
-    status: ArchiveStatus = Query(ArchiveStatus.ACTIVE),
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the ACTIVE default lives in the model.
+    params: Annotated[ArchiveStatusParams, Query()],
 ) -> list[StaffResponse]:
     """Bare array of staff cards (GH #205), capped by ``BARE_LIST_MAX_ROWS``.
 
@@ -217,7 +226,7 @@ async def list_all_staff(
     try:
         return await service.list_all(
             db_session=session,
-            status=status,
+            status=params.status,
             order_by=[asc(Staff.sort_order), asc(Staff.first_name), asc(Staff.id)],
         )
     except BareListLimitExceededError as exc:
@@ -259,15 +268,10 @@ async def create_staff(
     unknown position, password policy) → 422 with their codes.
 
     Corridor 2 (GH #326 Task 3): the composite chain lives in the
-    usecases layer — the route stays transport-only. Leading ``None`` =
-    the @transactional wrapper's unused self slot (selfless-function
-    convention).
+    usecases layer — the route stays transport-only.
     """
     try:
-        # Selfless-scenario convention (usecases/records.py): the leading
-        # None fills the @transactional wrapper's unused ``self`` slot.
-        return await create_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        return await create_staff_scenario(
             db_session=session,
             data=data,
         )
@@ -288,13 +292,10 @@ async def update_staff(
     D7). ``position_ids`` is a full replace. One transaction.
 
     Corridor 2 (GH #326 Task 3): the chain lives in the usecases layer
-    (selfless scenario, keyword args — the records-route convention).
+    (keyword args — the records-route convention).
     """
     try:
-        # Selfless-scenario convention (usecases/records.py): the leading
-        # None fills the @transactional wrapper's unused ``self`` slot.
-        staff = await update_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        staff = await update_staff_scenario(
             db_session=session,
             id=staff_id,
             data=data,
@@ -329,9 +330,7 @@ async def patch_staff(
     Corridor 2 (GH #326 Task 3): same convention as PUT above.
     """
     try:
-        # Selfless-scenario convention — see POST above.
-        staff = await patch_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        staff = await patch_staff_scenario(
             db_session=session,
             id=staff_id,
             data=data,
@@ -454,8 +453,7 @@ async def delete_staff(
     # the ROUTE keeps only transport — the 409 stale_dependencies
     # rendering, the 422 mapping, and 404.
     try:
-        ok = await delete_staff_scenario(  # type: ignore[misc]
-            None,  # type: ignore[arg-type]
+        ok = await delete_staff_scenario(
             db_session=session,
             id=staff_id,
             resolutions=resolutions or {},
@@ -516,8 +514,7 @@ async def archive_staff(
     Corridor 2 (GH #326 Task 3): the dismissal chain lives in the
     ``archive_staff`` scenario (usecases).
     """
-    ok = await archive_staff_scenario(  # type: ignore[misc]
-        None,  # type: ignore[arg-type]
+    ok = await archive_staff_scenario(
         db_session=session,
         id=staff_id,
         archive_master=(checkboxes.archive_master if checkboxes else True),

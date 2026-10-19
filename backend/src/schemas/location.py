@@ -5,12 +5,34 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from src.models.enums import ArchiveStatus
+from src.schemas.common import SortParams
+from src.schemas.pagination import PaginationParams
+
 # Sort whitelist for GET /api/v1/locations (#205 Task 3, spec §4.5; #172:
 # ``name`` → ``title`` — thing-title canon).
 LocationSortBy = Literal[
     "title", "short_title", "capacity", "address", "location_hint",
     "description", "archived", "yandex_map_url", "created_at",
 ]
+
+
+class LocationListParams(SortParams[LocationSortBy], PaginationParams):
+    """Query parameters for GET /api/v1/locations (GH #371 §4.1).
+
+    Composed of the live bricks: ``SortParams[LocationSortBy]`` (mechanics
+    #367 — no fixed default here, the ``sort_by=None`` fallback order
+    stays at the route) + ``PaginationParams`` (``page``/``per_page`` and
+    the ``id`` set filter, #232: UUID-only values, dedup of repeats
+    before the ≤MAX_LIST_IDS cap → 422). The router's former scalar
+    query siblings ride along 1:1: ``status`` (ACTIVE default), ``q``
+    (2..100). Injected as ``Annotated[LocationListParams, Query()]`` —
+    scalar query siblings are banned (fastapi PR #12481; domain rule
+    8, #371).
+    """
+
+    status: ArchiveStatus = ArchiveStatus.ACTIVE
+    q: str | None = Field(default=None, min_length=2, max_length=100)
 
 
 class LocationBase(BaseModel):

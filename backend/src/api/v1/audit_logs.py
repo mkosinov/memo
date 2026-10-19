@@ -13,7 +13,7 @@ queries live in the free reading functions of ``src/services/audit_log.py``
 written through this surface).
 """
 
-from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
@@ -21,10 +21,10 @@ from src.auth.permissions import require_admin
 from src.db import SessionDep
 from src.schemas.audit_log import (
     AuditLogAuthorResponse,
+    AuditLogListParams,
     AuditLogResponse,
 )
 from src.schemas.common import PaginatedResponse
-from src.schemas.pagination import PaginationParams
 from src.services.audit_log import list_audit_log_authors, list_audit_logs
 
 router = APIRouter(
@@ -37,13 +37,11 @@ router = APIRouter(
 @router.get("", response_model=PaginatedResponse[AuditLogResponse])
 async def get_audit_logs(
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    user_id: str | None = Query(None),
-    action: str | None = Query(None),
-    entity: str | None = Query(None),
-    entity_id: str | None = Query(None),
-    date_from: date | None = Query(None),
-    date_to: date | None = Query(None),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The brick carries page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here, §4.3 gap 3); the
+    # six former scalar filters ride along 1:1 (annotations kept).
+    params: Annotated[AuditLogListParams, Query()],
 ) -> PaginatedResponse[AuditLogResponse]:
     """Return a page of journal rows — ``created_at DESC`` (spec §6).
 
@@ -51,20 +49,24 @@ async def get_audit_logs(
     ``entity_id``, whole-day period (``date_from`` from 00:00:00
     inclusive, ``date_to`` through the end of the day — the shared
     ``day_range`` canon, same semantics as the payments/records lists).
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the page to the
+    given UUID set — conjunctive with every filter above (narrowing
+    never expands visibility), ≤100 distinct after dedup, garbage → 422.
     ``user.label`` is resolved in the SAME query (users ⟕ staff) — no
     N+1 over journal rows; ``user_role`` is the row's role snapshot,
     never the live users.role.
     """
     return await list_audit_logs(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
-        user_id=user_id,
-        action=action,
-        entity=entity,
-        entity_id=entity_id,
-        date_from=date_from,
-        date_to=date_to,
+        page=params.page,
+        per_page=params.per_page,
+        ids=params.id,
+        user_id=params.user_id,
+        action=params.action,
+        entity=params.entity,
+        entity_id=params.entity_id,
+        date_from=params.date_from,
+        date_to=params.date_to,
     )
 
 

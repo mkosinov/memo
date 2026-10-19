@@ -34,8 +34,8 @@ then failed on the leftover rows, i.e. the assertions below genuinely
 discriminate "rolled back" from "partially committed". Scratch removed;
 the committed tests pass against the real rollback behavior.
 
-CALLING CONVENTION: scenarios are selfless functions — invoked with a
-leading ``None`` and keyword arguments (see the module docstring in
+CALLING CONVENTION: scenarios are selfless functions — invoked with
+plain keyword arguments (see the module docstring in
 ``src/usecases/records.py``).
 """
 
@@ -178,7 +178,7 @@ async def test_create_record_mid_step_failure_leaves_no_partial_state(
         comment="boom",
     )
     with pytest.raises(StepBoomError):
-        await records_module.create_record(None, db_session=db_session, data=data)
+        await records_module.create_record(db_session=db_session, data=data)
 
     # The injection genuinely fired mid-scenario (past the client/visitor/
     # record writes, at the visit batch step).
@@ -240,7 +240,7 @@ async def test_update_record_mid_step_failure_leaves_no_partial_state(
     )
     with pytest.raises(StepBoomError):
         await records_module.update_record(
-            None, db_session=db_session, id=record_id, data=data,
+            db_session=db_session, id=record_id, data=data,
         )
 
     # Both earlier visit steps ran for real (delete → insert exploded):
@@ -285,7 +285,7 @@ async def test_patch_record_mid_step_failure_leaves_no_partial_state(
     data = RecordPatch(comment="patched then boomed", visits=[VisitItem(price=777)])
     with pytest.raises(StepBoomError):
         await records_module.patch_record(
-            None, db_session=db_session, id=record_id, data=data,
+            db_session=db_session, id=record_id, data=data,
         )
 
     assert calls == ["delete_visits_by_record", "create_visits_bulk"]
@@ -343,7 +343,7 @@ async def test_delete_record_mid_step_failure_leaves_no_partial_state(
 
     with pytest.raises(StepBoomError):
         await records_module.delete_record(
-            None, db_session=db_session, id=record_id,
+            db_session=db_session, id=record_id,
             resolutions={"visits": "cascade", "payments": "cascade"},
             expected={"visits": visit_ids, "payments": payment_ids},
         )

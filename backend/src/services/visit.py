@@ -21,12 +21,16 @@ from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.record import Record
 from src.models.visit import Visit
+from src.repositories.search import ids_in_predicate
 from src.repositories.visit import VisitRepository, get_visit_repository
 from src.schemas.common import PaginatedResponse
 from src.schemas.visit import VisitCreate, VisitPatch, VisitResponse, VisitUpdate
 from src.services.decorators import transactional
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.repositories.generic import ModelList
@@ -79,6 +83,7 @@ class VisitService:
         page: int = 1,
         per_page: int = 20,
         record_id: str | None = None,
+        ids: Sequence[UUID] | None = None,
         master_key: str | None = None,
     ) -> PaginatedResponse[VisitResponse]:
         """Return a paginated page of visits, optionally filtered by record_id.
@@ -88,6 +93,13 @@ class VisitService:
         a visit is visible only through its record's activity
         («всё через записи»); conjunctive with the ``record_id`` filter.
         ``None`` (admin) → no join filter.
+
+        GH #371 §4.3 gap 2: ``ids`` narrows via ``ids_in_predicate`` —
+        the shared #232 helper — placed right AFTER the ``record_id``
+        filter and BEFORE the count subquery, in the same WHERE: the
+        narrowing is conjunctive with every filter and the scope, and
+        items/``total`` narrow consensually (custom list outside
+        ``GenericService``, hence the explicit call site).
 
         Items are validated via VisitResponse.model_validate.
         """
@@ -100,6 +112,11 @@ class VisitService:
             )
         if record_id is not None:
             stmt = stmt.where(Visit.record_id == record_id)
+        # The shared narrowing helper (#232), conjunctive with the filters
+        # above — one call, same as every other list consumer.
+        ids_pred = ids_in_predicate(Visit.id, ids)
+        if ids_pred is not None:
+            stmt = stmt.where(ids_pred)
         # ONE count shape repo-wide (cf. VisitorService.list): the count
         # rides a subquery of the filtered stmt — no second hand-mirrored
         # join chain to keep in sync.

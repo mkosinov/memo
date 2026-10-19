@@ -18,11 +18,12 @@ from src.domain.deletion import collect_dependencies
 from src.errors import ErrorCode, ErrorDetail
 from src.models.payment import Payment
 from src.schemas.common import DeleteBody, PaginatedResponse
-from src.schemas.pagination import PaginationParams
 from src.schemas.payment import (
     PaymentCreate,
+    PaymentListParams,
     PaymentPatch,
     PaymentResponse,
+    PaymentTotalsParams,
     PaymentTotalsResponse,
     PaymentUpdate,
 )
@@ -105,30 +106,41 @@ async def _record_scoped_or_404(
 async def list_payments(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
-    record_id: str | None = None,
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). The brick carries page/per_page + the ``id``
+    # set filter (#232 — ``?id=`` starts working here); the former
+    # ``record_id`` filter rides along 1:1.
+    params: Annotated[PaymentListParams, Query()],
     # GH #263 T4: scope via payment → record → activity («всё через
     # записи»); conjunctive with the record_id param. Admin → no filter.
     scope: ScopeContext = Depends(get_scope),
 ) -> PaginatedResponse[PaymentResponse]:
-    """Return payments visible to the caller, optionally filtered by record_id."""
+    """Return payments visible to the caller, optionally filtered by record_id.
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with the scope and every other filter
+    (narrowing never expands visibility: a foreign id stays absent),
+    ≤100 distinct after dedup, garbage → 422.
+    """
     return await service.list(
-        db_session=session, page=pagination.page, per_page=pagination.per_page,
-        record_id=record_id, master_key=scope.master_key,
+        db_session=session, page=params.page, per_page=params.per_page,
+        record_id=params.record_id, ids=params.id, master_key=scope.master_key,
     )
 
 
 @router.get("/totals", response_model=PaymentTotalsResponse)
 async def get_payment_totals_route(
     session: SessionDep,
-    record_ids: Annotated[list[str], Query(max_length=200)] = [],
+    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481); the 200-cap (too_long → 422) lives in the model.
+    params: Annotated[PaymentTotalsParams, Query()],
     # GH #263 T4: чужие record_ids молча исключены перед агрегацией
     # (все чужие → 200 {"totals": {}}); admin → без фильтрации.
     scope: ScopeContext = Depends(get_scope),
 ) -> PaymentTotalsResponse:
     """Return per-record payment sums for a list of record IDs."""
     totals = await get_payment_totals(
-        db_session=session, record_ids=record_ids, master_key=scope.master_key
+        db_session=session, record_ids=params.record_ids, master_key=scope.master_key
     )
     return PaymentTotalsResponse(totals=totals)
 

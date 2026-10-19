@@ -10,7 +10,7 @@ dry_run/commit fork (spec #324 §4.3); their title stays freely editable
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy import asc
 
 from src.api.v1._delete_family import (
@@ -29,9 +29,9 @@ from src.domain.deletion import (
 from src.errors import ErrorCode, ErrorDetail
 from src.models.position import Position
 from src.schemas.common import DeleteBody, PaginatedResponse
-from src.schemas.pagination import PaginationParams
 from src.schemas.position import (
     PositionCreate,
+    PositionListParams,
     PositionPatch,
     PositionResponse,
     PositionUpdate,
@@ -76,14 +76,24 @@ def _not_found() -> HTTPException:
 async def list_positions(
     service: _ServiceDep,
     session: SessionDep,
-    pagination: PaginationParams = Depends(),
+    # GH #371 §4.1: one model-as-query entry — no scalar query siblings
+    # (fastapi PR #12481). Positions have no filters of their own: the
+    # model carries only the brick fields (page/per_page + the ``id``
+    # set filter, #232 — ``?id=`` starts working here).
+    params: Annotated[PositionListParams, Query()],
 ) -> PaginatedResponse[PositionResponse]:
     """Paginated dictionary list — ``title ASC, id ASC`` (plain dictionary,
-    no archive status; the set is tiny, the envelope keeps UI parity)."""
+    no archive status; the set is tiny, the envelope keeps UI parity).
+
+    ``id`` (GH #232/#371): repeated ``?id=`` keys narrow the list to the
+    given UUID set — conjunctive with the other filters, ≤100 distinct
+    after dedup, garbage → 422.
+    """
     return await service.list(
         db_session=session,
-        page=pagination.page,
-        per_page=pagination.per_page,
+        page=params.page,
+        per_page=params.per_page,
+        ids=params.id,
         order_by=[asc(Position.title), asc(Position.id)],
     )
 

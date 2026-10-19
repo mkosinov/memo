@@ -203,3 +203,15 @@ class ClientListParams(SortParams[ClientSortBy], PaginationParams):
     # subclass, and `None` drops out of the sort_by type entirely.
     sort_by: ClientSortBy = "name"
     sort_order: SortOrder = "asc"
+
+
+class ClientPhoneLookupParams(BaseModel):
+    """Query parameters for GET /api/v1/clients/get (GH #371 §4.2).
+
+    The single ``phone`` search key, moved from the scalar signature into
+    a one-field model (uniform model-as-query entry; no scalar query
+    siblings — fastapi PR #12481). Required, min 3 chars — the same 422
+    contract as the scalar ``Query(..., min_length=3)`` before it.
+    """
+
+    phone: str = Field(min_length=3)

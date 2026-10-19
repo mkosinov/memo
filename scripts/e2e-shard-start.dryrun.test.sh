@@ -55,9 +55,10 @@
 # the wrong tree.
 #
 # Feature #317 (run tag + manual-stack lease, spec §3.1/§3.3):
-#   → Untagged invariant: Cases 1-5 run with SHARD_RUNS_DIR pointed at an
+#   → Untagged invariant: Cases 1-6 run with SHARD_RUNS_DIR pointed at an
 #     isolated dir — an untagged run must NEVER write a lease (empty tag →
-#     zero behavior change, CI path byte-identical).
+#     zero behavior change, CI path byte-identical). #415: Case 6's valid
+#     loop is untagged too, so it is covered by the same check.
 #   → Case 7 (§3.1/§3.3): a tagged run (SHARD_RUN_TAG=6 hex) uses tagged
 #     resource names (NEXT_DIST_DIR=.next-shard-<id>_<tag>, FILES_DIR=
 #     test_files_shard<id>_<tag>), exports SHARD_RUN_TAG to children, and
@@ -79,6 +80,19 @@
 #     BOTH shard stacks it starts) → the orchestrator owns the tag's
 #     4-port lease: the managed stack writes NO lease and removes NONE on
 #     exit; a pre-existing orchestrator lease survives byte-intact.
+#
+# Feature #415 (CI native shards 1-4, spec §3.2):
+#   → Case 6 rewritten table-driven: valid ids 1/2/3/4 (full STUBBED run —
+#     rc=0 + reached next dev as positive control) and invalid
+#     `rest 0 5 abc` (DIRECT call: the allowlist guard fires before any
+#     machinery — rc=1 + `must be 1–4` on stderr).
+#   → Case 13: export cases for the NEW ids 3/4, same assertion set as
+#     Cases 3/4 (S1 NEXT_DIST_DIR + #317 legacy storage exports + empty
+#     tag re-export), table-driven over the spec §3.2 port pairs
+#     (3→3004/8003, 4→3005/8004).
+#   Table form is deliberate: a future shard-count change extends
+#   SHARD_ID_PORT_TABLE (and the Case 13 entry list), never a copy-pasted
+#   case block (panel simplicity remark).
 #
 # ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
 # Every cell carries a LIVE, EXACT assertion (case numbers refer to the
@@ -271,6 +285,8 @@ FAIL=0
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 # run_shard <log> <journal> <db> <shard_id> <shard_port> <backend_port>
+# Sets LAST_RC to the run's exit code (#415: the allowlist table asserts
+# rc=0 for every valid id; earlier callers ignore it).
 run_shard() {
   local log="$1" journal="$2" db="$3" sid="$4" sport="$5" bport="$6"
   set +e
@@ -281,7 +297,8 @@ run_shard() {
     SHARD_DRYRUN_JOURNAL="$journal" \
     SHARD_RUNS_DIR="$RUNS_DIR" \
     PATH="$STUBS:$PATH" \
-    timeout 15 bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1 || true
+    timeout 15 bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1
+  LAST_RC=$?
   set -e
 }
 
@@ -531,40 +548,65 @@ else
   FAIL=1
 fi
 
-# ── Case 6 (#209): SHARD_ID whitelist rejects non-canonical values ────────
+# ── Case 6 (#209/#415): SHARD_ID allowlist — table-driven ─────────────────
 # A SHARD_ID typo (e.g. "rest") used to fall through to Playwright project
 # resolution and CI reported "0 spec files" far from the root cause. The
-# script must hard-fail before any machinery: only 1 and 2 are canonical.
-# Called DIRECTLY (no stubs, no staged tree): the whitelist fires before
-# uv/pnpm, so nothing beyond the guard is reachable in this case.
+# script must hard-fail before any machinery. #415 (spec §3.2): canonical
+# shards are now 1-4; port pairs stay caller-provided (1→3002/8001,
+# 2→3003/8002, 3→3004/8003, 4→3005/8004 — pinned here only as table data).
+#   valid ids   → full STUBBED run (run_shard): rc=0 AND the positive
+#                 control (reached next dev), so rc=0 is not vacuous;
+#   invalid ids → DIRECT call, no stubs (the guard fires before uv/pnpm —
+#                 nothing beyond it is reachable) → rc=1 + `must be 1–4`
+#                 on stderr.
+# Loop logs print on FAILURE only (a passing table needs no forensics;
+# per-id artifacts remain under $WORK/case6 for CI debugging).
 CASE6_DIR="$WORK/case6"; mkdir -p "$CASE6_DIR"
-set +e
-SHARD_ID=rest SHARD_PORT=3003 BACKEND_PORT=8002 \
-  BACKEND_URL=http://127.0.0.1:8002 \
-  NEXT_PUBLIC_API_URL=http://127.0.0.1:8002 \
-  TEST_DB_PATH="$CASE6_DIR/test_memo_shard1.db" \
-  timeout 5 bash "$SCRIPT_UNDER_TEST" \
-  > "$CASE6_DIR/run.out" 2> "$CASE6_DIR/run.err"
-WHITELIST_EXIT=$?
-set -e
+SHARD_ID_PORT_TABLE="1:3002:8001 2:3003:8002 3:3004:8003 4:3005:8004"
+for entry in $SHARD_ID_PORT_TABLE; do
+  sid="${entry%%:*}"; _ports="${entry#*:}"
+  sport="${_ports%%:*}"; bport="${_ports#*:}"
+  CASE6_DB="$CASE6_DIR/test_memo_shard${sid}.db"
+  printf 'seed' > "$CASE6_DB"
+  run_shard "$CASE6_DIR/run-$sid.log" "$CASE6_DIR/journal-$sid" "$CASE6_DB" "$sid" "$sport" "$bport"
+  if [ "$LAST_RC" -eq 0 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE6_DIR/journal-$sid" 2>/dev/null; then
+    echo "PASS Case 6 (#415): SHARD_ID=$sid accepted — rc=0, reached next dev (ports $sport/$bport)"
+  else
+    echo "FAIL Case 6 (#415): SHARD_ID=$sid rejected or never reached next dev (rc=$LAST_RC)"
+    echo "── Case 6 id=$sid log ──"
+    cat "$CASE6_DIR/run-$sid.log"
+    echo "─────────────────"
+    FAIL=1
+  fi
+done
+for bad_id in rest 0 5 abc; do
+  set +e
+  SHARD_ID="$bad_id" SHARD_PORT=3002 BACKEND_PORT=8001 \
+    BACKEND_URL=http://127.0.0.1:8001 \
+    NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
+    TEST_DB_PATH="$CASE6_DIR/test_memo_shard1.db" \
+    timeout 5 bash "$SCRIPT_UNDER_TEST" \
+    > "$CASE6_DIR/guard-$bad_id.out" 2> "$CASE6_DIR/guard-$bad_id.err"
+  WHITELIST_EXIT=$?
+  set -e
+  if [ "$WHITELIST_EXIT" -eq 1 ] && grep -q "must be 1–4" "$CASE6_DIR/guard-$bad_id.err"; then
+    echo "PASS Case 6 (#415): SHARD_ID=$bad_id rejected with exit 1 + allowlist diagnostic"
+  else
+    echo "FAIL Case 6 (#415): expected exit 1 + 'must be 1–4' on stderr for SHARD_ID=$bad_id"
+    echo "  exit code: $WHITELIST_EXIT"
+    echo "── Case 6 id=$bad_id stderr ──"
+    cat "$CASE6_DIR/guard-$bad_id.err"
+    echo "─────────────────"
+    FAIL=1
+  fi
+done
 
-echo "── Case 6 stderr ──"
-cat "$CASE6_DIR/run.err"
-echo "─────────────────"
-
-if [ "$WHITELIST_EXIT" -eq 1 ] && grep -q "must be 1 or 2" "$CASE6_DIR/run.err"; then
-  echo "PASS Case 6 (#209): SHARD_ID=rest rejected with exit 1 + whitelist diagnostic"
-else
-  echo "FAIL Case 6 (#209): expected exit code 1 + 'must be 1 or 2' on stderr for SHARD_ID=rest"
-  echo "  exit code: $WHITELIST_EXIT"
-  FAIL=1
-fi
-
-# ── #317 untagged invariant: Cases 1-5 wrote NO lease ──────────────────────
-# They ran untagged with SHARD_RUNS_DIR pointed at RUNS_DIR: an empty tag
-# must produce ZERO lease side effects (spec §3.1 — CI path unchanged).
+# ── #317 untagged invariant: Cases 1-6 wrote NO lease ──────────────────────
+# They ran untagged with SHARD_RUNS_DIR pointed at RUNS_DIR (incl. Case 6's
+# valid-id loop, #415): an empty tag must produce ZERO lease side effects
+# (spec §3.1 — CI path unchanged).
 if [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
-  echo "PASS (#317 untagged): untagged runs (Cases 1-5) wrote no run lease"
+  echo "PASS (#317 untagged): untagged runs (Cases 1-6) wrote no run lease"
 else
   echo "FAIL (#317 untagged): untagged runs must not write leases; $RUNS_DIR contains:"
   ls -A "$RUNS_DIR"
@@ -1083,6 +1125,44 @@ fi
 assert_reached_next_dev "$CASE12_DIR/journal-b" "Case 12 (positive control)" || FAIL=1
 assert_no_default_next_rm "$CASE12_DIR/journal-b" "Case 12 (S5)" || FAIL=1
 assert_fixture_intact "Case 12 (S5)" || FAIL=1
+
+# ── Case 13 (#415): export cases for the new ids 3/4 — after Cases 3/4 ────
+# Same contract as Cases 3/4 (S1 build-dir isolation + the #317 matrix row
+# "unset × id": legacy storage exports, EMPTY-string tag re-export, no
+# default-.next rm, fixture intact), looped over the NEW shard ids so a
+# future shard-count bump extends the entry list, not a copy-pasted block
+# (panel remark). Ports per spec §3.2: 3→3004/8003, 4→3005/8004. Runs
+# AFTER Case 12b (which deliberately leaves a lease in $RUNS_DIR), so no
+# runs-dir emptiness assertion here — the untagged no-lease invariant for
+# these ids is carried by assert_tag_export pinning the EMPTY tag.
+CASE13_DIR="$WORK/case13"; mkdir -p "$CASE13_DIR"
+for entry in 3:3004:8003 4:3005:8004; do
+  sid="${entry%%:*}"; _ports="${entry#*:}"
+  sport="${_ports%%:*}"; bport="${_ports#*:}"
+  CASE13_SUB="$CASE13_DIR/id$sid"; mkdir -p "$CASE13_SUB"
+  CASE13_DB="$CASE13_SUB/test_memo_shard${sid}.db"
+  printf 'seed' > "$CASE13_DB"
+  run_shard "$CASE13_SUB/run.log" "$CASE13_SUB/journal" "$CASE13_DB" "$sid" "$sport" "$bport"
+
+  echo "── Case 13 (id=$sid) log ──"
+  cat "$CASE13_SUB/run.log"
+  echo "── Case 13 (id=$sid) journal ──"
+  cat "$CASE13_SUB/journal" 2>/dev/null || echo "(empty)"
+  echo "─────────────────"
+
+  if grep -q "NEXT_DIST_DIR=\[\.next-shard-${sid}\]" "$CASE13_SUB/journal" 2>/dev/null; then
+    echo "PASS Case 13 (S1): shard $sid exports NEXT_DIST_DIR=.next-shard-${sid} to pnpm exec next dev"
+  else
+    echo "FAIL Case 13 (S1): expected NEXT_DIST_DIR=[.next-shard-${sid}] in pnpm journal"
+    FAIL=1
+  fi
+  # #317 matrix row (unset × new id): full legacy storage exports + the
+  # empty-string tag re-export.
+  assert_storage_exports "$CASE13_SUB/journal" "$sid" "" "Case 13 (#317 id=$sid)" || FAIL=1
+  assert_tag_export "$CASE13_SUB/journal" "" "Case 13 (#317 id=$sid)" || FAIL=1
+  assert_no_default_next_rm "$CASE13_SUB/journal" "Case 13 (S5 id=$sid)" || FAIL=1
+  assert_fixture_intact "Case 13 (S5 id=$sid)" || FAIL=1
+done
 
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"

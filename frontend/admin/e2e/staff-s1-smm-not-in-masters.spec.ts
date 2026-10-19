@@ -82,7 +82,7 @@ test.describe('S1 — SMM employee without a master section', () => {
       await expect(dropdown).toBeVisible();
 
       // Positive control — a seed master option is rendered.
-      await expect(dropdown.locator('[data-testid="multiselect-option-m1"]')).toBeVisible();
+      await expect(dropdown.locator(`[data-testid="multiselect-option-${SEED_STAFF_IDS[0]}"]`)).toBeVisible();
       // The SMM employee has no option and their name is nowhere in the list.
       await expect(
         dropdown.locator(`[data-testid="multiselect-option-${staff.id}"]`),

@@ -76,14 +76,14 @@ async function navigateToTestDay(page: import('@playwright/test').Page) {
   await gotoScheduleDay(page, TEST_DATE);
 
   // Wait for DayView column headers to appear
-  await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
+  await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 5000 });
 }
 
 /**
  * Get current column header names.
  */
 async function getColumnHeaders(page: import('@playwright/test').Page): Promise<string[]> {
-  return page.locator('[data-testid^="column-header-m"]').allTextContents();
+  return page.locator('[data-testid^="column-header-"]').allTextContents();
 }
 
 /**
@@ -128,7 +128,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('Space lifts, ArrowLeft moves, Space drops — column order changes', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     await expect(allHeaders.nth(1)).toBeVisible({ timeout: 5000 });
 
     const headersBefore = await getColumnHeaders(page);
@@ -157,7 +157,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('keyboard reorder persists across reload (user settings)', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     const headersBefore = await getColumnHeaders(page);
 
     // Keyboard reorder: grab the second column, move left, drop.
@@ -171,7 +171,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
 
     // Reload on the same deep-linked day URL: the per-user column order survives.
     await page.reload();
-    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 10_000 });
+    await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 10_000 });
     const headersAfterReload = await getColumnHeaders(page);
     expect(headersAfterReload[0]).toBe(headersBefore[1]);
   });
@@ -179,7 +179,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('Enter on the move-left button clicks it (no key hijack by the header drag sensor)', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     const headersBefore = await getColumnHeaders(page);
 
     // Regression guard (GH #138): Enter on the nested move-left button used to

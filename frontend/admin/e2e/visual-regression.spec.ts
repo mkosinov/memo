@@ -327,11 +327,14 @@ const TABLE_CONFIGS: PageTableConfig[] = [
     apiUrl: '/api/v1/records/view',
     // Post-migration (T8-FE2b): records render via the shared DataTable —
     // uniform ↕/↑/↓ glyphs like the other migrated tables; initial sort is
-    // `date` (B2 cat 15), so clicking `Гостей` deterministically captures
-    // the ↑ active state. The ⋯ action dropdown column is NEW in T8
-    // (Addendum 13 dry-run delete flow) — locked visual delta.
-    sortHeader: (page) => thExact(page, 'Гостей'),
-    glyphSelector: 'th:has-text("Гостей"):has-text("↑")',
+    // `date` (B2 cat 15). GH #491: click `Дата` (the already-active column,
+    // toggling it to ↑) — seed record STARTS are all distinct, so the row
+    // order is tiebreak-independent; `Гостей` ties four of six seed rows
+    // and the `id` tiebreak went random with the UUID seed. The ⋯ action
+    // dropdown column is NEW in T8 (Addendum 13 dry-run delete flow) —
+    // locked visual delta.
+    sortHeader: (page) => thExact(page, 'Дата'),
+    glyphSelector: 'th:has-text("Дата"):has-text("↑")',
     // No row testids (Addendum 6: no pre-#139 prefix to preserve — same case
     // as clients/materials/services in T5–T6); scope via the ⋯ button.
     row: (page) => page.locator('tbody tr:has(button[aria-label^="Действия"])').first(),

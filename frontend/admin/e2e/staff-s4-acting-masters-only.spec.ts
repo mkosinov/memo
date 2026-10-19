@@ -154,7 +154,7 @@ async function openStampMasterPickerAndExpect(
   const dropdown = await openCombobox(page, trigger);
 
   // Positive control — an acting seed master is always offered.
-  await expect(dropdown.locator('[data-testid="combobox-option-m1"]')).toBeVisible();
+  await expect(dropdown.locator(`[data-testid="combobox-option-${M1}"]`)).toBeVisible();
 
   const option = dropdown.locator(`[data-testid="combobox-option-${staffId}"]`);
   if (expected === 'visible') {

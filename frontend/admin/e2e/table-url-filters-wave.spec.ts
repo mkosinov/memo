@@ -33,6 +33,7 @@ let TAG_NEWS = '';
 let TAG_HIT = '';
 let TAG_GUEST = '';
 let GRAND_ID = '';
+let RECORDS_LINK = '';
 
 interface WavePage {
   /** Route pathname, e.g. /positions. */
@@ -408,7 +409,6 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
   // has two visited records at location «Гранд Отель Поляна» — the combined
   // link below yields exactly those rows deterministically (GH #491: the
   // location id is resolved by title — ids are UUIDs).
-  let RECORDS_LINK = '';
 
   test('US-1/US-5: link restores period in the date inputs + filters, exactly one list request', async ({
     page,

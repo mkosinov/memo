@@ -29,8 +29,10 @@ test.describe('User Scenario 2 — master signs in (role menu)', () => {
     await page.locator('#login-password').fill('master12345');
     await page.getByRole('button', { name: 'Войти' }).click();
 
-    // Same app shell, role-filtered nav (GH #263 T9).
-    await expect(page).toHaveURL(/\/$/);
+    // Same app shell, role-filtered nav (GH #263 T9). Post-login URL: "/"
+    // (soft nav, warm server) or its resolved redirect "/schedule" (cold
+    // server) — GH #389; the menubar check below is the shell assertion.
+    await expect(page).toHaveURL(/\/(schedule)?$/);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
 

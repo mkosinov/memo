@@ -175,20 +175,28 @@ jobs:
       - name: Run e2e-shard-start dryrun test
         run: bash scripts/e2e-shard-start.dryrun.test.sh
 
+  # GH #415: 4 native Playwright shards (spec §3.2). One project (--project=e2e),
+  # tests split via --shard=i/4; each matrix entry starts its OWN stack
+  # (e2e-shard-start.sh) on its port pair. Check names keep today's informative
+  # style: e2e-tests (1, 3002, 8001) … e2e-tests (4, 3005, 8004).
   e2e-tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - shard-name: shard-schedule
-            shard-id: 1
+          - shard: 1
             shard-port: 3002
             backend-port: 8001
-          - shard-name: shard-rest
-            shard-id: 2
+          - shard: 2
             shard-port: 3003
             backend-port: 8002
+          - shard: 3
+            shard-port: 3004
+            backend-port: 8003
+          - shard: 4
+            shard-port: 3005
+            backend-port: 8004
 
     steps:
       - uses: actions/checkout@v4
@@ -220,44 +228,43 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: frontend/admin
 
-      # CI guard (#209): fail EARLY if the Playwright project resolves 0 spec
-      # files (project-name typo in the matrix, testMatch filter regression,
-      # or a worktree path swept by the regexes) — before the stack starts.
-      # `--list` prints spec paths to stdout only; stderr (config-error traces
-      # with absolute .spec.ts paths) is NOT scanned.
-      - name: Spec-file guard (${{ matrix.shard-name }})
+      # CI guard (#209, #415): fail EARLY if the shard resolves 0 spec files
+      # (bad --project/--shard args, config/testMatch regression) — before the
+      # stack starts. `--list` prints spec paths to stdout only; stderr
+      # (config-error traces with absolute .spec.ts paths) is NOT scanned.
+      - name: Spec-file guard (shard ${{ matrix.shard }}/4)
         run: |
           list_output=$(mktemp)
-          if ! pnpm exec playwright test --project=${{ matrix.shard-name }} --list > "$list_output"; then
-            echo "ERROR: playwright --list failed for project '${{ matrix.shard-name }}'."
-            echo "Likely cause: project name typo in this job's matrix vs playwright.config.ts."
+          if ! pnpm exec playwright test --project=e2e --shard=${{ matrix.shard }}/4 --list > "$list_output"; then
+            echo "ERROR: playwright --list failed for --project=e2e --shard=${{ matrix.shard }}/4."
+            echo "Likely cause: bad --project/--shard args vs playwright.config.ts."
             rm -f "$list_output"
             exit 1
           fi
           spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
           rm -f "$list_output"
           if [ "$spec_count" -eq 0 ]; then
-            echo "ERROR: project '${{ matrix.shard-name }}' resolved 0 spec files."
-            echo "Likely cause: test-filter regression or worktree path swept by the"
-            echo "testMatch regexes (frontend/admin/playwright.config.ts:118,125)."
+            echo "ERROR: shard ${{ matrix.shard }}/4 resolved 0 spec files."
+            echo "Likely cause: config/testMatch regression or spec files swept"
+            echo "out of e2e/ (frontend/admin/playwright.config.ts)."
             exit 1
           fi
-          echo "Spec-file guard OK: ${spec_count} spec files in project '${{ matrix.shard-name }}'."
+          echo "Spec-file guard OK: ${spec_count} spec files in shard ${{ matrix.shard }}/4."
         working-directory: frontend/admin
         env:
-          SHARD_ID: ${{ matrix.shard-id }}
+          SHARD_ID: ${{ matrix.shard }}
           SHARD_PORT: ${{ matrix.shard-port }}
           BACKEND_PORT: ${{ matrix.backend-port }}
-          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard-id }}.db
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard }}.db
           BACKEND_URL: http://127.0.0.1:${{ matrix.backend-port }}
           NEXT_PUBLIC_API_URL: http://127.0.0.1:${{ matrix.backend-port }}
 
-      - name: Start E2E stack (${{ matrix.shard-name }})
+      - name: Start E2E stack (shard ${{ matrix.shard }})
         run: |
-          SHARD_ID=${{ matrix.shard-id }} \
+          SHARD_ID=${{ matrix.shard }} \
           SHARD_PORT=${{ matrix.shard-port }} \
           BACKEND_PORT=${{ matrix.backend-port }} \
-          TEST_DB_PATH=backend/test_memo_shard${{ matrix.shard-id }}.db \
+          TEST_DB_PATH=backend/test_memo_shard${{ matrix.shard }}.db \
           BACKEND_URL=http://127.0.0.1:${{ matrix.backend-port }} \
           NEXT_PUBLIC_API_URL=http://127.0.0.1:${{ matrix.backend-port }} \
             bash scripts/e2e-shard-start.sh &
@@ -279,22 +286,35 @@ jobs:
           # Buffer for Next.js compilation to stabilize
           sleep 10
 
-      - name: Run Playwright tests (${{ matrix.shard-name }})
-        run: pnpm exec playwright test --project=${{ matrix.shard-name }} --workers=1
+      - name: Run Playwright tests (shard ${{ matrix.shard }}/4)
+        run: pnpm exec playwright test --project=e2e --shard=${{ matrix.shard }}/4 --workers=1
         working-directory: frontend/admin
         env:
-          SHARD_ID: ${{ matrix.shard-id }}
+          SHARD_ID: ${{ matrix.shard }}
           SHARD_PORT: ${{ matrix.shard-port }}
           BACKEND_PORT: ${{ matrix.backend-port }}
-          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard-id }}.db
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_shard${{ matrix.shard }}.db
           BACKEND_URL: http://127.0.0.1:${{ matrix.backend-port }}
           NEXT_PUBLIC_API_URL: http://127.0.0.1:${{ matrix.backend-port }}
+
+      # Flake gate (GH #415, spec §3.5): ≥1 flaky test → exit 1, the job goes
+      # red even on an otherwise green run (merge blocked by green-CI gate).
+      # Missing/broken results.json → warning, exit 0 (no flakes exist if the
+      # run never started). Runs from the REPO ROOT — the results.json path is
+      # relative to it. Kept BEFORE the artifact upload: a flake-red job must
+      # still upload its HTML report (if: failure() becomes true).
+      - name: Flake summary
+        if: always()
+        run: node scripts/e2e-report-summary.mjs frontend/admin/results.json
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.shard-name }}
-          path: frontend/admin/playwright-report/
+          name: e2e-report-shard-${{ matrix.shard }}
+          path: |
+            frontend/admin/playwright-report/**
+            frontend/admin/test-results/**
+          if-no-files-found: warn
           retention-days: 7
 

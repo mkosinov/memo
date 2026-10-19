@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — best-practices perspective. Verifies spec decisions against current community/vendor best practices, using web research.
 mode: all
-model: opencode/muse-spark-1.3-contributor-free
+model: opencode/deepseek-v4.1-flash-free
 temperature: 0.1
 permission:
   read: allow

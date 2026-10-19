@@ -103,7 +103,7 @@ test.describe('S3 — migration smoke: seed staff, activities and records intact
       `SELECT staff_id, position_id FROM staff_positions ORDER BY staff_id`,
     );
     const byStaff = new Map(links.map((l) => [String(l.staff_id), String(l.position_id)]));
-    expect([...byStaff.keys()].sort()).toEqual([...staffIds].sort());
+    expect(Array.from(byStaff.keys()).sort()).toEqual([...staffIds].sort());
     for (const id of staffIds) {
       expect(byStaff.get(id)).toBe('master');
     }
@@ -111,7 +111,7 @@ test.describe('S3 — migration smoke: seed staff, activities and records intact
       `SELECT staff_id, is_active FROM masters WHERE is_active = 1`,
     );
     const extByStaff = new Map(extRows.map((r) => [String(r.staff_id), Number(r.is_active)]));
-    expect([...extByStaff.keys()].sort()).toEqual([...staffIds].sort());
+    expect(Array.from(extByStaff.keys()).sort()).toEqual([...staffIds].sort());
     for (const id of staffIds) {
       expect(extByStaff.get(id)).toBe(1);
     }

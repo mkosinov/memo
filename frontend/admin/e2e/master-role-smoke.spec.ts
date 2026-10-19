@@ -12,6 +12,7 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 // Seed staff anchor by business key (GH #491 — seed ids are UUIDs).

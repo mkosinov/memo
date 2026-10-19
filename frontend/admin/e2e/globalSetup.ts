@@ -253,7 +253,7 @@ export default async function globalSetup() {
   if (activitiesList.length === 0) {
     throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
   }
-  console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesList.length} activities for current week.`);
+  console.log(`[globalSetup] Seed contract verified: ${JSON.stringify(volume)} + ${activitiesList.length} activities for current week.`);
 
   // GH #247 T14: authenticate as the seeded admin ONCE per run and persist
   // the session cookie as a Playwright storageState file. Every project

@@ -10,8 +10,10 @@ import { queryDBRow } from './db-query';
 
 /**
  * Resolve a record's activity.start as ISO date (YYYY-MM-DD).
- * - Pass `recordId` to target a specific record (e.g., seed "r1")
- * - Omit to pick any active record (deterministic: smallest id)
+ * - Pass `recordId` to target a specific record
+ * - Omit to pick the earliest record (deterministic: activity start ASC —
+ *   the fixed reference week sorts first; `ORDER BY id` died with the
+ *   literal seed ids, GH #491)
  *
  * Returns null if no record found.
  *
@@ -32,7 +34,7 @@ export function resolveRecordDate(recordId?: string): { date: string; activityId
     : `SELECT substr(a.start, 1, 10) AS d, a.id AS activityId
        FROM records r
        JOIN activities a ON r.activity_id = a.id
-       ORDER BY r.id ASC
+       ORDER BY a.start ASC, r.id ASC
        LIMIT 1`;
   const row = queryDBRow(sql);
   return row ? { date: row.d, activityId: row.activityId } : null;
@@ -249,8 +251,8 @@ function waitForModalRecords(page: Page): Promise<void> {
  * Uses DB lookup to find the target record's week, then navigates directly
  * to that week via page.goto — no fragile walk-back logic.
  *
- * @param opts.recordId — target a specific record (e.g., seed "r1").
- *   If omitted, picks any active record (deterministic: smallest id).
+ * @param opts.recordId — target a specific record. If omitted, picks the
+ *   earliest record (deterministic: activity start ASC, see resolveRecordDate).
  */
 export async function openModal(
   page: Page,

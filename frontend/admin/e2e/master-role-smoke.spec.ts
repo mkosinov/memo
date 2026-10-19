@@ -14,6 +14,8 @@ import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 
 const BACKEND = resolveBackendUrl();
+// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
+const M1 = seedId('staff', 'last_name', 'Середа');
 
 test.describe('GH #263 T8 — master session smoke', () => {
   useMasterSession();
@@ -23,7 +25,8 @@ test.describe('GH #263 T8 — master session smoke', () => {
     expect(me.status()).toBe(200);
     const body = await me.json();
     expect(body?.user?.role).toBe('master');
-    // Seed contract #247 §3.11: the demo master is linked to staff card m1.
-    expect(body?.user?.master_id).toBe('m1');
+    // Seed contract #247 §3.11: the demo master is linked to the first seed
+    // staff card (Ольга Середа; GH #491 — the id resolves by business key).
+    expect(body?.user?.master_id).toBe(M1);
   });
 });

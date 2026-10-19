@@ -1,6 +1,7 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 
 /**
  * E2E: DayView column reorder with the KEYBOARD (GH #138 US-6).
@@ -23,12 +24,13 @@ import { gotoScheduleDay } from './fixtures/helpers';
 
 const BACKEND = resolveBackendUrl();
 
-// Use a future date that has no seed data — we create our own activities
+// Use a fixed date — we create our own activities there (GH #491: seed ids
+// are UUIDs; staff/location/service resolve by business keys).
 const TEST_DATE = '2026-06-20';
-const MASTER_A = 'm1';
-const MASTER_B = 'm2';
-const LOCATION = 'alpika';
-const SERVICE = 's1';
+const MASTER_A = seedId('staff', 'last_name', 'Середа');
+const MASTER_B = seedId('staff', 'last_name', 'Большакова');
+const LOCATION = seedId('locations', 'title', 'Альпика');
+const SERVICE = seedId('services', 'title', 'Картина маслом');
 
 async function createActivity(
   request: import('@playwright/test').APIRequestContext,

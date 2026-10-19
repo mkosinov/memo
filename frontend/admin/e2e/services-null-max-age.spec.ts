@@ -25,13 +25,14 @@ import {
   waitForScheduleReady,
   waitForToast,
 } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
 /** Seed service with max_age: null — «Возраст до» must open empty. */
-const NULL_AGE_SEED = { id: 's1' };
+const NULL_AGE_SEED = { id: seedId('services', 'title', 'Картина маслом') };
 /** Seed service with max_age: 12 — the only non-null in the seed. */
-const AGE12_SEED = { id: 's4', title: 'Акварель' };
+const AGE12_SEED = { id: seedId('services', 'title', 'Акварель'), title: 'Акварель' };
 
 /** Full service row as the GET endpoint returns it (fields we restore). */
 interface ServiceRow {
@@ -213,8 +214,8 @@ test.describe('Services — NULL max_age smoke pair (#203 §4.1–4.2)', () => {
         items?: { id: string; service_id: string; start: string }[];
       };
       const items = acts.items ?? (acts as unknown as { service_id: string; start: string }[]);
-      const s4Activity = items.find((a) => a.service_id === 's4');
-      expect(s4Activity, 'seed schedule must contain an «Акварель» (s4) activity').toBeTruthy();
+      const s4Activity = items.find((a) => a.service_id === AGE12_SEED.id);
+      expect(s4Activity, 'seed schedule must contain an «Акварель» activity').toBeTruthy();
       const weekStart = s4Activity!.start.slice(0, 10);
 
       await gotoScheduleWeek(page, weekStart);

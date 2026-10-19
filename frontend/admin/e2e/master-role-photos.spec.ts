@@ -22,6 +22,7 @@ import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
 import { waitForPhotosReady } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 import { searchAndSelect } from './helpers/combobox';
 import {
   createTestPhoto, createTestActivity, createTestMaster,
@@ -29,6 +30,9 @@ import {
 } from './fixtures/factories';
 
 const BACKEND = resolveBackendUrl();
+
+// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
+const M1 = seedId('staff', 'last_name', 'Середа');
 
 test.describe('GH #263 S5 — master photos scoped to own activities', () => {
   useMasterSession();
@@ -52,7 +56,7 @@ test.describe('GH #263 S5 — master photos scoped to own activities', () => {
     });
 
     // Own pen: a photo on one of the SESSION master's (m1) activities.
-    const ownActivity = await createTestActivity(admin, { master_id: 'm1' });
+    const ownActivity = await createTestActivity(admin, { master_id: M1 });
     const ownPhoto = await createTestPhoto(admin, {
       filename: `/images/e2e-own-${Date.now()}.jpg`,
       activity_id: ownActivity.id,
@@ -83,7 +87,7 @@ test.describe('GH #263 S5 — master photos scoped to own activities', () => {
     // matches deterministically (same idiom as photos-crud activity spec).
     const service = await createTestService(admin);
     const ownActivity = await createTestActivity(admin, {
-      master_id: 'm1', service_id: service.id,
+      master_id: M1, service_id: service.id,
     });
     const locationsJson = await (await admin.get(`${BACKEND}/api/v1/locations`)).json();
     const locationName = ((locationsJson.items ?? locationsJson) as Array<{ title: string }>)[0].title;

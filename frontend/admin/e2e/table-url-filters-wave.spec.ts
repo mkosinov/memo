@@ -1,6 +1,7 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { createTestTag, cleanup } from './fixtures/factories';
+import { seedId } from './fixtures/seed-ids';
 import type { APIRequestContext } from '@playwright/test';
 
 /**
@@ -24,6 +25,13 @@ import type { APIRequestContext } from '@playwright/test';
  */
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
+// per worker (seed rows are constant across the run; reset restores the canon).
+const TAG_NEWS = seedId('tags', 'title', 'новинка');
+const TAG_HIT = seedId('tags', 'title', 'хит');
+const TAG_GUEST = seedId('tags', 'title', 'гость');
+const GRAND_ID = seedId('locations', 'title', 'Гранд Отель Поляна');
 
 interface WavePage {
   /** Route pathname, e.g. /positions. */
@@ -132,14 +140,14 @@ const WAVE_PAGES: WavePage[] = [
   },
   {
     // #349 Task 8 — wave group 3: /photos. URL contract is q + tag_id
-    // (repeatable) + page + per_page (spec §5 п.6). q=guest + tag7 match
-    // the seed photos guest-1/guest-2.jpg (both tagged tag7).
+    // (repeatable) + page + per_page (spec §5 п.6). q=guest + the guest tag
+    // match the seed photos guest-1/guest-2.jpg (both carry it).
     route: '/photos',
     listPath: '/api/v1/photos',
-    linkWithFilters: '/photos?q=guest&tag_id=tag7&page=1&per_page=50',
+    linkWithFilters: `/photos?q=guest&tag_id=${TAG_GUEST}&page=1&per_page=50`,
     expectedWireParams: {
       q: 'guest',
-      tag_id: 'tag7',
+      tag_id: TAG_GUEST,
       page: '1',
       per_page: '50',
     },
@@ -373,11 +381,12 @@ function defaultWeekISO(): { monday: string; sunday: string } {
 }
 
 test.describe('#349 Task 7 — records: period + filters in one URL', () => {
-  // Seed facts (test_memo_349.db): all records' activities are 2026-06-15..20;
-  // «Анна Иванова» has two visited records at location «grand» — the combined
-  // link below yields exactly those rows deterministically.
+  // Seed facts: all records' activities are 2026-06-15..20; «Анна Иванова»
+  // has two visited records at location «Гранд Отель Поляна» — the combined
+  // link below yields exactly those rows deterministically (GH #491: the
+  // location id is resolved by title — ids are UUIDs).
   const RECORDS_LINK =
-    '/records?from=2026-06-01&to=2026-06-30&q=%D0%90%D0%BD%D0%BD%D0%B0&status=visited&location_id=grand&sort_by=client&sort_order=desc&page=1&per_page=50';
+    `/records?from=2026-06-01&to=2026-06-30&q=%D0%90%D0%BD%D0%BD%D0%B0&status=visited&location_id=${GRAND_ID}&sort_by=client&sort_order=desc&page=1&per_page=50`;
 
   test('US-1/US-5: link restores period in the date inputs + filters, exactly one list request', async ({
     page,
@@ -406,7 +415,7 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
       date_to: '2026-06-30',
       q: 'Анна',
       status: 'visited',
-      location_id: 'grand',
+      location_id: GRAND_ID,
       sort_by: 'client',
       sort_order: 'desc',
       page: '1',
@@ -450,17 +459,17 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
 });
 
 // ─── #349 Task 8 — photos: tag_id ARRAY (repeatable param) ────────────────
-// Seed facts (test_memo_349.db): tag1=«новинка», tag2=«хит»; ph5
-// (/images/tag-pair.jpg) is the ONLY photo with BOTH tags; ph6
-// (/images/guest-1.jpg) carries tag1+tag7 — after removing tag2 the AND
-// set widens to ph5+ph6 deterministically.
+// Seed facts: «новинка»+«хит»; /images/tag-pair.jpg is the ONLY photo with
+// BOTH tags; /images/guest-1.jpg carries «новинка»+«гость» — after removing
+// «хит» the AND set widens to tag-pair+guest-1 deterministically.
+// (GH #491: tag ids are UUIDs — the URLs interpolate resolved ids.)
 
 test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
-  test('link with tag_id=tag1&tag_id=tag2 → both chips active, one request, AND semantics', async ({
+  test('link with two tag_id values → both chips active, one request, AND semantics', async ({
     page,
   }) => {
     const listRequests = listCounter(page, '/api/v1/photos');
-    await page.goto('/photos?tag_id=tag1&tag_id=tag2');
+    await page.goto(`/photos?tag_id=${TAG_NEWS}&tag_id=${TAG_HIT}`);
 
     // Both filter chips restored from the URL (each chip's ✕ carries the
     // tag title in its aria-label).
@@ -480,12 +489,12 @@ test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
     // values verbatim on the wire (repeatable param).
     expect(listRequests).toHaveLength(1);
     const only = new URL(listRequests[0]!);
-    expect(only.searchParams.getAll('tag_id')).toEqual(['tag1', 'tag2']);
+    expect(only.searchParams.getAll('tag_id')).toEqual([TAG_NEWS, TAG_HIT]);
   });
 
   test('removing one tag of two → URL keeps a single tag_id, one new request', async ({ page }) => {
     const listRequests = listCounter(page, '/api/v1/photos');
-    await page.goto('/photos?tag_id=tag1&tag_id=tag2');
+    await page.goto(`/photos?tag_id=${TAG_NEWS}&tag_id=${TAG_HIT}`);
     await expect(page.getByRole('button', { name: 'Удалить тег хит' })).toBeVisible({
       timeout: 20_000,
     });
@@ -493,12 +502,12 @@ test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
     const mountRequests = listRequests.length;
     expect(mountRequests).toBe(1);
 
-    // Remove «хит» (tag2) via its chip ✕.
+    // Remove «хит» via its chip ✕.
     await page.getByRole('button', { name: 'Удалить тег хит' }).click();
 
-    // URL: exactly ONE tag_id param survives — tag1; tag2 fully gone.
-    await expect(page).toHaveURL(/tag_id=tag1/, { timeout: 10_000 });
-    await expect(page).not.toHaveURL(/tag_id=tag2/);
+    // URL: exactly ONE tag_id param survives — «новинка»; «хит» fully gone.
+    await expect(page).toHaveURL(new RegExp(`tag_id=${TAG_NEWS}`), { timeout: 10_000 });
+    await expect(page).not.toHaveURL(new RegExp(`tag_id=${TAG_HIT}`));
     expect((page.url().match(/tag_id=/g) ?? []).length).toBe(1);
 
     // Chips: «новинка» stays active, «хит» is gone.
@@ -508,11 +517,11 @@ test.describe('#349 Task 8 — photos: tag_id array in one URL', () => {
     await expect(page.getByRole('button', { name: 'Удалить тег хит' })).toHaveCount(0);
 
     // The filter change fired exactly ONE more list request with the
-    // remaining single tag; the AND set widens to include ph6 (tag1+tag7).
+    // remaining single tag; the AND set widens to include guest-1.
     await page.waitForTimeout(500);
     expect(listRequests.length).toBe(mountRequests + 1);
     const last = new URL(listRequests[listRequests.length - 1]!);
-    expect(last.searchParams.getAll('tag_id')).toEqual(['tag1']);
+    expect(last.searchParams.getAll('tag_id')).toEqual([TAG_NEWS]);
     await expect(page.getByText('/images/guest-1.jpg')).toBeVisible({ timeout: 10_000 });
   });
 });

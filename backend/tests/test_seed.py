@@ -251,12 +251,15 @@ async def test_seed_populates_photos(db_manager: DBManager) -> None:
         )
         assert result.scalar() == 0
 
-        # the both-tags pair exists: a photo carrying T1 AND T2 (AND-demo)
+        # the both-tags pair exists: a photo carrying T1 AND T2 (AND-demo) —
+        # tags resolved by title; tag ids are UUIDs now (GH #491)
         result = await session.execute(
             text(
                 "SELECT COUNT(*) FROM photo_tags pt1 "
                 "JOIN photo_tags pt2 ON pt1.photo_id = pt2.photo_id "
-                "WHERE pt1.tag_id = 'tag1' AND pt2.tag_id = 'tag2'"
+                "JOIN tags t1 ON t1.id = pt1.tag_id "
+                "JOIN tags t2 ON t2.id = pt2.tag_id "
+                "WHERE t1.title = 'новинка' AND t2.title = 'хит'"
             )
         )
         assert result.scalar() >= 1
@@ -276,9 +279,13 @@ async def test_seed_photos_guest_tagged(db_manager: DBManager) -> None:
         result = await session.execute(text("SELECT COUNT(*) FROM photo_tags"))
         assert result.scalar() == 5
 
-        # guest tag (tag7) still marks exactly the 2 activity-owned photos
+        # guest tag («гость») still marks exactly the 2 activity-owned photos
         result = await session.execute(
-            text("SELECT COUNT(*) FROM photo_tags WHERE tag_id = 'tag7'")
+            text(
+                "SELECT COUNT(*) FROM photo_tags pt "
+                "JOIN tags t ON t.id = pt.tag_id "
+                "WHERE t.title = 'гость'"
+            )
         )
         assert result.scalar() == 2
 
@@ -296,18 +303,16 @@ async def test_seed_populates_materials(db_manager: DBManager) -> None:
 
 
 async def test_seed_has_guest_tag(db_manager: DBManager) -> None:
-    """Tag with id 'tag7' exists and has title 'гость'."""
+    """The guest tag (title 'гость'; former alias tag7) exists exactly once."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text("SELECT title FROM tags WHERE id = 'tag7'")
+            text("SELECT COUNT(*) FROM tags WHERE title = 'гость'")
         )
-        row = result.one_or_none()
-        assert row is not None, "tag7 does not exist"
-        assert row[0] == "гость"
+        assert result.scalar() == 1, "guest tag does not exist"
 
 
 async def test_seed_populates_activities(db_manager: DBManager) -> None:
@@ -400,14 +405,17 @@ async def test_seed_raises_on_populated_db(db_manager: DBManager) -> None:
 
 
 async def test_seed_creates_fixed_week_activities(db_manager: DBManager) -> None:
-    """Seed creates 10 activities with ev_fixed_ prefix for the fixed reference week."""
+    """Seed creates 10 activities in the fixed reference week (2026-06-15..21)."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text("SELECT COUNT(*) FROM activities WHERE id LIKE 'ev_fixed_%'")
+            text(
+                "SELECT COUNT(*) FROM activities "
+                "WHERE start >= '2026-06-15' AND start < '2026-06-22'"
+            )
         )
         assert result.scalar() == 10
 
@@ -423,8 +431,9 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
     async with db_manager.async_session() as session:
         result = await session.execute(
             text(
-                "SELECT id, start FROM activities WHERE id LIKE 'ev_fixed_%' "
-                "ORDER BY id"
+                "SELECT start FROM activities "
+                "WHERE start >= '2026-06-15' AND start < '2026-06-22' "
+                "ORDER BY start"
             )
         )
         rows = result.all()
@@ -432,15 +441,15 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
         for row in rows:
             # SQLite stores datetime as ISO string; parse it.
             start = _dt.fromisoformat(row.start) if isinstance(row.start, str) else row.start
-            assert start.year == 2026, f"{row.id}: expected year 2026, got {start.year}"
-            assert start.month == 6, f"{row.id}: expected month 6, got {start.month}"
+            assert start.year == 2026, f"{start}: expected year 2026"
+            assert start.month == 6, f"{start}: expected month 6"
             assert 15 <= start.day <= 21, (
-                f"{row.id}: expected day 15-21, got {start.day}"
+                f"{start}: expected day 15-21"
             )
 
 
 async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
-    """Seed photos ph1-ph7 carry fixed rising created_at (2026-06-15..21, noon).
+    """Seed photos carry fixed rising created_at (2026-06-15..21, noon).
 
     Guard test: expectations are hardcoded literals ON PURPOSE (not imported
     from PHOTO_FIXED_DATES) so a later edit of the seed constant fails loudly
@@ -453,19 +462,19 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
 
     await seed_data(db_manager)
 
-    expected: dict[str, _dt] = {
-        "ph1": _dt(2026, 6, 15, 12, 0, 0),
-        "ph2": _dt(2026, 6, 16, 12, 0, 0),
-        "ph3": _dt(2026, 6, 17, 12, 0, 0),
-        "ph4": _dt(2026, 6, 18, 12, 0, 0),
-        "ph5": _dt(2026, 6, 19, 12, 0, 0),
-        "ph6": _dt(2026, 6, 20, 12, 0, 0),
-        "ph7": _dt(2026, 6, 21, 12, 0, 0),
-    }
+    expected: list[_dt] = [
+        _dt(2026, 6, 15, 12, 0, 0),
+        _dt(2026, 6, 16, 12, 0, 0),
+        _dt(2026, 6, 17, 12, 0, 0),
+        _dt(2026, 6, 18, 12, 0, 0),
+        _dt(2026, 6, 19, 12, 0, 0),
+        _dt(2026, 6, 20, 12, 0, 0),
+        _dt(2026, 6, 21, 12, 0, 0),
+    ]
 
     async with db_manager.async_session() as session:
         result = await session.execute(
-            text("SELECT id, created_at FROM photos ORDER BY id")
+            text("SELECT created_at FROM photos ORDER BY created_at")
         )
         rows = result.all()
         assert len(rows) == 7
@@ -478,21 +487,15 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
                 if isinstance(row.created_at, str)
                 else row.created_at
             )
-            assert row.id in expected, f"Unexpected photo id: {row.id}"
-            assert created_at == expected[row.id], (
-                f"{row.id}: expected {expected[row.id]}, got {created_at}"
-            )
             dates.append(created_at)
 
-        # Determinism contract: strictly rising dates → stable DESC feed order.
-        assert dates == sorted(dates), (
-            f"Photo created_at must be strictly increasing by id, got {dates}"
-        )
+        # Determinism contract: the exact date set, strictly rising order.
+        assert dates == expected, f"Photo created_at set drifted, got {dates}"
         assert len(set(dates)) == 7, "Photo created_at values must be unique"
 
 
 async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:
-    """Records r1-r6 are linked to fixed-week activities (ev_fixed_*)."""
+    """All 6 seed records link to fixed-week activities (2026-06-15..21)."""
     from src.seed.seed import seed_data
 
     await seed_data(db_manager)
@@ -500,35 +503,30 @@ async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:
     async with db_manager.async_session() as session:
         result = await session.execute(
             text(
-                "SELECT id, activity_id FROM records "
-                "WHERE id IN ('r1','r2','r3','r4','r5','r6') ORDER BY id"
+                "SELECT r.id, a.start FROM records r "
+                "JOIN activities a ON r.activity_id = a.id"
             )
         )
-        rows = {r.id: r.activity_id for r in result.all()}
-        for rid, expected_prefix in [
-            ("r1", "ev_fixed_"),
-            ("r2", "ev_fixed_"),
-            ("r3", "ev_fixed_"),
-            ("r4", "ev_fixed_"),
-            ("r5", "ev_fixed_"),
-            ("r6", "ev_fixed_"),
-        ]:
-            assert rows[rid].startswith(expected_prefix), (
-                f"Record {rid}: expected activity starting with {expected_prefix}, "
-                f"got {rows[rid]}"
+        rows = result.all()
+        assert len(rows) == 6
+        for row in rows:
+            start = str(row.start)
+            assert "2026-06-15" <= start[:10] <= "2026-06-21", (
+                f"Record {row.id}: activity outside the fixed week, start={start}"
             )
 
 
 async def test_seed_records_match_original_master_service(db_manager: DBManager) -> None:
-    """Records r1-r6 link to fixed-week activities matching original (master, service) pairs.
+    """Seed records link to fixed-week activities matching original (master, service) pairs.
 
-    Original mapping:
-      r1 → m1/s7 (Морской пейзаж) Mon
-      r2 → m2/s5 (Ручная лепка) Mon
-      r3 → m3/s2 (Картина акрилом) Tue
-      r4 → m1/s3 (Мини-картина акрилом) Tue
-      r5 → m1/s7 (Морской пейзаж) Thu
-      r6 → m1/s7 (Морской пейзаж) Sat
+    Original mapping (aliases → business keys; ids are UUIDs now, so the
+    pairs are pinned by client name + service title + staff last name):
+      r1 → Середа/Морской пейзаж Mon   (client Анна Иванова)
+      r2 → Большакова/Ручная лепка Mon (client Мария Петрова)
+      r3 → П./Картина акрилом Tue      (client Елена Сидорова)
+      r4 → Середа/Мини-картина акрилом Tue (client Анна Иванова)
+      r5 → Середа/Морской пейзаж Thu   (client Ольга Новикова)
+      r6 → Середа/Морской пейзаж Sat   (client Дмитрий Козлов)
     """
     from datetime import datetime as _dt
 
@@ -539,48 +537,35 @@ async def test_seed_records_match_original_master_service(db_manager: DBManager)
     async with db_manager.async_session() as session:
         result = await session.execute(
             text(
-                "SELECT r.id AS rid, a.master_id, a.service_id, a.start "
+                "SELECT c.name AS client_name, s.title AS service_title, "
+                "st.last_name AS master_last_name, a.start AS start "
                 "FROM records r "
                 "JOIN activities a ON r.activity_id = a.id "
-                "WHERE r.id IN ('r1','r2','r3','r4','r5','r6') "
-                "ORDER BY r.id"
+                "JOIN services s ON a.service_id = s.id "
+                "JOIN staff st ON a.master_id = st.id "
+                "JOIN clients c ON r.client_id = c.id"
             )
         )
-        rows = {r.rid: r for r in result.all()}
+        rows = result.all()
 
         def _parse_dt(val: object) -> _dt:
             """Parse ISO string from SQLite into datetime."""
             return _dt.fromisoformat(val) if isinstance(val, str) else val
 
-        # r1 → m1, s7, Monday (weekday 0)
-        assert rows["r1"].master_id == "m1"
-        assert rows["r1"].service_id == "s7"
-        assert _parse_dt(rows["r1"].start).weekday() == 0  # Monday
-
-        # r2 → m2, s5, Monday (weekday 0)
-        assert rows["r2"].master_id == "m2"
-        assert rows["r2"].service_id == "s5"
-        assert _parse_dt(rows["r2"].start).weekday() == 0
-
-        # r3 → m3, s2, Tuesday (weekday 1)
-        assert rows["r3"].master_id == "m3"
-        assert rows["r3"].service_id == "s2"
-        assert _parse_dt(rows["r3"].start).weekday() == 1
-
-        # r4 → m1, s3, Tuesday (weekday 1)
-        assert rows["r4"].master_id == "m1"
-        assert rows["r4"].service_id == "s3"
-        assert _parse_dt(rows["r4"].start).weekday() == 1
-
-        # r5 → m1, s7, Thursday (weekday 3)
-        assert rows["r5"].master_id == "m1"
-        assert rows["r5"].service_id == "s7"
-        assert _parse_dt(rows["r5"].start).weekday() == 3
-
-        # r6 → m1, s7, Saturday (weekday 5)
-        assert rows["r6"].master_id == "m1"
-        assert rows["r6"].service_id == "s7"
-        assert _parse_dt(rows["r6"].start).weekday() == 5
+        expected: set[tuple[str, str, str, int]] = {
+            ("Анна Иванова", "Морской пейзаж", "Середа", 0),      # r1
+            ("Мария Петрова", "Ручная лепка", "Большакова", 0),   # r2
+            ("Елена Сидорова", "Картина акрилом", "П.", 1),       # r3
+            ("Анна Иванова", "Мини-картина акрилом", "Середа", 1),  # r4
+            ("Ольга Новикова", "Морской пейзаж", "Середа", 3),    # r5
+            ("Дмитрий Козлов", "Морской пейзаж", "Середа", 5),    # r6
+        }
+        actual = {
+            (r.client_name, r.service_title, r.master_last_name,
+             _parse_dt(r.start).weekday())
+            for r in rows
+        }
+        assert actual == expected
 
 
 async def test_seed_handles_month_boundary_overflow(db_manager: DBManager) -> None:

@@ -23,6 +23,10 @@ import { openCombobox } from './helpers/combobox';
 import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
+import { seedId } from './fixtures/seed-ids';
+
+// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
+const M1 = seedId('staff', 'last_name', 'Середа');
 
 const SPECIALTY = 'S4-специальность';
 const COLOR = '#4A7C59';
@@ -63,7 +67,7 @@ test.describe('S4 — activity creation lists acting masters only', () => {
         Array<{ id: string }>).map((m) => m.id);
       expect(actingIds).not.toContain(staff.id);
       // Positive control — seed masters still listed (the view isn't empty).
-      expect(actingIds).toContain('m1');
+      expect(actingIds).toContain(M1);
 
       // 4. VERIFY UI — reload the schedule; the creation picker (StampPanel)
       //    no longer offers the archived master, seed masters stay.

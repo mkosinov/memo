@@ -24,7 +24,7 @@
  * both flows assert on the POST /records wire response + DB truth instead
  * of the ephemeral toast. The booking target is whatever OWN card the
  * quick-add picked (seed m1 ev activity or a factory m1 activity) — the
- * DB assertion joins records → activities ON master_id='m1'.
+ * DB assertion joins records → activities ON master_id=m1 (seed «Ольга Середа»).
  */
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
@@ -33,8 +33,12 @@ import { adminApiContext } from './fixtures/admin-context';
 import { waitForScheduleReady, openAddTab } from './fixtures/helpers';
 import { createTestClient, createTestActivity, createTestRecord, createTestMaster, cleanup, cleanupRecord } from './fixtures/factories';
 import { queryDBRow } from './fixtures/db-query';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
+
+// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
+const M1 = seedId('staff', 'last_name', 'Середа');
 
 /** mask_phone backend contract (src/auth/scope.py): all digits except the
  *  LAST 4 → '•', non-digits preserved in place. */
@@ -48,7 +52,7 @@ function expectMasked(phone: string, naked: string): void {
 function ownRecordRow(clientId: string): Record<string, unknown> | null {
   return queryDBRow(
     `SELECT r.id FROM records r JOIN activities a ON a.id = r.activity_id
-     WHERE r.client_id='${clientId}' AND a.master_id='m1'
+     WHERE r.client_id='${clientId}' AND a.master_id='${M1}'
      ORDER BY r.created_at DESC LIMIT 1`,
   );
 }

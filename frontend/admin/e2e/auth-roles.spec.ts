@@ -63,15 +63,16 @@ test.describe('User Scenario 2 — master signs in (role menu)', () => {
     // the master session PATCHing an existing client is rejected 403
     // AUTH_FORBIDDEN. API-level via page.request (shares the context's
     // session cookie + correct fetch metadata), same style as
-    // auth-session.spec.ts. The target is a seeded client (c1..c5), so the
-    // master legitimately reads it (200 scoped+masked) but may not mutate.
+    // auth-session.spec.ts. The target is a seeded client (former alias c1,
+    // «Анна Иванова» — GH #491 resolves the id by phone), so the master
+    // legitimately reads it (200 scoped+masked) but may not mutate.
     const me = await page.request.get(`${BACKEND}/api/v1/auth/me`);
     expect(me.ok()).toBeTruthy();
 
     const seed = queryDBRow(
-      `SELECT id FROM clients WHERE id IN ('c1','c2','c3','c4','c5') ORDER BY id LIMIT 1`,
+      `SELECT id FROM clients WHERE phone='+79001234567'`,
     ) as unknown as { id: string } | null;
-    test.skip(!seed, 'seed clients c1..c5 missing (DB reset drifted)');
+    test.skip(!seed, 'seed client «Анна Иванова» missing (DB reset drifted)');
 
     const patchResp = await page.request.patch(`${BACKEND}/api/v1/clients/${seed!.id}`, {
       data: { name: 'Взлом имени' },

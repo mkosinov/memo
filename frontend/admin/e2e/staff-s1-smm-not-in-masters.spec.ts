@@ -14,8 +14,14 @@ import { test, expect } from './fixtures/test';
 import { cleanup, createTestStaff } from './fixtures/factories';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
+
+// Seed staff ids resolved by business key (GH #491 — seed ids are UUIDs).
+const SEED_STAFF_IDS = ['Середа', 'Большакова', 'П.', 'Тюльпина', 'В.', 'Горох'].map(
+  (last_name) => seedId('staff', 'last_name', last_name),
+);
 
 test.describe('S1 — SMM employee without a master section', () => {
   test('absent from /api/v1/masters and from the schedule master filter', async ({ page, request }) => {
@@ -42,12 +48,12 @@ test.describe('S1 — SMM employee without a master section', () => {
       expect(allIds).not.toContain(staff.id);
       // Positive control — seed masters ARE in the view (an empty/broken
       // view would pass `not.toContain` alone).
-      expect(allIds).toEqual(expect.arrayContaining(['m1', 'm2', 'm3', 'm4', 'm5', 'm7']));
+      expect(allIds).toEqual(expect.arrayContaining(SEED_STAFF_IDS));
 
       const paged = await (await request.get(`${BACKEND}/api/v1/masters?page=1&per_page=100`)).json();
       const pagedIds = (paged.items as Array<{ id: string }>).map((m) => m.id);
       expect(pagedIds).not.toContain(staff.id);
-      expect(pagedIds).toContain('m1');
+      expect(pagedIds).toContain(SEED_STAFF_IDS[0]);
 
       // 3. VERIFY DB — no masters extension row; the position link is there.
       expect(queryDBRow(

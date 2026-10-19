@@ -29,8 +29,12 @@ import {
   createTestMaster, createTestPhoto,
   cleanup, cleanupRecord,
 } from './fixtures/factories';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
+
+// Seed staff anchor by business key (GH #491 — seed ids are UUIDs).
+const M1 = seedId('staff', 'last_name', 'Середа');
 
 /** D3 mask invariant: for every digit position except the last four
  *  digits, the char is «•»; separators/plus survive in place. */
@@ -60,7 +64,7 @@ test.describe('GH #263 S6 — master API герметичность', () => {
     });
     // Make him VISIBLE to the master's list scope («есть запись клиента к
     // своей активности», D1): a record on one of m1's activities.
-    const activity = await createTestActivity(admin, { master_id: 'm1' });
+    const activity = await createTestActivity(admin, { master_id: M1 });
     const ownRecord = await createTestRecord(admin, activity.id, client.id);
 
     try {
@@ -178,7 +182,7 @@ test.describe('GH #263 S6 — master API герметичность', () => {
     const admin = await adminApiContext();
     // Own chain: m1 activity → client → record → payment 700.
     const ownClient = await createTestClient(admin);
-    const ownActivity = await createTestActivity(admin, { master_id: 'm1' });
+    const ownActivity = await createTestActivity(admin, { master_id: M1 });
     const ownRecord = await createTestRecord(admin, ownActivity.id, ownClient.id);
     const ownPaymentResp = await admin.post(`${BACKEND}/api/v1/payments`, {
       data: { record_id: ownRecord.id, amount: 700, method: 'card' },

@@ -40,16 +40,29 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { waitForServicesReady, waitForToast } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
-/** Seed tag titles (seed.py `_seed_tags`: tag1..tag7). */
+/** Seed tag titles (seed.py `_seed_tags`: former aliases tag1..tag7). */
 const TAG_TITLES = {
   news: 'новинка', // tag1
   hit: 'хит', // tag2
   kids: 'для детей', // tag3
   popular: 'популярное', // tag4
   seasonal: 'сезонное', // tag6
+} as const;
+
+// GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
+// per worker (seed rows are constant across the run; reset restores the canon).
+const S1 = seedId('services', 'title', 'Картина маслом');
+const S4 = seedId('services', 'title', 'Акварель');
+const TAG_ID = {
+  news: seedId('tags', 'title', TAG_TITLES.news),
+  hit: seedId('tags', 'title', TAG_TITLES.hit),
+  kids: seedId('tags', 'title', TAG_TITLES.kids),
+  popular: seedId('tags', 'title', TAG_TITLES.popular),
+  seasonal: seedId('tags', 'title', TAG_TITLES.seasonal),
 } as const;
 
 /** Full service row as the GET endpoint returns it (fields we restore). */
@@ -157,22 +170,22 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
     page,
     request,
   }) => {
-    const snapshot = await captureService(request, 's4');
+    const snapshot = await captureService(request, S4);
     expect(
       snapshot.tagIds,
       'seed contract: s4 «Акварель» → tag3 «для детей» (created before the form opens)',
-    ).toContain('tag3');
+    ).toContain(TAG_ID.kids);
     // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
     await waitForServicesReady(page);
     await enableTagsColumn(page);
 
     // Seed link visible in the table BEFORE any mutation.
     await expect(
-      serviceRow(page, 's4'),
+      serviceRow(page, S4),
       'S1: seed tag visible in the table before the edit',
     ).toContainText(TAG_TITLES.kids);
 
-    const dialog = await openServiceModal(page, 's4', snapshot.row.title);
+    const dialog = await openServiceModal(page, S4, snapshot.row.title);
     await expect(
       chip(dialog, TAG_TITLES.kids),
       'S1: modal prefills the chip from service.tags',
@@ -186,32 +199,32 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
 
     // VERIFY UI — the chip is still on the row after the save+refetch.
     await expect(
-      serviceRow(page, 's4'),
+      serviceRow(page, S4),
       'S1: tag chip survives a duration-only save (table)',
     ).toContainText(TAG_TITLES.kids);
 
     // VERIFY API — the live link. Pre-fix the form PUT tag_ids:[] and
     // this GET would return no tags (the reported bug).
-    const after = await getService(request, 's4');
+    const after = await getService(request, S4);
     expect(after.duration, 'S1: the duration change landed').toBe(160);
     expect(after.title, 'S1: title untouched').toBe(snapshot.row.title);
     expect(
       after.tags.map((t) => t.id),
       'S1: GET returns the live service→tag link',
-    ).toContain('tag3');
+    ).toContain(TAG_ID.kids);
   });
 
   test('S2 swap-tag-set: remove A, add B via typeahead', async ({ page, request }) => {
-    const snapshot = await captureService(request, 's1');
+    const snapshot = await captureService(request, S1);
     expect(
       [...snapshot.tagIds].sort(),
       'seed contract: s1 «Картина маслом» → tag2 «хит» + tag4 «популярное»',
-    ).toEqual(['tag2', 'tag4']);
+    ).toEqual([TAG_ID.hit, TAG_ID.popular].sort());
     // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
     await waitForServicesReady(page);
     await enableTagsColumn(page);
 
-    const dialog = await openServiceModal(page, 's1', snapshot.row.title);
+    const dialog = await openServiceModal(page, S1, snapshot.row.title);
     await expect(chip(dialog, TAG_TITLES.hit)).toBeVisible();
 
     // ACTION — remove chip A («хит»), add chip B («сезонное») through
@@ -224,13 +237,13 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
     await waitForToast(page, 'Услуга обновлена');
 
     // VERIFY UI — B present in the row, A gone.
-    const row = serviceRow(page, 's1');
+    const row = serviceRow(page, S1);
     await expect(row, 'S2: new tag chip in the table').toContainText(TAG_TITLES.seasonal);
     await expect(row, 'S2: removed tag gone from the table').not.toContainText(TAG_TITLES.hit);
 
     // VERIFY API — the set was REPLACED (full-update PUT semantics):
     // exactly the untouched seed tag plus the newly picked one.
-    const after = await getService(request, 's1');
+    const after = await getService(request, S1);
     expect(
       after.tags.map((t) => t.title).sort(),
       'S2: GET returns exactly the new set',
@@ -276,23 +289,23 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
   });
 
   test('S4 remove-all-tags: both chips off, no links left, no errors', async ({ page, request }) => {
-    const snapshot = await captureService(request, 's1');
+    const snapshot = await captureService(request, S1);
     expect(
       [...snapshot.tagIds].sort(),
       'seed contract: s1 «Картина маслом» → tag2 «хит» + tag4 «популярное»',
-    ).toEqual(['tag2', 'tag4']);
+    ).toEqual([TAG_ID.hit, TAG_ID.popular].sort());
     // GH #310: no `finally` restore — the canonical per-test reset fully restores the seed row (incl. tag links).
     await waitForServicesReady(page);
     await enableTagsColumn(page);
 
-    const row = serviceRow(page, 's1');
+    const row = serviceRow(page, S1);
     await expect(row, 'S4: both seed chips visible before the edit').toContainText(
       TAG_TITLES.hit,
     );
     await expect(row).toContainText(TAG_TITLES.popular);
 
     // ACTION — remove both chips, save the now-empty set.
-    const dialog = await openServiceModal(page, 's1', snapshot.row.title);
+    const dialog = await openServiceModal(page, S1, snapshot.row.title);
     await removeTagButton(dialog, TAG_TITLES.hit).click();
     await removeTagButton(dialog, TAG_TITLES.popular).click();
     await expect(chip(dialog, TAG_TITLES.hit)).toHaveCount(0);
@@ -307,7 +320,7 @@ test.describe('Services — ServiceModal tags S1–S4 (#328 §5)', () => {
     await expect(row, 'S4: «популярное» gone from the row').not.toContainText(TAG_TITLES.popular);
 
     // VERIFY API — zero links survive.
-    const after = await getService(request, 's1');
+    const after = await getService(request, S1);
     expect(after.tags, 'S4: GET returns an empty tag set').toEqual([]);
   });
 });

@@ -18,6 +18,7 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import { seedId, seedRecordIdByClientName, seedTariffId } from './fixtures/seed-ids';
 
 /**
  * E2E tests for Services page: table rendering, CRUD operations,
@@ -139,6 +140,18 @@ test.describe('Services — Create Modal', () => {
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids are UUIDs — resolve the seed pins by business keys once
+// per worker (seed rows are constant across the run; reset restores the canon).
+const S5 = seedId('services', 'title', 'Ручная лепка');
+const S7 = seedId('services', 'title', 'Морской пейзаж');
+const R2 = seedRecordIdByClientName('Мария Петрова');
+const T5A = seedTariffId('Ручная лепка', 'Взрослый');
+const T5C = seedTariffId('Ручная лепка', 'Детский');
+const T5I = seedTariffId('Ручная лепка', 'Индивидуальный');
+const T7A = seedTariffId('Морской пейзаж', 'Взрослый');
+const T7C = seedTariffId('Морской пейзаж', 'Детский');
+const T7I = seedTariffId('Морской пейзаж', 'Индивидуальный');
+
 /** Tariff shape on GET /api/v1/services/{id} (fields the scenarios assert). */
 interface TariffPayload {
   id: string;
@@ -229,26 +242,26 @@ test.describe('Services — Tariff diff by id (GH #357 US-1..US-4)', () => {
     request,
   }) => {
     test.setTimeout(120_000);
-    const visitsBefore = (await fetchRecordVisits(request, 'r2')).map(visitLink);
+    const visitsBefore = (await fetchRecordVisits(request, R2)).map(visitLink);
 
     const dialog = await openServiceEditor(page, 'Ручная лепка');
     const adult = tariffCard(dialog, 1); // t5a «Взрослый» — first in list
     await expect(adult.getByLabel('Название')).toHaveValue('Взрослый');
     await adult.getByLabel('Название').fill('Взрослый+');
     await adult.getByLabel('Цена').fill('2500');
-    await saveServiceAndRefresh(page, 's5');
+    await saveServiceAndRefresh(page, S5);
 
     // API — the tariff was UPDATED in place: same id, new title/price;
     // the sibling rows (t5c, t5i) untouched.
-    const after = await fetchService(request, 's5');
-    expect(after.tariffs.map((t) => t.id)).toEqual(expect.arrayContaining(['t5a', 't5c', 't5i']));
-    const t5a = after.tariffs.find((t) => t.id === 't5a');
+    const after = await fetchService(request, S5);
+    expect(after.tariffs.map((t) => t.id)).toEqual(expect.arrayContaining([T5A, T5C, T5I]));
+    const t5a = after.tariffs.find((t) => t.id === T5A);
     expect(t5a).toMatchObject({ title: 'Взрослый+', price: 2500 });
-    expect(after.tariffs.find((t) => t.id === 't5c')).toMatchObject({
+    expect(after.tariffs.find((t) => t.id === T5C)).toMatchObject({
       title: 'Детский',
       price: 1800,
     });
-    expect(after.tariffs.find((t) => t.id === 't5i')).toMatchObject({
+    expect(after.tariffs.find((t) => t.id === T5I)).toMatchObject({
       title: 'Индивидуальный',
       price: 3500,
     });
@@ -259,7 +272,7 @@ test.describe('Services — Tariff diff by id (GH #357 US-1..US-4)', () => {
     await expect(tariffCard(dialog2, 1).getByLabel('Цена')).toHaveValue('2500');
 
     // Visits — links and price snapshots unchanged (r2: v3 on t5a, v4 on t5c).
-    const visitsAfter = (await fetchRecordVisits(request, 'r2')).map(visitLink);
+    const visitsAfter = (await fetchRecordVisits(request, R2)).map(visitLink);
     expect(visitsAfter).toEqual(visitsBefore);
   });
 
@@ -282,21 +295,21 @@ test.describe('Services — Tariff diff by id (GH #357 US-1..US-4)', () => {
     await expect(dialog.getByLabel('Возрастная группа: Детский')).toHaveCount(0);
     await expect(dialog.getByLabel('Возрастная группа: Взрослый')).toHaveCount(1);
     await expect(dialog.getByLabel('Возрастная группа: Индивидуальный')).toHaveCount(1);
-    await saveServiceAndRefresh(page, 's5');
+    await saveServiceAndRefresh(page, S5);
 
     // API — t5c is gone; t5a and t5i survive with their ids.
-    const after = await fetchService(request, 's5');
+    const after = await fetchService(request, S5);
     expect(after.tariffs).toHaveLength(2);
-    expect(after.tariffs.map((t) => t.id)).toEqual(expect.arrayContaining(['t5a', 't5i']));
+    expect(after.tariffs.map((t) => t.id)).toEqual(expect.arrayContaining([T5A, T5I]));
 
     // Visits — the former t5c visit survives with tariff_id = null and its
     // creation-time price snapshot; the t5a visit is untouched.
-    const visits = await fetchRecordVisits(request, 'r2');
+    const visits = await fetchRecordVisits(request, R2);
     expect(visits).toHaveLength(2);
     const unlinked = visits.find((v) => v.tariff_id === null);
     expect(unlinked).toBeDefined();
     expect(unlinked!.price).toBe(1800);
-    expect(visits.find((v) => v.tariff_id === 't5a')).toMatchObject({ price: 2200 });
+    expect(visits.find((v) => v.tariff_id === T5A)).toMatchObject({ price: 2200 });
   });
 
   test('US-3: adding a tariff to a busy service keeps existing ids stable', async ({
@@ -304,33 +317,33 @@ test.describe('Services — Tariff diff by id (GH #357 US-1..US-4)', () => {
     request,
   }) => {
     test.setTimeout(120_000);
-    const before = await fetchService(request, 's7');
-    expect(before.tariffs.map((t) => t.id).sort()).toEqual(['t7a', 't7c', 't7i']);
+    const before = await fetchService(request, S7);
+    expect(before.tariffs.map((t) => t.id).sort()).toEqual([T7A, T7C, T7I].sort());
 
     const dialog = await openServiceEditor(page, 'Морской пейзаж');
     await dialog.getByText('+ Добавить тариф').click();
     const fresh = tariffCard(dialog, 4); // 3 seed rows + the new one
     await fresh.getByLabel('Название').fill('Групповой');
     await fresh.getByLabel('Цена').fill('3200');
-    await saveServiceAndRefresh(page, 's7');
+    await saveServiceAndRefresh(page, S7);
 
     // API — four tariffs: t7a/t7c/t7i keep their ids and values, the new
     // row got a server id (no delete+recreate churn of the existing trio).
-    const after = await fetchService(request, 's7');
+    const after = await fetchService(request, S7);
     expect(after.tariffs).toHaveLength(4);
-    expect(after.tariffs.find((t) => t.id === 't7a')).toMatchObject({
+    expect(after.tariffs.find((t) => t.id === T7A)).toMatchObject({
       title: 'Взрослый',
       price: 3800,
     });
-    expect(after.tariffs.find((t) => t.id === 't7c')).toMatchObject({
+    expect(after.tariffs.find((t) => t.id === T7C)).toMatchObject({
       title: 'Детский',
       price: 2800,
     });
-    expect(after.tariffs.find((t) => t.id === 't7i')).toMatchObject({
+    expect(after.tariffs.find((t) => t.id === T7I)).toMatchObject({
       title: 'Индивидуальный',
       price: 5500,
     });
-    const added = after.tariffs.find((t) => !['t7a', 't7c', 't7i'].includes(t.id));
+    const added = after.tariffs.find((t) => ![T7A, T7C, T7I].includes(t.id));
     expect(added).toMatchObject({ title: 'Групповой', price: 3200 });
     expect(added!.id).toBeTruthy();
   });
@@ -340,30 +353,30 @@ test.describe('Services — Tariff diff by id (GH #357 US-1..US-4)', () => {
     request,
   }) => {
     test.setTimeout(120_000);
-    const before = await fetchService(request, 's5');
+    const before = await fetchService(request, S5);
     const snapshot = before.tariffs.map(({ id, title, price, audience }) => ({
       id,
       title,
       price,
       audience,
     }));
-    const visitsBefore = (await fetchRecordVisits(request, 'r2')).map(visitLink);
+    const visitsBefore = (await fetchRecordVisits(request, R2)).map(visitLink);
 
     const dialog = await openServiceEditor(page, 'Ручная лепка');
     // The SERVICE title field — the tariff rows carry their own «Название»
     // labels, so the top-level one is targeted by its unique placeholder.
     await dialog.getByPlaceholder('Мастер-класс по рисованию').fill('Ручная лепка (прогрев)');
-    await saveServiceAndRefresh(page, 's5');
+    await saveServiceAndRefresh(page, S5);
 
     // API — new title, byte-identical tariff rows.
-    const after = await fetchService(request, 's5');
+    const after = await fetchService(request, S5);
     expect(after.title).toBe('Ручная лепка (прогрев)');
     expect(
       after.tariffs.map(({ id, title, price, audience }) => ({ id, title, price, audience })),
     ).toEqual(snapshot);
 
     // Visits — links and snapshots intact through the save.
-    const visitsAfter = (await fetchRecordVisits(request, 'r2')).map(visitLink);
+    const visitsAfter = (await fetchRecordVisits(request, R2)).map(visitLink);
     expect(visitsAfter).toEqual(visitsBefore);
   });
 });

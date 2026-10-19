@@ -30,23 +30,26 @@ const BACKEND = resolveBackendUrl();
  * Requires: backend on :8000 (frontend via playwright webServer).
  */
 
-// ── Seeded constants (backend/src/seed/seed.py — same ids the neighboring
-// specs rely on; never hardcode what seed.py doesn't define) ────────────────
+// ── Seeded constants (backend/src/seed/seed.py) ──────────────────────────────
+// GH #491: seed ids are UUIDs — every pin resolves by its business key once
+// per worker (seed rows are constant across the run; reset restores the canon).
+
+import { seedId, seedFixedWeekRecordId } from './fixtures/seed-ids';
 
 /** m2: Юлия Большакова — unique surname fragment «Больша». Label «Фамилия Имя». */
-const MASTER_ID = 'm2';
+const MASTER_ID = seedId('staff', 'last_name', 'Большакова');
 const MASTER_LABEL = 'Большакова Юлия';
 const MASTER_SURNAME_FRAGMENT = 'Больша';
 
-/** s4: Акварель — the only seed service with max_age → range display «6–12». */
-const SERVICE_ID = 's4';
+/** «Акварель» — the only seed service with max_age → range display «6–12». */
 const SERVICE_TITLE = 'Акварель';
+const SERVICE_ID = seedId('services', 'title', SERVICE_TITLE);
 const SERVICE_TITLE_FRAGMENT = 'Акв';
 const SERVICE_AGE_DISPLAY = '6–12';
 
 /** Location «Альпика» — fragment «Альп» is unique among seed locations. */
-const LOCATION_ID = 'alpika';
 const LOCATION_NAME = 'Альпика';
+const LOCATION_ID = seedId('locations', 'title', LOCATION_NAME);
 const LOCATION_NAME_FRAGMENT = 'Альп';
 
 /** Unique name to avoid collisions between parallel runs (clients.spec.ts). */
@@ -153,11 +156,11 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
   }) => {
     // Same convention as activity-details-modal.spec.ts: the schedule page
     // with activity cards must be loaded before the modal can open. Target
-    // the seed record 'r1' explicitly — the untargeted scan picks the
-    // smallest record id, and parallel specs' leaked factory records sort
-    // before the seed ids and would steal the modal.
+    // the fixed-week seed record explicitly — the untargeted scan picks the
+    // earliest record, and parallel specs' leaked factory records could
+    // steal the modal.
     await waitForScheduleReady(page);
-    const activity = await openModal(page, { recordId: 'r1' });
+    const activity = await openModal(page, { recordId: seedFixedWeekRecordId() });
     expect(activity).toBeTruthy();
     const activityId = (activity as { id: string }).id;
 
@@ -167,7 +170,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
     await expect(serviceTrigger).toBeVisible();
 
     // GH #310: no manual restore of the seed activity afterwards — the
-    // per-test canonical reset fully restores ev_fixed_0 before the next
+    // per-test canonical reset fully restores the fixed-week record before the next
     // test, mutations of seed rows are allowed by policy.
     // Type a title fragment → select the Акварель service
     await searchAndSelect(page, serviceTrigger, SERVICE_TITLE_FRAGMENT, SERVICE_ID);

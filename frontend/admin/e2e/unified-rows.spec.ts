@@ -16,8 +16,13 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import { seedFixedWeekRecordId, seedRecordIdByClientName } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
+
+// Seed record anchors by business key (GH #491 — seed ids are UUIDs):
+// R3 = «Елена Сидорова»'s seed record (former alias r3).
+const R3 = seedRecordIdByClientName('Елена Сидорова');
 
 /**
  * Saved payment ROW locator (scenario 15b). The naive
@@ -45,7 +50,7 @@ async function openClientRecordTab(
   page: import('@playwright/test').Page,
   opts?: { recordId?: string },
 ) {
-  await openModal(page, { recordId: opts?.recordId ?? 'r1' });
+  await openModal(page, { recordId: opts?.recordId ?? seedFixedWeekRecordId() });
   await switchToRecordsTab(page);
   await expect(page.locator('[data-testid="record-visits-table"]')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible({ timeout: 5_000 });
@@ -385,13 +390,13 @@ test.describe('Unified inline-editable rows', () => {
     test('× on existing payment calls DELETE API', async ({ page, request }) => {
       // Use seed record r3 — create a payment on it via API
       const paymentResp = await request.post(`${BACKEND}/api/v1/payments`, {
-        data: { record_id: 'r3', amount: 2500, method: 'card' },
+        data: { record_id: R3, amount: 2500, method: 'card' },
       });
       expect(paymentResp.ok()).toBeTruthy();
       const payment = await paymentResp.json();
 
       try {
-        await openClientRecordTab(page, { recordId: 'r3' });
+        await openClientRecordTab(page, { recordId: R3 });
 
         // Find the saved payment row
         const paymentRow = page.locator(`[data-testid="payment-${payment.id}"]`);
@@ -418,7 +423,7 @@ test.describe('Unified inline-editable rows', () => {
     // ── 9d: Multiple empty payment rows ─────────────────────────────────
 
     test('multiple empty payment rows can coexist', async ({ page }) => {
-      await openClientRecordTab(page, { recordId: 'r1' });
+      await openClientRecordTab(page, { recordId: seedFixedWeekRecordId() });
 
       const addBtn = page.locator('[data-testid="btn-add-payment"]');
 

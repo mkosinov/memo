@@ -33,7 +33,7 @@ async function clearUserSettingsStorage(page: import('@playwright/test').Page) {
 
 /**
  * Reset user settings via the API to ensure column orders include all masters/locations.
- * Previous test runs may have saved partial column orders (e.g. only ["m2"]),
+ * Previous test runs may have saved partial column orders (a single id),
  * which causes DayView to render only that one column.
  */
 async function resetUserSettings(request: import('@playwright/test').APIRequestContext) {

@@ -30,7 +30,7 @@ resolveBackendUrl();
 const SHARD_PORT = process.env.SHARD_PORT || '3002';
 
 // GH #247 T14: globalSetup logs the seeded admin in and saves the session
-// cookie here; both projects start authenticated. Login-flow specs opt out
+// cookie here; the project starts authenticated. Login-flow specs opt out
 // with `test.use({ storageState: { cookies: [], origins: [] } })` — a bare
 // `undefined` does NOT override a project-level default.
 // The filename is SHARD-SCOPED via the shared helper (same expression as
@@ -72,7 +72,15 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: 'list',
+  // GH #415: always emit list + HTML + JSON. Output paths are env-driven:
+  // local test-all.sh runs 2 shards in PARALLEL from this same cwd and sets
+  // per-shard E2E_REPORT_DIR/E2E_RESULTS_JSON so they don't overwrite each
+  // other's artifacts; CI uses the defaults (one VM per job, no conflicts).
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: process.env.E2E_REPORT_DIR ?? 'playwright-report' }],
+    ['json', { outputFile: process.env.E2E_RESULTS_JSON ?? 'results.json' }],
+  ],
   // #278: collect visual specs only on CI (or the E2E_VISUAL investigation
   // opt-in) — see the RUN_VISUAL note above the config.
   testIgnore: RUN_VISUAL ? [] : [VISUAL_SPECS],
@@ -120,27 +128,16 @@ export default defineConfig({
     },
   }),
 
-  // 2 shards instead of 5 to avoid CPU contention on 4-core machines.
-  // Shard 1: schedule-heavy tests (services, schedule, records, activity-details)
-  //   — all share schedule page data, heavy per-test.
-  // Shard 2: everything else (clients, masters, locations, tags, photos, etc.)
-  //   — lighter per-test, more files.
+  // GH #415: ONE project — sharding is native, via the --shard=i/N run flag
+  // (Playwright splits spec files across shards deterministically); the
+  // project name no longer encodes test composition. Default testMatch
+  // catches every .spec.ts file (no .test.ts exists under e2e/).
+  // Locally still 2 shards instead of 5 to avoid CPU contention on
+  // 4-core machines (5 parallel Next.js dev servers caused 30s+ page
+  // loads) — see scripts/test-all.sh.
   projects: [
     {
-      name: 'shard-schedule',
-      // records.* — records page specs (records.spec.ts, records-view.spec.ts, …).
-      // Filename-anchored ((^|\/)…$ + [^/]*) so the patterns match the spec
-      // FILE name, not an arbitrary path segment — Playwright tests these
-      // regexes against the absolute path, and a worktree directory named
-      // e.g. records-view-213 would otherwise sweep every spec in here.
-      testMatch: /(^|\/)(services-crud|schedule[^/]*|records[^/]*|activity-details-modal)\.spec\.ts$/,
-      use: { ...devices['Desktop Chrome'], storageState: AUTH_STORAGE_STATE },
-    },
-    {
-      name: 'shard-rest',
-      // Everything whose FILE NAME does not belong to the schedule shard
-      // (same filename-anchoring rationale as above).
-      testMatch: /^(?!.*(\/|^)(services-crud|schedule|records|activity-details-modal)[^/]*\.spec\.ts$).*\.spec\.ts$/,
+      name: 'e2e',
       use: { ...devices['Desktop Chrome'], storageState: AUTH_STORAGE_STATE },
     },
   ],

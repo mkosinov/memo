@@ -20,6 +20,7 @@
 | Record | Данные — результат бронирования | belongs to Activity, Client; has Visits | **High** |
 | Visit | Attendance | belongs to Record, Visitor | Low |
 | Payment | Transaction | belongs to Record | Low |
+| Notify | Подсистема оповещений — журнал доменных событий, задачи доставок | см. [notify.md](notify.md) | Medium |
 
 ## Shared Enums
 

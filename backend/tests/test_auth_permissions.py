@@ -222,7 +222,9 @@ class TestPublicRoutes:
             ("GET", "/api/v1/photos"),
             ("GET", "/api/v1/photos/{id}"),
             ("GET", "/api/v1/photos/web"),
-            ("POST", "/api/v1/records"),
+            # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed
+            # from the allowlist — the route carries records:write now;
+            # guest booking is #499.
             ("POST", "/api/v1/auth/login"),
             ("POST", "/api/v1/auth/logout"),
             ("GET", "/api/v1/auth/me"),

@@ -65,8 +65,12 @@ _WRITE_GUARD = [
     Depends(require_permission("records:write")),
     Depends(verify_fetch_metadata),
 ]
-# Guarded reads — POST "" stays public (anonymous booking until #8).
 _READ_GUARD = [Depends(require_permission("records:read"))]
+# GH #479 (Изменение 5): the full POST contract is staff-only —
+# records:write, like every other records mutation. The CSRF secondary
+# line (verify_fetch_metadata) is NOT layered here yet — #493 owns that
+# wiring; the permission guard alone seals the anonymous surface.
+_CREATE_GUARD = [Depends(require_permission("records:write"))]
 
 
 @router.get("", response_model=PaginatedResponse[RecordResponse],
@@ -171,13 +175,17 @@ async def _activity_scoped_or_404(
         )
 
 
-@router.post("", response_model=RecordResponse, status_code=201)
+@router.post("", response_model=RecordResponse, status_code=201,
+             dependencies=_CREATE_GUARD)
 async def create_record(
     data: RecordCreate,
     service: _ServiceDep,
     session: SessionDep,
-    # GH #263 T2-quality: the booking route stays public, but a scoped
-    # master may only book onto his OWN activities (foreign → 404).
+    # GH #263 T2-quality: a scoped master may only book onto his OWN
+    # activities (foreign → 404). GH #479: the anonymous surface is
+    # closed — the permission guard upstream already resolved a session,
+    # so the optional resolution here always sees an authenticated
+    # caller (admin → unscoped, master → his own key).
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> RecordResponse:
     """Create a new record with visits. Seats auto-calculated from len(visits)."""

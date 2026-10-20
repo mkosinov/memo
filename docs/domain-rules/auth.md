@@ -23,9 +23,10 @@ Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
 - `GET` dictionaries: masters, locations, services, tags, activities, photos — incl. `GET /api/v1/photos/web` (the public gallery the site's home page consumes)
-- `POST /api/v1/records` — anonymous booking, **until #8** adds client phone verification
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
+
+`POST /api/v1/records` left this list (#479): the full creation contract is staff-only (`records:write`); a guest booking contract is a separate effort (#499).
 
 A contract test enforces: every `/api/v1` route has an auth dependency or is allowlisted. `GET /api/v1/events` (SSE, #239) requires a session (transport, not entity — no permission token).
 

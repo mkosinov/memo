@@ -17,9 +17,13 @@ import { ApiError } from '@memo/api-client';
 
 interface ClientsTableProps {
   onClientClick: (client: ClientWithStats) => void;
+  /** #412 US-2: the page's filter panel rides in the toolbar's left group
+   *  (the slot the dict *Filters bars use) — the external filter card above
+   *  the table is retired. */
+  toolbarLead?: React.ReactNode;
 }
 
-export function ClientsTable({ onClientClick }: ClientsTableProps) {
+export function ClientsTable({ onClientClick, toolbarLead }: ClientsTableProps) {
   // GH #140 — table state from the factory context (server-paginated,
   // page-scoped); mutations are local hook instances (LocationsTable
   // precedent) — the parked 409 tree lives on this component's state.
@@ -108,6 +112,7 @@ export function ClientsTable({ onClientClick }: ClientsTableProps) {
           refetch,
         }}
         actions={actions}
+        toolbarLead={toolbarLead}
         onRowClick={onClientClick}
         rowKey={(c) => c.id}
         // Pre-#139 row classes were `border-b hover:bg-gray-50 cursor-pointer

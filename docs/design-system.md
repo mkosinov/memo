@@ -2,7 +2,7 @@
 type: design-system
 scope: project
 sections: [colors, status-colors, status-icons, status-components, typography, shadows, spacing, border-radius, scrollbar, transitions, animations, components, patterns]
-updated: 2026-09-16
+updated: 2026-10-20
 source: frontend/admin (live code)
 ---
 
@@ -621,6 +621,45 @@ Toolbar/Topbar/StampFab are **schedule-page furniture**, not global chrome:
 definitions live in `app/components/layout/`, and every other page renders
 its own content directly under `MainShell`.
 
+### Table Toolbar (DataTable)
+
+```tsx
+<div className="p-4 border-b flex items-center justify-between">   {/* DataTable.tsx */}
+  <div className="flex items-center gap-3 flex-1 min-w-0">
+    {toolbarLead}            {/* page filter panel slot — may wrap to rows */}
+    {withSearch && <input … />}   {/* built-in search, when enabled */}
+    {withStatus && <select … />}  {/* built-in status select, when enabled */}
+  </div>
+  <div className="flex items-center gap-2">
+    <ColumnPicker … />       {/* column-settings gear */}
+    {toolbarExtras}          {/* page actions («+ Добавить …») */}
+  </div>
+</div>
+```
+
+**Structure — filters left, actions right (#412 §3.1).** The left group
+holds list filters: the `toolbarLead` slot (the page's filter panel) plus
+the built-in search/status controls where enabled. The right group holds
+actions and settings — the `ColumnPicker` gear and `toolbarExtras` — never
+filters. Boundary: a control that narrows the list is a filter (left); a
+control that creates/exports/configures is an action (right).
+
+**Wrapping (#412 §3.1).** The left group stretches (`flex-1 min-w-0`); a
+filter panel mounted in `toolbarLead` uses a flat
+`flex flex-wrap items-end gap-3` root, so when width runs out its controls
+wrap to following rows inside the group — every control stays visible, no
+horizontal scroll down to 768 px (minimum supported admin width). The right
+group never wraps and stays flush right on the toolbar's first row. The
+filter panel is a plain form-field group — no `role="toolbar"` (keyboard
+navigation stays native). Small panels (dictionaries' 2–3 controls) keep a
+single row — their pixel baselines are the regression guard.
+
+**Canon:** filters of ALL list pages live in the toolbar row via
+`toolbarLead`; separate filter cards above the table are not used (retired
+by #412). The single-row toolbar decision of the #139 unification (addendum
+9, `docs/plans/2026-08-18-generic-datatable-plan.md`) is historical — the
+living canon is this section.
+
 ### Shared component inventory
 
 Generic building blocks in `frontend/admin/app/components/shared/`
@@ -628,7 +667,7 @@ Generic building blocks in `frontend/admin/app/components/shared/`
 
 | Component | Path | Role |
 |-----------|------|------|
-| `DataTable` | `shared/DataTable.tsx` | Canonical generic table (GH #139); `ColumnDef` via `tableTypes.ts`, runtime column filtering (GH #141) |
+| `DataTable` | `shared/DataTable.tsx` | Canonical generic table (GH #139); `ColumnDef` via `tableTypes.ts`, runtime column filtering (GH #141); toolbar canon — see «Table Toolbar (DataTable)» (#412) |
 | `ColumnPicker` | `shared/ColumnPicker.tsx` | Column visibility menu for DataTable |
 | `Modal` | `shared/modal/Modal.tsx` | Base overlay dialog (backbone of `MyDataModal`, `PasswordModal`) |
 | `FullPageError` | `app/components/error/FullPageError.tsx` | Full-screen error with reset; siblings in `components/error/`: `ErrorBoundary`, `NoAccessScreen`, `ErrorState` |

@@ -9,7 +9,7 @@ import type {
   ServiceResponse,
   VisitResponse,
 } from '@memo/api-client';
-import { mockClient, mockLocationResponse } from './helpers/mockData';
+import { mockClient, mockLocationResponse, LEGACY_SEED_SPELLINGS } from './helpers/mockData';
 import { formatPhoneDisplay } from '../app/components/shared/phone/format';
 
 // GH #213 §6.5: NO RecordsContext mock — the card renders without any
@@ -266,15 +266,10 @@ describe('records-folder ClientQuickCard — re-homed off RecordsContext (#213)'
   });
 
   // ─── Phone display through the shared formatter (GH #414 Task 9) ───────
-  // Legacy seed-row spellings → the grouped display (spec §Форматирование,
-  // показ); the second pin locks the header line to `formatPhoneDisplay` —
-  // the automatable seed-row eyeball check.
-  it.each([
-    ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
-    ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
-    ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
-    ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
-  ] as Array<[string, string]>)(
+  // The spellings table lives in the shared fixtures (GH #429 dedup); the
+  // second pin locks the header line to `formatPhoneDisplay` — the
+  // automatable seed-row eyeball check.
+  it.each(LEGACY_SEED_SPELLINGS)(
     'header renders stored %s as %s (formatPhoneDisplay)',
     async (stored, expected) => {
       vi.mocked(getClientById).mockResolvedValue({ ...mockClient, phone: stored });
@@ -286,4 +281,16 @@ describe('records-folder ClientQuickCard — re-homed off RecordsContext (#213)'
       expect(expected).toBe(formatPhoneDisplay(stored));
     },
   );
+
+  // Symmetric null pin: the formatter's empty output keeps the header phone
+  // line blank (no fallback copy — unlike the clients table's «Не указан»).
+  it('header phone line renders empty when the stored phone is null', async () => {
+    vi.mocked(getClientById).mockResolvedValue({ ...mockClient, phone: null });
+    renderModal();
+
+    const nameHeading = await waitFor(() =>
+      screen.getByRole('heading', { name: /Анна Иванова/ }),
+    );
+    expect(nameHeading.nextElementSibling?.textContent).toBe('');
+  });
 });

@@ -325,6 +325,26 @@ Element shows up, becomes actionable, state updates. Budget-based:
 deliberate and correct: raising it slows the suite and weakens the
 assertion. Never "fix" flakes here by growing timeouts.
 
+### Unit toast asserts (canon since #337, classified per site by #445)
+
+Asserting a toast spy after a user action in unit tests:
+
+- Positive assert after an async chain (mutation promise settling, a
+  timer-driven deferred flow): `await waitFor(() => expect(showToast).toHaveBeenCalledWith(...))`.
+  A bare sync assert right after `act()` is the #337/#445 flake: under load
+  the promise chain may not settle within the single act flush, and the
+  assert observes 0 calls.
+- Negative assert ("no toast"): keep it sync and short (class 2 above), but
+  give it a settle anchor first — a preceding `waitFor` on the pipeline's
+  side effect (the deferred call, `console.error`, a state reset) — otherwise
+  a late toast silently greens the test.
+- Sync-deterministic sites stay sync: the toast fired synchronously inside
+  the handler, or the test invokes the mutation callbacks manually
+  (`callbacks.onSuccess()`). Classify per site; do not blanket-convert.
+- Fake timers + `waitFor`: start them with
+  `vi.useFakeTimers({ shouldAdvanceTime: true })` so the waitFor polling can
+  tick (the `PhotosTableDeleteFlow.test.tsx` pattern).
+
 ### 3. Semantic time — the FEATURE is a timer
 
 Undo window, cache staleTime, SSE reconnect backoff. Never wait real

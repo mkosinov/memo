@@ -899,8 +899,14 @@ test.describe('Deep-link ?clientId= — #232', () => {
         page.locator('table tbody tr').filter({ hasText: target.name }),
       ).toBeVisible({ timeout: 10_000 });
 
-      // ✕ on the chip — targeted removal only.
-      await page.getByRole('button', { name: 'Снять сужение' }).click();
+      // ✕ on the chip — targeted removal only (#412: the accessible name
+      // substitutes the live client; the narrowed row is already loaded).
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
 
       // The param is gone from the address (everything else in its place).
       // #349: the address is the single writer and the ✕ preserves the
@@ -915,7 +921,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       );
 
       // …the chip is gone…
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
 
       // …the user filter SURVIVES (target still matches, other does not)…
       await expect(
@@ -951,7 +957,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       // the default «Активные».
       await page.getByText('Сбросить фильтры').click();
       await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
       const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
       await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
     } finally {
@@ -978,8 +984,11 @@ test.describe('Deep-link ?clientId= — #232', () => {
     // No modal can open for a vanished client.
     await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
 
-    // ✕ on the dead chip — full table comes back, address clean.
-    await page.getByRole('button', { name: 'Снять сужение' }).click();
+    // ✕ on the dead chip — full table comes back, address clean (#412: no
+    // name is known for a vanished client → the unsubstituted base label).
+    await page
+      .getByRole('button', { name: 'Убрать фильтр по клиенту', exact: true })
+      .click();
     await expect(page).not.toHaveURL(/clientId=/);
     await expect(
       page.locator('table tbody tr').first(),
@@ -1071,7 +1080,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await expect(
         page.locator('table tbody tr').filter({ hasText: filler.name }),
       ).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
       await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
       await expectClientSearchEmpty(page);
     } finally {
@@ -1092,7 +1101,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await waitForClientsReady(page, { waitForName: target.name });
 
       // Full table, no narrowing chip in play.
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
 
       const row = page.locator('table tbody tr').filter({ hasText: target.name });
       await expect(row).toBeVisible({ timeout: 10_000 });
@@ -1106,7 +1115,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
 
       await closeByBackdrop(page);
       await expect(page).toHaveURL(/\/clients$/);
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
     }
@@ -1292,6 +1301,199 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
     } finally {
       if (recordId) await cleanupRecord(request, recordId);
       if (clientId) await cleanup(request, `/api/v1/clients/${clientId}`);
+    }
+  });
+
+  // ── US-2 (#412): all clients filters visible and fitting in the toolbar ──
+
+  test('US-2 (#412): narrow viewport — toolbar panel wraps rows, no horizontal scroll; «Записи от/до» pair filters; reset clears', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `US2 Toolbar ${uid()}`;
+    const client = await createTestClient(request, { name: clientName });
+
+    try {
+      // Narrow-but-supported window (spec §3.1: 768 px is the minimum admin
+      // width; at 800 px the 11 controls have no chance of a single row).
+      await page.setViewportSize({ width: 800, height: 900 });
+      await waitForClientsReady(page, { waitForName: clientName });
+
+      // US-2: the whole filter panel lives in the table card's toolbar row —
+      // the same border-b row that carries the column-settings gear. The
+      // external filter card above the table is gone (panel root testid is
+      // the new #412 anchor; field markup is unchanged).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      const panel = toolbar.locator('[data-testid="clients-filters"]');
+      await expect(panel).toBeVisible();
+
+      // Every control stays visible: search + status select + 4 от/до pairs
+      // (10 inputs in 6 groups) + «Сбросить фильтры».
+      const controls = panel.locator('input, select, button');
+      await expect(controls).toHaveCount(11);
+      for (const control of await controls.all()) {
+        await expect(control).toBeVisible();
+      }
+
+      // The fields lay out in MULTIPLE rows: the panel's direct children
+      // occupy more than one distinct top edge inside the left group.
+      const childTops = await panel.locator(':scope > *').evaluateAll((els) =>
+        Array.from(new Set(els.map((el) => Math.round(el.getBoundingClientRect().top)))),
+      );
+      expect(childTops.length).toBeGreaterThan(1);
+
+      // ...and nothing overflows horizontally (spec §3.1: no horizontal
+      // scroll down to 768 px).
+      const noHorizontalScroll = await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      );
+      expect(noHorizontalScroll).toBe(true);
+
+      // Apply the «Записи от/до» pair (min_records/max_records — the pair
+      // the plan names) — machine-side filters (#349: the clients URL
+      // contract is q/status/sort/page only; structured filters never write
+      // the address — spec §3.3 unchanged): each fill fires a list GET
+      // carrying the param. Our fresh client has 0 records; the 5 seed
+      // clients (1–2 records each) stay — от=1 drops our row.
+      const recordsFrom = panel.locator('div:has(> label:text-is("Записи")) input[placeholder="от"]');
+      const recordsTo = panel.locator('div:has(> label:text-is("Записи")) input[placeholder="до"]');
+      const minWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('min_records=1'),
+        { timeout: 10_000 },
+      );
+      await recordsFrom.fill('1');
+      await minWait;
+      const maxWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('max_records=10'),
+        { timeout: 10_000 },
+      );
+      await recordsTo.fill('10');
+      await maxWait;
+      const row = page.locator('table tbody tr').filter({ hasText: clientName });
+      await expect(row).toHaveCount(0); // 0 records < от=1 — the pair filters
+
+      // An impossible window (от=1, до=0) excludes every client — the
+      // table filters down to the unified empty state (server returns an
+      // empty 200 for the contradictory range, no cross-field 422).
+      const impossibleWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('max_records=0'),
+        { timeout: 10_000 },
+      );
+      await recordsTo.fill('0');
+      await impossibleWait;
+      await expect(row).toHaveCount(0);
+      await expect(page.getByText('Нет записей')).toBeVisible();
+
+      // Widen back (от=0): our 0-record client returns — a fresh filter key,
+      // so the list GET fires; the seed clients (≥1 record) drop out. Then
+      // add a URL-backed filter (status) so the address carries something
+      // reset must clear.
+      const widenWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('min_records=0'),
+        { timeout: 10_000 },
+      );
+      await recordsFrom.fill('0');
+      await widenWait;
+      await expect(row).toBeVisible();
+      const statusSelect = panel.locator('select');
+      const statusWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('status=archived'),
+        { timeout: 10_000 },
+      );
+      await statusSelect.selectOption('archived');
+      await statusWait;
+      await expect(page).toHaveURL(/status=archived/);
+      await expect(row).toHaveCount(0); // our client is active
+
+      // «Сбросить фильтры» from the toolbar panel: the fields return to
+      // their defaults, the address is cleaned (one push to the clean
+      // /clients — #349 reset contract) and the row comes back.
+      await panel.getByText('Сбросить фильтры').click();
+      await expect(page).toHaveURL(/\/clients$/, { timeout: 10_000 });
+      await expect(statusSelect).toHaveValue('active');
+      await expect(clientSearchInput(page)).toHaveValue('');
+      await expect(row).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — GH #412 US-4: deep-link chip rides in the table toolbar
+// ---------------------------------------------------------------------------
+
+test.describe('#412 — client deep-link chip in the toolbar (US-4)', () => {
+  // Spec 2026-10-19-filters-inline-412-design §3.2 (Клиенты): the chip stays
+  // a separate component mounted in toolbarLead NEXT TO the panel — outside
+  // its data-testid root, visually AFTER it. The ✕ accessible name
+  // substitutes the client («Убрать фильтр по клиенту: <имя>»), and after
+  // closing, focus lands on the FILTERS PANEL, not the page body.
+
+  test('US-4 (#412): chip in the toolbar row after the panel; ✕ removes the narrowing and focuses the panel', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US4T-toolbar-${uid()}` });
+    // Filler row proves the "full table comes back" leg without relying on
+    // seed counts.
+    const filler = await createTestClient(request, { name: `US4F-toolbar-${uid()}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}`);
+
+      // Deep-link narrowing applied: exactly the target row; the auto-opened
+      // card (#232 US-1) closes first so the toolbar is interactable.
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+      await closeByBackdrop(page);
+
+      // The chip is visible in the TABLE TOOLBAR row (the same border-b row
+      // as the panel) — AFTER the panel, OUTSIDE its testid root (§3.2).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      const panel = toolbar.locator('[data-testid="clients-filters"]');
+      const chip = toolbar.locator('[data-testid="client-deep-link-chip"]');
+      await expect(panel).toBeVisible();
+      await expect(chip).toBeVisible();
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
+      // Sibling, not child: the panel root does NOT contain the chip.
+      await expect(panel.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
+
+      // ✕ (#412 a11y: the accessible name substitutes the live client) —
+      // removes ONLY the narrowing from the address.
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
+      await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
+
+      // The full table comes back (filler + target rows prove it)…
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: filler.name }),
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+
+      // …and focus landed on the FILTERS PANEL, not the page body (§3.2).
+      await expect
+        .poll(
+          () => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? ''),
+          { timeout: 5_000 },
+        )
+        .toBe('clients-filters');
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+      await cleanup(request, `/api/v1/clients/${filler.id}`);
     }
   });
 });

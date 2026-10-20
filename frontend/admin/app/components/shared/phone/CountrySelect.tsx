@@ -8,12 +8,14 @@ import {
 } from './countries';
 
 // GH #414 (spec §Виджет PhoneField — селектор кода страны): the country
-// selector of the phone module — trigger «+7 Россия ⌄» + listbox popover
-// following the admin listbox pattern (StatusPicker): own popover on
-// --z-popover, mouse-only, click-outside/ESC close, bound row marked.
-// Shared by PhoneField (client card, staff, login) and the record-form
-// typeahead prefix (PhoneInput) — one implementation, no fork. The module
-// imports no admin specifics.
+// selector of the phone module — trigger «+7 ⌄» (calling code only, user
+// decision 2026-10-20 in #428: the country name cost trigger width) +
+// listbox popover following the admin listbox pattern (StatusPicker): own
+// popover on --z-popover, mouse-only, click-outside/ESC close, bound row
+// marked. The list keeps code AND name — RU/KZ share «+7», names are the
+// only disambiguator there. Shared by PhoneField (client card, staff,
+// login) and the record-form typeahead prefix (PhoneInput) — one
+// implementation, no fork. The module imports no admin specifics.
 
 export interface PhoneCountrySelectProps {
   /** Bound list country; `null` — the «no country» state (the trigger keeps
@@ -105,7 +107,6 @@ export function PhoneCountrySelect({
         data-testid="phone-country-select"
       >
         <span className="font-medium">+{shown.callingCode}</span>
-        <span>{shown.name}</span>
         <Chevron />
       </button>
 

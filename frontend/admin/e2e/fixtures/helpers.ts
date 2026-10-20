@@ -819,6 +819,17 @@ export function phoneMaskDisplay(digits: string, mode: 'international' | 'nation
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;
 }
 
+/**
+ * The grouped display of a 10-digit RU remainder as the PhoneField widget
+ * shows it (GH #414): `999 123-45-67`. Same grouping as
+ * {@link phoneMaskDisplay}(digits, 'national'), kept as its own named form
+ * because the specs feed it the NATIONAL string they type (not a full
+ * number) — shared by the phone e2e specs (GH #429 dedup).
+ */
+export function groupedRu(national: string): string {
+  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // #232 deep-link narrowing — shared /clients page assertions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -830,12 +841,13 @@ export function clientSearchInput(page: Page): Locator {
 
 /**
  * Assert the #232 narrowing chip state on /clients: the aria-live label of
- * `[data-testid="client-deeplink-chip"]` reads the exact copy —
- * «Открыт по ссылке» (single id) or «Открыто по ссылке: N» (multi).
+ * `[data-testid="client-deep-link-chip"]` (#412 testid anchor) reads the
+ * exact copy — «Открыт по ссылке» (single id) or «Открыто по ссылке: N»
+ * (multi).
  */
 export function expectDeepLinkChip(page: Page, text: string) {
   return expect(
-    page.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
+    page.locator('[data-testid="client-deep-link-chip"] span[aria-live]'),
   ).toHaveText(text);
 }
 

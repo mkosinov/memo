@@ -384,3 +384,66 @@ describe('ClientsFilters — controlled search input (GH #216 / #349 canonical q
     expect(screen.getByDisplayValue('Все')).toBeInTheDocument();
   });
 });
+
+// ─── Root composition (#412 US-2: flat toolbar panel) ────────────────────
+// The panel rides in the DataTable toolbarLead slot; its root switches from
+// the vertical `space-y-3` stack to the flat wrap container (spec §3.1/§3.2).
+// Field set, labels, control widths and behavior are unchanged (covered by
+// the describes above).
+
+describe('ClientsFilters — flat toolbar root (#412 US-2)', () => {
+  beforeEach(() => {
+    mockUseClientsTable.mockReturnValue(createMockClientsTableState());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('root carries data-testid="clients-filters" with the flat wrap classes', () => {
+    render(<ClientsFilters />);
+    const root = screen.getByTestId('clients-filters');
+    expect(root.className).toContain('flex');
+    expect(root.className).toContain('flex-wrap');
+    expect(root.className).toContain('items-end');
+    expect(root.className).toContain('gap-3');
+    // the vertical stack container is retired
+    expect(root.className).not.toContain('space-y-3');
+  });
+
+  it('search is an inline row control — w-full retired, direct root child', () => {
+    render(<ClientsFilters />);
+    const search = screen.getByPlaceholderText(/Поиск по имени или телефону/);
+    expect(search.className).not.toContain('w-full');
+    expect(search.parentElement).toBe(screen.getByTestId('clients-filters'));
+  });
+
+  it('flat root: search + 5 field groups + reset are direct children (no wrapper row)', () => {
+    render(<ClientsFilters />);
+    const root = screen.getByTestId('clients-filters');
+    const children = Array.from(root.children);
+    expect(children).toHaveLength(7);
+    // children[0] — the search input; children[1..5] — the field groups
+    // (inner structure unchanged: label + controls per group); children[6]
+    // — the reset button.
+    expect(children[0].tagName).toBe('INPUT');
+    expect(screen.getByText('Статус').closest('div')).toBe(children[1]);
+    expect(screen.getByText('Записи').closest('div')).toBe(children[2]);
+    expect(screen.getByText('Пропущенные').closest('div')).toBe(children[3]);
+    expect(screen.getByText('Создан').closest('div')).toBe(children[4]);
+    expect(screen.getByText('Оплата').closest('div')).toBe(children[5]);
+    expect(children[6].tagName).toBe('BUTTON');
+    expect(children[6]).toHaveTextContent('Сбросить фильтры');
+  });
+
+  it('field groups keep their inner от/до pair structure (10 inputs + select + reset)', () => {
+    render(<ClientsFilters />);
+    const root = screen.getByTestId('clients-filters');
+    expect(root.querySelectorAll('input')).toHaveLength(9);
+    expect(root.querySelectorAll('select')).toHaveLength(1);
+    expect(root.querySelectorAll('button')).toHaveLength(1);
+    // the numeric pairs keep their fixed widths (w-20), dates keep type=date
+    expect(root.querySelectorAll('input.w-20')).toHaveLength(6);
+    expect(root.querySelectorAll('input[type="date"]')).toHaveLength(2);
+  });
+});

@@ -14,6 +14,7 @@ import React from 'react';
 import type { ClientWithStats } from '@memo/api-client';
 import { clientColumns } from '../app/(main)/clients/components/clientColumns';
 import { formatPhoneDisplay } from '../app/components/shared/phone/format';
+import { LEGACY_SEED_SPELLINGS } from './helpers/mockData';
 
 // ─── Fixtures (mirrors ClientsTable.test.tsx mock shape) ────────────────────
 
@@ -85,17 +86,10 @@ describe('clientColumns — archived badge cell (GH #220 Task 1)', () => {
 });
 
 // ─── Phone cell display (GH #414 Task 9) ────────────────────────────────────
-
-/** Legacy seed-row spellings → the grouped display (spec §Форматирование,
- *  показ). The second pin (`expected === formatPhoneDisplay(stored)`) locks
- *  the column to the shared formatter — the automatable equivalent of the
- *  manual seed-row eyeball check from the plan DoD. */
-const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
-  ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
-  ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
-  ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
-  ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
-];
+// The spellings table lives in the shared fixtures (GH #429 dedup); the
+// second pin (`expected === formatPhoneDisplay(stored)`) locks the column
+// to the shared formatter — the automatable equivalent of the manual
+// seed-row eyeball check from the plan DoD.
 
 describe('clientColumns — phone cell display (GH #414 Task 9)', () => {
   it.each(LEGACY_SEED_SPELLINGS)('renders stored %s as %s (formatPhoneDisplay)', (stored, expected) => {

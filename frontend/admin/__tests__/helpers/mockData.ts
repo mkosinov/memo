@@ -567,3 +567,17 @@ export function createMockAuditLog(
 ): AuditLogResponse {
   return { ...mockAuditLogUpdate, ...overrides };
 }
+
+// ─── Phone display spellings (GH #414 Task 9; dedup GH #429) ───────────────
+
+/** Legacy seed-row spellings → the grouped display (spec §Форматирование,
+ *  показ) — the shared table behind every «stored spelling renders grouped»
+ *  pin (RecordHeader, clientColumns, ClientLabelById, ClientQuickCard). Each
+ *  consumer's second assert (`expected === formatPhoneDisplay(stored)`)
+ *  locks its surface to the shared formatter. */
+export const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
+  ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
+  ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
+  ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
+  ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
+];

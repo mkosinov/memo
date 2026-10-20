@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures/test';
 import { cleanup } from './fixtures/factories';
-import { waitForStaffReady } from './fixtures/helpers';
+import { waitForStaffReady, groupedRu } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
 /**
@@ -22,10 +22,7 @@ import { queryDBRow } from './fixtures/db-query';
  * staff card (users-first — the CLI sqlite runs with foreign_keys=OFF).
  */
 
-/** The grouped display of a 10-digit RU remainder in the widget input. */
-function groupedRu(national: string): string {
-  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
-}
+// groupedRu lives in the shared fixtures helpers (GH #429 dedup).
 test.describe('Staff phone fields (GH #414 scenario 6)', () => {
   test('incomplete account phone blocks creation and the account PATCH; the compact reaches the DB', async ({
     page,

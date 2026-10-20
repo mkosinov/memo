@@ -22,7 +22,7 @@ import { searchAndSelect } from './helpers/combobox';
  *
  * Data hygiene: totals are asserted ONLY against deterministic result sets —
  * each test either scopes via its own unique owner (client/service filter) or
- * relies on the immutable seed pins (alpika location gallery, tag pair).
+ * relies on the immutable seed pins (Альпика location gallery, tag pair).
  *
  * Requires: dev server on :3002 (webServer), backend on :8000
  */
@@ -275,9 +275,10 @@ test.describe('Photos — Service filter (variant A)', () => {
 
 test.describe('Photos — Location filter', () => {
   test('location-OWNED photo visible; activity-owned photos at L1 are NOT', async ({ page, request }) => {
-    // Seed pins (backend/src/seed/seed.py _seed_photos): ph4 is location-owned
-    // at alpika; ph6/ph7 are activity-owned whose activities (ev_1/ev_4) also
-    // sit at alpika — the direct-only filter must NOT surface them.
+    // Seed pins (backend/src/seed/seed.py _seed_photos): the interior shot is
+    // location-owned at Альпика; guest-1/guest-2 are activity-owned whose
+    // activities also sit at Альпика — the direct-only filter must NOT
+    // surface them.
     const locsResp = await request.get(`${BACKEND}/api/v1/locations/all`);
     const alpika = ((await locsResp.json()) as Array<{ id: string; title: string }>).find(
       (l) => l.title === 'Альпика',
@@ -304,8 +305,9 @@ test.describe('Photos — Location filter', () => {
 
 test.describe('Photos — Tags AND filter', () => {
   test('selecting «новинка» + «хит» chips leaves only the pair photo', async ({ page }) => {
-    // Seed pins: ph5 carries tag1+tag2 (the pair); ph6 carries tag1+tag7 —
-    // the AND semantics must drop it once tag2 joins the chip set.
+    // Seed pins: the pair photo carries «новинка»+«хит»; guest-1 carries
+    // «новинка»+«гость» — the AND semantics must drop it once «хит» joins
+    // the chip set.
     await waitForPhotosReady(page);
     const addTag = page.getByPlaceholder('Добавить тег...');
 

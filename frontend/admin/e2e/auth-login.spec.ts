@@ -32,8 +32,12 @@ test.describe('User Scenario 1 — admin signs in', () => {
     await page.locator('#login-password').fill('admin12345');
     await page.getByRole('button', { name: 'Войти' }).click();
 
-    // Landed in the app with the menubar (the (main) shell) rendered.
-    await expect(page).toHaveURL(/\/$/);
+    // Landed in the app with the menubar (the (main) shell) rendered. The
+    // post-login URL is one of two legitimate states, not a fixed path: the
+    // soft navigation to "/" (optimistic URL) on a warm dev server, or the
+    // resolved server redirect "/"→"/schedule" on a cold one (GH #389: the
+    // Node 26 CI exposed this — never assert the transitional state alone).
+    await expect(page).toHaveURL(/\/(schedule)?$/);
     await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
     // Services page hosts the «Материалы» view toggle.

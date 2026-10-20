@@ -45,9 +45,17 @@ async def test_seed_creates_staff_users(db_manager: DBManager) -> None:
     await seed_data(db_manager)
 
     rows = await _users(db_manager)
+    # The master account links to the first seeded staff card (sort_order 0 —
+    # «Ольга Середа»); staff ids are UUIDs (GH #491), so resolve it by order.
+    async with db_manager.async_session() as session:
+        first_staff_id = (
+            await session.execute(
+                text("SELECT id FROM staff ORDER BY sort_order LIMIT 1")
+            )
+        ).scalar_one()
     assert rows == [
         ("+79990000001", "admin", None, 1),
-        ("+79990000002", "master", "m1", 1),  # linked to first seeded master
+        ("+79990000002", "master", first_staff_id, 1),
     ]
 
 

@@ -14,12 +14,15 @@
  *   id ASC), no replacement → skipped + reported in the toast; a repeat
  *   click → copied=0, тост «Всё уже есть».
  *
- * Seed anchors (backend/src/seed/seed.py; the per-test reset keeps ev_* rows):
- *   ev_0..ev_27  → week-before-last (W0) — 28 rows, 3 private: ev_2, ev_12, ev_23
- *   ev_28..ev_35 → last week (W1)
- *   ev_36..ev_44 → current week (W2) — copy SOURCE for the empty next week
- * Mondays are resolved FROM THE DB (not Date.now()) so a midnight rollover
- * between stack boot and test run cannot shift the week windows.
+ * Seed anchors (backend/src/seed/seed.py; the per-test reset keeps them):
+ *   week-before-last (W0) — 28 rows, 3 private (former aliases ev_2/12/23)
+ *   last week (W1)        — 8 rows
+ *   current week (W2)     — 9 rows, copy SOURCE for the empty next week
+ * GH #491: seed ids are UUIDs — there is no id pattern to grep, so the
+ * seed↔copy discriminator is the seed created_at batch (every seed row
+ * precedes the first seeded record; copies are created by the API later),
+ * and the week Mondays are resolved FROM THE DB (not Date.now()) so a
+ * midnight rollover between stack boot and test run cannot shift windows.
  *
  * Test weeks: S1/S2/S3/S5/S7 copy into the empty next week (N = W2+7);
  * S4 into last week (W1); S8 views N2 = W2+14 (its source week is empty).
@@ -36,25 +39,76 @@ import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
+import { seedId } from './fixtures/seed-ids';
 import { createTestActivity } from './fixtures/factories';
 
 const BACKEND = resolveBackendUrl();
 
+// ─── Seed anchors by business key (GH #491 — ids are UUIDs) ─────────────────
+
+// GH #491: resolved at test runtime (beforeAll) — the module stays DB-free
+// at import: CI's `playwright --list` collects specs before the shard stack
+// seeds the DB.
+let ALPIKA = ''; let GRAND = ''; let P1389 = '';
+let M1 = ''; let M2 = ''; let M3 = ''; let M4 = ''; let M5 = ''; let M7 = '';
+let S2 = ''; let S3 = ''; let S5 = ''; let S6 = ''; let S7 = '';
+let SEED_MASTER_SECTIONS: Record<string, { specialty: string; color: string }> = {};
+
+/** All seed rows share the seed transaction's created_at, which precedes
+ * every test-created row — MIN(records.created_at) is the canonical guard
+ * (the seed inserts activities before records within one batch). */
+const SEED_GUARD = 'created_at <= (SELECT MIN(created_at) FROM records)';
+const COPY_GUARD = 'created_at > (SELECT MIN(created_at) FROM records)';
+
 // ─── Seed anchor weeks (resolved from the DB — see header) ──────────────────
 
-let W0 = ''; // week-before-last Monday (ev_0 week — carries the 3 private rows)
-let W1 = ''; // last-week Monday (ev_28 week)
-let W2 = ''; // current-week Monday (ev_36 week)
+let W0 = ''; // week-before-last Monday (carries the 3 private rows)
+let W1 = ''; // last-week Monday
+let W2 = ''; // current-week Monday — copy SOURCE for the empty next week
+
+/** Monday of the week containing the given ISO date (UTC arithmetic). */
+function mondayOf(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dow = (dt.getUTCDay() + 6) % 7; // 0 = Monday
+  dt.setUTCDate(dt.getUTCDate() - dow);
+  return dt.toISOString().slice(0, 10);
+}
 
 test.beforeAll(() => {
-  const read = (id: string): string => {
-    const row = queryDBRow(`SELECT substr(start,1,10) AS d FROM activities WHERE id='${id}'`);
-    if (!row) throw new Error(`copy-last-week: seed anchor activity ${id} missing`);
-    return String(row.d);
+  // Seed ids by business key (GH #491 — ids are UUIDs; no DB at import).
+  ALPIKA = seedId('locations', 'title', 'Альпика');
+  GRAND = seedId('locations', 'title', 'Гранд Отель Поляна');
+  P1389 = seedId('locations', 'title', 'Поляна 1389');
+  M1 = seedId('staff', 'last_name', 'Середа');
+  M2 = seedId('staff', 'last_name', 'Большакова');
+  M3 = seedId('staff', 'last_name', 'П.');
+  M4 = seedId('staff', 'last_name', 'Тюльпина');
+  M5 = seedId('staff', 'last_name', 'В.');
+  M7 = seedId('staff', 'last_name', 'Горох');
+  S2 = seedId('services', 'title', 'Картина акрилом');
+  S3 = seedId('services', 'title', 'Мини-картина акрилом');
+  S5 = seedId('services', 'title', 'Ручная лепка');
+  S6 = seedId('services', 'title', 'Роспись одежды');
+  S7 = seedId('services', 'title', 'Морской пейзаж');
+  SEED_MASTER_SECTIONS = {
+    [M1]: { specialty: 'живопись', color: '#5B8C7A' },
+    [M2]: { specialty: 'керамика', color: '#6B7E9C' },
+    [M3]: { specialty: 'живопись', color: '#A07060' },
+    [M4]: { specialty: 'керамика', color: '#7A6E9C' },
+    [M5]: { specialty: 'живопись', color: '#8A7840' },
+    [M7]: { specialty: 'керамика', color: '#9A5870' },
   };
-  W0 = read('ev_0');
-  W1 = read('ev_28');
-  W2 = read('ev_36');
+
+  // Latest SEED activity day lands in the current seed week (the fixed
+  // reference week ended 2026-06-21, long before any relative week).
+  const row = queryDBRow(
+    `SELECT MAX(substr(start,1,10)) AS d FROM activities WHERE ${SEED_GUARD}`,
+  );
+  if (!row || !row.d) throw new Error('copy-last-week: no seed activities found');
+  W2 = mondayOf(String(row.d));
+  W1 = addDays(W2, -7);
+  W0 = addDays(W2, -14);
 });
 
 // ─── Date helpers (pure-date arithmetic — no TZ hazards, #142) ──────────────
@@ -71,11 +125,11 @@ function weekWhere(monday: string): string {
   return `substr(start,1,10) >= '${monday}' AND substr(start,1,10) <= '${addDays(monday, 6)}'`;
 }
 
-/** Rows in the window that are NOT seed ids → copies (UUID ids). */
+/** Rows in the window that are NOT seed rows → copies (created_at guard). */
 function countCopies(monday: string): number {
   const row = queryDBRow(
     `SELECT COUNT(*) AS n FROM activities
-     WHERE id NOT LIKE 'ev\\_%' ESCAPE '\\' AND id NOT LIKE 'ev_fixed_%'
+     WHERE ${COPY_GUARD}
      AND ${weekWhere(monday)}`,
   );
   if (!row) throw new Error('copy-last-week: copies count query failed');
@@ -98,10 +152,10 @@ function parityCount(srcMonday: string, tgtMonday: string): number {
       AND t.location_id = s.location_id
       AND substr(t.start,1,10) = date(substr(s.start,1,10), '+7 days')
       AND substr(s.start,11) = substr(t.start,11)
-     WHERE s.id LIKE 'ev\\_%' ESCAPE '\\' AND s.id NOT LIKE 'ev_fixed_%'
+     WHERE s.${SEED_GUARD}
        AND s.is_private = 0
        AND ${weekWhere(srcMonday).replaceAll('start', 's.start')}
-       AND t.id NOT LIKE 'ev\\_%' ESCAPE '\\' AND t.id NOT LIKE 'ev_fixed_%'
+       AND t.${COPY_GUARD}
        AND ${weekWhere(tgtMonday).replaceAll('start', 't.start')}`,
   );
   if (!row) throw new Error('copy-last-week: parity count query failed');
@@ -202,15 +256,8 @@ async function delayActivitiesGETs(page: Page, ms: number): Promise<void> {
   });
 }
 
-/** Seed master sections (specialty/color) — for the S6 restore PATCH. */
-const SEED_MASTER_SECTIONS: Record<string, { specialty: string; color: string }> = {
-  m1: { specialty: 'живопись', color: '#5B8C7A' },
-  m2: { specialty: 'керамика', color: '#6B7E9C' },
-  m3: { specialty: 'живопись', color: '#A07060' },
-  m4: { specialty: 'керамика', color: '#7A6E9C' },
-  m5: { specialty: 'живопись', color: '#8A7840' },
-  m7: { specialty: 'керамика', color: '#9A5870' },
-};
+/** Seed master sections (specialty/color) — for the S6 restore PATCH.
+ * (Built in beforeAll together with the resolved staff ids.) */
 
 /** Restore a seed master through the штатный path: person + master section. */
 async function restoreSeedMaster(request: APIRequestContext, id: string): Promise<void> {
@@ -242,18 +289,18 @@ test('S1: чистая неделя ← копия прошлой — карто
 
   await openCopyPopover(page);
   // Net counters = source rows of the location (target empty, no private):
-  // alpika 4 (ev_38/39/43/44), grand 3 (ev_36/40/42), p1389 2 (ev_37/41).
+  // Альпика 4, Гранд 3, Поляна 1389 2.
   await expectLocationCounters(page, [
-    { id: 'alpika', count: 4 },
-    { id: 'grand', count: 3 },
-    { id: 'p1389', count: 2 },
+    { id: ALPIKA, count: 4 },
+    { id: GRAND, count: 3 },
+    { id: P1389, count: 2 },
   ]);
   // No private rows in the current week → no private hint.
   await expect(page.getByTestId('copy-private-hint')).toHaveCount(0);
 
   const { request: body, result } = await clickCopyConfirm(page);
   expect(body.week_start).toBe(target);
-  expect([...body.locations].sort()).toEqual(['alpika', 'grand', 'p1389']);
+  expect([...body.locations].sort()).toEqual([ALPIKA, GRAND, P1389].sort());
   expect(result).toEqual({
     copied: 9,
     skipped_duplicates: 0,
@@ -280,9 +327,9 @@ test('S2: повторное копирование не дублирует — 
 
   await openCopyPopover(page);
   await expectLocationCounters(page, [
-    { id: 'alpika', count: 4 },
-    { id: 'grand', count: 3 },
-    { id: 'p1389', count: 2 },
+    { id: ALPIKA, count: 4 },
+    { id: GRAND, count: 3 },
+    { id: P1389, count: 2 },
   ]);
 
   // Hold the post-copy refetches so the popover's target-week cache stays
@@ -316,30 +363,34 @@ test('S2: повторное копирование не дублирует — 
 
 test('S3: merge в частично занятую неделю — несовпадающее не блокирует, совпавшее пропущено, счётчики нетто', async ({ page, request }) => {
   const target = addDays(W2, 7);
-  // Pre-create in the target week: one KEY duplicate of ev_36 (m1/s7 Mon 10:00,
-  // 180 — location alpika + capacity 6 deliberately different: outside the key,
-  // spec §5.2) and one non-matching activity (Tue 09:00).
+  // Pre-create in the target week: one KEY duplicate of the W2 source opener
+  // (m1/s7 Mon 10:00, 180 — location Альпика + capacity 6 deliberately
+  // different: outside the key, spec §5.2) and one non-matching activity
+  // (Tue 09:00).
   //
   // The duplicate's start must be the SOURCE row's stored start shifted +7d —
   // the dedup key is the EXACT start (the seed week base carries boot-time
   // seconds/micros, seed.py uses datetime.now()), so a clean ':00' slot would
   // NOT be a key match.
-  const srcRow = queryDBRow(`SELECT start FROM activities WHERE id='ev_36'`);
-  if (!srcRow) throw new Error('copy-last-week: seed ev_36 missing');
+  const srcRow = queryDBRow(
+    `SELECT start FROM activities WHERE ${SEED_GUARD} AND substr(start,1,10)='${W2}'
+     ORDER BY start LIMIT 1`,
+  );
+  if (!srcRow) throw new Error('copy-last-week: W2 source opener missing');
   const srcStartISO = String(srcRow.start).replace(' ', 'T');
   const dupStart = `${addDays(srcStartISO.slice(0, 10), 7)}T${srcStartISO.slice(11)}`;
   const dup = await createTestActivity(request, {
-    master_id: 'm1',
-    service_id: 's7',
-    location_id: 'alpika',
+    master_id: M1,
+    service_id: S7,
+    location_id: ALPIKA,
     start: dupStart,
     duration: 180,
     capacity: 6,
   });
   await createTestActivity(request, {
-    master_id: 'm3',
-    service_id: 's2',
-    location_id: 'grand',
+    master_id: M3,
+    service_id: S2,
+    location_id: GRAND,
     start: `${addDays(target, 1)}T09:00:00`,
     duration: 60,
     capacity: 4,
@@ -350,12 +401,12 @@ test('S3: merge в частично занятую неделю — несовп
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(2);
 
   await openCopyPopover(page);
-  // Honest net counters: the ev_36 duplicate subtracts from grand (the SOURCE
-  // row's location), the non-matching row subtracts nothing.
+  // Honest net counters: the source-opener duplicate subtracts from Гранд
+  // (the SOURCE row's location), the non-matching row subtracts nothing.
   await expectLocationCounters(page, [
-    { id: 'alpika', count: 4 },
-    { id: 'grand', count: 2 },
-    { id: 'p1389', count: 2 },
+    { id: ALPIKA, count: 4 },
+    { id: GRAND, count: 2 },
+    { id: P1389, count: 2 },
   ]);
 
   const { result } = await clickCopyConfirm(page);
@@ -376,7 +427,7 @@ test('S3: merge в частично занятую неделю — несовп
   // The duplicate slot holds exactly ONE row (the pre-created one — no copy
   // duplicate despite the different location/capacity), and it survives.
   const slot = queryDBRow(
-    `SELECT COUNT(*) AS n FROM activities WHERE master_id='m1' AND service_id='s7'
+    `SELECT COUNT(*) AS n FROM activities WHERE master_id='${M1}' AND service_id='${S7}'
      AND substr(start,1,16)='${target} 10:00'`,
   );
   expect(Number(slot!.n)).toBe(1);
@@ -389,16 +440,16 @@ test('S4: индивидуальные не копируются — подск�
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(8);
 
   await openCopyPopover(page);
-  // ev_2 / ev_12 / ev_23 are is_private in the source week.
+  // ev_2 / ev_12 / ev_23 aliases — the 3 private rows in the source week.
   await expect(page.getByTestId('copy-private-hint')).toHaveText(
     '3 индивидуальных занятий не копируются',
   );
   // Net counters: minus the 3 private rows, minus the 4 key duplicates already
-  // in the target week (ev_0, ev_4, ev_17, ev_25 match ev_28/29/33/35).
+  // in the target week (the W0 Monday/Tuesday rows matching W1 sources).
   await expectLocationCounters(page, [
-    { id: 'alpika', count: 6 },
-    { id: 'grand', count: 8 },
-    { id: 'p1389', count: 7 },
+    { id: ALPIKA, count: 6 },
+    { id: GRAND, count: 8 },
+    { id: P1389, count: 7 },
   ]);
 
   const { result } = await clickCopyConfirm(page);
@@ -428,11 +479,11 @@ test('S4: индивидуальные не копируются — подск�
       queryDBRow(`SELECT COUNT(*) AS n FROM activities WHERE is_private=1 AND ${weekWhere(W1)}`)!.n,
     ),
   ).toBe(0);
-  // …and the three private slots (ev_2 Mon 14:00 / ev_12 Thu 18:00 / ev_23
-  // Sat 14:30, each +7d) stay empty.
-  expectNoSlot('m4', 's3', `${W1} 14:00`);
-  expectNoSlot('m5', 's5', `${addDays(W1, 3)} 18:00`);
-  expectNoSlot('m3', 's5', `${addDays(W1, 5)} 14:30`);
+  // …and the three private slots (ПН 14:00 m4/s3 / ЧТ 18:00 m5/s5 / СБ 14:30
+  // m3/s5, each +7d) stay empty.
+  expectNoSlot(M4, S3, `${W1} 14:00`);
+  expectNoSlot(M5, S5, `${addDays(W1, 3)} 18:00`);
+  expectNoSlot(M3, S5, `${addDays(W1, 5)} 14:30`);
 });
 
 test('S5: архивная локация пропускается — занятий из неё нет, локации нет в попапе', async ({ page, request }) => {
@@ -440,7 +491,7 @@ test('S5: архивная локация пропускается — заня�
   // dedicated POST /{id}/archive route (the same call the locations table's
   // «В архив» makes; locations.py has no PATCH-is_active archive path) —
   // BEFORE the page load, then restore in finally.
-  const archiveResp = await request.post(`${BACKEND}/api/v1/locations/p1389/archive`);
+  const archiveResp = await request.post(`${BACKEND}/api/v1/locations/${P1389}/archive`);
   expect(archiveResp.status()).toBe(200);
   expect(await archiveResp.json()).toMatchObject({ archived: true });
 
@@ -450,12 +501,12 @@ test('S5: архивная локация пропускается — заня�
     await switchToWeek(page, target);
 
     await openCopyPopover(page);
-    // p1389 («Поляна 1389») is not offered in the popover at all.
-    await expect(page.getByTestId('copy-loc-p1389')).toHaveCount(0);
+    // «Поляна 1389» is not offered in the popover at all.
+    await expect(page.getByTestId(`copy-loc-${P1389}`)).toHaveCount(0);
     await expect(page.getByTestId('copy-last-week-popover')).not.toContainText('Поляна 1389');
     await expectLocationCounters(page, [
-      { id: 'alpika', count: 4 },
-      { id: 'grand', count: 3 },
+      { id: ALPIKA, count: 4 },
+      { id: GRAND, count: 3 },
     ]);
 
     const { result } = await clickCopyConfirm(page);
@@ -472,12 +523,12 @@ test('S5: архивная локация пропускается — заня�
     await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(7);
     expect(countCopies(target)).toBe(7);
 
-    // The archived location's two source rows (ev_37 Mon 14:00 m4/s3,
-    // ev_41 Fri 14:00 m5/s1) never land.
-    expectNoSlot('m4', 's3', `${target} 14:00`);
-    expectNoSlot('m5', 's1', `${addDays(target, 4)} 14:00`);
+    // The archived location's two source rows (ПН 14:00 m4/s3,
+    // ПТ 14:00 m5/s1) never land.
+    expectNoSlot(M4, S3, `${target} 14:00`);
+    expectNoSlot(M5, seedId('services', 'title', 'Картина маслом'), `${addDays(target, 4)} 14:00`);
   } finally {
-    await request.post(`${BACKEND}/api/v1/locations/p1389/restore`);
+    await request.post(`${BACKEND}/api/v1/locations/${P1389}/restore`);
   }
 });
 
@@ -487,7 +538,7 @@ test('S6: ремап архивного мастера — первый акти
   // керамика remains → no replacement) through the штатный staff archive
   // path — bare POST = D6 preselected checkboxes {archive_master, archive_user}.
   // None of them holds a user link (only m1 does) → no account side effects.
-  for (const id of ['m3', 'm2', 'm4', 'm7']) {
+  for (const id of [M3, M2, M4, M7]) {
     const resp = await request.post(`${BACKEND}/api/v1/staff/${id}/archive`);
     expect(resp.status()).toBe(200);
   }
@@ -500,9 +551,9 @@ test('S6: ремап архивного мастера — первый акти
     // D2: the «не найдут замену» hint is NOT computable client-side — the
     // counters stay gross (9 across 3 locations).
     await expectLocationCounters(page, [
-      { id: 'alpika', count: 4 },
-      { id: 'grand', count: 3 },
-      { id: 'p1389', count: 2 },
+      { id: ALPIKA, count: 4 },
+      { id: GRAND, count: 3 },
+      { id: P1389, count: 2 },
     ]);
 
     const { result } = await clickCopyConfirm(page);
@@ -524,34 +575,35 @@ test('S6: ремап архивного мастера — первый акти
     expect(countCopies(target)).toBe(6);
 
     // m3's rows (ВТ 11:00 / СБ 14:00 «Картина акрилом») remapped under m1 —
-    // the FIRST active живопись master in canonical board order (m1 < m5).
+    // the FIRST active живопись master in canonical board order
+    // (Середа sort_order 0 < В. sort_order 4).
     const remapTue = queryDBRow(
-      `SELECT COUNT(*) AS n FROM activities WHERE master_id='m1' AND service_id='s2'
+      `SELECT COUNT(*) AS n FROM activities WHERE master_id='${M1}' AND service_id='${S2}'
        AND substr(start,1,16)='${addDays(target, 1)} 11:00'`,
     );
     expect(Number(remapTue!.n)).toBe(1);
     const remapSat = queryDBRow(
-      `SELECT COUNT(*) AS n FROM activities WHERE master_id='m1' AND service_id='s2'
+      `SELECT COUNT(*) AS n FROM activities WHERE master_id='${M1}' AND service_id='${S2}'
        AND substr(start,1,16)='${addDays(target, 5)} 14:00'`,
     );
     expect(Number(remapSat!.n)).toBe(1);
 
-    // The керамика rows (m4 ПН 14:00 «Мини-картина», m2 СР 10:00 / ВС 11:00)
-    // found no active керамика replacement → skipped.
-    expectNoSlot('m4', 's3', `${target} 14:00`);
-    expectNoSlot('m2', 's6', `${addDays(target, 2)} 10:00`);
-    expectNoSlot('m2', 's5', `${addDays(target, 6)} 11:00`);
+    // The керамика rows (m4 ПН 14:00 «Мини-картина», m2 СР 10:00 / ВС 11:00
+    // «Ручная лепка») found no active керамика replacement → skipped.
+    expectNoSlot(M4, S3, `${target} 14:00`);
+    expectNoSlot(M2, S6, `${addDays(target, 2)} 10:00`);
+    expectNoSlot(M2, S5, `${addDays(target, 6)} 11:00`);
 
     // No copy carries an archived master either (remap invariant, spec §5.3).
     const archivedCarriers = queryDBRow(
       `SELECT COUNT(*) AS n FROM activities t
        JOIN masters m ON m.staff_id = t.master_id
-       WHERE t.id NOT LIKE 'ev\\_%' ESCAPE '\\' AND t.id NOT LIKE 'ev_fixed_%'
+       WHERE t.${COPY_GUARD}
        AND ${weekWhere(target).replaceAll('start', 't.start')} AND NOT m.is_active`,
     );
     expect(Number(archivedCarriers!.n)).toBe(0);
   } finally {
-    for (const id of ['m3', 'm2', 'm4', 'm7']) {
+    for (const id of [M3, M2, M4, M7]) {
       await restoreSeedMaster(request, id);
     }
   }
@@ -564,19 +616,19 @@ test('S7: снятая галка локации — её занятия не с
 
   await openCopyPopover(page);
   await expectLocationCounters(page, [
-    { id: 'alpika', count: 4 },
-    { id: 'grand', count: 3 },
-    { id: 'p1389', count: 2 },
+    { id: ALPIKA, count: 4 },
+    { id: GRAND, count: 3 },
+    { id: P1389, count: 2 },
   ]);
 
-  // Uncheck alpika → 4 rows stay behind.
-  await page.getByTestId('copy-loc-alpika').uncheck();
+  // Uncheck Альпика → 4 rows stay behind.
+  await page.getByTestId(`copy-loc-${ALPIKA}`).uncheck();
 
   const { request: body, result } = await clickCopyConfirm(page);
   expect(body.week_start).toBe(target);
   // The request ALWAYS carries the explicit checked list (no "all" encoding).
-  expect(body.locations).toEqual(expect.arrayContaining(['grand', 'p1389']));
-  expect(body.locations).not.toContain('alpika');
+  expect(body.locations).toEqual(expect.arrayContaining([GRAND, P1389]));
+  expect(body.locations).not.toContain(ALPIKA);
   expect(body.locations).toHaveLength(2);
 
   expect(result).toEqual({
@@ -591,11 +643,12 @@ test('S7: снятая галка локации — её занятия не с
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(5);
   expect(countCopies(target)).toBe(5);
 
-  // None of alpika's four source rows (ВТ 11:00 / СР 10:00 / СБ 14:00 / ВС 11:00) lands…
+  // None of Альпика's four source rows (ВТ 11:00 / СР 10:00 / СБ 14:00 / ВС
+  // 11:00) lands…
   expect(
     Number(
       queryDBRow(
-        `SELECT COUNT(*) AS n FROM activities WHERE location_id='alpika' AND ${weekWhere(target)}`,
+        `SELECT COUNT(*) AS n FROM activities WHERE location_id='${ALPIKA}' AND ${weekWhere(target)}`,
       )!.n,
     ),
   ).toBe(0);
@@ -616,5 +669,5 @@ test('S8: пустая прошлая неделя — пустое состоя
   );
   await expect(page.getByTestId('copy-confirm')).toBeDisabled();
   // No location picker rows render for an empty source week.
-  await expect(page.getByTestId('copy-loc-alpika')).toHaveCount(0);
+  await expect(page.getByTestId(`copy-loc-${ALPIKA}`)).toHaveCount(0);
 });

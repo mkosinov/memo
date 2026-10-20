@@ -29,6 +29,7 @@ import { adminApiContext } from './fixtures/admin-context';
 import {
   waitForScheduleReady, waitForRecordsReady, openModal,
 } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
   createTestClient, createTestActivity, createTestRecord,
@@ -36,6 +37,16 @@ import {
 } from './fixtures/factories';
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+
+let M1 = '';
 
 test.describe('GH #263 S3 — master payment CUD recalculates payment status', () => {
   useMasterSession();
@@ -47,7 +58,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
     // OWN fixtures (admin pen — no activities:write on the master token):
     // one visit at 3500 ₽, no payments → the badge starts «Не оплачено».
     const client = await createTestClient(admin);
-    const activity = await createTestActivity(admin, { master_id: 'm1' });
+    const activity = await createTestActivity(admin, { master_id: M1 });
     const record = await createTestRecord(admin, activity.id, client.id);
 
     try {

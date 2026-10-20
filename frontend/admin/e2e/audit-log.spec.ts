@@ -46,6 +46,17 @@ import type { Page } from '@playwright/test';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+import { seedId } from './fixtures/seed-ids';
+
+let M1 = '';
+
 /** Marker prefix — unique per run/test so journal assertions never
  * collide with rows left by sibling specs (audit_logs are NOT wiped by
  * the per-test seed reset; rows accumulate across a run). */
@@ -241,11 +252,11 @@ test.describe('GH #344 §9 — журнал действий администр�
     // Б — the seeded demo master, a DISTINCT author (the admin of С1/С2 is
     // the only other journal writer in this run). His own record's payment
     // is patched through the modal UI (master-role-payments S3 precedent:
-    // activity pinned to m1 — the seed card the demo master is linked to),
+    // activity pinned to «Ольга Середа» — the seed card the demo master is linked to),
     // which journals an update row carrying Б's user_id. Without such a
     // row the author-filter step below could not prove narrowing.
     const clientB = await createTestClient(request);
-    const activityB = await createTestActivity(request, { master_id: 'm1' });
+    const activityB = await createTestActivity(request, { master_id: M1 });
     const recordB = await createTestRecord(request, activityB.id, clientB.id, {
       visits: [],
     });

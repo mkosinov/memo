@@ -175,20 +175,20 @@ class TestSeed:
             try:
                 await seed_data(manager)
                 async with manager.async_session() as session:
-                    staff_ids = (await session.execute(text(
-                        "SELECT id FROM staff ORDER BY sort_order"
-                    ))).scalars().all()
-                    assert staff_ids == ["m1", "m2", "m3", "m4", "m5", "m7"]
+                    # Seed ids are UUIDs (GH #491) — cards resolve by sort_order.
+                    staff_rows = (await session.execute(text(
+                        "SELECT id, sort_order FROM staff ORDER BY sort_order"
+                    ))).all()
+                    assert [r[1] for r in staff_rows] == [0, 1, 2, 3, 4, 5]
+                    staff_ids = [r[0] for r in staff_rows]
 
                     masters = (await session.execute(text(
                         "SELECT staff_id, specialty, color, is_active FROM masters"
-                        " ORDER BY staff_id"
                     ))).all()
-                    assert [m[0] for m in masters] == ["m1", "m2", "m3", "m4", "m5", "m7"]
-                    m1 = dict(zip(("staff_id", "specialty", "color", "is_active"), masters[0]))
-                    assert m1["specialty"] == "живопись"
-                    assert m1["color"] == "#5B8C7A"
-                    assert m1["is_active"] == 1
+                    by_staff = {m[0]: m[1:] for m in masters}
+                    assert sorted(by_staff.keys()) == sorted(staff_ids)
+                    # The first card's extension row (former alias m1):
+                    assert by_staff[staff_ids[0]] == ("живопись", "#5B8C7A", 1)
 
                     positions = dict((await session.execute(text(
                         "SELECT id, title FROM positions"
@@ -199,18 +199,14 @@ class TestSeed:
 
                     links = (await session.execute(text(
                         "SELECT sp.staff_id, sp.position_id FROM staff_positions sp"
-                        " ORDER BY sp.staff_id"
                     ))).all()
-                    assert links == [
-                        ("m1", "master"), ("m2", "master"), ("m3", "master"),
-                        ("m4", "master"), ("m5", "master"), ("m7", "master"),
-                    ]
+                    assert set(links) == {(sid, "master") for sid in staff_ids}
 
-                    # users linked via staff_id (demo master account → m1)
+                    # users linked via staff_id (demo master account → first card)
                     users = (await session.execute(text(
                         "SELECT phone, staff_id FROM users ORDER BY phone"
                     ))).all()
-                    assert ("+79990000002", "m1") in users
+                    assert ("+79990000002", staff_ids[0]) in users
             finally:
                 await manager.engine.dispose()
 

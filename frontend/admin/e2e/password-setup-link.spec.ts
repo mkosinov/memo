@@ -149,7 +149,9 @@ test.describe('#348 S2 — install password by link, then log in', () => {
       await page.locator('#login-phone').fill(phone.replace('+7', ''));
       await page.locator('#login-password').fill(E2E_PASSWORD);
       await page.getByRole('button', { name: 'Войти' }).click();
-      await expect(page).toHaveURL(/\/$/);
+      // Post-login URL: "/" (soft nav, warm server) or its resolved redirect
+      // "/schedule" (cold server) — GH #389.
+      await expect(page).toHaveURL(/\/(schedule)?$/);
       await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
       // The page's own session is the employee's (not the admin's). The

@@ -47,6 +47,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (секция N/A спеки); PR-временной DoD (4 зелёных e2e-джобы ≤ 10 мин, красная
     проба артефакта, гарды в логах CI) — на PR, T8/приёмка у архитектора.
   - Status: `docs/status/2026-10-20-e2e-ci-native-shards-415.md`
+- **GH #389 — Локальное vitest-окружение admin: TZ=UTC пин + выключение
+  Node-заглушки webstorage + декларативный пин Node 26 (.nvmrc)** — branch
+  `389-vitest-local-env` (2 коммита `fa1562a1..4d76f6a2`, base `b573542c`; 3 файла,
+  +12/−4; спека `docs/specs/2026-10-10-vitest-local-env-design.md` рев.3 и план
+  `docs/plans/2026-10-10-vitest-local-env-plan.md` — оба на main, unchanged by IMPL;
+  инфра-коммит тестового окружения — прод-код/контракты API/БД не тронуты):
+  - **TZ + webstorage (T1, `fa1562a1`):** `frontend/admin/vitest.config.ts` —
+    `process.env.TZ = 'UTC'` до `defineConfig` (детерминизм date-зависимых тестов)
+    и `test.execArgv: ['--no-experimental-webstorage']` — экспериментальная
+    встроенная заглушка localStorage в Node конфликтует с jsdom, отключена в пользу
+    jsdom-хранилища.
+  - **Пин Node 26 (T2, `4d76f6a2`):** новый `.nvmrc` (`26`); четыре CI-работы
+    `.github/workflows/test.yml` переведены с `node-version: 22` на
+    `node-version-file: .nvmrc` — единый декларативный источник версии.
+  - **Behavioral delta:** локальный `npx vitest run` в admin детерминирован по TZ и
+    хранилищу (до-фиксный RED — 6 TZ-чувствительных падений); CI-тесты едут на
+    Node 26 (верификация переключения — гейт PR CI).
+  - **Tests:** полный admin vitest **3053p/0f** (183 файла, exit 0); US-1/US-3 —
+    зелёные локально, US-2 — верифицируется на PR CI, US-4 (CI на Node 26) —
+    PENDING PR CI (finishing leg); пост-мерж — закрытие поглощённых #403/#460 и
+    пост-условие в #389.
+  - **Rev.4 (19.10, решение пользователя, до мержа PR):** (1) e2e-ассерт адреса
+    после входа в `auth-login.spec.ts` / `auth-roles.spec.ts` /
+    `password-setup-link.spec.ts` принимает оба легитимных состояния
+    (`/\/(schedule)?$/`): оптимистичный корень при мягкой навигации либо
+    разрешившийся серверный пересыл корня на `/schedule` — на Node 26 холодный
+    dev-сервер стабильно доводил пересыл, прежний ассерт переходного состояния
+    падал дважды идентично (PR CI run 38128103495, 15/16 чеков зелёные);
+    (2) пин `.nvmrc` распространён на `web-checks.yml`, `visual-check.yml`,
+    `update-snapshots.yml` — версия Node едина во всех семи setup-node CI,
+    единственный источник `.nvmrc`. Спека рев.4 (расширение скоупа + резолюция
+    риска e2e) едет этим же PR.
+  - Status: `docs/status/2026-10-11-vitest-local-env-389.md`
 - **GH #394 — Типизация `@transactional`: одна обёртка без слота, 30 подавлений в ноль
   (вариант C)** — branch `394-transactional-typing` (3 коммита `b334024f..fdbce5ea`,
   base `5821474f`; 39 файлов (14 src + 25 tests), +494/−418; спека

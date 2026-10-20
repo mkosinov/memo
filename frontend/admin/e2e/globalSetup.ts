@@ -177,18 +177,20 @@ export default async function globalSetup() {
   }
 
   // #152: diagnostic — assert seed contract before tests run. Two checks:
-  // (a) reject if leftover seed rows exist (ev_*, r1-r6, etc.) — means the DB
-  //     was not wiped + reseeded by scripts/e2e-shard-start.sh, likely a
-  //     manual `npx playwright test` bypass. Abort with diagnostic.
+  // (a) assert the seeded volume is present (55 activities / 6 records /
+  //     10 visits / 6 payments) — means the DB was wiped + reseeded by
+  //     scripts/e2e-shard-start.sh; a manual `npx playwright test` bypass
+  //     on a foreign DB aborts with a diagnostic. (Count-based since
+  //     GH #491: seed ids are UUIDs, there is no id pattern to grep.)
   // (b) assert API returns ≥1 activity for the current week. Empty = seed
   //     did not populate (e.g., seed failure, week rollover against stale
   //     data, missing seed subprocess). Abort with diagnostic.
 
-  // (a) Leftover seed rows check
-  let leftoverSeedRows = 0;
+  // (a) Seeded-volume presence check
+  let seedVolume: { activities: number; records: number; visits: number; payments: number } | null = null;
   try {
-    const result = sqliteExecWithRetry(`sqlite3 "${dbPath}" "SELECT COUNT(*) FROM (SELECT 1 FROM activities WHERE id LIKE 'ev_%' OR id LIKE 'ev_fixed_%' UNION SELECT 1 FROM records WHERE id IN ('r1','r2','r3','r4','r5','r6') UNION SELECT 1 FROM visits WHERE id IN ('v1','v2','v3','v4','v5','v6','v7','v8','v9','v10') UNION SELECT 1 FROM payments WHERE id IN ('p1','p2','p3','p4','p5','p6'))"`);
-    leftoverSeedRows = parseInt(result, 10) || 0;
+    const result = sqliteExecWithRetry(`sqlite3 -json "${dbPath}" "SELECT (SELECT COUNT(*) FROM activities) AS activities, (SELECT COUNT(*) FROM records) AS records, (SELECT COUNT(*) FROM visits) AS visits, (SELECT COUNT(*) FROM payments) AS payments"`);
+    seedVolume = JSON.parse(result)[0] ?? null;
   } catch (err: any) {
     const msg = String(err?.stderr || err?.message || '');
     if (msg.includes('no such table') || msg.includes('no such file')) {
@@ -197,8 +199,20 @@ export default async function globalSetup() {
     }
     throw err;
   }
-  if (leftoverSeedRows === 0) {
-    throw new Error(`[#152] Seed data is missing from ${dbPath}. Expected ev_*/ev_fixed_*/r1-r6/v1-v10/p1-p6 rows. The shard stack was not started via scripts/e2e-shard-start.sh (which wipes + reseeds the DB). Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\`, then retry playwright.`);
+  const volume = seedVolume && {
+    activities: Number(seedVolume.activities),
+    records: Number(seedVolume.records),
+    visits: Number(seedVolume.visits),
+    payments: Number(seedVolume.payments),
+  };
+  if (
+    !volume ||
+    volume.activities < 55 ||
+    volume.records < 6 ||
+    volume.visits < 10 ||
+    volume.payments < 6
+  ) {
+    throw new Error(`[#152] Seed data is missing from ${dbPath}. Expected the seeded volume (55 activities / 6 records / 10 visits / 6 payments), got ${JSON.stringify(volume)}. The shard stack was not started via scripts/e2e-shard-start.sh (which wipes + reseeds the DB). Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\`, then retry playwright.`);
   }
 
   // (b) Current-week activities check (with 5×1s retry for 503 race)
@@ -239,7 +253,7 @@ export default async function globalSetup() {
   if (activitiesList.length === 0) {
     throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
   }
-  console.log(`[globalSetup] Seed contract verified: ${leftoverSeedRows} seed rows + ${activitiesList.length} activities for current week.`);
+  console.log(`[globalSetup] Seed contract verified: ${JSON.stringify(volume)} + ${activitiesList.length} activities for current week.`);
 
   // GH #247 T14: authenticate as the seeded admin ONCE per run and persist
   // the session cookie as a Playwright storageState file. Every project

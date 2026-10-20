@@ -12,8 +12,18 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+let M1 = '';
 
 test.describe('GH #263 T8 — master session smoke', () => {
   useMasterSession();
@@ -23,7 +33,8 @@ test.describe('GH #263 T8 — master session smoke', () => {
     expect(me.status()).toBe(200);
     const body = await me.json();
     expect(body?.user?.role).toBe('master');
-    // Seed contract #247 §3.11: the demo master is linked to staff card m1.
-    expect(body?.user?.master_id).toBe('m1');
+    // Seed contract #247 §3.11: the demo master is linked to the first seed
+    // staff card (Ольга Середа; GH #491 — the id resolves by business key).
+    expect(body?.user?.master_id).toBe(M1);
   });
 });

@@ -1,6 +1,7 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 
 /**
  * E2E: DayView column reorder with the KEYBOARD (GH #138 US-6).
@@ -23,12 +24,24 @@ import { gotoScheduleDay } from './fixtures/helpers';
 
 const BACKEND = resolveBackendUrl();
 
-// Use a future date that has no seed data — we create our own activities
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  MASTER_A = seedId('staff', 'last_name', 'Середа');
+  MASTER_B = seedId('staff', 'last_name', 'Большакова');
+  LOCATION = seedId('locations', 'title', 'Альпика');
+  SERVICE = seedId('services', 'title', 'Картина маслом');
+});
+
+
+// Use a fixed date — we create our own activities there (GH #491: seed ids
+// are UUIDs; staff/location/service resolve by business keys).
 const TEST_DATE = '2026-06-20';
-const MASTER_A = 'm1';
-const MASTER_B = 'm2';
-const LOCATION = 'alpika';
-const SERVICE = 's1';
+let MASTER_A = '';
+let MASTER_B = '';
+let LOCATION = '';
+let SERVICE = '';
 
 async function createActivity(
   request: import('@playwright/test').APIRequestContext,
@@ -63,14 +76,14 @@ async function navigateToTestDay(page: import('@playwright/test').Page) {
   await gotoScheduleDay(page, TEST_DATE);
 
   // Wait for DayView column headers to appear
-  await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
+  await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 5000 });
 }
 
 /**
  * Get current column header names.
  */
 async function getColumnHeaders(page: import('@playwright/test').Page): Promise<string[]> {
-  return page.locator('[data-testid^="column-header-m"]').allTextContents();
+  return page.locator('[data-testid^="column-header-"]').allTextContents();
 }
 
 /**
@@ -115,7 +128,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('Space lifts, ArrowLeft moves, Space drops — column order changes', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     await expect(allHeaders.nth(1)).toBeVisible({ timeout: 5000 });
 
     const headersBefore = await getColumnHeaders(page);
@@ -144,7 +157,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('keyboard reorder persists across reload (user settings)', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     const headersBefore = await getColumnHeaders(page);
 
     // Keyboard reorder: grab the second column, move left, drop.
@@ -158,7 +171,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
 
     // Reload on the same deep-linked day URL: the per-user column order survives.
     await page.reload();
-    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 10_000 });
+    await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 10_000 });
     const headersAfterReload = await getColumnHeaders(page);
     expect(headersAfterReload[0]).toBe(headersBefore[1]);
   });
@@ -166,7 +179,7 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
   test('Enter on the move-left button clicks it (no key hijack by the header drag sensor)', async ({ page }) => {
     await navigateToTestDay(page);
 
-    const allHeaders = page.locator('[data-testid^="column-header-m"]');
+    const allHeaders = page.locator('[data-testid^="column-header-"]');
     const headersBefore = await getColumnHeaders(page);
 
     // Regression guard (GH #138): Enter on the nested move-left button used to

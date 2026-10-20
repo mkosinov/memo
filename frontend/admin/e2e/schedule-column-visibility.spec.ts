@@ -33,7 +33,7 @@ async function clearUserSettingsStorage(page: import('@playwright/test').Page) {
 
 /**
  * Reset user settings via the API to ensure column orders include all masters/locations.
- * Previous test runs may have saved partial column orders (e.g. only ["m2"]),
+ * Previous test runs may have saved partial column orders (a single id),
  * which causes DayView to render only that one column.
  */
 async function resetUserSettings(request: import('@playwright/test').APIRequestContext) {
@@ -65,8 +65,9 @@ async function switchToDayView(page: import('@playwright/test').Page, date?: str
     // Deep-link to the specific date via the schedule URL
     await gotoScheduleDay(page, date);
 
-    // Wait for DayView column headers to appear (master columns start with 'column-header-m')
-    await page.waitForSelector('[data-testid^="column-header-m"]', { timeout: 5000 });
+    // Wait for DayView column headers to appear (any column — GH #491: master
+    // ids are UUIDs, there is no letter prefix to anchor on)
+    await page.waitForSelector('[data-testid^="column-header-"]', { timeout: 5000 });
   }
 }
 

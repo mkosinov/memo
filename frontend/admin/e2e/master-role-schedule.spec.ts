@@ -15,7 +15,7 @@
  *
  * Setup roles: the master token matrix has no activities:write / staff:write
  * (spec D7), so BOTH fixtures are created via the admin context (own rows
- * pinned to master_id 'm1'); the page, its data fetches and every scope
+ * pinned to the seed staff card «Ольга Середа»); the page, its data fetches and every scope
  * assertion ride the master session.
  *
  * Isolation: fixtures/test.ts resets the DB to seed before EVERY test, so
@@ -28,6 +28,17 @@ import { adminApiContext } from './fixtures/admin-context';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { createTestActivity, createTestMaster, cleanup } from './fixtures/factories';
 import { resolveBackendUrl } from './lib/backend-url';
+
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+import { seedId } from './fixtures/seed-ids';
+
+let M1 = '';
 
 test.describe('GH #263 S1 — master schedule shows only own activities', () => {
   useMasterSession();
@@ -46,7 +57,7 @@ test.describe('GH #263 S1 — master schedule shows only own activities', () => 
       master_id: foreignMaster.id,
     });
     // …and the session master's OWN activity (seed m1 = authed master).
-    const ownActivity = await createTestActivity(admin, { master_id: 'm1' });
+    const ownActivity = await createTestActivity(admin, { master_id: M1 });
 
     try {
       // The API surface is already scoped — the schedule data fetch must

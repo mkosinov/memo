@@ -91,10 +91,13 @@ TOOL_TIMEOUT_SECONDS = 600
 # 116 → 115 — TC001 1 → 0 in schemas/staff.py: the enums import line
 # gained a runtime-used name (ArchiveStatus default), so the UserRole
 # type-only sibling no longer flags as movable.
+# 2026-10-19 (GH #491 — seed on UUID ids): ruff 115 → 114 — B905 1 → 0:
+# the bare zip() lived in seed-pinned test data asserts (records by
+# literal id) rewritten to business-key joins with no zip.
 RUFF_BUDGET: dict[str, int] = {
     "B006": 0,
     "B011": 2,
-    "B905": 1,
+    "B905": 0,
     "E712": 1,
     "F841": 10,
     "RUF001": 9,

@@ -39,7 +39,9 @@ import globalSetupFunc from '../e2e/globalSetup';
 //   sqlite call #1 — canon application (.read) — returns ''
 //   sqlite call #2 — schema table list for the canon sanity — returns the
 //                    tables the fake canon below "covers"
-//   sqlite call #3 — #152 seed-rows count — per test ('0' or '30')
+//   sqlite call #3 — #152 seeded-volume check — per test: a JSON row
+//                    ({activities,records,visits,payments}) below the
+//                    thresholds (missing-seed test) or the full seed volume
 // The canon file itself is a REAL temp file (TEST_DB_PATH-based, SHARD_ID
 // unset), so resetToSeed()'s existence check and the sanity read succeed.
 describe('globalSetup #152 diagnostics', () => {
@@ -87,7 +89,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('') // canon application (.read)
       .mockReturnValueOnce('activities\nrecords') // schema tables for sanity
-      .mockReturnValueOnce('0'); // seed-rows check → missing
+      .mockReturnValueOnce('[{"activities":10,"records":0,"visits":0,"payments":0}]'); // seeded volume → below thresholds → missing
 
     await expect(globalSetupFunc()).rejects.toThrow(/Seed data is missing/);
   });
@@ -96,7 +98,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('30'); // seed rows present
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]'); // seeded volume present
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [],
@@ -110,7 +112,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('30');
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]');
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],
@@ -127,7 +129,7 @@ describe('globalSetup #152 diagnostics', () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
-      .mockReturnValueOnce('30');
+      .mockReturnValueOnce('[{"activities":55,"records":6,"visits":10,"payments":6}]');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => [{ id: 'ev_0' }],

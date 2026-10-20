@@ -24,6 +24,17 @@ import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
 
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+import { seedId } from './fixtures/seed-ids';
+
+let M1 = '';
+
 const SPECIALTY = 'S4-специальность';
 const COLOR = '#4A7C59';
 
@@ -63,7 +74,7 @@ test.describe('S4 — activity creation lists acting masters only', () => {
         Array<{ id: string }>).map((m) => m.id);
       expect(actingIds).not.toContain(staff.id);
       // Positive control — seed masters still listed (the view isn't empty).
-      expect(actingIds).toContain('m1');
+      expect(actingIds).toContain(M1);
 
       // 4. VERIFY UI — reload the schedule; the creation picker (StampPanel)
       //    no longer offers the archived master, seed masters stay.
@@ -143,7 +154,7 @@ async function openStampMasterPickerAndExpect(
   const dropdown = await openCombobox(page, trigger);
 
   // Positive control — an acting seed master is always offered.
-  await expect(dropdown.locator('[data-testid="combobox-option-m1"]')).toBeVisible();
+  await expect(dropdown.locator(`[data-testid="combobox-option-${M1}"]`)).toBeVisible();
 
   const option = dropdown.locator(`[data-testid="combobox-option-${staffId}"]`);
   if (expected === 'visible') {

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getLocations } from '@/app/lib/api/locations';
-import { toLocationView } from '@/app/lib/mappers/to-location-vm';
+import { getLocations as fetchLocations } from '@memo/api-client';
+import { toLocationViewFromResponse } from '@/app/lib/mappers/to-location-vm';
 import type { LocationView } from '@/app/lib/model/view/location';
 import { ApiError } from '@/app/lib/errors';
 
@@ -16,10 +16,13 @@ export function useLocations() {
     setIsLoading(true);
     setError(null);
 
-    getLocations()
-      .then((raw) => {
+    // Real locations via api-client (GH #491): the former in-repo mock list
+    // hardcoded the pre-UUID seed ids and stopped matching real rows once
+    // the seed switched to UUID ids.
+    fetchLocations()
+      .then((page) => {
         if (!cancelled) {
-          setLocations(raw.map(toLocationView));
+          setLocations(page.items.map(toLocationViewFromResponse));
         }
       })
       .catch((err) => {

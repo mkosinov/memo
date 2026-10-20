@@ -162,7 +162,10 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- 'frontend/admin/e2e/**/*-snapshots/**'
+          # Explicit snapshot DIRS, no globs: the ubuntu-26 runner's git
+          # (2.55+) stopped matching `**` pathspecs here (GH #491 round 5 —
+          # `git add` fatal: pathspec did not match any files).
+          git add -- frontend/admin/e2e/visual-regression.spec.ts-snapshots frontend/admin/e2e/wave6-status-snapshots.spec.ts-snapshots frontend/admin/e2e/week-view.spec.ts-snapshots
           if git diff --cached --quiet; then
             echo "No snapshot changes — nothing to commit."
             exit 0

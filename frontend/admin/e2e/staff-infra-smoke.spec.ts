@@ -33,11 +33,24 @@ import {
   E2E_PASSWORD,
 } from './fixtures/factories';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
+import { seedId } from './fixtures/seed-ids';
 
 const BACKEND = resolveBackendUrl();
 
-/** Seed staff ids preserved by the migration (m6 never existed). */
-const SEED_STAFF = ['m1', 'm2', 'm3', 'm4', 'm5', 'm7'];
+// GH #491: seed ids resolve at TEST runtime (beforeAll) — the module stays
+// DB-free at import: CI's `playwright --list` collects specs before the
+// shard stack seeds the DB.
+test.beforeAll(() => {
+  SEED_STAFF = ['Середа', 'Большакова', 'П.', 'Тюльпина', 'В.', 'Горох'].map(
+    (last_name) => seedId('staff', 'last_name', last_name),
+  );
+  M1 = SEED_STAFF[0];
+});
+
+
+/** Seed staff ids resolved by business key (GH #491 — ids are UUIDs). */
+let SEED_STAFF: string[] = [];
+let M1 = '';
 
 // Hand-off from test 1 → test 2 (serial, single worker — see file header).
 const leaked: { staffA?: string; staffB?: string; masterC?: string; phoneA?: string; phoneB?: string } = {};
@@ -142,11 +155,11 @@ test.describe('GH #266 T7 — staff e2e infrastructure smoke', () => {
     // seeded master account still linked to m1.
     expect(queryDBRows(`SELECT id FROM staff WHERE id IN (${SEED_STAFF.map((s) => `'${s}'`).join(',')})`))
       .toHaveLength(SEED_STAFF.length);
-    expect(queryDBRow(`SELECT sort_order FROM staff WHERE id='m1'`)).toMatchObject({ sort_order: 0 });
-    expect(queryDBRow(`SELECT sort_order FROM staff WHERE id='m7'`)).toMatchObject({ sort_order: 5 });
+    expect(queryDBRow(`SELECT sort_order FROM staff WHERE id='${M1}'`)).toMatchObject({ sort_order: 0 });
+    expect(queryDBRow(`SELECT sort_order FROM staff WHERE id='${SEED_STAFF[5]}'`)).toMatchObject({ sort_order: 5 });
     expect(queryDBRows(`SELECT id FROM positions WHERE id IN ('master','admin','smm')`)).toHaveLength(3);
     expect(queryDBRow(`SELECT staff_id FROM users WHERE phone='+79990000002'`))
-      .toMatchObject({ staff_id: 'm1' });
+      .toMatchObject({ staff_id: M1 });
 
     // A fresh card still creates cleanly after the reset (and cleans up).
     const fresh = await createTestStaff(request, {

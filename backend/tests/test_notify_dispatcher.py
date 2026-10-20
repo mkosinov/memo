@@ -9,7 +9,8 @@ Covered (spec §5, US-5–US-8):
   limit), the real scenario closes events for deleted records;
 - 3-attempts policy: ``attempts`` 1→2→3 → ``processing_error`` (last
   error text), NOT written during attempts 1–2, dead event no longer
-  picked;
+  picked, failing handler does not skip the rest of the batch (rollback
+  expiry — routing survives, later events process in the same sweep);
 - statuses: attempt rows appended, derived state per §4.3 (first
   ``sending`` → sending; first ``sent`` of ANY attempt → sent, terminal;
   final ``failed`` → failed), idempotent re-apply (duplicate redelivery
@@ -328,6 +329,39 @@ class TestAttemptsPolicy:
         # dead event: the polling predicate no longer takes it
         await dispatcher.process_pending_batch(factory, FakeQueue())
         assert len(calls) == 3
+
+    async def test_failing_event_rest_of_batch_processes_same_sweep(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """Regression (review of 6710caba): a failing handler's rollback
+        expires every loaded event of the batch; the routing must survive
+        that, and the events AFTER the failing one must still process in
+        the SAME sweep instead of waiting out the next ticks."""
+        real_handler = SCENARIOS["new_record"]
+        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
+        first = await _stage_event(db_session, occurred_at=base)
+        await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
+        await _stage_event(db_session, occurred_at=base + timedelta(seconds=2))
+
+        async def flaky(event, session, queue) -> None:
+            if event.id == first.id:
+                raise RenderError("template exploded")
+            await real_handler(event, session, queue)
+
+        monkeypatch.setitem(SCENARIOS, "new_record", flaky)
+
+        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
+
+        row = _event_row(first.id)
+        assert row["attempts"] == 1
+        assert row["processed_at"] is None
+        assert row["processing_error"] is None  # attempt 1 — not written yet
+        # the two LATER events closed in the same sweep (nonexistent record
+        # → the scenario closes them without a task)
+        processed = query_db(
+            f"SELECT id FROM domain_events WHERE processed_at IS NOT NULL AND id != '{first.id}'"
+        )
+        assert len(processed) == 2
 
 
 # ── cycle 2: notify:statuses → attempts + derived state (§4.3) ──────────────

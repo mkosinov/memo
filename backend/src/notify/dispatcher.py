@@ -135,38 +135,49 @@ async def process_pending_batch(
     the attempts bookkeeping to the dispatcher: rollback, ``attempts``
     +1, ``processing_error`` at the 3rd failure. No backoff — the next
     polling iteration is the retry cadence (§3.8).
+
+    The batch is selected as PLAIN ``(id, type)`` tuples and each event
+    re-loaded inside its own ``try``: a failing handler's ``rollback()``
+    expires every identity-mapped instance, and touching an attribute of
+    an expired instance is synchronous lazy IO — ``MissingGreenlet`` in
+    an async session, raised OUTSIDE the per-event ``try``. With ORM
+    instances in the routing one failing event would therefore skip the
+    whole rest of the batch every tick.
     """
     async with session_factory() as session:
-        events = (
-            (
-                await session.execute(
-                    select(DomainEvent)
-                    .where(
-                        DomainEvent.processed_at.is_(None),
-                        DomainEvent.processing_error.is_(None),
-                    )
-                    .order_by(DomainEvent.occurred_at.asc(), DomainEvent.id.asc())
-                    .limit(POLL_BATCH_SIZE)
+        batch = (
+            await session.execute(
+                select(DomainEvent.id, DomainEvent.type)
+                .where(
+                    DomainEvent.processed_at.is_(None),
+                    DomainEvent.processing_error.is_(None),
                 )
+                .order_by(DomainEvent.occurred_at.asc(), DomainEvent.id.asc())
+                .limit(POLL_BATCH_SIZE)
             )
-            .scalars()
-            .all()
-        )
-        for event in events:
-            handler = SCENARIOS.get(event.type)
+        ).all()
+        for event_id, event_type in batch:
+            handler = SCENARIOS.get(event_type)
             if handler is None:
                 logger.error(
                     "notify dispatcher: no scenario handler for event type %r"
                     " (event %s) — event stays pending",
-                    event.type,
-                    event.id,
+                    event_type,
+                    event_id,
                 )
                 continue
-            # Captured pre-handler: after a failing handler's rollback the
-            # instance may be expired, and attribute access on an expired
-            # object needs lazy IO (a greenlet hazard in async sessions).
-            event_id = event.id
             try:
+                # Fresh instance per event: a previous iteration's rollback
+                # may have expired the identity-mapped copy, and
+                # populate_existing guarantees the row values overwrite
+                # whatever stale state it holds.
+                event = (
+                    await session.execute(
+                        select(DomainEvent)
+                        .where(DomainEvent.id == event_id)
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one()
                 await handler(event, session, queue)
             except Exception as exc:
                 await session.rollback()
@@ -176,6 +187,18 @@ async def process_pending_batch(
                 fresh.attempts += 1
                 if fresh.attempts >= MAX_EVENT_ATTEMPTS:
                     fresh.processing_error = f"{type(exc).__name__}: {exc}"
+                else:
+                    # Attempts 1-2 degrade invisibly without this: the error
+                    # text only lands on the row at attempt 3.
+                    logger.warning(
+                        "notify dispatcher: scenario for event %s failed (attempt %d/%d): %s: %s",
+                        event_id,
+                        fresh.attempts,
+                        MAX_EVENT_ATTEMPTS,
+                        type(exc).__name__,
+                        exc,
+                        exc_info=exc,
+                    )
                 await session.commit()
 
 
@@ -191,6 +214,12 @@ async def reenqueue_stale_tasks(
     of once per window. Past ``REENQUEUE_CAP`` the task becomes ``failed``
     (the error text has no column on the task row — it is logged; part 5
     screens read the attempt journal for failure detail).
+
+    Deliberate inversion: the enqueue lands BEFORE the stamp is committed
+    — a crash in between leaves an unstamped task that the next sweep
+    re-enqueues again, an at-least-once duplicate absorbed by the
+    terminal-``sent`` rule (§4.4), whereas the reverse order could
+    silently lose a notification for a full re-enqueue window.
     """
     threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(
         seconds=settings.NOTIFY_REENQUEUE_AFTER

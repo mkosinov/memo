@@ -10,6 +10,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-20
 
 ### Added
+- **GH #482 — Подсистема доменных событий: часть 1 системы оповещений (журнал
+  `domain_events`, диспетчер, сценарий `new_record` с рендером)** — branch
+  `feat/482-notify-events` (13 коммитов `f7051238..1a601c2c`, base `f7190cae`;
+  42 файла, +4629/−14; спека `docs/specs/2026-10-19-notify-events-482-design.md`
+  рев.2, план `docs/plans/2026-10-20-notify-events-482-plan.md` 10/10; семья
+  #476 — система оповещений; без Redis по построению):
+  - **Фундамент (T1–T3):** миграция `c970adc6b3d6` + ORM-модели
+    `backend/src/notify/models.py` с каскадными хвостами удаления
+    (`f7051238`); notify-настройки, `business_now()`, зависимость
+    `jinja2>=3.1.6` (`60ef558e`); очередевой порт `NotifyQueue` + `FakeQueue`
+    с reliable-list паттерном — шов к части 2, Redis-реализация подменяется
+    без изменения диспетчера (`30175968`).
+  - **Журнал и событие (T4–T6):** аккумулятор журнала `domain_events` —
+    третий аккумулятор `@transactional` (врезка в `services/decorators.py`
+    рядом с событиями #239 и аудитом #344), транзакционные гарантии пинются
+    отдельным сюитом (`8b25872d`); сборщик снапшота `new_record` +
+    `record_total_price` (`8ed09885`); флаг «отправлять оповещения» по цепочке
+    front→back (`useRecordMutations` → api-client zod → `RecordCreate` → гейт
+    актёра) + метка события в сценарии `create_record`;
+    `docs/domain-rules/records.md` синхронизирован (`0f9d977d`).
+  - **Рендер и сценарий (T7–T8):** песочница jinja2 — шаблоны из БД,
+    экранирование разметки; харденинг после ревью: полный wrap в
+    `RenderError` + экранирование backslash-ов (`45086fa2`, `f8341ad9`);
+    обработчик + реестр сценариев `new_record` — live-предикат,
+    frozen-каналы, постановка задач по §4.2 (`d1537016`, `88fca574`).
+  - **Диспетчер (T9):** три TaskGroup-цикла, политика попыток, re-enqueue,
+    парсинг приоритетов; batch-resilience после ревью качества — падение
+    обработчика не роняет батч, + observability (`6710caba`, `fb2f085c`).
+  - **Канон сида (T10):** blacklist notify-журнальных таблиц в
+    `gen_seed_canon.py` + гарды исключения в seed-reset (`1a601c2c`).
+  - **Tests:** полный backend `uv run pytest` **3504p/0f/15s** (skip — без
+    Redis, US-7 по построению), admin vitest зелёный (seed-reset **26/26**,
+    useRecordMutations **80/80**), api-client **472/472**, lint-рахет
+    **114==114**, mypy **0**, визуальный гейт exit 0 (секция N/A спеки);
+    US-1…US-8 проверены; каждая задача two-stage ревью, финальное
+    full-feature ревью ✅ COMPLIANT.
+  - Status: `docs/status/2026-10-20-notify-events-482.md`
 - **GH #415 — e2e CI: 4 нативных шарда Playwright + HTML-отчёт с трейсами +
   блокирующий флейк-гейт** — branch `415-e2e-ci-native-shards` (8 коммитов
   `d7192263..915e5bae`, base `88c20845`; 14 файлов, +790/−146; спека

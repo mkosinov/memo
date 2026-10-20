@@ -446,7 +446,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       predicate: (r) => r.url().includes('/api/v1/events'),
       timeout: 15_000,
     });
-    const loaded = pageA.goto('/schedule'); // cold start under the abort
+    const loaded = pageA.goto(`/schedule?date=${SEED_WEEK_MONDAY}`); // cold start under the abort
     loaded.catch(() => {}); // no unhandled rejection if t0 never observes; re-awaited below
     await firstConnectFail; // t0: the debounce armed with the first onerror
 

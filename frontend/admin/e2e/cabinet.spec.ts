@@ -29,6 +29,7 @@
  * decodes the url param to prove the underlying served path, then a direct
  * backend GET proves the file is stored and served.
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type Page } from '@playwright/test';
@@ -454,7 +455,7 @@ test.describe('S5 — logout from the popup', () => {
       await loginAsUser(page, phone, E2E_PASSWORD);
 
       // A protected route renders the shell while the session is live.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
       const popup = await openUserMenu(page);
@@ -462,7 +463,7 @@ test.describe('S5 — logout from the popup', () => {
       await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
 
       // The session is dead: navigating back to /schedule bounces to /login.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
     } finally {
       deleteUser(phone);

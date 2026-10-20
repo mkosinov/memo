@@ -16,6 +16,7 @@
  * layer. The default project storageState is the ADMIN session (#247 T14),
  * so this spec simply does NOT call useMasterSession().
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { adminApiContext } from './fixtures/admin-context';
@@ -139,7 +140,7 @@ test.describe('GH #263 S7 — admin regression: no scope, no mask', () => {
   test('S7d: admin menu keeps all sections (Клиенты/Сотрудники/Мастера…)', async ({
     page,
   }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
 

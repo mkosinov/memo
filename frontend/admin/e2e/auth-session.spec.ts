@@ -12,6 +12,7 @@
  * precondition: the spec proves a LIVE cookie works, then proves logout
  * kills it.
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 
@@ -43,7 +44,7 @@ test.describe('User Scenario 4 — logout', () => {
     }]);
 
     // The session is live: protected route renders the app shell.
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
     // Logout via the UserMenu popup (GH #262 §5.1): open the user plate,
@@ -63,7 +64,7 @@ test.describe('User Scenario 4 — logout', () => {
     expect(body?.detail?.code).toBe('AUTH_UNAUTHORIZED');
 
     // A fresh navigation to a protected route stays on /login (no session).
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
   });
 });

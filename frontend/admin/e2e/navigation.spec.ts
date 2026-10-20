@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 
 /**
@@ -108,7 +109,7 @@ test.describe('Sidebar Navigation', () => {
   });
 
   test('active link is highlighted in sidebar', async ({ page }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await page.waitForSelector('[data-testid="menubar"]', { timeout: 10_000 });
 
     // Schedule link should have active styling (brand background)

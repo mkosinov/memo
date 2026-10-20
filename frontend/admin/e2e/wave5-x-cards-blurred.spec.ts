@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import { createTestActivity } from './fixtures/factories';
@@ -29,7 +30,7 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
     });
 
     // 2. Navigate to schedule
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
 
     // 3. Look for the "x cards" badge (data-popover-toggle with "cards" text)

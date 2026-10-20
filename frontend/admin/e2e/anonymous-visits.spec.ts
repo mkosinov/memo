@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
@@ -62,7 +63,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
 
     try {
       // 1. SETUP/ACTION — open the quick-add booking form.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openAddTab(page);
       // The modal opened on the first card of the record's week — its DTO
@@ -186,7 +187,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     let recordId = '';
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openAddTab(page);
 
@@ -299,7 +300,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     const name = `Конверт ${Date.now()}`;
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openRecordTab(page, record.id);
 
@@ -361,7 +362,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     const { record, activity, visitId, cleanupAll } = setup;
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openRecordTab(page, record.id);
 
@@ -422,7 +423,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     let extraRecordId = '';
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openRecordTab(page, record.id);
 
@@ -593,7 +594,7 @@ test.describe('Anonymous visits — unified visitors model (#257)', () => {
     const { record, activity, visitId, cleanupAll } = setup;
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openRecordTab(page, record.id);
 

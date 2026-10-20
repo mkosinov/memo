@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 
@@ -15,7 +16,7 @@ async function hasActivityCards(page: Page): Promise<boolean> {
  * This helper navigates backwards up to 4 weeks to find activity cards.
  */
 async function waitForScheduleReadyWithFallback(page: Page) {
-  await page.goto('/schedule');
+  await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
 
   // Wait for the page to stabilize (schedule columns rendered)
   await page.waitForSelector('[data-testid="date-nav-text"]', { timeout: 10_000 });

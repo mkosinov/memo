@@ -96,7 +96,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       expect((await readBadge()).trim()).toMatch(/Частично \(1[\s\u00A0]?500/);
 
       // ── 2. EDIT the saved row to 3500 ₽ → ✓ Оплачено ───────────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);
@@ -119,7 +119,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       expect((await readBadge()).trim()).toBe('✓ Оплачено');
 
       // ── 3. DELETE the payment → Не оплачено again ──────────────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);

@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
@@ -376,7 +377,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
       await expect(page.locator('text=Нет платежей')).toBeVisible();
 
       // ── Round 1: partial payment 1500₽ → «Частично (1 500₽)» ──────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);
       await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible();
@@ -408,7 +409,7 @@ test.describe('Records View Endpoint — GH #213 US-1..US-6', () => {
       await expect(row.locator('td').nth(8)).toContainText(/Частично \(1[\s\u00A0]?500₽\)/);
 
       // ── Round 2: top up 2000₽ → «✓ Оплачено» ───────────────────────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);
       await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible();

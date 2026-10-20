@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
@@ -1204,7 +1205,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
     page.on('request', (req) => {
       if (req.url().includes('/api/v1/clients')) clientsRequests.push(req.url());
     });
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     // Wait for the page's own data fetch to settle instead of networkidle —
     // the SSE /api/v1/events stream never idles the network (#239).
     await page
@@ -1247,7 +1248,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
     try {
       // 1. Full load of /schedule, then SPA-navigate to /clients via the
       //    sidebar link (NOT page.goto) — this primes the list cache.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
       await page.locator('a[aria-label="Клиенты"]').click();
       await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });

@@ -301,7 +301,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
   // ── US-5: stamps panel — master by surname ──────────────────────────────
 
   test('US-5: stamps panel master searchable by surname («Фамилия Имя»)', async ({ page }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
     // Right panel starts collapsed → open it via the topbar stamp toggle

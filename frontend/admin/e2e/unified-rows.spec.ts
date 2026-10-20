@@ -141,7 +141,7 @@ test.describe('Unified inline-editable rows', () => {
     const visit = await createTestVisit(request, record.id, visitor.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -185,7 +185,7 @@ test.describe('Unified inline-editable rows', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -253,7 +253,7 @@ test.describe('Unified inline-editable rows', () => {
     const visit = await createTestVisit(request, record.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -298,7 +298,7 @@ test.describe('Unified inline-editable rows', () => {
 
     try {
       // Navigate to schedule (reload to bypass React Query cache)
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.reload();
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
@@ -332,7 +332,7 @@ test.describe('Unified inline-editable rows', () => {
       const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
       try {
-        await page.goto('/schedule');
+        await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
         await waitForScheduleReady(page);
         await openClientRecordTab(page, { recordId: record.id });
 
@@ -455,7 +455,7 @@ test.describe('Unified inline-editable rows', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -496,7 +496,7 @@ test.describe('Unified inline-editable rows', () => {
     const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -590,7 +590,7 @@ test.describe('Unified inline-editable rows', () => {
     const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -641,7 +641,7 @@ test.describe('Unified inline-editable rows', () => {
     const record = await createTestRecord(request, activity.id, client.id, { visits: [] });
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -690,7 +690,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -756,7 +756,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     );
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -802,7 +802,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -877,7 +877,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const payment = await paymentResp.json();
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -934,7 +934,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -1058,7 +1058,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
         route.continue();
       });
 
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 
@@ -1168,7 +1168,7 @@ test.describe('addendum-2: cache sync, tariffs, undo', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openClientRecordTab(page, { recordId: record.id });
 

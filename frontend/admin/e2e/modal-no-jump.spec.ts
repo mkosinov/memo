@@ -1,8 +1,9 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M09: Modal does not jump when switching tabs [GH #156 — unblocked by #124 Wave 1 openModal fix]', async ({ page }) => {
-  await page.goto('/schedule');
+  await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
   await waitForScheduleReady(page);
 
   await openModal(page);

@@ -23,6 +23,7 @@
  * API — services-materials.spec.ts precedent), UI action in the browser,
  * verify UI + verify API, cleanup in finally.
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
@@ -148,7 +149,7 @@ async function waitForSecondVisit(
  */
 async function openTabAndAddDraft(page: Page, recordId: string) {
   test.setTimeout(120_000);
-  await page.goto('/schedule');
+  await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
   await waitForScheduleReady(page);
   await openRecordTab(page, recordId);
   await page.locator('[data-testid="btn-add-visitor"]').click();
@@ -272,7 +273,7 @@ test.describe('Tariff age autofill — manual pick clobbered (#284 scenario 4)',
 
     try {
       test.setTimeout(120_000);
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openRecordTab(page, setup.recordId);
       const row = page.locator(`[data-testid="visit-row-${visitId}"]`);

@@ -335,7 +335,7 @@ test.describe('Client phone typeahead — record form (GH #221)', () => {
 
     try {
       // Re-navigate so the fresh activity is in the current week's range.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
       await openModal(page, { recordId: record.id });

@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import {
@@ -22,7 +23,7 @@ test('US-M05: Admin can change record status via icon picker', async ({
   const record = await createTestRecord(request, activity.id, client.id);
 
   try {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
 
     await openModal(page, { recordId: record.id });

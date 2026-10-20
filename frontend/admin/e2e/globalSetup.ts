@@ -23,6 +23,7 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { masterAuthStatePath, resolveAuthStatePath } from './fixtures/auth-state';
 import { resetToSeed, resolveSeedCanonPath, wipeAvatarsDir } from './fixtures/seed-reset';
 import { sqliteExecWithRetry } from './fixtures/sqlite-exec';
+import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY } from './fixtures/seed-week';
 import { WARMUP_ROUTES } from './fixtures/warmup-routes';
 
 /**
@@ -182,9 +183,11 @@ export default async function globalSetup() {
   //     scripts/e2e-shard-start.sh; a manual `npx playwright test` bypass
   //     on a foreign DB aborts with a diagnostic. (Count-based since
   //     GH #491: seed ids are UUIDs, there is no id pattern to grep.)
-  // (b) assert API returns ≥1 activity for the current week. Empty = seed
-  //     did not populate (e.g., seed failure, week rollover against stale
-  //     data, missing seed subprocess). Abort with diagnostic.
+  // (b) assert API returns ≥1 activity for the seed REFERENCE week
+  //     (GH #422: the seed pins functional weeks to fixed dates — the
+  //     reference week is 2026-06-01…07, not the current calendar week).
+  //     Empty = seed did not populate (e.g., seed failure, stale DB or
+  //     canon, missing seed subprocess). Abort with diagnostic.
 
   // (a) Seeded-volume presence check
   let seedVolume: { activities: number; records: number; visits: number; payments: number } | null = null;
@@ -215,22 +218,19 @@ export default async function globalSetup() {
     throw new Error(`[#152] Seed data is missing from ${dbPath}. Expected the seeded volume (55 activities / 6 records / 10 visits / 6 payments), got ${JSON.stringify(volume)}. The shard stack was not started via scripts/e2e-shard-start.sh (which wipes + reseeds the DB). Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\`, then retry playwright.`);
   }
 
-  // (b) Current-week activities check (with 5×1s retry for 503 race)
+  // (b) Seed reference-week activities check (with 5×1s retry for 503 race)
   // #153: use BACKEND_URL (exported by test-all.sh and test.yml as
   // http://127.0.0.1:8001/8002). Do NOT use SHARD_PORT — that's the Next.js
   // frontend port; /api/v1/* returns 404 from Next.js dev server.
   // GH #387: single resolver — no silent default port, host must match
   // NEXT_PUBLIC_API_URL (loud error with the standalone recipe otherwise).
+  // GH #422: the week under check is imported from fixtures/seed-week.ts —
+  // the SINGLE TS-side source of the reference date (guard, navigation
+  // defaults and factory dates must not drift apart). date_from/date_to
+  // are derived from the constant itself, never serialized from the real
+  // clock, so the guard stays deterministic on any run date.
   const backendBase = resolveBackendUrl();
-  const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7)); // Mon=0
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  const activitiesUrl = `${backendBase}/api/v1/activities?date_from=${fmt(monday)}&date_to=${fmt(sunday)}`;
+  const activitiesUrl = `${backendBase}/api/v1/activities?date_from=${SEED_WEEK_MONDAY}&date_to=${SEED_WEEK_SUNDAY}`;
 
   let activitiesResponse: Response | null = null;
   let lastErr: any = null;
@@ -251,9 +251,9 @@ export default async function globalSetup() {
   // #182: activities list is paginated ({items,total,page,per_page}) — unwrap envelope
   const activitiesList: any[] = activitiesJson.items || activitiesJson;
   if (activitiesList.length === 0) {
-    throw new Error(`[#152] No activities for the current week (${fmt(monday)} to ${fmt(sunday)}) at ${dbPath}. Seed did not populate — likely a stale DB or calendar week rollover without re-seed. Run \`bash scripts/test-all.sh\` or \`SHARD_ID=N ... bash scripts/e2e-shard-start.sh\` to wipe+reseed, then retry.`);
+    throw new Error(`[#152] No activities for the seed reference week (${SEED_WEEK_MONDAY} to ${SEED_WEEK_SUNDAY}) at ${dbPath}. сид не в опорной неделе — перезапусти стек (канон пуст или устарел).`);
   }
-  console.log(`[globalSetup] Seed contract verified: ${JSON.stringify(volume)} + ${activitiesList.length} activities for current week.`);
+  console.log(`[globalSetup] Seed contract verified: ${JSON.stringify(volume)} + ${activitiesList.length} activities for the seed reference week.`);
 
   // GH #247 T14: authenticate as the seeded admin ONCE per run and persist
   // the session cookie as a Playwright storageState file. Every project

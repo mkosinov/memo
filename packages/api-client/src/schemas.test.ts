@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
+import { ApiError } from './client';
 import {
   AuditLogResponseSchema,
   AuditLogListResponseSchema,
   AuditLogAuthorResponseSchema,
   StaffResponseSchema,
+  StaffAccountSchema,
   UserResponseSchema,
   UserPhonePatchSchema,
   PasswordLinkResponseSchema,
@@ -44,6 +46,7 @@ import {
   type ClientResponse,
   ClientUpdateSchema,
   PaymentResponseSchema,
+  PaymentTotalsResponseSchema,
   type PaymentResponse,
   TariffCreateSchema,
   StaffArchiveRequestSchema,
@@ -199,6 +202,203 @@ describe('Request enum fields rewired to named schemas (#480 §3.2)', () => {
   it('RecordUpdateSchema (= partial of create) loses the dead status automatically', () => {
     const parsed = RecordUpdateSchema.parse({ status: 'confirmed' });
     expect(parsed).not.toHaveProperty('status');
+  });
+});
+
+// ─── Strict response fields (#480 §3.3 — концепция A) ─────────────────────
+// Seven response fields parse by enum dictionaries now. An unknown value is
+// reachable only via a backend bug or manual SQL; it must fail the WHOLE
+// response (client.ts parses the entire body) and escape as a ZodError —
+// NOT an ApiError — so handlers matching only ApiError never swallow it.
+// Deliberate exceptions keep z.string(): ClientResponse.channel (documented
+// legacy junk, backend #60), AuditLogResponse.user_role (journal snapshot
+// of historical values), PaymentTotalsResponse.totals (backend dict[str,int]).
+
+describe('Strict response fields (#480 §3.3)', () => {
+  const visitRow = {
+    id: 'visit-1',
+    record_id: 'record-1',
+    visitor_id: null,
+    tariff_id: null,
+    price: 2500,
+    custom_price: null,
+    status: 'waiting',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+  };
+
+  const recordRow = {
+    id: 'record-1',
+    activity_id: 'activity-1',
+    client_id: null,
+    status: 'waiting',
+    seats: 2,
+    comment: null,
+    custom_price: null,
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+    visits: [visitRow],
+  };
+
+  const recordViewRow = {
+    ...recordRow,
+    client_name: 'Иван Петров',
+    activity_start: '2026-01-02T12:00:00Z',
+    service_title: 'Живопись',
+    master_name: 'Анна Иванова',
+    location_name: 'Студия 1',
+    master_color: '#5B8C7A',
+    is_private: false,
+    paid: 0,
+  };
+
+  const paymentRow = {
+    id: 'payment-1',
+    record_id: 'record-1',
+    amount: 5000,
+    method: 'card',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+  };
+
+  const accountRow = {
+    id: 'u-1',
+    phone: '+79990000001',
+    role: 'master',
+    password_is_set: true,
+    is_active: true,
+    link_expires_at: null,
+  };
+
+  const authMeBody = {
+    user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
+    permissions: ['*'],
+  };
+
+  const userRow = {
+    id: 'u-1',
+    phone: '+79990000001',
+    role: 'admin',
+    staff_id: null,
+    password_is_set: true,
+    is_active: true,
+  };
+
+  const profileRow = {
+    role: 'master',
+    has_staff: true,
+    has_master: true,
+    first_name: 'Анна',
+    last_name: 'Иванова',
+    avatar_url: null,
+    specialties: ['живопись'],
+    patronymic: null,
+    birth_date: null,
+    residence_address: null,
+    birth_place: null,
+    passport_series_number: null,
+    passport_issued_date: null,
+    passport_issued_by: null,
+    registration_address: null,
+  };
+
+  const auditRow = {
+    id: 'al-1',
+    created_at: '2026-01-01T10:00:00Z',
+    user: { id: 'u-1', label: 'Иванов Иван' },
+    user_role: 'admin',
+    action: 'update',
+    entity: 'clients',
+    entity_id: 'c-1',
+    entity_label: 'Иванов Иван',
+    changes: null,
+  };
+
+  const clientRow = {
+    id: 'client-1',
+    name: 'Иван Петров',
+    phone: '+79990000002',
+    email: null,
+    channel: 'telegram',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+    archived: false,
+  };
+
+  /** Run a parse expecting it to throw a ZodError (the fail-closed escape
+   *  type — never an ApiError, which response-validation errors predate). */
+  function expectZodError(schema: z.ZodTypeAny, data: unknown): void {
+    let thrown: unknown = undefined;
+    try {
+      schema.parse(data);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ZodError);
+    expect(thrown).not.toBeInstanceOf(ApiError);
+  }
+
+  // ── negatives: an unknown value fails the whole response ─────────────────
+
+  it('VisitResponseSchema: unknown status → ZodError for the whole response', () => {
+    expectZodError(VisitResponseSchema, { ...visitRow, status: 'confirmed' }); // dead Wave-5 RecordStatus value
+    expectZodError(VisitResponseSchema, { ...visitRow, status: 'no_show' });
+  });
+
+  it('RecordResponseSchema: unknown status → ZodError (record status carries VisitStatus)', () => {
+    expectZodError(RecordResponseSchema, { ...recordRow, status: 'confirmed' });
+  });
+
+  it('RecordViewResponseSchema inherits the tightened status (extend)', () => {
+    expect(RecordViewResponseSchema.parse(recordViewRow).status).toBe('waiting');
+    expectZodError(RecordViewResponseSchema, { ...recordViewRow, status: 'bogus' });
+  });
+
+  it('PaymentResponseSchema: unknown method → ZodError; null still parses (backend enum | None)', () => {
+    expectZodError(PaymentResponseSchema, { ...paymentRow, method: 'crypto' });
+    expect(PaymentResponseSchema.parse({ ...paymentRow, method: null }).method).toBeNull();
+  });
+
+  it.each([
+    ['StaffAccountSchema.role', StaffAccountSchema, () => ({ ...accountRow, role: 'superuser' })],
+    ['AuthUserSchema.role (auth/me + login body)', AuthMeSchema, () => ({
+      ...authMeBody,
+      user: { ...authMeBody.user, role: 'superuser' },
+    })],
+    ['UserResponseSchema.role', UserResponseSchema, () => ({ ...userRow, role: 'owner' })],
+    ['MyProfileSchema.role', MyProfileSchema, () => ({ ...profileRow, role: 'superuser' })],
+  ])('%s: unknown role → ZodError', (_name, schema, makeData) => {
+    expectZodError(schema, makeData());
+  });
+
+  // ── positives: dictionary values parse (the tightening must not over-fire)
+
+  it('VisitStatus / PaymentMethod / UserRole values all still parse', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitResponseSchema.parse({ ...visitRow, status }).status).toBe(status);
+    }
+    for (const method of PaymentMethodSchema.options) {
+      expect(PaymentResponseSchema.parse({ ...paymentRow, method }).method).toBe(method);
+    }
+    for (const role of UserRoleSchema.options) {
+      expect(AuthMeSchema.parse({ ...authMeBody, user: { ...authMeBody.user, role } }).user.role).toBe(role);
+    }
+  });
+
+  // ── counter-cases: the deliberate §3.3 exceptions stay strings ───────────
+
+  it('ClientResponseSchema.channel: arbitrary legacy strings still parse (backend #60 junk)', () => {
+    expect(ClientResponseSchema.parse({ ...clientRow, channel: 'instagram' }).channel).toBe('instagram');
+    expect(ClientResponseSchema.parse({ ...clientRow, channel: null }).channel).toBeNull();
+  });
+
+  it('AuditLogResponseSchema.user_role: arbitrary historical strings still parse (journal snapshot)', () => {
+    expect(AuditLogResponseSchema.parse({ ...auditRow, user_role: 'superuser' }).user_role).toBe('superuser');
+  });
+
+  it('PaymentTotalsResponseSchema.totals: free-form string keys stay (backend dict[str, int])', () => {
+    const parsed = PaymentTotalsResponseSchema.parse({ totals: { cash: 1, weird_unknown: 2 } });
+    expect(parsed.totals).toEqual({ cash: 1, weird_unknown: 2 });
   });
 });
 
@@ -1300,7 +1500,7 @@ describe('PhotoListResponseSchema (GH #211)', () => {
 
 // ─── VisitResponse ──────────────────────────────────────────────────────────
 
-const validVisit = {
+const validVisit: VisitResponse = {
   id: 'visit-1',
   record_id: 'record-1',
   visitor_id: 'visitor-1',
@@ -1329,11 +1529,11 @@ describe('VisitResponseSchema', () => {
 
 // ─── RecordResponse ────────────────────────────────────────────────────────
 
-const validRecord = {
+const validRecord: RecordResponse = {
   id: 'record-1',
   activity_id: 'activity-1',
   client_id: 'client-1',
-  status: 'confirmed',
+  status: 'waiting', // VisitStatus value (#480 §3.3): 'confirmed' was a stale fixture string, never on the wire
   seats: 2,
   comment: 'VIP guests',
   custom_price: null,
@@ -1348,7 +1548,7 @@ describe('RecordResponseSchema', () => {
     expect(result.id).toBe('record-1');
     expect(result.activity_id).toBe('activity-1');
     expect(result.client_id).toBe('client-1');
-    expect(result.status).toBe('confirmed');
+    expect(result.status).toBe('waiting');
     expect(result.seats).toBe(2);
     expect(result.comment).toBe('VIP guests');
     expect(result.visits).toHaveLength(1);
@@ -1390,7 +1590,7 @@ describe('RecordCreateSchema (#482)', () => {
 
 // ─── RecordViewResponse (GH #213: composite read endpoint display fields) ───
 
-const recordViewVisit = {
+const recordViewVisit: VisitResponse = {
   id: 'visit-1',
   record_id: 'record-1',
   visitor_id: 'visitor-1',
@@ -1401,11 +1601,11 @@ const recordViewVisit = {
   updated_at: '2024-06-01T12:00:00Z',
 };
 
-const validRecordView = {
+const validRecordView: RecordView = {
   id: 'record-1',
   activity_id: 'activity-1',
   client_id: 'client-1',
-  status: 'confirmed',
+  status: 'waiting', // VisitStatus value (#480 §3.3)
   seats: 2,
   comment: 'VIP guests',
   custom_price: null,
@@ -1555,7 +1755,7 @@ describe('ClientUpdateSchema', () => {
 
 // ─── PaymentResponse ───────────────────────────────────────────────────────
 
-const validPayment = {
+const validPayment: PaymentResponse = {
   id: 'payment-1',
   record_id: 'record-1',
   amount: 5000,

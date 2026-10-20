@@ -1061,14 +1061,14 @@ describe('dryRunDeleteRecord', () => {
 
 describe('patchRecord', () => {
   it('calls PATCH /api/v1/records/:id with partial body', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'r-1', status: 'confirmed' });
-    await patchRecord('r-1', { status: 'confirmed' });
+    vi.mocked(api).mockResolvedValue({ id: 'r-1', status: 'waiting' });
+    await patchRecord('r-1', { status: 'waiting' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records/r-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'waiting' }),
       }),
     );
   });

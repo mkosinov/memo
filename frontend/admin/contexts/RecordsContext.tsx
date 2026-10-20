@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRecordsView } from '@memo/api-client';
-import type { PaginatedResponse, RecordView } from '@memo/api-client';
+import type { PaginatedResponse, RecordView, VisitStatus } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
 import type { RecordsUrlAdapter, RecordsUrlPatch, RecordsUrlStateView } from '@/app/(main)/records/useRecordsUrlState';
 import { defaultRecordsPeriod } from '@/app/(main)/records/useRecordsUrlState';
@@ -209,7 +209,10 @@ export function RecordsProvider({
       location_id: filters.locationId || undefined,
       service_id: filters.serviceId || undefined,
       master_id: filters.masterId || undefined,
-      status: filters.status || undefined,
+      // #480 §3.2: getRecordsView's status param is VisitStatus-typed now; the
+      // URL-state bag stays `string` until Task 3 exhaustively types it —
+      // bridge with the same temporary cast idiom as useRecordMutations.
+      status: (filters.status || undefined) as VisitStatus | undefined,
       // GH #212 Task 12 — server-side search. The ≥2-char clamp mirrors the
       // server min_length=2 (shorter values are treated as unset — no 422s).
       q: filters.search.length >= 2 ? filters.search : undefined,

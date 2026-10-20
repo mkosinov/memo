@@ -59,7 +59,7 @@ export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
 export const StaffAccountSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3): role writes go through the enum
   password_is_set: z.boolean(),
   is_active: z.boolean(),
   link_expires_at: z.string().nullable(),
@@ -430,7 +430,7 @@ export const VisitResponseSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number(),
   custom_price: z.number().nullable(),
-  status: z.string(),
+  status: VisitStatusSchema, // strict (#480 §3.3)
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -468,7 +468,9 @@ export const RecordResponseSchema = z.object({
   id: z.string(),
   activity_id: z.string(),
   client_id: z.string().nullable(),
-  status: z.string(),
+  // strict (#480 §3.3): record status is DERIVED from visits server-side and
+  // carries VisitStatus values (domain rule "Single enum: VisitStatus").
+  status: VisitStatusSchema,
   seats: z.number(),
   comment: z.string().nullable(),
   custom_price: z.number().nullable(),
@@ -557,7 +559,10 @@ export const PaymentResponseSchema = z.object({
   id: z.string(),
   record_id: z.string(),
   amount: z.number(),
-  method: z.string().nullable(),
+  // strict (#480 §3.3, mirror fix): backend PaymentResponse inherits
+  // PaymentBase.method: PaymentMethod | None — the client was looser than
+  // the contract.
+  method: PaymentMethodSchema.nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -765,7 +770,7 @@ export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
 export const AuthUserSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3) — auth path is fail-closed
   master_id: z.string().nullable(),
   email: z.string().nullable(),
 });
@@ -797,7 +802,7 @@ export type AuthMe = z.infer<typeof AuthMeSchema>;
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 
 export const MyProfileSchema = z.object({
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3)
   has_staff: z.boolean(),
   has_master: z.boolean(),
   // Public half — the linked staff card / master section; null when
@@ -871,7 +876,7 @@ export type UserPhonePatch = z.input<typeof UserPhonePatchSchema>;
 export const UserResponseSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3)
   staff_id: z.string().nullable(), // null = a pure admin (no card)
   password_is_set: z.boolean(), // false = passwordless (#348)
   is_active: z.boolean(),

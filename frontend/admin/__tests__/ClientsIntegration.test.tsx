@@ -134,7 +134,7 @@ const mockRecord: RecordResponse = {
   id: 'rec1',
   activity_id: 'ev_1',
   client_id: 'c1',
-  status: 'confirmed',
+  status: 'waiting',
   seats: 1,
   comment: null,
   custom_price: null,

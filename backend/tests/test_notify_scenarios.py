@@ -23,7 +23,7 @@ Covered (spec §5, US-2/US-3):
 import importlib.util
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -85,6 +85,13 @@ async def _fetch_event(db_session, event_id: str) -> DomainEvent:
     return event
 
 
+# Relative time bounds (repo precedent — conftest.py activity factory).
+# The 1-day margin dwarfs the Europe/Moscow shift of business_now()
+# (§3.2), so past/future predicates hold on any run date — no expiry.
+_PAST = datetime.now(UTC) - timedelta(days=1)
+_FUTURE = datetime.now(UTC) + timedelta(days=1)
+
+
 async def _stage_event(
     db_session,
     create_activity,
@@ -106,7 +113,7 @@ async def _stage_event(
     ]
     # booking rules see a valid future activity; the snapshot start is
     # shaped by the SQL flip below
-    activity = create_activity(start=datetime(2027, 6, 1, 18, 0))
+    activity = create_activity(start=_FUTURE)
     record_overrides: dict = {"notify": notify}
     if client is not None:
         record_overrides["client_id"] = client["id"]
@@ -134,13 +141,9 @@ async def _stage_event(
     return event, record
 
 
-_PAST = datetime(2025, 1, 1, 12, 0)
-_FUTURE = datetime(2027, 6, 1, 18, 0)
-
-
 class TestRegistry:
     def test_pilot_entry_is_new_record_handler(self) -> None:
-        assert SCENARIOS == {"new_record": handle_new_record}
+        assert {"new_record": handle_new_record} == SCENARIOS
 
 
 class TestDeletedRecord:
@@ -369,7 +372,7 @@ class TestSuccessPath:
             master_id=master["id"],
             service_id=service["id"],
             location_id=location["id"],
-            start=datetime(2027, 6, 1, 18, 0),
+            start=_FUTURE,
         )
         client = create_client(name="Анна", phone="+79990001122")
         record = create_record(
@@ -427,7 +430,7 @@ class TestSuccessPath:
         assert "6\u00a0000 ₽" in task.text  # Итого
         assert "Студия «Горы»" in task.text
         assert "ул. Ленина, 1" in task.text
-        assert "01.06.2027 18:00" in task.text
+        assert _FUTURE.strftime("%d.%m.%Y %H:%M") in task.text
 
         # channels FROZEN in the task column (§4.4: never re-resolved)
         assert task.channels == [{"name": "telegram", "address": "+79990001122"}]

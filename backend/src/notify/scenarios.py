@@ -78,7 +78,7 @@ def _frozen_channels(phone: str) -> list[dict[str, str]]:
 
 
 async def _client_id_for_task(
-    session: "AsyncSession", snapshot: dict[str, Any]
+    session: AsyncSession, snapshot: dict[str, Any]
 ) -> str | None:
     """Task ``client_id`` — the snapshot client id IFF the live row exists.
 
@@ -96,7 +96,7 @@ async def _client_id_for_task(
 
 async def _skip(
     event: DomainEvent,
-    session: "AsyncSession",
+    session: AsyncSession,
     reason: SkipReason,
 ) -> None:
     """Decision «skipped»: task row with the reason + ``processed_at``,
@@ -116,8 +116,8 @@ async def _skip(
 
 async def handle_new_record(
     event: DomainEvent,
-    session: "AsyncSession",
-    queue: "NotifyQueue",
+    session: AsyncSession,
+    queue: NotifyQueue,
 ) -> None:
     """``new_record`` scenario — the §3.4 decision flowchart, verbatim.
 

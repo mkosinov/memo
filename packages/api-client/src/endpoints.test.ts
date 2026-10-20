@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate } from './schemas';
 
 // Mock the api function from client
@@ -334,44 +334,6 @@ describe('getMaterials', () => {
 
 // ─── Photos ─────────────────────────────────────────────────────────────────
 
-// spec §10.2: GET /photos/web is UNCHANGED — bare array, no pagination envelope.
-describe('getWebPhotos', () => {
-  it('calls /api/v1/photos/web without query params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
-    await getWebPhotos();
-    expect(api).toHaveBeenCalledWith('/api/v1/photos/web', expect.anything());
-  });
-
-  it('calls /api/v1/photos/web with activity_id param', async () => {
-    vi.mocked(api).mockResolvedValue([]);
-    await getWebPhotos({ activity_id: 'activity-1' });
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/photos/web?activity_id=activity-1',
-      expect.anything(),
-    );
-  });
-
-  it('still parses a bare array (GH #211 did not paginate /photos/web)', async () => {
-    const photo = {
-      id: 'photo-1',
-      filename: 'workshop-2024.jpg',
-      client_id: null,
-      service_id: null,
-      activity_id: 'activity-1',
-      location_id: null,
-      is_public: true,
-      tags: [],
-      client_name: null,
-      created_at: '2024-06-01T12:00:00Z',
-      updated_at: '2024-06-01T12:00:00Z',
-    };
-    vi.mocked(api).mockResolvedValue([photo]);
-    const result = await getWebPhotos({ activity_id: 'activity-1' });
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(1);
-  });
-});
-
 // GH #211: getPhotos now fetches the paginated server list with filters/sort.
 describe('getPhotos', () => {
   it('calls /api/v1/photos without query string when no params', async () => {
@@ -422,6 +384,25 @@ describe('getPhotos', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getPhotos({ page: 1, tag_id: [] });
     expect(api).toHaveBeenCalledWith('/api/v1/photos?page=1', expect.anything());
+  });
+
+  // GH #479: is_public mirrors backend PhotoListParams (bool | None; None = no filter).
+  it('serializes is_public=true filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: true, per_page: 12 });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?is_public=true&per_page=12', expect.anything());
+  });
+
+  it('serializes is_public=false explicitly (false is not omitted)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: false });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?is_public=false', expect.anything());
+  });
+
+  it('omits is_public when not provided (backend None = unfiltered)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: undefined, per_page: 12 });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?per_page=12', expect.anything());
   });
 });
 

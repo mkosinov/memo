@@ -31,6 +31,29 @@ class Settings(BaseSettings):
     # Signs the sqladmin session cookie (GH #247 §2.8). API sessions are
     # random opaque tokens — no SECRET_KEY involved there.
     SECRET_KEY: str = ""
+    # ── Notify subsystem (#482 part 1, spec §3.9; family #476 §4.5) ──────
+    # Disabled by default: nothing boots until the stack opts in (the
+    # dispatcher process arrives in part 2).
+    NOTIFY_ENABLED: bool = False
+    # Seconds; dispatcher journal-polling interval (spec §3.8).
+    NOTIFY_POLL_INTERVAL: int = 1
+    # CSV without spaces, case-insensitive; order = channel priority.
+    NOTIFY_CHANNEL_PRIORITY: str = "telegram"
+    # Seconds; a queued task older than this is re-enqueued (spec §3.8).
+    NOTIFY_REENQUEUE_AFTER: int = 120
+    # Wall-clock zone of the business — the single time interpretation
+    # for the future/past predicate and message text (spec §3.2).
+    # Explicit zone, never the server TZ (panel finding).
+    BUSINESS_TIMEZONE: str = "Europe/Moscow"
+
+    @model_validator(mode="after")
+    def _force_notify_off_in_testing(self) -> "Settings":
+        """The testing profile never runs the enabled notify subsystem
+        (family #476 §3.3, US-7): a standard pytest pass must not require
+        Redis. An accidental NOTIFY_ENABLED=true is forced off."""
+        if self.ENV == "testing" and self.NOTIFY_ENABLED:
+            self.NOTIFY_ENABLED = False
+        return self
 
     @model_validator(mode="after")
     def _resolve_secret_key(self) -> "Settings":

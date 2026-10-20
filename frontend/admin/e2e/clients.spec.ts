@@ -1297,7 +1297,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
 
   // ── US-2 (#412): all clients filters visible and fitting in the toolbar ──
 
-  test('US-2 (#412): narrow viewport — toolbar panel wraps rows, no horizontal scroll; date pair filters; reset clears', async ({
+  test('US-2 (#412): narrow viewport — toolbar panel wraps rows, no horizontal scroll; «Записи от/до» pair filters; reset clears', async ({
     page,
     request,
   }) => {
@@ -1342,47 +1342,52 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       );
       expect(noHorizontalScroll).toBe(true);
 
-      // Apply the «Создан» date pair (created_from/created_to) — machine-side
-      // filters (#349: the clients URL contract is q/status/sort/page only;
-      // structured filters never write the address — spec §3.3 unchanged):
-      // each fill fires a list GET carrying the param (mirrors records US-1
-      // mechanics, minus the URL). A wide window keeps the seeded row visible
-      // (seed reset leaves 5 seed clients + ours — all on page 1).
-      const dateFrom = panel.locator('input[type="date"]').nth(0);
-      const dateTo = panel.locator('input[type="date"]').nth(1);
-      const fromWait = page.waitForResponse(
-        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_from=1990-01-01'),
+      // Apply the «Записи от/до» pair (min_records/max_records — the pair
+      // the plan names) — machine-side filters (#349: the clients URL
+      // contract is q/status/sort/page only; structured filters never write
+      // the address — spec §3.3 unchanged): each fill fires a list GET
+      // carrying the param. Our fresh client has 0 records; the 5 seed
+      // clients (1–2 records each) stay — от=1 drops our row.
+      const recordsFrom = panel.locator('div:has(> label:text-is("Записи")) input[placeholder="от"]');
+      const recordsTo = panel.locator('div:has(> label:text-is("Записи")) input[placeholder="до"]');
+      const minWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('min_records=1'),
         { timeout: 10_000 },
       );
-      await dateFrom.fill('1990-01-01');
-      await fromWait;
-      const toWait = page.waitForResponse(
-        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_to=2030-12-31'),
+      await recordsFrom.fill('1');
+      await minWait;
+      const maxWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('max_records=10'),
         { timeout: 10_000 },
       );
-      await dateTo.fill('2030-12-31');
-      await toWait;
+      await recordsTo.fill('10');
+      await maxWait;
       const row = page.locator('table tbody tr').filter({ hasText: clientName });
-      await expect(row).toBeVisible();
+      await expect(row).toHaveCount(0); // 0 records < от=1 — the pair filters
 
-      // A window that excludes every client (all created ≤ today) filters
-      // the table down to the unified empty state.
-      const narrowWait = page.waitForResponse(
-        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_from=2100-01-01'),
+      // An impossible window (от=1, до=0) excludes every client — the
+      // table filters down to the unified empty state (server returns an
+      // empty 200 for the contradictory range, no cross-field 422).
+      const impossibleWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('max_records=0'),
         { timeout: 10_000 },
       );
-      await dateFrom.fill('2100-01-01');
-      await narrowWait;
+      await recordsTo.fill('0');
+      await impossibleWait;
       await expect(row).toHaveCount(0);
       await expect(page.getByText('Нет записей')).toBeVisible();
 
-      // Widen the window back (the row returns — served from the query
-      // cache: React Query staleTime makes the revisit of an earlier filter
-      // key network-free, so assert the UI, not a refetch), then add a
-      // URL-backed filter (status) so the address carries something reset
-      // must clear.
-      await dateFrom.fill('1990-01-01');
-      await expect(row).toBeVisible({ timeout: 10_000 });
+      // Widen back (от=0): our 0-record client returns — a fresh filter key,
+      // so the list GET fires; the seed clients (≥1 record) drop out. Then
+      // add a URL-backed filter (status) so the address carries something
+      // reset must clear.
+      const widenWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('min_records=0'),
+        { timeout: 10_000 },
+      );
+      await recordsFrom.fill('0');
+      await widenWait;
+      await expect(row).toBeVisible();
       const statusSelect = panel.locator('select');
       const statusWait = page.waitForResponse(
         (r) => r.url().includes('/api/v1/clients') && r.url().includes('status=archived'),

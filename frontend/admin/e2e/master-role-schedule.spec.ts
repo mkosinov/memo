@@ -22,6 +22,7 @@
  * both activities are factory-created inside the test and cleaned up in
  * `finally`.
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -72,7 +73,7 @@ test.describe('GH #263 S1 — master schedule shows only own activities', () => 
       expect(items.some((a) => a.id === foreignActivity.id)).toBe(false);
 
       // ACTION — open the schedule grid as the master.
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
       // VERIFY UI — own card is in the grid; foreign card is not.
       await expect(

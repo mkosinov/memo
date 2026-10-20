@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -66,7 +67,7 @@ test.describe('Scenario 1 — Activity at capacity', () => {
 
     try {
       // 2. Navigate to schedule and wait for the activity card
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
       // Reload to force React Query to refetch fresh data.
       // waitForScheduleReady waits for any activity card (seed data)

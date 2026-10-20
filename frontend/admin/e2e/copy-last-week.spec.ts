@@ -35,6 +35,7 @@
  * update-rejects-is-active.spec.ts).
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
@@ -283,7 +284,7 @@ function expectNoSlot(masterId: string, serviceId: string, slot: string): void {
 
 test('S1: чистая неделя ← копия прошлой — карточки на тех же слотах, числа совпадают, тост, попап закрыт', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page); // current week = source, 9 cards
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY); // current week = source, 9 cards
   await switchToWeek(page, target); // empty target week
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);
 
@@ -321,7 +322,7 @@ test('S1: чистая неделя ← копия прошлой — карто
 
 test('S2: повторное копирование не дублирует — copied=0, тост «Всё уже есть», сетка не меняется', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);
 
@@ -396,7 +397,7 @@ test('S3: merge в частично занятую неделю — несовп
     capacity: 4,
   });
 
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(2);
 
@@ -435,7 +436,7 @@ test('S3: merge в частично занятую неделю — несовп
 });
 
 test('S4: индивидуальные не копируются — подсказка «K индивидуальных…», приватных в целевой нет', async ({ page }) => {
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, W1); // target = last week; source = week-before-last
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(8);
 
@@ -497,7 +498,7 @@ test('S5: архивная локация пропускается — заня�
 
   try {
     const target = addDays(W2, 7);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToWeek(page, target);
 
     await openCopyPopover(page);
@@ -544,7 +545,7 @@ test('S6: ремап архивного мастера — первый акти
   }
   try {
     const target = addDays(W2, 7);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToWeek(page, target);
 
     await openCopyPopover(page);
@@ -611,7 +612,7 @@ test('S6: ремап архивного мастера — первый акти
 
 test('S7: снятая галка локации — её занятия не скопированы, запрос уходит с явным списком', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
 
   await openCopyPopover(page);
@@ -658,7 +659,7 @@ test('S7: снятая галка локации — её занятия не с
 
 test('S8: пустая прошлая неделя — пустое состояние попапа, «Скопировать» неактивна', async ({ page }) => {
   const far = addDays(W2, 14); // its source week (N..N+6) holds nothing in seed
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, far);
 
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);

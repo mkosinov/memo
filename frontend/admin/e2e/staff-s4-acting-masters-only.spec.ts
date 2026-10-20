@@ -12,6 +12,7 @@
  * «create activity» flow), API/SQL for the view contract and the TOCTOU guard.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   cleanup,
@@ -55,7 +56,7 @@ test.describe('S4 — activity creation lists acting masters only', () => {
         Array<{ id: string }>).map((m) => m.id);
       expect(actingIds).toContain(staff.id);
 
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       await openStampMasterPickerAndExpect(page, staff.id, 'visible');
 
       // 2. ACTION — archive the master section (Gap A flag, D7: row KEPT).

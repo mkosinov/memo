@@ -27,6 +27,7 @@
  * DB assertion joins records → activities ON master_id=m1 (seed «Ольга Середа»).
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
@@ -90,7 +91,7 @@ test.describe('GH #263 S2 — master creates records', () => {
 
     try {
       // The grid shows only own cards → quick-add can only ever bind them.
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       await expect(
         page.locator(`[data-testid="activity-${foreignActivity.id}"]`),
       ).toHaveCount(0);
@@ -175,7 +176,7 @@ test.describe('GH #263 S2 — master creates records', () => {
     const clientName = `Новенький ${typed}`;
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       await openAddTab(page);
 
       // Type an UNKNOWN complete number + a name, save (no suggestion pick).

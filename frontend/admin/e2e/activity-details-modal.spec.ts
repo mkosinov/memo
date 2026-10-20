@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -27,7 +28,7 @@ const BACKEND = resolveBackendUrl();
 
 test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── Scenario 1: Create record — verify DB persistence ─────────────────

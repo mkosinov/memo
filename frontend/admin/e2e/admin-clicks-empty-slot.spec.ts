@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
@@ -11,7 +12,7 @@ test('US-S01: Admin can click empty slot to create activity', async ({
   page,
 }) => {
   // ARRANGE: on /schedule with the seeded week rendered
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
   const cardsBefore = await page.locator('[data-testid^="activity-"]').count();
 

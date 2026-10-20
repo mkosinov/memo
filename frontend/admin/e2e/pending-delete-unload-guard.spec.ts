@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Dialog, Page, Request } from '@playwright/test';
 import { queryDBRow } from './fixtures/db-query';
@@ -130,7 +131,7 @@ test.describe('Pending-delete unload guard (GH #397, C3 best-effort)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -173,7 +174,7 @@ test.describe('Pending-delete unload guard (GH #397, C3 best-effort)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -233,7 +234,7 @@ test.describe('Pending-delete unload guard (GH #397, C3 best-effort)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -273,7 +274,7 @@ test.describe('Pending-delete unload guard (GH #397, C3 best-effort)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 

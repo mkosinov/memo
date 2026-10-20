@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -74,7 +75,7 @@ async function openClientRecordTab(
  */
 test.describe('Unified inline-editable rows', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── Scenario 3: Multiple empty rows allowed ─────────────────────────────
@@ -677,7 +678,7 @@ test.describe('Unified inline-editable rows', () => {
 
 test.describe('addendum-2: cache sync, tariffs, undo', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── Scenario 15: No F5 after add visitor ─────────────────────────────────

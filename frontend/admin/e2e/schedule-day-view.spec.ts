@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import type { Page } from '@playwright/test';
@@ -39,7 +40,7 @@ function dayViewColumns(page: Page) {
 
 test.describe('Schedule — WeekView ↔ DayView', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('day option switches from week to day view', async ({ page }) => {
@@ -97,7 +98,7 @@ test.describe('Schedule — WeekView ↔ DayView', () => {
 
 test.describe('Schedule — View selector dropdown', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('dropdown opens with all three options, active marked', async ({ page }) => {
@@ -148,7 +149,7 @@ test.describe('Schedule — View selector dropdown', () => {
 
 test.describe('Schedule — Week header date click', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('clicking a week date opens that day by locations', async ({ page }) => {
@@ -178,7 +179,7 @@ test.describe('Schedule — Week header date click', () => {
 
 test.describe('Schedule — Zoom Popup', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('zoom button opens popup with cell height options', async ({ page }) => {
@@ -266,7 +267,7 @@ test.describe('Schedule — Zoom Popup', () => {
 
 test.describe('Schedule — Day View Date Navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     // Switch to day view and wait for the grid (auto-wait, no sleep)
     await selectView(page, 'view-masters');
     await expect(dayViewColumns(page).first()).toBeVisible();

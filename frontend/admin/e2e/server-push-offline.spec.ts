@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   waitForRecordsReady,
@@ -285,7 +286,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
 
     // Schedule load: activity GETs pass (only /events is aborted), the page
     // is interactive while the channel is dead.
-    await waitForScheduleReady(pageA);
+    await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
 
     // S1 — the persistent toast appears within the 8s CEILING (5s debounce
     // + ES error latency; probe: ~4.4s from ready). Scoped by text: the
@@ -341,7 +342,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
     await ctxA.route('**/api/v1/records**', (route) => route.abort('connectionreset'));
 
     try {
-      await waitForScheduleReady(pageA);
+      await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
       // Let the debounce-armed flag settle (isChannelDown flips on the FIRST
       // onerror — near-instant — but the loss toast itself is not needed here).
       await pageA.waitForTimeout(1_000);

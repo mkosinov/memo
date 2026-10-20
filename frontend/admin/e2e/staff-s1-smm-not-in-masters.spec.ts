@@ -10,6 +10,7 @@
  * API/SQL for the view + tables, UI for the schedule filter dropdown.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { cleanup, createTestStaff } from './fixtures/factories';
 import { waitForScheduleReady } from './fixtures/helpers';
@@ -73,7 +74,7 @@ test.describe('S1 — SMM employee without a master section', () => {
 
       // 4. VERIFY UI — the schedule master filter offers seed masters but
       //    never the SMM employee.
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const mastersFilter = page.locator(
         '[data-testid="center-content"] button[aria-label="Мастера"]',
       );

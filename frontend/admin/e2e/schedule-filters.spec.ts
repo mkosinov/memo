@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
@@ -14,7 +15,7 @@ import { waitForScheduleReady } from './fixtures/helpers';
 
 test.describe('Schedule — Masters Filter', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('masters filter button is visible in topbar', async ({ page }) => {
@@ -103,7 +104,7 @@ test.describe('Schedule — Masters Filter', () => {
 
 test.describe('Schedule — Locations Filter', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('locations filter button is visible in topbar', async ({ page }) => {

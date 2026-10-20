@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   waitForScheduleReady,
@@ -101,7 +102,7 @@ async function makeStampReady(page: import('@playwright/test').Page) {
 test.describe('«Сохраняем…» toast during schedule mutations (GH #261)', () => {
   test.beforeEach(async ({ page }) => {
     await delayActivityMutations(page);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── S1. Создание занятия ────────────────────────────────────────────────

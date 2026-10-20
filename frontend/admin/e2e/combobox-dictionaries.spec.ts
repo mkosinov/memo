@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page, APIRequestContext } from '@playwright/test';
 import {
@@ -169,7 +170,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
     // the fixed-week seed record explicitly — the untargeted scan picks the
     // earliest record, and parallel specs' leaked factory records could
     // steal the modal.
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     const activity = await openModal(page, { recordId: seedFixedWeekRecordId() });
     expect(activity).toBeTruthy();
     const activityId = (activity as { id: string }).id;

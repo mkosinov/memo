@@ -40,7 +40,7 @@ test.describe('Schedule Page', () => {
   });
 
   test('schedule with activity cards', async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, '2026-06-15');
     // Hide the NowLine to avoid time-dependent screenshot differences
     await page.evaluate(() => {
       const nowLine = document.querySelector('[data-testid="now-line"]');
@@ -53,7 +53,7 @@ test.describe('Schedule Page', () => {
   });
 
   test('schedule — different week', async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, '2026-06-15');
 
     // Navigate to next week
     await page.locator('[data-testid="date-nav-next"]').click();

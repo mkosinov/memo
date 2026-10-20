@@ -7,6 +7,7 @@
 
 import { type Locator, type Page, type Request, expect } from '@playwright/test';
 import { queryDBRow } from './db-query';
+import { SEED_WEEK_MONDAY } from './seed-week';
 
 /**
  * Resolve a record's activity.start as ISO date (YYYY-MM-DD).
@@ -45,14 +46,16 @@ export function resolveRecordDate(recordId?: string): { date: string; activityId
  * view containing the given date via page.goto('/schedule?view=week&date=…').
  *
  * @param page Playwright page
- * @param date ISO date (YYYY-MM-DD)
+ * @param date ISO date (YYYY-MM-DD); optional since GH #422 — defaults to
+ *   `SEED_WEEK_MONDAY` (the seed's reference functional week), so bare
+ *   calls land on a week that actually has seeded activities.
  * @param opts.col — optional column mode (`masters` | `locations`); a full
  *   page load resets the URL to exactly the given params, so callers that
  *   depend on a non-default column mode must pass it explicitly.
  */
 export async function gotoScheduleWeek(
   page: Page,
-  date: string,
+  date: string = SEED_WEEK_MONDAY,
   opts?: { col?: string },
 ): Promise<void> {
   const col = opts?.col ? `&col=${opts.col}` : '';
@@ -72,13 +75,14 @@ export async function gotoScheduleWeek(
  * page.goto('/schedule?view=day&date=…').
  *
  * @param page Playwright page
- * @param date ISO date (YYYY-MM-DD)
+ * @param date ISO date (YYYY-MM-DD); optional since GH #422 — defaults to
+ *   `SEED_WEEK_MONDAY`, see {@link gotoScheduleWeek}.
  * @param opts.col — optional column mode (`masters` | `locations`); see
  *   gotoScheduleWeek.
  */
 export async function gotoScheduleDay(
   page: Page,
-  date: string,
+  date: string = SEED_WEEK_MONDAY,
   opts?: { col?: string },
 ): Promise<void> {
   const col = opts?.col ? `&col=${opts.col}` : '';
@@ -142,11 +146,23 @@ export async function closeModal(page: Page): Promise<void> {
 }
 
 /**
- * Wait for schedule page to load with activity cards.
- * Navigates to /schedule and waits for at least one activity card to appear.
+ * Wait for the schedule page to load with activity cards.
+ *
+ * GH #422 split semantics — the helper no longer owns a silent default:
+ * - WITH `date` — navigates to `/schedule?date=<date>` (week view) and
+ *   waits for at least one activity card.
+ * - WITHOUT `date` — NO navigation: only waits for cards on whatever page
+ *   is already open. The caller must have navigated explicitly before
+ *   (a `page.goto('/schedule…')` — post-#422 codemod with `?date=` — or
+ *   an earlier dated call). A silent fallback to SEED_WEEK_MONDAY is
+ *   FORBIDDEN here: visual specs share this helper and rely on the
+ *   wait-only form holding on their frozen-clock week (2026-06-15),
+ *   which is NOT the seed reference week.
  */
-export async function waitForScheduleReady(page: Page) {
-  await page.goto('/schedule');
+export async function waitForScheduleReady(page: Page, date?: string): Promise<void> {
+  if (date !== undefined) {
+    await page.goto(`/schedule?date=${date}`);
+  }
   // 10s is UI-render-sync only — data validation (#152) lives in
   // globalSetup.ts (asserts /api/v1/activities non-empty before any
   // worker starts). If cards don't appear in 10s, the bug is real, not

@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -184,7 +185,7 @@ test('S1: archived master — card visible with badge and muted on current week'
 
     // Grid opens on the current week — the activity start (factory default,
     // fixed inside this week by the factory contract) must be there.
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     const card = page.locator(`[data-testid="activity-${activity.id}"]`);
     await expect(card).toBeVisible({ timeout: 10_000 });
@@ -218,7 +219,7 @@ test('S2: archived location — hidden by default, toggle reveals card and day-v
   });
   try {
     await archiveLocation(request, location.id);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     // Default `show_archived_locations=false` → the card is hidden...
     await expect(page.locator(`[data-testid="activity-${activity.id}"]`)).toHaveCount(0, { timeout: 10_000 });
@@ -273,7 +274,7 @@ test('S3: archived service — card always visible, toggles do not affect it', a
   });
   try {
     await archiveService(request, service.id);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     const card = page.locator(`[data-testid="activity-${activity.id}"]`);
     // Visible right away — no toggle needed.
@@ -316,7 +317,7 @@ test('S4: filtering by one active master keeps archived cards visible', async ({
   });
   try {
     await archiveStaff(request, archivedMaster.id);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     // Card visible before filtering (default masters gate is ON).
     const card = page.locator(`[data-testid="activity-${archivedActivity.id}"]`);
@@ -359,7 +360,7 @@ test('S5: toggle states persist across page reload (user.settings)', async ({ pa
     await archiveLocation(request, location.id);
 
     // 1. Enable the locations checkbox, then reload.
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await openFilterDropdown(page, 'Локации');
     await setArchivedToggle(page, 'show-archived-locations-toggle', true, { waitForPersist: true });
     await closeFilterDropdown(page);
@@ -427,7 +428,7 @@ test('S6: day view by masters — archived column on the day with activities onl
   });
   try {
     await archiveStaff(request, master.id);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     // Switch to DayView «по мастерам» on day D.
     await switchToDay(page, dayD);
@@ -465,7 +466,7 @@ test('S7: archived master and location — card visible only with both toggles o
   try {
     await archiveStaff(request, master.id);
     await archiveLocation(request, location.id);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     const card = page.locator(`[data-testid="activity-${activity.id}"]`);
 

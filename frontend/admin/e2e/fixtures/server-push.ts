@@ -6,6 +6,7 @@
  * separate module-level tab identities (spec §2.4), so B's UI writes carry
  * B's X-Memo-Tab-Id and A must see the external toast.
  */
+import { SEED_WEEK_MONDAY } from './seed-week';
 import { test, expect } from './test';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
 import { waitForScheduleReady, openAddTab } from './helpers';
@@ -282,7 +283,7 @@ export async function clickFabRobust(page: Page, timeoutMs = 15_000) {
  * response (for cleanup).
  */
 export async function createRecordViaUI(pageB: Page, clientName: string) {
-  await waitForScheduleReady(pageB);
+  await waitForScheduleReady(pageB, SEED_WEEK_MONDAY);
   const today = new Date().toISOString().slice(0, 10);
   await openAddTab(pageB, { date: today });
 

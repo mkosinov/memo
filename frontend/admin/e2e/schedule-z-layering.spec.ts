@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import { createTestActivity } from './fixtures/factories';
@@ -42,7 +43,7 @@ test.describe('Schedule z-layering (#260)', () => {
     loc.evaluate((el) => parseInt(getComputedStyle(el).zIndex, 10));
 
   test('S1: badge sits below the topbar (zoom popover paints above badges)', async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await expect(badge(page)).toBeVisible();
     // Root-context relation that caused the bug: badge 110 > topbar 40 => the
     // whole header (with its zoom popup) painted UNDER the badge. After the fix
@@ -51,7 +52,7 @@ test.describe('Schedule z-layering (#260)', () => {
   });
 
   test('S2: stack badge click opens OverlapPopover above the badge', async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     const b = badge(page);
     await expect(b).toBeVisible();
     await b.click();
@@ -68,7 +69,7 @@ test.describe('Schedule z-layering (#260)', () => {
   });
 
   test('S3: root-context ladder badge < sidebar < topbar < details-modal < toast', async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
     // Layers that are always present in the root stacking context.
     const badgeZ = await zOf(badge(page));

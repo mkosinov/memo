@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 
@@ -28,7 +29,7 @@ async function clickPrevWeek(page: import('@playwright/test').Page) {
 
 test.describe('Schedule — Week Navigation and UI', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── 1. Week navigation — arrows change displayed week ──────────────────

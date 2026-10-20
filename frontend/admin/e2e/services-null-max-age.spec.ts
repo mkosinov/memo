@@ -17,6 +17,7 @@
  * never leaks into the next.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -213,7 +214,7 @@ test.describe('Services — NULL max_age smoke pair (#203 §4.1–4.2)', () => {
 
       // VERIFY SCHEDULE — buildSchedule-backed card renders «6+» (min 6, no
       // upper bound), never the «6–12» range badge.
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
 
       // Find a seed week that contains an «Акварель» (s4) activity, then
       // deep-link there via the schedule URL canon (#138 gotoScheduleWeek).

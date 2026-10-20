@@ -285,11 +285,7 @@ What a spec author must know:
 
 | Test type | G6 quality¹ | G4.5 visual² | G7 pre-push³ | CI Tests⁴ |
 |---|---|---|---|---|
-| backend unit | ✅ | — | ✅ | ✅ |
-| backend api | ✅ | — | ✅ | ✅ |
-| backend integration | ✅ | — | ✅ | ✅ |
-| backend misc | ✅ | — | ✅ | ✅ |
-| backend coverage (report) | — | — | — | ✅ |
+| backend pytest (unit/api/integration/misc — маркеры как локальные селекторы `pytest -m …`) | ✅ | — | ✅ | ✅ один джоб `backend-tests`: весь набор одним прогоном + coverage ≥ 80 (GH #416) |
 | frontend vitest | ✅ | — | ✅ | ✅ (sharded — every file covered, no hand lists) |
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |

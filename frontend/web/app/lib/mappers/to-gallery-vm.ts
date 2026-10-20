@@ -1,10 +1,25 @@
-import type { GalleryPhotoDTO } from '@/app/lib/model/dto/gallery';
+import type { PhotoResponse } from '@memo/api-client';
 import type { GalleryPhotoView } from '@/app/lib/model/view/gallery';
 
-export function toGalleryPhotoView(raw: GalleryPhotoDTO): GalleryPhotoView {
+/** URL allowlist (GH #479): same-origin paths (absolute or relative) and full
+ * http(s) URLs render; everything else — foreign schemes (javascript:, data:),
+ * protocol-relative foreign hosts, empty strings — is dropped from the gallery. */
+function toAllowedUrl(filename: string): string | null {
+  if (/^https?:\/\//i.test(filename)) return filename;
+  if (filename.startsWith('//')) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(filename)) return null;
+  return filename.length > 0 ? filename : null;
+}
+
+/** Contract photo → gallery view (GH #479): url = filename (allowlisted),
+ * caption = tag titles joined with " · " ('' when no tags).
+ * Returns null when the filename fails the allowlist — the caller drops it. */
+export function toGalleryPhotoView(raw: PhotoResponse): GalleryPhotoView | null {
+  const url = toAllowedUrl(raw.filename);
+  if (url === null) return null;
   return {
     id: raw.id,
-    url: raw.url,
-    technique: raw.technique,
+    url,
+    caption: raw.tags.map((tag) => tag.title).join(' · '),
   };
 }

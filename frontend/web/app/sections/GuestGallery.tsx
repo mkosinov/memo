@@ -1,6 +1,7 @@
 export interface GuestPhoto {
   url: string;
-  technique: string;
+  /** Tag titles joined with " · "; empty when the photo has no tags. */
+  caption: string;
 }
 
 export interface GuestGalleryProps {
@@ -8,9 +9,13 @@ export interface GuestGalleryProps {
   onPhotoClick?: (photo: GuestPhoto) => void;
 }
 
+/** Uniform no-data rule (GH #479): loading, a failed fetch and an empty result
+ * all arrive as an empty photo list — the section is then not rendered at all. */
 export function GuestGallery({ photos, onPhotoClick }: GuestGalleryProps) {
+  if (photos.length === 0) return null;
+
   return (
-    <section className="py-1 px-4">
+    <section className="py-1 px-4" data-testid="guest-gallery">
       <div className="flex gap-3 overflow-x-auto no-scrollbar">
         {photos.map((photo, index) => (
           <div
@@ -28,12 +33,17 @@ export function GuestGallery({ photos, onPhotoClick }: GuestGalleryProps) {
           >
             <img
               src={photo.url}
-              alt={`Guest photo — ${photo.technique}`}
+              alt={photo.caption ? `Guest photo — ${photo.caption}` : "Guest photo"}
               className="w-full h-full object-cover rounded-lg"
             />
-            <span className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full">
-              {photo.technique}
-            </span>
+            {photo.caption && (
+              <span
+                data-testid="guest-gallery-caption"
+                className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full"
+              >
+                {photo.caption}
+              </span>
+            )}
           </div>
         ))}
       </div>

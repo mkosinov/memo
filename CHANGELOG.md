@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-20
 
 ### Added
+- **GH #412 — Фильтры Записей/Клиентов/Фото в строку таблицы (единый
+  DataTable)** — branch `412-filters-inline` (11 коммитов
+  `59a2814f..7765edcf` + merge `a41095e7` origin/main, base `f7190cae`;
+  47 файлов, +1116/−166 = 24 кода/доков + 23 PNG-базлайна; спека
+  `docs/specs/2026-10-19-filters-inline-412-design.md` рев.1 и план
+  `docs/plans/2026-10-19-filters-inline-412-plan.md` 7/7 — оба на main,
+  unchanged by IMPL; frontend/admin-only — бэкенд и URL-контракты #349 не
+  тронуты):
+  - **Тулбар DataTable (T1):** переносимая левая группа тулбара в общем
+    `DataTable.tsx` + канон табличного тулбара в `docs/design-system.md`.
+  - **US-1/US-2/US-3 — переезд панелей (T2/T3/T5):** фильтры Записей, Клиентов
+    и Фото переехали в тулбар своих таблиц; блок тегов Фото нетронут
+    (approved deviation: встроенный поиск Фото остался включён — был включён
+    до переезда, инвариант §3.3 спеки); fix-loop — e2e «Записи от/до» (US-2)
+    и stale locator в `clients-url-filters.spec.ts` (US-4).
+  - **US-4 — чип глубокой ссылки клиента в тулбаре** (`ClientDeepLinkChip`).
+  - **US-5 — e2e старых ссылок:** контракт #349 подтверждён; факт —
+    URL-параметр `clientId` (singular), плановское `clientIds` — только
+    внутреннее состояние.
+  - **US-6 — перегон базлайнов:** `update-snapshots.yml` (mode=changed,
+    run 39) → бото-коммит `7765edcf`, гард §7 — ровно 23 базлайна тройки
+    (clients 7, photos 7, records 9), чужие нетронуты, новых нет;
+    контрольный CI-прогон `test.yml` (run 39443080031) — 18/18 SUCCESS.
+  - **Внеплановый фикс (mid-phase):** `be3c7821` — e2e
+    `clients-status-column`: коллизия `getByLabel('Статус')` с именем чипа,
+    локатор на role+name; merge origin/main (PR #502/#503 + docs #479) —
+    авто-мерж.
+  - **Tests:** admin vitest **3080/3080** (185 файлов, exit 0); локальные
+    e2e: records 31/31, clients 32/32, clients-url-filters 4/4,
+    photos-crud 21/21, clients-status-column 3/3; DoD спеки §7 закрыт
+    целиком.
+  - Status: `docs/status/2026-10-20-filters-inline-412.md`
 - **GH #415 — e2e CI: 4 нативных шарда Playwright + HTML-отчёт с трейсами +
   блокирующий флейк-гейт** — branch `415-e2e-ci-native-shards` (8 коммитов
   `d7192263..915e5bae`, base `88c20845`; 14 файлов, +790/−146; спека

@@ -227,6 +227,10 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
       await createRecord({
         activity_id: activityId,
         client_id: clientId,
+        // GH #482 (§3.3): the «отправлять оповещения» checkbox state
+        // must reach the backend — before, the flag died here (spec §5);
+        // RecordCreate declares it, so it belongs in the body verbatim.
+        notify: input.notify,
         visits: [
           ...visitData.map((vd) => {
             // Lookup tariff price by id; fall back to the resolver default

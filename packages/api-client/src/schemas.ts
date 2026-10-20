@@ -548,6 +548,9 @@ export const RecordCreateSchema = z.object({
   seats: z.number().optional(),
   comment: z.string().optional(),
   custom_price: z.number().nullable().optional(),
+  /** GH #482: «отправлять оповещения» — optional mirror of the backend's
+   * `notify: bool = False`; fixed at creation, read by the dispatcher. */
+  notify: z.boolean().optional(),
   visits: z.array(z.object({
     visitor_id: z.string().optional(),
     price: z.number(),

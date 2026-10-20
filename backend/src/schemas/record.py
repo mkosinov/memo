@@ -64,6 +64,12 @@ class RecordCreate(BaseModel):
       The service will find-or-create a Client and Visitors automatically.
     - **Client-ID-based** (for admin/integration): provide ``client_id``.
       Links to an existing Client directly.
+
+    GH #482 (spec §3.3): ``notify`` — the admin form's «отправлять
+    оповещения» checkbox. Default False keeps every existing caller
+    (seeds, e2e helpers, the public web form) unchanged; the scenario
+    saves ``True`` into ``records.notify`` ONLY for an authenticated
+    actor (anonymous booking → forced False).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -73,6 +79,7 @@ class RecordCreate(BaseModel):
     client_id: str | None = None
     comment: str | None = None
     custom_price: int | None = None
+    notify: bool = False
     visits: list[VisitItem]  # seats = len(visits)
 
 

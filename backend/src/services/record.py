@@ -489,6 +489,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         seats: int,
         comment: str | None = None,
         custom_price: int | None = None,
+        notify: bool = False,
     ) -> Record:
         """Insert ONE record row — WITHOUT committing, no recalculation.
 
@@ -502,6 +503,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         boundary, the visit batch, and the recalculation timing belong
         to the scenario. Value-typed parameters — no foreign
         ORM/schema objects.
+
+        ``notify`` (GH #482 §3.3): the scenario has already applied the
+        actor gate; the value is FIXED here at creation (no edit path
+        ever rewrites it).
         """
         record = Record(
             activity_id=activity_id,
@@ -510,6 +515,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             seats=seats,
             comment=comment,
             custom_price=custom_price,
+            notify=notify,
         )
         db_session.add(record)
         await db_session.flush()

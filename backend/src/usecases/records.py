@@ -147,7 +147,10 @@ async def create_record(
        "visitors" on create), visitor_id → link, else anonymous;
     4. record row (status "pending", seats initialized to len(visits));
     5. ONE bulk visit insert (marks "visits");
-    6. recalculate seats then status from the persisted visits, refresh.
+    6. recalculate seats then status from the persisted visits, refresh;
+    7. mark the ``new_record`` domain event (GH #482 §3.1) — the
+       ``@transactional`` wrapper inserts the journal row in the same
+       commit as the record itself.
 
     NOTE: call as ``create_record(db_session=..., data=...)`` — see
     the module docstring for the calling convention.
@@ -192,6 +195,13 @@ async def create_record(
             visitor_ids.append(None)
 
     # ── Create Record row (status derived after visits flush) ──────
+    # GH #482 (§3.3.4) — actor gate: the booking route is public, so the
+    # notify flag is respected ONLY when an audit actor is in context
+    # (an authenticated save); an anonymous API call with notify=True is
+    # recorded as False — no imposed mailings on an arbitrary client.
+    from src.events.audit import current_actor
+
+    notify_flag = data.notify and current_actor() is not None
     record = await get_record_service().create_row(
         db_session,
         activity_id=data.activity_id,
@@ -199,6 +209,7 @@ async def create_record(
         seats=effective_seats,
         comment=data.comment,
         custom_price=data.custom_price,
+        notify=notify_flag,
     )
 
     # ── Create Visits — ONE bulk insert (marks "visits") ────────────
@@ -229,6 +240,20 @@ async def create_record(
     from src.events.audit import snapshot_pairs_after
 
     _mark_record_audit(record, "create", snapshot_pairs_after("records", record))
+
+    # ── GH #482 (§3.1): mark the ``new_record`` domain event ────────
+    # AFTER the seats/status recalculation (the snapshot must see the
+    # derived state), BEFORE return — the @transactional wrapper inserts
+    # the journal row in the SAME commit (Task 4 wiring). Snapshot is
+    # built with this session, pre-commit, local reads only (§3.2).
+    # No actor gate here: domain events are DATA, not an action log.
+    # LAZY imports — cycle discipline (see _mark_record_audit above).
+    from src.notify.journal import mark_domain_event
+    from src.notify.snapshots import build_new_record_snapshot
+
+    mark_domain_event(
+        "new_record", await build_new_record_snapshot(db_session, record)
+    )
     return record
 
 

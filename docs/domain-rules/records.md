@@ -12,6 +12,7 @@ A Record is data that comes from the booking flow. It links a Client to an Activ
 | seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
+| notify | boolean | ❌ | — | — | false | «отправлять оповещения» (#482): fixed at creation — saved as `true` ONLY when an audit actor is in context (anonymous booking → `false`); never edited after creation; read live by the notify dispatcher. Internal state: not exposed in API responses |
 | visits | array | ✅ | — | — | — | List of VisitItems |
 
 An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it is created as a Visit row with `visitor_id = NULL` (#257) and carries a real tariff/price/status like any other visit — there is no separate counter field anymore.
@@ -122,7 +123,8 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
   - ID-based: link existing Visitor
   - Anonymous: no Visitor linked — the Visit row is created with `visitor_id = NULL` and still carries a real tariff/price/status (#257)
 - **Seats = len(visits):** Always recomputed by `recompute_record_seats()` — recalculates on record create/update/patch and on `VisitService.create/delete`; never user-set
-- **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
+- **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits → recompute seats/status → mark the `new_record` domain event (#482: the `@transactional` wrapper inserts the journal row in the same commit)
+- **notify flag gate (#482):** `RecordCreate.notify` (default `false`) is saved into the column as `true` ONLY when `audit.current_actor()` is not None — the booking route is public, so an anonymous call with `notify: true` is recorded as `false`
 - **Update (PUT):** Full replacement — record's own visit rows hard-deleted, new Visits created, seats recomputed; capacity re-checked (409 when over)
 - **Patch:** Partial update. If `visits` in payload → old visit rows hard-deleted, new created, seats recomputed and capacity re-checked (409). A comment/custom_price-only patch skips the capacity query.
 - **Delete (unified contract, #285 rev7/rev8, GH #139):**

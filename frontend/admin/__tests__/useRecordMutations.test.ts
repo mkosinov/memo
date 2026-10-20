@@ -576,6 +576,45 @@ describe('useRecordMutations', () => {
     });
   });
 
+  // ─── GH #482 Task 6: the notify flag must reach the API body (spec §3.3) ───
+  // Regression for «флаг гибнет на фронте» (§5): the checkbox state lives in
+  // the form payload, but createRecord dropped it — the backend (extra=forbid)
+  // would 422 on any future leak, so the flag must be an explicit body field.
+
+  describe('createRecord — notify flag chain (#482)', () => {
+    it('sends notify: true in the createRecord body when the checkbox is on', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, notify: true },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ notify: true }),
+      );
+    });
+
+    it('sends notify: false in the createRecord body when the checkbox is off', async () => {
+      const { wrapper } = createQueryClientWrapper();
+      const { result } = renderHook(() => useRecordMutations(activityId, recordId), { wrapper });
+
+      await act(async () => {
+        await result.current.createRecord(
+          { ...baseCreateRecordInput, notify: false },
+          serviceTariffs,
+        );
+      });
+
+      expect(mockCreateRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ notify: false }),
+      );
+    });
+  });
+
   describe('saveRecord', () => {
     it('calls patchRecord with the provided data', async () => {
       const { wrapper } = createQueryClientWrapper();

@@ -9,13 +9,17 @@
 # testing
 /coverage
 
-# Playwright (baseline screenshots are committed; these are temporary)
+# Playwright (baseline screenshots are committed; these are temporary).
+# GH #415: playwright-report*/ covers per-shard dirs (playwright-report-shard1
+# etc. — /playwright-report/ alone does NOT match them); results*.json covers
+# the default results.json and per-shard results-shard{N}.json.
 /test-results/
-/playwright-report/
+/playwright-report*/
 /blob-report/
 /playwright/.cache/
 *.actual.png
 *.diff.png
+/results*.json
 
 # next.js
 /.next/

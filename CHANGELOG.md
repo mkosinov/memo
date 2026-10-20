@@ -7,9 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-10-11
+## [Unreleased] — 2026-10-20
 
 ### Added
+- **GH #415 — e2e CI: 4 нативных шарда Playwright + HTML-отчёт с трейсами +
+  блокирующий флейк-гейт** — branch `415-e2e-ci-native-shards` (8 коммитов
+  `d7192263..915e5bae`, base `88c20845`; 14 файлов, +790/−146; спека
+  `docs/specs/2026-10-13-e2e-ci-native-shards-415-design.md` рев.4 и план
+  `docs/plans/2026-10-19-e2e-ci-native-shards-415-plan.md` — оба на main,
+  unchanged by IMPL; CI/harness change — продуктовый код не тронут):
+  - **Нативные шарды (T1 `d7192263`, T3 `4330f117`, T4 `da60be81`):** один проект
+    `e2e` в `playwright.config.ts` вместо двух ручных regex-проектов
+    (`shard-schedule`/`shard-rest`, дисбаланс ~4:1) — деление spec-файлами через
+    `--shard=i/N`: 4 шарда в CI (матрица `test.yml` с гардом spec-файлов,
+    пины 144/143/143/143), 2 локально (`test-all.sh`, пер-шардные выходы
+    отчётов); `e2e-shard-start.sh` — allowlist `SHARD_ID` ∈ {1..4} + табличные
+    dryrun-кейсы 65/0.
+  - **Отчёты и трейсы (T1, T4, T6 `3da60bb4`):** репортеры `list`+`html`+`json`
+    с env-управляемыми путями выходов; при падении джобы выгружаются артефакты
+    `e2e-report-shard-<i>` (HTML-отчёт + трейсы, `if-no-files-found: warn`) —
+    падение в CI больше не диагностируется только по тексту лога;
+    `visual-check.yml`/`update-snapshots.yml` → `--project=e2e`, артефакт
+    `updated-snapshots-e2e`.
+  - **Блокирующий флейк-гейт (T2 `8724df41`, решение Gate B):**
+    `scripts/e2e-report-summary.mjs` — сводка ретрай-флейков (статус `flaky`
+    теста, Markdown в `$GITHUB_STEP_SUMMARY`, `::warning`-аннотации); ≥1 флейк →
+    exit 1 — джоба падает и блокирует мерж (ретраи остаются классификатором,
+    а не способом скрыть нестабильность); юнит-тест контракта 13/13.
+  - **Доки и скиллы (T7 `915e5bae`):** `docs/tests_workflow.md` — раздел шардов
+    переписан, ВСЕ упоминания старых имён мигрированы (греп по зоне пуст);
+    скиллы `dev-workflow` и `vitest-playwright-patterns` — команды, SHARD_ID,
+    имя артефакта.
+  - **Внеплановый фикс (санкционирован):** `6350f6b3` — `clients.spec.ts` US-4
+    ждёт финальный URL с `?q=` (дебаунс-синк #349): pre-existing флейк, который
+    новый гейт превратил бы в красный мерж-блокер этого PR; изолированно 5/5 +
+    ревью 2/2.
+  - **Tests:** полный `test-all.sh` ×3 — pytest **3392p**, vitest **3066p**,
+    структурный DoD зелёный в каждом прогоне; визуальный комплаенс-гейт exit 0
+    (секция N/A спеки); PR-временной DoD (4 зелёных e2e-джобы ≤ 10 мин, красная
+    проба артефакта, гарды в логах CI) — на PR, T8/приёмка у архитектора.
+  - Status: `docs/status/2026-10-20-e2e-ci-native-shards-415.md`
 - **GH #389 — Локальное vitest-окружение admin: TZ=UTC пин + выключение
   Node-заглушки webstorage + декларативный пин Node 26 (.nvmrc)** — branch
   `389-vitest-local-env` (2 коммита `fa1562a1..4d76f6a2`, base `b573542c`; 3 файла,

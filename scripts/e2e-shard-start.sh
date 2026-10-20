@@ -5,7 +5,7 @@
 # Each shard gets its own DB, backend port, and frontend port.
 #
 # Environment variables (all required):
-#   SHARD_ID          1-2 (determines DB path)
+#   SHARD_ID          1-4 (determines DB path)
 #   SHARD_PORT        Frontend port (e.g. 3002)
 #   BACKEND_PORT      Backend port (e.g. 8001)
 #   TEST_DB_PATH      Path to shard's SQLite DB (e.g. backend/test_memo_shard1.db)
@@ -55,13 +55,15 @@ for var in SHARD_ID SHARD_PORT BACKEND_PORT TEST_DB_PATH BACKEND_URL NEXT_PUBLIC
   fi
 done
 
-# GH #209 — canonical shards are 1 and 2. A typo (e.g. SHARD_ID=rest) used to
-# fall through to Playwright project resolution, where CI reported "0 spec
-# files" far from the root cause. Fail here, at the source.
+# GH #209 — fail fast on a SHARD_ID typo: it used to fall through to
+# Playwright project resolution, where CI reported "0 spec files" far from
+# the root cause. #415 (spec §3.2) — canonical shards are now 1-4 (four
+# native CI shards); ports stay caller-provided (1→3002/8001 ...
+# 4→3005/8004). Fail here, at the source.
 case "$SHARD_ID" in
-  1|2) ;;
+  1|2|3|4) ;;
   *)
-    echo "ERROR: SHARD_ID must be 1 or 2 (canonical shards; got '$SHARD_ID')" >&2
+    echo "ERROR: SHARD_ID must be 1–4 (canonical shards; got '$SHARD_ID')" >&2
     exit 1
     ;;
 esac

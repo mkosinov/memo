@@ -160,10 +160,10 @@ Two modes, controlled by the `SHARD_ID` env var (see `frontend/admin/playwright.
   canonical narrative: `docs/tests_workflow.md` ("How to run").
 
 **Shard mode** (`SHARD_ID` set) — canonical CI/pre-push path via `scripts/test-all.sh`:
-- 2 isolated stacks (`scripts/e2e-shard-start.sh`): per-shard SQLite DB
-  (`test_memo_shard{1,2}.db`), FastAPI :8001-8002, Next.js :3002-3003 —
-  these fixed ports are CI facts; a LOCAL `test-all.sh` run instead gets a
-  6-hex run tag + 4 dynamic ports from the 28000-32700 window (see §3).
+- Per-shard isolated stacks (`scripts/e2e-shard-start.sh`): per-shard SQLite DB
+  (`test_memo_shard{N}.db`). CI runs 4 native shards on fixed ports (FastAPI
+  :8001-8004, Next.js :3002-3005); a LOCAL `test-all.sh` run gets 2 shards with
+  a 6-hex run tag + 4 dynamic ports from the 28000-32700 window (see §3).
 - `webServer` config is SKIPPED (`...(process.env.SHARD_ID ? {} : {...})`);
   the shard stack pre-starts the server and Playwright connects to it.
 - Run the whole suite: `pnpm test:all` (or `bash scripts/test-all.sh`).
@@ -182,8 +182,8 @@ tr '\0' '\n' < /proc/<PID>/environ | grep -E '^(SHARD_ID|DATABASE_URL|NEXT_DIST_
 ```
 
 Check that `SHARD_ID`, `DATABASE_URL`, and `NEXT_DIST_DIR` match what YOUR run
-expects (legacy/CI mapping: shard 1 → `test_memo_shard1.db`/:8001/:3002,
-shard 2 → `test_memo_shard2.db`/:8002/:3003). **When in any doubt — kill it and
+expects (CI mapping: shard 1 → `test_memo_shard1.db`/:8001/:3002 … shard 4 →
+`test_memo_shard4.db`/:8004/:3005). **When in any doubt — kill it and
 start a fresh stack.** A 30-second restart is cheaper than debugging failures
 caused by a stale stack.
 
@@ -229,7 +229,7 @@ cd frontend/admin && SHARD_PORT=3005 BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBL
 Changed the API host between runs? Remove `frontend/admin/.next` first —
 `NEXT_PUBLIC_API_URL` is baked into the bundle at compile time.
 
-For a specific shard project: `pnpm exec playwright test --project=shard-rest --workers=1` (shard mode, pins come from the stack script).
+For the single `e2e` project: `pnpm exec playwright test --project=e2e --workers=1` (shard mode, pins come from the stack script); add `--shard=i/N` to limit the run to one native shard.
 
 ### 5. ALWAYS use PTY for E2E
 
@@ -250,11 +250,12 @@ Visual baselines are recorded in the CI environment, never locally. Local
 regeneration (`pnpm run test:e2e:update`) is for iteration ONLY — local PNGs
 will pixel-diff on CI due to font/OS rendering drift.
 
-**Canonical drill** (manual trigger, shard 2 = `shard-rest` project):
+**Canonical drill** (manual trigger; mirrors the CI shard-2 stack but runs the
+WHOLE `e2e` project — no `--shard`):
 
 1. Trigger the workflow: `gh workflow run update-snapshots.yml --ref <branch>`
    (`workflow_dispatch`, runs with `SHARD_ID=2` on `ubuntu-latest`).
-2. Download the `updated-snapshots-shard-rest` artifact from the workflow run.
+2. Download the `updated-snapshots-e2e` artifact from the workflow run.
 3. Copy the PNGs into `frontend/admin/e2e/**/*-snapshots/` (the spec's
    `-snapshots/` dirs).
 4. Commit the new PNG files.
@@ -263,8 +264,8 @@ Local regeneration (step order: verify baseline dirs, run with
 `--update-snapshots`) is acceptable ONLY for iterating on a visual test while
 developing — do NOT commit locally recorded baselines as the final state.
 
-`SHARD_ID` is always from {1, 2} (shard 1 = `shard-schedule`, shard 2 =
-`shard-rest`).
+`SHARD_ID` is from {1, 2, 3, 4} in CI (4 native shards of the single `e2e`
+project) and {1, 2} in local `test-all.sh` runs.
 
 **Full canon:** `docs/tests_workflow.md` ("Visual regression" + "Known
 caveats" sections) is the single source of truth for snapshot provenance,

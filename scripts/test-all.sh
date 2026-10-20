@@ -5,7 +5,8 @@
 # Parallelization strategy:
 # - Backend pytest runs in parallel with frontend stages.
 # - Lint, type-check, vitest all run in parallel.
-# - 2 Playwright shards run in PARALLEL, each with its own isolated stack:
+# - 2 native Playwright shards (--shard=1/2 and --shard=2/2 of the single
+#   e2e project, GH #415) run in PARALLEL, each with its own isolated stack:
 #   * Its own SQLite DB (test_memo_shard{N}_${SHARD_RUN_TAG}.db)
 #   * Its own FastAPI backend (dynamic port from the 28000-32700 window)
 #   * Its own Next.js frontend (dynamic port from the same window)
@@ -72,13 +73,14 @@ fi
 
 echo "🔍 Running local test suite (PARALLEL mode)..."
 
-# ── Shard projects + sourced helpers library ────────────────────────────────
+# ── Sourced helpers library ─────────────────────────────────────────────────
 # Functions in the library read these globals (no arguments) — declared
 # before the source and before any call into the library. The port arrays
 # are filled by dynamic allocation below (#317 §3.2); they stay empty until
 # then, and no library function that reads them is called before they are
 # filled (cleanup_shards runs at trap time, after allocation).
-SHARD_PROJECTS=("shard-schedule" "shard-rest")
+# GH #415: SHARD_PROJECTS is gone — sharding is native (--shard=i/2 of the
+# single Playwright project e2e), no project-name split remains.
 SHARD_FRONTEND_PORTS=()
 SHARD_BACKEND_PORTS=()
 source "$ROOT/scripts/lib/shard-helpers.sh"
@@ -366,7 +368,6 @@ echo "  → per-shard DBs ready (2 tagged copies of $MASTER_DB, tag $SHARD_RUN_T
 echo "  → starting 2 shard stacks..."
 for i in $(seq 0 1); do
   SHARD_NUM=$((i + 1))
-  PROJECT="${SHARD_PROJECTS[$i]}"
   BACKEND_PORT="${SHARD_BACKEND_PORTS[$i]}"
   FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
   SHARD_DB="backend/test_memo_shard${SHARD_NUM}_${SHARD_RUN_TAG}.db"
@@ -454,11 +455,14 @@ done
 echo "  → waiting 30s for Next.js compilation to stabilize..."
 sleep 30
 
-# Run 2 Playwright shards in parallel, each against its own frontend
+# Run 2 native Playwright shards in parallel, each against its own frontend.
+# GH #415: single e2e project + --shard=i/2 (deterministic spec-file split).
+# Both shards run in PARALLEL from the SAME cwd (frontend/admin) — per-shard
+# E2E_RESULTS_JSON / E2E_REPORT_DIR keep them from overwriting each other's
+# results.json and playwright-report/ (see playwright.config.ts reporters).
 echo "  → running 2 Playwright shards in parallel..."
 for i in $(seq 0 1); do
   SHARD_NUM=$((i + 1))
-  PROJECT="${SHARD_PROJECTS[$i]}"
   FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
   BACKEND_PORT="${SHARD_BACKEND_PORTS[$i]}"
   BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
@@ -473,8 +477,10 @@ for i in $(seq 0 1); do
     TEST_DB_PATH="$ROOT/$SHARD_DB" \
     BACKEND_URL="$BACKEND_URL" \
     NEXT_PUBLIC_API_URL="$BACKEND_URL" \
-    CI= pnpm exec playwright test --project="$PROJECT" --workers=1 \
-      > "$LOG_DIR/pw-$PROJECT.log" 2>&1
+    E2E_RESULTS_JSON="results-shard${SHARD_NUM}.json" \
+    E2E_REPORT_DIR="playwright-report-shard${SHARD_NUM}" \
+    CI= pnpm exec playwright test --project=e2e --shard=${SHARD_NUM}/2 --workers=1 \
+      > "$LOG_DIR/pw-shard-${SHARD_NUM}.log" 2>&1
   ) &
   ALL_PIDS+=($!)
 done

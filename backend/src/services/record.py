@@ -58,6 +58,8 @@ from src.schemas.record import (
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Alias import keeps the builtin ``list`` usable in the class body
@@ -260,6 +262,18 @@ def _total_price_sq() -> ScalarSelect[Any]:
         .where(Visit.record_id == Record.id)
         .scalar_subquery()
     )
+
+
+def record_total_price(visits: Iterable[Visit]) -> int:
+    """Sum of the record's visit prices — the Python twin of the SQL total.
+
+    GH #482 (spec §3.2): the SINGLE semantics point of the record total
+    for Python consumers (the ``new_record`` snapshot's ``total_price``).
+    Mirrors ``_total_price_sq`` exactly: ``COALESCE(SUM(visit.price), 0)``
+    — ``custom_price`` is NOT included (parity with the lists), ``None``
+    prices are skipped like SQL ``SUM`` skips NULLs, no visits → 0.
+    """
+    return sum(v.price for v in visits if v.price is not None)
 
 
 def _paid_sum_sq() -> ScalarSelect[Any]:

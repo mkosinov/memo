@@ -31,6 +31,12 @@ in the request context → nothing is inserted (spec §4.1: seeds, CLI,
 session-less fixtures, anonymous mutations are not journaled); the
 method itself still runs and commits.
 
+GH #482 (spec §3.1) — the wrapper is also the SINGLE domain-event
+insertion point, a THIRD accumulator opened next to audit with the same
+token-ownership rule (single owner per transaction). KEY DIFFERENCE:
+no actor gate — the domain-event journal is data, not an action log,
+so the insertion is UNCONDITIONAL (seeds and CLI write events too).
+
 Usage — two supported forms, both called NATURALLY with their own
 declared arguments (no placeholder slot, no leading ``None``)::
 
@@ -99,6 +105,29 @@ def _insert_audit_rows(session: Any) -> None:
     from src.models.audit_log import AuditLog
 
     session.add_all(AuditLog(**row) for row in rows)
+
+
+def _insert_event_rows(session: Any) -> None:
+    """Insert the accumulated domain-event rows into ``session`` (#482 §3.1).
+
+    Called by the OWNING wrapper after a successful method return and
+    BEFORE ``commit()`` — entity + event in one commit, rolled back
+    together on any error. Unlike audit there is NO actor gate: domain
+    events are data, not an action log — the insertion is unconditional
+    (seeds and CLI included). Skipped when nothing accumulated (no
+    marks — the pilot ``new_record`` mark arrives in Task 6).
+
+    LAZY imports — cycle precedent: same rule as the audit insert above;
+    the model import lives here, not in the accumulator module.
+    """
+    from src.notify import journal
+
+    events = journal.draw_events()
+    if not events:
+        return
+    from src.notify.models import DomainEvent
+
+    session.add_all(DomainEvent(**event) for event in events)
 
 
 def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
@@ -213,12 +242,28 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
         from src.events import audit as _audit
 
         audit_token = _audit.open_audit(entity_name)
+        # ── GH #482: open the domain-event journal accumulator (spec §3.1)
+        # Third accumulator, opened NEXT TO audit with the same
+        # token-ownership rule: the wrapper that receives a token OWNS
+        # it (transaction outer boundary); nested wrappers get None and
+        # neither insert nor reset (single-owner rule). KEY DIFFERENCE
+        # from audit: no actor gate — the insertion is unconditional
+        # (domain events are data, not an action log; seeds and CLI
+        # write them too). LAZY import — cycle precedent (see above +
+        # src/notify/journal.py).
+        from src.notify import journal as _journal
+
+        journal_token = _journal.open_journal()
         try:
             result = await func(*args, **kwargs)
             # Audit insert BEFORE commit (§4.4): action + journal in one
             # commit; owner-only (nested wrappers inserted nothing).
             if audit_token is not None:
                 _insert_audit_rows(session)
+            # Domain-event insert BEFORE commit (#482 §3.1): entity +
+            # event in one commit; owner-only (single-owner rule).
+            if journal_token is not None:
+                _insert_event_rows(session)
             await session.commit()
             # Emit only on success — after commit, before returning (§3.3).
             hub.publish(emitter.accumulated() or set(), emitter.get_origin())
@@ -228,6 +273,7 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
             emitter.reset_accumulation(token)
             # Owner-only reset (§4.4); None token (inner wrapper) is a no-op.
             _audit.reset_audit(audit_token)
+            _journal.reset_journal(journal_token)
 
     setattr(wrapper, _TRANSACTIONAL_MARKER, True)
     return wrapper

@@ -819,6 +819,17 @@ export function phoneMaskDisplay(digits: string, mode: 'international' | 'nation
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;
 }
 
+/**
+ * The grouped display of a 10-digit RU remainder as the PhoneField widget
+ * shows it (GH #414): `999 123-45-67`. Same grouping as
+ * {@link phoneMaskDisplay}(digits, 'national'), kept as its own named form
+ * because the specs feed it the NATIONAL string they type (not a full
+ * number) — shared by the phone e2e specs (GH #429 dedup).
+ */
+export function groupedRu(national: string): string {
+  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // #232 deep-link narrowing — shared /clients page assertions
 // ─────────────────────────────────────────────────────────────────────────────

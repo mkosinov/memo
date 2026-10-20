@@ -16,7 +16,7 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { request as apiRequest, type APIRequestContext } from '@playwright/test';
 import { cleanup, E2E_PASSWORD } from './fixtures/factories';
-import { waitForStaffReady } from './fixtures/helpers';
+import { waitForStaffReady, groupedRu } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
@@ -30,11 +30,6 @@ let phoneCounter = 0;
 function uniquePhone(): string {
   phoneCounter += 1;
   return `+7994${String(Date.now()).slice(-6)}${phoneCounter}`;
-}
-
-/** The grouped display of a 10-digit RU remainder in the widget input. */
-function groupedRu(national: string): string {
-  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
 }
 
 /** A passwordless staff card + account (no link yet) — the admin corridor. */

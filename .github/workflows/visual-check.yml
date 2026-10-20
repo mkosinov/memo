@@ -1,7 +1,7 @@
 name: Visual Check (manual, spec #278)
 
 # Manually-triggered NARROW visual-only run: the three screenshot e2e spec
-# files of the `shard-rest` project, check-only. Complements the existing
+# files of the `e2e` project, check-only. Complements the existing
 # manual full-suite dispatch (`gh workflow run test.yml --ref <branch>`)
 # with a ~10-minute pixel-verdict channel.
 #
@@ -71,7 +71,7 @@ jobs:
       - name: Spec-file guard (visual specs)
         run: |
           list_output=$(mktemp)
-          if ! pnpm exec playwright test --project=shard-rest \
+          if ! pnpm exec playwright test --project=e2e \
               visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts \
               --list > "$list_output"; then
             echo "ERROR: playwright --list failed for the visual spec set."
@@ -96,7 +96,7 @@ jobs:
           BACKEND_URL: http://127.0.0.1:8002
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
 
-      - name: Start E2E stack (shard-rest)
+      - name: Start E2E stack (e2e)
         run: |
           SHARD_ID=2 \
           SHARD_PORT=3003 \
@@ -126,7 +126,7 @@ jobs:
       # Check-only run: `--update-snapshots=none` guarantees no baseline
       # writes (default "missing" mode would create absent baselines).
       - name: Run visual specs (check-only)
-        run: pnpm exec playwright test --project=shard-rest visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts --workers=1 --update-snapshots=none
+        run: pnpm exec playwright test --project=e2e visual-regression.spec.ts week-view.spec.ts wave6-status-snapshots.spec.ts --workers=1 --update-snapshots=none
         working-directory: frontend/admin
         env:
           SHARD_ID: 2

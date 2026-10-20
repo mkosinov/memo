@@ -1,12 +1,15 @@
-name: Update Snapshots (shard-rest)
+name: Update Snapshots
 
 # Manually-triggered workflow to regenerate Playwright `toHaveScreenshot`
-# baselines for the `shard-rest` project ON the exact `ubuntu-latest` CI
+# baselines for the `e2e` project ON the exact `ubuntu-latest` CI
 # runner image. This guarantees the font stack / browser build matches the
 # environment where the `e2e-tests` job runs, avoiding font-render drift.
 #
-# It mirrors the `e2e-tests` job in test.yml (shard-rest matrix entry:
-# SHARD_ID=2, SHARD_PORT=3003, BACKEND_PORT=8002) but adds `--update-snapshots`.
+# It mirrors the `e2e-tests` job in test.yml (shard-2 stack: SHARD_ID=2,
+# SHARD_PORT=3003, BACKEND_PORT=8002) but adds `--update-snapshots`.
+# Unlike a CI shard it runs the WHOLE `e2e` project (no `--shard`):
+# since #415 that is all 99 spec files, schedule ones included (spec #415
+# §3.6 — an accepted consequence; the run is manual, not a PR gate).
 #
 # Regenerated PNGs are committed and pushed back to the dispatched branch
 # automatically (#316): one dispatch → baselines committed exactly once;
@@ -83,16 +86,16 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: frontend/admin
 
-      # CI guard (#209): fail EARLY if the `shard-rest` Playwright project
+      # CI guard (#209): fail EARLY if the `e2e` Playwright project
       # resolves 0 spec files (project-name typo, testMatch filter regression,
       # or a worktree path swept by the regexes) — before the stack starts.
       # `--list` prints spec paths to stdout only; stderr (config-error traces
       # with absolute .spec.ts paths) is NOT scanned.
-      - name: Spec-file guard (shard-rest)
+      - name: Spec-file guard (e2e)
         run: |
           list_output=$(mktemp)
-          if ! pnpm exec playwright test --project=shard-rest --list > "$list_output"; then
-            echo "ERROR: playwright --list failed for project 'shard-rest'."
+          if ! pnpm exec playwright test --project=e2e --list > "$list_output"; then
+            echo "ERROR: playwright --list failed for project 'e2e'."
             echo "Likely cause: project name typo vs playwright.config.ts."
             rm -f "$list_output"
             exit 1
@@ -100,12 +103,12 @@ jobs:
           spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
           rm -f "$list_output"
           if [ "$spec_count" -eq 0 ]; then
-            echo "ERROR: project 'shard-rest' resolved 0 spec files."
+            echo "ERROR: project 'e2e' resolved 0 spec files."
             echo "Likely cause: test-filter regression or worktree path swept by the"
             echo "testMatch regexes (frontend/admin/playwright.config.ts:118,125)."
             exit 1
           fi
-          echo "Spec-file guard OK: ${spec_count} spec files in project 'shard-rest'."
+          echo "Spec-file guard OK: ${spec_count} spec files in project 'e2e'."
         working-directory: frontend/admin
         env:
           SHARD_ID: 2
@@ -115,7 +118,7 @@ jobs:
           BACKEND_URL: http://127.0.0.1:8002
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8002
 
-      - name: Start E2E stack (shard-rest)
+      - name: Start E2E stack (e2e)
         run: |
           SHARD_ID=2 \
           SHARD_PORT=3003 \
@@ -142,8 +145,8 @@ jobs:
           # Buffer for Next.js compilation to stabilize
           sleep 10
 
-      - name: Regenerate shard-rest snapshots
-        run: pnpm exec playwright test --project=shard-rest --update-snapshots=${{ inputs.mode }} --workers=1
+      - name: Regenerate e2e snapshots
+        run: pnpm exec playwright test --project=e2e --update-snapshots=${{ inputs.mode }} --workers=1
         working-directory: frontend/admin
         env:
           SHARD_ID: 2
@@ -167,13 +170,13 @@ jobs:
             echo "No snapshot changes — nothing to commit."
             exit 0
           fi
-          git commit -m "chore(snapshots): regenerate shard-rest baselines (mode=${{ inputs.mode }}, run ${{ github.run_number }})"
+          git commit -m "chore(snapshots): regenerate e2e baselines (mode=${{ inputs.mode }}, run ${{ github.run_number }})"
           git push
 
       - name: Upload updated snapshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: updated-snapshots-shard-rest
+          name: updated-snapshots-e2e
           path: frontend/admin/e2e/**/*-snapshots/**
           retention-days: 7

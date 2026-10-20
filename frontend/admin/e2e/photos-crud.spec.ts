@@ -577,3 +577,114 @@ test.describe('Photos — Actions Dropdown', () => {
     await expect(dropdown.locator('button:has-text("Удалить")')).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// US-3 (#412) — tag filters in the table toolbar: chip in the table header,
+// ✕ removes the tag; multiple tags wrap inside the tag cell (nested wrap)
+// ---------------------------------------------------------------------------
+
+test.describe('Photos — US-3 (#412): tags in the table toolbar', () => {
+  test('US-3 (#412) — add tag via typeahead → chip in the table header; ✕ removes the tag', async ({ page }) => {
+    await waitForPhotosReady(page);
+
+    // US-3: the whole filter panel lives in the table card's toolbar row —
+    // the same border-b row that carries the column-settings gear. The
+    // external filter card above the table is gone (panel root testid is
+    // the new #412 anchor; the tag block keeps its chips-over-typeahead
+    // device inside the w-56 cell).
+    const toolbar = page
+      .locator('div.p-4.border-b')
+      .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+    const panel = toolbar.locator('[data-testid="photos-filters"]');
+    await expect(panel).toBeVisible();
+    const addTag = panel.getByPlaceholder('Добавить тег...');
+
+    // Add «новинка» via the typeahead — the chip appears IN the toolbar.
+    const first = nextPhotosList(page);
+    await addTag.fill('новинка');
+    await page.getByRole('option', { name: 'новинка' }).click();
+    await first;
+    await settle(page);
+    await expect(toolbar.getByLabel('Удалить тег новинка')).toBeVisible();
+
+    // The filter is applied from the toolbar: seed pins — the pair photo and
+    // guest-1 carry «новинка» (Scenario 6 pins), guest-2 (no T1) drops out.
+    await expect(page.getByText('/images/tag-pair.jpg')).toBeVisible();
+    await expect(page.getByText('/images/guest-1.jpg')).toBeVisible();
+    await expect(page.getByText('/images/guest-2.jpg')).toHaveCount(0);
+
+    // ✕ on the chip removes the tag: the chip disappears from the toolbar
+    // and the filter lifts — guest-2 is back.
+    const cleared = nextPhotosList(page);
+    await toolbar.getByLabel('Удалить тег новинка').click();
+    await cleared;
+    await settle(page);
+    await expect(toolbar.getByLabel('Удалить тег новинка')).toHaveCount(0);
+    await expect(page.getByText('/images/guest-2.jpg')).toBeVisible();
+  });
+
+  test('US-3 (#412) — multiple tags: nested wrap keeps every chip visible and accessible', async ({ page }) => {
+    await waitForPhotosReady(page);
+
+    // Narrow-but-supported window (spec §3.1: 768 px is the minimum admin
+    // width) — at 800 px the panel's controls wrap inside the toolbar left
+    // group AND the selected chips wrap INSIDE the w-56 tag cell: the
+    // nested wrap the spec §3.2 (Фото) pins for US-3.
+    await page.setViewportSize({ width: 800, height: 900 });
+
+    const toolbar = page
+      .locator('div.p-4.border-b')
+      .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+    const panel = toolbar.locator('[data-testid="photos-filters"]');
+    await expect(panel).toBeVisible();
+    const addTag = panel.getByPlaceholder('Добавить тег...');
+
+    // Four tags ≈ 310 px of chips inside the 224 px (w-56) cell — the chip
+    // row must wrap inside the block, not stretch it (seed dictionary:
+    // новинка, хит, для детей, популярное). The add-typeahead holds each
+    // pick as a readOnly label — click its × before the next fill.
+    const tagTitles = ['новинка', 'хит', 'для детей', 'популярное'];
+    for (const title of tagTitles) {
+      const refetch = nextPhotosList(page);
+      await addTag.fill(title);
+      await page.getByRole('option', { name: title }).click();
+      await refetch;
+      await settle(page);
+      await expect(toolbar.getByLabel(`Удалить тег ${title}`)).toBeVisible();
+      await page.getByRole('button', { name: 'clear' }).click();
+    }
+
+    // Every chip is visible and accessible — each removal ✕ is a named,
+    // enabled button (accessible name «Удалить тег <title>»).
+    for (const title of tagTitles) {
+      await expect(toolbar.getByLabel(`Удалить тег ${title}`)).toBeVisible();
+      await expect(toolbar.getByLabel(`Удалить тег ${title}`)).toBeEnabled();
+    }
+
+    // Nested wrap, level 1 — the panel's direct children occupy more than
+    // one distinct top edge (the tag cell wrapped inside the left group).
+    const panelTops = await panel.locator(':scope > *').evaluateAll((els) =>
+      Array.from(new Set(els.map((el) => Math.round(el.getBoundingClientRect().top)))),
+    );
+    expect(panelTops.length).toBeGreaterThan(1);
+
+    // Nested wrap, level 2 — the chips wrap INSIDE the tag cell: the chip
+    // row's children occupy more than one distinct top edge.
+    const chipsRow = toolbar.locator('span.rounded-full').first().locator('..');
+    const chipTops = await chipsRow.locator(':scope > *').evaluateAll((els) =>
+      Array.from(new Set(els.map((el) => Math.round(el.getBoundingClientRect().top)))),
+    );
+    expect(chipTops.length).toBeGreaterThan(1);
+
+    // Nothing overflows horizontally (spec §3.1: no horizontal scroll down
+    // to 768 px) despite the two wrap levels.
+    const noHorizontalScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    );
+    expect(noHorizontalScroll).toBe(true);
+
+    // The multi-tag AND still filters from the toolbar: no seed photo
+    // carries all four tags → the unified empty state.
+    await expect(page.getByText('Нет записей')).toBeVisible();
+  });
+});

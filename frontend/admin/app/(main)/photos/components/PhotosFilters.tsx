@@ -79,7 +79,7 @@ export function PhotosFilters() {
   const labelStyle = { color: 'var(--ink-light)' };
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div data-testid="photos-filters" className="flex flex-wrap items-end gap-3">
       {/* Клиент — server search, active clients only (spec §7.3) */}
       <div className="w-56">
         <RemoteSearchSelect

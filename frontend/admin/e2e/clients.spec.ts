@@ -1294,4 +1294,115 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       if (clientId) await cleanup(request, `/api/v1/clients/${clientId}`);
     }
   });
+
+  // ── US-2 (#412): all clients filters visible and fitting in the toolbar ──
+
+  test('US-2 (#412): narrow viewport — toolbar panel wraps rows, no horizontal scroll; date pair filters; reset clears', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `US2 Toolbar ${uid()}`;
+    const client = await createTestClient(request, { name: clientName });
+
+    try {
+      // Narrow-but-supported window (spec §3.1: 768 px is the minimum admin
+      // width; at 800 px the 11 controls have no chance of a single row).
+      await page.setViewportSize({ width: 800, height: 900 });
+      await waitForClientsReady(page, { waitForName: clientName });
+
+      // US-2: the whole filter panel lives in the table card's toolbar row —
+      // the same border-b row that carries the column-settings gear. The
+      // external filter card above the table is gone (panel root testid is
+      // the new #412 anchor; field markup is unchanged).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      const panel = toolbar.locator('[data-testid="clients-filters"]');
+      await expect(panel).toBeVisible();
+
+      // Every control stays visible: search + status select + 4 от/до pairs
+      // (10 inputs in 6 groups) + «Сбросить фильтры».
+      const controls = panel.locator('input, select, button');
+      await expect(controls).toHaveCount(11);
+      for (const control of await controls.all()) {
+        await expect(control).toBeVisible();
+      }
+
+      // The fields lay out in MULTIPLE rows: the panel's direct children
+      // occupy more than one distinct top edge inside the left group.
+      const childTops = await panel.locator(':scope > *').evaluateAll((els) =>
+        Array.from(new Set(els.map((el) => Math.round(el.getBoundingClientRect().top)))),
+      );
+      expect(childTops.length).toBeGreaterThan(1);
+
+      // ...and nothing overflows horizontally (spec §3.1: no horizontal
+      // scroll down to 768 px).
+      const noHorizontalScroll = await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      );
+      expect(noHorizontalScroll).toBe(true);
+
+      // Apply the «Создан» date pair (created_from/created_to) — machine-side
+      // filters (#349: the clients URL contract is q/status/sort/page only;
+      // structured filters never write the address — spec §3.3 unchanged):
+      // each fill fires a list GET carrying the param (mirrors records US-1
+      // mechanics, minus the URL). A wide window keeps the seeded row visible
+      // (seed reset leaves 5 seed clients + ours — all on page 1).
+      const dateFrom = panel.locator('input[type="date"]').nth(0);
+      const dateTo = panel.locator('input[type="date"]').nth(1);
+      const fromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_from=1990-01-01'),
+        { timeout: 10_000 },
+      );
+      await dateFrom.fill('1990-01-01');
+      await fromWait;
+      const toWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_to=2030-12-31'),
+        { timeout: 10_000 },
+      );
+      await dateTo.fill('2030-12-31');
+      await toWait;
+      const row = page.locator('table tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+
+      // A window that excludes every client (all created ≤ today) filters
+      // the table down to the unified empty state.
+      const narrowWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('created_from=2100-01-01'),
+        { timeout: 10_000 },
+      );
+      await dateFrom.fill('2100-01-01');
+      await narrowWait;
+      await expect(row).toHaveCount(0);
+      await expect(page.getByText('Нет записей')).toBeVisible();
+
+      // Widen the window back (the row returns — served from the query
+      // cache: React Query staleTime makes the revisit of an earlier filter
+      // key network-free, so assert the UI, not a refetch), then add a
+      // URL-backed filter (status) so the address carries something reset
+      // must clear.
+      await dateFrom.fill('1990-01-01');
+      await expect(row).toBeVisible({ timeout: 10_000 });
+      const statusSelect = panel.locator('select');
+      const statusWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/clients') && r.url().includes('status=archived'),
+        { timeout: 10_000 },
+      );
+      await statusSelect.selectOption('archived');
+      await statusWait;
+      await expect(page).toHaveURL(/status=archived/);
+      await expect(row).toHaveCount(0); // our client is active
+
+      // «Сбросить фильтры» from the toolbar panel: the fields return to
+      // their defaults, the address is cleaned (one push to the clean
+      // /clients — #349 reset contract) and the row comes back.
+      await panel.getByText('Сбросить фильтры').click();
+      await expect(page).toHaveURL(/\/clients$/, { timeout: 10_000 });
+      await expect(statusSelect).toHaveValue('active');
+      await expect(clientSearchInput(page)).toHaveValue('');
+      await expect(row).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
 });

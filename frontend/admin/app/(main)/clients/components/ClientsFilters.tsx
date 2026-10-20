@@ -84,11 +84,16 @@ export function ClientsFilters() {
   const inputStyle = { borderColor: 'var(--line)' };
 
   return (
-    <div className="space-y-3">
+    // #412 US-2 (spec §3.1/§3.2): the panel rides in the DataTable toolbar's
+    // left group — a FLAT wrap container (no vertical stack, no wrapper row):
+    // when width runs out the controls wrap to following rows inside the
+    // group; the search input is a normal inline control (w-full retired).
+    // Field set, labels, control widths and behavior are unchanged.
+    <div data-testid="clients-filters" className="flex flex-wrap items-end gap-3">
       <input
         type="text"
         placeholder="🔍 Поиск по имени или телефону"
-        className={`w-full ${inputClass}`}
+        className={inputClass}
         style={inputStyle}
         value={draft}
         onChange={(e) => {
@@ -98,55 +103,53 @@ export function ClientsFilters() {
           debouncedSearch(value);
         }}
       />
-      <div className="flex flex-wrap gap-4">
-        <div>
-          <label className="text-xs text-ink-mid block mb-1">Статус</label>
-          <select
-            className={inputClass}
-            style={inputStyle}
-            value={status}
-            onChange={(e) => setStatus(e.target.value as ArchiveFilter)}
-          >
-            <option value="all">Все</option>
-            <option value="active">Активные</option>
-            <option value="archived">Неактивные</option>
-          </select>
+      <div>
+        <label className="text-xs text-ink-mid block mb-1">Статус</label>
+        <select
+          className={inputClass}
+          style={inputStyle}
+          value={status}
+          onChange={(e) => setStatus(e.target.value as ArchiveFilter)}
+        >
+          <option value="all">Все</option>
+          <option value="active">Активные</option>
+          <option value="archived">Неактивные</option>
+        </select>
+      </div>
+      <div>
+        <label className="text-xs text-ink-mid block mb-1">Записи</label>
+        <div className="flex gap-1">
+          <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ min_records: e.target.value ? Number(e.target.value) : null })} />
+          <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ max_records: e.target.value ? Number(e.target.value) : null })} />
         </div>
-        <div>
-          <label className="text-xs text-ink-mid block mb-1">Записи</label>
-          <div className="flex gap-1">
-            <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ min_records: e.target.value ? Number(e.target.value) : null })} />
-            <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ max_records: e.target.value ? Number(e.target.value) : null })} />
-          </div>
+      </div>
+      <div>
+        <label className="text-xs text-ink-mid block mb-1">Пропущенные</label>
+        <div className="flex gap-1">
+          <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ missed_from: e.target.value ? Number(e.target.value) : null })} />
+          <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ missed_to: e.target.value ? Number(e.target.value) : null })} />
         </div>
-        <div>
-          <label className="text-xs text-ink-mid block mb-1">Пропущенные</label>
-          <div className="flex gap-1">
-            <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ missed_from: e.target.value ? Number(e.target.value) : null })} />
-            <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ missed_to: e.target.value ? Number(e.target.value) : null })} />
-          </div>
+      </div>
+      <div>
+        <label className="text-xs text-ink-mid block mb-1">Создан</label>
+        <div className="flex gap-1">
+          <input type="date" className={inputClass} style={inputStyle}
+            onChange={(e) => setFilters({ created_from: e.target.value })} />
+          <input type="date" className={inputClass} style={inputStyle}
+            onChange={(e) => setFilters({ created_to: e.target.value })} />
         </div>
-        <div>
-          <label className="text-xs text-ink-mid block mb-1">Создан</label>
-          <div className="flex gap-1">
-            <input type="date" className={inputClass} style={inputStyle}
-              onChange={(e) => setFilters({ created_from: e.target.value })} />
-            <input type="date" className={inputClass} style={inputStyle}
-              onChange={(e) => setFilters({ created_to: e.target.value })} />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs text-ink-mid block mb-1">Оплата</label>
-          <div className="flex gap-1">
-            <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ min_paid: e.target.value ? Number(e.target.value) : null })} />
-            <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
-              onChange={(e) => setFilters({ max_paid: e.target.value ? Number(e.target.value) : null })} />
-          </div>
+      </div>
+      <div>
+        <label className="text-xs text-ink-mid block mb-1">Оплата</label>
+        <div className="flex gap-1">
+          <input type="number" placeholder="от" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ min_paid: e.target.value ? Number(e.target.value) : null })} />
+          <input type="number" placeholder="до" className={`w-20 ${inputClass}`} style={inputStyle}
+            onChange={(e) => setFilters({ max_paid: e.target.value ? Number(e.target.value) : null })} />
         </div>
       </div>
       <button onClick={handleReset} className="text-xs text-brand hover:underline">

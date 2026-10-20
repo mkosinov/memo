@@ -100,11 +100,14 @@ vi.mock('../app/(main)/clients/components/ClientsTable', () => ({
   // #139 T6 — ClientsTable renders the unified <DataTable> which owns the pager.
   // Mock reads `useClientsTable` from the module scope (mocked above) and exposes
   // the pager controls so page-level tests can assert on them.
-  ClientsTable: ({ onClientClick }: any) => {
+  // #412 US-2 — the stub renders the toolbarLead slot (the real table passes
+  // it into the DataTable toolbar's left group).
+  ClientsTable: ({ onClientClick, toolbarLead }: any) => {
     // useClientsTable is already imported at the top of this file from the mocked module.
     const ctx = useClientsTable();
     return (
       <div data-testid="clients-table">
+        {toolbarLead}
         <button onClick={() => onClientClick({ id: 'c1', name: 'Test Client' })}>
           Click client
         </button>
@@ -217,6 +220,22 @@ describe('ClientsPage', () => {
       </QueryClientProvider>,
     );
     expect(screen.getByTestId('clients-filters')).toBeInTheDocument();
+  });
+
+  // #412 US-2 — the filter panel rides in the table's toolbarLead slot (the
+  // DataTable toolbar's left group), not in an external card above the table.
+  it('mounts ClientsFilters inside ClientsTable toolbarLead — no external filter card (#412 US-2)', async () => {
+    const ClientsPage = (await import('../app/(main)/clients/page')).default;
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <ClientsPage />
+      </QueryClientProvider>,
+    );
+    const filters = screen.getByTestId('clients-filters');
+    const table = screen.getByTestId('clients-table');
+    // The panel is rendered BY the table stub (toolbarLead pass-through) —
+    // the retired composition rendered it as a sibling above the table.
+    expect(table.contains(filters)).toBe(true);
   });
 
   it('renders ClientsTable', async () => {
@@ -666,7 +685,7 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
 
   // ─── Narrowing chip (#232 §3.5) ─────────────────────────────────────────
 
-  it('renders the chip between filters and table when the URL narrows (single id)', async () => {
+  it('renders the chip above the table card when the URL narrows (single id)', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1]]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
@@ -679,12 +698,17 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
 
     await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
     expect(screen.getByText('Открыт по ссылке')).toBeInTheDocument();
-    // Between the filters block and the table (spec §3.5 placement).
+    // #412 Task 3 (US-2): the filter panel rides inside the table card's
+    // toolbar (toolbarLead), so the chip now sits directly above the table
+    // card — Task 4 will mount it into toolbarLead after the panel
+    // (spec §3.2: visually after the panel, behavior unchanged).
     const chip = screen.getByTestId('client-deeplink-chip');
-    const filtersBlock = screen.getByTestId('clients-filters').closest('div');
-    const tableBlock = screen.getByTestId('clients-table').closest('div');
-    expect(chip.compareDocumentPosition(filtersBlock!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+    const filtersBlock = screen.getByTestId('clients-filters');
+    const tableBlock = screen.getByTestId('clients-table');
     expect(chip.compareDocumentPosition(tableBlock!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // the panel is INSIDE the table (mounted via toolbarLead), not a
+    // sibling card above it
+    expect(tableBlock.contains(filtersBlock)).toBe(true);
   });
 
   it('multi-id URL renders «Открыто по ссылке: N»', async () => {

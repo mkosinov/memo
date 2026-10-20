@@ -79,16 +79,9 @@ function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
         </button>
       </div>
 
-      {/* Filters */}
-      <div
-        className="rounded-xl border p-4"
-        style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
-      >
-        <ClientsFilters />
-      </div>
-
       {/* #232 §3.5 — narrowing chip: visible affordance for an active
-          deep-link narrowing (between the filters block and the table). The
+          deep-link narrowing (now directly above the table card — #412
+          Task 4 will mount it into toolbarLead after the panel). The
           ✕ removes the param from the address through the SAME adapter's
           navigate() (#349 single writer + single instance: a pending
           coalesced flush must adopt the navigated URL, not resurrect the
@@ -100,12 +93,15 @@ function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
         />
       )}
 
-      {/* Table */}
+      {/* Table — #412 US-2: the filter panel rides in the table toolbar
+          (ClientsTable → DataTable toolbarLead); the external filter card
+          above the table is retired. No key wrapper: the panel must not
+          remount on page re-renders (local states preserved). */}
       <div
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <ClientsTable onClientClick={setSelectedClient} />
+        <ClientsTable toolbarLead={<ClientsFilters />} onClientClick={setSelectedClient} />
       </div>
 
       {/* Modal — closing it does NOT touch the address or filters (#232 §3.4):

@@ -58,11 +58,11 @@ test.describe('Phone field country selector — record form (GH #414 scenario 4)
       await phoneInput.pressSequentially('2312345');
       await ruSearch;
       await expect(phoneInput).toHaveValue('2312345');
-      await expect(selector).toContainText('Россия');
+      await expect(selector).toContainText('+7');
 
       await selector.click();
       await page.getByTestId('phone-country-select-option-LV').click();
-      await expect(selector).toContainText('Латвия');
+      await expect(selector).toContainText('+371');
       // The typed digits survive and regroup under the LV template on the
       // spot; the honest placeholder follows the new country.
       await expect(phoneInput).toHaveValue('23 123 45');
@@ -70,7 +70,7 @@ test.describe('Phone field country selector — record form (GH #414 scenario 4)
 
       // ── Part 2: paste a copied «+375 …» — the country comes from it ───
       await phoneInput.fill('+375 29 123-45-67');
-      await expect(selector).toContainText('Беларусь');
+      await expect(selector).toContainText('+375');
       await expect(phoneInput).toHaveValue('291234567');
 
       // The typeahead searched with the BY national digits (not the display

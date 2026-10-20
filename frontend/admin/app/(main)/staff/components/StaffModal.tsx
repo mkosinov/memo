@@ -9,7 +9,7 @@ import {
   phoneIsComplete,
   type PhoneFieldValue,
 } from '@/app/components/shared/phone/PhoneField';
-import { parseStoredPhone } from '@/app/components/shared/phone/format';
+import { formatPhoneDisplay, parseStoredPhone } from '@/app/components/shared/phone/format';
 import {
   PasswordLinkDialog,
   formatLinkExpiry,
@@ -715,7 +715,7 @@ export function StaffModal({
                     Учётка архивирована
                   </p>
                   <p className="text-sm" style={{ color: 'var(--ink-mid)' }}>
-                    {account.phone}
+                    {formatPhoneDisplay(account.phone)}
                   </p>
                 </div>
               )}

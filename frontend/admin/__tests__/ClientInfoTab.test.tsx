@@ -115,7 +115,7 @@ describe('ClientInfoTab', () => {
     // GH #414: the stored «+7 (900) 123-45-67» initializes the widget on RU
     // with the national remainder, grouped as-you-type for display.
     expect(input.value).toBe('900 123-45-67');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
   });
 
   it('renders email in input', () => {
@@ -375,7 +375,7 @@ describe('ClientInfoTab', () => {
     it('initializes from a legacy «8 …» spelling: RU bound, national remainder grouped', () => {
       renderClientInfoTab({ client: { ...mockClientWithStats, phone: LEGACY_RU } });
       expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('999 123-45-67');
-      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     });
 
     it('initializes an out-of-list stored number into the «без страны» state (digits shown)', () => {
@@ -388,7 +388,7 @@ describe('ClientInfoTab', () => {
     it('an empty stored phone starts on the RU selector, pristine', () => {
       renderClientInfoTab({ client: { ...mockClientWithStats, phone: null } });
       expect((screen.getByLabelText('Телефон') as HTMLInputElement).value).toBe('');
-      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+      expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     });
 
     it('pristine legacy value saves VERBATIM (no compact rewrite, no validation)', async () => {

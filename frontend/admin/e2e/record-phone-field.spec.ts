@@ -71,7 +71,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       const selector = page.getByTestId('phone-country-select');
 
       // RU is the default country with its honest national template.
-      await expect(selector).toContainText('Россия');
+      await expect(selector).toContainText('+7');
       await expect(phoneInput).toHaveAttribute('placeholder', '999 123-45-67');
 
       // 3 national digits — below the 4-digit threshold: no search, no listbox.
@@ -201,7 +201,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
 
       await selector.click();
       await page.getByTestId('phone-country-select-option-BY').click();
-      await expect(selector).toContainText('Беларусь');
+      await expect(selector).toContainText('+375');
       // The honest BY template of the remainder input.
       await expect(phoneInput).toHaveAttribute('placeholder', '29 123 45 67');
 
@@ -235,7 +235,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       // The widget mounts fresh on RU — switch to BY again, type the number.
       await selector.click();
       await page.getByTestId('phone-country-select-option-BY').click();
-      await expect(selector).toContainText('Беларусь');
+      await expect(selector).toContainText('+375');
 
       // The typeahead finds the Part-A client (search by BY national digits)
       // — and the scenario deliberately IGNORES the suggestion.
@@ -300,7 +300,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
     // Paste an out-of-list international number — the widget enters the
     // «без страны» state: selector unchanged (RU), raw digits, no template.
     await phoneInput.fill('+1 650 555 1234');
-    await expect(page.getByTestId('phone-country-select')).toContainText('Россия');
+    await expect(page.getByTestId('phone-country-select')).toContainText('+7');
     await expect(phoneInput).toHaveValue('16505551234');
     await expect(phoneInput).toHaveAttribute('placeholder', '');
 

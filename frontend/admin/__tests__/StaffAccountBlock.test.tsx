@@ -85,8 +85,8 @@ describe('edit: «Учётка» block states (S6)', () => {
     expect(screen.getByText('Учётка архивирована')).toBeInTheDocument();
     expect(screen.queryByLabelText('Телефон *')).not.toBeInTheDocument();
     expect(screen.queryByTestId('issue-link-btn')).not.toBeInTheDocument();
-    // The phone is still VISIBLE (read-only projection), just not editable.
-    expect(screen.getByText('+79990001122')).toBeInTheDocument();
+    // The phone is still VISIBLE (read-only projection, grouped per #414), just not editable.
+    expect(screen.getByText('+7 999 000 11 22')).toBeInTheDocument();
   });
 
   it('no account (account=null): the block is hidden entirely', () => {

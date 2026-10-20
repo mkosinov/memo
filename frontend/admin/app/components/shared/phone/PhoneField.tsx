@@ -11,7 +11,7 @@ import { PhoneCountrySelect } from './CountrySelect';
 import { compact, parseStoredPhone } from './format';
 
 // GH #414 (spec §Виджет PhoneField): composite phone field —
-// `[«+7 Россия ⌄»] │ [remainder input] [×]` in a single frame. The selector
+// `[«+7 ⌄»] │ [remainder input] [×]` in a single frame. The selector
 // is the shared PhoneCountrySelect (admin listbox pattern: own popover on
 // --z-popover, mouse-only, click-outside/ESC close, selected row marked).
 // Controlled value { country, national, pristine }; derived visible/compact/

@@ -60,7 +60,7 @@ test.describe('Staff phone fields (GH #414 scenario 6)', () => {
 
       // Both surfaces of the composite field: the selector + the remainder.
       const createInput = dialog.locator('[data-testid="staff-phone-input"]');
-      await expect(dialog.getByTestId('phone-country-select')).toContainText('Россия');
+      await expect(dialog.getByTestId('phone-country-select')).toContainText('+7');
 
       // An INCOMPLETE remainder blocks — no POST /staff leaves the browser.
       await createInput.fill('995123');
@@ -105,7 +105,7 @@ test.describe('Staff phone fields (GH #414 scenario 6)', () => {
       // The widget initialized from the stored compact: RU selector, the
       // grouped national remainder in the input (spec §Инициализация).
       const accountInput = editDialog.locator('[data-testid="staff-account-phone-input"]');
-      await expect(editDialog.getByTestId('phone-country-select')).toContainText('Россия');
+      await expect(editDialog.getByTestId('phone-country-select')).toContainText('+7');
       await expect(accountInput).toHaveValue(groupedRu(national));
 
       // An incomplete CHANGED number blocks BOTH the account PATCH and the

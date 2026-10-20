@@ -5,8 +5,9 @@ description: Use when designing or implementing frontend data flow with clean la
 
 # Frontend Clean Architecture (Data Flow)
 
-> Version: 2.0 — 2026  
-> Targets: React 18+, Next.js 14+, TypeScript 5+
+> Version: 2.1 — 2026  
+> Targets: React 18+, Next.js 14+, TypeScript 5+  
+> Transport: `@memo/api-client` — the ONLY data transport. No local `lib/api/`, `lib/errors.ts`, or `lib/model/dto/` layers.
 
 ---
 
@@ -35,35 +36,22 @@ Use this skill when:
 └───────────────────────────┬──────────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────────┐
-│  hooks/ useActivities.ts   ← React hooks (only React-aware layer)   │
-│  → calls api/ → applies lib/ (mappers) → exposes state              │
+│  hooks/ useLocations.ts    ← React hooks (only React-aware layer)   │
+│  → react-query → @memo/api-client → mappers → exposes state         │
 └───────────────────────────┬──────────────────────────────────────────┘
                             │
-               ┌────────────┴────────────────┐
-               ▼                             ▼
-┌──────────────────────────────┐  ┌──────────────────────────────┐
-│  lib/api/                    │  │  lib/ (mappers)              │
-│  Data layer                  │  │  Pure functions: DTO → View  │
-│  async fetch / mock          │  │  Side-effect free            │
-│  Returns DTO                 │  │  May call domain/            │
-│  Mock/real switch point      │  │                              │
-└──────────────────────────────┘  └──────────────────────────────┘
-               │                              │
-               ▼                              │
-┌──────────────────────────────┐             │
-│  lib/model/dto/              │             │
-│  Raw API types (snake_case)  │◄────────────┘
-└──────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  lib/model/domain/           │
-│  Business logic (optional)   │
-│  Reuses DTO                  │
-└──────────────────────────────┘
+┌───────────────────────────▼──────────────────────────────────────────┐
+│  @memo/api-client             ← Sole transport (package)             │
+│  Mirrors backend contracts: *Response types (snake_case, 1:1),      │
+│  endpoint functions (getLocations, getPhotos, …), throws ApiError.  │
+│  Mock/real switch lives inside the package. No local fetch layer.   │
+└──────────────────────────────────────────────────────────────────────┘
 
+lib/mappers/        ← Pure functions: *Response (contract) → View
+                       Side-effect free, may call domain/
 lib/model/view/     ← UI types (camelCase, formatted)
-                     Imported by ui/, hooks/, lib/
+                       Imported by ui/, hooks/, lib/mappers/
+lib/model/domain/   ← Business logic (optional), reuses contract types
 ```
 
 ---
@@ -77,146 +65,75 @@ Strict import hierarchy — violations are architectural errors.
 | Layer | May Import | Forbidden |
 |-------|-----------|-----------|
 | `app/` | everything | — |
-| `sections/` | `ui/`, `hooks/`, `lib/*` | direct `model/dto/`, `api/` |
-| `ui/` | `model/view/`, `lib/format` | `api/`, `model/dto/`, `hooks/` |
+| `sections/` | `ui/`, `hooks/`, `lib/*` | `@memo/api-client` (go through hooks) |
+| `ui/` | `model/view/`, `lib/format` | `@memo/api-client`, `hooks/` |
 | `hooks/` | EVERYTHING | `ui/`, `sections/`, `app/` |
-| `lib/api/` | `model/dto/`, `lib/errors` | `model/view/`, `hooks/`, `ui/` |
-| `lib/model/domain/` | `model/dto/`, other `model/domain/` | `api/`, `hooks/`, `ui/` |
+| `lib/mappers/` | `model/*`, `@memo/api-client` (types), `lib/format` | react-query, `hooks/`, `ui/` |
+| `lib/model/domain/` | `@memo/api-client` (types), other `model/domain/` | `hooks/`, `ui/` |
 | `lib/model/view/` | nothing (types only) | everything |
-| `lib/lib/` (mappers) | `model/*`, `lib/errors`, `lib/format` | `hooks/`, `ui/`, `api/` |
 
 ### In plain English:
-- **Components** know nothing about API or DTO
+- **Components** know nothing about the transport or contract types
 - **Hooks** are the only React-aware layer, can access everything except UI
-- **Data layer** knows nothing about React or ViewModel
-- **Domain** knows nothing about React or API
+- **Mappers** are pure functions — no React, no fetching
+- **Transport** is the `@memo/api-client` package itself — never a local `lib/api/`
 
 ---
 
 ## Layer-by-layer Rules
 
-### 1. DTO (`lib/model/dto/`)
+### 1. Transport (`@memo/api-client`)
 
 ```typescript
-// lib/model/dto/activity.ts
-export interface RawActivityDTO {
-  id: number;
-  master_name: string;        // snake_case, matches API
-  master_avatar: string;
-  service_name: string;
-  category: string;
-  min_price: number;
-  max_price: number;
-  duration_minutes: number;
-  date: string;
-  start_time: string;
-  location_name: string;
-  location_address: string;
-  image_url: string;
-  guests_count: number;
-  max_capacity: number;
-  min_age: number;
-  technique: string;
-  canvas_size: string;
-}
+// NO local data layer — the package owns transport:
+import { getLocations, ApiError } from '@memo/api-client';
+
+const page = await getLocations(); // → PaginatedResponse<LocationResponse>
 ```
 
-- Interfaces only
-- snake_case (1:1 with API response)
-- No logic whatsoever
+- Package mirrors backend contracts: `*Response` types, snake_case fields (1:1 with API JSON)
+- Endpoints are plain async functions (`getLocations`, `getPhotos`, …) — React-unaware
+- Errors are thrown as `ApiError` exported by the package — never define a local one
+- Mock/real switch lives inside the package — apps never hand-roll `fetch`
+- There is no `lib/api/`, no `lib/errors.ts`, no `lib/model/dto/` in apps
 
 ### 2. Domain Model (`lib/model/domain/`)
 
 ```typescript
 // lib/model/domain/activity.ts
-import type { RawActivityDTO } from '@/lib/model/dto/activity';
+import type { ActivityResponse } from '@memo/api-client';
 
-export function canBookActivity(dto: RawActivityDTO): boolean {
-  return dto.guests_count < dto.max_capacity;
-}
-
-export function getActivityCategory(dto: RawActivityDTO): 'adult' | 'child' | 'together' {
-  if (dto.min_age >= 18) return 'adult';
-  if (dto.min_age >= 6) return 'child';
-  return 'together';
-}
-
-export function calculateTotalPrice(
-  adultCount: number,
-  childCount: number,
-  adultPrice: number,
-  childPrice: number
-): number {
-  return adultCount * adultPrice + childCount * childPrice;
+export function canBookActivity(activity: ActivityResponse): boolean {
+  return activity.capacity > 0;
 }
 ```
 
-- Reuses DTO (no duplication!)
+- Reuses contract types from `@memo/api-client` (no duplication!)
 - Pure functions, no side effects
 - Optional layer — add only when business logic exists
 
-### 3. Data Layer (`lib/api/`)
+### 3. Mapper (`lib/mappers/`)
 
 ```typescript
-// lib/api/activities.ts
-import { ApiError } from '@/lib/errors';
-import type { RawActivityDTO } from '@/lib/model/dto/activity';
+// lib/mappers/to-location-vm.ts
+import type { LocationResponse } from '@memo/api-client';
+import type { LocationView } from '@/app/lib/model/view/location';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const IS_MOCK = process.env.NEXT_PUBLIC_MOCK_API !== 'false';
-
-export async function getActivities(): Promise<RawActivityDTO[]> {
-  if (IS_MOCK) return getMockActivities();
-  return fetchActivities();
-}
-
-async function fetchActivities(): Promise<RawActivityDTO[]> {
-  const res = await fetch(`${BASE_URL}/api/activities`);
-  if (!res.ok) throw new ApiError('Failed to fetch activities', res.status);
-  return res.json();
-}
-```
-
-- Async functions only
-- Single mock/real switch point
-- Returns DTO, never ViewModel
-- React-unaware (no hooks, no JSX)
-
-### 4. Mapper (`lib/`)
-
-```typescript
-// lib/to-activity-view.ts
-import type { RawActivityDTO } from '@/lib/model/dto/activity';
-import type { ActivityView } from '@/lib/model/view/activity';
-import { canBookActivity, getActivityCategory } from '@/lib/model/domain/activity';
-import { formatPrice, formatDate } from '@/lib/format';
-
-export function toActivityView(raw: RawActivityDTO): ActivityView {
+export function toLocationVm(raw: LocationResponse): LocationView {
   return {
     id: raw.id,
-    masterName: raw.master_name,
-    serviceName: raw.service_name,
-    category: getActivityCategory(raw),
-    priceFormatted: formatPrice(raw.min_price, raw.max_price),
-    durationLabel: `${raw.duration_minutes} min`,
-    dateFormatted: formatDate(raw.date),
-    timeFormatted: raw.start_time.slice(0, 5),
-    locationName: raw.location_name,
-    locationAddress: raw.location_address,
-    imageUrl: raw.image_url,
-    guestsLabel: `${raw.guests_count} guest(s)`,
-    canBook: canBookActivity(raw),
-    categoryColor: CATEGORY_COLORS[raw.category] || '#888888',
+    title: raw.title,
+    address: raw.address ?? '—',
   };
 }
 ```
 
-- Pure function: DTO → View
+- Pure function: contract `*Response` → View
 - May call Domain Model
 - snake_case → camelCase conversion
 - Side-effect free, easy to test
 
-### 5. ViewModel (`lib/model/view/`)
+### 4. ViewModel (`lib/model/view/`)
 
 ```typescript
 // lib/model/view/activity.ts
@@ -242,41 +159,34 @@ export interface ActivityView {
 - camelCase
 - Render-ready (formatted strings, computed values)
 
-### 6. Hook (`hooks/`)
+### 5. Hook (`hooks/`)
 
 ```typescript
+// hooks/useLocations.ts
 'use client';
-import { useState, useEffect } from 'react';
-import { getActivities } from '@/lib/api/activities';
-import { toActivityView } from '@/lib/to-activity-view';
-import type { ActivityView } from '@/lib/model/view/activity';
-import { ApiError } from '@/lib/errors';
+import { useQuery } from '@tanstack/react-query';
+import { getLocations } from '@memo/api-client';
+import { toLocationVm } from '@/app/lib/mappers/to-location-vm';
+import type { LocationView } from '@/app/lib/model/view/location';
 
-export function useActivities() {
-  const [activities, setActivities] = useState<ActivityView[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
-    getActivities()
-      .then(raw => { if (!cancelled) setActivities(raw.map(toActivityView)); })
-      .catch(err => { if (!cancelled) setError(err); })
-      .finally(() => { if (!cancelled) setIsLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  return { activities, isLoading, error };
+export function useLocations() {
+  return useQuery<LocationView[]>({
+    queryKey: ['locations'],
+    queryFn: async () => {
+      const page = await getLocations();
+      return page.items.map(toLocationVm);
+    },
+  });
+  // → { data: LocationView[] | undefined, isPending, error: ApiError | null }
 }
 ```
 
 - Only React-aware layer
-- Thin wrapper: API → Mapper → State
-- Uses ApiError for error handling
+- Thin wrapper: `@memo/api-client` → Mapper → react-query cache
+- Error surfaces as `ApiError` (from the package) via `error`
 - No business logic — delegate to domain or mapper
 
-### 7. UI (`ui/`)
+### 6. UI (`ui/`)
 
 ```typescript
 import type { ActivityView } from '@/lib/model/view/activity';
@@ -303,37 +213,24 @@ export function MKCard({ activity, onSelect }: Props) {
 ## Error Handling
 
 ```typescript
-// lib/errors.ts
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number,
-    public readonly code?: string
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-  get isNotFound() { return this.statusCode === 404; }
-  get isValidation() { return this.statusCode === 422; }
-  get isServerError() { return this.statusCode >= 500; }
-}
+// NO local lib/errors.ts — the error type comes from the package:
+import { ApiError } from '@memo/api-client';
 
-export type Result<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: ApiError };
+// Thrown by every endpoint on non-2xx responses:
+// new ApiError(status, message, code?, dependencies?)
 ```
 
 Usage:
-- Hooks always catch errors and set `ApiError` state
-- UI checks `error.isNotFound`, `error.isServerError`, etc.
-- Components show user-friendly messages based on error type
+- Hooks surface `ApiError` through react-query's `error` field
+- UI checks `error.status` (404 / 422 / 5xx) to pick user-friendly messages
+- Never re-declare `ApiError` or a local `Result<T>` in an app
 
 ---
 
 ## TanStack Query (position)
 
-**Not used** at this stage (MVP).  
-Architecture is migration-ready: only the hook body needs to switch to `useQuery`; `api/` and `lib/` layers stay unchanged.
+**Used** — hooks wrap `@memo/api-client` endpoint calls in `useQuery`/`useMutation`.
+Shared cache keys (`['locations']`, `['photos', 'public']`, …) dedupe requests across sections; transport functions, mappers, and view models stay unchanged when tuning cache policy.
 
 ---
 
@@ -341,29 +238,29 @@ Architecture is migration-ready: only the hook body needs to switch to `useQuery
 
 ```typescript
 // app/page.tsx
-import { useActivities } from '@/hooks/useActivities';
+import { useLocations } from '@/app/hooks/useLocations';
 import { MKCard } from '@/ui/MKCard';
 
 export default function Home() {
-  const { activities, isLoading, error } = useActivities();
+  const { data: locations, isPending, error } = useLocations();
   if (error) return <div>{error.message}</div>;
-  if (isLoading) return <div>Loading...</div>;
-  return activities.map(a => <MKCard key={a.id} activity={a} />);
+  if (isPending) return <div>Loading...</div>;
+  return locations.map(l => <MKCard key={l.id} item={l} />);
 }
 ```
 
 ```
 File                 Layer          Role
 ─────────────────────────────────────────────────
-page.tsx             app            composition
-MKCard.tsx           ui             dumb render
-useActivities.ts     hooks          React bridge
-to-activity-view.ts  lib/           mapper (pure fn)
-activities.ts        lib/api/       data fetching
-RawActivityDTO       model/dto/     raw types
-ActivityView         model/view/    UI types
-canBookActivity()    model/domain/  business logic
-ApiError             lib/errors     error types
+page.tsx             app              composition
+MKCard.tsx           ui               dumb render
+useLocations.ts      hooks            React bridge (react-query)
+to-location-vm.ts    lib/mappers/     mapper (pure fn)
+getLocations()       @memo/api-client transport (package)
+LocationResponse     @memo/api-client contract type
+LocationView         model/view/      UI types
+canBookActivity()    model/domain/    business logic
+ApiError             @memo/api-client error type
 ```
 
 ---
@@ -373,14 +270,15 @@ ApiError             lib/errors     error types
 Mappers are tested as pure functions:
 
 ```typescript
-// __tests__/lib/to-activity-view.test.ts
-import { toActivityView } from '@/lib/to-activity-view';
-import type { RawActivityDTO } from '@/lib/model/dto/activity';
+// __tests__/lib/mappers/to-location-vm.test.ts
+import { toLocationVm } from '@/app/lib/mappers/to-location-vm';
+import type { LocationResponse } from '@memo/api-client';
 
-describe('toActivityView', () => {
-  it('formats price range', () => {
-    const raw = { min_price: 3500, max_price: 5500 } as RawActivityDTO;
-    expect(toActivityView(raw).priceFormatted).toBe('3 500 – 5 500 ₽');
+describe('toLocationVm', () => {
+  it('maps contract fields to view model', () => {
+    const raw = { id: '1', title: 'Пленэр', address: null } as LocationResponse;
+    expect(toLocationVm(raw).title).toBe('Пленэр');
+    expect(toLocationVm(raw).address).toBe('—');
   });
 });
 ```

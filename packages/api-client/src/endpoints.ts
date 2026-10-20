@@ -113,6 +113,8 @@ import {
   PortraitResponseSchema,
   type PortraitResponse,
   type ChangePassword,
+  type VisitStatus,
+  type ArchiveStatus,
 } from './schemas';
 import { ApiError } from './client';
 
@@ -123,7 +125,7 @@ export interface ListParams {
   per_page?: number;
   /** Archive filter — soft-delete entities only (masters/locations/services/materials).
    *  Ignored by endpoints that don't declare it (tags, visitors). */
-  status?: 'active' | 'all' | 'archived' | null;
+  status?: ArchiveStatus | null;
   /** Server-side sort — dictionary list endpoints only (#205); must be in the endpoint's whitelist. */
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
@@ -550,7 +552,7 @@ export async function getRecords(params?: {
   location_id?: string;
   service_id?: string;
   master_id?: string;
-  status?: string;
+  status?: VisitStatus;
   q?: string;
   sort_by?: string;
   sort_order?: string;
@@ -587,7 +589,7 @@ export async function getRecordsView(params?: {
   location_id?: string;
   service_id?: string;
   master_id?: string;
-  status?: string;
+  status?: VisitStatus;
   q?: string;
   sort_by?: string;
   sort_order?: string;

@@ -69,8 +69,138 @@ import {
   UserSettingsResponseSchema,
   UserSettingsUpdateSchema,
   type UserSettingsResponse,
+  VisitStatusSchema,
+  PaymentMethodSchema,
+  ChannelSchema,
+  UserRoleSchema,
+  TariffAudienceSchema,
+  ArchiveStatusSchema,
+  type VisitStatus,
+  type PaymentMethod,
+  type Channel,
+  type UserRole,
+  type TariffAudience,
+  type ArchiveStatus,
+  VisitCreateSchema,
+  VisitPatchSchema,
+  PaymentCreateSchema,
+  RecordUpdateSchema,
+  type RecordCreate,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
+
+// ─── Contract enums (#480 — named enum dictionaries, spec §3.1) ─────────────
+// The six contract enums as named schemas: `.options` is the runtime value
+// list UIs derive from (zod ^3.23 tuple in DECLARATION order — the client-side
+// order, not the enums.py order). Backend parity is by value SET, not order.
+
+describe('Contract enum schemas (#480 §3.1)', () => {
+  it('VisitStatusSchema.options — composition and declaration order', () => {
+    expect(VisitStatusSchema.options).toEqual(['waiting', 'visited', 'missed', 'cancelled']);
+  });
+
+  it('PaymentMethodSchema.options — composition and declaration order', () => {
+    expect(PaymentMethodSchema.options).toEqual(['cash', 'card', 'transfer']);
+  });
+
+  it('ChannelSchema.options — client order (telegram, whatsapp, max — NOT enums.py order)', () => {
+    expect(ChannelSchema.options).toEqual(['telegram', 'whatsapp', 'max']);
+  });
+
+  it('UserRoleSchema.options — composition and declaration order', () => {
+    expect(UserRoleSchema.options).toEqual(['admin', 'master']);
+  });
+
+  it('TariffAudienceSchema.options — composition and declaration order', () => {
+    expect(TariffAudienceSchema.options).toEqual(['kid', 'adult', 'all']);
+  });
+
+  it('ArchiveStatusSchema.options — composition and declaration order', () => {
+    expect(ArchiveStatusSchema.options).toEqual(['active', 'archived', 'all']);
+  });
+
+  it('rejects values outside the dictionary', () => {
+    expect(() => VisitStatusSchema.parse('confirmed')).toThrow(); // dead Wave-5 RecordStatus value
+    expect(() => PaymentMethodSchema.parse('crypto')).toThrow();
+    expect(() => ChannelSchema.parse('instagram')).toThrow();
+    expect(() => UserRoleSchema.parse('superuser')).toThrow();
+    expect(() => TariffAudienceSchema.parse('senior')).toThrow();
+    expect(() => ArchiveStatusSchema.parse('deleted')).toThrow();
+  });
+
+  it('derived TS unions are valid types', () => {
+    const vs: VisitStatus = 'waiting';
+    const pm: PaymentMethod = 'cash';
+    const ch: Channel = 'max';
+    const ur: UserRole = 'master';
+    const ta: TariffAudience = 'all';
+    const ar: ArchiveStatus = 'archived';
+    expect([vs, pm, ch, ur, ta, ar]).toEqual(['waiting', 'cash', 'max', 'master', 'all', 'archived']);
+  });
+});
+
+// ─── Request enum fields rewired to named schemas (#480 §3.2) ───────────────
+// Rewiring swaps inline z.enum literals for the named dictionaries above —
+// parsing behavior of the request schemas must NOT change.
+
+describe('Request enum fields rewired to named schemas (#480 §3.2)', () => {
+  it('VisitCreateSchema.status accepts every VisitStatus, rejects unknown values', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitCreateSchema.parse({ record_id: 'r-1', price: 100, status }).status).toBe(status);
+    }
+    expect(() =>
+      VisitCreateSchema.parse({ record_id: 'r-1', price: 100, status: 'confirmed' }),
+    ).toThrow();
+  });
+
+  it('VisitCreateSchema.status stays optional (backend defaults to waiting)', () => {
+    expect(VisitCreateSchema.parse({ record_id: 'r-1', price: 100 }).status).toBeUndefined();
+  });
+
+  it('VisitPatchSchema.status accepts every VisitStatus, rejects unknown values', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitPatchSchema.parse({ status }).status).toBe(status);
+    }
+    expect(() => VisitPatchSchema.parse({ status: 'no_show' })).toThrow();
+  });
+
+  it('PaymentCreateSchema.method accepts every PaymentMethod, stays optional, rejects unknown', () => {
+    for (const method of PaymentMethodSchema.options) {
+      expect(PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100, method }).method).toBe(method);
+    }
+    expect(PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100 }).method).toBeUndefined();
+    expect(() =>
+      PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100, method: 'crypto' }),
+    ).toThrow();
+  });
+
+  it('RecordCreateSchema nested visits carry optional VisitStatus', () => {
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ price: 2500, status: 'visited' }],
+    });
+    expect(parsed.visits?.[0]?.status).toBe('visited');
+    expect(() =>
+      RecordCreateSchema.parse({ activity_id: 'a-1', visits: [{ price: 2500, status: 'pending' }] }),
+    ).toThrow();
+  });
+
+  it('RecordCreateSchema no longer accepts the dead top-level status (backend 422s on it)', () => {
+    // The Wave-5 mirror is gone (#480 §3.2): record status is DERIVED from
+    // visits server-side; RecordCreate/RecordUpdate payloads reject the field
+    // with extra="forbid". A stray key is stripped here, absent from the type.
+    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1', status: 'confirmed' });
+    expect(parsed).not.toHaveProperty('status');
+    // @ts-expect-error status is not part of RecordCreate anymore
+    const typed: RecordCreate = { activity_id: 'a-1', status: 'waiting' };
+    expect(typed.activity_id).toBe('a-1');
+  });
+
+  it('RecordUpdateSchema (= partial of create) loses the dead status automatically', () => {
+    const parsed = RecordUpdateSchema.parse({ status: 'confirmed' });
+    expect(parsed).not.toHaveProperty('status');
+  });
+});
 
 // ─── StaffResponse (GH #266 — composite staff card) ─────────────────────────
 

@@ -1,5 +1,37 @@
 import { z } from 'zod';
 
+// ─── Contract enums (#480 — named enum dictionaries) ────────────────────────
+// Single reuse layer for the contract's six enums: request schemas below
+// reference the named dictionaries instead of inline literals, and UIs derive
+// value lists from `XSchema.options` (zod ^3.23 tuple in DECLARATION order —
+// the client-side order, not the enums.py order). Parity with the backend
+// (`backend/src/models/enums.py`, `backend/src/domain/visit_status.py`) is by
+// value SET, not order. There is deliberately NO RecordStatus dictionary:
+// record status carries VisitStatus values — it is derived from visits
+// server-side (docs/domain-rules/records.md, "Single enum: VisitStatus").
+
+export const VisitStatusSchema = z.enum(['waiting', 'visited', 'missed', 'cancelled']);
+export type VisitStatus = z.infer<typeof VisitStatusSchema>;
+
+export const PaymentMethodSchema = z.enum(['cash', 'card', 'transfer']);
+export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
+
+// Declaration order is the client's UI-list order (telegram, whatsapp, max) —
+// deliberately NOT the enums.py order (TELEGRAM, MAX, WHATSAPP), #480 §3.1.
+export const ChannelSchema = z.enum(['telegram', 'whatsapp', 'max']);
+export type Channel = z.infer<typeof ChannelSchema>;
+
+export const UserRoleSchema = z.enum(['admin', 'master']);
+export type UserRole = z.infer<typeof UserRoleSchema>;
+
+export const TariffAudienceSchema = z.enum(['kid', 'adult', 'all']);
+export type TariffAudience = z.infer<typeof TariffAudienceSchema>;
+
+// Soft-delete list filter (?status=active|archived|all) — a query enum of the
+// dictionary list endpoints, not a row state.
+export const ArchiveStatusSchema = z.enum(['active', 'archived', 'all']);
+export type ArchiveStatus = z.infer<typeof ArchiveStatusSchema>;
+
 // ─── Staff (GH #266 — composite staff card, full directory CRUD) ───────────
 // The /api/v1/staff card carries an optional master section (the 1:0..1
 // masters extension, D5), a list of position ids (M2M staff_positions), and —
@@ -78,7 +110,7 @@ export const CreateUserSectionSchema = z
     phone: z.string().min(1).max(20),
     // GH #263 D10: manual role override — a sent value beats the position
     // template; omitted → the backend template decides (admin > master).
-    role: z.enum(['admin', 'master']).nullable().optional(),
+    role: UserRoleSchema.nullable().optional(),
   })
   .strict();
 export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
@@ -111,7 +143,7 @@ export type StaffCreate = z.input<typeof StaffCreateSchema>;
 // UPDATE-only — a sent value beats the position template; omitted → the
 // template decides (anchors admin > master, fixed position ids, D4 #266).
 export const StaffUpdateSchema = StaffCardSchema.extend({
-  role: z.enum(['admin', 'master']).nullable().optional(),
+  role: UserRoleSchema.nullable().optional(),
 });
 export type StaffUpdate = z.input<typeof StaffUpdateSchema>;
 
@@ -247,7 +279,7 @@ export const TariffResponseSchema = z.object({
   price: z.number(),
   // Backend always serializes audience (Task 1) — required, so a degraded
   // response fails loudly instead of silently resetting marks to «all».
-  audience: z.enum(['kid', 'adult', 'all']),
+  audience: TariffAudienceSchema,
 });
 
 export type TariffResponse = z.infer<typeof TariffResponseSchema>;
@@ -413,7 +445,7 @@ export const VisitCreateSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number().int().min(0),
   custom_price: z.number().nullable().optional(),
-  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+  status: VisitStatusSchema.optional(),
 });
 
 export type VisitCreate = z.infer<typeof VisitCreateSchema>;
@@ -425,7 +457,7 @@ export const VisitPatchSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number().int().min(0).optional(),
   custom_price: z.number().nullable().optional(),
-  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+  status: VisitStatusSchema.optional(),
 });
 
 export type VisitPatch = z.infer<typeof VisitPatchSchema>;
@@ -503,7 +535,7 @@ export const ClientUpdateSchema = z.object({
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
-  channel: z.enum(['telegram', 'whatsapp', 'max']).nullable(),
+  channel: ChannelSchema.nullable(),
 }).strict();
 
 export type ClientUpdate = z.infer<typeof ClientUpdateSchema>;
@@ -544,7 +576,10 @@ export const RecordCreateSchema = z.object({
   activity_id: z.string(),
   client_id: z.string().optional(),
   phone: z.string().optional(),
-  status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
+  // NO status field (#480 §3.2): record status is DERIVED from visits
+  // server-side; the backend rejects the field in Record payloads with 422
+  // (extra="forbid", backend/src/schemas/record.py). There is no client-side
+  // record PATCH schema either — the dead Wave-5 mirror is gone.
   seats: z.number().optional(),
   comment: z.string().optional(),
   custom_price: z.number().nullable().optional(),
@@ -555,7 +590,7 @@ export const RecordCreateSchema = z.object({
     visitor_id: z.string().optional(),
     price: z.number(),
     custom_price: z.number().nullable().optional(),
-    status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+    status: VisitStatusSchema.optional(),
   })).optional(),
 });
 
@@ -569,7 +604,7 @@ export type RecordUpdate = z.infer<typeof RecordUpdateSchema>;
 export const PaymentCreateSchema = z.object({
   record_id: z.string(),
   amount: z.number(),
-  method: z.enum(['cash', 'card', 'transfer']).optional(),
+  method: PaymentMethodSchema.optional(),
   /** Optional client-supplied timestamp (ISO 8601). If omitted, backend defaults to now. */
   created_at: z.string().optional(),
 });
@@ -603,7 +638,7 @@ export const TariffCreateSchema = z.object({
   price: z.number().min(0),
   // GH #284: absent → "all" (mirrors backend TariffBase). Carrying audience on
   // the write shape is what keeps marks alive across the PUT re-create.
-  audience: z.enum(['kid', 'adult', 'all']).optional().default('all'),
+  audience: TariffAudienceSchema.optional().default('all'),
 });
 
 export type TariffCreate = z.infer<typeof TariffCreateSchema>;

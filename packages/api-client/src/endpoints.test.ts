@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
 import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -743,6 +743,55 @@ describe('getRecordsView', () => {
   });
 });
 
+// ─── Query param enum typing (#480 §3.2 — closed set) ───────────────────────
+// Exactly three query spots carry enum types: getRecords/getRecordsView status
+// → VisitStatus (backend record.py:189 VisitStatus | None); the dictionary-list
+// archive filter → ArchiveStatus. Extension of this set is a spec revision.
+
+describe('query param enums (#480 §3.2)', () => {
+  it('getRecords accepts every VisitStatus value as the status filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of VisitStatusSchema.options) {
+      await getRecords({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/records?status=${status}`, expect.anything());
+    }
+  });
+
+  it('getRecordsView accepts every VisitStatus value as the status filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of VisitStatusSchema.options) {
+      await getRecordsView({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/records/view?status=${status}`, expect.anything());
+    }
+  });
+
+  it('getRecords/getRecordsView status params are typed as VisitStatus, not free strings', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    const status: VisitStatus = 'missed';
+    await getRecords({ status });
+    await getRecordsView({ status });
+    // @ts-expect-error 'confirmed' is a dead Record-status value, not a VisitStatus
+    getRecords({ status: 'confirmed' });
+    // @ts-expect-error free strings are no longer allowed on the records status filter
+    getRecordsView({ status: 'anything' });
+  });
+
+  it('ListParams archive filter accepts every ArchiveStatus value and null', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of ArchiveStatusSchema.options) {
+      await getStaff({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/staff?status=${status}`, expect.anything());
+    }
+    // Typed const pins the param type; null = no filter — omitted from the
+    // URL (falsy guard in listQuery).
+    const archived: ArchiveStatus = 'archived';
+    await getStaff({ status: archived });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff?status=archived', expect.anything());
+    await getStaff({ status: null });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything());
+  });
+});
+
 // ─── Clients With Stats ──────────────────────────────────────────────────────
 
 describe('getClientsWithStats', () => {
@@ -946,7 +995,9 @@ describe('getPaymentTotals', () => {
 describe('createRecord', () => {
   it('calls POST /api/v1/records with body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'r-1' });
-    const data = { activity_id: 'a-1', seats: 2, status: 'confirmed' as const };
+    // No `status` here on purpose (#480 §3.2): the backend rejects the field
+    // with 422 (extra="forbid") — record status is derived from visits.
+    const data = { activity_id: 'a-1', seats: 2, comment: 'VIP' };
     await createRecord(data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records',

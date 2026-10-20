@@ -202,7 +202,15 @@ test.describe('#349 — clients URL filters', () => {
       await expect(statusSelect).toHaveValue('all');
       await expect(page).not.toHaveURL(/status=/);
 
-      await page.getByRole('button', { name: 'Снять сужение' }).click();
+      // #412 US-4: the ✕ accessible name substitutes the live client
+      // («Убрать фильтр по клиенту: <имя>») — the auto-opened card above
+      // proves the narrowed row (and with it the name) already resolved.
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
 
       // clientId gone from the address → effective status falls back to
       // «Активные» (the rule, not a URL write).

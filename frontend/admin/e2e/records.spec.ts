@@ -1058,6 +1058,122 @@ test.describe('Records Page — Table and Filters', () => {
       await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });
+
+  // ── 24. US-1 (#412): filter panel rides in the table toolbar ────────────
+
+  test('24. US-1 (#412) — panel in table header; status + period update table and URL', async ({
+    page,
+    request,
+  }) => {
+    const clientName = `US1 Toolbar ${Date.now()}`;
+    const seeded = await createTestRecordWithClient(request, clientName);
+
+    try {
+      await waitForRecordsReady(page);
+
+      // US-1: the whole filter panel lives in the table card's toolbar row —
+      // the same border-b row that carries the column-settings gear. The
+      // external filter card above the table is gone (panel root testid is
+      // the new #412 anchor; field prefixes are unchanged).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      await expect(toolbar.locator('[data-testid="records-filters"]')).toBeVisible();
+
+      // Apply the period — each fill is a server request (mirrors test 11).
+      const dateFromWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_from=2020-01-01'),
+        { timeout: 10_000 },
+      );
+      await page.locator('input[aria-label="Фильтр по дате от"]').fill('2020-01-01');
+      await dateFromWait;
+      const dateToWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('date_to=2030-12-31'),
+        { timeout: 10_000 },
+      );
+      await page.locator('input[aria-label="Фильтр по дате до"]').fill('2030-12-31');
+      await dateToWait;
+
+      // Apply status=waiting from the toolbar panel (locators unchanged).
+      const statusWait = page.waitForResponse(
+        (r) => r.url().includes('/api/v1/records') && r.url().includes('status=waiting'),
+        { timeout: 10_000 },
+      );
+      await page.locator('[data-testid="records-filters-status-trigger"]').click();
+      await page.locator('[data-testid="records-filters-status-option-waiting"]').click();
+      await statusWait;
+
+      // Table updated: our seeded row (now inside the widened period) is
+      // visible and every visible status badge is "waiting".
+      const row = page.locator('tbody tr').filter({ hasText: clientName });
+      await expect(row).toBeVisible();
+      const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
+      await expect(badges.first()).toBeVisible();
+      for (const badge of await badges.all()) {
+        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      }
+
+      // The address carries the applied filters (#349 URL contract: period
+      // params are from/to, the status param is status).
+      await expect(page).toHaveURL(/from=2020-01-01/);
+      await expect(page).toHaveURL(/to=2030-12-31/);
+      await expect(page).toHaveURL(/status=waiting/);
+    } finally {
+      await cleanupRecord(request, seeded.recordId);
+      await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
+    }
+  });
+
+  // ── 25. US-5 (#412): an OLD saved link opens the filtered state ─────────
+
+  test('25. US-5 (#412) — pre-migration link ?from&to&q&status filters the table; toolbar controls carry the values', async ({
+    page,
+  }) => {
+    // A link saved BEFORE the filters moved into the toolbar (#412): the
+    // #349 URL contract must open the SAME filtered state afterwards.
+    // Seed pins (the wave-spec precedent): «Анна Иванова» has exactly two
+    // visited records on 2026-06-15/16 — the June window + q + status yield
+    // deterministically those rows (no service title matches «Анна»).
+    const link = `/records?from=2026-06-01&to=2026-06-30&q=${encodeURIComponent('Анна')}&status=visited`;
+    await page.goto(link);
+
+    // US-5: the restored state lives in the table card's toolbar row (the
+    // new #412 mount point) — the panel root testid is the anchor.
+    const toolbar = page
+      .locator('div.p-4.border-b')
+      .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+    await expect(toolbar.locator('[data-testid="records-filters"]')).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The header controls REFLECT the link values: the search input carries
+    // q, the period dates from/to, the status picker label «Посетил».
+    await expect(toolbar.getByLabel('Поиск по клиенту или услуге')).toHaveValue('Анна');
+    await expect(toolbar.getByLabel('Фильтр по дате от')).toHaveValue('2026-06-01');
+    await expect(toolbar.getByLabel('Фильтр по дате до')).toHaveValue('2026-06-30');
+    await expect(
+      toolbar.locator('[data-testid="records-filters-status-trigger"]'),
+    ).toContainText('Посетил');
+
+    // The table is filtered: every row is Anna's, every badge «visited».
+    const rows = page.locator('tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
+    expect(await rows.count()).toBeGreaterThan(0);
+    for (const row of await rows.all()) {
+      await expect(row).toContainText('Анна');
+    }
+    const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
+    await expect(badges.first()).toBeVisible();
+    for (const badge of await badges.all()) {
+      await expect(badge).toHaveAttribute('data-testid', 'status-badge-visited');
+    }
+
+    // The old URL survives the mount verbatim (a read never rewrites).
+    await expect(page).toHaveURL(/from=2026-06-01/);
+    await expect(page).toHaveURL(/to=2026-06-30/);
+    await expect(page).toHaveURL(/[?&]q=/);
+    await expect(page).toHaveURL(/status=visited/);
+  });
 });
 
 // ---------------------------------------------------------------------------

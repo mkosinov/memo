@@ -797,4 +797,39 @@ describe('DataTable toolbar', () => {
     expect(screen.queryByTestId('lead-bar')).toBeNull();
     expect(screen.getByLabelText('Настроить колонки')).toBeInTheDocument();
   });
+
+  it('left toolbar group stretches (flex-1 min-w-0) so a lead panel wraps, right group stays unwrapped (#412 §3.1)', () => {
+    renderTable(
+      { status: 'active', setStatus: vi.fn() },
+      {
+        withSearch: true,
+        withStatus: true,
+        toolbarLead: (
+          <div data-testid="lead-panel" className="flex flex-wrap items-end gap-3">
+            <input data-testid="lead-control" placeholder="Период от" />
+          </div>
+        ),
+      },
+    );
+
+    const lead = screen.getByTestId('lead-panel');
+    const leftGroup = lead.parentElement!;
+    // The left group fills the toolbar's available width and may shrink
+    // below its content's min-width: a wide filter panel mounted in
+    // toolbarLead wraps its own controls (panel root is flex-wrap) instead
+    // of overflowing the toolbar row.
+    expect(leftGroup).toHaveClass('flex-1', 'min-w-0');
+
+    // The right group (picker) keeps its unwrapped markup — no flex-wrap,
+    // not stretched — staying flush right on the toolbar's first row.
+    const toolbar = leftGroup.parentElement!;
+    const rightGroup = toolbar.lastElementChild!;
+    expect(rightGroup).toContainElement(screen.getByLabelText('Настроить колонки'));
+    expect(rightGroup).not.toHaveClass('flex-wrap');
+    expect(rightGroup).not.toHaveClass('flex-1');
+
+    // The filter panel stays a plain form field group — no toolbar widget
+    // role (spec #412 §3.1: keyboard navigation stays native).
+    expect(toolbar).not.toHaveAttribute('role');
+  });
 });

@@ -28,7 +28,8 @@ export interface PhoneCountry {
   iso: PhoneCountryIso;
   /** Calling code WITHOUT the leading '+' (e.g. '7', '375'). */
   callingCode: string;
-  /** Russian display name — the selector shows code AND name («+7 Россия»). */
+  /** Russian display name — shown in the selector LIST (the trigger shows
+   *  the calling code only, #428 user decision 2026-10-20). */
   name: string;
   /** National-format placeholder of the remainder input (e.g. «999 123-45-67»). */
   placeholder: string;

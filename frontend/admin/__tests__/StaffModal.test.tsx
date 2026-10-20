@@ -216,7 +216,7 @@ describe('StaffModal phone fields (GH #414)', () => {
 
   it('edit: the account phone is the widget, initialized from the stored compact (RU, grouped)', () => {
     setupAccounted();
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     expect(accountPhoneInput().value).toBe('999 123-45-67');
   });
 

@@ -55,11 +55,11 @@ function renderPhoneInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('PhoneInput — country selector in the prefix (GH #414)', () => {
-  it('renders «+7 Россия» in the prefix; input-phone anchors the remainder with the honest RU placeholder', () => {
+  it('renders «+7» in the prefix (no country name — #428); input-phone anchors the remainder with the honest RU placeholder', () => {
     renderPhoneInput();
     const trigger = screen.getByTestId('phone-country-select');
     expect(trigger).toHaveTextContent('+7');
-    expect(trigger).toHaveTextContent('Россия');
+    expect(trigger).not.toHaveTextContent('Россия');
 
     const input = screen.getByTestId('input-phone') as HTMLInputElement;
     expect(input).toHaveAttribute('placeholder', '999 123-45-67');
@@ -88,7 +88,7 @@ describe('PhoneInput — country selector in the prefix (GH #414)', () => {
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('2312345');
 
     selectCountry('LV');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Латвия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+371');
     // Same digits, regrouped under the LV template on the spot.
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('23 123 45');
     expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '23 123 456');
@@ -106,7 +106,7 @@ describe('PhoneInput — «+»-leading input parses as an international paste (G
     const onInputValueChange = vi.fn();
     renderPhoneInput({ onInputValueChange });
     typeValue('+375 29 123-45-67');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Беларусь');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+375');
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('291234567');
     // The lift is already the BY compact — the parse binds before lifting.
     expect(onInputValueChange).toHaveBeenLastCalledWith('+375291234567');
@@ -116,7 +116,7 @@ describe('PhoneInput — «+»-leading input parses as an international paste (G
     const onInputValueChange = vi.fn();
     renderPhoneInput({ onInputValueChange });
     typeValue('+1 555 123-45-67');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('15551234567');
     // No honest template while unbound; compact is undefined → lifted as ''.
     expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '');
@@ -128,7 +128,7 @@ describe('PhoneInput — «+»-leading input parses as an international paste (G
     renderPhoneInput({ onInputValueChange });
     typeValue('+1 555 123-45-67');
     selectCountry('DE');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Германия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+49');
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('15551234567');
     expect(screen.getByTestId('input-phone')).toHaveAttribute('placeholder', '1512 3456789');
     expect(onInputValueChange).toHaveBeenLastCalledWith('+4915551234567');
@@ -140,7 +140,7 @@ describe('PhoneInput — «+»-leading input parses as an international paste (G
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('');
     typeValue('999+');
     expect((screen.getByTestId('input-phone') as HTMLInputElement).value).toBe('999');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
   });
 });
 

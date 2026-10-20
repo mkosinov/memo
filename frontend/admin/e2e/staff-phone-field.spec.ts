@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures/test';
 import { cleanup } from './fixtures/factories';
-import { waitForStaffReady } from './fixtures/helpers';
+import { waitForStaffReady, groupedRu } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 
 /**
@@ -22,10 +22,7 @@ import { queryDBRow } from './fixtures/db-query';
  * staff card (users-first — the CLI sqlite runs with foreign_keys=OFF).
  */
 
-/** The grouped display of a 10-digit RU remainder in the widget input. */
-function groupedRu(national: string): string {
-  return national.replace(/^(\d{3})(\d{3})(\d{2})(\d{2})$/, '$1 $2-$3-$4');
-}
+// groupedRu lives in the shared fixtures helpers (GH #429 dedup).
 test.describe('Staff phone fields (GH #414 scenario 6)', () => {
   test('incomplete account phone blocks creation and the account PATCH; the compact reaches the DB', async ({
     page,
@@ -63,7 +60,7 @@ test.describe('Staff phone fields (GH #414 scenario 6)', () => {
 
       // Both surfaces of the composite field: the selector + the remainder.
       const createInput = dialog.locator('[data-testid="staff-phone-input"]');
-      await expect(dialog.getByTestId('phone-country-select')).toContainText('Россия');
+      await expect(dialog.getByTestId('phone-country-select')).toContainText('+7');
 
       // An INCOMPLETE remainder blocks — no POST /staff leaves the browser.
       await createInput.fill('995123');
@@ -108,7 +105,7 @@ test.describe('Staff phone fields (GH #414 scenario 6)', () => {
       // The widget initialized from the stored compact: RU selector, the
       // grouped national remainder in the input (spec §Инициализация).
       const accountInput = editDialog.locator('[data-testid="staff-account-phone-input"]');
-      await expect(editDialog.getByTestId('phone-country-select')).toContainText('Россия');
+      await expect(editDialog.getByTestId('phone-country-select')).toContainText('+7');
       await expect(accountInput).toHaveValue(groupedRu(national));
 
       // An incomplete CHANGED number blocks BOTH the account PATCH and the

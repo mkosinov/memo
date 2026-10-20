@@ -50,7 +50,11 @@ async function closeByBackdrop(page: Page) {
 /** Enable the «Статус» column via the shared ColumnPicker gear. */
 async function enableStatusColumn(page: Page) {
   await page.click('[aria-label="Настроить колонки"]');
-  await page.getByLabel('Статус').check();
+  // Role+name, not getByLabel: #412 US-4 substituted the client name into the
+  // deep-link chip ✕ aria-label («Убрать фильтр по клиенту: <имя>»), and this
+  // spec's clients are named «Статус-…» — getByLabel('Статус') substring-
+  // matched BOTH the chip button and this checkbox (strict mode violation).
+  await page.getByRole('checkbox', { name: 'Статус' }).check();
   await page.keyboard.press('Escape');
   await expect(
     page.locator('table thead th').filter({ hasText: 'Статус' }),

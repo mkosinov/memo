@@ -226,7 +226,7 @@ describe('LoginPage — phone widget (GH #414, spec §Экран входа)', (
   it('renders the PhoneField widget with the RU selector default', () => {
     renderLogin();
     expect(screen.getByTestId('phone-field')).toBeInTheDocument();
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     // The remainder input keeps the page's label/id anchor (#login-phone).
     expect(screen.getByLabelText('Телефон')).toHaveAttribute('id', 'login-phone');
   });

@@ -9,7 +9,7 @@ import {
   type PhoneFieldValue,
 } from '@/app/components/shared/phone/PhoneField';
 
-// GH #414 Task 2: PhoneField — composite field `[«+7 Россия ⌄»] │ [remainder] [×]`
+// GH #414 Task 2: PhoneField — composite field `[«+7 ⌄»] │ [remainder] [×]`
 // (spec §Виджет PhoneField). Controlled value { country, national, pristine };
 // derived visible/compact/isComplete. Country selector follows the admin
 // listbox pattern (StatusPicker): own popover on --z-popover, mouse-only,
@@ -65,11 +65,11 @@ afterEach(() => {
 });
 
 describe('PhoneField — selector shell (spec §Виджет PhoneField)', () => {
-  it('renders the selector «+7 Россия ⌄» and the remainder input (type=tel, dir=ltr, honest RU placeholder)', () => {
+  it('renders the selector «+7 ⌄» (no country name — #428) and the remainder input (type=tel, dir=ltr, honest RU placeholder)', () => {
     renderPhoneField();
     const trigger = screen.getByTestId('phone-country-select');
     expect(trigger).toHaveTextContent('+7');
-    expect(trigger).toHaveTextContent('Россия');
+    expect(trigger).not.toHaveTextContent('Россия');
 
     const input = screen.getByTestId('phone-input') as HTMLInputElement;
     expect(input).toHaveAttribute('type', 'tel');
@@ -111,7 +111,7 @@ describe('PhoneField — selector shell (spec §Виджет PhoneField)', () =>
       pristine: false,
     });
     expect(h.value()).toEqual({ country: 'BY', national: '', pristine: false });
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Беларусь');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+375');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
@@ -175,7 +175,7 @@ describe('PhoneField — remainder typing (spec §Виджет PhoneField)', () 
   it('groups a BY remainder under Belarus (min metadata keeps BY digits plain)', () => {
     const by = renderPhoneField({ country: 'BY', national: '291234567', pristine: false });
     expect((screen.getByTestId('phone-input') as HTMLInputElement).value).toBe('291234567');
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Беларусь');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+375');
     expect(by.value()).toEqual({ country: 'BY', national: '291234567', pristine: false });
   });
 
@@ -216,7 +216,7 @@ describe('PhoneField — paste of a «+»-leading string (spec §Виджет Ph
       national: '291234567',
       pristine: false,
     });
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Беларусь');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+375');
     expect((screen.getByTestId('phone-input') as HTMLInputElement).value).toBe('291234567');
   });
 
@@ -229,8 +229,8 @@ describe('PhoneField — paste of a «+»-leading string (spec §Виджет Ph
       pristine: false,
     });
     expect(h.value()).toEqual({ country: null, national: '15551234567', pristine: false });
-    // Selector does not move (still RU) and the remainder shows raw digits.
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    // Selector does not move (still RU — trigger code +7) and the remainder shows raw digits.
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     expect((screen.getByTestId('phone-input') as HTMLInputElement).value).toBe('15551234567');
     // No honest template while unbound.
     expect(screen.getByTestId('phone-input')).toHaveAttribute('placeholder', '');
@@ -265,7 +265,7 @@ describe('PhoneField — × clear and «без страны» exit (spec §Ви�
     });
     expect(h.onChange).toHaveBeenCalledWith({ country: 'RU', national: '', pristine: false });
     expect(h.value()).toEqual({ country: 'RU', national: '', pristine: false });
-    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('Россия');
+    expect(screen.getByTestId('phone-country-select')).toHaveTextContent('+7');
     expect(screen.getByTestId('phone-input')).toHaveValue('');
     expect(screen.getByTestId('phone-input')).toHaveAttribute('placeholder', '999 123-45-67');
   });

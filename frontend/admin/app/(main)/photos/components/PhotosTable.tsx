@@ -20,7 +20,7 @@ import { parseApiError } from '@/app/lib/api/parseApiError';
  * will swap in real server pagination without touching this file). Only
  * entity dialogs and mutations stay here.
  */
-export function PhotosTable() {
+export function PhotosTable({ toolbarLead }: { toolbarLead?: React.ReactNode }) {
   // Server-driven list state (PhotosContext, GH #211 Task 6)
   const photosTable = usePhotosTable();
   const { servicesMap, locationsMap } = photosTable;
@@ -149,6 +149,10 @@ export function PhotosTable() {
         // hover:opacity-80`; the shared DataTable renders the base three, the
         // hover style is entity-parity and comes through rowClassName.
         rowClassName={() => 'hover:opacity-80'}
+        // #412 US-3: the page's filter panel rides in the toolbar's left
+        // group (the slot the dict *Filters bars use) — the external
+        // filter card above the table is retired.
+        toolbarLead={toolbarLead}
         toolbarExtras={
           <button
             onClick={() => setCreatingPhoto(true)}

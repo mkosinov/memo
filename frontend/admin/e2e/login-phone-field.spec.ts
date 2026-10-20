@@ -51,9 +51,10 @@ test.describe('Login phone field (GH #414 scenario 7)', () => {
       await page.goto('/login');
       await waitForLoginForm(page);
 
-      // The widget with the RU selector default; the #login-phone anchor now
+      // The widget with the RU selector default (trigger = calling code only,
+      // country name dropped — #428); the #login-phone anchor now
       // addresses the remainder input.
-      await expect(page.getByTestId('phone-country-select')).toContainText('Россия');
+      await expect(page.getByTestId('phone-country-select')).toContainText('+7');
 
       const loginReq = page.waitForRequest((req) => req.url().includes('/api/v1/auth/login'));
       await page.locator('#login-phone').pressSequentially('9991112233');

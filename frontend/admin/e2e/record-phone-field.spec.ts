@@ -71,7 +71,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       const selector = page.getByTestId('phone-country-select');
 
       // RU is the default country with its honest national template.
-      await expect(selector).toContainText('Россия');
+      await expect(selector).toContainText('+7');
       await expect(phoneInput).toHaveAttribute('placeholder', '999 123-45-67');
 
       // 3 national digits — below the 4-digit threshold: no search, no listbox.
@@ -118,7 +118,6 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       const search = clientSearchInput(page);
       await expect(search).toBeVisible({ timeout: 10_000 });
       await search.fill(clientName);
-      await page.waitForTimeout(1500); // debounced search (300 ms) + network
       const clientRow = page.locator('table tbody tr').filter({ hasText: clientName });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toContainText(phoneMaskDisplay(digits, 'international'));
@@ -167,8 +166,10 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       await expect(nameInput).toHaveAttribute('readonly');
 
       // × dissolves the pick — the form returns to free input (no client
-      // name, no typed number), the selector is live again.
-      await page.getByLabel('clear').click();
+      // name, no typed number), the selector is live again. The × is the
+      // RemoteSearchSelect selection button (GH #429: stable testid, not
+      // the PhoneField's own phone-clear which stays inert on a frozen pick).
+      await page.getByTestId('clear-selection').click();
       await expect(phoneInput).not.toHaveAttribute('readonly');
       await expect(phoneInput).toHaveValue('');
       await expect(selector).toBeEnabled();
@@ -200,7 +201,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
 
       await selector.click();
       await page.getByTestId('phone-country-select-option-BY').click();
-      await expect(selector).toContainText('Беларусь');
+      await expect(selector).toContainText('+375');
       // The honest BY template of the remainder input.
       await expect(phoneInput).toHaveAttribute('placeholder', '29 123 45 67');
 
@@ -234,7 +235,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       // The widget mounts fresh on RU — switch to BY again, type the number.
       await selector.click();
       await page.getByTestId('phone-country-select-option-BY').click();
-      await expect(selector).toContainText('Беларусь');
+      await expect(selector).toContainText('+375');
 
       // The typeahead finds the Part-A client (search by BY national digits)
       // — and the scenario deliberately IGNORES the suggestion.
@@ -299,7 +300,7 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
     // Paste an out-of-list international number — the widget enters the
     // «без страны» state: selector unchanged (RU), raw digits, no template.
     await phoneInput.fill('+1 650 555 1234');
-    await expect(page.getByTestId('phone-country-select')).toContainText('Россия');
+    await expect(page.getByTestId('phone-country-select')).toContainText('+7');
     await expect(phoneInput).toHaveValue('16505551234');
     await expect(phoneInput).toHaveAttribute('placeholder', '');
 

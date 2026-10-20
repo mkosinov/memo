@@ -42,7 +42,8 @@ test.describe('Client card phone field (GH #414 scenario 5)', () => {
       // remainder grouped (spec §Инициализация существующих значений).
       const phoneInput = page.locator('#client-phone');
       await expect(phoneInput).toHaveValue('999 653-18-03');
-      await expect(page.getByTestId('phone-country-select')).toContainText('Россия');
+      // Trigger shows the calling code only (country name dropped, #428).
+      await expect(page.getByTestId('phone-country-select')).toContainText('+7');
 
       // Every PUT to this client is counted — the blocked save must add none.
       let puts = 0;

@@ -1,4 +1,4 @@
-"""Notify text rendering — sandboxed Jinja2, templates from the DB (#482 §3.5).
+r"""Notify text rendering — sandboxed Jinja2, templates from the DB (#482 §3.5).
 
 Rendering runs ONCE at task creation (spec §3.4): the finished text is
 frozen into ``notify_tasks`` and never re-rendered.
@@ -10,9 +10,12 @@ Decisions pinned by the spec:
   — a missing snapshot key is a RENDER ERROR, not a silent blank;
   ``autoescape=False`` — the output is NEUTRAL markup (Markdown common
   denominator); channel-specific conversion belongs to part 3.
-- Markup control chars (``*``, ``_``, `` ` ``, ``[``, ``]``) are
-  neutralized in snapshot STRING VALUES before substitution — never in
-  the template's own markup: the author writes markup, data stays data.
+- Markup control chars (``*``, ``_``, `` ` ``, ``[``, ``]`` and the
+  backslash itself) are neutralized in snapshot STRING VALUES before
+  substitution — never in the template's own markup: the author writes
+  markup, data stays data. The backslash is in the set so a
+  client-supplied ``\[`` cannot re-activate what escaping neutralized
+  (``\\[`` would render as a literal ``\`` + ACTIVE link start).
   Client names arrive from a public form; unescaped they could break the
   message layout or inject links on behalf of the studio (panel finding).
 - Template lookup: row with matching ``event_type`` first, then the
@@ -47,8 +50,10 @@ class RenderError(Exception):
 
 # Neutral-markup control chars neutralized in snapshot string values
 # (spec §3.5). Deterministic scheme: backslash prefix — readable, and a
-# plain-text channel just shows the bare character.
-_MARKUP_CONTROL_CHARS = "*_`[]"
+# plain-text channel just shows the bare character. The backslash IS in
+# the set: str.translate replaces single chars, so ``\[`` becomes
+# ``\\\[`` — both chars prefixed, no active escape/link sequence left.
+_MARKUP_CONTROL_CHARS = "*_`\\[]"
 _ESCAPE_TABLE = str.maketrans({char: "\\" + char for char in _MARKUP_CONTROL_CHARS})
 
 
@@ -146,9 +151,12 @@ async def render_event(
     data = _neutralize_markup(snapshot)
     try:
         return _ENV.from_string(body).render(**data)
-    except jinja2.TemplateError as exc:
+    except (jinja2.TemplateError, ValueError, TypeError) as exc:
         # UndefinedError (missing key), SecurityError (sandbox),
-        # TemplateSyntaxError (broken authored body) — one boundary type.
+        # TemplateSyntaxError (broken authored body), plus ValueError /
+        # TypeError — a filter blowing up on a bad snapshot VALUE (e.g.
+        # fmt_dt on a non-ISO string, money on None). One boundary type:
+        # Task 9's attempts policy routes RenderError and nothing else.
         raise RenderError(
             f"notify template render failed for event_type={event_type!r}: {exc}"
         ) from exc

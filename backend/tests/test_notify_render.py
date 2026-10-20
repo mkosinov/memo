@@ -8,7 +8,7 @@ Jinja2 template taken from ``notify_templates``:
 - filters ``fmt_dt`` (stored naive value → ``%d.%m.%Y %H:%M``, same
   interpretation as the past/future predicate — no conversion) and
   ``money`` (``1000`` → ``1 000 ₽``);
-- MARKUP control chars (``*``, ``_``, `` ` ``, ``[``, ``]``) are
+- MARKUP control chars (``*``, ``_``, `` ` ``, ``[``, ``]``, ``\\``) are
   neutralized in snapshot STRING VALUES before substitution — never in
   the template's own markup;
 - template selection by ``event_type`` with fallback to ``is_default``;
@@ -116,6 +116,12 @@ class TestFilters:
     def test_money_small_amount_has_no_separator(self) -> None:
         assert money(250) == "250 ₽"
 
+    def test_money_zero(self) -> None:
+        assert money(0) == "0 ₽"
+
+    def test_money_negative_amount(self) -> None:
+        assert money(-1000) == "-1\u00a0000 ₽"
+
 
 # ─── render_event (DB: template lookup) ───────────────────────────────────────
 
@@ -200,6 +206,39 @@ class TestRenderEvent:
         assert text == "*Анна" + r"\*\[x\]\_\`" + "н*"
         # escaping works on a copy — the journal snapshot stays untouched
         assert snap["client"]["name"] == raw_name
+
+    async def test_backslash_before_bracket_neutralized(self, db_session) -> None:
+        """``\\[x]`` — the backslash itself must be escaped too: left
+        bare it turns the following ``\\[`` into a literal backslash +
+        ACTIVE link start (spec §3.5 anti-link-injection)."""
+        raw_name = "\\[x]"
+        await _add_template(
+            db_session, event_type="new_record", body="*{{ client.name }}*"
+        )
+        snap = _snapshot(client={"id": "c-1", "name": raw_name, "phone": "+7999"})
+
+        text = await render_event(db_session, "new_record", snap)
+
+        # BOTH chars prefixed: \ → \\, [ → \[, ] → \] — fully inert
+        assert text == "*" + r"\\\[x\]" + "*"
+        # escaping works on a copy — the journal snapshot stays untouched
+        assert snap["client"]["name"] == raw_name
+
+    async def test_filter_failure_on_bad_value_is_render_error(
+        self, db_session
+    ) -> None:
+        """A filter blowing up on a bad VALUE (non-ISO datetime through
+        ``fmt_dt``) must wrap into RenderError — it must NOT escape the
+        boundary as a bare ValueError (Task 9 routes RenderError only)."""
+        await _add_template(
+            db_session, event_type="new_record", body="{{ activity.start | fmt_dt }}"
+        )
+        snap = _snapshot(activity={"start": "oops-not-iso", "duration": 90})
+
+        with pytest.raises(RenderError) as excinfo:
+            await render_event(db_session, "new_record", snap)
+
+        assert isinstance(excinfo.value.__cause__, ValueError)
 
     async def test_event_type_template_preferred_over_default(self, db_session) -> None:
         await _add_template(

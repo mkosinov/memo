@@ -119,7 +119,7 @@ export function RecordsFilters({
   };
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div data-testid="records-filters" className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Поиск</label>
         <input

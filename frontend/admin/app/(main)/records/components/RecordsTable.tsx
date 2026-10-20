@@ -17,7 +17,7 @@ import { recordColumns, recordsActions, formatPrice, formatDateRu } from './reco
 import { StatusBadge } from '@/app/components/shared/StatusBadge';
 import { safeStatus } from '@/app/lib/status-utils';
 
-export function RecordsTable() {
+export function RecordsTable({ toolbarLead }: { toolbarLead?: React.ReactNode }) {
   const recordsCtx = useRecords();
   const { records } = recordsCtx;
   const { showToast } = useUI();
@@ -99,6 +99,10 @@ export function RecordsTable() {
           columns={columns}
           tableState={recordsCtx}
           actions={actions}
+          // #412 US-1: the page's filter panel rides in the toolbar's left
+          // group (the slot the dict *Filters bars use) — the external
+          // filter card above the table is retired.
+          toolbarLead={toolbarLead}
           onRowClick={(r) =>
             setSelectedRecord((sel) => (sel?.id === r.id ? null : r))
           }

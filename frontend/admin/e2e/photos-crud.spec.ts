@@ -12,6 +12,7 @@ import {
   selectClientFilterOption,
   waitForPhotosReady,
 } from './fixtures/helpers';
+import { seedId } from './fixtures/seed-ids';
 import { searchAndSelect } from './helpers/combobox';
 
 /**
@@ -686,5 +687,57 @@ test.describe('Photos — US-3 (#412): tags in the table toolbar', () => {
     // The multi-tag AND still filters from the toolbar: no seed photo
     // carries all four tags → the unified empty state.
     await expect(page.getByText('Нет записей')).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// US-5 (#412) — an old saved link opens the filtered state: ?q + ?tag_id
+// ---------------------------------------------------------------------------
+
+test.describe('Photos — US-5 (#412): old link opens filtered state', () => {
+  // GH #491: the tag id is a UUID — resolve by title at TEST runtime, never
+  // at import (CI's --list collects specs before the shard stack seeds).
+  let TAG_NOVINKA = '';
+
+  test.beforeAll(() => {
+    TAG_NOVINKA = seedId('tags', 'title', 'новинка');
+  });
+
+  test('US-5 (#412) — pre-migration link ?q&tag_id filters the table; search field + tag chip in the toolbar', async ({
+    page,
+  }) => {
+    // A link saved BEFORE the filters moved into the toolbar (#412): the
+    // #349 URL contract must open the SAME filtered state afterwards. Seed
+    // pins (US-3 precedent): q=guest matches guest-1/guest-2.jpg filenames,
+    // «новинка» is carried by tag-pair.jpg + guest-1.jpg — the AND leaves
+    // exactly guest-1.jpg (guest-2 has no tag, tag-pair has no «guest»).
+    await page.goto(`/photos?q=guest&tag_id=${TAG_NOVINKA}`);
+
+    // US-5: the panel AND the DataTable search field ride in the table
+    // card's toolbar row (the new #412 mount point — panel root testid is
+    // the anchor).
+    const toolbar = page
+      .locator('div.p-4.border-b')
+      .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+    await expect(toolbar.locator('[data-testid="photos-filters"]')).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // The header controls REFLECT the link values: the search field carries
+    // q, the «новинка» chip sits in the toolbar's tag block (✕ is a named
+    // button — «Удалить тег новинка»).
+    await expect(toolbar.getByPlaceholder('Поиск фото...')).toHaveValue('guest');
+    await expect(toolbar.getByLabel('Удалить тег новинка')).toBeVisible();
+
+    // The table is filtered by BOTH params: only guest-1.jpg survives.
+    await expect(page.getByText('/images/guest-1.jpg')).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByText('/images/guest-2.jpg')).toHaveCount(0);
+    await expect(page.getByText('/images/tag-pair.jpg')).toHaveCount(0);
+
+    // The old URL survives the mount verbatim (a read never rewrites).
+    await expect(page).toHaveURL(/[?&]q=guest/);
+    await expect(page).toHaveURL(new RegExp(`[?&]tag_id=${TAG_NOVINKA}`));
   });
 });

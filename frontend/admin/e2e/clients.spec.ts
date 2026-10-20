@@ -902,9 +902,17 @@ test.describe('Deep-link ?clientId= — #232', () => {
       // ✕ on the chip — targeted removal only.
       await page.getByRole('button', { name: 'Снять сужение' }).click();
 
-      // The param is gone from the address (everything else in its place)…
-      await expect(page).not.toHaveURL(/clientId=/);
-      await expect(page).toHaveURL(/\/clients$/);
+      // The param is gone from the address (everything else in its place).
+      // #349: the address is the single writer and the ✕ preserves the
+      // other params — the SURVIVING user filter is ?q= in the final URL
+      // (a pending coalesced q-flush re-lands on the navigated base). Wait
+      // for that final state, not the transitional /clients-only URL the
+      // debounced sync passes through — that race flaked full-suite runs
+      // (GH #415: failed 2/3, passed isolated).
+      await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
+      await expect(page).toHaveURL(
+        new RegExp(`/clients\\?q=${encodeURIComponent(`US4target-${ts}`)}`),
+      );
 
       // …the chip is gone…
       await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);

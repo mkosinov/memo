@@ -12,7 +12,10 @@
  *   2. resetToSeed() applies the canon: mutated seed rows are fully
  *      restored (status/sort_order/titles/staff_positions), deleted seed
  *      rows resurrect, non-seed (UUID) rows vanish, user_settings wiped;
- *   3. the two by-design exceptions survive: audit_logs, sessions;
+ *   3. the by-design exceptions survive: audit_logs, sessions, and the
+ *      nondeterministic notify journal tables (domain_events, notify_tasks,
+ *      notify_task_attempts — GH #482), while notify_templates (deterministic
+ *      seed) stays IN the canon;
  *   4. a missing canon file is a LOUD error naming the stack script.
  *
  * Uses TEST_DB_PATH pointing at a temp file — no backend, no shard stack;
@@ -41,7 +44,8 @@ let tmpDir: string;
 let dbPath: string;
 
 /** Create a minimal DB shaped like the real schema (only columns under test):
- *  the full transactional + staff domain + the two canon-exception tables. */
+ *  the full transactional + staff domain + the canon-exception tables
+ *  (incl. the #482 notify set; notify_templates is seeded, not excluded). */
 function createSchema(db: string) {
   execSync(`sqlite3 "${db}" "
     CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT);
@@ -60,6 +64,10 @@ function createSchema(db: string) {
     CREATE TABLE locations (id TEXT PRIMARY KEY, sort_order INTEGER);
     CREATE TABLE audit_logs (id TEXT PRIMARY KEY, action TEXT);
     CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id TEXT);
+    CREATE TABLE domain_events (id TEXT PRIMARY KEY, type TEXT);
+    CREATE TABLE notify_tasks (id TEXT PRIMARY KEY, event_id TEXT);
+    CREATE TABLE notify_task_attempts (id TEXT PRIMARY KEY, task_id TEXT);
+    CREATE TABLE notify_templates (id TEXT PRIMARY KEY, event_type TEXT, title TEXT);
   "`);
 }
 
@@ -88,6 +96,7 @@ function seedCanonical(db: string) {
     INSERT INTO locations (id, sort_order) VALUES ('alpika', 0);
     INSERT INTO locations (id, sort_order) VALUES ('grand', 1);
     INSERT INTO locations (id, sort_order) VALUES ('p1389', 2);
+    INSERT INTO notify_templates (id, event_type, title) VALUES ('tpl_new_record', 'new_record', 'Новая запись');
   "`);
 }
 
@@ -272,15 +281,33 @@ describe('resetToSeed (canon-based, against a real temp SQLite DB)', () => {
     expect(scalar(dbPath, 'SELECT COUNT(*) FROM user_settings')).toBe(0);
   });
 
-  it('keeps audit_logs and sessions — the two by-design exceptions (GH #310)', () => {
+  it('keeps the by-design exceptions: audit_logs, sessions and the #482 notify journal tables', () => {
     execSync(`sqlite3 "${dbPath}" "
       INSERT INTO audit_logs (id, action) VALUES ('aud-1', 'TEST');
       INSERT INTO sessions (token, user_id) VALUES ('tok-1', 'u1');
+      INSERT INTO domain_events (id, type) VALUES ('dev-1', 'new_record');
+      INSERT INTO notify_tasks (id, event_id) VALUES ('ntk-1', 'dev-1');
+      INSERT INTO notify_task_attempts (id, task_id) VALUES ('nat-1', 'ntk-1');
     "`);
     resetToSeed();
 
     expect(count(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id='aud-1'")).toBe(1);
     expect(count(dbPath, "SELECT COUNT(*) FROM sessions WHERE token='tok-1'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM domain_events WHERE id='dev-1'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM notify_tasks WHERE id='ntk-1'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM notify_task_attempts WHERE id='nat-1'")).toBe(1);
+  });
+
+  it('notify_templates stays IN the canon (#482 — deterministic seed: restored, non-seed rows gone)', () => {
+    execSync(`sqlite3 "${dbPath}" "
+      INSERT INTO notify_templates (id, event_type, title) VALUES ('tpl_polluted', 'new_record', 'Загрязнённый шаблон');
+    "`);
+    resetToSeed();
+
+    // the seed template row is restored by the canon (total restore) and the
+    // polluted non-seed template is wiped — i.e. the table is NOT excluded.
+    expect(count(dbPath, "SELECT COUNT(*) FROM notify_templates WHERE id='tpl_new_record' AND event_type='new_record'")).toBe(1);
+    expect(count(dbPath, "SELECT COUNT(*) FROM notify_templates WHERE id='tpl_polluted'")).toBe(0);
   });
 
   it('is idempotent (double application is a no-op beyond the first)', () => {

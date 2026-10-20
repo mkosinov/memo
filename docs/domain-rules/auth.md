@@ -22,7 +22,7 @@ Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
 
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
-- `GET` dictionaries: masters, locations, services, tags, activities, photos — incl. `GET /api/v1/photos/web` (the public gallery the site's home page consumes)
+- `GET` dictionaries: masters, locations, services, tags, activities, photos (the web gallery rides the photo list with `?is_public=true` — the separate `GET /api/v1/photos/web` showcase was removed in #479)
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
 

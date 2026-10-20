@@ -10,8 +10,9 @@ contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
 - ``GET`` dictionaries: masters, locations, services, tags, activities,
-  photos (public site + gallery; the public gallery surface is
-  ``GET /api/v1/photos/web`` — ``frontend/web`` ``useGallery``);
+  photos (public site; the web gallery rides the same list with
+  ``?is_public=true`` — GH #479 Изменение 4 retired the separate
+  ``GET /api/v1/photos/web`` showcase);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout / me) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -47,7 +48,8 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v1/activities/{id}"),
     ("GET", "/api/v1/photos"),
     ("GET", "/api/v1/photos/{id}"),
-    ("GET", "/api/v1/photos/web"),
+    # GH #479 (Изменение 4): ("GET", "/api/v1/photos/web") was removed —
+    # the gallery rides the public list above with ?is_public=true.
     # GH #479 (Изменение 5): ("POST", "/api/v1/records") was removed —
     # the full contract now carries the records:write guard; guest
     # booking is a separate contract (#499).

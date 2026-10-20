@@ -439,6 +439,11 @@ async def list_photos_view(
         stmt = stmt.outerjoin(Activity, Activity.id == Photo.activity_id)
         conds.append(or_(Photo.service_id == params.service_id,
                          Activity.service_id == params.service_id))
+    if params.is_public is not None:
+        # GH #479 Изменение 4: publicity filter — the retired /web
+        # showcase successor; direct equality, only when sent (None =
+        # no filter). AND-combines with the scope and other filters.
+        conds.append(Photo.is_public == params.is_public)
     if params.tag_id:
         for t in dict.fromkeys(params.tag_id):          # dedupe, keep order
             conds.append(Photo.tags.any(Tag.id == t))   # per-tag EXISTS, AND-chained

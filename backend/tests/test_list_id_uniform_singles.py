@@ -2,20 +2,20 @@
 
 Spec ``docs/specs/2026-10-10-list-id-uniform-371-design.md`` §4.2: the five
 dictionary ``/all`` routes (services, materials, locations, staff, masters)
-share ``ArchiveStatusParams``; the public photo gallery ``GET /photos/web``
-gets ``PhotoWebListParams``; payment totals get ``PaymentTotalsParams``; the
-client phone lookup gets ``ClientPhoneLookupParams``. Every handler injects
-the model as ``Annotated[<Model>, Query()]`` — scalar query siblings are
-banned (fastapi PR #12481).
+share ``ArchiveStatusParams``; payment totals get ``PaymentTotalsParams``;
+the client phone lookup gets ``ClientPhoneLookupParams``. Every handler
+injects the model as ``Annotated[<Model>, Query()]`` — scalar query
+siblings are banned (fastapi PR #12481).
 
 The wire must NOT change (scenario С8): same keys, same defaults, same 422
 codes. This file pins the singles part of С8:
 
 * garbage ``status`` → 422 on every dictionary ``/all``;
-* the ``ACTIVE`` default on ``/all`` (spec §4.2 default table);
-* non-UUID ``activity_id`` → 422 on ``/photos/web`` (spec §4.2 types the
-  field as UUID — newly enforced by the params model) and the valid-UUID
-  contract around it (unknown UUID → 200 empty, same as before).
+* the ``ACTIVE`` default on ``/all`` (spec §4.2 default table).
+
+The former ``PhotoWebListParams`` pins (``/photos/web``) were removed with
+the route itself — GH #479 Изменение 4 retired the showcase; the gallery
+rides the common list's ``is_public`` filter (``PhotoListParams``).
 
 The short-phone (``/clients/get``) and record_ids-cap (``/payments/totals``)
 422 pins already live in ``test_api_clients.py`` / ``test_api_payments.py``
@@ -23,8 +23,6 @@ and must stay green without expectation edits (regression, not duplicated
 here). The masters ``/all`` default + garbage pins live in
 ``test_api_staff.py``.
 """
-
-from uuid import uuid4
 
 import pytest
 
@@ -67,18 +65,3 @@ class TestArchiveStatusParamsContract:
         body = api_client.get("/api/v1/locations/all").json()
 
         assert [loc["id"] for loc in body] == [active["id"]]
-
-
-class TestPhotoWebListParamsContract:
-    """Public gallery ``GET /photos/web`` — ``PhotoWebListParams`` (§4.2)."""
-
-    def test_web_non_uuid_activity_id_returns_422(self, api_client) -> None:
-        """``?activity_id=<garbage>`` → 422: the field is UUID-typed (§4.2)."""
-        resp = api_client.get("/api/v1/photos/web", params={"activity_id": "not-a-uuid"})
-        assert resp.status_code == 422, resp.text
-
-    def test_web_unknown_uuid_activity_id_returns_empty_list(self, api_client) -> None:
-        """Valid but unknown UUID → 200 + [] (wire unchanged for UUIDs)."""
-        resp = api_client.get("/api/v1/photos/web", params={"activity_id": str(uuid4())})
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == []

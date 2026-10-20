@@ -102,6 +102,12 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         # behavior-neutral for every inherited path.
         self._repository: ClientRepository = repository
 
+    # GH #482: clients.notify_enabled is NOT NULL (default true) — patch
+    # bodies carrying null for it are stripped like other not-null fields.
+    # (Suppressed RUF012 keeps the frozen lint budget flat — location and
+    # activity already pay for their identical sets.)
+    NOT_NULL_FIELDS = {"notify_enabled"}  # noqa: RUF012
+
     # GH #212 search matrix (spec §5.2): substring over name/phone/email,
     # exact id equality when q parses as a full UUID (deep-link #216).
     search_fields = [

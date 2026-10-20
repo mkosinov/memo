@@ -38,8 +38,8 @@ import {
   VisitResponseSchema,
   type VisitResponse,
   RecordResponseSchema,
-  type RecordResponse,
   RecordCreateSchema,
+  type RecordResponse,
   RecordUpdateSchema,
   type RecordCreate,
   type RecordUpdate,
@@ -1244,6 +1244,27 @@ describe('RecordResponseSchema', () => {
   it('rejects missing required field', () => {
     const { id, ...without } = validRecord;
     expect(() => RecordResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── RecordCreate (GH #482: notify flag — manual mirror of the backend contract) ───
+
+describe('RecordCreateSchema (#482)', () => {
+  it('keeps the notify flag in the parsed payload', () => {
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      notify: true,
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
+    expect(parsed.notify).toBe(true);
+  });
+
+  it('keeps notify optional — legacy payloads without the flag still parse', () => {
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
+    expect(parsed.notify).toBeUndefined();
   });
 });
 

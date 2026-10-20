@@ -58,6 +58,8 @@ from src.schemas.record import (
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Alias import keeps the builtin ``list`` usable in the class body
@@ -260,6 +262,18 @@ def _total_price_sq() -> ScalarSelect[Any]:
         .where(Visit.record_id == Record.id)
         .scalar_subquery()
     )
+
+
+def record_total_price(visits: Iterable[Visit]) -> int:
+    """Sum of the record's visit prices — the Python twin of the SQL total.
+
+    GH #482 (spec §3.2): the SINGLE semantics point of the record total
+    for Python consumers (the ``new_record`` snapshot's ``total_price``).
+    Mirrors ``_total_price_sq`` exactly: ``COALESCE(SUM(visit.price), 0)``
+    — ``custom_price`` is NOT included (parity with the lists), ``None``
+    prices are skipped like SQL ``SUM`` skips NULLs, no visits → 0.
+    """
+    return sum(v.price for v in visits if v.price is not None)
 
 
 def _paid_sum_sq() -> ScalarSelect[Any]:
@@ -475,6 +489,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         seats: int,
         comment: str | None = None,
         custom_price: int | None = None,
+        notify: bool = False,
     ) -> Record:
         """Insert ONE record row — WITHOUT committing, no recalculation.
 
@@ -488,6 +503,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         boundary, the visit batch, and the recalculation timing belong
         to the scenario. Value-typed parameters — no foreign
         ORM/schema objects.
+
+        ``notify`` (GH #482 §3.3): the scenario has already applied the
+        actor gate; the value is FIXED here at creation (no edit path
+        ever rewrites it).
         """
         record = Record(
             activity_id=activity_id,
@@ -496,6 +515,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             seats=seats,
             comment=comment,
             custom_price=custom_price,
+            notify=notify,
         )
         db_session.add(record)
         await db_session.flush()

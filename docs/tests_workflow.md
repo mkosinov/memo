@@ -9,6 +9,7 @@
 |-----------|---------|-------------|---------------|
 | Backend pytest | `cd backend && uv run pytest` | `backend/` | Backend API, models, services |
 | Frontend unit (vitest) | `cd frontend/admin && pnpm test` | `frontend/admin/` | React components, hooks, contexts |
+| Workspace unit (vitest) | `bash scripts/run-workspace-tests.sh` | repo root | Unit tests of `packages/domain`, `packages/api-client`, `frontend/web` — the package list is derived from the workspace globs (GH #420) |
 | Frontend e2e (Playwright) | `cd frontend/admin && pnpm test:e2e` | `frontend/admin/` | Full user flows in browser |
 | Type check | `cd frontend/admin && pnpm type-check` | `frontend/admin/` | TypeScript validation |
 | Lint | `pnpm lint` (from repo root) | repo root | ESLint via Turbo |
@@ -285,12 +286,9 @@ What a spec author must know:
 
 | Test type | G6 quality¹ | G4.5 visual² | G7 pre-push³ | CI Tests⁴ |
 |---|---|---|---|---|
-| backend unit | ✅ | — | ✅ | ✅ |
-| backend api | ✅ | — | ✅ | ✅ |
-| backend integration | ✅ | — | ✅ | ✅ |
-| backend misc | ✅ | — | ✅ | ✅ |
-| backend coverage (report) | — | — | — | ✅ |
-| frontend vitest | ✅ | — | ✅ | ✅ (sharded — every file covered, no hand lists) |
+| backend pytest (unit/api/integration/misc — маркеры как локальные селекторы `pytest -m …`) | ✅ | — | ✅ | ✅ один джоб `backend-tests`: весь набор одним прогоном + coverage ≥ 80 (GH #416) |
+| frontend vitest | ✅ | — | ✅ | ✅ (single run, no shards — GH #420) |
+| workspace vitest (domain, api-client, web) | ✅ (`test:all`) | — | — | ✅ (`workspace-tests` — list derived from workspace globs, GH #420) |
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
 | e2e Playwright (4 CI shards) | — | — | forbidden⁶ | ✅ |

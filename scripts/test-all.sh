@@ -59,6 +59,8 @@ if [ "${SEQUENTIAL:-0}" = "1" ]; then
   (cd packages/api-client && pnpm run type-check)
   echo "  → vitest..."
   (cd frontend/admin && pnpm run test)
+  echo "  → vitest (workspace packages)..."
+  bash scripts/run-workspace-tests.sh
   echo "  → playwright..."
   (cd frontend/admin && CI= pnpm exec playwright test --workers=1)
   echo "  → backend pytest..."
@@ -311,6 +313,16 @@ ALL_PIDS+=($!)
 echo "  → vitest..."
 (
   cd frontend/admin && pnpm run test > "$LOG_DIR/vitest.log" 2>&1
+) &
+ALL_PIDS+=($!)
+
+# ── Vitest (other workspace packages: domain, api-client, web) ─────────────
+# GH #420: the local full suite must cover ALL tests, not just admin's.
+# Same shared script as the CI workspace-tests job — the package list is
+# derived from the workspace globs, no hand lists to go stale.
+echo "  → vitest (workspace packages)..."
+(
+  bash scripts/run-workspace-tests.sh > "$LOG_DIR/vitest-workspace.log" 2>&1
 ) &
 ALL_PIDS+=($!)
 

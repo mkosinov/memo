@@ -299,6 +299,9 @@ class TestFKMatrixFamily:
             "visitors",
             "client_tags",
             "photos",
+            # GH #482: notify_tasks.client_id FK (ON DELETE SET NULL) —
+            # task history survives the client hard delete (spec §3.6).
+            "notify_tasks",
         }
         assert {d.entity for d in FK_MATRIX[Record]} == {
             "visits",

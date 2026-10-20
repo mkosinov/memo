@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ActivityCard } from '../app/components/schedule/ActivityCard';
 import type { ScheduleAdminDTO, Master, Location } from '@memo/domain';
@@ -397,7 +397,10 @@ const mockUseScheduleData = vi.mocked(useScheduleData);
 const mockUseGridSettings = vi.mocked(useGridSettings);
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // shouldAdvanceTime lets waitFor polling tick between explicit
+  // advanceTimersByTimeAsync steps (toast asserts after the deferred
+  // flow, #445 / the #337 canonical pattern).
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   mockUseUI.mockReturnValue(createMockUIContext());
   mockUseScheduleData.mockReturnValue(createMockScheduleData());
   mockUseGridSettings.mockReturnValue(createMockGridSettings());
@@ -495,7 +498,7 @@ describe('ActivityCard delete mode (#286 deferred flow)', () => {
 
     expect(card).not.toHaveClass('opacity-0');
     // A plain Error parses to the generic fallback message (parseApiError).
-    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error'));
 
     // Re-click allowed after the failure.
     fireEvent.click(card);
@@ -569,7 +572,7 @@ describe('ActivityCard delete mode (#286 deferred flow)', () => {
     });
 
     expect(setPendingActivityConfirm).not.toHaveBeenCalled();
-    expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error');
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Неизвестная ошибка', 'error'));
   });
 });
 

@@ -10,16 +10,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # GH #416: один прогон всего набора с coverage-порогом вместо матрицы по
+  # маркерам (4 джоба) + отдельного coverage-джоба. Каждый тест выполняется
+  # ровно один раз; тесты без меток проверяются тем же прогоном. Маркеры
+  # unit/api/integration/misc/pure_unit остаются локальными селекторами
+  # (pytest -m …) — CI их не потребляет. Отказы: verbose-вывод + junit-артефакт.
   backend-tests:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - group: unit
-          - group: api
-          - group: integration
-          - group: misc
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -36,30 +34,18 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run tests (${{ matrix.group }})
-        run: uv run pytest -m ${{ matrix.group }} -v --tb=short
+      - name: Run tests (full suite, coverage threshold 80%)
+        run: uv run pytest --cov=src --cov-report=xml --cov-fail-under=80 -n auto -v --tb=short --junitxml=test-results.xml
 
-  backend-coverage:
-    runs-on: ubuntu-latest
-    needs: [backend-tests]
-    defaults:
-      run:
-        working-directory: backend
+      - name: Upload junit results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/test-results.xml
+          if-no-files-found: warn
+          retention-days: 7
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Check coverage threshold
-        run: uv run pytest --cov=src --cov-report=xml --cov-fail-under=80 -n auto
 
   # Рахет-гейт lint/mypy (#306): быстрый сигнал, параллельно тестам —
   # без needs. Скрипт в PR-режиме делает git show <merge-base>:… —
@@ -87,11 +73,12 @@ jobs:
       - name: Lint budget (ruff/mypy ratchet)
         run: uv run python scripts/lint_budget.py
 
+  # GH #420: single run, no shards. The 2026-06 sharding existed to survive
+  # OOM from heavy ClientRecordTab files — those were since split up and the
+  # 4 GB NODE_OPTIONS limit is in place. Fallback if OOM returns: split into
+  # 2–3 shards INSIDE this same job (still one check in the PR).
   frontend-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        group: [1, 2, 3, 4, 5]
     defaults:
       run:
         working-directory: frontend/admin
@@ -111,10 +98,37 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run vitest (shard ${{ matrix.group }}/5)
-        run: npx vitest run --shard=${{ matrix.group }}/5
+      - name: Run vitest
+        run: npx vitest run
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+  # GH #420: unit tests of every OTHER workspace package (packages/domain,
+  # packages/api-client, frontend/web) — previously run by no gate at all.
+  # The package list is derived from the workspace globs by the shared
+  # scripts/run-workspace-tests.sh (also used by the local full suite), so a
+  # new package with a test script joins this job automatically.
+  workspace-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies (workspace)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run workspace unit tests
+        run: bash scripts/run-workspace-tests.sh
+
 
   frontend-checks:
     runs-on: ubuntu-latest

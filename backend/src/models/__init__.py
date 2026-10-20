@@ -37,6 +37,12 @@ from src.models.user_profile import UserProfile
 from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.notify.models import (  # noqa: F401 — bare registration import (#482)
+    DomainEvent,
+    NotifyTask,
+    NotifyTaskAttempt,
+    NotifyTemplate,
+)
 
 __all__ = [
     "AbstractModel",

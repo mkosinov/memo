@@ -12,11 +12,15 @@
  *
  * Policy (GH #310, spec rev 4): mutations of ANY seed row are allowed — the
  * reset restores every table and every field (incl. created_at/updated_at
- * stamps and relative-week ev_* activities) from the canon. Two exceptions
+ * stamps and relative-week ev_* activities) from the canon. Three exceptions
  * BY DESIGN:
  *   - `audit_logs` — append-only journal, never wiped;
  *   - `sessions`   — the auth-cookie invariant (GH #252 §3.1): storageState
- *                    logins from globalSetup must survive per-test resets.
+ *                    logins from globalSetup must survive per-test resets;
+ *   - `domain_events`, `notify_tasks`, `notify_task_attempts` — the
+ *                    nondeterministic notify journal chain (#482 §5),
+ *                    blacklisted from the canon like `audit_logs`
+ *                    (`notify_templates` stays: deterministic seed).
  *
  * The canon file is data-only (DELETE + INSERT in one transaction with
  * `BEGIN IMMEDIATE`, so the write lock is taken up front — no WAL upgrade

@@ -23,11 +23,13 @@
 - Started via `dev.sh`
 
 ### E2E (automated)
-The full local suite (`pnpm test:all` via `scripts/test-all.sh`) uses **2 Playwright projects** (per `frontend/admin/playwright.config.ts`):
-- `shard-schedule` — services, schedule, records, activity-details-modal
-- `shard-rest` — everything else
+A single Playwright project `e2e` (per `frontend/admin/playwright.config.ts`, GH #415); sharding is native — the `--shard=i/N` run flag makes Playwright split spec FILES deterministically across N runs. The project name no longer encodes test composition: which spec runs in which shard is decided by `--shard` alone.
 
-Where the stacks live depends on the environment (GH #317): **locally** every run gets a unique run tag and 4 dynamic ports from the 28000-32700 window (details in [Run tag & dynamic ports](#run-tag--dynamic-ports-gh-317) below); **in CI** the ports stay fixed (front 3002/3003, back 8001/8002) and the tag is empty — the workflows are untouched.
+- **CI** (`e2e-tests` in `test.yml`): 4 shards, `--shard=i/4` — each matrix job starts its OWN stack on fixed ports: shard 1 → 3002/8001, 2 → 3003/8002, 3 → 3004/8003, 4 → 3005/8004.
+- **Local** (`pnpm test:all` via `scripts/test-all.sh`): 2 shards, `--shard=1/2` and `--shard=2/2`, run in parallel from the SAME cwd (`frontend/admin`); per-shard env outputs `E2E_RESULTS_JSON=results-shard<N>.json` and `E2E_REPORT_DIR=playwright-report-shard<N>` (read by the config's reporters) keep the two runs from overwriting each other's `results.json`/`playwright-report/`.
+- 2 local shards instead of 5 is deliberate — CPU contention on 4-core machines (5 parallel Next.js dev servers caused 30s+ page loads).
+
+Where the stacks live depends on the environment (GH #317): **locally** every run gets a unique run tag and 4 dynamic ports from the 28000-32700 window (details in [Run tag & dynamic ports](#run-tag--dynamic-ports-gh-317) below); **in CI** the ports stay fixed by the shard matrix (front 3002–3005, back 8001–8004) and the tag is empty — each workflow job passes its shard's env explicitly.
 
 Each shard stack is orchestrated by `scripts/test-all.sh`:
  1. Start-cleanup: run leases (`/tmp/memo-shard-runs/*.run`) classify runs as live/dead; dead runs are swept by THEIR 4 ports + command mask, their tagged files and lease removed; a tail audit deletes tagged resources with no live lease (log dirs `run-<tag>` only once the tag has been dead > 24 h)
@@ -40,7 +42,7 @@ Each shard stack is orchestrated by `scripts/test-all.sh`:
  8. Cleanup kills the run's background processes and removes its tagged DBs, build/photo dirs and lease
 
 Each shard's servers start via `scripts/e2e-shard-start.sh`:
-- Sets `SHARD_ID`, `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_DIST_DIR` (and, optional GH #317, `SHARD_RUN_TAG`: a set tag suffixes resource names and writes a manual-stack run lease; unset → exact legacy untagged names — the CI path)
+- Sets `SHARD_ID` (allowlist 1–4, GH #415), `SHARD_PORT`, `BACKEND_PORT`, `TEST_DB_PATH`, `BACKEND_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_DIST_DIR` (and, optional GH #317, `SHARD_RUN_TAG`: a set tag suffixes resource names and writes a manual-stack run lease; unset → exact legacy untagged names — the CI path)
 - Backend starts in background, frontend in foreground
 - Waits for backend health check (Alembic runs migrations automatically during startup)
 - Seeds DB with test data (idempotent — skips if tables already exist)
@@ -52,7 +54,12 @@ Each shard's servers start via `scripts/e2e-shard-start.sh`:
 
 **reuseExistingServer pattern:** When `SHARD_ID` is set, `playwright.config.ts` omits the `webServer` block entirely. This avoids a Playwright edge case where `reuseExistingServer` health check fails under load, causing `EADDRINUSE` when Playwright tries to start a second Next.js on the same port.
 
-**5-shard design (deferred):** The original `scripts/test-all.sh` was designed for 5 shards (services, schedule, records, clients, rest), but `playwright.config.ts` only declares 2. The 5-shard design spec lives in `docs/specs/2026-06-18-e2e-shard-5-projects-design.md` and is deferred until the missing 3 projects are added to `playwright.config.ts`.
+**CI artifacts & flake gate (GH #415):**
+- On failure a shard job uploads the `e2e-report-shard-<i>` artifact (HTML report `playwright-report/` + `test-results/`, 7-day retention).
+- After every run — green included (`if: always()`) — the «Flake summary» step runs `scripts/e2e-report-summary.mjs` over the shard's `results.json`: each test with status `flaky` (failed an earlier attempt, passed on the retry — CI has `retries: 1`) prints a `FLAKY: <suite> — <test>` line, the total `Flaky: N` goes to the log and the job's Step-Summary table. A missing or broken `results.json` is ONE warning line, exit 0 — no run, no flakes; a false red is unacceptable.
+- **The flake policy is BLOCKING:** ≥1 flaky test exits 1 and turns the e2e job red even on an otherwise green run — merge is blocked by the green-CI gate. `Flaky: 0` → exit 0. The gate runs before the artifact upload, so a flake-red job still uploads its report. Locally `retries: 0` — the `flaky` status cannot occur by construction.
+
+**5-shard design (superseded by GH #415):** the old plan — 5 named Playwright projects (services, schedule, records, clients, rest) — is obsolete: scaling the suite is now just a higher N in `--shard=i/N` plus more CI matrix entries, no project split involved. The historical spec stays in `docs/specs/2026-06-18-e2e-shard-5-projects-design.md`.
 
 ### Run tag & dynamic ports (GH #317)
 
@@ -168,15 +175,15 @@ Backend pytest ───────────────┐
                               ├── wait for all
 Lint + type-check + vitest ───┤   │
                               │   │
-Playwright shard 1 (schedule) ─┤   │
-Playwright shard 2 (rest) ─────┘   │
-                                   │
+Playwright --shard=1/2 ───────┤   │
+Playwright --shard=2/2 ───────┘   │
+                                  │
 Visual compliance (after all) ─────┘
 ```
 
 - Backend pytest runs in parallel with frontend stages
 - Lint, type-check, and vitest run in parallel with each other
-- 2 Playwright shards run in parallel (each with its own server stack)
+- 2 native Playwright shards (`--shard=1/2`, `--shard=2/2`) run in parallel (each with its own server stack)
 - Visual compliance runs last (needs admin dev server on `:3001`)
 - 2 shards instead of 5 to avoid CPU contention on 4-core machines (5 parallel Next.js dev servers caused 30s+ page loads)
 
@@ -286,7 +293,7 @@ What a spec author must know:
 | frontend vitest | ✅ | — | ✅ | ✅ (sharded — every file covered, no hand lists) |
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
-| e2e Playwright (2 shards) | — | — | forbidden⁶ | ✅ |
+| e2e Playwright (4 CI shards) | — | — | forbidden⁶ | ✅ |
 | visual compliance | ✅ (UI) | ✅ | — | ✅ (inside e2e) |
 
 ¹ G6: whole pytest / whole vitest by language; UI changes add playwright-visual (`test:all`). Mandatory only for Standard/Large tasks (review budget).
@@ -297,7 +304,7 @@ What a spec author must know:
 ⁶ Harness policy: local e2e is an investigation tool, never a gate; CI owns e2e.
 
 In CI:
-- `retries: 1` (vs 0 locally) — one automatic retry for flaky tests; a retry first snapshots the DB (see [Per-test seed reset](#per-test-seed-reset-gh-252))
+- `retries: 1` (vs 0 locally) — one automatic retry; a test that passes only on the retry gets status `flaky` and FAILS the job via the blocking flake gate (GH #415, see [E2E (automated)](#e2e-automated)); a retry first snapshots the DB (see [Per-test seed reset](#per-test-seed-reset-gh-252))
 - `workers: 1` everywhere (config-pinned since GH #252, not just CI) — per-test DB resets cannot race across workers; the fixture throws on `workers > 1`
 - `forbidOnly: true` — `test.only` blocks CI from passing
 
@@ -325,8 +332,10 @@ comparison is therefore pure environment noise, and it is disabled:
   investigation** — to eyeball diffs and tell font drift from a genuinely
   broken layout. Red local visual runs under the opt-in are expected
   environment noise, not regressions.
-- **CI is the source of truth for screenshot e2e.** The `shard-rest` job of
-  `.github/workflows/test.yml` runs all visual specs on every PR.
+- **CI is the source of truth for screenshot e2e.** The `e2e-tests` matrix of
+  `.github/workflows/test.yml` (project `e2e`, `--shard=i/4`) runs all visual
+  specs on every PR — the deterministic spec-file split spreads them across
+  the 4 shards.
 - **Manual visual verdict on a branch:** run the narrow check-only workflow
   (available after its file lands on `main`, on branches that contain it):
   `gh workflow run visual-check.yml --ref <branch>` (~10 min, diffs
@@ -348,6 +357,6 @@ the CI-only policy.
 - `docs/specs/2026-06-19-testing-strategy-v2.md` — testing strategy (current)
 - `docs/specs/2026-06-03-backend-testing.md` — backend testing handbook
 - `docs/specs/2026-06-03-frontend-testing.md` — frontend testing handbook
-- `docs/specs/2026-06-18-e2e-shard-5-projects-design.md` — 5-shard design (deferred)
+- `docs/specs/2026-06-18-e2e-shard-5-projects-design.md` — 5-shard design (superseded by native `--shard`, GH #415)
 - `docs/specs/2026-06-18-optimize-backend-tests-design.md` — backend test perf optimization
 - `.opencode/skills/dev-workflow/SKILL.md` — dev environment, ports, PTY rule

@@ -89,7 +89,10 @@ export function ClientsFilters() {
     // when width runs out the controls wrap to following rows inside the
     // group; the search input is a normal inline control (w-full retired).
     // Field set, labels, control widths and behavior are unchanged.
-    <div data-testid="clients-filters" className="flex flex-wrap items-end gap-3">
+    // #412 US-4: tabIndex={-1} makes the root a programmatic focus target
+    // only (NOT a tab stop) — the deep-link chip's ✕ moves focus here after
+    // removing the narrowing, per spec §3.2.
+    <div data-testid="clients-filters" tabIndex={-1} className="flex flex-wrap items-end gap-3">
       <input
         type="text"
         placeholder="🔍 Поиск по имени или телефону"

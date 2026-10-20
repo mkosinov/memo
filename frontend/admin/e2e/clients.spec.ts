@@ -899,8 +899,14 @@ test.describe('Deep-link ?clientId= — #232', () => {
         page.locator('table tbody tr').filter({ hasText: target.name }),
       ).toBeVisible({ timeout: 10_000 });
 
-      // ✕ on the chip — targeted removal only.
-      await page.getByRole('button', { name: 'Снять сужение' }).click();
+      // ✕ on the chip — targeted removal only (#412: the accessible name
+      // substitutes the live client; the narrowed row is already loaded).
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
 
       // The param is gone from the address (everything else in its place).
       // #349: the address is the single writer and the ✕ preserves the
@@ -915,7 +921,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       );
 
       // …the chip is gone…
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
 
       // …the user filter SURVIVES (target still matches, other does not)…
       await expect(
@@ -951,7 +957,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       // the default «Активные».
       await page.getByText('Сбросить фильтры').click();
       await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
       const statusSelect = page.locator('div:has(> label:text-is("Статус")) > select');
       await expect(statusSelect).toHaveValue('active', { timeout: 10_000 });
     } finally {
@@ -978,8 +984,11 @@ test.describe('Deep-link ?clientId= — #232', () => {
     // No modal can open for a vanished client.
     await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
 
-    // ✕ on the dead chip — full table comes back, address clean.
-    await page.getByRole('button', { name: 'Снять сужение' }).click();
+    // ✕ on the dead chip — full table comes back, address clean (#412: no
+    // name is known for a vanished client → the unsubstituted base label).
+    await page
+      .getByRole('button', { name: 'Убрать фильтр по клиенту', exact: true })
+      .click();
     await expect(page).not.toHaveURL(/clientId=/);
     await expect(
       page.locator('table tbody tr').first(),
@@ -1071,7 +1080,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await expect(
         page.locator('table tbody tr').filter({ hasText: filler.name }),
       ).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
       await expect(page.locator('[data-testid="client-card-modal"]')).not.toBeVisible();
       await expectClientSearchEmpty(page);
     } finally {
@@ -1092,7 +1101,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
       await waitForClientsReady(page, { waitForName: target.name });
 
       // Full table, no narrowing chip in play.
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
 
       const row = page.locator('table tbody tr').filter({ hasText: target.name });
       await expect(row).toBeVisible({ timeout: 10_000 });
@@ -1106,7 +1115,7 @@ test.describe('Deep-link ?clientId= — #232', () => {
 
       await closeByBackdrop(page);
       await expect(page).toHaveURL(/\/clients$/);
-      await expect(page.locator('[data-testid="client-deeplink-chip"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
     }
@@ -1408,6 +1417,83 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       await expect(row).toBeVisible({ timeout: 10_000 });
     } finally {
       await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — GH #412 US-4: deep-link chip rides in the table toolbar
+// ---------------------------------------------------------------------------
+
+test.describe('#412 — client deep-link chip in the toolbar (US-4)', () => {
+  // Spec 2026-10-19-filters-inline-412-design §3.2 (Клиенты): the chip stays
+  // a separate component mounted in toolbarLead NEXT TO the panel — outside
+  // its data-testid root, visually AFTER it. The ✕ accessible name
+  // substitutes the client («Убрать фильтр по клиенту: <имя>»), and after
+  // closing, focus lands on the FILTERS PANEL, not the page body.
+
+  test('US-4 (#412): chip in the toolbar row after the panel; ✕ removes the narrowing and focuses the panel', async ({
+    page,
+    request,
+  }) => {
+    const target = await createTestClient(request, { name: `US4T-toolbar-${uid()}` });
+    // Filler row proves the "full table comes back" leg without relying on
+    // seed counts.
+    const filler = await createTestClient(request, { name: `US4F-toolbar-${uid()}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}`);
+
+      // Deep-link narrowing applied: exactly the target row; the auto-opened
+      // card (#232 US-1) closes first so the toolbar is interactable.
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+      await closeByBackdrop(page);
+
+      // The chip is visible in the TABLE TOOLBAR row (the same border-b row
+      // as the panel) — AFTER the panel, OUTSIDE its testid root (§3.2).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      const panel = toolbar.locator('[data-testid="clients-filters"]');
+      const chip = toolbar.locator('[data-testid="client-deep-link-chip"]');
+      await expect(panel).toBeVisible();
+      await expect(chip).toBeVisible();
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
+      // Sibling, not child: the panel root does NOT contain the chip.
+      await expect(panel.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
+
+      // ✕ (#412 a11y: the accessible name substitutes the live client) —
+      // removes ONLY the narrowing from the address.
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
+      await expect(page).not.toHaveURL(/clientId=/, { timeout: 10_000 });
+      await expect(page.locator('[data-testid="client-deep-link-chip"]')).toHaveCount(0);
+
+      // The full table comes back (filler + target rows prove it)…
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: filler.name }),
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: target.name }),
+      ).toBeVisible();
+
+      // …and focus landed on the FILTERS PANEL, not the page body (§3.2).
+      await expect
+        .poll(
+          () => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? ''),
+          { timeout: 5_000 },
+        )
+        .toBe('clients-filters');
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+      await cleanup(request, `/api/v1/clients/${filler.id}`);
     }
   });
 });

@@ -488,7 +488,7 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
     const state = (clientsProviderMounts[0].urlState as ReturnType<typeof useClientsUrlState>).state;
     expect(state.clientIds).toBeNull();
     expect(state.effectiveStatus).toBe('active');
-    expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('client-deep-link-chip')).not.toBeInTheDocument();
   });
 
   it('mixed garbage and valid: only valid ids reach the adapter', async () => {
@@ -685,7 +685,7 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
 
   // ─── Narrowing chip (#232 §3.5) ─────────────────────────────────────────
 
-  it('renders the chip above the table card when the URL narrows (single id)', async () => {
+  it('renders the chip in the toolbar after the filter panel when the URL narrows (single id)', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1]]);
     mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
 
@@ -696,19 +696,18 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('client-deep-link-chip')).toBeInTheDocument());
     expect(screen.getByText('Открыт по ссылке')).toBeInTheDocument();
-    // #412 Task 3 (US-2): the filter panel rides inside the table card's
-    // toolbar (toolbarLead), so the chip now sits directly above the table
-    // card — Task 4 will mount it into toolbarLead after the panel
-    // (spec §3.2: visually after the panel, behavior unchanged).
-    const chip = screen.getByTestId('client-deeplink-chip');
+    // #412 Task 4 (US-4, spec §3.2): the chip rides in the toolbarLead
+    // fragment AFTER the panel — inside the table card, but OUTSIDE the
+    // panel's data-testid root (sibling, not child), visually after it.
+    const chip = screen.getByTestId('client-deep-link-chip');
     const filtersBlock = screen.getByTestId('clients-filters');
     const tableBlock = screen.getByTestId('clients-table');
-    expect(chip.compareDocumentPosition(tableBlock!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    // the panel is INSIDE the table (mounted via toolbarLead), not a
-    // sibling card above it
+    expect(tableBlock.contains(chip)).toBe(true);
     expect(tableBlock.contains(filtersBlock)).toBe(true);
+    expect(filtersBlock.contains(chip)).toBe(false);
+    expect(chip.compareDocumentPosition(filtersBlock!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
   });
 
   it('multi-id URL renders «Открыто по ссылке: N»', async () => {
@@ -737,12 +736,16 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
     );
 
     await waitFor(() => expect(screen.getByText('Клиенты')).toBeInTheDocument());
-    expect(screen.queryByTestId('client-deeplink-chip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('client-deep-link-chip')).not.toBeInTheDocument();
   });
 
   it('chip ✕ clears only the address (clientId occurrences), other params survive', async () => {
     mockSearchParams = new URLSearchParams([['clientId', U1], ['page', '2']]);
-    mockUseClients.mockReturnValue(createMockClientsTableState({ items: [] }));
+    // Live narrowed row: the page resolves the client NAME for the ✕
+    // accessible label (#412: «Убрать фильтр по клиенту: <имя>»).
+    mockUseClients.mockReturnValue(
+      createMockClientsTableState({ items: [{ ...mockClient, id: U1 }] }),
+    );
 
     const ClientsPage = (await import('../app/(main)/clients/page')).default;
     render(
@@ -751,8 +754,10 @@ describe('ClientsPage — ?clientId= deep-link (#232, managed-mode era)', () => 
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('client-deeplink-chip')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Снять сужение' }));
+    await waitFor(() => expect(screen.getByTestId('client-deep-link-chip')).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Убрать фильтр по клиенту: Анна Иванова' }),
+    );
 
     // #349 single writer: the ✕ routes through the hook's navigate() —
     // one push carrying the cleaned URL (page survives, clientId gone).

@@ -830,12 +830,13 @@ export function clientSearchInput(page: Page): Locator {
 
 /**
  * Assert the #232 narrowing chip state on /clients: the aria-live label of
- * `[data-testid="client-deeplink-chip"]` reads the exact copy —
- * «Открыт по ссылке» (single id) or «Открыто по ссылке: N» (multi).
+ * `[data-testid="client-deep-link-chip"]` (#412 testid anchor) reads the
+ * exact copy — «Открыт по ссылке» (single id) or «Открыто по ссылке: N»
+ * (multi).
  */
 export function expectDeepLinkChip(page: Page, text: string) {
   return expect(
-    page.locator('[data-testid="client-deeplink-chip"] span[aria-live]'),
+    page.locator('[data-testid="client-deep-link-chip"] span[aria-live]'),
   ).toHaveText(text);
 }
 

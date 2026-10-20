@@ -63,6 +63,14 @@ function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
     }
   }, [deepLinkId, items, selectedClient]);
 
+  // #412 US-4: display name for the chip's ✕ accessible label («Убрать
+  // фильтр по клиенту: <имя>») — resolved from the narrowed rows, so a dead
+  // link (empty rows) or an anonymous client yields null → the chip falls
+  // back to the unsubstituted base label.
+  const deepLinkClientName = deepLinkId
+    ? items.find((c) => c.id === deepLinkId)?.name || null
+    : null;
+
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
@@ -79,29 +87,35 @@ function ClientsPageContent({ urlState }: { urlState: ClientsUrlAdapter }) {
         </button>
       </div>
 
-      {/* #232 §3.5 — narrowing chip: visible affordance for an active
-          deep-link narrowing (now directly above the table card — #412
-          Task 4 will mount it into toolbarLead after the panel). The
-          ✕ removes the param from the address through the SAME adapter's
-          navigate() (#349 single writer + single instance: a pending
-          coalesced flush must adopt the navigated URL, not resurrect the
-          dropped param). */}
-      {state.clientIds && (
-        <ClientDeepLinkChip
-          clientIds={state.clientIds}
-          onRemove={(url, options) => navigate(url, options)}
-        />
-      )}
-
-      {/* Table — #412 US-2: the filter panel rides in the table toolbar
-          (ClientsTable → DataTable toolbarLead); the external filter card
-          above the table is retired. No key wrapper: the panel must not
-          remount on page re-renders (local states preserved). */}
+      {/* Table — #412 US-2/US-4: the filter panel AND the deep-link chip
+          ride in the table toolbar's left group (ClientsTable → DataTable
+          toolbarLead); the external filter card above the table is retired.
+          The chip is a separate component mounted via a fragment AFTER the
+          panel — outside its clients-filters testid root, visually after it
+          (spec §3.2). The ✕ removes the param from the address through the
+          SAME adapter's navigate() (#349 single writer + single instance: a
+          pending coalesced flush must adopt the navigated URL, not
+          resurrect the dropped param) and moves focus to the panel. No key
+          wrapper: neither child remounts on page re-renders. */}
       <div
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <ClientsTable toolbarLead={<ClientsFilters />} onClientClick={setSelectedClient} />
+        <ClientsTable
+          toolbarLead={
+            <>
+              <ClientsFilters />
+              {state.clientIds && (
+                <ClientDeepLinkChip
+                  clientIds={state.clientIds}
+                  clientName={deepLinkClientName}
+                  onRemove={(url, options) => navigate(url, options)}
+                />
+              )}
+            </>
+          }
+          onClientClick={setSelectedClient}
+        />
       </div>
 
       {/* Modal — closing it does NOT touch the address or filters (#232 §3.4):

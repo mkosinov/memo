@@ -118,6 +118,7 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
 - **Client resolution (dual flow):**
   - Phone-based (web): find-or-create Client by phone
   - Client-ID-based (admin): link directly
+  - Session-based (#499, спека): клиентская ветка `POST /api/v1/my/records` — владелец из клиентской сессии (без phone-flow), цена визита вычисляется сервером из `tariff_id` (обязателен при платной услуге; услуга без тарифов — 0), схема строгая `extra="forbid"`
 - **Visitor resolution (triple flow):**
   - Name-based: find-or-create Visitor by (client_id, name)
   - ID-based: link existing Visitor

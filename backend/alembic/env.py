@@ -36,6 +36,12 @@ from src.models import (  # noqa: F401
     Visit,
     Visitor,
 )
+from src.notify.models import (  # noqa: F401 — notify subsystem tables (#482)
+    DomainEvent,
+    NotifyTask,
+    NotifyTaskAttempt,
+    NotifyTemplate,
+)
 
 config = context.config
 
@@ -81,7 +87,8 @@ def run_migrations_online() -> None:
     # the migration connection ONLY — app / sqladmin / test engines keep FK ON.
     @event.listens_for(connectable, "connect")
     def _disable_fk_for_migration_connection(
-        dbapi_connection: Any, connection_record: Any,
+        dbapi_connection: Any,
+        connection_record: Any,
     ) -> None:
         if "sqlite" not in type(dbapi_connection).__module__:
             return  # same non-sqlite guard as the global listener

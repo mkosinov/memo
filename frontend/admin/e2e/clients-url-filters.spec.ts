@@ -202,7 +202,15 @@ test.describe('#349 — clients URL filters', () => {
       await expect(statusSelect).toHaveValue('all');
       await expect(page).not.toHaveURL(/status=/);
 
-      await page.getByRole('button', { name: 'Снять сужение' }).click();
+      // #412 US-4: the ✕ accessible name substitutes the live client
+      // («Убрать фильтр по клиенту: <имя>») — the auto-opened card above
+      // proves the narrowed row (and with it the name) already resolved.
+      await page
+        .getByRole('button', {
+          name: `Убрать фильтр по клиенту: ${target.name}`,
+          exact: true,
+        })
+        .click();
 
       // clientId gone from the address → effective status falls back to
       // «Активные» (the rule, not a URL write).
@@ -211,6 +219,56 @@ test.describe('#349 — clients URL filters', () => {
       await expect(page).not.toHaveURL(/status=/); // still no explicit write
     } finally {
       await cleanup(request, `/api/v1/clients/${target.id}`);
+    }
+  });
+
+  // ── US-5 (#412): an OLD saved link opens the filtered state ─────────────
+
+  test('US-5 (#412): pre-migration link ?clientId&status=all — narrowed table, chip in the toolbar row, controls reflect status', async ({
+    page,
+    request,
+  }) => {
+    const ts = uid();
+    const target = await createTestClient(request, { name: `US5-${ts}` });
+    const other = await createTestClient(request, { name: `US5-other-${ts}` });
+
+    try {
+      await page.goto(`/clients?clientId=${target.id}&status=all`);
+
+      // US-5: the panel AND the deep-link chip ride in the table card's
+      // toolbar row (the new #412 mount point) — the OLD link still opens
+      // the narrowed state there (panel root + chip testids are anchors).
+      const toolbar = page
+        .locator('div.p-4.border-b')
+        .filter({ has: page.getByRole('button', { name: 'Настроить колонки' }) });
+      await expect(toolbar.locator('[data-testid="clients-filters"]')).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(
+        toolbar.locator('[data-testid="client-deep-link-chip"]'),
+      ).toBeVisible();
+      await expectDeepLinkChip(page, 'Открыт по ссылке');
+
+      // The controls reflect the link: the explicit status=all in the select.
+      const statusSelect = toolbar.locator('div:has(> label:text-is("Статус")) > select');
+      await expect(statusSelect).toHaveValue('all');
+
+      // The table is narrowed to the linked client — the other fresh client
+      // drops out; the auto-opened card overlays the row (US-4, unchanged).
+      await expect(page.locator('table tbody tr')).toHaveCount(1, { timeout: 10_000 });
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: `US5-${ts}` }),
+      ).toBeVisible();
+      await expect(
+        page.locator('table tbody tr').filter({ hasText: `US5-other-${ts}` }),
+      ).toHaveCount(0);
+
+      // The old URL survives the mount verbatim (a read never rewrites).
+      await expect(page).toHaveURL(new RegExp(`clientId=${target.id}`));
+      await expect(page).toHaveURL(/status=all/);
+    } finally {
+      await cleanup(request, `/api/v1/clients/${target.id}`);
+      await cleanup(request, `/api/v1/clients/${other.id}`);
     }
   });
 });

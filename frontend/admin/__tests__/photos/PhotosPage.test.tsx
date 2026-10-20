@@ -1,7 +1,8 @@
 /**
- * Wiring test — the photos page renders PhotosFilters ABOVE PhotosTable
- * (GH #211 Task 8; records/page.tsx precedent: filters card + table card,
- * both inside the provider).
+ * Wiring test — the photos page mounts PhotosFilters into PhotosTable's
+ * toolbarLead slot (GH #211 Task 8 composition; #412 US-3: the panel rides
+ * in the DataTable toolbar's left group — the external filter card above
+ * the table is retired). Both live inside the provider.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -9,7 +10,11 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('@/app/(main)/photos/components/PhotosTable', () => ({
-  PhotosTable: () => <div data-testid="photos-table-stub" />,
+  // #412 US-3 — the stub renders the toolbarLead slot (the real table passes
+  // it into the DataTable toolbar's left group).
+  PhotosTable: ({ toolbarLead }: { toolbarLead?: React.ReactNode }) => (
+    <div data-testid="photos-table-stub">{toolbarLead}</div>
+  ),
 }));
 
 vi.mock('@/app/(main)/photos/components/PhotosFilters', () => ({
@@ -51,7 +56,7 @@ afterEach(() => {
 });
 
 describe('photos page wiring (GH #211 Task 8)', () => {
-  it('renders the filter bar above the table', async () => {
+  it('mounts the filter bar inside the table toolbarLead — no external filter card (#412 US-3)', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -66,9 +71,10 @@ describe('photos page wiring (GH #211 Task 8)', () => {
     expect(filtersStub).toBeInTheDocument();
     expect(tableStub).toBeInTheDocument();
 
-    // Filters BEFORE the table in document order.
-    const position = filtersStub.compareDocumentPosition(tableStub);
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // #412 US-3: the panel is rendered BY the table (toolbarLead
+    // pass-through) — the retired composition rendered it as a sibling
+    // card above the table.
+    expect(tableStub.contains(filtersStub)).toBe(true);
 
     await waitFor(() => {
       expect(mockGetPhotos).toHaveBeenCalled();

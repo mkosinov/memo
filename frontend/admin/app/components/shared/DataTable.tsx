@@ -188,7 +188,10 @@ export function DataTable<T>({
         className="p-4 border-b flex items-center justify-between"
         style={{ borderColor: 'var(--line)' }}
       >
-        <div className="flex items-center gap-3">
+        {/* Left group stretches across the toolbar row (#412 §3.1): a wide
+            filter panel in toolbarLead wraps its own controls (panel root is
+            flex-wrap) instead of overflowing; right group stays unwrapped. */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
           {/* Addendum #9: dict *Filters bars ride in the toolbar's left group,
               before search/status — single-row toolbar preserved (§6.1). */}
           {toolbarLead}

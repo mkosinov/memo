@@ -16,32 +16,31 @@ function RecordsPageContent() {
         Управление записями
       </h1>
 
-      {/* Filters */}
-      <div
-        className="rounded-xl border p-4"
-        style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
-      >
-        <RecordsFilters
-          locationId={filters.locationId}
-          serviceId={filters.serviceId}
-          masterId={filters.masterId}
-          status={filters.status}
-          search={filters.search}
-          onLocationChange={(v) => setFilters({ locationId: v })}
-          onServiceChange={(v) => setFilters({ serviceId: v })}
-          onMasterChange={(v) => setFilters({ masterId: v })}
-          onStatusChange={(v) => setFilters({ status: v })}
-          onSearchChange={(v) => setFilters({ search: v })}
-          onReset={resetFilters}
-        />
-      </div>
-
-      {/* Table */}
+      {/* Table — #412 US-1: the filter panel rides in the table toolbar
+          (RecordsTable → DataTable toolbarLead); the external filter card
+          above the table is retired. No key wrapper: the panel must not
+          remount on page re-renders (local states preserved). */}
       <div
         className="rounded-xl border overflow-hidden"
         style={{ borderColor: 'var(--line)', backgroundColor: 'var(--white)' }}
       >
-        <RecordsTable />
+        <RecordsTable
+          toolbarLead={
+            <RecordsFilters
+              locationId={filters.locationId}
+              serviceId={filters.serviceId}
+              masterId={filters.masterId}
+              status={filters.status}
+              search={filters.search}
+              onLocationChange={(v) => setFilters({ locationId: v })}
+              onServiceChange={(v) => setFilters({ serviceId: v })}
+              onMasterChange={(v) => setFilters({ masterId: v })}
+              onStatusChange={(v) => setFilters({ status: v })}
+              onSearchChange={(v) => setFilters({ search: v })}
+              onReset={resetFilters}
+            />
+          }
+        />
       </div>
     </div>
   );

@@ -336,6 +336,19 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             auto=True,
             allowed_actions=["nullify"],
         ),
+        # GH #482: delivery-task history survives the client hard delete —
+        # the FK is ON DELETE SET NULL at the DB level (spec §3.6); no
+        # NULLIFY_HANDLERS entry (phase 6 dispatch skips None handlers and
+        # the client event grid stays byte-identical; the service-level
+        # handler decision belongs to the dispatcher part).
+        FKDependency(
+            entity="notify_tasks",
+            relation="Оповещение",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
+        ),
     ],
     Record: [
         FKDependency(

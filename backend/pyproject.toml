@@ -15,6 +15,9 @@ dependencies = [
     "pwdlib[argon2]>=0.3.1",
     # GH #262 Task 2 — multipart/form-data parsing for POST /my/portrait
     "python-multipart>=0.0.20",
+    # GH #482 — template rendering for notify messages (spec §3.5).
+    # Floor 3.1.6: CVE-2025-27516 (sandbox escape via |attr, fixed in 3.1.6).
+    "jinja2>=3.1.6",
 ]
 
 [project.optional-dependencies]

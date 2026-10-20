@@ -19,6 +19,7 @@ vi.mock('@/hooks/useClient', () => ({
 import { useClient } from '@/hooks/useClient';
 import { ClientLabelById } from '../app/components/modal/ActivityDetailsModal/ClientLabelById';
 import { formatPhoneDisplay } from '../app/components/shared/phone/format';
+import { LEGACY_SEED_SPELLINGS } from './helpers/mockData';
 
 const mockUseClient = vi.mocked(useClient);
 
@@ -80,16 +81,9 @@ describe('ClientLabelById — progressive states', () => {
 });
 
 // ─── Phone display through the shared formatter (GH #414 Task 9) ───────────
-
-/** Legacy seed-row spellings → the grouped display; the second pin locks
- *  the label to `formatPhoneDisplay` — the automatable seed-row eyeball
- *  check from the plan DoD. */
-const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
-  ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
-  ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
-  ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
-  ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
-];
+// The spellings table lives in the shared fixtures (GH #429 dedup); the
+// second pin locks the label to `formatPhoneDisplay` — the automatable
+// seed-row eyeball check from the plan DoD.
 
 describe('ClientLabelById — phone display (GH #414 Task 9)', () => {
   it.each(LEGACY_SEED_SPELLINGS)(

@@ -4,6 +4,7 @@ import { RecordHeader } from '../RecordHeader';
 import type { RecordWithDerived } from '../types';
 import type { ClientResponse, VisitResponse } from '@memo/api-client';
 import { formatPhoneDisplay } from '@/app/components/shared/phone/format';
+import { LEGACY_SEED_SPELLINGS } from '@/__tests__/helpers/mockData';
 
 const mockClient: ClientResponse = {
   id: 'c1',
@@ -62,15 +63,8 @@ function makeData(overrides: Partial<RecordWithDerived> = {}): RecordWithDerived
 }
 
 // ─── Phone display through the shared formatter (GH #414 Task 9) ───────────
-
-/** Legacy seed-row spellings → the grouped display (spec §Форматирование,
- *  показ); the second pin locks the header to `formatPhoneDisplay`. */
-const LEGACY_SEED_SPELLINGS: Array<[string, string]> = [
-  ['+79991234567', '+7 999 123 45 67'], // compact storage (current seeds)
-  ['+7 999 123-45-67', '+7 999 123 45 67'], // legacy spaced/hyphenated
-  ['8 999 123-45-67', '+7 999 123 45 67'], // legacy trunk-prefixed
-  ['спам', 'спам'], // garbage → verbatim (tolerance to legacy rows)
-];
+// The spellings table lives in the shared fixtures (GH #429 dedup); the
+// second pin locks the header to `formatPhoneDisplay`.
 
 describe('RecordHeader — phone display (GH #414 Task 9)', () => {
   it.each(LEGACY_SEED_SPELLINGS)('client phone line renders stored %s as %s', (stored, expected) => {

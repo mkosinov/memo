@@ -118,7 +118,6 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       const search = clientSearchInput(page);
       await expect(search).toBeVisible({ timeout: 10_000 });
       await search.fill(clientName);
-      await page.waitForTimeout(1500); // debounced search (300 ms) + network
       const clientRow = page.locator('table tbody tr').filter({ hasText: clientName });
       await expect(clientRow).toBeVisible({ timeout: 10_000 });
       await expect(clientRow).toContainText(phoneMaskDisplay(digits, 'international'));
@@ -167,8 +166,10 @@ test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', ()
       await expect(nameInput).toHaveAttribute('readonly');
 
       // × dissolves the pick — the form returns to free input (no client
-      // name, no typed number), the selector is live again.
-      await page.getByLabel('clear').click();
+      // name, no typed number), the selector is live again. The × is the
+      // RemoteSearchSelect selection button (GH #429: stable testid, not
+      // the PhoneField's own phone-clear which stays inert on a frozen pick).
+      await page.getByTestId('clear-selection').click();
       await expect(phoneInput).not.toHaveAttribute('readonly');
       await expect(phoneInput).toHaveValue('');
       await expect(selector).toBeEnabled();

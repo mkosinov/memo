@@ -269,10 +269,10 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
-|--------------------|----------------|-------|
-| visits: required | visits: optional | ❌ |
-| VisitItem has name/age | VisitItem missing name/age | ❌ |
-| seats: not in schema | seats: in schema | ❌ (ignored) |
+|--------------------|-----------------|-------|
+| visits: required | visits: required | ✅ (GH #479) |
+| VisitItem has name/age/tariff_id | VisitItem mirrors name/age/tariff_id | ✅ (GH #479) |
+| seats: not in schema (extra="forbid") | seats: rejected by `.strict()` mirror | ✅ (GH #479) |
 | **Record.status: derived, no input field** | **Record.status: derived, no input field** | ✅ (after migration) |
 | VisitStatus enum (waiting/visited/missed/cancelled) | VisitStatus enum | ✅ |
-| ~~RecordStatus enum (pending/confirmed/...)~~ | ~~RecordStatus enum~~ | ❌ MIGRATION NEEDED |
+| ~~RecordStatus enum (pending/confirmed/...)~~ | removed from the write mirrors (GH #479) | ✅ |

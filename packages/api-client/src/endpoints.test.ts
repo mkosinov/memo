@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
 import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -944,9 +944,18 @@ describe('getPaymentTotals', () => {
 // ─── Records CRUD ─────────────────────────────────────────────────────────
 
 describe('createRecord', () => {
-  it('calls POST /api/v1/records with body', async () => {
+  it('calls POST /api/v1/records with the contract body (name-based visit included)', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'r-1' });
-    const data = { activity_id: 'a-1', seats: 2, status: 'confirmed' as const };
+    // GH #479 mirror: no record-level status/seats; visits carry
+    // name/age/tariff_id (name-based mode) alongside visitor_id-based ones.
+    const data: RecordCreate = {
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [
+        { visitor_id: 'v-1', tariff_id: 't-1', price: 3500 },
+        { name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 },
+      ],
+    };
     await createRecord(data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records',
@@ -960,15 +969,22 @@ describe('createRecord', () => {
 });
 
 describe('updateRecord', () => {
-  it('calls PUT /api/v1/records/:id with partial body', async () => {
+  it('calls PUT /api/v1/records/:id with the full-replacement body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'r-1' });
-    await updateRecord('r-1', { seats: 3 });
+    // GH #479 mirror: own PUT contract — activity_id required, visits
+    // replaced wholesale; no status/seats/phone.
+    const data: RecordUpdate = {
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [{ visitor_id: 'v-1', tariff_id: 't-1', price: 3500 }],
+    };
+    await updateRecord('r-1', data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records/r-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ seats: 3 }),
+        body: JSON.stringify(data),
       }),
     );
   });

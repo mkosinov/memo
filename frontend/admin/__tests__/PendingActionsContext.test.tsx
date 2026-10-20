@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { ApiError } from '@memo/api-client';
 import { useUI } from '../contexts/UIContext';
@@ -334,7 +334,9 @@ describe('PendingActionsContext commit error handling (#285 D4)', () => {
   });
 
   it('(в) commit throws ApiError 500 — default path: undo + error toast', async () => {
-    vi.useFakeTimers();
+    // shouldAdvanceTime lets waitFor polling tick while the error path
+    // settles (toast asserts, #445 / the #337 canonical pattern).
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const { api } = renderProvider();
     const commit = vi.fn().mockRejectedValue(new ApiError(500, 'boom'));
     const undo = vi.fn();
@@ -355,14 +357,13 @@ describe('PendingActionsContext commit error handling (#285 D4)', () => {
     });
 
     expect(undo).toHaveBeenCalledTimes(1);
-    expect(showToastMock).toHaveBeenCalledWith(
-      'Не удалось удалить. Изменение отменено',
-      'error',
+    await waitFor(() =>
+      expect(showToastMock).toHaveBeenCalledWith('Не удалось удалить. Изменение отменено', 'error'),
     );
   });
 
   it('(д) commit throws non-ApiError (no server response) — undo + honest toast «Не удалось подтвердить удаление»', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const { api } = renderProvider();
     // Network failure / abort / timeout — the server never answered, so the
     // deletion outcome is unknown (#243 S3): the row returns, but the text
@@ -386,9 +387,8 @@ describe('PendingActionsContext commit error handling (#285 D4)', () => {
     });
 
     expect(undo).toHaveBeenCalledTimes(1);
-    expect(showToastMock).toHaveBeenCalledWith(
-      'Не удалось подтвердить удаление',
-      'error',
+    await waitFor(() =>
+      expect(showToastMock).toHaveBeenCalledWith('Не удалось подтвердить удаление', 'error'),
     );
     expect(showToastMock).not.toHaveBeenCalledWith(
       'Не удалось удалить. Изменение отменено',
@@ -847,7 +847,7 @@ describe('PendingActionsContext unload guard counter (#397)', () => {
   });
 
   it('inflight decrement happens on the default error path: ApiError → rollback + toast, guard detaches', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const { api } = renderProvider();
     const undo = vi.fn();
 
@@ -870,16 +870,15 @@ describe('PendingActionsContext unload guard counter (#397)', () => {
     // Default handling ran (rollback + error toast) AND the single decrement
     // point still released the guard — the error outcome is a finished action.
     expect(undo).toHaveBeenCalledTimes(1);
-    expect(showToastMock).toHaveBeenCalledWith(
-      'Не удалось удалить. Изменение отменено',
-      'error',
+    await waitFor(() =>
+      expect(showToastMock).toHaveBeenCalledWith('Не удалось удалить. Изменение отменено', 'error'),
     );
     expect(guardCount()).toBe(0);
     expect(fireBeforeunload().defaultPrevented).toBe(false);
   });
 
   it('inflight decrement happens on a network failure (non-ApiError) — the guard never sticks forever', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const { api } = renderProvider();
     const undo = vi.fn();
 
@@ -902,9 +901,8 @@ describe('PendingActionsContext unload guard counter (#397)', () => {
     });
 
     expect(undo).toHaveBeenCalledTimes(1);
-    expect(showToastMock).toHaveBeenCalledWith(
-      'Не удалось подтвердить удаление',
-      'error',
+    await waitFor(() =>
+      expect(showToastMock).toHaveBeenCalledWith('Не удалось подтвердить удаление', 'error'),
     );
     expect(guardCount()).toBe(0);
     expect(fireBeforeunload().defaultPrevented).toBe(false);

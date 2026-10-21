@@ -45,6 +45,7 @@ from sqlalchemy import select
 
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import (
+    CLIENT_SESSION_COOKIE,
     SESSION_COOKIE,
     AuthedUser,
     require_session,
@@ -165,12 +166,23 @@ async def login(
 
 @router.post("/logout", status_code=204)
 async def logout(request: Request, db_session: SessionDep) -> Response:
-    """Delete the session row and clear the cookie. Idempotent (spec §3.6)."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if token is not None:
-        await get_auth_service().logout(db_session, token)
+    """Delete the presented session row(s) and clear the cookie. Idempotent.
+
+    #499 (spec §4.2): the ONE logout for both session kinds — whichever
+    cookie is presented, that session is revoked (both cookies → both
+    rows die); a client-only logout never touches the staff session.
+    Both cookies are always cleared client-side: a browser holding one
+    kind has nothing left to keep, and clearing a cookie that was never
+    set is a no-op. No cookie at all → still 204 (spec §3.6).
+    """
+    auth_service = get_auth_service()
+    for cookie_name in (CLIENT_SESSION_COOKIE, SESSION_COOKIE):
+        token = request.cookies.get(cookie_name)
+        if token is not None:
+            await auth_service.logout(db_session, token)
 
     resp = Response(status_code=204)
+    resp.delete_cookie(key=CLIENT_SESSION_COOKIE, path="/")
     resp.delete_cookie(key=SESSION_COOKIE, path="/")
     return resp
 

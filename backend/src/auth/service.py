@@ -606,6 +606,9 @@ class AuthService:
             role=user.role,
             staff_id=user.staff_id,
             permissions=ROLE_PERMISSIONS.get(user.role, frozenset()),
+            # #499 (spec §3): the client-card link rides the principal so
+            # client-surface endpoints resolve their card server-side.
+            client_id=user.client_id,
         )
 
     @staticmethod

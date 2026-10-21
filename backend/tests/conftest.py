@@ -1205,7 +1205,10 @@ def query_db_params(sql: str, params: dict | None = None) -> None:
 
 
 def insert_user(
-    phone: str, password_hash: str, role: str = "admin", master_id: str | None = None
+    phone: str,
+    password_hash: str | None,  # #499: client accounts are passwordless (NULL hash)
+    role: str = "admin",
+    master_id: str | None = None,
 ) -> dict:
     """Insert a users row directly (no user-creation API exists).
 

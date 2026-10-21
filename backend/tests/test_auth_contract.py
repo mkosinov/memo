@@ -64,14 +64,21 @@ def _is_auth_depend(call: Any) -> bool:
       call, so identity is useless; its qualname is
       ``require_permission.<locals>._guard`` and is stable;
     * ``require_admin`` (GH #263) — module-level async function, identity
-      check; a role guard, still an authenticating dependency.
+      check; a role guard, still an authenticating dependency;
+    * ``require_client_session`` (#499 spec §3) — the client-cookie twin
+      of ``require_session`` (identity check; authenticates the client
+      principal, the role barrier is part of the guard).
 
     ``verify_fetch_metadata`` is deliberately NOT an auth dependency — it
     only rejects cross-site browser fetches and authenticates nobody.
     """
-    from src.auth.permissions import require_admin
+    from src.auth.permissions import require_admin, require_client_session
 
-    if call is require_session or call is require_admin:
+    if (
+        call is require_session
+        or call is require_admin
+        or call is require_client_session
+    ):
         return True
     return getattr(call, "__qualname__", "").startswith("require_permission")
 

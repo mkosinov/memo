@@ -52,6 +52,19 @@ class PortraitResponse(BaseModel):
     avatar_url: str
 
 
+class MyClientResponse(BaseModel):
+    """GET /api/v1/my/client — the client cabinet's «who am I» (#499 §4.3).
+
+    ``phone`` is the confirmed account phone; ``name`` comes from the
+    linked client card (``users.client_id``) and may be ``null`` — a
+    cardless account, or a card with no name set (spec §4.2: the OTP
+    verify response uses the same shape).
+    """
+
+    phone: str
+    name: str | None = None
+
+
 class MyProfileUpdate(BaseModel):
     """PUT body — only sent keys apply; ``null`` clears a nullable field.
 

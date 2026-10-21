@@ -1,6 +1,6 @@
 ---
 name: design-phase
-description: DESIGN phase on the host (zcode) in the host/container split topology — scout + issue-actuality check → concept gate A (auto) → spec + 6-reviewer panel → spec gate B (the user's main OK) → plan + plan-reviewer → plan gate C (auto), DoD = push to origin, board = the scripts/gh_board.py script living in memo itself, handoff to the container is «продолжаем траекторию #NNN». Use when the user writes «design #NNN», «продолжаем design», «вернулся #NNN», or asks for a spec/plan for an issue in a host session.
+description: DESIGN phase on the host (zcode) in the host/container split topology — scout + issue-actuality check → concept gate A (auto) → spec + 7-reviewer panel → spec gate B (the user's main OK) → plan + plan-reviewer → plan gate C (auto), DoD = push to origin, board = the scripts/gh_board.py script living in memo itself, handoff to the container is «продолжаем траекторию #NNN». Use when the user writes «design #NNN», «продолжаем design», «вернулся #NNN», or asks for a spec/plan for an issue in a host session.
 ---
 
 # DESIGN phase on the host (split host/container)
@@ -111,14 +111,14 @@ superagents canon `docs/workflow/design-phase.md` §Fast-track (v3.10).
    docker cp /tmp/panel-<N> opencode:/root/workspace/panel-in/<run-id>
    ```
 2. One dispatch runs the whole panel (run it in the background — a full panel takes up to ~25 min):
-   `docker exec opencode bash /root/workspace/memo/.opencode/scripts/panel_review.sh <run-id> /root/workspace/panel-in/<run-id> spec-panel-completeness spec-panel-consistency spec-panel-feasibility spec-panel-simplicity spec-panel-best-practices spec-panel-security`
-   The script syncs the dedicated clean clone `/root/workspace/panel-memo` (never the IMPL clone), copies the inputs to `.panel-review/`, and launches the agents in parallel — each with its own ephemeral opencode server (fresh agent definitions; the long-running :4096 server is not involved and is never restarted). Models are zen free, baked in the repo's `.opencode/agents/spec-panel-*.md` (`mode: all`); per-agent timeout 25 min. The script prints one summary line per agent (rc / seconds / report path).
+   `docker exec opencode bash /root/workspace/memo/.opencode/scripts/panel_review.sh <run-id> /root/workspace/panel-in/<run-id> spec-panel-completeness spec-panel-consistency spec-panel-feasibility spec-panel-simplicity spec-panel-best-practices spec-panel-security spec-panel-test-design`
+   The script syncs the dedicated clean clone `/root/workspace/panel-memo` (never the IMPL clone), copies the inputs to `.panel-review/`, and launches the agents in parallel — each with its own ephemeral opencode server (fresh agent definitions; the long-running :4096 server is not involved and is never restarted). Models are zen free, baked in the repo's `.opencode/agents/spec-panel-*.md` (`mode: subagent`); per-agent timeout 25 min. The script prints one summary line per agent (rc / seconds / report path).
 3. Fetch the reports: `docker cp opencode:/root/workspace/panel-out/<run-id> /tmp/panel-out-<run-id>` → read the `<agent>.md` files (per-agent stderr sits next to them).
 4. Aggregation: dedupe identical findings → rank **BLOCKER > MAJOR > MINOR** → one consolidated report to the user for the fix decision. Before trusting a finding, verify it against the code — the panelists read the clean clone and err in paths (the #287 lesson).
 5. Availability policy: a summary line `rc!=0` (124 = timeout, rate limit) or an empty report → **one** rerun of that agent alone (same script, only that agent as the argument); second failure → mark it `skipped` in the consolidated report, verdict on the rest.
 6. best-practices returned `Verdict: FAILED` (web research unavailable) → note it in the report and exclude it from the verdict — that is its designed refusal, not a crash.
 7. The panel sees the repo at origin/main only (the script syncs the clean clone); uncommitted host-side state is invisible to it — keep the spec self-contained (§3).
-8. Fallback: container unreachable → dispatch the host agents `.zcode/agents/spec-panel-*.md` the pre-D-flow way; aggregation unchanged.
+8. Fallback: container unreachable → dispatch the 7 host agents `.zcode/agents/spec-panel-*.md` the pre-D-flow way; aggregation unchanged.
 
 ## 5. Gate C — plan review (container runner)
 

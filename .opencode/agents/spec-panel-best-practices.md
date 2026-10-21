@@ -1,6 +1,6 @@
 ---
 description: Spec panel reviewer — best-practices perspective. Verifies spec decisions against current community/vendor best practices, using web research.
-mode: all
+mode: subagent
 model: opencode/deepseek-v4.1-flash-free
 temperature: 0.1
 permission:
@@ -66,7 +66,7 @@ Failure (research unavailable — STOP, do not produce findings):
 Reason: researcher-agent unavailable — <short failure description, e.g. "task tool blocked" / "403 on websearch" / "empty results">
 ```
 
-The evidence tag goes INSIDE the finding line appended to the `<where>` field (same 3-field em-dash structure as the other 5 panelists — the architect aggregates all 6 reports and format consistency matters).
+The evidence tag goes INSIDE the finding line appended to the `<where>` field (same 3-field em-dash structure as the other 6 panelists — the architect aggregates all 7 reports and format consistency matters).
 
 Every finding MUST carry a `[VERIFIED via research]` tag — findings based on model training knowledge alone are not acceptable from this perspective. If research was not possible, report FAILED. Do not produce self-assessed findings.
 

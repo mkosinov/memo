@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Signs the sqladmin session cookie (GH #247 §2.8). API sessions are
     # random opaque tokens — no SECRET_KEY involved there.
     SECRET_KEY: str = ""
+    # Keys the HMAC-SHA-256 of otp_codes.code_hash (#499 §4.1) — a
+    # deployment secret outside the DB, so a leaked dump cannot brute
+    # the 6-digit code space.
+    OTP_PEPPER: str = ""
     # ── Notify subsystem (#482 part 1, spec §3.9; family #476 §4.5) ──────
     # Disabled by default: nothing boots until the stack opts in (the
     # dispatcher process arrives in part 2).
@@ -67,6 +71,20 @@ class Settings(BaseSettings):
             )
         if not self.SECRET_KEY:
             self.SECRET_KEY = "dev-sqladmin-secret"
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_otp_pepper(self) -> "Settings":
+        """Production fails fast on an empty OTP pepper; otherwise an empty
+        value resolves to the fixed dev constant (the SECRET_KEY pattern —
+        stable across dev restarts, #499 §4.1)."""
+        if self.ENV == "production" and not self.OTP_PEPPER:
+            raise ValueError(
+                "OTP_PEPPER must be set when ENV=production "
+                "(it keys the otp_codes.code_hash HMAC)"
+            )
+        if not self.OTP_PEPPER:
+            self.OTP_PEPPER = "dev-otp-pepper"
         return self
 
     @field_validator("CORS_ORIGINS", mode="before")

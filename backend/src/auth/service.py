@@ -32,6 +32,9 @@ Two-tier brute-force throttle (spec §2.11 + §3.4):
   20/15-min trip wire (``register_ip_failure``), and a tripped IP is
   pre-gated before any work (``ip_failure_gate``).
 
+  #499 extension (spec §4.1): OTP send/verify limits reuse this store
+  and its fixed-window mechanics — see the §4.1 section below.
+
 Passwordless accounts (#348 spec §4): ``password_hash`` NULL means the
 password is not set yet. Login of such an account follows the
 unknown-phone branch exactly — dummy-hash verify (timing parity; a
@@ -156,8 +159,10 @@ def _counter_exception(key: str, now: datetime) -> HTTPException | None:
 
 
 def threshold_for(key: str) -> int:
-    """Threshold for a counter key: ``ip:`` → 20, ``phone:`` → 5."""
-    return IP_FAILURE_THRESHOLD if key.startswith("ip:") else PHONE_FAILURE_THRESHOLD
+    """Threshold for a counter key: ``ip:``/``otp:ip:`` → 20, else 5."""
+    if key.startswith("ip:") or key.startswith("otp:ip:"):
+        return IP_FAILURE_THRESHOLD
+    return PHONE_FAILURE_THRESHOLD
 
 
 # ─── §3.4 extension — public setup routes (#348 Task 5) ────────────────────────
@@ -190,6 +195,122 @@ def register_ip_failure(client_ip: str) -> HTTPException | None:
     key = f"ip:{client_ip}"
     _bump_counter(key, now)
     return _counter_exception(key, now)
+
+
+# ─── §4.1 extension — OTP send/verify limits (#499 Task 2) ─────────────────────
+
+# One 15-minute window, the same store and fixed-window mechanics as the
+# login counters above (spec §4.1: «существующий стор in-memory счётчиков»).
+# Keys added to ``_FAILURE_COUNTERS``:
+#   otp_send:phone:<phone> — sends per phone, threshold 5;
+#   otp:ip:<ip>            — per IP, threshold 20, SHARED by sends and
+#                            verify failures («отказы verify дополнительно
+#                            считаются в IP-счётчик»);
+#   otp_try:phone:<phone>  — failed verify inputs per phone, threshold 5;
+#                            NOT reset by code rotation — a new code does
+#                            not refund the guess budget.
+# Count thresholds come from ``threshold_for`` (5/20, the login values).
+OTP_DISTINCT_PHONES_PER_IP = 5
+
+# Distinct-phone tracker per IP: ip → (phones seen, window start). A set,
+# not a count — the limit is «не более 5 разных номеров с одного IP».
+_OTP_PHONES_PER_IP: dict[str, tuple[set[str], datetime]] = {}
+
+
+def _prune_otp_phones(now: datetime) -> None:
+    """Drop distinct-phone windows that expired (same rule as counters)."""
+    expired = [k for k, (_, started) in _OTP_PHONES_PER_IP.items()
+               if now - started >= FAILURE_WINDOW]
+    for key in expired:
+        del _OTP_PHONES_PER_IP[key]
+
+
+def _otp_phones_exception(
+    phone: str, client_ip: str, now: datetime,
+) -> HTTPException | None:
+    """429 when this send would add a 6th distinct phone for the IP.
+
+    The limit is on the COUNT of distinct numbers («не более 5 разных
+    номеров с одного IP») — a repeat send to an already-seen phone does
+    not grow the set and stays governed by the 5/phone and 20/IP wires.
+    """
+    entry = _OTP_PHONES_PER_IP.get(client_ip)
+    if entry is None:
+        return None
+    phones, started = entry
+    if phone in phones or len(phones) < OTP_DISTINCT_PHONES_PER_IP:
+        return None
+    if now - started >= FAILURE_WINDOW:
+        return None  # stale window — does not block
+    remaining = max(1, int((FAILURE_WINDOW - (now - started)).total_seconds()))
+    return AuthService._locked_out(retry_after=remaining)
+
+
+def otp_send_gate(phone: str, client_ip: str) -> HTTPException | None:
+    """Pre-work gate for a code send (#499 §4.1).
+
+    One 15-minute window, three wires: 5 sends per phone, 20 per IP
+    (shared with verify failures), max 5 distinct phones per IP (a
+    repeat send to a seen phone is not a new number). Returns the 429
+    to raise, or None when the send is allowed.
+    """
+    now = datetime.utcnow()
+    _prune_counters(now)
+    _prune_otp_phones(now)
+    for key in (f"otp_send:phone:{phone}", f"otp:ip:{client_ip}"):
+        exc = _counter_exception(key, now)
+        if exc is not None:
+            return exc
+    return _otp_phones_exception(phone, client_ip, now)
+
+
+def register_otp_send(phone: str, client_ip: str) -> None:
+    """Count one performed send on all three windows.
+
+    Called after the code row is written — a failed write must not
+    consume the send budget.
+    """
+    now = datetime.utcnow()
+    _bump_counter(f"otp_send:phone:{phone}", now)
+    _bump_counter(f"otp:ip:{client_ip}", now)
+    entry = _OTP_PHONES_PER_IP.get(client_ip)
+    if entry is None or now - entry[1] >= FAILURE_WINDOW:
+        _OTP_PHONES_PER_IP[client_ip] = ({phone}, now)
+    else:
+        entry[0].add(phone)
+
+
+def otp_verify_gate(phone: str, client_ip: str) -> HTTPException | None:
+    """Pre-work gate for a verify attempt (#499 §4.1).
+
+    The phone attempt budget (5 failed inputs / 15 min — even the
+    correct code is rejected once tripped, the login-lockout rule) and
+    the shared 20/IP wire. Returns the 429 to raise, or None.
+    """
+    now = datetime.utcnow()
+    _prune_counters(now)
+    _prune_otp_phones(now)
+    for key in (f"otp_try:phone:{phone}", f"otp:ip:{client_ip}"):
+        exc = _counter_exception(key, now)
+        if exc is not None:
+            return exc
+    return None
+
+
+def register_otp_verify_failure(phone: str, client_ip: str) -> HTTPException | None:
+    """Count one failed input on the phone attempt budget and the shared
+    IP wire (§4.1: «все отказы verify дополнительно считаются в
+    IP-счётчик»).
+
+    Returns the 429 when THIS bump trips the IP wire — the counter
+    rejection then wins over the caller's unified verify failure
+    (the ``register_ip_failure`` semantics).
+    """
+    now = datetime.utcnow()
+    _bump_counter(f"otp_try:phone:{phone}", now)
+    ip_key = f"otp:ip:{client_ip}"
+    _bump_counter(ip_key, now)
+    return _counter_exception(ip_key, now)
 
 
 class AuthService:

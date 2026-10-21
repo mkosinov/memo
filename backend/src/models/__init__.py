@@ -4,6 +4,7 @@
 # but must register with Base.metadata:
 # seed.py builds dev/E2E schema via Base.metadata.create_all on a wiped DB,
 # where run_alembic_upgrade only stamps head (src/db/migrate.py:57-62).
+from src.auth.otp import OtpCode  # noqa: F401 — bare registration import (#499 §4.1)
 from src.auth.password_setup import PasswordSetupToken  # noqa: F401 — bare registration import
 from src.auth.session import Session  # noqa: F401 — bare registration import
 from src.models.abstract import AbstractModel, AbstractModelSoftDelete
@@ -55,6 +56,7 @@ __all__ = [
     "Location",
     "Master",
     "Material",
+    "OtpCode",
     "Payment",
     "Photo",
     "Position",

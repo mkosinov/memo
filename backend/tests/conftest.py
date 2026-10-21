@@ -167,6 +167,7 @@ async def _truncate_all_tables(engine):
     Uses ``PRAGMA foreign_keys=OFF`` to avoid FK violation errors during
     deletion.  ~10x faster than drop+create: ~10-20ms vs 180-330ms per test.
     """
+    from src.auth.otp import OtpCode  # noqa: F401 — registers otp_codes with Base.metadata (#499)
     from src.auth.session import Session  # noqa: F401 — registers sessions with Base.metadata
     from src.db.base import Base
     from src.models import (  # noqa: F401 — register models with Base.metadata

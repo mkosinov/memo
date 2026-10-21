@@ -28,6 +28,7 @@ from fastapi import Depends, HTTPException
 # resolves dependency signatures via get_type_hints at registration time.
 from starlette.requests import Request
 
+from src.core.config import settings
 from src.db import db_manager
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import UserRole
@@ -102,6 +103,32 @@ async def verify_fetch_metadata(request: Request) -> None:
             detail=ErrorDetail(
                 code=ErrorCode.AUTH_FORBIDDEN,
                 message="Cross-site request rejected",
+            ).model_dump(),
+        )
+
+
+async def verify_origin(request: Request) -> None:
+    """Login-CSRF line for the anonymous session-ISSUING routes (#499 §4.2).
+
+    When the browser sends ``Origin`` (cross-origin fetches and all
+    modern form posts), it must be in the CORS list — the same list the
+    CORS middleware allows credentials for. A mismatch means a foreign
+    page is driving the request: 403 before any code work (issuing a
+    session must not be available to someone else's page). A missing
+    header passes — non-browser clients and same-origin navigations
+    (the JSON-only + CORS posture remains the primary line; anonymous
+    routes are exempt from ``Sec-Fetch-Site``).
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    allowed = settings.CORS_ORIGINS
+    if "*" not in allowed and origin not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorDetail(
+                code=ErrorCode.AUTH_FORBIDDEN,
+                message="Cross-origin request rejected",
             ).model_dump(),
         )
 

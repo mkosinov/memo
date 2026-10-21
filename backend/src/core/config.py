@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # deployment secret outside the DB, so a leaked dump cannot brute
     # the 6-digit code space.
     OTP_PEPPER: str = ""
+    # #499 §4.2 — the OTP code transport selector. Fail-closed: empty
+    # (the default) → NO transport → ``POST /auth/otp/request`` answers
+    # 503 in every environment. ``dev`` → the dev transport, active
+    # only under the exact ``ENV == "development"`` (staging/preview
+    # stay 503). The production transport arrives with #476/#485.
+    OTP_TRANSPORT: str = ""
     # ── Notify subsystem (#482 part 1, spec §3.9; family #476 §4.5) ──────
     # Disabled by default: nothing boots until the stack opts in (the
     # dispatcher process arrives in part 2).

@@ -217,6 +217,9 @@ class TestPublicRoutes:
         # "(site + gallery)" names exactly this surface.
         # #348 addition: the public password-setup pair (spec §5/§7) —
         # the authority is the one-time token itself.
+        # #499 addition: the client OTP pair (spec §4.2) — the authority
+        # is the rate-limited one-time code; verify issues the client
+        # session cookie.
         assert frozenset({
             ("GET", "/api/v1/health"),
             # GH #266 D8: /masters is read-only acting masters; GET /{id}
@@ -239,6 +242,8 @@ class TestPublicRoutes:
             ("GET", "/api/v1/auth/me"),
             ("POST", "/api/v1/auth/password-setup/validate"),
             ("POST", "/api/v1/auth/password-setup"),
+            ("POST", "/api/v1/auth/otp/request"),
+            ("POST", "/api/v1/auth/otp/verify"),
         }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:

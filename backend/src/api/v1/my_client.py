@@ -5,19 +5,28 @@ A SEPARATE router from the staff ``src/api/v1/my.py``: that router binds
 level, which would 401 every client session. Client routes hang off this
 module behind ``require_client_session`` instead (cookie
 ``memo_client_session`` + ``role=client`` — spec §3), mounted under the
-same ``/api/v1/my`` prefix. The #499 booking endpoint (spec §5) will join
-this router.
+same ``/api/v1/my`` prefix. The #499 booking endpoint (spec §5) lives
+here too.
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
-from src.auth.permissions import AuthedUser, require_client_session
+from src.auth.permissions import (
+    AuthedUser,
+    require_client_session,
+    verify_fetch_metadata,
+    verify_origin,
+)
 from src.db import SessionDep
+from src.domain.errors import PhoneInvalidError
+from src.domain.phones import validate_phone
+from src.errors import ErrorCode, ErrorDetail
 from src.models.client import Client
-from src.schemas.my import MyClientResponse
+from src.schemas.my import MyClientResponse, MyRecordCreate, MyRecordResponse
+from src.usecases.my_booking import create_my_record as create_my_record_scenario
 
 router = APIRouter(tags=["my"])
 
@@ -47,3 +56,43 @@ async def get_my_client(
             )
         ).scalar_one_or_none()
     return MyClientResponse(phone=authed.phone, name=name)
+
+
+@router.post(
+    "/records",
+    response_model=MyRecordResponse,
+    status_code=201,
+    # CSRF posture (spec §5): an AUTHENTICATED mutation — the staff
+    # Sec-Fetch-Site line (same as the /my profile writes) + the Origin
+    # check against the CORS list when the header is present (the OTP
+    # endpoints' verify_origin).
+    dependencies=[Depends(verify_fetch_metadata), Depends(verify_origin)],
+)
+async def create_my_record(
+    payload: MyRecordCreate,
+    authed: _ClientUser,
+    db_session: SessionDep,
+) -> MyRecordResponse:
+    """Book from the web form under a client session (#499 §5).
+
+    The owner is the SESSION's client card (never the wire), visit prices
+    are computed server-side from the service's tariffs, and the wire is
+    strict (``MyRecordCreate`` extra=forbid). ``phone`` is the record's
+    contact phone — domain validation only (422 ``PHONE_INVALID``), it
+    never resolves the client. Inherited from the reused creation
+    scenario: 404 activity, 409 capacity. Soft anti-spam: 20 records /
+    40 visits per account per 15 min → 429.
+    """
+    try:
+        validate_phone(payload.phone)
+    except PhoneInvalidError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=ErrorDetail(
+                code=ErrorCode.PHONE_INVALID,
+                message=str(exc),
+            ).model_dump(),
+        ) from exc
+    return await create_my_record_scenario(
+        db_session=db_session, data=payload, owner=authed,
+    )

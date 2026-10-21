@@ -103,6 +103,24 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",")]
         return v
 
+    @model_validator(mode="after")
+    def _reject_wildcard_cors(self) -> "Settings":
+        """#499 §5: exact origins only — ``*`` is banned at the config level.
+
+        The app ALWAYS mounts CORSMiddleware with ``allow_credentials=True``
+        (cookie sessions), and a wildcard there degrades the credentials
+        posture (Starlette would answer ``Access-Control-Allow-Origin: *``,
+        which browsers reject for credentialed requests — and any relaxed
+        fallback would reflect-any-origin). A deployment must list its
+        exact origins; the dev/test env files carry the localhost list.
+        """
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must list exact origins — '*' is forbidden "
+                "with credentials (the app always enables allow_credentials)"
+            )
+        return self
+
 
 _env_file = os.environ.get("ENV_FILE")
 # ``_env_file`` is a real pydantic-settings constructor parameter (it picks

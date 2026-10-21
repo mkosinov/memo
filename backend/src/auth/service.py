@@ -313,6 +313,63 @@ def register_otp_verify_failure(phone: str, client_ip: str) -> HTTPException | N
     return _counter_exception(ip_key, now)
 
 
+# ─── §5 extension — booking anti-spam (#499 Task 5) ────────────────────────────
+
+# The client booking branch's soft anti-spam (spec §5): same in-memory
+# store, same fixed 15-minute window — but counting SUCCESSES, not
+# failures: 20 records and 40 visits total per client ACCOUNT per window
+# (the account user id, not the client card). Keys added to
+# ``_FAILURE_COUNTERS``:
+#   mybook:records:<user_id> — bookings created, ceiling 20;
+#   mybook:visits:<user_id>  — visits created (summed), ceiling 40.
+# The gate REJECTS a request that would cross a ceiling (records at 20,
+# or visits that would total over 40) and only a SUCCESSFUL creation
+# registers — a 4xx/409/429 attempt never consumes the budget.
+MY_BOOKING_RECORDS_LIMIT = 20
+MY_BOOKING_VISITS_LIMIT = 40
+
+
+def _my_booking_exception(started: datetime, now: datetime) -> HTTPException:
+    """429 (with Retry-After) for a tripped booking wire — the lockout shape."""
+    remaining = max(1, int((FAILURE_WINDOW - (now - started)).total_seconds()))
+    return AuthService._locked_out(retry_after=remaining)
+
+
+def booking_spam_gate(account_id: str, visits: int) -> HTTPException | None:
+    """Pre-work gate for ``POST /api/v1/my/records`` (#499 §5).
+
+    Rejects (429 ``AUTH_LOCKED_OUT`` + Retry-After) when the account is
+    at the 20-record ceiling or when THIS booking's visits would push the
+    15-minute total over 40. Pure projection: expired windows never
+    block (the next registration restarts them). Returns the 429 to
+    raise, or None when the booking is allowed.
+    """
+    now = datetime.utcnow()
+    _prune_counters(now)
+    records = _FAILURE_COUNTERS.get(f"mybook:records:{account_id}")
+    if records is not None:
+        count, started = records
+        if count >= MY_BOOKING_RECORDS_LIMIT and now - started < FAILURE_WINDOW:
+            return _my_booking_exception(started, now)
+    visited = _FAILURE_COUNTERS.get(f"mybook:visits:{account_id}")
+    if visited is not None:
+        count, started = visited
+        if (
+            count + visits > MY_BOOKING_VISITS_LIMIT
+            and now - started < FAILURE_WINDOW
+        ):
+            return _my_booking_exception(started, now)
+    return None
+
+
+def register_booking(account_id: str, visits: int) -> None:
+    """Count one SUCCESSFUL booking: +1 record, +N visits (§4.1 window)."""
+    now = datetime.utcnow()
+    _bump_counter(f"mybook:records:{account_id}", now)
+    for _ in range(visits):
+        _bump_counter(f"mybook:visits:{account_id}", now)
+
+
 class AuthService:
     """Login / logout / session resolution with sliding-window sessions."""
 

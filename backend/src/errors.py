@@ -74,6 +74,10 @@ class ErrorCode(str, Enum):
     COPY_WEEK_INVALID_LOCATION = "COPY_WEEK_INVALID_LOCATION"  # unknown location id in the request
     COPY_WEEK_SOURCE_TOO_LARGE = "COPY_WEEK_SOURCE_TOO_LARGE"  # > 100 rows to insert — copy in passes
 
+    # 422 — client booking (#499 §5): server-side price from tariffs
+    TARIFF_REQUIRED = "TARIFF_REQUIRED"      # paid service, visit without tariff_id
+    TARIFF_NOT_FOUND = "TARIFF_NOT_FOUND"    # tariff_id foreign to the activity's service
+
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INTEGRITY_VIOLATION = "INTEGRITY_VIOLATION"
@@ -142,6 +146,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
         "сузив выбор локаций"
     ),
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
+    ErrorCode.TARIFF_REQUIRED: "Выберите тариф для каждого места",
+    ErrorCode.TARIFF_NOT_FOUND: "Тариф не найден",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.EXPECTED_STATE_REQUIRED: (
         "Не указано ожидаемое состояние зависимостей"

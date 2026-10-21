@@ -347,6 +347,24 @@ class TestSetupEndpoint:
         # An archive never burns the link — the row keeps used_at NULL.
         assert _token_row(digest)["used_at"] is None
 
+    def test_client_role_422_token_live_no_password(self, anon) -> None:
+        """#499 (spec §3): the client-account invariant — the setup link
+        never sets a password on a role-client account (client accounts are
+        passwordless by construction; even an admin-issued link is refused).
+        Same unified PASSWORD_LINK_INVALID as every other dead link; the
+        raised error rolls the consume back, and no hash lands."""
+        user = insert_user(_PHONE, "x", role="client")
+        digest = _seed_token(user["id"], "raw-setup-client-role")
+
+        resp = anon.post(SETUP, json={"token": "raw-setup-client-role", "password": NEW_PASSWORD})
+
+        assert resp.status_code == 422
+        assert _code(resp) == ErrorCode.PASSWORD_LINK_INVALID.value
+        # The consume rolled back — the token row keeps used_at NULL.
+        assert _token_row(digest)["used_at"] is None
+        # The password did NOT land.
+        assert _user_row(user["id"])["password_hash"] == "x"
+
     def test_policy_violation_422_and_token_live(self, anon) -> None:
         user = insert_user(_PHONE, "x", role="master")
         digest = _seed_token(user["id"], "raw-setup-policy")

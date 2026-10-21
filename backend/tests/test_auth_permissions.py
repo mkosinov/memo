@@ -105,6 +105,17 @@ class TestRolePermissions:
         assert ROLE_PERMISSIONS.get("client", set()) == set()
         assert has_permission(set(), "records:read") is False
 
+    def test_client_role_exists_outside_matrix(self) -> None:
+        """#499 (spec §3): the third role ``client`` exists in UserRole but
+        deliberately has NO matrix entry — client endpoints authorize by the
+        client-session fact, not permissions; the defensive ``.get`` lookup
+        yields the empty set. The «exactly admin + master» invariant above
+        is what keeps this honest."""
+        assert hasattr(UserRole, "CLIENT"), "UserRole.CLIENT missing"
+        assert UserRole.CLIENT.value == "client"
+        assert UserRole.CLIENT.value not in ROLE_PERMISSIONS
+        assert ROLE_PERMISSIONS.get(UserRole.CLIENT.value, frozenset()) == frozenset()
+
 
 class TestHasPermission:
     """The matcher is exactly ``"*" in perms or perm in perms`` — no other wildcards."""

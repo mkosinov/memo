@@ -86,6 +86,7 @@ from src.auth.session import (
 )
 from src.domain.phone_digits import to_national_digits
 from src.errors import ErrorCode, ErrorDetail
+from src.models.enums import UserRole
 from src.models.user import User
 
 if TYPE_CHECKING:
@@ -292,7 +293,13 @@ class AuthService:
         # the attempt. The §2.11 ladder is deliberately NOT fed — there
         # is no per-account secret to brute-force (spec §4: «лестницу
         # учётки не кормить»).
-        if user.password_hash is None:
+        # #499 (spec §3): role client joins this branch — client accounts
+        # never log in via password. The barrier sits ON TOP of the
+        # null-guard (a stray hash — e.g. a sqladmin edit — buys nothing:
+        # the refusal fires even with the CORRECT password), keeps the
+        # same unified answer and timing parity, and likewise skips the
+        # ladder (client sessions come from the OTP flow, not passwords).
+        if user.password_hash is None or user.role == UserRole.CLIENT.value:
             verify_password(password, DUMMY_HASH)
             _bump_counter(phone_key, now)
             _bump_counter(ip_key, now)

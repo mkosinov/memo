@@ -23,6 +23,12 @@ class User(AbstractModelSoftDelete):
     staff_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("staff.id"), unique=True, nullable=True,
     )
+    # #499 (spec §3): optional 1:1 link to the client card — mirrors
+    # staff_id (FK-only, no ORM relationship; unique = one account per
+    # card, nullable for staff accounts and not-yet-linked client ones).
+    client_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("clients.id"), unique=True, nullable=True,
+    )
     email_is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     phone_is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     # Login lockout ladder state (auth spec §2.11; logic in src/auth/service.py):

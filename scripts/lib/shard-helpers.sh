@@ -45,6 +45,10 @@
 #     the legacy per-port `lsof -ti :PORT` (byte-for-byte pre-#448).
 #   _watch_interval_s  — normalize SHARD_STACK_WATCH_S / SHARD_RUN_WATCH_S
 #     (default 5 s, hard max 600 s).
+#   run_watchdog / stop_run_watchdog (#448 Task 4, §3.2) — fail-fast слой
+#     оркестратора: фоновый цикл kill-0 по PID стек-обёрток; смерть обёртки →
+#     диагноз + маркер + TERM обеим Playwright-стадиям с эскалацией
+#     TERM → грейс → SIGKILL (жёсткая форма rev4); останов — родителем.
 
 CLEANUP_BUDGET_S=10
 
@@ -283,6 +287,213 @@ _listener_on() {
     case "$busy_ports" in *" $port "*) return 0 ;; esac
   done
   return 1
+}
+
+# ── Feature #448 Task 4: fail-fast слой оркестратора (watchdog) ─────────────
+# run_watchdog MARKER_FILE TERM_STAGES_FILE EXIT_STAGES_FILE — фоновый цикл
+# оркестратора (test-all.sh запускает его как фоновый сабшелл СРАЗУ после
+# старта стек-обёрток, ДО readiness-ожидания — рано выключенным стекам не
+# потеряться; §3.2). Читает глобалы вызывающего (как остальная библиотека):
+#   SHARD_BACKEND_PIDS — PID стек-обёрток: ПРЯМЫЕ дети главного shell-а
+#     оркестратора (сабшеллы `( … bash e2e-shard-start.sh ) &`); индекс i ↔
+#     SHARD_FRONTEND_PORTS[i] / SHARD_BACKEND_PORTS[i] ↔ стек-лог
+#     $LOG_DIR/shard-stack-$((i+1)).log;
+#   LOG_DIR            — каталог логов прогона (стек-логи для диагностики);
+#   SHARD_RUN_WATCH_S  — тик поллинга (нормализуется _watch_interval_s);
+#   CLEANUP_BUDGET_S   — бюджет лестницы эскалации стадий (как cleanup_shards).
+# Каждый тик: kill -0 по обёрткам. Провал kill -0 = ESRCH — ЗОМБИ тоже
+# отвечает на kill -0 (невыбранный родителем труп «жив»), поэтому провал
+# означает «репнут и исчез» и есть окончательный вердикт «умер»: ложных
+# смертей не бывает — бывает лишь задержка на тик до рептинга родителем.
+# wait "$pid" — родительский шаг паттерна kill-0→wait (§3.2: рептинг+статус):
+# в контексте родителя он репает и даёт статус; в сабшелле watchdog —
+# безвредный 127 (обёртки — сиблинги watchdog, не его дети; pid уже исчез,
+# репать некого — ESRCH уже доказал смерть).
+# Вердикт «умер» (§3.2, порядок: диагноз → маркер → TERM → эскалация):
+#   1) диагноз: номер стека, порты, ALWAYS-путь стека-лога + кап-хвост 20
+#      строк с фильтром секретов — _capped_log_tail (Task 3);
+#   2) маркер-файл MARKER_FILE (строка «shard=N pid=P epoch=E») — его наличие
+#      после финального wait краснит прогон (US-6: смерть обёртки после
+#      зелёной её стадии — прогон, проехавший зелёным на мёртвом стеке);
+#   3) TERM ОБЕИМ Playwright-стадиям из TERM_STAGES_FILE (жёсткая форма rev4
+#      — соседняя тоже останавливается) с эскалацией TERM → грейс-полл
+#      (CLEANUP_BUDGET_S, шаг 0.5) → SIGKILL заклинившим; коды оборванных
+#      стадий собирает финальный wait оркестратора (существующий механизм
+#      FAIL);
+#   4) выход после ухода всех стадий.
+# Без смертей: самовыход, когда все pid из EXIT_STAGES_FILE вышли (обёртки
+# сами не завершаются — их прибирает exit-trap teardown, поэтому критерий —
+# стадии, а не обёртки; живёт до конца финального wait). Файлы стадий
+# пишутся оркестратором атомарным mv ПОСЛЕ старта Playwright-стадий и
+# перечитываются каждый тик: файла НЕТ = стадии ещё не стартовали (окно
+# readiness) — смотрим только обёртки, преждевременного само-выхода на
+# пустом списке нет. Строки фильтруются числовым паттерном — только pid'ы.
+# TERM/INT watchdog'у (stop_run_watchdog / сигнал главному shell-у): флаг
+# остановки + убийство внутреннего sleep-ребёнка (урок Task 3: teardown не
+# сиротит sleep); идущая реакция ДОЕЗЖАЕТ (заклинившая стадия получает свой
+# SIGKILL) — останов не отнимает у реакции последний рунг лестницы.
+# Диагностика — в stderr; stdout пуст; rc 0. bash 3.2: kill-0-поллинг, без
+# wait -n; sleep-ребёнок прерываем (trap срабатывает в `wait`).
+run_watchdog() {
+  local marker="$1" term_file="$2" exit_file="$3"
+  local interval i pid shard_n
+  local -a wpids=()
+
+  interval="$(_watch_interval_s "${SHARD_RUN_WATCH_S:-}")"
+  for pid in ${SHARD_BACKEND_PIDS[@]+"${SHARD_BACKEND_PIDS[@]}"}; do
+    wpids+=("$pid")
+  done
+  if [ "${#wpids[@]}" -eq 0 ]; then
+    echo "⚠️ run_watchdog: SHARD_BACKEND_PIDS пуст — нечего сторожить, выходим" >&2
+    return 0
+  fi
+
+  _wd_stop=0
+  _wd_sleep_pid=""
+  _wd_on_signal() {
+    _wd_stop=1
+    if [ -n "${_wd_sleep_pid:-}" ]; then
+      kill "$_wd_sleep_pid" 2>/dev/null || true
+    fi
+  }
+  trap _wd_on_signal TERM INT
+
+  while :; do
+    # Останов запрошен — новых реакций не открываем: после останова teardown
+    # сам TERM-ит обёртки, и живой watchdog поставил бы ЛОЖНЫЙ маркер
+    # (порядок «финальный wait → ОСТАНОВ → проверка маркера → вердикт»).
+    [ "$_wd_stop" = 1 ] && exit 0
+
+    # 1) живость обёрток: первый умерший выигрывает (вердикт по нему)
+    i=0
+    shard_n=0
+    while [ "$i" -lt "${#wpids[@]}" ]; do
+      if ! kill -0 "${wpids[$i]}" 2>/dev/null; then
+        shard_n=$((i + 1))
+        break
+      fi
+      i=$((i + 1))
+    done
+    if [ "$shard_n" -gt 0 ]; then
+      i=$((shard_n - 1))
+      pid="${wpids[$i]}"
+      wait "$pid" 2>/dev/null || true
+      echo "❌ run watchdog: stack shard $shard_n wrapper died (pid $pid; frontend :${SHARD_FRONTEND_PORTS[$i]:-?}, backend :${SHARD_BACKEND_PORTS[$i]:-?}) — останавливаю прогон" >&2
+      _capped_log_tail "${LOG_DIR:-}/shard-stack-${shard_n}.log" >&2
+      printf 'shard=%s pid=%s epoch=%s\n' "$shard_n" "$pid" \
+        "$(date +%s 2>/dev/null || printf '%s' 0)" > "$marker" 2>/dev/null || true
+      _wd_stop_stages "$term_file"
+      exit 0
+    fi
+
+    # 2) все стадии вышли → сторожить больше нечего (зелёная форма прогона)
+    if [ -f "$exit_file" ] && _wd_pids_gone "$exit_file"; then
+      exit 0
+    fi
+
+    # 3) тик: спим интервалом, TERM прерывает sleep (см. _wd_on_signal)
+    sleep "$interval" &
+    _wd_sleep_pid=$!
+    wait "$_wd_sleep_pid" 2>/dev/null || true
+    _wd_sleep_pid=""
+  done
+}
+
+# _wd_read_pid_file FILE → stdout: числовые строки файла (по одной; мусорные
+# и пустые строки пропускаются). rc всегда 0.
+_wd_read_pid_file() {
+  local line
+  local num_re='^[0-9]+$'
+  [ -f "$1" ] || return 0
+  while read -r line; do
+    [[ "$line" =~ $num_re ]] || continue
+    printf '%s\n' "$line"
+  done < "$1" 2>/dev/null
+  return 0
+}
+
+# _wd_pids_gone FILE → rc 0 ⇔ КАЖДЫЙ pid файла уже не отвечает kill -0.
+_wd_pids_gone() {
+  local pid
+  for pid in $(_wd_read_pid_file "$1"); do
+    if kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# _wd_stop_stages TERM_STAGES_FILE — жёсткая форма rev4: TERM КАЖДОЙ стадии
+# из файла (соседняя — тоже) с лестницей TERM → грейс-полл (CLEANUP_BUDGET_S,
+# шаг 0.5 с — бюджет существующей лестницы cleanup_shards) → SIGKILL
+# выжившим; в конце — добор до «все вышли». Уже вышедшие pid пропускаются
+# естественно (kill -0 молчит, kill в пустоту безвреден). rc всегда 0.
+_wd_stop_stages() {
+  local term_file="$1"
+  local spids sp deadline
+  spids="$(_wd_read_pid_file "$term_file")"
+  [ -n "$spids" ] || return 0
+  for sp in $spids; do
+    kill "$sp" 2>/dev/null || true
+  done
+  deadline=$(( SECONDS + CLEANUP_BUDGET_S ))
+  while :; do
+    if _wd_pids_gone "$term_file"; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      break
+    fi
+    sleep 0.5
+  done
+  for sp in $spids; do
+    if kill -0 "$sp" 2>/dev/null; then
+      echo "⚠️ run watchdog: стадия pid $sp игнорирует TERM — SIGKILL" >&2
+      kill -9 "$sp" 2>/dev/null || true
+    fi
+  done
+  # финальный добор: выходим, когда все стадии ушли (kill -0 молчит); бюджет
+  # ограничен — рептинг остаётся родителю, SIGKILL приговор окончательный
+  deadline=$(( SECONDS + CLEANUP_BUDGET_S ))
+  while :; do
+    if _wd_pids_gone "$term_file"; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      break
+    fi
+    sleep 0.5
+  done
+  return 0
+}
+
+# stop_run_watchdog — останов watchdog оркестратором. Жёсткий порядок
+# завершения прогона (#448 Task 4, §3.2): финальный wait → ОСТАНОВ watchdog →
+# проверка маркера → вердикт — останов ДО teardown-ловушки: teardown TERM-ит
+# обёртки, и живой watchdog увидел бы эти (организованные нами же) смерти и
+# поставил ЛОЖНЫЙ маркер зелёного прогона. TERM (флаг останова; идущая
+# реакция доезжает — бюджет ниже это покрывает) → ограниченный полл → SIGKILL
+# → wait-рептинг (watchdog — прямой ребёнок главного shell-а, wait действует;
+# идемпотентен уже мёртвым — bash отдаёт сохранённый статус). Идемпотентен:
+# пустой/очищенный RUN_WATCHDOG_PID → no-op; rc всегда 0.
+stop_run_watchdog() {
+  local pid="${RUN_WATCHDOG_PID:-}"
+  local deadline
+  [ -n "$pid" ] || return 0
+  RUN_WATCHDOG_PID=""
+  kill "$pid" 2>/dev/null || true
+  deadline=$(( SECONDS + 2 * CLEANUP_BUDGET_S ))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      break
+    fi
+    sleep 0.2
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+  return 0
 }
 
 # ── Внутренний хелпер: выборка «порт + маска команды» ───────────────────────

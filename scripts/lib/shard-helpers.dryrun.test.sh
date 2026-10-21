@@ -179,6 +179,19 @@
 #     rc≠0 fail-fast; wider window → 4 distinct in-window ports never
 #     including the fixture-busy ones (busy/free discrimination is the
 #     resolver's — lsof sees those ports FREE).
+#   → Case 29 (#448 Task 4, US-4/US-5, rev4 hard form): run_watchdog on real
+#     background children — wrapper death while both stages live → diagnosis
+#     (shard, ports, capped stack-log tail) + marker + TERM to BOTH stages
+#     (the neighbor stage too — rev4); the neighbor WRAPPER survives; the
+#     pre-file phase (stage lists not yet published) watches on without a
+#     premature self-exit.
+#   → Case 30 (#448 Task 4, US-6): wrapper death AFTER a stage already
+#     finished → marker still set + the surviving stage TERMed; one finished
+#     stage alone does not end the watch.
+#   → Case 31 (#448 Task 4): no deaths → clean self-exit (rc 0) once every
+#     stage pid is gone, no marker, wrapper untouched.
+#   → Case 32 (#448 Task 4): TERM-ignoring stuck stage → escalation to
+#     SIGKILL within the (shrunk) grace budget; the normal stage TERMed.
 
 set -euo pipefail
 
@@ -456,6 +469,54 @@ s.connect((host, port))
 open(marker, "w").write("connected")
 time.sleep(60)
 ' "$host" "$port" "$marker"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# ── #448 Task 4: orchestrator-watchdog stubs (real background children) ─────
+# The watchdog cases deviate from the $( )-call convention ON PURPOSE: the
+# fake wrappers/stages must be DIRECT children of THIS shell — exactly the
+# test-all.sh shape (stack wrappers = SHARD_BACKEND_PIDS subshells, stages =
+# ALL_PIDS subshells; run_watchdog itself is a background subshell SIBLING of
+# both lists: kill -0 reaches them, `wait` inside the watchdog answers 127 —
+# the PARENT does the reaping, which is what makes kill -0 fail there). Only
+# direct children allow the parent-side `kill -9 $pid; wait $pid` moves the
+# cases assert with. So: call the spawn helpers PLAINLY (no command
+# substitution — a $( ) would orphan the child and break wait/reaping) and
+# take the PID from `$!` right after the call; the helper's stdout printf
+# goes to /dev/null (spawn rules 1-2 keep applying: detached stdio,
+# registration in the parent).
+
+# spawn_term_logging_stage MARKER — TERM-sensitive fake Playwright stage:
+# python3 sleeping 300 s; on SIGTERM writes MARKER and exits 0. The marker
+# proves the TERM rung reached THIS stage (SIGKILL writes nothing) — the
+# neighbor-stage assertion of the rev4 hard form.
+spawn_term_logging_stage() {
+  local marker="$1"
+  (
+    exec -a pw-fake-stage python3 -c '
+import signal, sys, time
+marker = sys.argv[1]
+def on_term(signum, frame):
+    open(marker, "w").write("term")
+    sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+time.sleep(300)
+' "$marker"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# spawn_term_ignoring_stage — stuck stage (SIGTERM → SIG_IGN): only the KILL
+# rung of the watchdog ladder can stop it; its death alone proves the
+# escalation fired (TERM cannot kill it). Same direct-child call shape.
+spawn_term_ignoring_stage() {
+  (
+    exec -a pw-stuck-stage python3 -c '
+import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(300)
+'
   ) >/dev/null 2>&1 </dev/null &
   printf '%s' "$!"
 }
@@ -2552,6 +2613,214 @@ if $CASE28_OK; then
   echo "PASS Case 28 (#448): fully-busy 4-window → rc≠0; 8-window → 4 distinct ports avoiding fixture-busy 20001+20002 (lsof-free, invisible), tries=$RETRY28"
 else
   echo "FAIL Case 28 (#448): phase1 rc=$R28 out='$P28'; phase2 rc=$R28B tries=$RETRY28 out='$P28B'"
+  FAIL=1
+fi
+
+# ── Case 29 (#448 Task 4, US-4/US-5, rev4 hard form): wrapper death while ───
+# both stages live → diagnosis + marker + TERM to BOTH stages (neighbor too)
+echo "── Case 29 (#448 T4): wrapper death, stages live → marker + TERM BOTH stages ──"
+fresh_root "case29"
+LOG_DIR="$WORK/case29-logs"
+mkdir -p "$LOG_DIR"
+echo "[shard-1] ERROR: stack shard 1: backend died on :CASE29" > "$LOG_DIR/shard-stack-1.log"
+source_lib
+CASE29_OK=true
+# Direct children (see the Task-4 stub note): call plainly, PID from $!.
+spawn_sleep_wrapper >/dev/null; W29A=$!
+register_pid "$W29A"
+spawn_sleep_wrapper >/dev/null; W29B=$!
+register_pid "$W29B"
+spawn_term_logging_stage "$WORK/case29.stageA.term" >/dev/null; S29A=$!
+register_pid "$S29A"
+spawn_term_logging_stage "$WORK/case29.stageB.term" >/dev/null; S29B=$!
+register_pid "$S29B"
+P29F2="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+SHARD_BACKEND_PIDS=("$W29A" "$W29B")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT" "$P29F2")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")
+MARKER29="$LOG_DIR/stack-wrapper-died.marker"
+TF29="$WORK/case29.term-pids"
+XF29="$WORK/case29.exit-pids"
+WD29_ERR="$WORK/case29.wd.err"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER29" "$TF29" "$XF29" 2> "$WD29_ERR" &
+WD29=$!
+register_pid "$WD29"
+# (a) pre-file phase (readiness window): stage lists NOT yet published — the
+# watchdog must keep watching (no premature self-exit on an absent list).
+sleep 2
+kill -0 "$WD29" 2>/dev/null || CASE29_OK=false
+[ ! -e "$MARKER29" ] || CASE29_OK=false
+# (b) publish the stage lists (re-read every tick; production writes them
+# atomically after the Playwright stages start).
+printf '%s\n%s\n' "$S29A" "$S29B" > "$TF29"
+printf '%s\n%s\n' "$S29A" "$S29B" > "$XF29"
+sleep 2
+kill -0 "$WD29" 2>/dev/null || CASE29_OK=false      # everything alive → still watching
+[ ! -e "$MARKER29" ] || CASE29_OK=false             # no false verdict while alive
+# (c) wrapper death: kill -9 + parent-side `wait` — the orchestrator-context
+# reap that makes kill -0 fail for the watchdog sibling.
+kill -9 "$W29A" 2>/dev/null || true
+wait "$W29A" 2>/dev/null || true
+wait_marker "$MARKER29" 10 || CASE29_OK=false
+wait_marker "$WORK/case29.stageA.term" 10 || CASE29_OK=false   # own stage TERMed
+wait_marker "$WORK/case29.stageB.term" 10 || CASE29_OK=false   # NEIGHBOR stage TERMed (rev4)
+wait_pid_gone "$WD29" 15 || CASE29_OK=false
+wait "$WD29" 2>/dev/null || true
+kill -0 "$W29B" 2>/dev/null || CASE29_OK=false       # neighbor WRAPPER untouched (stages die, not stacks)
+grep -q "stack shard 1" "$WD29_ERR" || CASE29_OK=false              # diagnosis: shard
+grep -q ":$TEST_BACKEND_PORT_A" "$WD29_ERR" || CASE29_OK=false      # diagnosis: port
+grep -q "stack log:" "$WD29_ERR" || CASE29_OK=false                 # diagnosis: log path line
+grep -q "CASE29" "$WD29_ERR" || CASE29_OK=false                     # the capped tail itself
+grep -q "shard=1" "$MARKER29" 2>/dev/null || CASE29_OK=false        # marker names the shard
+if $CASE29_OK; then
+  echo "PASS Case 29 (#448 T4): wrapper death → marker + TERM both stages (neighbor too); diagnosis shard/ports/log-tail; pre-file phase no premature exit"
+else
+  echo "FAIL Case 29 (#448 T4): wd=$(kill -0 "$WD29" 2>/dev/null && echo alive || echo dead) marker=$([ -e "$MARKER29" ] && echo yes || echo no) A=$([ -e "$WORK/case29.stageA.term" ] && echo term || echo no) B=$([ -e "$WORK/case29.stageB.term" ] && echo term || echo no) w2=$(kill -0 "$W29B" 2>/dev/null && echo alive || echo dead)"
+  sed -n '1,10p' "$WD29_ERR" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 30 (#448 Task 4, US-6): wrapper death AFTER a stage finished → ─────
+# marker still set (a green stage on a dead stack reds the run)
+echo "── Case 30 (#448 T4): wrapper death after a stage finished → marker ──"
+fresh_root "case30"
+LOG_DIR="$WORK/case30-logs"
+mkdir -p "$LOG_DIR"
+: > "$LOG_DIR/shard-stack-1.log"
+source_lib
+CASE30_OK=true
+spawn_sleep_wrapper >/dev/null; W30=$!
+register_pid "$W30"
+sleep 0.3 >/dev/null 2>&1 </dev/null &
+S30A=$!                       # stage A: exits on its own (green) and is reaped
+register_pid "$S30A"
+wait "$S30A" 2>/dev/null || true
+spawn_term_logging_stage "$WORK/case30.stageB.term" >/dev/null; S30B=$!
+register_pid "$S30B"
+SHARD_BACKEND_PIDS=("$W30")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER30="$LOG_DIR/stack-wrapper-died.marker"
+TF30="$WORK/case30.term-pids"
+XF30="$WORK/case30.exit-pids"
+WD30_ERR="$WORK/case30.wd.err"
+printf '%s\n%s\n' "$S30A" "$S30B" > "$TF30"
+printf '%s\n%s\n' "$S30A" "$S30B" > "$XF30"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER30" "$TF30" "$XF30" 2> "$WD30_ERR" &
+WD30=$!
+register_pid "$WD30"
+sleep 2
+kill -0 "$WD30" 2>/dev/null || CASE30_OK=false   # one finished stage ≠ all-gone: B live → watching on
+[ ! -e "$MARKER30" ] || CASE30_OK=false
+kill -9 "$W30" 2>/dev/null || true
+wait "$W30" 2>/dev/null || true
+wait_marker "$MARKER30" 10 || CASE30_OK=false
+wait_marker "$WORK/case30.stageB.term" 10 || CASE30_OK=false   # surviving stage TERMed
+wait_pid_gone "$WD30" 15 || CASE30_OK=false
+wait "$WD30" 2>/dev/null || true
+grep -q "shard=1" "$MARKER30" 2>/dev/null || CASE30_OK=false
+if $CASE30_OK; then
+  echo "PASS Case 30 (#448 T4): death after a finished stage → marker + TERM the survivor; finished stage alone does not end the watch"
+else
+  echo "FAIL Case 30 (#448 T4): wd=$(kill -0 "$WD30" 2>/dev/null && echo alive || echo dead) marker=$([ -e "$MARKER30" ] && echo yes || echo no) B=$([ -e "$WORK/case30.stageB.term" ] && echo term || echo no)"
+  sed -n '1,10p' "$WD30_ERR" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 31 (#448 Task 4): no deaths → clean self-exit once all stages ──────
+# gone, no marker, wrapper untouched
+echo "── Case 31 (#448 T4): no deaths → self-exit, no marker ──"
+fresh_root "case31"
+LOG_DIR="$WORK/case31-logs"
+mkdir -p "$LOG_DIR"
+source_lib
+CASE31_OK=true
+spawn_sleep_wrapper >/dev/null; W31=$!
+register_pid "$W31"
+sleep 0.5 >/dev/null 2>&1 </dev/null &
+S31A=$!
+sleep 0.5 >/dev/null 2>&1 </dev/null &
+S31B=$!
+register_pid "$S31A"
+register_pid "$S31B"
+wait "$S31A" 2>/dev/null || true
+wait "$S31B" 2>/dev/null || true
+SHARD_BACKEND_PIDS=("$W31")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER31="$LOG_DIR/stack-wrapper-died.marker"
+TF31="$WORK/case31.term-pids"
+XF31="$WORK/case31.exit-pids"
+printf '%s\n%s\n' "$S31A" "$S31B" > "$TF31"
+printf '%s\n%s\n' "$S31A" "$S31B" > "$XF31"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER31" "$TF31" "$XF31" 2> "$WORK/case31.wd.err" &
+WD31=$!
+register_pid "$WD31"
+wait_pid_gone "$WD31" 15 || CASE31_OK=false      # self-exit ≤ one interval + slack after stages gone
+set +e
+wait "$WD31" 2>/dev/null
+RC31=$?
+set -e
+[ "$RC31" -eq 0 ] || CASE31_OK=false             # clean exit code
+[ ! -e "$MARKER31" ] || CASE31_OK=false          # no marker
+kill -0 "$W31" 2>/dev/null || CASE31_OK=false    # wrapper NOT signaled
+if $CASE31_OK; then
+  echo "PASS Case 31 (#448 T4): green shape — self-exit rc=0 after all stages gone; no marker; wrapper untouched"
+else
+  echo "FAIL Case 31 (#448 T4): wd_rc=$RC31 marker=$([ -e "$MARKER31" ] && echo yes || echo no) w=$(kill -0 "$W31" 2>/dev/null && echo alive || echo dead)"
+  FAIL=1
+fi
+
+# ── Case 32 (#448 Task 4): stuck stage (TERM-ignoring) → escalation to ──────
+# SIGKILL within the grace budget; marker set; watchdog exits
+echo "── Case 32 (#448 T4): stuck stage → KILL rung within the grace budget ──"
+fresh_root "case32"
+LOG_DIR="$WORK/case32-logs"
+mkdir -p "$LOG_DIR"
+source_lib
+CLEANUP_BUDGET_S=2   # shrink the ladder budget for a fast case (read at call time)
+BUDGET32=$CLEANUP_BUDGET_S
+CASE32_OK=true
+spawn_sleep_wrapper >/dev/null; W32=$!
+register_pid "$W32"
+spawn_term_logging_stage "$WORK/case32.stageA.term" >/dev/null; S32A=$!
+register_pid "$S32A"
+spawn_term_ignoring_stage >/dev/null; S32B=$!
+register_pid "$S32B"
+SHARD_BACKEND_PIDS=("$W32")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER32="$LOG_DIR/stack-wrapper-died.marker"
+TF32="$WORK/case32.term-pids"
+XF32="$WORK/case32.exit-pids"
+WD32_ERR="$WORK/case32.wd.err"
+printf '%s\n%s\n' "$S32A" "$S32B" > "$TF32"
+printf '%s\n%s\n' "$S32B" "$S32A" > "$XF32"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER32" "$TF32" "$XF32" 2> "$WD32_ERR" &
+WD32=$!
+register_pid "$WD32"
+sleep 1.5
+[ ! -e "$MARKER32" ] || CASE32_OK=false
+kill -9 "$W32" 2>/dev/null || true
+wait "$W32" 2>/dev/null || true
+wait_marker "$MARKER32" 10 || CASE32_OK=false
+T32A=$SECONDS
+wait_marker "$WORK/case32.stageA.term" 10 || CASE32_OK=false   # normal stage: TERM rung
+wait_pid_gone "$S32B" 10 || CASE32_OK=false                    # stuck stage DEAD → the KILL rung fired
+T32B=$SECONDS
+[ $((T32B - T32A)) -le $((BUDGET32 + 3)) ] || CASE32_OK=false  # within budget + poll slack
+wait_pid_gone "$WD32" 15 || CASE32_OK=false
+wait "$WD32" 2>/dev/null || true
+grep -q "SIGKILL" "$WD32_ERR" || CASE32_OK=false               # the KILL rung announced itself
+CLEANUP_BUDGET_S=10   # restore (source-time default)
+if $CASE32_OK; then
+  echo "PASS Case 32 (#448 T4): stuck stage ignored TERM → SIGKILL ≤ ${BUDGET32}s budget (+slack); normal stage TERMed; marker set"
+else
+  echo "FAIL Case 32 (#448 T4): marker=$([ -e "$MARKER32" ] && echo yes || echo no) A=$([ -e "$WORK/case32.stageA.term" ] && echo term || echo no) stuck=$(kill -0 "$S32B" 2>/dev/null && echo alive || echo dead) killtime=$((T32B - T32A))s (budget $BUDGET32)"
+  sed -n '1,10p' "$WD32_ERR" 2>/dev/null || true
+  echo "─────────────────"
   FAIL=1
 fi
 

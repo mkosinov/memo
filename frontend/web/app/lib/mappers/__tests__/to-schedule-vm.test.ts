@@ -22,6 +22,10 @@ function makeRawSchedule(overrides?: Partial<WebScheduleDTO>): WebScheduleDTO {
     priceMin: 3500,
     priceMax: 5500,
     priceHint: undefined,
+    tariffs: [
+      { id: 'tariff-1', title: 'Взрослый', price: 3500 },
+      { id: 'tariff-2', title: 'Детский (5–11 лет)', price: 2450 },
+    ],
     image_url: 'https://example.com/image.jpg',
     tags: ['хит', 'для детей'],
     masterAvatar: 'https://example.com/avatar.jpg',
@@ -46,6 +50,15 @@ describe('toScheduleView', () => {
     expect(vm.masterName).toBe('Ольга Середа');
     expect(vm.masterAvatar).toBe('https://example.com/avatar.jpg');
     expect(vm.guestsCount).toBe(3);
+  });
+
+  it('passes tariffs through to the view model', () => {
+    const vm = toScheduleView(makeRawSchedule());
+
+    expect(vm.tariffs).toEqual([
+      { id: 'tariff-1', title: 'Взрослый', price: 3500 },
+      { id: 'tariff-2', title: 'Детский (5–11 лет)', price: 2450 },
+    ]);
   });
 
   it('formats price range', () => {

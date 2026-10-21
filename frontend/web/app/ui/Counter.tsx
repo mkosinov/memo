@@ -5,6 +5,8 @@ export interface CounterProps {
   onChange: (value: number) => void;
   min?: number;
   max?: number;
+  /** Optional data-testid for the counter row (e.g. tariff-counter-{id}, #499). */
+  testId?: string;
 }
 
 export function Counter({
@@ -14,12 +16,13 @@ export function Counter({
   onChange,
   min = 0,
   max = 99,
+  testId,
 }: CounterProps) {
   const atMin = value <= min;
   const atMax = value >= max;
 
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between" data-testid={testId}>
       <div>
         <div className="text-base text-[#1a1a1a]">{label}</div>
         {subLabel && (

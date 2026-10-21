@@ -7,45 +7,110 @@ import { Button } from "./Button";
 import { Counter } from "./Counter";
 import { ContactForm } from "./ContactForm";
 
-export interface Tariff {
-  label: string;
-  price: number;
-}
+/** State of the tariffs data (#499): drives loading/error blocks in place of counters. */
+export type TariffsStatus = "ready" | "loading" | "error";
 
 export interface BookingActivityOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   activityId: string;
   activities: ActivityView[];
+  tariffsStatus?: TariffsStatus;
 }
 
-function computeTariffs(maxPrice: number): Tariff[] {
-  return [
-    { label: "Взрослый", price: maxPrice },
-    { label: "Детский (5–11 лет)", price: Math.round(maxPrice * 0.7) },
-  ];
+interface SeatCounter {
+  id: string;
+  label: string;
+  price: number;
+  testId?: string;
 }
 
-export function BookingActivityOverlay({ isOpen, onClose, activityId, activities }: BookingActivityOverlayProps) {
+/** One row of the optional visitors-names table: a seat with its read-only tariff. */
+interface VisitorRow {
+  key: string;
+  tariffLabel: string;
+}
+
+interface VisitorName {
+  name: string;
+  age: string;
+}
+
+/** Counter key for tariff-free services: a single unnamed seats counter (US-2). */
+const SEATS_KEY = "seats";
+const SEATS_LABEL = "Места";
+const NO_TARIFF_LABEL = "—";
+
+function formatPrice(price: number): string {
+  return `${price.toLocaleString("ru-RU")} ₽`;
+}
+
+export function BookingActivityOverlay({
+  isOpen,
+  onClose,
+  activityId,
+  activities,
+  tariffsStatus = "ready",
+}: BookingActivityOverlayProps) {
   const activity = activities.find((a) => a.id === activityId);
-  const tariffs = activity ? computeTariffs(activity.priceMax) : [];
-  const [counts, setCounts] = useState<Record<number, number>>(() =>
-    Object.fromEntries(tariffs.map((_, i) => [i, 0])),
-  );
+  const tariffs = activity?.tariffs ?? [];
+  const hasTariffs = tariffs.length > 0;
+
+  // One counter per tariff (US-1); tariff-free service gets a single seats counter (US-2).
+  const counters: SeatCounter[] = hasTariffs
+    ? tariffs.map((t) => ({
+        id: t.id,
+        label: t.title,
+        price: t.price,
+        testId: `tariff-counter-${t.id}`,
+      }))
+    : [{ id: SEATS_KEY, label: SEATS_LABEL, price: 0 }];
+
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [visitors, setVisitors] = useState<Record<string, VisitorName>>({});
+  const [showVisitors, setShowVisitors] = useState(false);
   const [isFormValid, setIsFormValid] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const total = tariffs.reduce(
-    (sum, tariff, i) => sum + counts[i] * tariff.price,
+  const total = counters.reduce(
+    (sum, counter) => sum + (counts[counter.id] ?? 0) * counter.price,
     0,
   );
-  const totalCount = Object.values(counts).reduce((sum, c) => sum + c, 0);
-  const canSubmit = totalCount > 0 && isFormValid && !!activity;
+  const totalCount = counters.reduce(
+    (sum, counter) => sum + (counts[counter.id] ?? 0),
+    0,
+  );
+  const tariffsReady = tariffsStatus === "ready";
+  const canSubmit = totalCount > 0 && isFormValid && !!activity && tariffsReady;
+
+  /** One row per selected seat; the trailing seats of each counter keep a stable key. */
+  const visitorRows: VisitorRow[] = hasTariffs
+    ? tariffs.flatMap((t) =>
+        Array.from({ length: counts[t.id] ?? 0 }, (_, k) => ({
+          key: `${t.id}#${k}`,
+          tariffLabel: t.title,
+        })),
+      )
+    : Array.from({ length: counts[SEATS_KEY] ?? 0 }, (_, k) => ({
+        key: `${SEATS_KEY}#${k}`,
+        tariffLabel: NO_TARIFF_LABEL,
+      }));
 
   const handleValidityChange = useCallback((valid: boolean) => {
     setIsFormValid(valid);
   }, []);
+
+  const handleCountChange = (counterId: string, value: number) => {
+    setCounts((prev) => ({ ...prev, [counterId]: value }));
+  };
+
+  const handleVisitorChange = (rowKey: string, field: keyof VisitorName, value: string) => {
+    setVisitors((prev) => ({
+      ...prev,
+      [rowKey]: { ...(prev[rowKey] ?? { name: "", age: "" }), [field]: value },
+    }));
+  };
 
   const handleSubmit = () => {
     setSubmitted(true);
@@ -89,14 +154,22 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
             <p className="text-base">{activity.title}</p>
             <p className="text-sm">{time} · {activity.location.title}</p>
             <p className="text-sm">
-              {tariffs
-                .filter((_, i) => counts[i] > 0)
-                .map((tariff, i) => `${tariff.label}: ${counts[i]}`)
-                .join(" · ")}
+              {hasTariffs
+                ? tariffs
+                    .filter((t) => (counts[t.id] ?? 0) > 0)
+                    .map((t) => `${t.title}: ${counts[t.id]}`)
+                    .join(" · ")
+                : `${SEATS_LABEL}: ${totalCount}`}
             </p>
-            <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
-              Итого: {total.toLocaleString("ru-RU")} ₽
-            </p>
+            {hasTariffs ? (
+              <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
+                Итого: {formatPrice(total)}
+              </p>
+            ) : (
+              <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
+                Стоимость уточняется
+              </p>
+            )}
           </div>
 
           <Button variant="primary" size="lg" onClick={onClose}>
@@ -136,24 +209,108 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
         </div>
       </div>
 
-      {/* Counters */}
-      <div className="space-y-4 mb-6">
-        {tariffs.map((tariff, index) => (
-          <Counter
-            key={tariff.label}
-            label={tariff.label}
-            subLabel={`${tariff.price.toLocaleString("ru-RU")} ₽`}
-            value={counts[index]}
-            onChange={(value) => setCounts((prev) => ({ ...prev, [index]: value }))}
-            min={0}
-          />
-        ))}
-      </div>
+      {/* Counters / tariffs status */}
+      {!tariffsReady ? (
+        <div className="mb-6" data-testid={tariffsStatus === "loading" ? "booking-tariffs-loading" : "booking-tariffs-error"}>
+          {tariffsStatus === "loading" ? (
+            <p className="text-sm text-[#555555]">Загрузка тарифов…</p>
+          ) : (
+            <p className="text-sm text-[#C8503C]">
+              Не удалось загрузить тарифы. Попробуйте позже.
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="space-y-4 mb-6">
+            {counters.map((counter) => (
+              <Counter
+                key={counter.id}
+                label={counter.label}
+                subLabel={hasTariffs ? formatPrice(counter.price) : undefined}
+                testId={counter.testId}
+                value={counts[counter.id] ?? 0}
+                onChange={(value) => handleCountChange(counter.id, value)}
+                min={0}
+              />
+            ))}
+          </div>
 
-      {/* Total */}
-      <div className="text-lg font-semibold text-[#1a1a1a] mb-6">
-        Итого: {total.toLocaleString("ru-RU")} ₽
-      </div>
+          {/* Visitors names table toggle */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setShowVisitors((prev) => !prev)}
+              className="text-sm text-[#004D56] underline underline-offset-2 hover:opacity-80 transition"
+            >
+              Указать имена посетителей
+            </button>
+          </div>
+
+          {showVisitors && (
+            <div className="mb-6">
+              <table
+                data-testid="visitors-names-table"
+                className="w-full text-sm border-collapse"
+              >
+                <thead>
+                  <tr className="text-left text-[#888888]">
+                    <th className="py-1 pr-2 font-medium">Имя</th>
+                    <th className="py-1 pr-2 font-medium">Возраст</th>
+                    <th className="py-1 font-medium">Тариф</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visitorRows.map((row) => (
+                    <tr key={row.key} className="border-t border-[#E0E0E1]/60">
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="text"
+                          aria-label="Имя посетителя"
+                          placeholder="Имя"
+                          value={visitors[row.key]?.name ?? ""}
+                          onChange={(e) => handleVisitorChange(row.key, "name", e.target.value)}
+                          className="w-full rounded-lg border border-[#E0E0E1] px-2 py-1.5 text-sm text-[#1a1a1a] placeholder-[#cccccc] transition focus:border-[#004D56] focus:outline-none"
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2 w-24">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label="Возраст посетителя"
+                          placeholder="Возраст"
+                          value={visitors[row.key]?.age ?? ""}
+                          onChange={(e) => handleVisitorChange(row.key, "age", e.target.value)}
+                          className="w-full rounded-lg border border-[#E0E0E1] px-2 py-1.5 text-sm text-[#1a1a1a] placeholder-[#cccccc] transition focus:border-[#004D56] focus:outline-none"
+                        />
+                      </td>
+                      {/* Read-only tariff column */}
+                      <td className="py-1.5 text-[#555555]">{row.tariffLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-[#888888] mt-2">
+                Пустые имена останутся анонимными — уточним детали на месте.
+              </p>
+            </div>
+          )}
+
+          {/* Total / price hint */}
+          {hasTariffs ? (
+            <div className="text-lg font-semibold text-[#1a1a1a] mb-6">
+              Итого: {formatPrice(total)}
+            </div>
+          ) : (
+            <div
+              data-testid="booking-price-hint"
+              className="text-sm text-[#555555] mb-6"
+            >
+              Стоимость уточняется
+            </div>
+          )}
+        </>
+      )}
 
       {/* Contact form */}
       <div className="mb-6">

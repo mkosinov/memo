@@ -1039,12 +1039,19 @@ printf '%s\n' "$P9" | grep -q '/proc/net/tcp' || CASE9A_OK=false   # /proc hint
 if printf '%s\n' "$P9" | grep -q 'lsof'; then CASE9A_OK=false; fi  # lsof advice gone
 # 9a control: same pinned window against the LIVE /proc (fixture inert) —
 # the real 20001-20004 are free, so the allocation must succeed: proves the
-# FIXTURE rows drove the failure, not the window pinning.
-R9C=-1
+# FIXTURE rows drove the failure, not the window pinning. Bounded
+# coupon-collector retry (the Case 8/28 pattern): collecting all 4 ports of
+# a 4-wide window in 20 draws misses a coupon ~1.3% of runs — retried, not
+# treated as a property violation.
+R9C=-1 RETRY9C=0
 if [ "$CONT9" = true ]; then
-  set +e
-  P9C=$(allocate_shard_ports 2>&1); R9C=$?
-  set -e
+  while [ "$RETRY9C" -lt 5 ]; do
+    RETRY9C=$((RETRY9C + 1))
+    set +e
+    P9C=$(allocate_shard_ports 2>&1); R9C=$?
+    set -e
+    [ "$R9C" -eq 0 ] && break
+  done
   [ "$R9C" -eq 0 ] || CASE9A_OK=false
 fi
 SHARD_PORT_WINDOW_LOW=28000
@@ -1079,13 +1086,18 @@ CASE9B_OK=true
 [ "$LSOF_N" -gt 0 ] || CASE9B_OK=false         # the legacy lsof really ran
 # 9b control: unreadable root + the REAL lsof → fallback sees the fixture-only
 # ports free → rc 0 (the stub drove the failure, not the broken resolver).
-R9D=-1
+# Same bounded coupon-collector retry as the 9a control (4-wide window).
+R9D=-1 RETRY9D=0
 if [ "$CONT9" = true ]; then
   SHARD_PROC_DRYRUN=1
   SHARD_PROC_ROOT="$FIX9B"
-  set +e
-  P9D=$(allocate_shard_ports 2>&1); R9D=$?
-  set -e
+  while [ "$RETRY9D" -lt 5 ]; do
+    RETRY9D=$((RETRY9D + 1))
+    set +e
+    P9D=$(allocate_shard_ports 2>&1); R9D=$?
+    set -e
+    [ "$R9D" -eq 0 ] && break
+  done
   unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
   [ "$R9D" -eq 0 ] || CASE9B_OK=false
 fi
@@ -1096,9 +1108,9 @@ CASE9_OK=true
 $CASE9A_OK || CASE9_OK=false
 $CASE9B_OK || CASE9_OK=false
 if $CASE9_OK; then
-  echo "PASS Case 9 (#317+#448): fixture-busy window (incl. lsof-invisible) → rc≠0, message names window+attempts+/proc hint; fallback branch: lsof calls=$LSOF_N ≤ $SHARD_ALLOC_MAX_ATTEMPTS; controls rc=$R9C/$R9D"
+  echo "PASS Case 9 (#317+#448): fixture-busy window (incl. lsof-invisible) → rc≠0, message names window+attempts+/proc hint; fallback branch: lsof calls=$LSOF_N ≤ $SHARD_ALLOC_MAX_ATTEMPTS; controls rc=$R9C/$R9D (tries $RETRY9C/$RETRY9D)"
 else
-  echo "FAIL Case 9 (#317+#448): 9a rc=$R9 (hint=/proc-net-tcp) 9b rc=$R9B lsof_calls=$LSOF_N controls=$R9C/$R9D cont9=$CONT9"
+  echo "FAIL Case 9 (#317+#448): 9a rc=$R9 (hint=/proc-net-tcp) 9b rc=$R9B lsof_calls=$LSOF_N controls=$R9C/$R9D tries=$RETRY9C/$RETRY9D cont9=$CONT9"
   echo "── Case 9 outputs ──"
   printf '9a: %s\n9b: %s\n' "$P9" "$P9B"
   echo "─────────────────"

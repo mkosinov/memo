@@ -19,9 +19,10 @@ An ADR captures a significant architectural decision, its context, and consequen
 | 007 | Composite Reads Stay Free Functions in Owning Service Modules (No `queries/` Layer) | Accepted | 2026-09-20 |
 | 008 | Domain Events Are a Transactional Journal in the Main DB | Accepted | 2026-10-11 |
 | 009 | Delivery Worker Is DB-Free — Full Snapshot Down, Status Events Back | Accepted | 2026-10-11 |
-| 010 | arq + Redis as the Queue Transport | Accepted | 2026-10-11 |
+| 010 | arq + Redis as the Queue Transport | Superseded by 013 | 2026-10-11 |
 | 011 | Channels Are Registry-Based Extensions; Templates and Rules Live in the Core | Accepted | 2026-10-11 |
 | 012 | The Notification System Is Decomposed into Five Leaf Tasks under Container #476 | Accepted | 2026-10-11 |
+| 013 | Redis Streams + Consumer Groups as the Queue Transport (redis-py Directly) | Accepted | 2026-10-21 |
 
 ## When to create an ADR?
 

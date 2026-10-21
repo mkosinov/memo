@@ -18,6 +18,9 @@ dependencies = [
     # GH #482 — template rendering for notify messages (spec §3.5).
     # Floor 3.1.6: CVE-2025-27516 (sandbox escape via |attr, fixed in 3.1.6).
     "jinja2>=3.1.6",
+    # GH #483 — Redis Streams transport for notify queue (spec §3.1, ADR 013).
+    # Floor: version actually smoke-tested against Redis 7 (XADD/XREADGROUP/XACK/XAUTOCLAIM).
+    "redis>=8.1.0",
 ]
 
 [project.optional-dependencies]

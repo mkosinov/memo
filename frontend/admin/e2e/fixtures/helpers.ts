@@ -771,8 +771,9 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
  *   the unified-rows scenario 19 pair of windows): after `resume()` the
  *   clock can be paused anew. The pause target is re-read from the page
  *   on every call — after a rewind the fake clock runs AHEAD of real
- *   time, and only the page's own fake "now" (plus a 10ms epsilon) is
- *   guaranteed to be a legal (non-past) pauseAt target. Node-side offset
+ *   time, and only the page's own fake "now" (plus a 250ms roundtrip
+ *   epsilon) is guaranteed to be a legal (non-past) pauseAt target.
+ *   Node-side offset
  *   bookkeeping was removed on purpose: it raced the ticking fake clock
  *   under load ("Cannot fast-forward to the past"). The page's clock MAY
  *   be pre-installed at a fake epoch (GH #422 installReferenceWeekClock)
@@ -799,17 +800,22 @@ export async function withUndoWindow<T>(
   // pauseAt() may not target the fake past. Reading the fake time from
   // the page (not computing an offset Node-side — that races the
   // ticking clock under load) makes the target ≥ fake-now by
-  // construction; the 10ms epsilon keeps it monotonic across the
-  // evaluate→pauseAt round trip.
+  // construction; the 250ms epsilon keeps it monotonic across the
+  // evaluate→pauseAt round trip even under load — 10ms proved too tight
+  // on a cold stack: the CDP roundtrip exceeded it and the target landed
+  // in the past → "clock.pauseAt: Cannot fast-forward to the past"
+  // (2/2 on visitor-delete-invalidation, PR #515 CI-fix verification).
+  // 250ms is roundtrip-safe and semantically negligible vs seconds-scale
+  // undo windows.
   // GH #422: the OLD `Math.max(Date.now(), fakeNow + 10)` real-now anchor
-  // is GONE — under a pre-installed reference-week clock the fake now is
-  // months BEHIND real time, and the max() would pause the clock at the
-  // REAL date, silently reverting every page-clock week/month derivation
-  // (records default period, mini calendar) to the runner's calendar.
-  // Without a pre-installed clock fakeNow ≈ real now anyway, so the
-  // anchor was a no-op there.
+  // is GONE and must NOT be reintroduced — under a pre-installed
+  // reference-week clock the fake now is months BEHIND real time, and
+  // the max() would pause the clock at the REAL date, silently reverting
+  // every page-clock week/month derivation (records default period,
+  // mini calendar) to the runner's calendar. Without a pre-installed
+  // clock fakeNow ≈ real now anyway, so the anchor was a no-op there.
   const fakeNow: number = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(new Date(fakeNow + 10));
+  await page.clock.pauseAt(new Date(fakeNow + 250));
   try {
     return await fn(page);
   } finally {

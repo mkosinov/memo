@@ -21,7 +21,7 @@ export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
 export const ChannelSchema = z.enum(['telegram', 'whatsapp', 'max']);
 export type Channel = z.infer<typeof ChannelSchema>;
 
-export const UserRoleSchema = z.enum(['admin', 'master']);
+export const UserRoleSchema = z.enum(['admin', 'master', 'client']); // mirrors backend UserRole order
 export type UserRole = z.infer<typeof UserRoleSchema>;
 
 export const TariffAudienceSchema = z.enum(['kid', 'adult', 'all']);

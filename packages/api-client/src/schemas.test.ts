@@ -118,7 +118,7 @@ describe('Contract enum schemas (#480 §3.1)', () => {
   });
 
   it('UserRoleSchema.options — composition and declaration order', () => {
-    expect(UserRoleSchema.options).toEqual(['admin', 'master']);
+    expect(UserRoleSchema.options).toEqual(['admin', 'master', 'client']);
   });
 
   it('TariffAudienceSchema.options — composition and declaration order', () => {
@@ -760,7 +760,7 @@ describe('StaffCreateSchema', () => {
     expect(withUser.create_user).not.toHaveProperty('role');
   });
 
-  it('rejects a role outside the UserRole enum (admin|master)', () => {
+  it('rejects a role outside the UserRole enum (admin|master|client)', () => {
     expect(() =>
       StaffCreateSchema.parse({
         first_name: 'И',
@@ -850,7 +850,7 @@ describe('StaffUpdateSchema', () => {
     expect(result.role).toBeUndefined();
   });
 
-  it('rejects a role outside the UserRole enum (admin|master)', () => {
+  it('rejects a role outside the UserRole enum (admin|master|client)', () => {
     expect(() =>
       StaffUpdateSchema.parse({ first_name: 'П', last_name: 'И', role: 'superuser' }),
     ).toThrow();

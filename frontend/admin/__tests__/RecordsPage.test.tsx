@@ -15,7 +15,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('next/navigation', async () => await import('./helpers/nextNavigationMock'));
 
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: records components import VisitStatusSchema at module level —
+// spread the actual module, the fn mocks stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   // The provider's list query — resolved empty (composition only).
   getRecordsView: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 10 }),
   // RecordsFilters' own canonical-key selection queries.

@@ -8,7 +8,9 @@ import { createMockGridSettings } from './helpers/mockContexts';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => {
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module; the local ApiError + fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(status: number, message: string, code?: string) {
       super(message);
@@ -20,6 +22,7 @@ vi.mock('@memo/api-client', () => {
     code?: string;
   }
   return {
+    ...(await importOriginal<typeof import('@memo/api-client')>()),
     ApiError,
     getClientsWithStats: vi.fn(),
     createClient: vi.fn(),

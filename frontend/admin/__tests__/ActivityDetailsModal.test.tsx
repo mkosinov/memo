@@ -29,7 +29,10 @@ import type { Tariff } from '@memo/domain';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module, the fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   // parseApiError does `err instanceof ApiError` — create mode's error path
   // reaches it, so the mock must expose the class (same as ClientRecordTab).
   ApiError: class ApiError extends Error {},

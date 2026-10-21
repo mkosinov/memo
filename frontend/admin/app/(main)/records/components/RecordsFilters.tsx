@@ -14,12 +14,13 @@ interface RecordsFiltersProps {
   locationId: string;
   serviceId: string;
   masterId: string;
-  status: string;
+  /** VisitStatus | '' (#480 §3.4) — '' = «Все статусы». */
+  status: VisitStatus | '';
   search: string;
   onLocationChange: (v: string) => void;
   onServiceChange: (v: string) => void;
   onMasterChange: (v: string) => void;
-  onStatusChange: (v: string) => void;
+  onStatusChange: (v: VisitStatus | '') => void;
   onSearchChange: (v: string) => void;
   onReset: () => void;
 }
@@ -196,7 +197,7 @@ export function RecordsFilters({
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium" style={{ color: 'var(--ink-light)' }}>Статус</label>
         <StatusFiltersPicker
-          value={status === '' ? null : (status as VisitStatus)}
+          value={status === '' ? null : status}
           onChange={(v) => onStatusChange(v ?? '')}
           size="md"
           testIdPrefix="records-filters-status"

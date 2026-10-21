@@ -103,6 +103,16 @@ describe('ClientInfoTab', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  // #480 §3.4: the option list derives from ChannelSchema.options — pin the
+  // composition and order (empty «Не указан» + telegram/whatsapp/max).
+  it('channel select offers the contract channels in client declaration order', () => {
+    renderClientInfoTab();
+    const select = screen.getByLabelText('Канал') as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toEqual(['', 'telegram', 'whatsapp', 'max']);
+  });
+
   it('renders client name in input', () => {
     renderClientInfoTab();
     const input = screen.getByLabelText('Имя') as HTMLInputElement;

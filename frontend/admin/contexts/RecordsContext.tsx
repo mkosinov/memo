@@ -33,7 +33,8 @@ export interface RecordFilters {
   locationId: string;
   serviceId: string;
   masterId: string;
-  status: string;
+  /** VisitStatus | '' (#480 §3.4) — '' = all statuses (param absent). */
+  status: VisitStatus | '';
   /** Server-side search (GH #212 Task 12) — sent to getRecordsView as `q`. */
   search: string;
 }
@@ -209,10 +210,9 @@ export function RecordsProvider({
       location_id: filters.locationId || undefined,
       service_id: filters.serviceId || undefined,
       master_id: filters.masterId || undefined,
-      // #480 §3.2: getRecordsView's status param is VisitStatus-typed now; the
-      // URL-state bag stays `string` until Task 3 exhaustively types it —
-      // bridge with the same temporary cast idiom as useRecordMutations.
-      status: (filters.status || undefined) as VisitStatus | undefined,
+      // #480 §3.4: the filters bag is VisitStatus-typed end-to-end (the URL
+      // enum preset + RecordFilters) — no bridge cast needed anymore.
+      status: filters.status || undefined,
       // GH #212 Task 12 — server-side search. The ≥2-char clamp mirrors the
       // server min_length=2 (shorter values are treated as unset — no 422s).
       q: filters.search.length >= 2 ? filters.search : undefined,

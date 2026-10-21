@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 013 (2026-10-21) — at the #483 design arq turned out maintenance-only with a redis-py ceiling and an async-only client against the sync port; the transport switched to Redis Streams + consumer groups. Kept for history.
 
 **Date:** 2026-10-11
 

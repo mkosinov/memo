@@ -1,6 +1,9 @@
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady } from './fixtures/helpers';
+import {
+  waitForScheduleReady,
+  installReferenceWeekClock,
+} from './fixtures/helpers';
 
 /**
  * E2E tests for Schedule page: week navigation, today button,
@@ -29,6 +32,11 @@ async function clickPrevWeek(page: import('@playwright/test').Page) {
 
 test.describe('Schedule — Week Navigation and UI', () => {
   test.beforeEach(async ({ page }) => {
+    // GH #422: the page's «today» IS the reference week (install-before-
+    // goto — must precede the beforeEach's first navigation). «Сегодня»
+    // lands back on the seed week the grid opens on; the now-line renders
+    // deterministically (10:00 > 09:00 grid start).
+    await installReferenceWeekClock(page);
     await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
@@ -63,6 +71,8 @@ test.describe('Schedule — Week Navigation and UI', () => {
     const dateRange = page.locator('[data-testid="date-nav-text"]');
     await expect(dateRange).toBeVisible();
 
+    // The reference week (the page clock is pinned to it — beforeEach's
+    // installReferenceWeekClock — so «сегодня» IS SEED_WEEK_MONDAY).
     const currentWeekText = await dateRange.textContent();
 
     // Navigate to different week
@@ -136,22 +146,15 @@ test.describe('Schedule — Week Navigation and UI', () => {
   // ── 6. Now-line — visible on current week after 09:00 local ────────────
 
   test('now-line — visible on current week (after 09:00 grid start)', async ({ page }) => {
-    const now = new Date();
-    const hours = now.getHours();
-
     const nowLine = page.locator('[data-testid="now-line"]');
 
     // Component dependency: the schedule grid starts at 09:00 local
     // (gridStartMinutes = 540). Before 09:00 nowPos is negative and the
-    // component legitimately hides the now-line, so only from 09:00 onward
-    // can we hard-assert visibility (GH #247).
-    if (hours >= 9 && hours < 22) {
-      await expect(nowLine).toBeVisible({ timeout: 5_000 });
-    } else {
-      // Before 09:00 (or late evening) the line may or may not be visible —
-      // just verify the page renders without crashing.
-      await page.waitForTimeout(500);
-    }
+    // component legitimately hides the now-line (GH #247). The page clock
+    // is pinned to the reference Monday 10:00 (beforeEach) — past the grid
+    // start on the displayed (== page-current) week — so visibility is
+    // deterministic, no wall-clock branch needed (GH #422).
+    await expect(nowLine).toBeVisible({ timeout: 5_000 });
   });
 
   // ── 7. Week navigation — round trip integrity ──────────────────────────

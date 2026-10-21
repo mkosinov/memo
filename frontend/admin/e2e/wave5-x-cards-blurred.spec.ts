@@ -1,7 +1,11 @@
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
-import { createTestActivity } from './fixtures/factories';
+import {
+  createTestActivity,
+  createTestClient,
+  createTestRecord,
+} from './fixtures/factories';
 
 /**
  * US-M11 / #86: "x cards" overlap badge is hidden under the modal
@@ -14,9 +18,11 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
     request,
   }) => {
     // 1. Create two overlapping activities at the same time in the same column
-    //    to force the "x cards" badge to appear.
-    const now = new Date();
-    const dayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    //    to force the "x cards" badge to appear. GH #422: the pair lives on
+    //    the reference week the grid opens on (was UTC-today — the badge
+    //    never rendered there after the seed's weeks were fixed, leaving the
+    //    assert body vacuously skipped).
+    const dayStr = SEED_WEEK_MONDAY; // YYYY-MM-DD
     const startTime = '10:00';
 
     // Both activities at the same time → overlap → badge shows
@@ -40,8 +46,12 @@ test.describe('Wave 5: x cards badge behind modal (#86)', () => {
     const badgeCount = await badge.count();
 
     if (badgeCount > 0) {
-      // Badge exists — open any activity card via custom event
-      await openModal(page);
+      // Badge exists — open the details modal. A record on act1 pins the
+      // modal to the badge's own week: bare openModal resolves the EARLIEST
+      // seed record (a May week) and would navigate away from the badge.
+      const client = await createTestClient(request, { name: 'Wave5 M11 Client' });
+      const record = await createTestRecord(request, act1.id, client.id);
+      await openModal(page, { recordId: record.id });
       await expect(page.locator('[role="dialog"]')).toBeVisible();
       await page.waitForTimeout(300);
 

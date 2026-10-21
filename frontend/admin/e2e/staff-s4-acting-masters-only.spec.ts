@@ -98,7 +98,9 @@ test.describe('S4 — activity creation lists acting masters only', () => {
           master_id: staff.id,
           service_id: services[0].id,
           location_id: locations[0].id,
-          start: new Date().toISOString().slice(0, 19),
+          // GH #422: reference-week date (any valid date works — the 422 is
+          // master-gated; the value just must not be a wall-clock «today»).
+          start: `${SEED_WEEK_MONDAY}T10:00:00`,
           duration: services[0].duration || 90,
           capacity: 8,
           is_private: false,

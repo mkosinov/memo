@@ -1,9 +1,10 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { waitForRecordsReady, withUndoWindow } from './fixtures/helpers';
+import { waitForRecordsReady, withUndoWindow, installReferenceWeekClock } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import {
   createTestClient,
   createTestActivity,
@@ -26,7 +27,15 @@ const BACKEND = resolveBackendUrl();
  * No page.route mocking, no waitForTimeout for server-sync waits.
  *
  * Requires: backend on :8000 (frontend via playwright webServer).
+ *
+ * GH #422: the default records period is monday..sunday of the PAGE-CLOCK
+ * week, and factory records live on the seed's reference week — pin the
+ * clock to it (install-before-goto) so rows created in tests are inside
+ * the default range without each test widening the filters.
  */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
+});
 
 /** Read the server total from the "N всего" pagination label. */
 async function readServerTotal(page: Page): Promise<number> {
@@ -432,13 +441,21 @@ test.describe('Records Page — Table and Filters', () => {
   // ── 12. Pagination — server total + page 2 disjoint ──────────────────────
 
   test('12. Pagination — server total and page navigation', async ({ page, request }) => {
-    // Seed 12 records (> default per_page=10) on current-week activities.
-    // Seed records r1-r6 live in the fixed week 2026-06-15, so the current-week
-    // server total is driven by our 12 records alone.
+    // Seed 12 records (> default per_page=10) on reference-week activities.
+    // Seed records r1-r6 live in the fixed week 2026-06-15, so the default
+    // period's server total is driven by our 12 records alone. GH #422:
+    // each record gets a DISTINCT start (10:00, 10:05, …) — the shared
+    // factory-default timestamp made the date-sort ties undeterministic
+    // under server pagination (page 1/2 could overlap).
     const ts = Date.now();
     const seeded = [];
     for (let i = 0; i < 12; i++) {
-      seeded.push(await createTestRecordWithClient(request, `PgClient-${ts}-${i}`));
+      const minute = String(i * 5).padStart(2, '0');
+      seeded.push(
+        await createTestRecordWithClient(request, `PgClient-${ts}-${i}`, {
+          start: `${SEED_WEEK_MONDAY}T10:${minute}:00`,
+        }),
+      );
     }
 
     try {
@@ -448,8 +465,8 @@ test.describe('Records Page — Table and Filters', () => {
       const total = await readServerTotal(page);
       expect(total).toBeGreaterThanOrEqual(12);
 
-      // Page 1: collect client names (unique per seeded record; the date
-      // column is useless for disjointness — all activities share "now")
+      // Page 1: collect client names (unique per seeded record; also the
+      // date keys are distinct now — GH #422 — but names stay the anchor)
       const pageOneNames = await page
         .locator('tbody tr td:nth-child(2)')
         .allTextContents();

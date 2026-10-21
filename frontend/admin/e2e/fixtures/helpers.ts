@@ -10,6 +10,29 @@ import { queryDBRow } from './db-query';
 import { SEED_WEEK_MONDAY } from './seed-week';
 
 /**
+ * GH #422 — pin the page clock to the seed's reference week, BEFORE the
+ * first navigation (install-before-goto, same rule as the visual specs'
+ * frozen 2026-06-15 clock). Functional specs need the page's «today» to BE
+ * the reference Monday wherever «today» is load-bearing:
+ *   - the «Сегодня» button (its target week),
+ *   - the records default period (monday..sunday of the page-clock week —
+ *     `defaultRecordsPeriod` in useRecordsUrlState),
+ *   - the mini-calendar's displayed month.
+ * 10:00 is past the 09:00 grid start, so the now-line renders
+ * deterministically where asserted. The clock keeps ticking in real time
+ * after install — only the epoch moves (SSE/timers unaffected).
+ *
+ * The time string carries an EXPLICIT «Z»: Playwright parses offset-less
+ * strings through `new Date()` in the RUNNER's timezone (MSK/UTC+3 here),
+ * which silently lands «10:00» at 07:00 UTC — before the 09:00 grid start,
+ * hiding the now-line. The browser timezone is pinned to UTC
+ * (playwright.config), so 10:00Z IS the intended page-local 10:00.
+ */
+export async function installReferenceWeekClock(page: Page): Promise<void> {
+  await page.clock.install({ time: `${SEED_WEEK_MONDAY}T10:00:00Z` });
+}
+
+/**
  * Resolve a record's activity.start as ISO date (YYYY-MM-DD).
  * - Pass `recordId` to target a specific record
  * - Omit to pick the earliest record (deterministic: activity start ASC —
@@ -751,7 +774,10 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
  *   time, and only the page's own fake "now" (plus a 10ms epsilon) is
  *   guaranteed to be a legal (non-past) pauseAt target. Node-side offset
  *   bookkeeping was removed on purpose: it raced the ticking fake clock
- *   under load ("Cannot fast-forward to the past").
+ *   under load ("Cannot fast-forward to the past"). The page's clock MAY
+ *   be pre-installed at a fake epoch (GH #422 installReferenceWeekClock)
+ *   or not installed at all — both work: the target is always the page's
+ *   own fake now + epsilon.
  *
  * @param page Playwright page
  * @param fn window body: `(page) => Promise<T>`
@@ -774,10 +800,16 @@ export async function withUndoWindow<T>(
   // the page (not computing an offset Node-side — that races the
   // ticking clock under load) makes the target ≥ fake-now by
   // construction; the 10ms epsilon keeps it monotonic across the
-  // evaluate→pauseAt round trip, and the max() keeps the first window
-  // (fakeNow ≈ real now) anchored to real "now".
+  // evaluate→pauseAt round trip.
+  // GH #422: the OLD `Math.max(Date.now(), fakeNow + 10)` real-now anchor
+  // is GONE — under a pre-installed reference-week clock the fake now is
+  // months BEHIND real time, and the max() would pause the clock at the
+  // REAL date, silently reverting every page-clock week/month derivation
+  // (records default period, mini calendar) to the runner's calendar.
+  // Without a pre-installed clock fakeNow ≈ real now anyway, so the
+  // anchor was a no-op there.
   const fakeNow: number = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(new Date(Math.max(Date.now(), fakeNow + 10)));
+  await page.clock.pauseAt(new Date(fakeNow + 10));
   try {
     return await fn(page);
   } finally {

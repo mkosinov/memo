@@ -1,5 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
-import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, addDaysIso } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import {
@@ -414,11 +414,12 @@ test('S6: day view by masters — archived column on the day with activities onl
   const service = await createTestService(request);
   const location = await createTestLocation(request);
 
-  // Anchor activity: now (current week). A day later — the neighbouring day
-  // must NOT gain the column (spec D8: only days with ≥1 gated activity).
-  const now = new Date();
-  const dayD = localIsoDate(now);
-  const nextDay = localIsoDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  // Anchor activity: a reference-week date (GH #422 — was `today 10:00`;
+  // the grid opens on the seed week, so the activity must live on it).
+  // A day later — the neighbouring day must NOT gain the column
+  // (spec D8: only days with ≥1 gated activity).
+  const dayD = SEED_WEEK_MONDAY;
+  const nextDay = addDaysIso(SEED_WEEK_MONDAY, 1);
 
   const activityD = await createTestActivity(request, {
     master_id: master.id,

@@ -9,7 +9,11 @@
 import { SEED_WEEK_MONDAY } from './seed-week';
 import { test, expect } from './test';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
-import { waitForScheduleReady, openAddTab } from './helpers';
+import {
+  waitForScheduleReady,
+  openAddTab,
+  installReferenceWeekClock,
+} from './helpers';
 import { resolveBackendUrl } from '../lib/backend-url';
 
 /** Spec §6 — "within seconds". 10s = один цикл реконнекта `retry: 5000`
@@ -278,14 +282,16 @@ export async function clickFabRobust(page: Page, timeoutMs = 15_000) {
 /**
  * Create a record through B's UI (schedule → quick add → new booking tab)
  * so the write carries B's real tab header. The record lands on an
- * activity of the CURRENT week so the record is inside the records page's
- * default date range. Returns the record payload from the POST /api/v1/records
- * response (for cleanup).
+ * activity of the REFERENCE week (GH #422: quick-add targets a card on
+ * the grid the writer opens — the seed's fixed week) so the record is
+ * inside the records page's default date range (monday..sunday of the
+ * page-clock week, pinned to the same reference week by the fixture's
+ * installReferenceWeekClock below). Returns the record payload from the
+ * POST /api/v1/records response (for cleanup).
  */
 export async function createRecordViaUI(pageB: Page, clientName: string) {
   await waitForScheduleReady(pageB, SEED_WEEK_MONDAY);
-  const today = new Date().toISOString().slice(0, 10);
-  await openAddTab(pageB, { date: today });
+  await openAddTab(pageB, { date: SEED_WEEK_MONDAY });
 
   // GH #414: a «+»-fill into the composite phone field is a PASTE — the
   // country binds from the string, the national remainder commits; the
@@ -307,6 +313,15 @@ export async function createRecordViaUI(pageB: Page, clientName: string) {
 /**
  * Two-context fixture: pageA (observer, context also exposed as ctxA for
  * setOffline outage emulation) and pageB (writer).
+ *
+ * GH #422: both pages get the reference-week clock (install-before-goto —
+ * the pages have not navigated yet at fixture time). The records default
+ * period (monday..sunday of the page-clock week) then covers the
+ * reference-week records this family creates via UI/factories, so the
+ * row-visibility asserts (С1/С3/С4/С5/С6) stay deterministic. The frame
+ * logger (openFrameLogger) intentionally KEEPS the real clock: its frame
+ * timestamps are compared against Node-side `Date.now()` anchors for
+ * ±300ms own-echo attribution.
  */
 export const serverPushPages = test.extend<{
   pageA: Page;
@@ -316,6 +331,7 @@ export const serverPushPages = test.extend<{
   pageA: async ({ browser }, use) => {
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
+    await installReferenceWeekClock(pageA);
     await use(pageA);
     await ctxA.close();
   },
@@ -326,6 +342,7 @@ export const serverPushPages = test.extend<{
   pageB: async ({ browser }, use) => {
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
+    await installReferenceWeekClock(pageB);
     await use(pageB);
     await ctxB.close();
   },

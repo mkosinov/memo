@@ -1,4 +1,4 @@
-import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, addDaysIso } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 import { createTestActivity } from './fixtures/factories';
@@ -19,7 +19,9 @@ import type { Page, Locator } from '@playwright/test';
  * cross-context — it is protected transitively by the «badge < topbar» pair.
  */
 test.describe('Schedule z-layering (#260)', () => {
-  const dayStr = new Date().toISOString().slice(0, 10);
+  // GH #422: the overlapping pair lives on the reference week — the grid
+  // every test below opens (was UTC-today, invisible on the fixed seed).
+  const dayStr = SEED_WEEK_MONDAY;
 
   test.beforeEach(async ({ request }) => {
     // Two activities in the same slot, same master (createTestActivity picks
@@ -89,13 +91,10 @@ test.describe('Schedule z-layering (#260)', () => {
     // error toast — a real flow, not a stub. Capture its z BEFORE opening the
     // modal — the modal covers the screen (fixed inset-0 z-200) and would
     // block the panel clicks. The number is captured, so the toast
-    // auto-dismissing (4.5s) later is harmless.
-    const monday = new Date();
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7)); // viewed Monday
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    monday.setDate(monday.getDate() - 7); // source week start
-    const srcFrom = iso(monday);
+    // auto-dismissing (4.5s) later is harmless. GH #422: the viewed week is
+    // the reference week (the grid every test opens) → the copy source is
+    // its Monday − 7.
+    const srcFrom = addDaysIso(SEED_WEEK_MONDAY, -7);
     await page.route('**/api/v1/activities**', (route) => {
       if (route.request().url().includes(`date_from=${srcFrom}`)) return route.abort();
       return route.continue();

@@ -17,6 +17,7 @@ import { type APIRequestContext, expect } from "@playwright/test";
 import { sqliteExecWithRetry } from "./sqlite-exec";
 import { resolveTestDbPath } from "../lib/db-path";
 import { resolveBackendUrl } from "../lib/backend-url";
+import { SEED_WEEK_MONDAY } from "./seed-week";
 
 // GH #387: single resolver — no silent :8000 default; the guard errors
 // carry the canonical standalone recipe.
@@ -48,6 +49,12 @@ export async function createTestClient(
 /**
  * Create a test activity via backend API.
  * Uses first available master, service, location from seed data.
+ *
+ * GH #422: the default `start` is pinned to the seed's reference week
+ * (SEED_WEEK_MONDAY 10:00) — specs open the grid on that week, so a
+ * factory activity must land on it to be visible (the old UTC-now default
+ * dated activities outside every fixed seed week). Callers passing an
+ * explicit `start` keep their own time of day — only the DEFAULT moved.
  */
 export async function createTestActivity(
   api: APIRequestContext,
@@ -71,7 +78,7 @@ export async function createTestActivity(
       master_id: masters[0].id,
       service_id: services[0].id,
       location_id: locations[0].id,
-      start: new Date().toISOString().slice(0, 19),
+      start: `${SEED_WEEK_MONDAY}T10:00:00`,
       duration: services[0].duration || 90,
       capacity: 8,
       is_private: false,
@@ -109,13 +116,18 @@ export async function createTestRecord(
 /**
  * Create a client + activity + record in one call.
  * Useful for tests that need records with known client names (e.g., sort tests).
+ *
+ * GH #422: `activityOverrides` forwards to {@link createTestActivity} — e.g.
+ * pagination/ordering tests pass distinct `start`s (the shared factory-default
+ * timestamp makes same-second ties undeterministic under server pagination).
  */
 export async function createTestRecordWithClient(
   api: APIRequestContext,
   clientName: string,
+  activityOverrides?: Record<string, any>,
 ) {
   const client = await createTestClient(api, { name: clientName });
-  const activity = await createTestActivity(api);
+  const activity = await createTestActivity(api, activityOverrides);
   const record = await createTestRecord(api, activity.id, client.id);
   return { clientId: client.id, recordId: record.id, activityId: activity.id };
 }

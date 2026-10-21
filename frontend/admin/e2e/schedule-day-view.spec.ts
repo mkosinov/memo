@@ -1,4 +1,4 @@
-import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, addDaysIso } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import type { Page } from '@playwright/test';
@@ -153,13 +153,11 @@ test.describe('Schedule — Week header date click', () => {
   });
 
   test('clicking a week date opens that day by locations', async ({ page }) => {
-    // Monday of the current week; click its Wednesday (index 2)
-    const now = new Date();
-    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
-    const wednesday = new Date(monday);
-    wednesday.setDate(monday.getDate() + 2);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    // The grid is open on the reference week (beforeEach); click its
+    // Wednesday (index 2). GH #422: the clicked header's date is a
+    // SEED_WEEK_MONDAY derivative — the URL assert must match the GRID's
+    // week, not the runner's calendar.
+    const wednesday = addDaysIso(SEED_WEEK_MONDAY, 2);
 
     await page.locator('[data-testid="week-day-header-2"]').click();
 
@@ -169,7 +167,7 @@ test.describe('Schedule — Week header date click', () => {
     await expect(page.locator('[data-testid="view-selector"]')).toContainText('День локаций');
     await expect(page).toHaveURL(/view=day/);
     await expect(page).toHaveURL(/col=locations/);
-    await expect(page).toHaveURL(new RegExp(`date=${iso(wednesday)}`));
+    await expect(page).toHaveURL(new RegExp(`date=${wednesday}`));
   });
 });
 

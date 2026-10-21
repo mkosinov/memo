@@ -253,7 +253,10 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
         'Записи — будут удалены:',
       );
       await expect(recordLine).toHaveCount(1);
-      await expect(recordLine).toContainText(new Date().toISOString().slice(0, 10));
+      // GH #422: the one-liner's date is the created activity's own start
+      // date (backend label = Activity.start date part, ISO YYYY-MM-DD) —
+      // read it from the factory response instead of the wall clock.
+      await expect(recordLine).toContainText(activity.start.slice(0, 10));
       await expect(page.locator('[data-testid="dep-visits"]')).toContainText(
         'Посещения — будут удалены:',
       );

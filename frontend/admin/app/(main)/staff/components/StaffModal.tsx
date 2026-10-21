@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
-import { UserRoleSchema } from '@memo/api-client';
 import type { StaffResponse, PositionResponse, UserRole } from '@memo/api-client';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
@@ -109,11 +108,20 @@ function Label({ htmlFor, children }: { htmlFor: string; children: React.ReactNo
   );
 }
 
-/** Role select labels — values come from UserRoleSchema.options (#480 §3.4). */
+/** Role labels keyed by UserRole. The Record spans the FULL enum — #499
+ *  widened it with 'client' (web self-registration), so every role carries
+ *  a label; the select below still lists STAFF roles only. */
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Администратор',
   master: 'Мастер',
+  client: 'Клиент',
 };
+
+/** Role select options — an EXPLICIT list, NOT UserRoleSchema.options
+ *  (#499 leg 3): the enum now includes 'client', but clients are not staff
+ *  and must never appear in the staff role select. Declaration order
+ *  admin, master (#480 §3.4 pin). */
+const STAFF_ROLE_OPTIONS: readonly UserRole[] = ['admin', 'master'];
 
 /**
  * Role select (GH #263 D10) — auto-filled from the position template,
@@ -141,7 +149,7 @@ function RoleField({
         style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
       >
         <option value="">— не выбрана —</option>
-        {UserRoleSchema.options.map((value) => (
+        {STAFF_ROLE_OPTIONS.map((value) => (
           <option key={value} value={value}>
             {ROLE_LABELS[value]}
           </option>

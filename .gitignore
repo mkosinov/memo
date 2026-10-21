@@ -39,6 +39,9 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Seed canon dumps — contain user table data: phones, password hashes (GH #373)
+*.canon.sql
+
 # TypeScript
 *.tsbuildinfo
 

@@ -122,6 +122,7 @@ class TestModelImports:
             "Service", "ServiceMaterial", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings", "AuditLog",
+            "OtpCode",  # #499 §4.1 — re-exported from src.auth.otp
             "ArchiveStatus", "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",

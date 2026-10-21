@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import type { PaymentResponse } from '@memo/api-client';
+import { PaymentMethodSchema } from '@memo/api-client';
+import type { PaymentMethod, PaymentResponse } from '@memo/api-client';
 import { useUI } from '@/contexts/UIContext';
 import { RecordTable, type Column } from '@/app/components/shared/record/RecordTable';
 import { InlineEditCell } from '../InlineEditCell';
@@ -14,13 +15,13 @@ export interface PaymentRow {
   /** Transient UUID for React key. Stripped before API send. */
   clientId: string;
   amount: number;
-  method: string;
+  method: PaymentMethod;
   created_at: string;
 }
 
 interface PaymentFormState {
   amount: number;
-  method: string;
+  method: PaymentMethod;
   created_at: string;
 }
 
@@ -32,6 +33,13 @@ function transientId(): string {
     return crypto.randomUUID();
   }
   return `tid-${++_idCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Contract methods as a runtime set — narrows select change events (#480 §3.4). */
+const METHOD_VALUES = new Set<string>(PaymentMethodSchema.options);
+
+function isPaymentMethod(value: string): value is PaymentMethod {
+  return METHOD_VALUES.has(value);
 }
 
 /**
@@ -94,12 +102,17 @@ const PAYMENT_COLUMNS: Column[] = [
   { key: 'amount', label: 'Сумма', width: 'w-20 shrink-0', align: 'right' },
 ];
 
-const METHOD_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'cash', label: 'Наличные' },
-  { value: 'card', label: 'Карта' },
-  { value: 'transfer', label: 'Перевод' },
-  { value: 'online', label: 'Онлайн' },
-];
+// #480 §3.4: the option list derives from PaymentMethodSchema.options (the
+// backend PaymentMethod enum — declaration order). The former literal list
+// also carried a dead «Онлайн» value the contract rejects with 422.
+const METHOD_LABELS_BY_VALUE: Record<PaymentMethod, string> = {
+  cash: 'Наличные',
+  card: 'Карта',
+  transfer: 'Перевод',
+};
+
+const METHOD_OPTIONS: Array<{ value: PaymentMethod; label: string }> =
+  PaymentMethodSchema.options.map((value) => ({ value, label: METHOD_LABELS_BY_VALUE[value] }));
 
 const METHOD_LABELS: Record<string, string> = Object.fromEntries(
   METHOD_OPTIONS.map((o) => [o.value, o.label]),
@@ -113,9 +126,9 @@ export interface RecordPaymentsTableProps {
   /** Pre-fill amount when opening the add form (e.g. "К оплате" from RecordSummary) */
   defaultAmount?: number;
   /** POST new payment. Returns saved PaymentResponse. */
-  onAddPayment: (amount: number, method: string, date: string) => Promise<PaymentResponse>;
+  onAddPayment: (amount: number, method: PaymentMethod, date: string) => Promise<PaymentResponse>;
   /** PATCH existing payment. Returns updated PaymentResponse. */
-  onPatchPayment: (paymentId: string, data: { amount?: number; method?: string }) => Promise<PaymentResponse>;
+  onPatchPayment: (paymentId: string, data: { amount?: number; method?: PaymentMethod }) => Promise<PaymentResponse>;
   /** DELETE existing payment. */
   onDeletePayment: (paymentId: string) => Promise<void>;
 }
@@ -278,7 +291,9 @@ export function RecordPaymentsTable({
                   <select
                     value={formState.method}
                     onChange={(e) => {
-                      const method = e.target.value;
+                      // Options are the contract methods — narrow the DOM
+                      // string through the schema-derived set (#480 §3.4).
+                      const method = isPaymentMethod(e.target.value) ? e.target.value : 'card';
                       if (isNew) {
                         handleChange('method', method);
                       } else {

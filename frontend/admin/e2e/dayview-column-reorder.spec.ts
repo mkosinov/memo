@@ -165,7 +165,26 @@ test.describe('DayView Column Reorder — keyboard (US-6)', () => {
     await header.focus();
     await page.keyboard.press('Space');
     await expect(header).toHaveAttribute('aria-pressed', 'true', { timeout: 5_000 });
+
+    // GH #478-class save/reload race (PR #514 shard 1, «Flaky: 1»): the drop
+    // persists the new order as a fire-and-forget PATCH /api/v1/user-settings
+    // (useColumnReorder → patchUserSettings, no await) — the DOM poll below
+    // passes on the React commit alone, so under CI load page.reload() could
+    // beat the still-in-flight write: the fresh boot's GET /user-settings
+    // would read the OLD row and re-seed the pre-reorder order. Arm the
+    // listener BEFORE the drop (waitForResponse only sees responses from
+    // now on), then await its 200 — response receipt means the backend row
+    // is committed, so the reload deterministically reads the NEW order.
+    // Same guard family as #479 (records.spec.ts expect.poll race-guard)
+    // and the user-settings-guarantee.spec.ts С3 waitForResponse corridor.
+    const settingsSaved = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/api/v1/user-settings')
+        && resp.request().method() === 'PATCH',
+      { timeout: 30_000 },
+    );
     await settleMoveLeftThenDrop(page, header);
+    expect((await settingsSaved).status()).toBe(200);
     await expect.poll(async () => (await getColumnHeaders(page))[0], { timeout: 10_000 })
       .toBe(headersBefore[1]);
 

@@ -23,7 +23,10 @@ import type { RecordResponse, TariffResponse } from '@memo/api-client';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module, the fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   getClientByPhone: vi.fn(),
   createClient: vi.fn(),
   createVisitor: vi.fn(),

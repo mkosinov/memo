@@ -29,7 +29,10 @@ import type { Tariff } from '@memo/domain';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module, the fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   // parseApiError does `err instanceof ApiError` — create mode's error path
   // reaches it, so the mock must expose the class (same as ClientRecordTab).
   ApiError: class ApiError extends Error {},
@@ -56,6 +59,7 @@ import {
   dryRunDeleteRecord,
   createPayment,
 } from '@memo/api-client';
+import type { PaymentResponse } from '@memo/api-client';
 
 // ─── Context Mocks ──────────────────────────────────────────────────────────
 
@@ -484,7 +488,7 @@ describe('ActivityDetailsModal', () => {
 
 describe('ActivityDetailsModal — API integration', () => {
   beforeEach(() => {
-    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'pending', seats: 1, comment: null, custom_price: null, created_at: '', updated_at: '', visits: [] });
+    vi.mocked(createRecord).mockResolvedValue({ id: 'r_new', activity_id: 'ev_1', client_id: 'c1', status: 'waiting', seats: 1, comment: null, custom_price: null, created_at: '', updated_at: '', visits: [] });
     vi.mocked(createClient).mockResolvedValue({ id: 'c_new', name: 'New', phone: '+7', email: null, channel: 'telegram', created_at: '', updated_at: '', archived: false });
     vi.mocked(createVisitor).mockResolvedValue({ id: 'vis_new', client_id: 'c1', name: 'V', age: null, created_at: '', updated_at: '' });
     vi.mocked(dryRunDeleteRecord).mockResolvedValue(undefined);
@@ -869,7 +873,9 @@ describe('SettingsTab — service/location combobox flow', () => {
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {
-  const mockPayments: Array<{ id: string; record_id: string; amount: number; method: string | null; created_at: string; updated_at: string }> = [
+  // PaymentResponse[] (typed — method is the PaymentMethod union since
+  // #480 §3.3; a loose `string | null` annotation no longer type-checks).
+  const mockPayments: PaymentResponse[] = [
     { id: 'p1', record_id: 'r1', amount: 3500, method: 'card', created_at: '', updated_at: '' },
   ];
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import React from 'react';
-import { ApiError } from '@memo/api-client';
+import { ApiError, UserRoleSchema, ZodError } from '@memo/api-client';
 
 // Mock the api-client module (repo pattern: mock the boundary, not fetch)
 vi.mock('@memo/api-client', async (importOriginal) => {
@@ -16,6 +16,7 @@ vi.mock('@memo/api-client', async (importOriginal) => {
 });
 
 import { getMe, login, logout, setUnauthorizedHandler } from '@memo/api-client';
+import type { AuthUser } from '@memo/api-client';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 const mockGetMe = vi.mocked(getMe);
@@ -23,8 +24,10 @@ const mockLogin = vi.mocked(login);
 const mockLogout = vi.mocked(logout);
 const mockSetUnauthorizedHandler = vi.mocked(setUnauthorizedHandler);
 
-// Minimal real AuthMe payload (AuthMeSchema shape from packages/api-client)
-const mockUser = {
+// Minimal real AuthMe payload (AuthMeSchema shape from packages/api-client).
+// Typed: AuthUser.role is the UserRole union since #480 §3.3 — a bare object
+// literal would widen role to string and stop type-checking.
+const mockUser: AuthUser = {
   id: 'user-uuid-1',
   phone: '+79990000001',
   role: 'admin',
@@ -66,7 +69,17 @@ function AuthConsumer() {
         }
       />
       <button data-testid="do-logout" onClick={() => void doLogout()} />
-      <button data-testid="do-refresh" onClick={() => void refresh()} />
+      <button
+        data-testid="do-refresh"
+        onClick={() => {
+          // Record the rejection name (if any) — fail-closed refresh must
+          // surface its error visibly (#480 §3.3), not swallow it.
+          delete document.body.dataset.refreshError;
+          refresh().catch((err: unknown) => {
+            document.body.dataset.refreshError = err instanceof Error ? err.name : 'unknown';
+          });
+        }}
+      />
     </div>
   );
 }
@@ -83,6 +96,7 @@ describe('AuthProvider', () => {
   afterEach(() => {
     delete document.body.dataset.loginReturn;
     delete document.body.dataset.loginError;
+    delete document.body.dataset.refreshError;
     vi.clearAllMocks();
   });
 
@@ -327,6 +341,82 @@ describe('AuthProvider', () => {
       await waitFor(() => {
         expect(screen.getByTestId('master')).toHaveTextContent('Новая Ф');
       });
+    });
+  });
+
+  // GH #480 §3.3 «Контракт отказа»: the auth path is fail-closed. A PARSE
+  // error of an auth response (login / auth/me / session refresh) means the
+  // contract is broken — the session is reset (stale role/permissions
+  // snapshot discarded) and the error surfaces. Network/ApiError failures
+  // keep the previous behavior (snapshot kept, guest at bootstrap).
+  describe('fail-closed auth parsing (#480 §3.3)', () => {
+    // A real ZodError, built the way production creates them: a response
+    // body failing schema validation inside api().
+    const parseError: ZodError = UserRoleSchema.safeParse('superuser').error!;
+
+    it('bootstrap: getMe parse error resolves to guest (no half-trusted state)', async () => {
+      mockGetMe.mockRejectedValue(parseError);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('guest');
+      });
+    });
+
+    it('login: parse error is rethrown visibly and no authenticated state is written', async () => {
+      mockGetMe.mockResolvedValue(null);
+      mockLogin.mockRejectedValue(parseError);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('guest');
+      });
+      await act(async () => {
+        screen.getByTestId('do-login-return').click();
+      });
+      // ZodError carries no `code` — the login page sees the raw parse error.
+      await waitFor(() => {
+        expect(document.body.dataset.loginError).toBe('unknown');
+      });
+      expect(screen.getByTestId('status')).toHaveTextContent('guest');
+      expect(screen.getByTestId('user-id')).toHaveTextContent('none');
+    });
+
+    it('refresh: parse error resets the session — stale role/permissions snapshot discarded, error visible', async () => {
+      mockGetMe.mockResolvedValue(mockAuthMe);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      });
+      expect(screen.getByTestId('can-payments')).toHaveTextContent('true');
+
+      mockGetMe.mockReset().mockRejectedValueOnce(parseError);
+      await act(async () => {
+        screen.getByTestId('do-refresh').click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('guest');
+      });
+      expect(screen.getByTestId('user-id')).toHaveTextContent('none');
+      expect(screen.getByTestId('permissions')).toHaveTextContent('');
+      // Visible: refresh() rethrows the parse error to its caller.
+      await waitFor(() => {
+        expect(document.body.dataset.refreshError).toBe('ZodError');
+      });
+    });
+
+    it('refresh: an ApiError keeps the snapshot (прежнее поведение for non-parse errors)', async () => {
+      mockGetMe.mockResolvedValue(mockAuthMe);
+      renderAuth();
+      await waitFor(() => {
+        expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      });
+      mockGetMe.mockReset().mockRejectedValueOnce(new ApiError(503, 'Backend restarting'));
+      await act(async () => {
+        screen.getByTestId('do-refresh').click();
+      });
+      expect(screen.getByTestId('status')).toHaveTextContent('authenticated');
+      expect(screen.getByTestId('user-id')).toHaveTextContent('user-uuid-1');
+      expect(document.body.dataset.refreshError).toBeUndefined();
     });
   });
 });

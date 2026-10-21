@@ -6,6 +6,7 @@ import { useTableUrlState } from '@/hooks/useTableUrlState';
 import type { TableUrlConfig } from '@/hooks/useTableUrlState';
 import { getMonday, toISODate } from '@/lib/datetime';
 import type { RecordFilters } from '@/contexts/RecordsContext';
+import type { VisitStatus } from '@memo/api-client';
 
 // #349 Task 7 — records page URL state. ONE adapter instance per /records
 // mount (created inside the page's Suspense boundary, consumed by
@@ -27,8 +28,14 @@ export const RECORDS_SORT_FIELDS = [
   'payment',
 ] as const;
 
-/** VisitStatus whitelist (@memo/domain) — '' (param absent) = all statuses. */
-export const RECORDS_STATUS_VALUES = ['waiting', 'visited', 'cancelled', 'missed'] as const;
+/**
+ * VisitStatus whitelist (#480 §3.4) — stays EXPLICIT: the filter cycle order
+ * (waiting → visited → cancelled → missed) is a UI order, not the enum's
+ * declaration order. Typed against the contract union (typo = compile
+ * error); set-completeness is pinned by the Task 5 suite. '' (param
+ * absent) = all statuses.
+ */
+export const RECORDS_STATUS_VALUES = ['waiting', 'visited', 'cancelled', 'missed'] as const satisfies readonly VisitStatus[];
 
 /**
  * The default records period: monday..sunday of the current week — the SAME
@@ -60,7 +67,9 @@ export const recordsUrlConfig = {
     defaults: defaultRecordsPeriod,
   },
   q: { kind: 'string', maxLength: 200, defaultValue: '' },
-  status: { kind: 'enum', values: RECORDS_STATUS_VALUES, defaultValue: '' },
+  // #480 §3.4: the defaultValue type flows into PresetValue → state.status
+  // (and the filters bag) is VisitStatus | '', not a bare string.
+  status: { kind: 'enum', values: RECORDS_STATUS_VALUES, defaultValue: '' as VisitStatus | '' },
   location_id: { kind: 'string', maxLength: 64, defaultValue: '' },
   service_id: { kind: 'string', maxLength: 64, defaultValue: '' },
   master_id: { kind: 'string', maxLength: 64, defaultValue: '' },
@@ -90,7 +99,7 @@ export interface RecordsUrlPatch {
   locationId?: string;
   serviceId?: string;
   masterId?: string;
-  status?: string;
+  status?: VisitStatus | '';
   search?: string;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';

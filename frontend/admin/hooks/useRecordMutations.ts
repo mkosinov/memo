@@ -19,7 +19,14 @@ import {
   patchVisit as apiPatchVisit,
   deleteVisit as apiDeleteVisit,
 } from '@memo/api-client';
-import type { RecordResponse, PaymentResponse, VisitPatch, VisitResponse } from '@memo/api-client';
+import type {
+  PaymentMethod,
+  RecordResponse,
+  PaymentResponse,
+  TariffAudience,
+  VisitPatch,
+  VisitResponse,
+} from '@memo/api-client';
 import {
   projectVisitPatch,
   removePayment,
@@ -157,7 +164,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   const createRecordMutation = useCallback(
     async (
       input: CreateRecordInput,
-      serviceTariffs: Array<{ id: string; price: number; audience?: 'kid' | 'adult' | 'all' }>,
+      serviceTariffs: Array<{ id: string; price: number; audience?: TariffAudience }>,
     ) => {
       // 1. Resolve or create client.
       //    GH #221: a picked client binds by id — no lookup, no create.
@@ -327,11 +334,13 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   // ── Payment mutations (fine-grained — use cacheSync helpers) ─────────
 
   const addPayment = useCallback(
-    async (amount: number, method: string, date?: string) => {
+    async (amount: number, method: PaymentMethod, date?: string) => {
       const payment = await createPayment({
         record_id: recordId,
         amount,
-        method: method as 'cash' | 'card' | 'transfer',
+        // #480 §3.4: PaymentMethod-typed end-to-end (the select derives from
+        // the schema) — the old cast only hid the stringly-typed form state.
+        method,
         ...(date ? { created_at: date } : {}),
       });
       // Optimistic cache update — writes BOTH per-record and global ['payments'].
@@ -530,7 +539,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
   );
 
   const patchPayment = useCallback(
-    async (paymentId: string, data: { amount?: number; method?: string }) => {
+    async (paymentId: string, data: { amount?: number; method?: PaymentMethod }) => {
       const payment = await apiPatchPayment(paymentId, data);
       // Optimistic cache update via helper — writes BOTH per-record and global ['payments'].
       // Reader: RecordModal (['payments', recordId]) + future global payments reader

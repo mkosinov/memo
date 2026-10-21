@@ -116,6 +116,28 @@ describe('ActivitySchema removed', () => {
   });
 });
 
+// Guards relocated from record.test.ts (deleted with the Wave-5 dead exports).
+describe('Old record names should not exist', () => {
+  it.each(['BookingRecordSchema', 'BookingStatusSchema', 'BookingRecord', 'BookingStatus'])(
+    '%s is not exported',
+    (name) => {
+      expect((domain as Record<string, unknown>)[name]).toBeUndefined();
+    },
+  );
+});
+
+// #480 §3.5: Wave-5 dead exports removed (type-only aliases — RecordStatus,
+// Record, PaymentMethod, Payment, Studio — are enforced by tsc + grep, the
+// runtime schemas by this guard).
+describe('#480 §3.5 dead exports removed', () => {
+  it.each(['RecordStatusSchema', 'RecordSchema', 'PaymentMethodSchema', 'PaymentSchema'])(
+    '%s is not exported',
+    (name) => {
+      expect((domain as Record<string, unknown>)[name]).toBeUndefined();
+    },
+  );
+});
+
 describe('ScheduleAdminDTO (type-level; enforced by tsc)', () => {
   it('uses startMinutes instead of startTime', () => {
     const dto = {

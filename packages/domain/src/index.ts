@@ -83,31 +83,6 @@ export const VisitorSchema = z.object({
 
 export type Visitor = z.infer<typeof VisitorSchema>;
 
-// ─── Record ───────────────────────────────────────────────────────────────
-
-/**
- * @deprecated Use `VisitStatus` from './visit_status' instead.
- * This enum uses the old Wave 5 values (pending/confirmed/cancelled/no_show).
- * Kept for backward compatibility during migration.
- */
-export const RecordStatusSchema = z.enum(['pending', 'confirmed', 'cancelled', 'no_show']);
-
-/**
- * @deprecated Use `VisitStatus` from './visit_status' instead.
- */
-export type RecordStatus = z.infer<typeof RecordStatusSchema>;
-
-export const RecordSchema = z.object({
-  id: z.string(),
-  activityId: z.string(),
-  clientId: z.string().nullable(),
-  status: RecordStatusSchema,
-  createdAt: z.string(),
-  comment: z.string().optional(),
-});
-
-export type Record = z.infer<typeof RecordSchema>;
-
 // ─── Visit ────────────────────────────────────────────────────────────────
 
 export const VisitSchema = z.object({
@@ -120,22 +95,6 @@ export const VisitSchema = z.object({
 });
 
 export type Visit = z.infer<typeof VisitSchema>;
-
-// ─── Payment ──────────────────────────────────────────────────────────────
-
-export const PaymentMethodSchema = z.enum(['cash', 'card', 'transfer']);
-export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
-
-export const PaymentSchema = z.object({
-  id: z.string(),
-  recordId: z.string(),
-  amount: z.number(),
-  paid: z.boolean(),
-  method: PaymentMethodSchema.optional(),
-  createdAt: z.string(),
-});
-
-export type Payment = z.infer<typeof PaymentSchema>;
 
 // ─── StampState ───────────────────────────────────────────────────────────
 
@@ -237,8 +196,3 @@ export { buildSchedule, resolveById } from './schedule-index';
 
 export type { VisitStatus, VisitItem } from './visit_status';
 export { computeRecordStatus } from './visit_status';
-
-// ─── Alias for backward compatibility ─────────────────────────────────────
-
-/** @deprecated Use `Location` instead. Kept for migration compatibility. */
-export type Studio = Location;

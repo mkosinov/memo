@@ -77,7 +77,7 @@ function makeRecord(
     id,
     activity_id: 'ev_1',
     client_id: 'c1',
-    status: 'confirmed',
+    status: 'waiting',
     seats: 1,
     comment: null,
     custom_price: null,
@@ -130,7 +130,7 @@ describe('patchRecordEverywhere', () => {
       'cancelled',
     );
     expect(dateList?.items.find((r) => r.id === otherRecordId)?.status).toBe(
-      'confirmed',
+      'waiting',
     );
     // Per-client list
     expect(
@@ -185,7 +185,7 @@ describe('patchRecordEverywhere', () => {
         '2026-01-01',
         '2026-01-31',
       ])?.items[0]?.status,
-    ).toBe('confirmed');
+    ).toBe('waiting');
   });
 });
 

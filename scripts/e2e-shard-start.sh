@@ -28,6 +28,18 @@
 #                    on exit. Absent → manual mode, byte-identical lease
 #                    behavior.
 #
+#   SHARD_STACK_WATCH_S  Optional (#448 Task 3): fail-fast watch interval
+#                    in seconds while both servers are up (default 5,
+#                    hard max 600; garbage/0/negative → default — see
+#                    _watch_interval_s in shard-helpers.sh). Either
+#                    server dying is detected within one interval.
+#   SHARD_STACK_LOG  Optional (#448 Task 3): stack log path printed in
+#                    the death diagnosis. Defaults to this script's own
+#                    stdout target (fd 1 readlink) — exactly the
+#                    $LOG_DIR/shard-stack-N.log the orchestrator
+#                    redirects the whole stack into; a terminal/pipe run
+#                    has no tail-able log → «log not created».
+#
 # Usage:
 #   SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
 #     TEST_DB_PATH=backend/test_memo_shard1.db \
@@ -260,16 +272,42 @@ pnpm exec next dev -p "$SHARD_PORT" &
 FRONTEND_PID=$!
 echo "[shard-$SHARD_ID] Frontend PID: $FRONTEND_PID"
 
-# Extend cleanup to also kill frontend
+# Extend cleanup to also kill frontend, and (#448 Task 3) to sweep MASKED
+# grandchild holders of THIS stack's ports: `next dev` re-execs into a
+# next-server worker it does not propagate signals to — the orphan keeps
+# the shard port LISTENing. The /proc resolver (listen_pairs) makes the
+# re-titled holder visible, and _sweep_masked kills it iff the conjunction
+# holds (args mask AND LISTEN on one of our ports — same masks/gates as
+# cleanup_shards; a bare port kill is forbidden, an innocent process that
+# grabbed a freed port between our TERM and the sweep is never touched).
+STACK_FRONTEND_PORTS=("$SHARD_PORT")
+STACK_BACKEND_PORTS=("$BACKEND_PORT")
 _orig_cleanup() {
   echo "[shard-$SHARD_ID] Shutting down..."
   kill "$FRONTEND_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$FRONTEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
+  _sweep_masked STACK_FRONTEND_PORTS "next dev -p $SHARD_PORT" "next dev -p $SHARD_PORT" "next-server (v"
+  _sweep_masked STACK_FRONTEND_PORTS "next-server" "next dev -p $SHARD_PORT" "next-server (v"
+  _sweep_masked STACK_BACKEND_PORTS "uvicorn" "uvicorn"
   remove_own_lease
 }
-trap _orig_cleanup EXIT INT TERM
+# Signal-aware teardown (#448 Task 3): INT/TERM run the cleanup and exit
+# 128+sig (precedent: test-all.sh on_signal). A handler that merely
+# RETURNED would resume the watch loop below, which would see the
+# TERM-killed children and report a bogus "died" verdict (exit 1) on every
+# normal orchestrator teardown. remove_own_lease stays covered: the EXIT
+# trap is cleared, but _orig_cleanup itself removes it (idempotent by
+# design — double fires and pre-lease calls are no-ops).
+_stack_on_signal() {
+  trap - EXIT
+  _orig_cleanup
+  exit $((128 + $1))
+}
+trap _orig_cleanup EXIT
+trap '_stack_on_signal 2' INT
+trap '_stack_on_signal 15' TERM
 
 # Wait for frontend to be ready (max 120s — 2 parallel Next.js dev servers
 # can take 15-30s each under load, allow plenty of headroom.
@@ -308,6 +346,42 @@ for route in "${WARMUP_ROUTES[@]}"; do
   echo "  [shard-$SHARD_ID] $route → $HTTP_CODE"
 done
 
+# ── #448 Task 3: stack log path for the death diagnosis ────────────────────
+# The orchestrator redirects this whole script into $LOG_DIR/shard-stack-N.log
+# and both servers inherit that stdout — their last words land there, so THAT
+# file is "the stack log". Explicit SHARD_STACK_LOG wins (manual override /
+# test seam); else resolve our own fd 1 (regular file only — a terminal or
+# pipe run has no tail-able log); else empty → «log not created».
+SHARD_STACK_LOG="${SHARD_STACK_LOG:-}"
+if [ -z "$SHARD_STACK_LOG" ]; then
+  # /proc/$$/fd/1, NOT /proc/self/fd/1: inside the command substitution
+  # fd 1 is the capture pipe; $$ stays the script's pid, so its fd table
+  # names the real stdout target.
+  _fd1_target="$(readlink "/proc/$$/fd/1" 2>/dev/null || true)"
+  case "$_fd1_target" in
+    /*) [ -f "$_fd1_target" ] && SHARD_STACK_LOG="$_fd1_target" || true ;;
+  esac
+fi
+
 echo "[shard-$SHARD_ID] Stack ready. Waiting for shutdown signal..."
-# Block until killed by parent (test-all.sh cleanup)
-wait "$FRONTEND_PID" 2>/dev/null || true
+# Fail-fast watch (#448 Task 3, spec §3.2): wait for EITHER server, not just
+# the frontend. While both pins live (kill -0; bash reaps dead background
+# children, so a reaped pin fails the probe), sleep one interval
+# (SHARD_STACK_WATCH_S via _watch_interval_s). Death of either — backend
+# checked first, first dead wins — prints the addressed verdict + the
+# ALWAYS-printed stack-log path + a capped secrets-filtered tail
+# (_capped_log_tail) and exits 1; the EXIT trap above still releases the
+# lease and sweeps. bash 3.2: kill -0 polling, no `wait -n`.
+while true; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "[shard-$SHARD_ID] ERROR: stack shard $SHARD_ID: backend died on :$BACKEND_PORT" >&2
+    _capped_log_tail "$SHARD_STACK_LOG" >&2
+    exit 1
+  fi
+  if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    echo "[shard-$SHARD_ID] ERROR: stack shard $SHARD_ID: frontend died on :$SHARD_PORT" >&2
+    _capped_log_tail "$SHARD_STACK_LOG" >&2
+    exit 1
+  fi
+  sleep "$(_watch_interval_s "${SHARD_STACK_WATCH_S:-}")"
+done

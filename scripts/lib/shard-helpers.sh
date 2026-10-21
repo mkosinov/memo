@@ -364,6 +364,30 @@ _sweep_masked() {
   done
 }
 
+# _capped_log_tail PATH [CAP] — диагностирующий хвост лога стека с капом
+# (#448 Task 3, §3.2). Печатает ВСЕГДА строку «stack log: PATH» — путь
+# называют и когда файла нет: носитель правды — сам файл, хвост — лишь
+# эвристика. PATH пуст или файла нет → строка «log not created»; иначе —
+# последние CAP строк (дефолт 20), из которых подавляются строки с
+# секретоносными маркерами (case-insensitive: cookie / authorization /
+# auth-token / api-key / bearer / password / secret / token — фильтр
+# сознательно эвристика, §3.2). Пустой вывод после фильтра валиден (все
+# строки хвоста секретны). Потребитель — слой стека
+# (e2e-shard-start.sh, fail-fast вердикт) и watchdog-примитив
+# оркестратора (Task 4 переиспользует). bash 3.2: grep -iE, без PCRE;
+# rc всегда 0 (диагностика не роняет вызывающий set -e).
+_capped_log_tail() {
+  local path="${1:-}" cap="${2:-20}"
+  echo "stack log: ${path:-<unknown>}"
+  if [ -n "$path" ] && [ -f "$path" ]; then
+    tail -n "$cap" -- "$path" 2>/dev/null \
+      | grep -viE 'cookie|authorization|auth-token|api-key|bearer|password|secret|token' || true
+  else
+    echo "log not created"
+  fi
+  return 0
+}
+
 # _legacy_ports_free → rc 0 ⇔ НИ один порт из SHARD_LEGACY_PORTS
 # ({3002,3003,8001,8002}) не занят слушателем. ЕДИНЫЙ гейт, переиспользуемый
 # вайпом и уборщиком (§3.3: «легаси-нетегированные — при свободных

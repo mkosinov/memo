@@ -1,5 +1,12 @@
 """GH #482 Task 9 — the dispatcher process (spec §3.8; family #476 §3.2/§4.3/§4.4).
 
+GH #483 part 2 wiring: the queue adapter is selected at start
+(``connect_or_exit`` — ``RedisQueue`` over ``REDIS_URL``, fail-fast code 2
+gates), every queue call from the async cycles goes through
+``asyncio.to_thread``, and a transport failure at the enqueue point is
+kept apart from scenario errors (attempts are not burned — the re-enqueue
+cycle owns recovery; spec §3.1).
+
 Standalone entry ``python -m src.notify.dispatcher``. Three loops of ONE
 ``asyncio.TaskGroup``, each iteration isolated in its own ``try/except``
 (one crash is logged and never kills the process or the sibling loops —
@@ -47,7 +54,8 @@ import src.models  # noqa: F401 — registration first; breaks the models↔noti
 from src.core.config import settings
 from src.db.database import DBManager
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
-from src.notify.queue import FakeQueue, InboundEvent
+from src.notify.queue import InboundEvent
+from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.scenarios import SCENARIOS
 
 if TYPE_CHECKING:
@@ -133,8 +141,10 @@ async def process_pending_batch(
     Handlers own their commit boundaries (task + ``processed_at`` in one
     transaction, enqueue after commit — §3.4). A raising handler leaves
     the attempts bookkeeping to the dispatcher: rollback, ``attempts``
-    +1, ``processing_error`` at the 3rd failure. No backoff — the next
-    polling iteration is the retry cadence (§3.8).
+    +1, ``processing_error`` at the 3rd failure — EXCEPT the typed
+    transport failure (``NotifyTransportError``, GH #483 §3.1), which
+    burns no attempts: the queued task is left for the re-enqueue cycle.
+    No backoff — the next polling iteration is the retry cadence (§3.8).
 
     The batch is selected as PLAIN ``(id, type)`` tuples and each event
     re-loaded inside its own ``try``: a failing handler's ``rollback()``
@@ -179,6 +189,22 @@ async def process_pending_batch(
                     )
                 ).scalar_one()
                 await handler(event, session, queue)
+            except NotifyTransportError as exc:
+                # GH #483 (spec §3.1): a TRANSPORT failure at the enqueue
+                # point is not a scenario failure — attempts must not burn
+                # (three dead Redis ticks must not kill the event). The
+                # handler owns its commit boundary (§3.4): the queued task
+                # is already committed and the re-enqueue cycle recovers
+                # it by NOTIFY_REENQUEUE_AFTER. Loud, identifiers only —
+                # no message bodies, no addresses.
+                await session.rollback()
+                logger.error(
+                    "notify dispatcher: event %s: transport failure at the enqueue"
+                    " point (%s) — attempts not burned, queued task left for the"
+                    " re-enqueue cycle",
+                    event_id,
+                    exc,
+                )
             except Exception as exc:
                 await session.rollback()
                 fresh = (
@@ -247,15 +273,32 @@ async def reenqueue_stale_tasks(
                     REENQUEUE_CAP,
                 )
             else:
-                queue.enqueue_task(
-                    {
-                        "task_id": task.id,
-                        "text": task.text,
-                        "channels": task.channels,
-                        "created_at": _utc_now_iso_z(),
-                        "resend_of": None,
-                    }
-                )
+                try:
+                    # sync adapter off the event loop (spec §3.1)
+                    await asyncio.to_thread(
+                        queue.enqueue_task,
+                        {
+                            "task_id": task.id,
+                            "text": task.text,
+                            "channels": task.channels,
+                            "created_at": _utc_now_iso_z(),
+                            "resend_of": None,
+                        },
+                    )
+                except NotifyTransportError as exc:
+                    # GH #483 (spec §3.1): a failed enqueue counts toward
+                    # the SAME cap as a successful one — a dead transport
+                    # must churn finitely, not forever. The task stays
+                    # «queued» until the cap path terminates it; the log
+                    # carries the exception class + task id only.
+                    logger.error(
+                        "notify task %s: enqueue failed (%s) — re-enqueue"
+                        " %d/%d counted, task stays queued",
+                        task.id,
+                        exc,
+                        task.reenqueues + 1,
+                        REENQUEUE_CAP,
+                    )
                 task.reenqueues += 1
             await session.commit()
 
@@ -302,8 +345,11 @@ async def statuses_once(
     """Claim ``notify:statuses`` → apply each event in its own commit →
     ack. An unapplied item is logged and left UNACKED: the reliable-list
     reclaim at the next process start redelivers it (§4.4), and sibling
-    items of the same batch still proceed."""
-    for item in queue.claim_statuses():
+    items of the same batch still proceed. The sync adapter is called
+    through ``asyncio.to_thread`` (§3.1) — a transport failure propagates
+    to the loop guard, the next tick retries.
+    """
+    for item in await asyncio.to_thread(queue.claim_statuses):
         try:
             async with session_factory() as session:
                 await apply_status_event(session, item)
@@ -313,7 +359,7 @@ async def statuses_once(
                 item,
             )
         else:
-            queue.ack_status(item)
+            await asyncio.to_thread(queue.ack_status, item)
 
 
 # ── cycle 3: notify:inbound (§3.8) ──────────────────────────────────────────
@@ -322,8 +368,9 @@ async def statuses_once(
 async def inbound_once(queue: NotifyQueue) -> None:
     """Claim ``notify:inbound`` → route by the handler registry. The pilot
     registry is empty, so every event is logged as a warning and acked —
-    producers do not exist yet; the routing form is the fixed contract."""
-    for item in queue.claim_inbound():
+    producers do not exist yet; the routing form is the fixed contract.
+    Queue calls go through ``asyncio.to_thread`` (§3.1)."""
+    for item in await asyncio.to_thread(queue.claim_inbound):
         handler = INBOUND_HANDLERS.get(str(item.get("channel", "")))
         if handler is None:
             logger.warning(
@@ -332,7 +379,7 @@ async def inbound_once(queue: NotifyQueue) -> None:
             )
         else:
             await handler(item)
-        queue.ack_inbound(item)
+        await asyncio.to_thread(queue.ack_inbound, item)
 
 
 # ── concurrency model: loops + stop (§3.8) ──────────────────────────────────
@@ -366,9 +413,11 @@ async def run_dispatcher(
 ) -> None:
     """The three cycles of the dispatcher: reclaim hanging queue items at
     process start (§4.4), then one ``asyncio.TaskGroup`` — a stop-event
-    winds all loops down correctly (§3.8)."""
+    winds all loops down correctly (§3.8). The sync adapter's start call
+    goes through ``asyncio.to_thread`` (§3.1); a failure there is a
+    process-start failure — loud, before any cycle begins."""
     interval = settings.NOTIFY_POLL_INTERVAL
-    queue.reclaim_hanging()
+    await asyncio.to_thread(queue.reclaim_hanging)
 
     async def polling_iteration() -> None:
         await process_pending_batch(session_factory, queue)
@@ -403,7 +452,16 @@ async def main(queue: NotifyQueue | None = None) -> None:
     """``python -m src.notify.dispatcher``. Disabled (``NOTIFY_ENABLED=false``,
     the default): log and return 0 — events keep accumulating in the
     journal (family §3.3). Enabled: validate the channel priority loudly,
-    then run the three cycles until SIGTERM/KeyboardInterrupt."""
+    select the transport adapter, then run the three cycles until
+    SIGTERM/KeyboardInterrupt.
+
+    Adapter selection (GH #483 spec §3.1): no injected queue →
+    ``connect_or_exit(REDIS_URL)`` — the fail-fast gate builds the
+    ``RedisQueue`` and refuses the process LOUDLY (``SystemExit(2)``,
+    stable message, the URL value never disclosed) when the transport
+    is not configured or unreachable. An explicitly injected queue
+    (the part-1 test seam) skips selection entirely.
+    """
     if not settings.NOTIFY_ENABLED:
         logger.info(
             "notify dispatcher: NOTIFY_ENABLED=false — exiting (domain events keep accumulating)"
@@ -414,14 +472,10 @@ async def main(queue: NotifyQueue | None = None) -> None:
     logger.info("notify dispatcher starting (channel priority: %s)", channels)
 
     if queue is None:
-        # Part 1 boundary (#483): the Redis/arq adapter does not exist yet.
-        # Run on FakeQueue, loudly — the process is not launched enabled in
-        # any part-1 stack.
-        logger.warning(
-            "notify dispatcher: no queue adapter configured — using FakeQueue"
-            " (the Redis/arq adapter ships in part 2)"
-        )
-        queue = FakeQueue()
+        # Part-1's FakeQueue fallback is gone: an enabled dispatcher with
+        # no configured/working transport must not rotate silently — the
+        # gate exits code 2 before any cycle starts.
+        queue = connect_or_exit(settings.REDIS_URL.get_secret_value())
 
     # Standalone-entry engine (the ``seed`` pattern): inherits the repo
     # connection pragmas — busy_timeout + WAL (src/db/database.py).
@@ -439,6 +493,8 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    # KeyboardInterrupt ONLY: the transport gate's SystemExit(2) (spec §3.1,
+    # S3) must propagate — the process exit code IS the fail-fast contract.
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

@@ -281,7 +281,7 @@ class TestOtpSendLimits:
 class TestOtpPepperSetting:
     def test_production_empty_pepper_fails_fast(self) -> None:
         with pytest.raises(ValueError, match="OTP_PEPPER"):
-            Settings(ENV="production", SECRET_KEY="set")
+            Settings(_env_file=None, ENV="production", SECRET_KEY="set")
 
     def test_dev_empty_pepper_resolves_to_dev_constant(self) -> None:
-        assert Settings(ENV="development").OTP_PEPPER == "dev-otp-pepper"
+        assert Settings(_env_file=None, ENV="development").OTP_PEPPER == "dev-otp-pepper"

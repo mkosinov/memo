@@ -291,6 +291,9 @@ What a spec author must know:
 | workspace vitest (domain, api-client, web) | ✅ (`test:all`) | — | — | ✅ (`workspace-tests` — list derived from workspace globs, GH #420) |
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
+| web checks (lint + type-check + vitest) | — | — | — | ✅ (`web-checks` workflow — path-filtered: only PRs touching `frontend/web/**`, GH #314) |
+| backend lint (ruff/mypy ratchet) | — | — | — | ✅ (`backend-lint`) |
+| script guards (z-token, skip-tracker, shard dryrun; parser/smoke of visual scripts) | — | — | — | ✅ (z-token in `frontend-checks`; skip-tracker warning-only; `shard-script-checks` — GH #415; parser/smoke local-only via `test:all`) |
 | e2e Playwright (4 CI shards) | — | — | forbidden⁶ | ✅ |
 | visual compliance | ✅ (UI) | ✅ | — | ✅ (inside e2e) |
 
@@ -300,6 +303,13 @@ What a spec author must know:
 ⁴ CI Tests = `test.yml`: `pull_request` + `workflow_dispatch`; concurrency cancels obsolete PR runs, never dispatch runs.
 ⁵ Type-check is deliberately **not duplicated at G6**: its deterministic homes are the CI `frontend-checks` job and the G7 fast suite; frontend coders additionally keep `tsc --noEmit` green in their checklist.
 ⁶ Harness policy: local e2e is an investigation tool, never a gate; CI owns e2e.
+
+**Anchor rule (GH #420, replaces a guard script by user decision — new packages are rare):**
+a new test surface or a new CI gate/check lands WITH its row in this table, in the same PR.
+This table is the inventory of what runs where; tests without a row here are suspected dead
+coverage — exactly what GH #420 found (package and web tests ran under no gate at all until
+`workspace-tests` closed the gap). Review holds the line: a PR adding tests or gates without
+touching this table is incomplete.
 
 In CI:
 - `retries: 1` (vs 0 locally) — one automatic retry; a test that passes only on the retry gets status `flaky` and FAILS the job via the blocking flake gate (GH #415, see [E2E (automated)](#e2e-automated)); a retry first snapshots the DB (see [Per-test seed reset](#per-test-seed-reset-gh-252))

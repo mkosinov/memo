@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
 
 // Mock the api function from client
@@ -1673,7 +1673,76 @@ describe('changePassword', () => {
         body: JSON.stringify({ current_password: 'old123', new_password: 'new456' }),
       },
     );
-   });
+  });
+});
+
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5) ─────────────────
+
+describe('requestOtpCode', () => {
+  it('calls POST /api/v1/auth/otp/request with {phone}', async () => {
+    vi.mocked(api).mockResolvedValue({});
+    await requestOtpCode('+79991234567');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/otp/request',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79991234567' }),
+      },
+    );
+  });
+});
+
+describe('verifyOtpCode', () => {
+  it('calls POST /api/v1/auth/otp/verify with {phone, code}', async () => {
+    vi.mocked(api).mockResolvedValue({ phone: '+79991234567', name: null });
+    await verifyOtpCode('+79991234567', '123456');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/otp/verify',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79991234567', code: '123456' }),
+      },
+    );
+  });
+});
+
+describe('getMyClient', () => {
+  it('calls GET /api/v1/my/client', async () => {
+    vi.mocked(api).mockResolvedValue({ phone: '+79991234567', name: 'Иван Петров' });
+    await getMyClient();
+    expect(api).toHaveBeenCalledWith('/api/v1/my/client', expect.anything());
+  });
+});
+
+describe('createMyRecord', () => {
+  it('calls POST /api/v1/my/records with the booking body', async () => {
+    vi.mocked(api).mockResolvedValue({
+      id: 'r-1',
+      activity_id: 'a-1',
+      start: '2026-10-25T12:00:00',
+      comment: null,
+      visits: [{ name: null, age: null, tariff_id: null, price: 0 }],
+    });
+    await createMyRecord({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/my/records',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          activity_id: 'a-1',
+          phone: '+79991234567',
+          visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
+        }),
+      },
+    );
+  });
 });
 
 // ─── Users vertical (#348 spec §5 — admin-side account ops) ────────────────

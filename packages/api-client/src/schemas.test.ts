@@ -65,6 +65,12 @@ import {
   MyProfileSchema,
   MyProfileUpdateSchema,
   ChangePasswordSchema,
+  OtpRequestSchema,
+  OtpRequestResponseSchema,
+  OtpVerifySchema,
+  MyClientSchema,
+  MyRecordCreateSchema,
+  MyRecordResponseSchema,
   UserSettingsCreateSchema,
   UserSettingsResponseSchema,
   UserSettingsUpdateSchema,
@@ -2140,6 +2146,170 @@ describe('ChangePasswordSchema (GH #262)', () => {
     });
     expect(parsed.current_password).toBe('old123');
     expect(parsed.new_password).toBe('new456');
+  });
+});
+
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5) ─────────────────
+
+describe('OtpRequestSchema (GH #499 §4.2)', () => {
+  it('parses {phone}', () => {
+    const parsed = OtpRequestSchema.parse({ phone: '+79991234567' });
+    expect(parsed.phone).toBe('+79991234567');
+  });
+
+  it('rejects a missing phone', () => {
+    expect(() => OtpRequestSchema.parse({})).toThrow();
+  });
+
+  it('rejects an extra key (backend extra=forbid)', () => {
+    expect(() => OtpRequestSchema.parse({ phone: '+79991234567', code: '123456' })).toThrow();
+  });
+});
+
+describe('OtpRequestResponseSchema (GH #499 §4.2 — 202 body: {} or {dev_code})', () => {
+  it('parses the empty body (dev_code absent outside dev — exclude_none)', () => {
+    const parsed = OtpRequestResponseSchema.parse({});
+    expect(parsed.dev_code).toBeUndefined();
+  });
+
+  it('parses dev_code when the dev transport handled the send', () => {
+    const parsed = OtpRequestResponseSchema.parse({ dev_code: '123456' });
+    expect(parsed.dev_code).toBe('123456');
+  });
+});
+
+describe('OtpVerifySchema (GH #499 §4.2)', () => {
+  it('parses the {phone, code} pair', () => {
+    const parsed = OtpVerifySchema.parse({ phone: '+79991234567', code: '123456' });
+    expect(parsed.phone).toBe('+79991234567');
+    expect(parsed.code).toBe('123456');
+  });
+
+  it('rejects an empty code (min 1 — a missing code is malformed, not wrong)', () => {
+    expect(() => OtpVerifySchema.parse({ phone: '+79991234567', code: '' })).toThrow();
+  });
+
+  it('rejects an extra key (backend extra=forbid)', () => {
+    expect(() => OtpVerifySchema.parse({ phone: '+79991234567', code: '123456', extra: 1 })).toThrow();
+  });
+});
+
+describe('MyClientSchema (GH #499 §4.3 — GET /my/client & verify 200)', () => {
+  it('parses {phone, name}', () => {
+    const parsed = MyClientSchema.parse({ phone: '+79991234567', name: 'Иван Петров' });
+    expect(parsed.phone).toBe('+79991234567');
+    expect(parsed.name).toBe('Иван Петров');
+  });
+
+  it('parses a null name (cardless account or nameless card)', () => {
+    const parsed = MyClientSchema.parse({ phone: '+79991234567', name: null });
+    expect(parsed.name).toBeNull();
+  });
+
+  it('rejects a missing phone', () => {
+    expect(() => MyClientSchema.parse({ name: 'Иван Петров' })).toThrow();
+  });
+});
+
+describe('MyRecordCreateSchema (GH #499 §5 — strict booking wire)', () => {
+  it('parses a full booking (comment + named visits with tariffs)', () => {
+    const parsed = MyRecordCreateSchema.parse({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      comment: 'Позвоните за день',
+      visits: [
+        { name: 'Мария', age: 30, tariff_id: 't-1' },
+        { name: null, age: null, tariff_id: null },
+      ],
+    });
+    expect(parsed.activity_id).toBe('a-1');
+    expect(parsed.comment).toBe('Позвоните за день');
+    expect(parsed.visits).toHaveLength(2);
+    expect(parsed.visits[0].tariff_id).toBe('t-1');
+  });
+
+  it('parses a minimal booking (optionals omitted → anonymous visits)', () => {
+    const parsed = MyRecordCreateSchema.parse({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      visits: [{}],
+    });
+    expect(parsed.comment).toBeUndefined();
+    expect(parsed.visits[0].name).toBeUndefined();
+  });
+
+  it('rejects an empty visits list (min 1)', () => {
+    expect(() =>
+      MyRecordCreateSchema.parse({ activity_id: 'a-1', phone: '+79991234567', visits: [] }),
+    ).toThrow();
+  });
+
+  it('rejects 21 visits (max = MY_RECORD_MAX_VISITS = 20)', () => {
+    const visits = Array.from({ length: 21 }, () => ({}));
+    expect(() =>
+      MyRecordCreateSchema.parse({ activity_id: 'a-1', phone: '+79991234567', visits }),
+    ).toThrow();
+  });
+
+  it('accepts exactly 20 visits (boundary)', () => {
+    const visits = Array.from({ length: 20 }, () => ({}));
+    const parsed = MyRecordCreateSchema.parse({ activity_id: 'a-1', phone: '+79991234567', visits });
+    expect(parsed.visits).toHaveLength(20);
+  });
+
+  it('rejects an unknown record key (backend extra=forbid)', () => {
+    expect(() =>
+      MyRecordCreateSchema.parse({
+        activity_id: 'a-1',
+        phone: '+79991234567',
+        visits: [{}],
+        client_id: 'c-1',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects forbidden service fields on a visit — price/visitor_id never ride the wire', () => {
+    expect(() =>
+      MyRecordCreateSchema.parse({ activity_id: 'a-1', phone: '+79991234567', visits: [{ price: 100 }] }),
+    ).toThrow();
+    expect(() =>
+      MyRecordCreateSchema.parse({ activity_id: 'a-1', phone: '+79991234567', visits: [{ visitor_id: 'v-1' }] }),
+    ).toThrow();
+  });
+});
+
+describe('MyRecordResponseSchema (GH #499 §5 — 201 body)', () => {
+  const validResponse = {
+    id: 'r-1',
+    activity_id: 'a-1',
+    start: '2026-10-25T12:00:00',
+    comment: null,
+    visits: [
+      { name: 'Мария', age: 30, tariff_id: 't-1', price: 1500 },
+      { name: null, age: null, tariff_id: null, price: 0 },
+    ],
+  };
+
+  it('parses the 201 body (server-computed prices)', () => {
+    const parsed = MyRecordResponseSchema.parse(validResponse);
+    expect(parsed.id).toBe('r-1');
+    expect(parsed.start).toBe('2026-10-25T12:00:00');
+    expect(parsed.comment).toBeNull();
+    expect(parsed.visits[0].price).toBe(1500);
+    expect(parsed.visits[1].price).toBe(0);
+  });
+
+  it('rejects a visit missing price', () => {
+    const broken = {
+      ...validResponse,
+      visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
+    };
+    expect(() => MyRecordResponseSchema.parse(broken)).toThrow();
+  });
+
+  it('rejects a missing required top-level field', () => {
+    const { id: _id, ...without } = validResponse;
+    expect(() => MyRecordResponseSchema.parse(without)).toThrow();
   });
 });
 

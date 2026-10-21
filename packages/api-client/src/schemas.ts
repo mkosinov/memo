@@ -818,6 +818,90 @@ export const ChangePasswordSchema = z.object({
 });
 export type ChangePassword = z.input<typeof ChangePasswordSchema>;
 
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5 — mirrors backend
+// src/schemas/auth.py + my.py). The client branch rides the SAME transport
+// (credentials included); its session cookie is memo_client_session.
+
+// POST /auth/otp/request body — strictly {phone}; the phone rule belongs to
+// the shared domain validator server-side (a blank phone answers the
+// domain 422 PHONE_INVALID, not a schema error — the PasswordSetupRequest
+// precedent), so no bounds here either.
+export const OtpRequestSchema = z.strictObject({
+  phone: z.string(),
+});
+export type OtpRequest = z.infer<typeof OtpRequestSchema>;
+
+// 202 body of a code request — `{}` on the wire; `dev_code` surfaces ONLY
+// via the dev transport (exact ENV == development, spec §4.2) and is
+// ABSENT in every other shape (the endpoint serializes exclude_none) —
+// optional, never null.
+export const OtpRequestResponseSchema = z.object({
+  dev_code: z.string().optional(),
+});
+export type OtpRequestResponse = z.infer<typeof OtpRequestResponseSchema>;
+
+// POST /auth/otp/verify body — `code` needs ≥1 char at the schema level:
+// a present-but-wrong code is the unified 401, a missing/empty one is a
+// malformed request.
+export const OtpVerifySchema = z.strictObject({
+  phone: z.string(),
+  code: z.string().min(1),
+});
+export type OtpVerify = z.infer<typeof OtpVerifySchema>;
+
+// GET /my/client and the OTP verify 200 body (the same shape, spec §4.2/§4.3):
+// `phone` is the confirmed account phone; `name` comes from the linked
+// client card — null for a cardless account or a nameless card.
+export const MyClientSchema = z.object({
+  phone: z.string(),
+  name: z.string().nullable(),
+});
+export type MyClient = z.infer<typeof MyClientSchema>;
+
+// POST /my/records body (spec §5) — the strict booking wire. From the wire
+// there is deliberately NO client_id/visitor_id/price/custom_price/notify/
+// status: the owner comes ONLY from the client session, prices are computed
+// server-side from tariff_id, notifications are never opted into here.
+export const MY_RECORD_MAX_VISITS = 20;
+
+export const MyVisitCreateSchema = z.strictObject({
+  // Absent name → an anonymous visit (the existing semantics).
+  name: z.string().nullable().optional(),
+  age: z.number().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+});
+export type MyVisitCreate = z.infer<typeof MyVisitCreateSchema>;
+
+export const MyRecordCreateSchema = z.strictObject({
+  activity_id: z.string(),
+  // The record's contact phone — domain validation server-side (422
+  // PHONE_INVALID), never a client lookup key.
+  phone: z.string(),
+  comment: z.string().nullable().optional(),
+  visits: z.array(MyVisitCreateSchema).min(1).max(MY_RECORD_MAX_VISITS),
+});
+export type MyRecordCreate = z.infer<typeof MyRecordCreateSchema>;
+
+// 201 body of the booking (spec §5): `start` is the activity's datetime
+// exactly as ActivityResponse.start serializes it; visits carry NO
+// record_id/timestamps/statuses — the minimum the success screen renders.
+export const MyVisitResponseSchema = z.object({
+  name: z.string().nullable(),
+  age: z.number().nullable(),
+  tariff_id: z.string().nullable(),
+  price: z.number(), // server-computed from the tariff (0 = tariff-less service)
+});
+export type MyVisitResponse = z.infer<typeof MyVisitResponseSchema>;
+
+export const MyRecordResponseSchema = z.object({
+  id: z.string(),
+  activity_id: z.string(),
+  start: z.string(),
+  comment: z.string().nullable(),
+  visits: z.array(MyVisitResponseSchema),
+});
+export type MyRecordResponse = z.infer<typeof MyRecordResponseSchema>;
+
 // ─── Users vertical (#348 spec §5 — admin-side account operations) ─────────
 // Mirrors backend src/schemas/user.py. Errors: 404 USER_NOT_FOUND; the phone
 // edit answers domain codes PHONE_TAKEN / PHONE_INVALID; link issue refuses a

@@ -316,8 +316,6 @@ async def update_record(
         custom_price=data.custom_price,
         existing=existing,
     )
-    if not record:
-        return None
 
     # ── Visit replacement — STRICT order (delete → recompute → check →
     #    insert). Inserting before recomputing would double-count the
@@ -408,8 +406,6 @@ async def patch_record(
     record = await record_service.patch_row(
         db_session, id, scalar_fields, existing=existing,
     )
-    if not record:
-        return None
 
     # ── Visit replacement (only when seats may change) — STRICT order:
     #    delete → recompute → check (same interleaving as update_record). ──

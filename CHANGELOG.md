@@ -361,6 +361,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     8 пунктов на ручную сверку).
   - Status: `docs/status/2026-10-10-visual-compliance-section-311.md`
 
+### Test Infra
+- **GH #448 — /proc-резолвер портов + fail-fast прогона: класс «невидимый держатель порта»
+  устранён** — branch `448-shard-port-resolver-failfast` (6 коммитов `a91b88aa..f4417af1`,
+  base `099f8098`; 5 файлов, +1963/−126; спека
+  `docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md` рев.4.1 и план
+  `docs/plans/2026-10-21-shard-port-resolver-failfast-448-plan.md` 5/5 — оба на main,
+  unchanged by IMPL; воркер next-server переписывает `process.title`, lsof слеп к такому
+  процессу — все проверки портов контура прогонов переведены на собственный резолвер,
+  смерть ребёнка прогона останавливает его красным за секунды; прод-код, API, БД и
+  e2e-спеки не затронуты):
+  - **Резолвер `listen_pairs` (T1 `a91b88aa`):** «порт → PID» без lsof — один сэмпл на вызов,
+    `/proc/net/tcp`+`/proc/net/tcp6` (отсутствие tcp6 — не ошибка), строки LISTEN `0A`,
+    hex→dec, inode → владелец проходом `/proc/[0-9]*/fd/*` по симлинку `socket:[inode]`
+    (stat не парсится — `process.title` для резолвера не существует); fail-closed: LISTEN без
+    атрибутируемого PID = «порт занят»; не-Linux фолбэк на lsof (macOS статус-кво); пути /proc
+    переопределяемы только в dryrun-режиме; нормализатор `_watch_interval_s` (мусор → дефолт 5).
+  - **Пять lsof-точек → резолвер (T2 `04e34fc8` + `062bcdf3`):** `_masked_pids`,
+    `allocate_shard_ports`, `_legacy_ports_free`, TOCTOU-recheck и `.next`-вайп-гард — конъюнкция
+    с pgrep+args-гейтами дословно, fd-скан одним `ls` (19.5s→0.4s); ревью-фикс — bounded retry
+    (≤5) контролей 9a/9b.
+  - **Fail-fast слой стека (T3 `710acb35` + `25971434`):** ожидание ЛЮБОГО из двух серверов
+    (kill-0 поллинг, bash 3.2) вместо `wait "$FRONTEND_PID"` — смерть → вердикт
+    «stack shard N: … died on :PORT» + путь лога всегда + кап-хвост 20 строк с фильтром
+    секретов (`_capped_log_tail`) + exit 1; exit-trap добирает внуков-держателей портов стека;
+    ревью-фикс — die-кейсы на HOLD_S=600, teardown не сиротит sleep (12 сирот/3 прогона → 0).
+  - **Fail-fast слой оркестратора (T4 `f4417af1`):** watchdog `run_watchdog`/`stop_run_watchdog`
+    — тик kill -0 по стек-обёрткам, провал подтверждается wait-рептингом (зомби отвечает
+    kill -0), вердикт = диагноз + маркер в LOG_DIR + TERM ОБЕИМ Playwright-стадиям
+    (TERM→грейс→SIGKILL, жёсткая форма rev4); `test-all.sh` — старт до readiness, порядок
+    «финальный wait → ОСТАНОВ watchdog → проверка маркера → вердикт», маркер → FAIL=1 (US-6:
+    смерть обёртки после зелёной её стадии краснит прогон).
+  - **Tests:** shard-helpers dryrun **33/33**; e2e-shard-start dryrun **ALL PASS** (75+
+    ассертов, детерминированно ×3+ прогонов); полный локальный test-all (тег `978ca3`):
+    pytest **3484p/15s**, Playwright шарды **239+240p**, lint/typecheck×2/vitest-workspace
+    **336** зелёные; admin vitest **3081p** + 3 посторонних load-флейка (изолированный
+    повтор 83/83, прецедент #478); визуальный гейт exit 0 (секция N/A спеки); DoD §7
+    закрыт, grep-чистота (lsof — только не-Linux-фолбэк).
+  - Status: `docs/status/2026-10-21-shard-port-resolver-failfast-448.md`
+
 ## [Unreleased] — 2026-10-09
 
 ### Added

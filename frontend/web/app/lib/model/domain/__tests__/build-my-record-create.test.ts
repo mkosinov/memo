@@ -55,6 +55,24 @@ describe("buildMyRecordCreate — tariff service (US-1)", () => {
     expect(payload.visits[0]).toEqual({ name: "Оля", age: null, tariff_id: "t-adult" });
   });
 
+  it("rejects partially-numeric ages instead of parseInt-truncating them", () => {
+    const payload = buildMyRecordCreate({
+      activityId: "act-1",
+      phone: "+79991234567",
+      comment: "",
+      counts: { "t-adult": 2 },
+      visitors: {
+        [visitorRowKey("t-adult", 0)]: { name: "Оля", age: "9abc" },
+        [visitorRowKey("t-adult", 1)]: { name: "Пётр", age: " 7 " },
+      },
+      tariffs,
+    });
+
+    // "9abc" is garbage → null; " 7 " is a numeric string with padding → 7.
+    expect(payload.visits[0].age).toBeNull();
+    expect(payload.visits[1].age).toBe(7);
+  });
+
   it("orders visits by tariff order, then seat index", () => {
     const payload = buildMyRecordCreate({
       activityId: "act-1",

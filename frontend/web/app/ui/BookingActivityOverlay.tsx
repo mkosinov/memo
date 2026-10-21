@@ -98,8 +98,9 @@ export function BookingActivityOverlay({
       setStep("form");
       setPendingPayload(null);
       otp.reset();
+      submission.reset();
     }
-  }, [isOpen, otp.reset]);
+  }, [isOpen, otp.reset, submission.reset]);
 
   const authenticated = session.client !== null;
   const phoneValue = session.client !== null ? session.client.phone : formPhone;

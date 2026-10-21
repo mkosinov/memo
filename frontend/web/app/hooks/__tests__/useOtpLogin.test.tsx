@@ -56,8 +56,10 @@ describe("useOtpLogin — code request (US-4)", () => {
     expect(result.current.error).toBe("Вход временно недоступен");
   });
 
-  it("shows the server message for other request failures (e.g. 429)", async () => {
-    mockedRequest.mockRejectedValue(new ApiError(429, "Слишком часто. Попробуйте позже"));
+  it("shows the server message for structured request failures (e.g. 429)", async () => {
+    mockedRequest.mockRejectedValue(
+      new ApiError(429, "Слишком часто. Попробуйте позже", "AUTH_LOCKED_OUT"),
+    );
 
     const { result } = renderHook(() => useOtpLogin());
     await act(async () => {
@@ -65,6 +67,18 @@ describe("useOtpLogin — code request (US-4)", () => {
     });
 
     expect(result.current.error).toBe("Слишком часто. Попробуйте позже");
+  });
+
+  it("falls back to the localized message when the refusal carries no structured detail", async () => {
+    // No code → message is the client-synthesized "API error: N ..." — never raw to a client.
+    mockedRequest.mockRejectedValue(new ApiError(429, "API error: 429 Too Many Requests"));
+
+    const { result } = renderHook(() => useOtpLogin());
+    await act(async () => {
+      await result.current.requestCode("+79991234567");
+    });
+
+    expect(result.current.error).toBe("Не удалось подтвердить телефон");
   });
 
   it("falls back to a connection hint on network errors", async () => {
@@ -101,7 +115,7 @@ describe("useOtpLogin — verify", () => {
   });
 
   it("returns null and renders the step error on a wrong/expired code (401)", async () => {
-    mockedVerify.mockRejectedValue(new ApiError(401, "Неверный код"));
+    mockedVerify.mockRejectedValue(new ApiError(401, "Неверный код", "AUTH_INVALID_OTP"));
 
     const { result } = renderHook(() => useOtpLogin());
     let verified: unknown = "unset";
@@ -112,5 +126,16 @@ describe("useOtpLogin — verify", () => {
     expect(verified).toBeNull();
     expect(result.current.stage).toBe("entering");
     expect(result.current.error).toBe("Неверный код");
+  });
+
+  it("falls back when a verify refusal carries no structured detail", async () => {
+    mockedVerify.mockRejectedValue(new ApiError(401, "API error: 401 Unauthorized"));
+
+    const { result } = renderHook(() => useOtpLogin());
+    await act(async () => {
+      await result.current.verify("+79991234567", "000000");
+    });
+
+    expect(result.current.error).toBe("Не удалось подтвердить телефон");
   });
 });

@@ -417,7 +417,9 @@ describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
   }
 
   it("keeps a wrong/expired code error inside the step and creates no record", async () => {
-    mockedVerifyOtpCode.mockRejectedValue(new ApiError(401, "Неверный код"));
+    mockedVerifyOtpCode.mockRejectedValue(
+      new ApiError(401, "Неверный код", "AUTH_INVALID_OTP"),
+    );
     await openStep();
 
     fireEvent.change(screen.getByTestId("otp-code-input"), { target: { value: "000000" } });
@@ -432,7 +434,7 @@ describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
 
   it("recovers from a wrong code and still auto-submits", async () => {
     mockedVerifyOtpCode
-      .mockRejectedValueOnce(new ApiError(401, "Неверный код"))
+      .mockRejectedValueOnce(new ApiError(401, "Неверный код", "AUTH_INVALID_OTP"))
       .mockResolvedValue({ phone: "+79991234567", name: null });
     await openStep();
 
@@ -516,7 +518,7 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
 
   it("renders the server message with a retry button; a retry resubmits and can succeed", async () => {
     mockedCreateMyRecord
-      .mockRejectedValueOnce(new ApiError(409, "Недостаточно мест"))
+      .mockRejectedValueOnce(new ApiError(409, "Недостаточно мест", "ACTIVITY_AT_CAPACITY"))
       .mockResolvedValue(createdResponse);
 
     const errorBlock = await submitExpectingRefusal();
@@ -526,6 +528,60 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
     fireEvent.click(within(errorBlock).getByRole("button", { name: /Отправить еще раз/i }));
 
     await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+  });
+
+  it("clears the stale booking-error on overlay reopen — no leaked block, no dead retry", async () => {
+    // The verify in this flow establishes the session: the first session check
+    // is anonymous, every later one (post-verify refresh, reopen) is authenticated.
+    mockedGetMyClient.mockReset();
+    mockedGetMyClient.mockRejectedValueOnce(new ApiError(401, "unauthorized"));
+    mockedGetMyClient.mockResolvedValue({ phone: "+79991234567", name: null });
+    mockedCreateMyRecord.mockRejectedValue(
+      new ApiError(409, "Недостаточно мест", "ACTIVITY_AT_CAPACITY"),
+    );
+
+    const { rerender } = renderOverlay();
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    // Anonymous: walk through the OTP step to the refusal.
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+    fireEvent.change(await screen.findByTestId("otp-code-input"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+    expect(await screen.findByTestId("booking-error")).toBeInTheDocument();
+    // Snapshot AFTER the walkthrough's own code request.
+    const otpCallsAfterWalkthrough = mockedRequestOtpCode.mock.calls.length;
+
+    // Close and reopen the overlay (it stays mounted in the page tree).
+    rerender(
+      <BookingActivityOverlay
+        isOpen={false}
+        onClose={vi.fn()}
+        activityId="act-1"
+        activities={[mockActivity, mockActivityNoTariffs]}
+      />,
+    );
+    rerender(
+      <BookingActivityOverlay
+        isOpen
+        onClose={vi.fn()}
+        activityId="act-1"
+        activities={[mockActivity, mockActivityNoTariffs]}
+      />,
+    );
+
+    // No stale error block after reopen…
+    expect(screen.queryByTestId("booking-error")).not.toBeInTheDocument();
+
+    // …and a fresh submit reaches the API again — directly, session reused.
+    mockedCreateMyRecord.mockResolvedValue(createdResponse);
+    await clickSubmit();
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(2));
+    expect(mockedRequestOtpCode.mock.calls.length).toBe(otpCallsAfterWalkthrough);
     expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
   });
 

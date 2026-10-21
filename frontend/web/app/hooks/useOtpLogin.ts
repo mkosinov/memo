@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { requestOtpCode, verifyOtpCode, ApiError } from "@memo/api-client";
 import type { MyClient } from "@memo/api-client";
+import { structuredServerMessage } from "@/app/lib/errors";
 
 /** Stages of the «подтвердите телефон» step (spec §4.2/§8). */
 export type OtpLoginStage = "idle" | "requesting" | "entering" | "verifying";
@@ -10,10 +11,13 @@ export type OtpLoginStage = "idle" | "requesting" | "entering" | "verifying";
 /** Fail-closed transport (#499 US-4): no configured transport → 503 → this message. */
 export const OTP_UNAVAILABLE_MESSAGE = "Вход временно недоступен";
 
+/** Localized step fallback — used unless the refusal carries a structured server message. */
+const OTP_FAILURE_MESSAGE = "Не удалось подтвердить телефон";
+
 function otpErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 503) return OTP_UNAVAILABLE_MESSAGE;
-    return err.message || "Не удалось подтвердить телефон";
+    return structuredServerMessage(err, OTP_FAILURE_MESSAGE);
   }
   return "Не удалось отправить код. Проверьте соединение";
 }

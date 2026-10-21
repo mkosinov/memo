@@ -35,12 +35,17 @@ export interface BuildMyRecordCreateInput {
   tariffs: TariffView[];
 }
 
+/** Strict numeric age: "9abc" or "" → null; " 7 " → 7 (no parseInt truncation). */
+function parseAge(raw: string | undefined): number | null {
+  const trimmed = raw?.trim() ?? '';
+  return /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : null;
+}
+
 function toVisit(row: VisitorFormValue | undefined, tariffId: string | null): MyVisitCreate {
   const name = row?.name?.trim();
-  const age = row ? Number.parseInt(row.age, 10) : Number.NaN;
   return {
     name: name ? name : null,
-    age: Number.isFinite(age) ? age : null,
+    age: parseAge(row?.age),
     tariff_id: tariffId,
   };
 }

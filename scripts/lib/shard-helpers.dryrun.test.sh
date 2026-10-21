@@ -61,9 +61,12 @@
 #     ports are a SUBSET of the usable ports (held/busy never returned);
 #     a rare coupon-collector timeout in the narrowed window is retried
 #     (bounded) — flake-free; the fail-fast contract itself is Case 9's.
-#   → Case 9 (§3.2): lsof stub reporting every port held → fail-fast
-#     rc≠0, message names the window and the attempt budget, ≤20 lsof
-#     calls; control with the real lsof succeeds.
+#   → Case 9 (§3.2 + #448 Task 2): fail-fast rc≠0, message names the window,
+#     the attempt budget and the /proc-tables hint (the lsof advice is gone).
+#     Busy-everything comes from the /proc FIXTURE (lsof-invisible holders —
+#     the #448 bug class); the non-Linux fallback branch keeps the legacy
+#     per-port `lsof -ti` with the PATH-stub call counter ≤ attempts budget
+#     on its own unreadable-root fixture; live-proc control succeeds.
 #   → Case 10 (#317 §3.3): write_run_lease format (one 8-field line, stamp
 #     = write time); sweep_dead_runs on a dead-PID lease — TERM-stubborn
 #     masked holder killed via the kill -9 rung, tagged files + lease of the
@@ -105,10 +108,12 @@
 #     OWN lease (guarded by file presence), never a foreign one; no-tag
 #     caller shape touches no lease at all; kill_port_orphans is GONE
 #     (unmasked port kills banned — startup cleaning is sweep_dead_runs').
-#   → Case 17 (#317 Task 7): _legacy_ports_free — the single lsof-based
-#     gate on ports {3002,3003,8001,8002} (overridable via SHARD_LEGACY_PORTS
-#     for deterministic fake-holder steering); free → rc 0, one holder →
-#     rc 1, holder gone → rc 0 again.
+#   → Case 17 (#317 Task 7 + #448 Task 2): _legacy_ports_free — the single
+#     busy-gate on ports {3002,3003,8001,8002} (overridable via
+#     SHARD_LEGACY_PORTS for deterministic fake-holder steering); free →
+#     rc 0, one holder → rc 1, holder gone → rc 0 again; on the /proc
+#     FIXTURE: attributed busy → rc 1, lsof-INVISIBLE ownerless busy →
+#     rc 1 (port_free proves the invisibility), fixture-free → rc 0.
 #   → Case 18 (#317 Task 7, §3.3 wipe, US-1/US-4/US-5/US-7): tagged wipe —
 #     own .next-shard-*_<tag> always removed; untagged legacy + lookalikes
 #     (.next-shard-N / .next-shard-stale / invalid-suffix) removed only
@@ -138,8 +143,9 @@
 #
 # Spec coverage (Feature #448, /proc port resolver + fail-fast run — LIB
 # primitives, docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md
-# §3.1/§3.2; Task 1 adds the PRIMITIVES, the five lsof call-site replacements
-# are Task 2 in the same PR):
+# §3.1/§3.2; Task 1 added the PRIMITIVES, Task 2 migrated the five lsof call
+# sites onto them — _masked_pids / allocate / _legacy_ports_free in the lib,
+# TOCTOU-recheck + .next-wipe guard in test-all.sh via _listener_on):
 #   → Case 23 (§3.1, US-1): listen_pairs on a /proc-form FIXTURE (make_proc_
 #     fixture & co) — tcp + tcp6 tables; LISTEN rows resolved, non-LISTEN
 #     (ESTABLISHED/TIME_WAIT) never reported; hex→dec port decode (incl.
@@ -161,6 +167,18 @@
 #     consumer's business) but the sweep spares it; unattributable fixture
 #     row → sample line is exactly «- <port>» (busy, «-» is never a pgrep
 #     candidate — no kill) with NO numeric pid claiming the port.
+#   → Case 27 (#448 Task 2, US-2): _listener_on — the busy-probe behind the
+#     legacy gate / TOCTOU recheck / .next-wipe guard — on the /proc fixture:
+#     attributed busy → rc 0, ownerless busy (lsof-INVISIBLE, proven via
+#     port_free — the #448 bug class) → rc 0, free → rc≠0, any-busy arg set →
+#     rc 0, no args → rc≠0; fixture inert without SHARD_PROC_DRYRUN;
+#     unreadable root → the legacy per-port `lsof -ti` fallback fires
+#     (PATH-stub call counter ≥ 1 proves lsof really ran).
+#   → Case 28 (#448 Task 2, US-2): allocate_shard_ports on the fixture —
+#     fully fixture-busy window (incl. lsof-invisible ownerless rows) →
+#     rc≠0 fail-fast; wider window → 4 distinct in-window ports never
+#     including the fixture-busy ones (busy/free discrimination is the
+#     resolver's — lsof sees those ports FREE).
 
 set -euo pipefail
 
@@ -983,10 +1001,61 @@ else
   FAIL=1
 fi
 
-# ── Case 9 (#317 §3.2): window exhausted → bounded fail-fast ────────────────
-echo "── Case 9 (#317 §3.2): fail-fast after ≤20 attempts, actionable message ──"
+# ── Case 9 (#317 §3.2 + #448 Task 2): window exhausted → bounded fail-fast ──
+echo "── Case 9 (#317+#448): fail-fast after ≤20 attempts; fixture-busy window, /proc hint ──"
 fresh_root "case9"
 source_lib
+# Controls (9a/9b) assume the live box has nothing on 20001-20004 — the
+# Task-1-vetted fixture range; if a foreign process sits there, skip them.
+CONT9=true
+for p9c in 20001 20002 20003 20004; do
+  port_free "$p9c" || CONT9=false
+done
+# 9a (resolver path): pinned 4-port window, ALL four ports fixture-busy.
+# The holders are lsof-INVISIBLE (fixture rows only, no real socket) — the
+# exact #448 bug class: the old lsof check called them free and the run died
+# on EADDRINUSE; the resolver-driven allocator must exhaust and fail-fast
+# with the /proc-tables hint (no lsof advice left in the message).
+FIX9A="$WORK/procfix-case9a"
+make_proc_fixture "$FIX9A"
+proc_fix_row   "$FIX9A" tcp 92001 4E21 0A     # 20001 busy, attributed
+proc_fix_owner "$FIX9A" 5151 92001
+proc_fix_row   "$FIX9A" tcp 92002 4E22 0A     # 20002 busy, ownerless → invisible
+proc_fix_row   "$FIX9A" tcp6 92003 4E23 0A    # 20003 busy (tcp6 table)
+proc_fix_row   "$FIX9A" tcp6 92004 4E24 0A    # 20004 busy (tcp6 table)
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX9A"
+set +e
+P9=$(allocate_shard_ports 2>&1); R9=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+CASE9A_OK=true
+[ "$R9" -ne 0 ] || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q "20001-20004" || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q "$SHARD_ALLOC_MAX_ATTEMPTS" || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q '/proc/net/tcp' || CASE9A_OK=false   # /proc hint
+if printf '%s\n' "$P9" | grep -q 'lsof'; then CASE9A_OK=false; fi  # lsof advice gone
+# 9a control: same pinned window against the LIVE /proc (fixture inert) —
+# the real 20001-20004 are free, so the allocation must succeed: proves the
+# FIXTURE rows drove the failure, not the window pinning.
+R9C=-1
+if [ "$CONT9" = true ]; then
+  set +e
+  P9C=$(allocate_shard_ports 2>&1); R9C=$?
+  set -e
+  [ "$R9C" -eq 0 ] || CASE9A_OK=false
+fi
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+# 9b (non-Linux fallback branch): fixture root WITHOUT net/tcp → listen_pairs
+# rc 1 → the allocator keeps the legacy per-port `lsof -ti`; the PATH stub
+# reports every port held → rc≠0, and the call counter stays within the
+# attempts budget — the #317 contract, preserved byte-for-byte for non-Linux
+# runs on its own fixture.
+FIX9B="$WORK/procfix-case9b"
+mkdir -p "$FIX9B"                             # no net/ at all
 cat > "$STUBS/lsof" <<EOF
 #!/bin/sh
 printf 'x' >> "$STUBS/lsof_calls"
@@ -994,26 +1063,45 @@ exit 0
 EOF
 chmod +x "$STUBS/lsof"
 rm -f "$STUBS/lsof_calls"
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX9B"
 set +e
-P9=$(PATH="$STUBS:$PATH" allocate_shard_ports 2>&1); R9=$?
+P9B=$(PATH="$STUBS:$PATH" allocate_shard_ports 2>&1); R9B=$?
 set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
 LSOF_N=$(wc -c < "$STUBS/lsof_calls" 2>/dev/null || printf '0')
 LSOF_N=$((LSOF_N))
-CASE9_OK=true
-[ "$R9" -ne 0 ] || CASE9_OK=false
-printf '%s\n' "$P9" | grep -q "$SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH" || CASE9_OK=false
-printf '%s\n' "$P9" | grep -q "$SHARD_ALLOC_MAX_ATTEMPTS" || CASE9_OK=false
-[ "$LSOF_N" -le "$SHARD_ALLOC_MAX_ATTEMPTS" ] || CASE9_OK=false
-# control: same call with the REAL lsof succeeds (the stub drove the failure)
-set +e
-P9B=$(allocate_shard_ports 2>&1); R9B=$?
-set -e
-[ "$R9B" -eq 0 ] || CASE9_OK=false
+CASE9B_OK=true
+[ "$R9B" -ne 0 ] || CASE9B_OK=false
+[ "$LSOF_N" -le "$SHARD_ALLOC_MAX_ATTEMPTS" ] || CASE9B_OK=false
+[ "$LSOF_N" -gt 0 ] || CASE9B_OK=false         # the legacy lsof really ran
+# 9b control: unreadable root + the REAL lsof → fallback sees the fixture-only
+# ports free → rc 0 (the stub drove the failure, not the broken resolver).
+R9D=-1
+if [ "$CONT9" = true ]; then
+  SHARD_PROC_DRYRUN=1
+  SHARD_PROC_ROOT="$FIX9B"
+  set +e
+  P9D=$(allocate_shard_ports 2>&1); R9D=$?
+  set -e
+  unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+  [ "$R9D" -eq 0 ] || CASE9B_OK=false
+fi
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
 rm -f "$STUBS/lsof" "$STUBS/lsof_calls"
+CASE9_OK=true
+$CASE9A_OK || CASE9_OK=false
+$CASE9B_OK || CASE9_OK=false
 if $CASE9_OK; then
-  echo "PASS Case 9 (#317): stubbed-held window → rc≠0, message names window+attempts, lsof calls=$LSOF_N ≤ 20; real-lsof control rc=0"
+  echo "PASS Case 9 (#317+#448): fixture-busy window (incl. lsof-invisible) → rc≠0, message names window+attempts+/proc hint; fallback branch: lsof calls=$LSOF_N ≤ $SHARD_ALLOC_MAX_ATTEMPTS; controls rc=$R9C/$R9D"
 else
-  echo "FAIL Case 9 (#317): rc=$R9 lsof_calls=$LSOF_N control_rc=$R9B out='$P9'"
+  echo "FAIL Case 9 (#317+#448): 9a rc=$R9 (hint=/proc-net-tcp) 9b rc=$R9B lsof_calls=$LSOF_N controls=$R9C/$R9D cont9=$CONT9"
+  echo "── Case 9 outputs ──"
+  printf '9a: %s\n9b: %s\n' "$P9" "$P9B"
+  echo "─────────────────"
   FAIL=1
 fi
 
@@ -1621,11 +1709,33 @@ wait "$H17" 2>/dev/null || true
 TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$H17/}")
 set +e; _legacy_ports_free; R17C=$?; set -e
 [ "$R17C" -eq 0 ] || CASE17_OK=false
+# (d) #448 Task 2: the gate on the /proc fixture — attributed busy → rc≠0;
+# lsof-INVISIBLE ownerless busy → rc≠0 (port_free proves lsof is blind —
+# the #448 bug class; the resolver gate still closes); fixture-free → rc 0.
+FIX17="$WORK/procfix-case17"
+make_proc_fixture "$FIX17"
+proc_fix_row   "$FIX17" tcp 93001 4E21 0A     # 20001: attributed LISTEN
+proc_fix_owner "$FIX17" 6161 93001
+proc_fix_row   "$FIX17" tcp 93002 0ABC 0A     # 2748: ownerless (invisible)
+SHARD_LEGACY_PORTS=(20001 2748)
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX17"
+set +e; _legacy_ports_free; R17D=$?; set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R17D" -ne 0 ] || CASE17_OK=false
+port_free 20001 || CASE17_OK=false            # busy to the resolver, free to lsof
+port_free 2748  || CASE17_OK=false
+SHARD_LEGACY_PORTS=(20009 20003)              # fixture-free ports → gate open
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX17"
+set +e; _legacy_ports_free; R17E=$?; set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R17E" -eq 0 ] || CASE17_OK=false
 SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
 if $CASE17_OK; then
-  echo "PASS Case 17 (#317 Task 7): legacy gate free → busy (holder on $LG17_C) → free; single helper, overridden ports"
+  echo "PASS Case 17 (#317+#448): legacy gate free → busy (holder on $LG17_C) → free; fixture: attributed+invisible busy → rc≠0, fixture-free → rc=0"
 else
-  echo "FAIL Case 17 (#317 Task 7): helper_defined=$(declare -F _legacy_ports_free >/dev/null 2>&1 && echo yes || echo no) rc=$R17A/$R17B/$R17C"
+  echo "FAIL Case 17 (#317+#448): helper_defined=$(declare -F _legacy_ports_free >/dev/null 2>&1 && echo yes || echo no) rc=$R17A/$R17B/$R17C fixture=$R17D/$R17E"
   FAIL=1
 fi
 
@@ -2303,6 +2413,133 @@ if $CASE26_OK; then
 else
   echo "FAIL Case 26 (#448): holder=$(kill -0 "$H26" 2>/dev/null && echo alive || echo dead) plain=$(kill -0 "$P26" 2>/dev/null && echo alive || echo dead) unattr='$LP26C' rc=$LP26C_RC"
   echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 27 (#448 Task 2, US-2): _listener_on — probe of legacy gate / ──────
+# TOCTOU-recheck / .next-wipe guard — on the /proc fixture
+echo "── Case 27 (#448): _listener_on — busy/free/invisible on fixture; legacy lsof fallback ──"
+fresh_root "case27"
+source_lib
+CASE27_OK=true
+declare -F _listener_on >/dev/null 2>&1 || CASE27_OK=false
+FIX27="$WORK/procfix-case27"
+make_proc_fixture "$FIX27"
+proc_fix_row   "$FIX27" tcp 94001 4E22 0A     # 20002: attributed LISTEN
+proc_fix_owner "$FIX27" 7171 94001
+proc_fix_row   "$FIX27" tcp 94002 0ABC 0A     # 2748: ownerless (lsof-invisible)
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX27"
+set +e
+_listener_on 20002;           R27A=$?
+_listener_on 2748;            R27B=$?
+_listener_on 20007;           R27C=$?
+_listener_on 20007 20009;     R27D=$?
+_listener_on 20007 2748;      R27E=$?
+_listener_on;                 R27F=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R27A" -eq 0 ]  || CASE27_OK=false         # busy (attributed)
+[ "$R27B" -eq 0 ]  || CASE27_OK=false         # busy-invisible (ownerless)
+[ "$R27C" -ne 0 ]  || CASE27_OK=false         # free
+[ "$R27D" -ne 0 ]  || CASE27_OK=false         # all-free arg set
+[ "$R27E" -eq 0 ]  || CASE27_OK=false         # any-busy wins
+[ "$R27F" -ne 0 ]  || CASE27_OK=false         # no args → not busy
+# invisibility proof: lsof sees BOTH fixture-busy ports free (bug class #448)
+port_free 20002 || CASE27_OK=false
+port_free 2748  || CASE27_OK=false
+# dryrun gate: without the flag the fixture is inert — the live /proc has
+# nothing on the fixture ports → not busy
+set +e
+_listener_on 20002 2748; R27G=$?
+set -e
+[ "$R27G" -ne 0 ]  || CASE27_OK=false
+# non-Linux fallback branch: unreadable root → the probe keeps the legacy
+# per-port `lsof -ti` (PATH stub counts the calls; rc 0 = busy per the stub)
+FIX27B="$WORK/procfix-case27b"
+mkdir -p "$FIX27B"                            # no net/ at all
+cat > "$STUBS/lsof" <<EOF
+#!/bin/sh
+printf 'x' >> "$STUBS/lsof27_calls"
+exit 0
+EOF
+chmod +x "$STUBS/lsof"
+rm -f "$STUBS/lsof27_calls"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX27B"
+set +e
+P27H=$(PATH="$STUBS:$PATH" _listener_on 20002 2>&1); R27H=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+C27=$(wc -c < "$STUBS/lsof27_calls" 2>/dev/null || printf '0')
+C27=$((C27))
+rm -f "$STUBS/lsof" "$STUBS/lsof27_calls"
+[ "$R27H" -eq 0 ]  || CASE27_OK=false         # stub says busy
+[ "$C27" -ge 1 ]   || CASE27_OK=false         # legacy lsof really called
+if $CASE27_OK; then
+  echo "PASS Case 27 (#448): _listener_on — busy/invisible-busy → rc 0, free/empty → rc≠0; fixture inert without dryrun; fallback lsof calls=$C27"
+else
+  echo "FAIL Case 27 (#448): rc A=$R27A B=$R27B C=$R27C D=$R27D E=$R27E F=$R27F G=$R27G H=$R27H fallback_calls=$C27"
+  FAIL=1
+fi
+
+# ── Case 28 (#448 Task 2, US-2): allocator avoids fixture-busy ports, ───────
+# including the lsof-INVISIBLE holder (ownerless row) — the main #448 scenario
+echo "── Case 28 (#448): allocate_shard_ports — fixture-busy (incl. invisible) never returned ──"
+fresh_root "case28"
+source_lib
+CASE28_OK=true
+FIX28="$WORK/procfix-case28"
+make_proc_fixture "$FIX28"
+# phase 1 — pinned 4-port window, 20001 attributed-busy + 20002 ownerless-busy
+# (BOTH lsof-free: fixture-only holders): only 2 usable ports remain → the
+# bounded allocator must fail-fast (rc≠0). The old lsof path called all four
+# free and happily «allocated» the invisible holder's port.
+proc_fix_row   "$FIX28" tcp 95001 4E21 0A
+proc_fix_owner "$FIX28" 8181 95001            # 20001
+proc_fix_row   "$FIX28" tcp6 95002 4E22 0A    # 20002 ownerless → invisible
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX28"
+set +e
+P28=$(allocate_shard_ports 2>&1); R28=$?
+set -e
+[ "$R28" -ne 0 ] || CASE28_OK=false
+# phase 2 — wider 8-port window over the same fixture (6 usable): 4 distinct
+# in-window ports, NEVER the fixture-busy ones; bounded coupon-collector retry.
+SHARD_PORT_WINDOW_HIGH=20008
+P28B="" R28B=1 RETRY28=0
+while [ "$RETRY28" -lt 5 ]; do
+  RETRY28=$((RETRY28 + 1))
+  set +e
+  P28B=$(allocate_shard_ports 2>&1); R28B=$?
+  set -e
+  [ "$R28B" -eq 0 ] && break
+done
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+if [ "$R28B" -eq 0 ]; then
+  P28_N=$(printf '%s' "$P28B" | wc -w | tr -d ' ')
+  P28_U=$(printf '%s\n' $P28B | sort -u | wc -l | tr -d ' ')
+  [ "$P28_N" -eq 4 ] || CASE28_OK=false
+  [ "$P28_U" -eq 4 ] || CASE28_OK=false
+  for p28 in $P28B; do
+    { [ "$p28" -ge 20001 ] && [ "$p28" -le 20008 ]; } || CASE28_OK=false
+    [ "$p28" -ne 20001 ] || CASE28_OK=false   # attributed-busy avoided
+    [ "$p28" -ne 20002 ] || CASE28_OK=false   # INVISIBLE-busy avoided
+  done
+else
+  CASE28_OK=false
+fi
+# lsof is blind to both fixture holders — the discrimination was the resolver's
+port_free 20001 || CASE28_OK=false
+port_free 20002 || CASE28_OK=false
+if $CASE28_OK; then
+  echo "PASS Case 28 (#448): fully-busy 4-window → rc≠0; 8-window → 4 distinct ports avoiding fixture-busy 20001+20002 (lsof-free, invisible), tries=$RETRY28"
+else
+  echo "FAIL Case 28 (#448): phase1 rc=$R28 out='$P28'; phase2 rc=$R28B tries=$RETRY28 out='$P28B'"
   FAIL=1
 fi
 

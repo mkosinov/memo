@@ -31,12 +31,18 @@
 #     tagged file resources with no live lease = garbage (removed, no
 #     grace); log dirs run-<tag> only when the tag is dead > 24 h.
 #
-# Feature #448, spec §3.1/§3.2 (/proc port resolver — Task 1 primitives;
-# the five lsof call-site replacements are Task 2):
+# Feature #448, spec §3.1/§3.2 (/proc port resolver — Task 1 primitives +
+# Task 2 migration of the five lsof call sites onto them):
 #   listen_pairs       — ONE sample per call: «pid port» lines from
 #     /proc/net/tcp{,6} LISTEN rows + a single /proc/[0-9]*/fd/* scan;
 #     unattributable holder → «- port» (fail-closed busy); unreadable
 #     /proc/net/tcp → one stderr warning + rc 1 (callers keep lsof).
+#   _listen_busy_ports — busy-port SET from ONE listen_pairs sample
+#     (allocate_shard_ports' «порт ∈ сэмплу» filter).
+#   _listener_on PORT…— «does ANY of these ports have a listener?» probe
+#     behind _legacy_ports_free and test-all.sh's TOCTOU recheck /
+#     .next-wipe guard; ONE sample per call; the non-Linux fallback keeps
+#     the legacy per-port `lsof -ti :PORT` (byte-for-byte pre-#448).
 #   _watch_interval_s  — normalize SHARD_STACK_WATCH_S / SHARD_RUN_WATCH_S
 #     (default 5 s, hard max 600 s).
 
@@ -108,25 +114,43 @@ _watch_interval_s() {
 }
 
 # _proc_fd_owners ROOT → stdout строки «pid socket:[inode]» — ОДИН проход по
-# ROOT/[0-9]*/fd/* (по одному readlink на симлинк; не-сокетные цели отсеет
-# join-awk listen_pairs). Вызывается внутри подстановки <( ) — падение
-# отдельного readlink (нет прав на чужой fd, каталог исчез в гонке) гасится
-# молча: неатрибутируемый inode → «- port» (fail-closed, §3.1). Пустой вывод
-# ВАЛИДЕН (нет процессов/нет прав вовсе). bash 3.2: extract сегментов пути
-# параметрическими расширениями.
+# ROOT/[0-9]*/fd. ОДНА команда `ls -l` на ВСЕ fd-каталоги (заголовки групп
+# «<root>/<pid>/fd:» дают pid; внешний readlink на каждый fd — тысячи
+# fork+exec, СЕКУНДЫ на загруженном боксе: ломала ≤15 s контракт
+# cleanup_shards, #448 Task 2). Ошибки листинга (нет прав на чужой
+# fd-каталог, процесс умер в гонке) — на stderr, подавлены: неатрибутируемый
+# inode → «- port» (fail-closed, §3.1). Строки-заголовки «total N» и
+# не-сокетные цели отсеивает awk. Вызывается внутри подстановки <( ).
+# Пустой вывод ВАЛИДЕН (нет процессов/нет прав вовсе). bash 3.2 + awk
+# (mawk/BSD/gawk); формат «N -> socket:[I]» и групповые заголовки «dir:»
+# одинаковы на GNU/BSD ls.
 _proc_fd_owners() {
-  local link target pid
-  for link in "$1"/[0-9]*/fd/*; do
-    target="$(readlink "$link" 2>/dev/null)" || continue
-    case "$target" in
-      socket:\[*\])
-        pid="${link%/*}"                 # …/<pid>/fd/<n> → …/<pid>/fd
-        pid="${pid%/fd}"                 # …/<pid>
-        pid="${pid##*/}"                 # <pid>
-        printf '%s %s\n' "$pid" "$target"
-        ;;
-    esac
+  local dir
+  local dirs=()
+  for dir in "$1"/[0-9]*; do
+    [ -d "$dir/fd" ] && dirs+=("$dir/fd")
   done
+  [ "${#dirs[@]}" -gt 0 ] || return 0
+  # Групповой заголовок «<dir>:» ls печатает только при >1 каталога —
+  # единственный каталог дублируется (повторы строк вычитает join-awk
+  # listen_pairs по (inode, pid); занятости это не меняет).
+  if [ "${#dirs[@]}" -eq 1 ]; then
+    dirs+=("${dirs[0]}")
+  fi
+  ls -l "${dirs[@]}" 2>/dev/null | awk '
+    /\/fd:$/ {
+      pid = $0
+      sub(/\/fd:$/, "", pid)   # …/<pid>/fd: → …/<pid>
+      sub(/.*\//, "", pid)     # → <pid>
+      next
+    }
+    {
+      target = $0
+      sub(/.*-> /, "", target)
+      if (pid ~ /^[0-9]+$/ && target ~ /^socket:\[[0-9]+\]$/) print pid, target
+    }
+  ' || true
+  return 0
 }
 
 # listen_pairs → stdout строки «pid port» — ОДИН сэмпл на вызов, без lsof
@@ -212,6 +236,55 @@ listen_pairs() {
   return 0
 }
 
+# _listen_busy_ports → stdout: пробел-обособленное множество занятых LISTEN-
+# портов (« 20001 20002 ») из ОДНОГО сэмпла listen_pairs (#448 Task 2, §3.1).
+# Членство проверяется шаблоном `case $set in *" $port "*` — обособление с
+# обеих сторон обязательно. Строки «- port» вносят порт (неатрибутируемый
+# держатель занят — fail-closed: «свободен» только порт без LISTEN-строки);
+# pid-колонка множеству не нужна. rc 1 ⇔ не-Linux фолбэк (сэмпл не удался,
+# см. listen_pairs) — вызывающая точка использует прежний lsof-вызов.
+# Пустой сэмпл → одиночный пробел (валидное пустое множество). bash 3.2.
+_listen_busy_ports() {
+  local sample spid sport out=" "
+  if ! sample="$(listen_pairs)"; then
+    return 1
+  fi
+  while read -r spid sport; do
+    [ -n "$sport" ] || continue
+    out="$out$sport "
+  done <<< "$sample"
+  printf '%s\n' "$out"
+  return 0
+}
+
+# _listener_on PORT... → rc 0 ⇔ ХОТЯ бы один из аргументов — порт занят
+# LISTEN-держателем. ЕДИНАЯ проба занятости трёх точек #448 Task 2 (§3.1):
+# легаси-гейт _legacy_ports_free, TOCTOU-recheck и гард .next-вайпа в
+# test-all.sh. ОДИН сэмпл на вызов (фильтр «порт ∈ аргументам»), не по
+# проверке на порт: дешевле и видит невидимых lsof держателей
+# (перетитулованный process.title). Неатрибутируемый держатель («- port»)
+# считается занятым. rc 1 — все аргументы свободны ИЛИ аргументов нет.
+# Не-Linux фолбэк (listen_pairs rc≠0): прежний пословичный `lsof -ti :PORT`
+# байт-в-байт как до #448 (диапазонный синтаксис lsof -i :a-b непереносим
+# и запрещён); ошибающийся/недоступный lsof трактуется как «свободно»
+# (поза отказобезопасности как в allocate_shard_ports). bash 3.2: "$@" на
+# пустом наборе безопасен под set -u.
+_listener_on() {
+  local busy_ports port
+  if ! busy_ports="$(_listen_busy_ports)"; then
+    for port in "$@"; do
+      if lsof -ti :"$port" >/dev/null 2>&1; then
+        return 0
+      fi
+    done
+    return 1
+  fi
+  for port in "$@"; do
+    case "$busy_ports" in *" $port "*) return 0 ;; esac
+  done
+  return 1
+}
+
 # ── Внутренний хелпер: выборка «порт + маска команды» ───────────────────────
 # Использование: _masked_pids PORTS_VAR PGPATTERN GATE1 [GATE2 ...]
 #   PORTS_VAR — имя глобала-массива портов (SHARD_FRONTEND_PORTS/...);
@@ -219,27 +292,34 @@ listen_pairs() {
 #   GATE*     — подстроки, хотя бы одна из которых должна быть в ps args.
 # Выводит (stdout) pid'ы, прошедшие КОНЪЮНКЦИЮ: args содержит маску И pid
 # держит LISTEN-сокет на одном из проверяемых портов.
-# Выборка слушающих (§3.3) — ОДНОЙ командой на вызов: `lsof -nP -i TCP
-# -sTCP:LISTEN`, из локального адреса берётся порт (после последнего
-# двоеточия: `1.2.3.4:PORT`, `[::]:PORT`, `*:PORT`), затем фильтр
-# «порт ∈ множеству проверяемых». Только LISTEN и только ЛОКАЛЬНЫЙ конец:
-# исходящее соединение с проверяемым портом на УДАЛЁННОМ конце не
-# матчится (в отличие от `lsof -ti :PORT`, который ловит оба конца и
-# не-LISTEN сокеты); диапазонный синтаксис `lsof -i :a-b` не используется.
-# PID берётся правым подсчётом полей (NF-8): COMMAND бывает с пробелами
-# (перетитулованный next-server), левый край строки не фиксирован.
+# Выборка слушающих (§3.3) — ОДИН сэмпл на вызов: строки «pid port» из
+# /proc-резолвера listen_pairs (#448 Task 2, §3.1) — только LISTEN и только
+# ЛОКАЛЬНЫЙ конец (исходящее соединение с проверяемым портом на УДАЛЁННОМ
+# конце не матчится, в отличие от `lsof -ti :PORT`, который ловит оба конца
+# и не-LISTEN сокеты). Резолвер видит перетитулованных next-server'ов
+# (process.title с пробелами/скобками ломает разбор lsof — исходный баг
+# #448): stat не читается, только fd-симлинки. Неатрибутируемый держатель
+# приходит строкой «- port»: «-» не матчится ни с одним pgrep-кандидатом —
+# убийства нет, занятость видна (fail-closed, Task 1). rc≠0 сэмпла
+# (не-Linux) — прежняя lsof-выборка байт-в-байт: `lsof -nP -i TCP
+# -sTCP:LISTEN`, порт после последнего двоеточия (`1.2.3.4:PORT`,
+# `[::]:PORT`, `*:PORT`), PID правым подсчётом полей (NF-8: COMMAND бывает
+# с пробелами, левый край строки не фиксирован).
 # Чистый finder: сигналов не посылает; pid выводится один раз. bash 3.2:
 # имя массива читается через eval-косвенность.
 _masked_pids() {
   local ports_var="$1" pgpat="$2"; shift 2
   # Один LISTEN-сэмпл на вызов: строки «pid port» (только локальный конец).
   local pairs
-  pairs="$(lsof -nP -i TCP -sTCP:LISTEN 2>/dev/null | awk '
-    $(NF) == "(LISTEN)" {
-      name = $(NF - 1); sub(/^.*:/, "", name)
-      if (name ~ /^[0-9]+$/) print $(NF - 8), name
-    }
-  ' || true)"
+  if ! pairs="$(listen_pairs)"; then
+    # не-Linux фолбэк: прежняя lsof-выборка (формат пар тот же).
+    pairs="$(lsof -nP -i TCP -sTCP:LISTEN 2>/dev/null | awk '
+      $(NF) == "(LISTEN)" {
+        name = $(NF - 1); sub(/^.*:/, "", name)
+        if (name ~ /^[0-9]+$/) print $(NF - 8), name
+      }
+    ' || true)"
+  fi
   local ports_list
   ports_list="$(eval "printf '%s ' \"\${${ports_var}[@]}\"")"
   # Держатели LISTEN-сокетов на проверяемых портах (фильтр «порт ∈ множеству»).
@@ -285,22 +365,29 @@ _sweep_masked() {
 }
 
 # _legacy_ports_free → rc 0 ⇔ НИ один порт из SHARD_LEGACY_PORTS
-# ({3002,3003,8001,8002}) не занят слушателем. ЕДИНЫЙ lsof-хелпер,
-# переиспользуемый вайпом и уборщиком (§3.3: «легаси-нетегированные —
-# при свободных легаси-портах (то же правило, что у вайпа)»). Проверка —
-# по одному `lsof -ti :PORT` на порт (диапазонный синтаксис запрещён);
-# нечисловые токены пропускаются; недоступный/ошибающийся lsof трактуется
-# как «свободно» (поза отказобезопасности как в allocate_shard_ports).
-# Детерминизм тестов — переопределением SHARD_LEGACY_PORTS на тест-порты
-# с фейк-держателями.
+# ({3002,3003,8001,8002}) не занят слушателем. ЕДИНЫЙ гейт, переиспользуемый
+# вайпом и уборщиком (§3.3: «легаси-нетегированные — при свободных
+# легаси-портах (то же правило, что у вайпа)»). Проба занятости —
+# _listener_on (#448 Task 2): ОДИН сэмпл /proc-резолвера на вызов против
+# ВСЕГО набора (неатрибутируемый держатель = занят — невидимые lsof
+# легаси-стеки больше не открывают гейт); не-Linux фолбэк — прежний
+# пословичный `lsof -ti :PORT` внутри _listener_on (байт-в-байт как до
+# #448). Нечисловые токены пропускаются; ошибающийся lsof во фолбэке
+# трактуется как «свободно» (поза отказобезопасности как в
+# allocate_shard_ports). Детерминизм тестов — переопределением
+# SHARD_LEGACY_PORTS на тест-порты с фейк-держателями / /proc-фикстурой.
 _legacy_ports_free() {
-  local p
+  local p ports=()
   for p in ${SHARD_LEGACY_PORTS[*]:-}; do
     case "$p" in ''|*[!0-9]*) continue ;; esac
-    if lsof -ti :"$p" >/dev/null 2>&1; then
-      return 1
-    fi
+    ports+=("$p")
   done
+  if [ "${#ports[@]}" -eq 0 ]; then
+    return 0
+  fi
+  if _listener_on "${ports[@]}"; then
+    return 1
+  fi
   return 0
 }
 
@@ -611,21 +698,31 @@ gen_run_tag() {
 # allocate_shard_ports [BUSY_PORT ...] → stdout: 4 pairwise-distinct free
 # ports from the window, space-separated on one line (draw order — the
 # ports are equivalent; the caller assigns front1/back1/front2/back2 per
-# spec §3.2); rc 1 on failure. Every candidate is checked with lsof
-# (per-port `lsof -ti :PORT` — range syntax `lsof -i :a-b` is unportable
-# and banned); BUSY_PORT args are treated as occupied without a check —
+# spec §3.2); rc 1 on failure. Занятость кандидата — фильтр «порт ∈ сэмплу»:
+# ОДИН сэмпл listen_pairs на вызов (#448 Task 2, §3.1 — видит невидимых
+# lsof держателей, перетитулованный process.title; до #448 был пословичный
+# `lsof -ti :PORT`, диапазонный синтаксис `lsof -i :a-b` unportable и
+# запрещён); BUSY_PORT args are treated as occupied without a check —
 # the caller passes live-lease ports there ("порты живых лизов передаются
-# как занятые"). Bounded: at most SHARD_ALLOC_MAX_ATTEMPTS candidate
-# draws, then fail-fast with an actionable message. stdout carries ONLY
-# the ports; diagnostics go to stderr.
+# как занятые"). Не-Linux фолбэк (сэмпл не удался) — прежний пословичный
+# `lsof -ti :PORT` в цикле ниже, байт-в-байт. Bounded: at most
+# SHARD_ALLOC_MAX_ATTEMPTS candidate draws, then fail-fast with an
+# actionable message. stdout carries ONLY the ports; diagnostics go to
+# stderr only.
 allocate_shard_ports() {
   local busy_raw="$*"
   local busy=" $busy_raw "
   local picked=()
   local attempt=0 have=0 port ok listed
+  # Один сэмпл на вызов → множество занятых LISTEN-портов («- port» строки
+  # вносят порт — неатрибутируемый держатель тоже занят, fail-closed §3.1).
+  local busy_ports="" resolver_ok=false
+  if busy_ports="$(_listen_busy_ports)"; then
+    resolver_ok=true
+  fi
   while [ "$have" -lt 4 ]; do
     if [ "$attempt" -ge "$SHARD_ALLOC_MAX_ATTEMPTS" ]; then
-      echo "❌ allocate_shard_ports: cannot find 4 free pairwise-distinct ports in window $SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH after $SHARD_ALLOC_MAX_ATTEMPTS attempts (got $have of 4; busy args:${busy_raw:+ $busy_raw}). Check listeners with 'lsof -nP -i TCP -sTCP:LISTEN', free the window or re-run test-all." >&2
+      echo "❌ allocate_shard_ports: cannot find 4 free pairwise-distinct ports in window $SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH after $SHARD_ALLOC_MAX_ATTEMPTS attempts (got $have of 4; busy args:${busy_raw:+ $busy_raw}). Inspect the LISTEN rows in /proc/net/tcp and /proc/net/tcp6 for the busy ports, free the window or re-run test-all." >&2
       return 1
     fi
     attempt=$((attempt + 1))
@@ -634,8 +731,12 @@ allocate_shard_ports() {
     case "$busy" in *" $port "*) ok=false ;; esac        # live-lease port
     listed="${picked[*]:-}"
     case " $listed " in *" $port "*) ok=false ;; esac    # already picked
-    if [ "$ok" = true ] && lsof -ti :"$port" >/dev/null 2>&1; then
-      ok=false                                          # someone listens
+    if [ "$ok" = true ]; then
+      if [ "$resolver_ok" = true ]; then
+        case "$busy_ports" in *" $port "*) ok=false ;; esac   # sample: someone listens
+      elif lsof -ti :"$port" >/dev/null 2>&1; then
+        ok=false                                             # non-Linux fallback: legacy lsof
+      fi
     fi
     if [ "$ok" = true ]; then
       picked+=("$port")

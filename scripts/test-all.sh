@@ -236,13 +236,14 @@ wipe_shard_dirs
 # frontend/admin. dev.sh admin mode serves :3001 from the SAME .next dir;
 # deleting it under a running server corrupts that stack (same lesson as
 # the port-guarded pkill above — never touch what a live stack owns).
+# Busy probe (#448 Task 2): one _listener_on call = ONE /proc-resolver
+# sample against the three ports — an lsof-INVISIBLE dev server (rewritten
+# process.title, the #448 bug class) is seen and protects the dir; the
+# non-Linux fallback inside _listener_on keeps the legacy per-port lsof.
 NEXT_DIR_IN_USE=false
-for port in 3001 3002 3003; do
-  if lsof -ti :"$port" >/dev/null 2>&1; then
-    NEXT_DIR_IN_USE=true
-    break
-  fi
-done
+if _listener_on 3001 3002 3003; then
+  NEXT_DIR_IN_USE=true
+fi
 if [ "$NEXT_DIR_IN_USE" = false ]; then
   echo "  → removing stale frontend/admin/.next (prevents baked NEXT_PUBLIC_API_URL poisoning)..."
   rm -rf frontend/admin/.next
@@ -389,8 +390,11 @@ for i in $(seq 0 1); do
   # narrow the allocate→bind TOCTOU window). Busy here means someone bound
   # the port between the allocation check and now — fatal with a clear
   # message, no blind retry (spec §4). exit 1 → the trap cleans up.
+  # Probe (#448 Task 2): _listener_on — the /proc-resolver sample sees
+  # lsof-invisible holders too (rewritten process.title); non-Linux keeps
+  # the legacy per-port `lsof -ti` inside the helper.
   for port in "$FRONTEND_PORT" "$BACKEND_PORT"; do
-    if lsof -ti :"$port" >/dev/null 2>&1; then
+    if _listener_on "$port"; then
       echo "❌ порт $port занят между проверкой и стартом; перезапусти test-all" >&2
       exit 1
     fi

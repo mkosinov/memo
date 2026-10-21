@@ -9,9 +9,9 @@ declaration order in schemas.ts is the client UI order (e.g. ChannelSchema:
 
 from __future__ import annotations
 
-import enum
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,6 +23,9 @@ from src.models.enums import (
     TariffAudience,
     UserRole,
 )
+
+if TYPE_CHECKING:
+    import enum
 
 # Named schema in packages/api-client/src/schemas.ts → backend enum (source of truth).
 PARITY: dict[str, type[enum.Enum]] = {

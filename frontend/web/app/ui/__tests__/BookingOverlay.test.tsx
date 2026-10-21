@@ -1,7 +1,50 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import type { Mock } from "vitest";
 import type { ActivityView } from "../../lib/model/view/activity";
 import { BookingActivityOverlay } from "../BookingActivityOverlay";
+
+// ── Mock the client-branch API (#499): session detection, OTP, booking ──────
+vi.mock("@memo/api-client", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    ApiError,
+    getMyClient: vi.fn(),
+    requestOtpCode: vi.fn(),
+    verifyOtpCode: vi.fn(),
+    createMyRecord: vi.fn(),
+  };
+});
+
+import {
+  getMyClient,
+  requestOtpCode,
+  verifyOtpCode,
+  createMyRecord,
+  ApiError,
+} from "@memo/api-client";
+
+const mockedGetMyClient = getMyClient as unknown as Mock;
+const mockedRequestOtpCode = requestOtpCode as unknown as Mock;
+const mockedVerifyOtpCode = verifyOtpCode as unknown as Mock;
+const mockedCreateMyRecord = createMyRecord as unknown as Mock;
+
+const createdResponse = {
+  id: "rec-1",
+  activity_id: "act-1",
+  start: "2026-05-20T14:00:00",
+  comment: null,
+  visits: [{ name: null, age: null, tariff_id: "tariff-adult", price: 1500 }],
+};
 
 const mockActivity: ActivityView = {
   id: "act-1",
@@ -51,6 +94,34 @@ function increaseTariffSeats(testId: string, times = 1) {
   const counter = screen.getByTestId(testId);
   const plus = within(counter).getByRole("button", { name: /increase/i });
   for (let i = 0; i < times; i += 1) fireEvent.click(plus);
+}
+
+beforeEach(() => {
+  mockedGetMyClient.mockReset();
+  mockedRequestOtpCode.mockReset();
+  mockedVerifyOtpCode.mockReset();
+  mockedCreateMyRecord.mockReset();
+  // Default: no client session — the OTP step path.
+  mockedGetMyClient.mockRejectedValue(new ApiError(401, "unauthorized"));
+  mockedRequestOtpCode.mockResolvedValue({});
+  mockedVerifyOtpCode.mockResolvedValue({ phone: "+79991234567", name: null });
+  mockedCreateMyRecord.mockResolvedValue(createdResponse);
+});
+
+/** Fill a valid contact form; pass phone=null to skip the session-owned field. */
+function fillContactForm(name = "Иван", phone: string | null = "+79991234567") {
+  fireEvent.change(screen.getByLabelText("Имя"), { target: { value: name } });
+  if (phone !== null) {
+    fireEvent.change(screen.getByLabelText("Телефон"), { target: { value: phone } });
+  }
+}
+
+/** Wait for the session check to settle, then click «Записаться». */
+async function clickSubmit() {
+  const submitBtn = await screen.findByRole("button", { name: /Записаться/i });
+  await waitFor(() => expect(submitBtn).not.toBeDisabled());
+  fireEvent.click(submitBtn);
+  return submitBtn;
 }
 
 describe("BookingActivityOverlay — real tariffs (US-1)", () => {
@@ -232,17 +303,17 @@ describe("BookingActivityOverlay — form flow", () => {
     expect(submitBtn).toBeDisabled();
   });
 
-  it("shows success state after booking", () => {
+  it("shows the booking-success screen after a 201 (authenticated client)", async () => {
+    mockedGetMyClient.mockResolvedValue({ phone: "+79990001122", name: "Анна" });
     renderOverlay();
 
-    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Иван" } });
-    fireEvent.change(screen.getByLabelText("Телефон"), { target: { value: "+79991234567" } });
+    await screen.findByDisplayValue("+79990001122");
+    fillContactForm("Иван", null);
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
 
-    const submitBtn = screen.getByRole("button", { name: /Записаться/i });
-    expect(submitBtn).not.toBeDisabled();
-    fireEvent.click(submitBtn);
+    await clickSubmit();
 
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
     expect(screen.getByText("Вы записаны!")).toBeInTheDocument();
     expect(screen.getByText("Готово")).toBeInTheDocument();
   });
@@ -254,5 +325,216 @@ describe("BookingActivityOverlay — form flow", () => {
     const backBtn = screen.getByRole("button", { name: /назад/i });
     fireEvent.click(backBtn);
     expect(handleClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("BookingActivityOverlay — OTP step for anonymous submit (US-1)", () => {
+  it("shows the confirm-phone step instead of creating a record", async () => {
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    expect(screen.getByText("Подтвердите телефон")).toBeInTheDocument();
+    expect(screen.getByText("+79991234567")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Отправить код/i })).toBeInTheDocument();
+    expect(mockedCreateMyRecord).not.toHaveBeenCalled();
+  });
+
+  it("full anonymous flow: code → verify → automatic re-submission with the exact payload → success", async () => {
+    renderOverlay();
+
+    fillContactForm("Иван", "+79991234567");
+    fireEvent.change(screen.getByLabelText(/Комментарий/i), {
+      target: { value: "Нужен стул для ребёнка" },
+    });
+    increaseTariffSeats("tariff-counter-tariff-adult", 2);
+    increaseTariffSeats("tariff-counter-tariff-kid", 1);
+    // Names for the first adult seat only; the rest stay anonymous.
+    fireEvent.click(screen.getByRole("button", { name: /Указать имена посетителей/i }));
+    fireEvent.change(screen.getAllByLabelText("Имя посетителя")[0], {
+      target: { value: "Иван" },
+    });
+    fireEvent.change(screen.getAllByLabelText("Возраст посетителя")[0], {
+      target: { value: "9" },
+    });
+
+    await clickSubmit();
+
+    // Step 1: request the code for the form phone.
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+    await waitFor(() =>
+      expect(mockedRequestOtpCode).toHaveBeenCalledWith("+79991234567"),
+    );
+
+    // Step 2: enter the code and confirm.
+    fireEvent.change(await screen.findByTestId("otp-code-input"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+    await waitFor(() =>
+      expect(mockedVerifyOtpCode).toHaveBeenCalledWith("+79991234567", "123456"),
+    );
+
+    // Step 3: automatic re-submission — no extra click.
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(1));
+    expect(mockedCreateMyRecord).toHaveBeenCalledWith({
+      activity_id: "act-1",
+      phone: "+79991234567",
+      comment: "Нужен стул для ребёнка",
+      visits: [
+        { name: "Иван", age: 9, tariff_id: "tariff-adult" },
+        { name: null, age: null, tariff_id: "tariff-adult" },
+        { name: null, age: null, tariff_id: "tariff-kid" },
+      ],
+    });
+
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+  });
+
+  it("shows the dev-transport code in the step when the API echoes it", async () => {
+    mockedRequestOtpCode.mockResolvedValue({ dev_code: "654321" });
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+    expect(await screen.findByText(/654321/)).toBeInTheDocument();
+  });
+});
+
+describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
+  async function openStep() {
+    renderOverlay();
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+    await screen.findByTestId("otp-code-input");
+  }
+
+  it("keeps a wrong/expired code error inside the step and creates no record", async () => {
+    mockedVerifyOtpCode.mockRejectedValue(new ApiError(401, "Неверный код"));
+    await openStep();
+
+    fireEvent.change(screen.getByTestId("otp-code-input"), { target: { value: "000000" } });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+
+    const errorBlock = await screen.findByTestId("otp-step-error");
+    expect(errorBlock).toHaveTextContent("Неверный код");
+    // The step stays: the input is still there for a corrected code.
+    expect(screen.getByTestId("otp-code-input")).toBeInTheDocument();
+    expect(mockedCreateMyRecord).not.toHaveBeenCalled();
+  });
+
+  it("recovers from a wrong code and still auto-submits", async () => {
+    mockedVerifyOtpCode
+      .mockRejectedValueOnce(new ApiError(401, "Неверный код"))
+      .mockResolvedValue({ phone: "+79991234567", name: null });
+    await openStep();
+
+    const input = screen.getByTestId("otp-code-input");
+    fireEvent.change(input, { target: { value: "000000" } });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+    await screen.findByTestId("otp-step-error");
+
+    fireEvent.change(screen.getByTestId("otp-code-input"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+  });
+
+  it("shows «Вход временно недоступен» when the transport is down (503)", async () => {
+    mockedRequestOtpCode.mockRejectedValue(
+      new ApiError(503, "notify transport unavailable", "NOTIFY_TRANSPORT_UNAVAILABLE"),
+    );
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+
+    const errorBlock = await screen.findByTestId("otp-step-error");
+    expect(errorBlock).toHaveTextContent("Вход временно недоступен");
+    expect(mockedCreateMyRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe("BookingActivityOverlay — authenticated client", () => {
+  it("prefills the phone from the session and locks it readonly", async () => {
+    mockedGetMyClient.mockResolvedValue({ phone: "+79990001122", name: "Анна" });
+    renderOverlay();
+
+    const phoneInput = await screen.findByLabelText("Телефон");
+    expect(phoneInput).toHaveValue("+79990001122");
+    expect(phoneInput).toHaveAttribute("readonly");
+  });
+
+  it("submits directly without the OTP step", async () => {
+    mockedGetMyClient.mockResolvedValue({ phone: "+79990001122", name: null });
+    renderOverlay();
+
+    await screen.findByDisplayValue("+79990001122");
+    fillContactForm("Иван", null);
+    increaseTariffSeats("tariff-counter-tariff-kid", 1);
+    await clickSubmit();
+
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(1));
+    expect(mockedCreateMyRecord).toHaveBeenCalledWith({
+      activity_id: "act-1",
+      // The session phone rides the wire, not whatever was typed before prefill.
+      phone: "+79990001122",
+      comment: null,
+      visits: [{ name: null, age: null, tariff_id: "tariff-kid" }],
+    });
+    expect(mockedRequestOtpCode).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+  });
+});
+
+describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
+  async function submitExpectingRefusal() {
+    renderOverlay();
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    // Anonymous: walk through the OTP step first.
+    fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
+    fireEvent.change(await screen.findByTestId("otp-code-input"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Подтвердить/i }));
+
+    return await screen.findByTestId("booking-error");
+  }
+
+  it("renders the server message with a retry button; a retry resubmits and can succeed", async () => {
+    mockedCreateMyRecord
+      .mockRejectedValueOnce(new ApiError(409, "Недостаточно мест"))
+      .mockResolvedValue(createdResponse);
+
+    const errorBlock = await submitExpectingRefusal();
+    expect(errorBlock).toHaveTextContent("Недостаточно мест");
+    expect(mockedCreateMyRecord).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(errorBlock).getByRole("button", { name: /Отправить еще раз/i }));
+
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+  });
+
+  it("falls back to a connection hint on network failure", async () => {
+    mockedCreateMyRecord.mockRejectedValue(new TypeError("fetch failed"));
+
+    const errorBlock = await submitExpectingRefusal();
+    expect(errorBlock).toHaveTextContent(
+      "Не удалось отправить запись. Проверьте соединение и попробуйте еще раз",
+    );
   });
 });

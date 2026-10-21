@@ -2,6 +2,28 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Home from "../page";
 
+// ── Mock the client-branch API (#499): the booking overlay detects the
+// session on open — keep these tests hermetic (anonymous by default).
+vi.mock("@memo/api-client", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    ApiError,
+    getMyClient: vi.fn().mockRejectedValue(new ApiError(401, "unauthorized")),
+    requestOtpCode: vi.fn(),
+    verifyOtpCode: vi.fn(),
+    createMyRecord: vi.fn(),
+  };
+});
+
 // ── Mock hooks ──────────────────────────────────────────────
 const mocks = vi.hoisted(() => ({
   selectDate: vi.fn(),

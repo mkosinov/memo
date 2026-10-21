@@ -1,5 +1,27 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+// ── Mock the client-branch API (#499): the booking overlay detects the
+// session on open — keep these tests hermetic (anonymous by default).
+vi.mock("@memo/api-client", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    ApiError,
+    getMyClient: vi.fn().mockRejectedValue(new ApiError(401, "unauthorized")),
+    requestOtpCode: vi.fn(),
+    verifyOtpCode: vi.fn(),
+    createMyRecord: vi.fn(),
+  };
+});
 
 // ── Page imports ────────────────────────────────────────────
 import ServicesPage from "../services/page";

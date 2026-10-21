@@ -13,6 +13,11 @@ export interface ContactFormProps {
   /** Controlled value for confirmation method (overrides internal state) */
   confirmation?: string;
   onConfirmationChange?: (method: string) => void;
+  /** Controlled value for comment (overrides internal state) */
+  comment?: string;
+  onCommentChange?: (comment: string) => void;
+  /** Locks the phone input (#499): a logged-in client books with the session phone. */
+  phoneReadOnly?: boolean;
 }
 
 const CONFIRMATION_OPTIONS = [
@@ -21,18 +26,20 @@ const CONFIRMATION_OPTIONS = [
   { value: "max", label: "Max" },
 ] as const;
 
-export function ContactForm({ onValidityChange, submitted, name: controlledName, onNameChange, phone: controlledPhone, onPhoneChange, confirmation: controlledConfirmation, onConfirmationChange }: ContactFormProps) {
+export function ContactForm({ onValidityChange, submitted, name: controlledName, onNameChange, phone: controlledPhone, onPhoneChange, confirmation: controlledConfirmation, onConfirmationChange, comment: controlledComment, onCommentChange, phoneReadOnly = false }: ContactFormProps) {
   const [internalName, setInternalName] = useState("");
   const [internalPhone, setInternalPhone] = useState("");
-  const [comment, setComment] = useState("");
+  const [internalComment, setInternalComment] = useState("");
   const [internalConfirmation, setInternalConfirmation] = useState("telegram");
 
   const name = controlledName ?? internalName;
   const phone = controlledPhone ?? internalPhone;
   const confirmation = controlledConfirmation ?? internalConfirmation;
+  const comment = controlledComment ?? internalComment;
   const setName = onNameChange ?? setInternalName;
   const setPhone = onPhoneChange ?? setInternalPhone;
   const setConfirmation = onConfirmationChange ?? setInternalConfirmation;
+  const setComment = onCommentChange ?? setInternalComment;
 
   const isValid =
     name.trim().length >= 2 &&
@@ -98,9 +105,11 @@ export function ContactForm({ onValidityChange, submitted, name: controlledName,
           placeholder="Телефон"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
+          readOnly={phoneReadOnly}
           className={[
             "w-full rounded-lg border px-3 py-2 text-sm transition",
             "border-[#E0E0E1] text-[#1a1a1a] placeholder-[#cccccc]",
+            phoneReadOnly ? "bg-[#F5F5F4] text-[#555555]" : null,
             "focus:border-[#004D56] focus:outline-none",
             (
               (phone.length > 0 || submitted) && !isValidPhoneNumber(phone, "RU")

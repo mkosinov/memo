@@ -1,11 +1,22 @@
 "use client";
 
 import type { ActivityView } from "@/app/lib/model/view/activity";
-import { useState, useCallback } from "react";
+import type { MyRecordCreate } from "@memo/api-client";
+import { useState, useCallback, useEffect } from "react";
 import { Overlay } from "./Overlay";
 import { Button } from "./Button";
 import { Counter } from "./Counter";
 import { ContactForm } from "./ContactForm";
+import { OtpStep } from "./OtpStep";
+import {
+  buildMyRecordCreate,
+  SEATS_KEY,
+  visitorRowKey,
+  type VisitorFormValue,
+} from "@/app/lib/model/domain/booking";
+import { useClientSession } from "@/app/hooks/useClientSession";
+import { useOtpLogin } from "@/app/hooks/useOtpLogin";
+import { useCreateMyRecord } from "@/app/hooks/useCreateMyRecord";
 
 /** State of the tariffs data (#499): drives loading/error blocks in place of counters. */
 export type TariffsStatus = "ready" | "loading" | "error";
@@ -31,19 +42,15 @@ interface VisitorRow {
   tariffLabel: string;
 }
 
-interface VisitorName {
-  name: string;
-  age: string;
-}
-
-/** Counter key for tariff-free services: a single unnamed seats counter (US-2). */
-const SEATS_KEY = "seats";
 const SEATS_LABEL = "Места";
 const NO_TARIFF_LABEL = "—";
 
 function formatPrice(price: number): string {
   return `${price.toLocaleString("ru-RU")} ₽`;
 }
+
+/** Overlay content machine (#499): form → (OTP step for anonymous) → success. */
+type Step = "form" | "otp" | "success";
 
 export function BookingActivityOverlay({
   isOpen,
@@ -67,11 +74,35 @@ export function BookingActivityOverlay({
     : [{ id: SEATS_KEY, label: SEATS_LABEL, price: 0 }];
 
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [visitors, setVisitors] = useState<Record<string, VisitorName>>({});
+  const [visitors, setVisitors] = useState<Record<string, VisitorFormValue>>({});
   const [showVisitors, setShowVisitors] = useState(false);
   const [isFormValid, setIsFormValid] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  // Contact-form state is owned here: the OTP step replaces the form without
+  // losing it, and the phone becomes session-owned once authenticated (#499).
+  const [contactName, setContactName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [comment, setComment] = useState("");
+
+  const session = useClientSession(isOpen && !!activity);
+  const otp = useOtpLogin();
+  const submission = useCreateMyRecord();
+
+  const [step, setStep] = useState<Step>("form");
+  /** The snapshot submitted on «Записаться» — reused by the post-login auto retry. */
+  const [pendingPayload, setPendingPayload] = useState<MyRecordCreate | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStep("form");
+      setPendingPayload(null);
+      otp.reset();
+    }
+  }, [isOpen, otp.reset]);
+
+  const authenticated = session.client !== null;
+  const phoneValue = session.client !== null ? session.client.phone : formPhone;
 
   const total = counters.reduce(
     (sum, counter) => sum + (counts[counter.id] ?? 0) * counter.price,
@@ -82,18 +113,24 @@ export function BookingActivityOverlay({
     0,
   );
   const tariffsReady = tariffsStatus === "ready";
-  const canSubmit = totalCount > 0 && isFormValid && !!activity && tariffsReady;
+  const canSubmit =
+    totalCount > 0 &&
+    isFormValid &&
+    !!activity &&
+    tariffsReady &&
+    session.status !== "checking" &&
+    submission.status !== "submitting";
 
   /** One row per selected seat; the trailing seats of each counter keep a stable key. */
   const visitorRows: VisitorRow[] = hasTariffs
     ? tariffs.flatMap((t) =>
         Array.from({ length: counts[t.id] ?? 0 }, (_, k) => ({
-          key: `${t.id}#${k}`,
+          key: visitorRowKey(t.id, k),
           tariffLabel: t.title,
         })),
       )
     : Array.from({ length: counts[SEATS_KEY] ?? 0 }, (_, k) => ({
-        key: `${SEATS_KEY}#${k}`,
+        key: visitorRowKey(SEATS_KEY, k),
         tariffLabel: NO_TARIFF_LABEL,
       }));
 
@@ -105,17 +142,55 @@ export function BookingActivityOverlay({
     setCounts((prev) => ({ ...prev, [counterId]: value }));
   };
 
-  const handleVisitorChange = (rowKey: string, field: keyof VisitorName, value: string) => {
+  const handleVisitorChange = (rowKey: string, field: keyof VisitorFormValue, value: string) => {
     setVisitors((prev) => ({
       ...prev,
       [rowKey]: { ...(prev[rowKey] ?? { name: "", age: "" }), [field]: value },
     }));
   };
 
+  /** Send (or re-send) the record; 201 → success screen, refusal → booking-error block. */
+  const sendRecord = async (payload: MyRecordCreate) => {
+    const ok = await submission.submit(payload);
+    if (ok) setStep("success");
+  };
+
   const handleSubmit = () => {
     setSubmitted(true);
-    if (canSubmit) {
-      setIsSuccess(true);
+    if (!canSubmit || !activity) return;
+    const payload = buildMyRecordCreate({
+      activityId: activity.id,
+      phone: phoneValue,
+      comment,
+      counts,
+      visitors,
+      tariffs,
+    });
+    setPendingPayload(payload);
+    if (authenticated) {
+      void sendRecord(payload);
+    } else {
+      setStep("otp");
+    }
+  };
+
+  /** Verified: the session now exists — re-submit the pending record automatically. */
+  const handleVerifyCode = async (code: string) => {
+    const client = await otp.verify(phoneValue, code);
+    if (!client) return; // the step shows its own error
+    setStep("form");
+    void session.refresh(); // the phone field becomes readonly-from-session
+    if (pendingPayload) await sendRecord(pendingPayload);
+  };
+
+  const handleOtpBack = () => {
+    setStep("form");
+    otp.reset();
+  };
+
+  const handleRetry = () => {
+    if (pendingPayload && submission.status !== "submitting") {
+      void sendRecord(pendingPayload);
     }
   };
 
@@ -125,11 +200,14 @@ export function BookingActivityOverlay({
 
   if (!activity) return null;
 
-  if (isSuccess) {
+  if (step === "success") {
     const time = `${activity.dateFormatted}, ${activity.time}`;
     return (
       <Overlay isOpen={isOpen} onClose={onClose} size="full">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <div
+          data-testid="booking-success"
+          className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4"
+        >
           {/* Palette icon */}
           <div className="w-20 h-20 rounded-full bg-[#004D56] flex items-center justify-center mb-6">
             <svg
@@ -176,6 +254,24 @@ export function BookingActivityOverlay({
             Готово
           </Button>
         </div>
+      </Overlay>
+    );
+  }
+
+  if (step === "otp") {
+    return (
+      <Overlay isOpen={isOpen} onClose={onClose} size="full">
+        <OtpStep
+          phone={phoneValue}
+          requesting={otp.stage === "requesting"}
+          codeSent={otp.stage === "entering" || otp.stage === "verifying"}
+          verifying={otp.stage === "verifying"}
+          error={otp.error}
+          devCode={otp.devCode}
+          onRequestCode={() => void otp.requestCode(phoneValue)}
+          onVerify={handleVerifyCode}
+          onBack={handleOtpBack}
+        />
       </Overlay>
     );
   }
@@ -314,8 +410,31 @@ export function BookingActivityOverlay({
 
       {/* Contact form */}
       <div className="mb-6">
-        <ContactForm onValidityChange={handleValidityChange} submitted={submitted} />
+        <ContactForm
+          onValidityChange={handleValidityChange}
+          submitted={submitted}
+          name={contactName}
+          onNameChange={setContactName}
+          phone={phoneValue}
+          onPhoneChange={setFormPhone}
+          phoneReadOnly={authenticated}
+          comment={comment}
+          onCommentChange={setComment}
+        />
       </div>
+
+      {/* Booking refusal (US-3): message + re-send */}
+      {submission.status === "error" && submission.error && (
+        <div
+          data-testid="booking-error"
+          className="mb-6 rounded-lg border border-[#C8503C]/40 bg-[#C8503C]/5 px-4 py-3"
+        >
+          <p className="text-sm text-[#C8503C] mb-3">{submission.error}</p>
+          <Button variant="outline" size="sm" onClick={handleRetry}>
+            Отправить еще раз
+          </Button>
+        </div>
+      )}
 
       {/* Submit button */}
       <Button
@@ -325,7 +444,7 @@ export function BookingActivityOverlay({
         disabled={!canSubmit}
         className="w-full"
       >
-        Записаться
+        {submission.status === "submitting" ? "Отправляем…" : "Записаться"}
       </Button>
     </Overlay>
   );

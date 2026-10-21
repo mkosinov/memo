@@ -16,7 +16,10 @@ vi.mock('@/hooks/useMaterials', () => ({
 // (search → dropdown option → chip). The beforeEach static empty page is
 // only the default for scenarios that don't type into the picker.
 const mockGetTags = vi.fn();
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: serviceFields imports TariffAudienceSchema at module level —
+// spread the actual module, the fn mocks stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   getTags: (...args: unknown[]) => mockGetTags(...args),
 }));
 

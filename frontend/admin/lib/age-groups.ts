@@ -10,6 +10,8 @@
  * it is deliberately not a number and must never be mixed with ages 3–17.
  */
 
+import type { TariffAudience } from '@memo/api-client';
+
 /** Inclusive lower bound of the «Дети» age group. */
 export const KIDS_AGE_MIN = 3;
 
@@ -19,8 +21,10 @@ export const KIDS_AGE_MAX = 11;
 /** Inclusive upper bound of the «Подростки» age group (18+ = «Взрослый» sentinel). */
 export const TEEN_AGE_MAX = 17;
 
-/** AgeSelect sentinel for «Взрослый» — a string, not an age. */
-export const ADULT_AGE_SENTINEL = 'adult';
+/** AgeSelect sentinel for «Взрослый» — a string, not an age. A member of the
+ *  TariffAudience contract union (#480 §3.4 — satisfies keeps the 'adult'
+ *  literal while checking membership). */
+export const ADULT_AGE_SENTINEL = 'adult' satisfies TariffAudience;
 
 /** All ages of the «Дети» group, ascending: 3..11. */
 export const KIDS_AGES: number[] = range(KIDS_AGE_MIN, KIDS_AGE_MAX);

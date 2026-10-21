@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
+import { ApiError } from './client';
 import {
   AuditLogResponseSchema,
   AuditLogListResponseSchema,
   AuditLogAuthorResponseSchema,
   StaffResponseSchema,
+  StaffAccountSchema,
   UserResponseSchema,
   UserPhonePatchSchema,
   PasswordLinkResponseSchema,
@@ -40,10 +42,14 @@ import {
   RecordResponseSchema,
   RecordCreateSchema,
   type RecordResponse,
+  RecordUpdateSchema,
+  type RecordCreate,
+  type RecordUpdate,
   ClientResponseSchema,
   type ClientResponse,
   ClientUpdateSchema,
   PaymentResponseSchema,
+  PaymentTotalsResponseSchema,
   type PaymentResponse,
   TariffCreateSchema,
   StaffArchiveRequestSchema,
@@ -75,8 +81,343 @@ import {
   UserSettingsResponseSchema,
   UserSettingsUpdateSchema,
   type UserSettingsResponse,
+  VisitStatusSchema,
+  PaymentMethodSchema,
+  ChannelSchema,
+  UserRoleSchema,
+  TariffAudienceSchema,
+  ArchiveStatusSchema,
+  type VisitStatus,
+  type PaymentMethod,
+  type Channel,
+  type UserRole,
+  type TariffAudience,
+  type ArchiveStatus,
+  VisitCreateSchema,
+  VisitPatchSchema,
+  PaymentCreateSchema,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
+
+// ─── Contract enums (#480 — named enum dictionaries, spec §3.1) ─────────────
+// The six contract enums as named schemas: `.options` is the runtime value
+// list UIs derive from (zod ^3.23 tuple in DECLARATION order — the client-side
+// order, not the enums.py order). Backend parity is by value SET, not order.
+
+describe('Contract enum schemas (#480 §3.1)', () => {
+  it('VisitStatusSchema.options — composition and declaration order', () => {
+    expect(VisitStatusSchema.options).toEqual(['waiting', 'visited', 'missed', 'cancelled']);
+  });
+
+  it('PaymentMethodSchema.options — composition and declaration order', () => {
+    expect(PaymentMethodSchema.options).toEqual(['cash', 'card', 'transfer']);
+  });
+
+  it('ChannelSchema.options — client order (telegram, whatsapp, max — NOT enums.py order)', () => {
+    expect(ChannelSchema.options).toEqual(['telegram', 'whatsapp', 'max']);
+  });
+
+  it('UserRoleSchema.options — composition and declaration order', () => {
+    expect(UserRoleSchema.options).toEqual(['admin', 'master']);
+  });
+
+  it('TariffAudienceSchema.options — composition and declaration order', () => {
+    expect(TariffAudienceSchema.options).toEqual(['kid', 'adult', 'all']);
+  });
+
+  it('ArchiveStatusSchema.options — composition and declaration order', () => {
+    expect(ArchiveStatusSchema.options).toEqual(['active', 'archived', 'all']);
+  });
+
+  it('rejects values outside the dictionary', () => {
+    expect(() => VisitStatusSchema.parse('confirmed')).toThrow(); // dead Wave-5 RecordStatus value
+    expect(() => PaymentMethodSchema.parse('crypto')).toThrow();
+    expect(() => ChannelSchema.parse('instagram')).toThrow();
+    expect(() => UserRoleSchema.parse('superuser')).toThrow();
+    expect(() => TariffAudienceSchema.parse('senior')).toThrow();
+    expect(() => ArchiveStatusSchema.parse('deleted')).toThrow();
+  });
+
+  it('derived TS unions are valid types', () => {
+    const vs: VisitStatus = 'waiting';
+    const pm: PaymentMethod = 'cash';
+    const ch: Channel = 'max';
+    const ur: UserRole = 'master';
+    const ta: TariffAudience = 'all';
+    const ar: ArchiveStatus = 'archived';
+    expect([vs, pm, ch, ur, ta, ar]).toEqual(['waiting', 'cash', 'max', 'master', 'all', 'archived']);
+  });
+});
+
+// ─── Request enum fields rewired to named schemas (#480 §3.2) ───────────────
+// Rewiring swaps inline z.enum literals for the named dictionaries above —
+// parsing behavior of the request schemas must NOT change.
+
+describe('Request enum fields rewired to named schemas (#480 §3.2)', () => {
+  it('VisitCreateSchema.status accepts every VisitStatus, rejects unknown values', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitCreateSchema.parse({ record_id: 'r-1', price: 100, status }).status).toBe(status);
+    }
+    expect(() =>
+      VisitCreateSchema.parse({ record_id: 'r-1', price: 100, status: 'confirmed' }),
+    ).toThrow();
+  });
+
+  it('VisitCreateSchema.status stays optional (backend defaults to waiting)', () => {
+    expect(VisitCreateSchema.parse({ record_id: 'r-1', price: 100 }).status).toBeUndefined();
+  });
+
+  it('VisitPatchSchema.status accepts every VisitStatus, rejects unknown values', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitPatchSchema.parse({ status }).status).toBe(status);
+    }
+    expect(() => VisitPatchSchema.parse({ status: 'no_show' })).toThrow();
+  });
+
+  it('PaymentCreateSchema.method accepts every PaymentMethod, stays optional, rejects unknown', () => {
+    for (const method of PaymentMethodSchema.options) {
+      expect(PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100, method }).method).toBe(method);
+    }
+    expect(PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100 }).method).toBeUndefined();
+    expect(() =>
+      PaymentCreateSchema.parse({ record_id: 'r-1', amount: 100, method: 'crypto' }),
+    ).toThrow();
+  });
+
+  it('RecordCreateSchema nested visits carry optional VisitStatus', () => {
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ price: 2500, status: 'visited' }],
+    });
+    expect(parsed.visits?.[0]?.status).toBe('visited');
+    expect(() =>
+      RecordCreateSchema.parse({ activity_id: 'a-1', visits: [{ price: 2500, status: 'pending' }] }),
+    ).toThrow();
+  });
+
+  it('RecordCreateSchema no longer accepts the dead top-level status (backend 422s on it)', () => {
+    // The Wave-5 mirror is gone (#480 §3.2): record status is DERIVED from
+    // visits server-side; RecordCreate/RecordUpdate payloads reject the field
+    // with extra="forbid". GH #479 made the mirror .strict() — a stray key
+    // throws here exactly as the server 422s.
+    expect(() =>
+      RecordCreateSchema.parse({ activity_id: 'a-1', visits: [], status: 'confirmed' }),
+    ).toThrow();
+    // @ts-expect-error status is not part of RecordCreate anymore
+    const typed: RecordCreate = { activity_id: 'a-1', visits: [], status: 'waiting' };
+    expect(typed.activity_id).toBe('a-1');
+  });
+
+  it('RecordUpdateSchema (own PUT contract since #479) rejects the dead status', () => {
+    // Own strict PUT contract, deliberately NOT Create.partial() (GH #479):
+    // the dead status throws instead of stripping (#480 §3.2 + backend
+    // extra="forbid" parity).
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [{ visitor_id: 'v-1', price: 1000 }],
+        status: 'confirmed',
+      }),
+    ).toThrow();
+  });
+});
+
+// ─── Strict response fields (#480 §3.3 — концепция A) ─────────────────────
+// Seven response fields parse by enum dictionaries now. An unknown value is
+// reachable only via a backend bug or manual SQL; it must fail the WHOLE
+// response (client.ts parses the entire body) and escape as a ZodError —
+// NOT an ApiError — so handlers matching only ApiError never swallow it.
+// Deliberate exceptions keep z.string(): ClientResponse.channel (documented
+// legacy junk, backend #60), AuditLogResponse.user_role (journal snapshot
+// of historical values), PaymentTotalsResponse.totals (backend dict[str,int]).
+
+describe('Strict response fields (#480 §3.3)', () => {
+  const visitRow = {
+    id: 'visit-1',
+    record_id: 'record-1',
+    visitor_id: null,
+    tariff_id: null,
+    price: 2500,
+    custom_price: null,
+    status: 'waiting',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+  };
+
+  const recordRow = {
+    id: 'record-1',
+    activity_id: 'activity-1',
+    client_id: null,
+    status: 'waiting',
+    seats: 2,
+    comment: null,
+    custom_price: null,
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+    visits: [visitRow],
+  };
+
+  const recordViewRow = {
+    ...recordRow,
+    client_name: 'Иван Петров',
+    activity_start: '2026-01-02T12:00:00Z',
+    service_title: 'Живопись',
+    master_name: 'Анна Иванова',
+    location_name: 'Студия 1',
+    master_color: '#5B8C7A',
+    is_private: false,
+    paid: 0,
+  };
+
+  const paymentRow = {
+    id: 'payment-1',
+    record_id: 'record-1',
+    amount: 5000,
+    method: 'card',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+  };
+
+  const accountRow = {
+    id: 'u-1',
+    phone: '+79990000001',
+    role: 'master',
+    password_is_set: true,
+    is_active: true,
+    link_expires_at: null,
+  };
+
+  const authMeBody = {
+    user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
+    permissions: ['*'],
+  };
+
+  const userRow = {
+    id: 'u-1',
+    phone: '+79990000001',
+    role: 'admin',
+    staff_id: null,
+    password_is_set: true,
+    is_active: true,
+  };
+
+  const profileRow = {
+    role: 'master',
+    has_staff: true,
+    has_master: true,
+    first_name: 'Анна',
+    last_name: 'Иванова',
+    avatar_url: null,
+    specialties: ['живопись'],
+    patronymic: null,
+    birth_date: null,
+    residence_address: null,
+    birth_place: null,
+    passport_series_number: null,
+    passport_issued_date: null,
+    passport_issued_by: null,
+    registration_address: null,
+  };
+
+  const auditRow = {
+    id: 'al-1',
+    created_at: '2026-01-01T10:00:00Z',
+    user: { id: 'u-1', label: 'Иванов Иван' },
+    user_role: 'admin',
+    action: 'update',
+    entity: 'clients',
+    entity_id: 'c-1',
+    entity_label: 'Иванов Иван',
+    changes: null,
+  };
+
+  const clientRow = {
+    id: 'client-1',
+    name: 'Иван Петров',
+    phone: '+79990000002',
+    email: null,
+    channel: 'telegram',
+    created_at: '2026-01-01T10:00:00Z',
+    updated_at: '2026-01-01T10:00:00Z',
+    archived: false,
+  };
+
+  /** Run a parse expecting it to throw a ZodError (the fail-closed escape
+   *  type — never an ApiError, which response-validation errors predate). */
+  function expectZodError(schema: z.ZodTypeAny, data: unknown): void {
+    let thrown: unknown = undefined;
+    try {
+      schema.parse(data);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ZodError);
+    expect(thrown).not.toBeInstanceOf(ApiError);
+  }
+
+  // ── negatives: an unknown value fails the whole response ─────────────────
+
+  it('VisitResponseSchema: unknown status → ZodError for the whole response', () => {
+    expectZodError(VisitResponseSchema, { ...visitRow, status: 'confirmed' }); // dead Wave-5 RecordStatus value
+    expectZodError(VisitResponseSchema, { ...visitRow, status: 'no_show' });
+  });
+
+  it('RecordResponseSchema: unknown status → ZodError (record status carries VisitStatus)', () => {
+    expectZodError(RecordResponseSchema, { ...recordRow, status: 'confirmed' });
+  });
+
+  it('RecordViewResponseSchema inherits the tightened status (extend)', () => {
+    expect(RecordViewResponseSchema.parse(recordViewRow).status).toBe('waiting');
+    expectZodError(RecordViewResponseSchema, { ...recordViewRow, status: 'bogus' });
+  });
+
+  it('PaymentResponseSchema: unknown method → ZodError; null still parses (backend enum | None)', () => {
+    expectZodError(PaymentResponseSchema, { ...paymentRow, method: 'crypto' });
+    expect(PaymentResponseSchema.parse({ ...paymentRow, method: null }).method).toBeNull();
+  });
+
+  it.each([
+    ['StaffAccountSchema.role', StaffAccountSchema, () => ({ ...accountRow, role: 'superuser' })],
+    ['AuthUserSchema.role (auth/me + login body)', AuthMeSchema, () => ({
+      ...authMeBody,
+      user: { ...authMeBody.user, role: 'superuser' },
+    })],
+    ['UserResponseSchema.role', UserResponseSchema, () => ({ ...userRow, role: 'owner' })],
+    ['MyProfileSchema.role', MyProfileSchema, () => ({ ...profileRow, role: 'superuser' })],
+  ])('%s: unknown role → ZodError', (_name, schema, makeData) => {
+    expectZodError(schema, makeData());
+  });
+
+  // ── positives: dictionary values parse (the tightening must not over-fire)
+
+  it('VisitStatus / PaymentMethod / UserRole values all still parse', () => {
+    for (const status of VisitStatusSchema.options) {
+      expect(VisitResponseSchema.parse({ ...visitRow, status }).status).toBe(status);
+    }
+    for (const method of PaymentMethodSchema.options) {
+      expect(PaymentResponseSchema.parse({ ...paymentRow, method }).method).toBe(method);
+    }
+    for (const role of UserRoleSchema.options) {
+      expect(AuthMeSchema.parse({ ...authMeBody, user: { ...authMeBody.user, role } }).user.role).toBe(role);
+    }
+  });
+
+  // ── counter-cases: the deliberate §3.3 exceptions stay strings ───────────
+
+  it('ClientResponseSchema.channel: arbitrary legacy strings still parse (backend #60 junk)', () => {
+    expect(ClientResponseSchema.parse({ ...clientRow, channel: 'instagram' }).channel).toBe('instagram');
+    expect(ClientResponseSchema.parse({ ...clientRow, channel: null }).channel).toBeNull();
+  });
+
+  it('AuditLogResponseSchema.user_role: arbitrary historical strings still parse (journal snapshot)', () => {
+    expect(AuditLogResponseSchema.parse({ ...auditRow, user_role: 'superuser' }).user_role).toBe('superuser');
+  });
+
+  it('PaymentTotalsResponseSchema.totals: free-form string keys stay (backend dict[str, int])', () => {
+    const parsed = PaymentTotalsResponseSchema.parse({ totals: { cash: 1, weird_unknown: 2 } });
+    expect(parsed.totals).toEqual({ cash: 1, weird_unknown: 2 });
+  });
+});
 
 // ─── StaffResponse (GH #266 — composite staff card) ─────────────────────────
 
@@ -1176,7 +1517,7 @@ describe('PhotoListResponseSchema (GH #211)', () => {
 
 // ─── VisitResponse ──────────────────────────────────────────────────────────
 
-const validVisit = {
+const validVisit: VisitResponse = {
   id: 'visit-1',
   record_id: 'record-1',
   visitor_id: 'visitor-1',
@@ -1205,11 +1546,11 @@ describe('VisitResponseSchema', () => {
 
 // ─── RecordResponse ────────────────────────────────────────────────────────
 
-const validRecord = {
+const validRecord: RecordResponse = {
   id: 'record-1',
   activity_id: 'activity-1',
   client_id: 'client-1',
-  status: 'confirmed',
+  status: 'waiting', // VisitStatus value (#480 §3.3): 'confirmed' was a stale fixture string, never on the wire
   seats: 2,
   comment: 'VIP guests',
   custom_price: null,
@@ -1224,7 +1565,7 @@ describe('RecordResponseSchema', () => {
     expect(result.id).toBe('record-1');
     expect(result.activity_id).toBe('activity-1');
     expect(result.client_id).toBe('client-1');
-    expect(result.status).toBe('confirmed');
+    expect(result.status).toBe('waiting');
     expect(result.seats).toBe(2);
     expect(result.comment).toBe('VIP guests');
     expect(result.visits).toHaveLength(1);
@@ -1254,19 +1595,26 @@ describe('RecordResponseSchema', () => {
 
 describe('RecordCreateSchema (#482)', () => {
   it('keeps the notify flag in the parsed payload', () => {
-    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1', notify: true });
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      notify: true,
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
     expect(parsed.notify).toBe(true);
   });
 
   it('keeps notify optional — legacy payloads without the flag still parse', () => {
-    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1' });
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
     expect(parsed.notify).toBeUndefined();
   });
 });
 
 // ─── RecordViewResponse (GH #213: composite read endpoint display fields) ───
 
-const recordViewVisit = {
+const recordViewVisit: VisitResponse = {
   id: 'visit-1',
   record_id: 'record-1',
   visitor_id: 'visitor-1',
@@ -1277,11 +1625,11 @@ const recordViewVisit = {
   updated_at: '2024-06-01T12:00:00Z',
 };
 
-const validRecordView = {
+const validRecordView: RecordView = {
   id: 'record-1',
   activity_id: 'activity-1',
   client_id: 'client-1',
-  status: 'confirmed',
+  status: 'waiting', // VisitStatus value (#480 §3.3)
   seats: 2,
   comment: 'VIP guests',
   custom_price: null,
@@ -1353,6 +1701,151 @@ describe('RecordViewResponseSchema', () => {
   it('RecordView is a valid type', () => {
     const r: RecordView = validRecordView;
     expect(r.paid).toBe(5000);
+  });
+});
+
+// ─── RecordCreateSchema / RecordUpdateSchema (GH #479 — mirror alignment) ──
+
+describe('RecordCreateSchema', () => {
+  it('parses a canonical admin create (visitor_id-based visits)', () => {
+    const result = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [
+        { visitor_id: 'v-1', tariff_id: 't-1', price: 3500 },
+        { tariff_id: 't-1', price: 3500 }, // anonymous seat — no visitor_id
+      ],
+    });
+    expect(result.visits).toHaveLength(2);
+    expect(result.visits[0]?.visitor_id).toBe('v-1');
+    expect(result.visits[0]?.tariff_id).toBe('t-1');
+  });
+
+  it('accepts name-based visits (name/age/tariff_id — web contract)', () => {
+    const result = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      visits: [
+        { name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 },
+        { name: 'Петр', age: null, tariff_id: null, price: 2500 },
+      ],
+    });
+    expect(result.visits[0]?.name).toBe('Мария');
+    expect(result.visits[0]?.age).toBe(8);
+    expect(result.visits[0]?.tariff_id).toBe('t-kid');
+    expect(result.visits[1]?.age).toBeNull();
+    expect(result.visits[1]?.tariff_id).toBeNull();
+  });
+
+  it('keeps visit price required (optional price is #499)', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [{ name: 'Мария', tariff_id: 't-kid' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects record-level status (backend 422 parity, extra="forbid")', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        status: 'confirmed',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects record-level seats (seats = len(visits), server-computed)', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        seats: 2,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a payload without visits (backend: required list)', () => {
+    expect(() => RecordCreateSchema.parse({ activity_id: 'a-1' })).toThrow();
+  });
+
+  it('RecordCreate type rejects status/seats (dropped from the mirror)', () => {
+    const data: RecordCreate = {
+      activity_id: 'a-1',
+      visits: [{ visitor_id: 'v-1', price: 1000 }],
+    };
+    // @ts-expect-error status no longer exists on RecordCreate
+    expect(data.status).toBeUndefined();
+    // @ts-expect-error seats no longer exists on RecordCreate
+    expect(data.seats).toBeUndefined();
+  });
+});
+
+describe('RecordUpdateSchema', () => {
+  it('parses a full-replacement PUT payload (activity_id + visits)', () => {
+    const result = RecordUpdateSchema.parse({
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      comment: 'перенос',
+      custom_price: 5000,
+      visits: [{ visitor_id: 'v-1', tariff_id: 't-1', price: 3500 }],
+    });
+    expect(result.activity_id).toBe('a-1');
+    expect(result.custom_price).toBe(5000);
+  });
+
+  it('accepts name-based visits (shared VisitItem contract)', () => {
+    const result = RecordUpdateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 }],
+    });
+    expect(result.visits[0]?.name).toBe('Мария');
+  });
+
+  it('requires activity_id (own PUT contract, NOT Create.partial())', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({ visits: [{ price: 1000 }] }),
+    ).toThrow();
+  });
+
+  it('rejects a payload without visits (full replacement needs the list)', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({ activity_id: 'a-1', comment: null }),
+    ).toThrow();
+  });
+
+  it('rejects record-level status/seats and create-only phone', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        status: 'confirmed',
+      }),
+    ).toThrow();
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        seats: 2,
+      }),
+    ).toThrow();
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        phone: '+79991234567',
+      }),
+    ).toThrow();
+  });
+
+  it('RecordUpdate type rejects seats (dropped from the mirror)', () => {
+    const data: RecordUpdate = {
+      activity_id: 'a-1',
+      visits: [{ price: 1000 }],
+    };
+    // @ts-expect-error seats no longer exists on RecordUpdate
+    expect(data.seats).toBeUndefined();
   });
 });
 
@@ -1431,7 +1924,7 @@ describe('ClientUpdateSchema', () => {
 
 // ─── PaymentResponse ───────────────────────────────────────────────────────
 
-const validPayment = {
+const validPayment: PaymentResponse = {
   id: 'payment-1',
   record_id: 'record-1',
   amount: 5000,

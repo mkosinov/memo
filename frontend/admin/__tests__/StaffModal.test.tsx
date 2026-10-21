@@ -73,6 +73,17 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('StaffModal role field (GH #263 D10)', () => {
+  // #480 §3.4: the option list derives from UserRoleSchema.options — pin the
+  // composition and order (empty + admin/master with ru labels).
+  it('role select offers exactly admin/master (UserRole declaration order)', () => {
+    setup({ mode: 'edit', staff: createMockStaffResponse({ position_ids: ['smm'], has_user: true }) });
+    const options = Array.from(roleSelect().options).map((o) => o.value);
+    const labels = Array.from(roleSelect().options).map((o) => o.label);
+    expect(options).toEqual(['', 'admin', 'master']);
+    expect(labels).toEqual(['— не выбрана —', 'Администратор', 'Мастер']);
+  });
+
+
   // Edit pre-fill: the select seeds from the template of the card's CURRENT
   // positions — anchored → the senior anchor; none → «— не выбрана —» (the
   // backend template decides).

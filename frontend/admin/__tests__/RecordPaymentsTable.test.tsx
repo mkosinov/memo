@@ -160,6 +160,26 @@ describe('RecordPaymentsTable — new-row save + preserve values', () => {
   });
 });
 
+// ─── Method options (#480 §3.4) ─────────────────────────────────────────────
+
+describe('RecordPaymentsTable — method options derive from the contract', () => {
+  it('offers exactly the PaymentMethod contract values in declaration order', () => {
+    renderPaymentsTable({});
+
+    fireEvent.click(screen.getByTestId('btn-add-payment'));
+    const methodSelect = screen.getByTestId('add-payment-method') as HTMLSelectElement;
+
+    // cash/card/transfer — the backend PaymentMethod enum (enums.py). The
+    // former literal list also carried a dead «Онлайн» option the contract
+    // cannot save (422); #480 §3.4 derives the list from the schema.
+    const options = Array.from(methodSelect.options).map((o) => o.value);
+    expect(options).toEqual(['cash', 'card', 'transfer']);
+
+    const labels = Array.from(methodSelect.options).map((o) => o.label);
+    expect(labels).toEqual(['Наличные', 'Карта', 'Перевод']);
+  });
+});
+
 // ─── Amount > 0 guard tests ─────────────────────────────────────────────────
 
 describe('RecordPaymentsTable — amount > 0 guard', () => {

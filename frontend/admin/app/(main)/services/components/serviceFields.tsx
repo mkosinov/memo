@@ -1,5 +1,15 @@
 /** Local field types — no shared modal imports */
 
+import { TariffAudienceSchema } from '@memo/api-client';
+import type { TariffAudience } from '@memo/api-client';
+
+/** Audience labels — values derive from TariffAudienceSchema.options (#480 §3.4). */
+const AUDIENCE_LABELS: Record<TariffAudience, string> = {
+  kid: 'детский',
+  adult: 'взрослый',
+  all: 'единый',
+};
+
 interface TextFieldConfig {
   type: 'text';
   key: string;
@@ -191,19 +201,18 @@ export const SERVICE_FIELDS: ServiceFieldConfig[] = [
         placeholder: 'Описание тарифа',
       },
       {
-        // GH #284: возрастная группа тарифа. Canonical values go to the API
-        // (TariffCreateSchema.audience), Russian lowercase labels are display
-        // only (owner decision); new rows default to «единый» (all). NO
-        // duplicate-group validation (canvas case — spec §2 п.2).
+        // GH #284: возрастная группа тарифа. Canonical values derive from
+        // TariffAudienceSchema.options (#480 §3.4); Russian lowercase labels
+        // are display only (owner decision); new rows default to «единый»
+        // (all). NO duplicate-group validation (canvas case — spec §2 п.2).
         type: 'select',
         key: 'audience',
         label: 'Возрастная группа',
         defaultValue: 'all',
-        options: [
-          { value: 'kid', label: 'детский' },
-          { value: 'adult', label: 'взрослый' },
-          { value: 'all', label: 'единый' },
-        ],
+        options: TariffAudienceSchema.options.map((value) => ({
+          value,
+          label: AUDIENCE_LABELS[value],
+        })),
       },
     ],
   },

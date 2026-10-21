@@ -125,7 +125,7 @@ const record2: RecordResponse = {
   ...record1,
   id: 'r2',
   activity_id: 'a2',
-  status: 'confirmed',
+  status: 'waiting',
   visits: [makeVisit('v3', 'r2', 3000)],
 };
 
@@ -141,7 +141,7 @@ const record4: RecordResponse = {
   ...record1,
   id: 'r4',
   activity_id: 'a2',
-  status: 'confirmed',
+  status: 'waiting',
   visits: [makeVisit('v5', 'r4', 1500)],
 };
 

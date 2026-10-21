@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getMe, login as apiLogin, logout as apiLogout, setUnauthorizedHandler } from '@memo/api-client';
+import { getMe, login as apiLogin, logout as apiLogout, setUnauthorizedHandler, ZodError } from '@memo/api-client';
 import type { AuthUser, MasterSnapshot } from '@memo/api-client';
 import { markForcedNavigation } from '@/lib/forcedNavigation';
 
@@ -18,8 +18,10 @@ interface AuthContextType {
   /** GH #262 T7 (pinned decision): re-fetch the /auth/me snapshot. The user
    *  plate reads avatar/name from this snapshot STATE (not react-query), so
    *  MyDataModal calls refresh() after a portrait upload and after a
-   *  successful save to keep the plate current. A failed refresh keeps the
-   *  existing snapshot (a network blip never logs the user out). */
+   *  successful save to keep the plate current. Error split (#480 §3.3):
+   *  a PARSE error of the auth response is fail-closed (session reset, error
+   *  rethrown); any other failure (network blip, ApiError) keeps the
+   *  existing snapshot — it must never log the user out. */
   refresh: () => Promise<void>;
 }
 
@@ -35,9 +37,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // resolving out of order can never apply a stale /auth/me response.
   const refreshSeq = useRef(0);
 
+  // #480 §3.3 «Контракт отказа»: drop every piece of auth state to guest.
+  // Used by logout (idempotent local discard) and by the fail-closed parse
+  // path — a broken auth contract must never leave a trusted snapshot.
+  const resetSession = useCallback(() => {
+    setUser(null);
+    setPermissions([]);
+    setMaster(undefined);
+    setStatus('guest');
+  }, []);
+
   // Bootstrap (spec §4.3): /me on mount — 401 resolves to null (guest), not an
   // error. A failed request (network down, server restarting) also lands as
-  // guest: the 401 interceptor re-prompts on the next real 401.
+  // guest: the 401 interceptor re-prompts on the next real 401. A PARSE
+  // error (#480 §3.3, fail-closed) lands as guest the same way — there is no
+  // snapshot to keep at bootstrap, and the login screen is the visible result.
   useEffect(() => {
     let cancelled = false;
     getMe()
@@ -77,14 +91,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(async (phone: string, password: string): Promise<AuthUser> => {
-    const me = await apiLogin(phone, password);
-    setUser(me.user);
-    setPermissions(me.permissions);
-    setMaster(me.master);
-    setStatus('authenticated');
-    return me.user;
-  }, []);
+  const login = useCallback(
+    async (phone: string, password: string): Promise<AuthUser> => {
+      try {
+        const me = await apiLogin(phone, password);
+        setUser(me.user);
+        setPermissions(me.permissions);
+        setMaster(me.master);
+        setStatus('authenticated');
+        return me.user;
+      } catch (error) {
+        // Fail-closed (#480 §3.3): a parse error of the login response means
+        // the auth contract is broken — reset the session (never leave a
+        // half-trusted state) and rethrow so the login page shows the error.
+        // Other errors (ApiError 401, network) keep the previous behavior:
+        // no state written, the error propagates as-is.
+        if (error instanceof ZodError) resetSession();
+        throw error;
+      }
+    },
+    [resetSession],
+  );
 
   const logout = useCallback(async (): Promise<void> => {
     try {
@@ -92,21 +119,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       // Idempotent on the client too: even if the API call fails (network
       // blip, already-expired session), the local session is discarded.
-      setUser(null);
-      setPermissions([]);
-      setMaster(undefined);
-      setStatus('guest');
+      resetSession();
     }
-  }, []);
+  }, [resetSession]);
 
   // GH #262 T7 (pinned decision): re-fetch the master snapshot so the user
-  // plate (avatar + name) reflects a portrait upload / profile save. Unlike
-  // the mount bootstrap, a FAILED refresh keeps the current snapshot — a
-  // network blip must never demote an authenticated user to guest. A null
-  // response (session vanished server-side) is treated like the bootstrap:
-  // drop to guest. Ordering guard (fix-round issue 3): each call takes a
-  // sequence number; a response applies ONLY while it is still the latest —
-  // overlapping refreshes resolving out of order can't apply stale data.
+  // plate (avatar + name) reflects a portrait upload / profile save. Error
+  // split (#480 §3.3 «Контракт отказа»): a PARSE error of the /auth/me
+  // response is fail-closed — the session resets and the STALE role/
+  // permissions snapshot is discarded (a broken contract must not keep
+  // serving old rights invisibly); the error rethrows so the caller shows
+  // it. Every other failure (network blip, ApiError) keeps the current
+  // snapshot — a network blip must never demote an authenticated user to
+  // guest. A null response (session vanished server-side) is treated like
+  // the bootstrap: drop to guest. Ordering guard (fix-round issue 3): each
+  // call takes a sequence number; a response applies ONLY while it is still
+  // the latest — overlapping refreshes resolving out of order can't apply
+  // stale data (the fail-closed reset respects the same guard).
   const refresh = useCallback(async (): Promise<void> => {
     const seq = ++refreshSeq.current;
     try {
@@ -120,10 +149,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setStatus('guest');
       }
-    } catch {
-      // Keep the existing snapshot on error.
+    } catch (error) {
+      if (error instanceof ZodError) {
+        // Fail-closed: discard the stale snapshot, then surface the error.
+        if (seq === refreshSeq.current) resetSession();
+        throw error;
+      }
+      // Non-parse errors (network, ApiError): keep the existing snapshot.
     }
-  }, []);
+  }, [resetSession]);
 
   const can = useCallback(
     (permission: string): boolean => {

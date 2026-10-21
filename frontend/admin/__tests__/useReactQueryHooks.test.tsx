@@ -179,7 +179,7 @@ const recordsFixture: RecordResponse[] = [
     id: 'r1',
     activity_id: 'a1',
     client_id: 'c1',
-    status: 'confirmed',
+    status: 'waiting',
     seats: 2,
     comment: null,
     custom_price: null,

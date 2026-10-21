@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ClientWithStats, ClientUpdate, DependencyNode, VisitorResponse } from '@memo/api-client';
+import { ChannelSchema } from '@memo/api-client';
+import type { Channel, ClientWithStats, ClientUpdate, DependencyNode, VisitorResponse } from '@memo/api-client';
 import { ApiError, getClientVisitors, createVisitor } from '@memo/api-client';
 import { useDeleteVisitor } from '@/hooks/useVisitorsMutations';
 import { DeleteDialog } from '@/app/components/DeleteDialog';
@@ -18,10 +19,24 @@ import {
 } from '@/app/components/shared/phone/PhoneField';
 import { parseStoredPhone } from '@/app/components/shared/phone/format';
 
-const CHANNEL_VALUES = ['telegram', 'whatsapp', 'max'] as const;
-type ChannelValue = (typeof CHANNEL_VALUES)[number];
-const isKnownChannel = (v: string): v is ChannelValue =>
+// #480 §3.4: the channel value domain derives from the contract schema —
+// the stored field stays a string (legacy values, backend issue #60), the
+// guard narrows it for the strict ClientUpdate.channel (Channel | null).
+const CHANNEL_VALUES = ChannelSchema.options;
+const isKnownChannel = (v: string): v is Channel =>
   (CHANNEL_VALUES as readonly string[]).includes(v);
+
+/** Select labels — values come from ChannelSchema.options (client order). */
+const CHANNEL_LABELS: Record<Channel, string> = {
+  telegram: 'Telegram',
+  whatsapp: 'WhatsApp',
+  max: 'Max',
+};
+
+/** Stored channel → select state: legacy garbage maps to '' (Не указан). */
+function channelToState(stored: string | null | undefined): Channel | '' {
+  return stored && isKnownChannel(stored) ? stored : '';
+}
 
 // GH #414 (spec §Форматирование, валидация, хранение): the two messages of
 // the completeness validator — applied to a CHANGED number only.
@@ -57,7 +72,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
   const [phone, setPhone] = useState<PhoneFieldValue>(() => storedToPhoneValue(client?.phone));
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [email, setEmail] = useState(client?.email || '');
-  const [channel, setChannel] = useState(client?.channel && isKnownChannel(client.channel) ? client.channel : '');
+  const [channel, setChannel] = useState<Channel | ''>(() => channelToState(client?.channel));
   const [hasChanges, setHasChanges] = useState(false);
 
   // ── Visitors render source — #324 Task 8 review fix ───────────────────
@@ -83,7 +98,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setPhone(storedToPhoneValue(client?.phone));
     setPhoneError(null);
     setEmail(client?.email || '');
-    setChannel(client?.channel || '');
+    setChannel(channelToState(client?.channel));
     setHasChanges(false);
   }, [client]);
 
@@ -138,7 +153,7 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
     setPhone(storedToPhoneValue(client?.phone));
     setPhoneError(null);
     setEmail(client?.email || '');
-    setChannel(client?.channel || '');
+    setChannel(channelToState(client?.channel));
     setHasChanges(false);
   }, [client]);
 
@@ -236,14 +251,16 @@ export const ClientInfoTab = forwardRef<ClientInfoTabHandle, ClientInfoTabProps>
               style={inputStyle}
               value={channel}
               onChange={e => {
-                setChannel(e.target.value);
+                // Options are the contract channels — narrow the DOM string
+                // through the schema-derived list (#480 §3.4).
+                setChannel(isKnownChannel(e.target.value) ? e.target.value : '');
                 handleChange();
               }}
             >
               <option value="">Не указан</option>
-              <option value="telegram">Telegram</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="max">Max</option>
+              {CHANNEL_VALUES.map((value) => (
+                <option key={value} value={value}>{CHANNEL_LABELS[value]}</option>
+              ))}
             </select>
           </div>
           <div>

@@ -16,6 +16,7 @@
  *     (idempotent), input is never mutated.
  */
 
+import type { TariffAudience } from '@memo/api-client';
 import { isKidsAge } from '@/lib/age-groups';
 
 /**
@@ -27,7 +28,7 @@ import { isKidsAge } from '@/lib/age-groups';
  */
 export interface TariffLike {
   id: string;
-  audience?: 'kid' | 'adult' | 'all';
+  audience?: TariffAudience;
 }
 
 /** Age as selected in the UI: a number 3–17, the 'adult' sentinel, or empty. */

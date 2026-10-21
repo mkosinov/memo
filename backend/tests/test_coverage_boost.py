@@ -627,10 +627,16 @@ class TestPhotoEndpoints:
     """Test photo listing endpoints."""
 
     def test_list_public_photos(self, api_client):
-        """GET /api/v1/photos/web returns public photos."""
-        resp = api_client.get("/api/v1/photos/web")
+        """GET /api/v1/photos?is_public=true returns public photos only
+        (GH #479 Изменение 4: the /web showcase became the list filter)."""
+        api_client.post("/api/v1/photos", json={
+            "filename": "cov-private.jpg", "is_public": False,
+        })
+        resp = api_client.get("/api/v1/photos", params={"is_public": "true"})
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        items = resp.json()["items"]
+        assert isinstance(items, list)
+        assert all(p["is_public"] for p in items)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

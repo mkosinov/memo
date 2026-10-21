@@ -22,7 +22,10 @@ vi.mock('@/contexts/UIContext', () => ({
 
 // ─── Mock api-client ───────────────────────────────────────────────────────
 
-vi.mock('@memo/api-client', () => ({
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module, the fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   getRecord: vi.fn(),
   updateRecord: vi.fn(),
   patchRecord: vi.fn(),

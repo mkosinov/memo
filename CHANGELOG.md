@@ -7,9 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-10-20
+## [Unreleased] — 2026-10-21
 
 ### Added
+- **GH #480 — Экспорт TS-юнионов перечислений контракта из `@memo/api-client`
+  (удаление локальных копий в админке)** — branch
+  `480-api-client-enum-unions` (6 коммитов `b7dc85fc..a6a4b61e`, base
+  `eb62de07`; 51 файл, +1111/−307; спека
+  `docs/specs/2026-10-20-api-client-enum-unions-design.md` рев.2 и план
+  `docs/plans/2026-10-21-api-client-enum-unions-plan.md` — оба на main,
+  unchanged by IMPL; pure refactor — без UI-дельты):
+  - **Контракт (T1–T2):** перечисления контракта — именованные
+    экспортируемые zod-схемы в `@memo/api-client` + перепайка request-стороны
+    эндпоинтов (`b7dc85fc`); строгие enum-ответы §3.3 + fail-closed парсинг
+    авторизации (`79cc514e`).
+  - **Админка (T3):** локальные дубликаты перечислений в `frontend/admin`
+    заменены на импорты схем api-client §3.4 (`acb33d5c`).
+  - **Чистка (T4):** мёртвые Wave-5 экспорты удалены из `@memo/domain`
+    §3.5 (`94334a68`).
+  - **Защитные тесты (T5):** backend parity pydantic↔TS словарей
+    (`backend/tests/test_api_client_enum_parity.py`) + pin полноты наборов
+    статус-списков админки против `VisitStatusSchema.options` (§6)
+    (`248bc23b`, `a6a4b61e`).
+  - **Approved deviation:** мёртвая опция оплаты «Онлайн» удалена из
+    `RecordPaymentsTable.tsx` — бэкенд всегда отклонял её с 422; строка
+    §3.4 требует `PaymentMethodSchema.options` = cash/card/transfer;
+    «ничего не меняется» §4 опиралось на ошибочную ячейку колонки «Сегодня».
+  - **Tests:** api-client vitest **503/503** + tsc чист; admin vitest
+    **3107/3107** + tsc чист; domain **37/37** + dts build; backend parity
+    pytest **6/6**; admin e2e полный прогон **508/510** (2 флейка —
+    изолированно зелёные, одно — известная records-pagination гонка #479);
+    сценарии 1–7 спеки зелёные; визуальный гейт N/A → exit 0.
+  - Status: `docs/status/2026-10-21-api-client-enum-unions-480.md`
 - **GH #482 — Подсистема доменных событий: часть 1 системы оповещений (журнал
   `domain_events`, диспетчер, сценарий `new_record` с рендером)** — branch
   `feat/482-notify-events` (13 коммитов `f7051238..1a601c2c`, base `f7190cae`;

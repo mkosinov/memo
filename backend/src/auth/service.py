@@ -213,7 +213,7 @@ def register_ip_failure(client_ip: str) -> HTTPException | None:
 OTP_DISTINCT_PHONES_PER_IP = 5
 
 # Distinct-phone tracker per IP: ip → (phones seen, window start). A set,
-# not a count — the limit is «не более 5 разных номеров с одного IP».
+# not a count — the limit is «не более 5 разных номеров на один IP».
 _OTP_PHONES_PER_IP: dict[str, tuple[set[str], datetime]] = {}
 
 
@@ -231,7 +231,7 @@ def _otp_phones_exception(
     """429 when this send would add a 6th distinct phone for the IP.
 
     The limit is on the COUNT of distinct numbers («не более 5 разных
-    номеров с одного IP») — a repeat send to an already-seen phone does
+    номеров на один IP») — a repeat send to an already-seen phone does
     not grow the set and stays governed by the 5/phone and 20/IP wires.
     """
     entry = _OTP_PHONES_PER_IP.get(client_ip)

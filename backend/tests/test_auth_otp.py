@@ -102,7 +102,7 @@ class TestOtpIssue:
         assert hmac.compare_digest(row.code_hash, _expected_hash(code))
         assert before <= row.created_at <= after
         assert row.expires_at - row.created_at == OTP_TTL
-        assert OTP_TTL == timedelta(minutes=5)
+        assert timedelta(minutes=5) == OTP_TTL
 
     async def test_issue_rotates_previous_code(
         self, db_session, otp_service,

@@ -36,14 +36,16 @@ Spec: docs/specs/2026-09-08-auth-design.md §2.6, §2.7, §3.5, §3.7, §7
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi.routing import APIRoute
 
 from src.auth.permissions import require_session
 from src.auth.public import PUBLIC_ROUTES
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.misc
 

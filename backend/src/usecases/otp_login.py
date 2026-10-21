@@ -66,7 +66,7 @@ class InvalidOtpError(Exception):
     phones have live codes (§4.2 «отказ — единое сообщение»).
     """
 
-    MESSAGE = "Неверный код подтверждения или истёк его срок"
+    MESSAGE = "Неверный код подтверждения или истёк срок действия"
 
 
 async def _phone_unavailable_for_client_login(

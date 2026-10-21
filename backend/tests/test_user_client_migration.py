@@ -120,7 +120,12 @@ class TestRoundtrip:
         assert "client_id" in _columns(url, "users")
         assert "client_id" in _unique_index_columns(url, "users")
 
-        command.downgrade(cfg, "-1")
+        # Downgrade to THIS migration's PARENT explicitly — «-1» stopped
+        # being the client_id step once later migrations appended to the
+        # chain (otp_codes, #499 d3b5f7a9c1e3): a relative step would run
+        # the newest migration's downgrade instead, silently voiding the
+        # assertions below (the test_notify_migration.py precedent).
+        command.downgrade(cfg, "c970adc6b3d6")
         assert "client_id" not in _columns(url, "users")
         assert "client_id" not in _unique_index_columns(url, "users")
         assert all(

@@ -480,6 +480,22 @@ test.describe('Records Page — Table and Filters', () => {
       await page.getByRole('button', { name: '2', exact: true }).click();
       await pageTwoWait;
 
+      // Settle BEFORE reading: waitForResponse resolves at response RECEIPT,
+      // while React commits the page-2 rows a frame later — a raw read in
+      // that gap returns the STALE page-1 names → false overlap flake
+      // (#479 read-before-render family, same race as the sort poll in
+      // test 11; hit by the cold-compile leg of the PR #515 verification).
+      // Poll until the rendered names actually leave the page-1 signature,
+      // then read and assert — a genuine overlap never becomes disjoint and
+      // still fails the strictness below.
+      await expect
+        .poll(
+          async () =>
+            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('|'),
+          { timeout: 10_000 },
+        )
+        .not.toBe(pageOneNames.join('|'));
+
       // Page 2 rows are disjoint from page 1 rows
       const pageTwoNames = await page
         .locator('tbody tr td:nth-child(2)')
@@ -1173,9 +1189,16 @@ test.describe('Records Page — Table and Filters', () => {
     ).toContainText('Посетил');
 
     // The table is filtered: every row is Anna's, every badge «visited».
+    // Settle BEFORE enumerating: under CI load the table transiently renders
+    // a superset (RecordsContext keepPreviousData + the mirror/adoption
+    // query-key transition — the June window alone is 6 rows, window+status
+    // without q is 4) before the fully-filtered result commits; a rows.all()
+    // snapshot of that tail then loses its nth → «element(s) not found»
+    // (PR #515 flake; same race family as test 12's #479, fixed via #507).
+    // toHaveCount(2) waits out the transient WITHOUT loosening the contract:
+    // the seed pins exactly the two visited «Анна» rows (r1/r4).
     const rows = page.locator('tbody tr');
-    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
-    expect(await rows.count()).toBeGreaterThan(0);
+    await expect(rows).toHaveCount(2, { timeout: 20_000 });
     for (const row of await rows.all()) {
       await expect(row).toContainText('Анна');
     }

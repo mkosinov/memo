@@ -12,8 +12,10 @@ Spec §3.7's access matrix exercised end-to-end through the real app:
   ``clients:write`` (spec §2.5: read-only payments + clients, no
   materials);
 * public surface intact (User Scenario 5): anonymous dictionary GETs →
-  200 (incl. ``GET /api/v1/photos/web`` — the public gallery) and
-  anonymous ``POST /api/v1/records`` → 201;
+  200 (the gallery rides ``GET /api/v1/photos?is_public=true`` — GH #479
+  Изменение 4 retired the ``/photos/web`` showcase);
+  ``POST /api/v1/records`` is CLOSED since GH #479 — anonymous → 401,
+  the full contract is staff-only (``records:write``);
 * Sec-Fetch-Site (User Scenario 6): an authenticated mutation with
   ``Sec-Fetch-Site: cross-site`` → 403; without the header → passes.
 
@@ -88,7 +90,6 @@ _PUBLIC_GETS = [
     "/api/v1/tags",
     "/api/v1/activities",
     "/api/v1/photos",
-    "/api/v1/photos/web",
     "/api/v1/health",
 ]
 
@@ -359,15 +360,47 @@ class TestPublicSurface:
         resp = anon_client.get(path)
         assert resp.status_code == 200, f"GET {path}: {resp.text}"
 
-    def test_anonymous_record_create_201(self, anon_client, create_activity) -> None:
-        """POST /records stays public until #8 (anonymous booking)."""
+    def test_anonymous_record_create_401(self, anon_client, create_activity) -> None:
+        """GH #479 (Изменение 5): the full POST /records contract is
+        staff-only — anonymous booking is closed (guest booking itself
+        is #499; the former «until #8» public posture is obsolete)."""
         activity = create_activity()
         resp = anon_client.post("/api/v1/records", json={
             "activity_id": activity["id"],
             "phone": f"+7999{uuid.uuid4().hex[:7]}",
             "visits": [{"name": "Гость", "price": 2000}],
         })
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+    def test_admin_record_create_explicit_visit_price_201(
+        self, api_client, create_activity,
+    ) -> None:
+        """US-4 (#479): admin keeps the full contract after the closure —
+        an explicit visit ``price`` overrides the service default."""
+        activity = create_activity()
+        resp = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "phone": f"+7999{uuid.uuid4().hex[:7]}",
+            "visits": [{"name": "Гость", "price": 1234}],
+        })
         assert resp.status_code == 201, resp.text
+        assert resp.json()["visits"][0]["price"] == 1234
+
+    def test_admin_record_create_without_phone_201(
+        self, api_client, create_activity, create_client,
+    ) -> None:
+        """US-4 (#479): admin booking by ``client_id`` — phone optional,
+        unchanged by the anonymous-surface closure."""
+        activity = create_activity()
+        client = create_client()
+        resp = api_client.post("/api/v1/records", json={
+            "activity_id": activity["id"],
+            "client_id": client["id"],
+            "visits": [{"name": "Гость", "price": 2000}],
+        })
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["client_id"] == client["id"]
 
 
 # ─── Sec-Fetch-Site: cross-site rejected, missing header passes (Scenario 6) ───
@@ -396,16 +429,20 @@ class TestSecFetchSite:
         resp = api_client.post("/api/v1/tags", json={"title": f"csrf-{uuid.uuid4().hex[:8]}"})
         assert resp.status_code == 201, resp.text
 
-    def test_cross_site_anonymous_public_route_exempt(self, anon_client, create_activity) -> None:
-        """Anonymous public routes are exempt from the CSRF line (§2.14)."""
-        activity = create_activity()
+    def test_cross_site_anonymous_public_route_exempt(self, anon_client) -> None:
+        """Anonymous public routes are exempt from the CSRF line (§2.14).
+
+        GH #479 closed anonymous ``POST /records`` — the exempt public
+        mutation is now probed via ``POST /api/v1/auth/login``: a
+        cross-site fetch reaches the login logic itself (401 invalid
+        credentials on dummy creds), never the 403 CSRF rejection.
+        """
         resp = anon_client.post(
-            "/api/v1/records",
-            json={
-                "activity_id": activity["id"],
-                "phone": f"+7999{uuid.uuid4().hex[:7]}",
-                "visits": [{"name": "Гость", "price": 2000}],
-            },
+            "/api/v1/auth/login",
+            json={"phone": "+79990000000", "password": "wrong-password"},
             headers={"Sec-Fetch-Site": "cross-site"},
         )
-        assert resp.status_code == 201, resp.text
+        assert resp.status_code == 401, resp.text
+        assert (
+            resp.json()["detail"]["code"] == ErrorCode.AUTH_INVALID_CREDENTIALS.value
+        )

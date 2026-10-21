@@ -4,8 +4,6 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from src.api.v1._delete_family import (
     DryRunParam,
@@ -30,7 +28,6 @@ from src.schemas.photo import (
     PhotoPatch,
     PhotoResponse,
     PhotoUpdate,
-    PhotoWebListParams,
 )
 from src.services.photo import (
     PhotoService,
@@ -109,28 +106,6 @@ async def _activity_scoped_or_404(
                 message="Activity not found",
             ).model_dump(),
         )
-
-
-@router.get("/web", response_model=list[PhotoResponse])
-async def list_public_photos(
-    session: SessionDep,
-    # GH #371 §4.2: one model-as-query entry — no scalar query siblings
-    # (fastapi PR #12481). ``activity_id`` is UUID-typed in the model:
-    # garbage → 422; the column is String(36), so the validated UUID is
-    # stringified for the SQL comparison.
-    params: Annotated[PhotoWebListParams, Query()],
-) -> list[PhotoResponse]:
-    """Return public photos (is_public=true). Optionally filter by activity_id."""
-    stmt = (
-        select(Photo)
-        .where(Photo.is_public == True)
-        .options(selectinload(Photo.tags))
-    )
-    if params.activity_id is not None:
-        stmt = stmt.where(Photo.activity_id == str(params.activity_id))
-    result = await session.execute(stmt)
-    photos = result.scalars().all()
-    return [PhotoResponse.model_validate(p) for p in photos]
 
 
 @router.get("", response_model=PaginatedResponse[PhotoResponse])

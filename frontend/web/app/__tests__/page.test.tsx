@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   selectDate: vi.fn(),
   setTab: vi.fn(),
   getByDate: vi.fn(),
+  useGallery: vi.fn(),
 }));
 
 const mockSchedules = [
@@ -90,9 +91,11 @@ const mockLocations = [
   { id: "loc-2", title: "Парк Горького", address: "ул. Крымский Вал, 9" },
 ];
 
+/** View-model photos as mapped from PhotoResponse (GH #479):
+ * caption = tag titles joined with " · ". */
 const mockGalleryPhotos = [
-  { id: "g1", url: "/gallery-1.jpg", technique: "Акварель" },
-  { id: "g2", url: "/gallery-2.jpg", technique: "Акрил" },
+  { url: "/images/gallery-1.jpg", caption: "масло · акварель" },
+  { url: "/images/gallery-2.jpg", caption: "акрил" },
 ];
 
 const mockToday = new Date(2026, 4, 20);
@@ -136,11 +139,7 @@ vi.mock("../hooks/useLocations", () => ({
 }));
 
 vi.mock("../hooks/useGallery", () => ({
-  useGallery: () => ({
-    photos: mockGalleryPhotos,
-    isLoading: false,
-    error: null,
-  }),
+  useGallery: () => mocks.useGallery(),
 }));
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -165,6 +164,11 @@ describe("Home (page.tsx)", () => {
     mocks.setTab.mockClear();
     mocks.getByDate.mockClear();
     mocks.getByDate.mockReturnValue(mockSchedules);
+    mocks.useGallery.mockReturnValue({
+      photos: mockGalleryPhotos,
+      isLoading: false,
+      error: null,
+    });
   });
 
   describe("section rendering", () => {
@@ -200,8 +204,38 @@ describe("Home (page.tsx)", () => {
 
     it("renders GuestGallery section", () => {
       renderHome();
+      expect(screen.getByTestId("guest-gallery")).toBeInTheDocument();
       const guestImages = screen.getAllByAltText(/Guest photo/);
       expect(guestImages.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("gallery visibility rule (GH #479: no data → no section)", () => {
+    it("hides the gallery section while photos are loading", () => {
+      mocks.useGallery.mockReturnValue({ photos: [], isLoading: true, error: null });
+      renderHome();
+      expect(screen.queryByTestId("guest-gallery")).not.toBeInTheDocument();
+    });
+
+    it("hides the gallery section on a failed fetch", () => {
+      mocks.useGallery.mockReturnValue({
+        photos: [],
+        isLoading: false,
+        error: new Error("backend down"),
+      });
+      renderHome();
+      expect(screen.queryByTestId("guest-gallery")).not.toBeInTheDocument();
+    });
+
+    it("hides the gallery section when there are no public photos", () => {
+      mocks.useGallery.mockReturnValue({ photos: [], isLoading: false, error: null });
+      renderHome();
+      expect(screen.queryByTestId("guest-gallery")).not.toBeInTheDocument();
+    });
+
+    it("renders tag-based captions on gallery photos", () => {
+      renderHome();
+      expect(screen.getByText("масло · акварель")).toBeInTheDocument();
     });
   });
 

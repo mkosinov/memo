@@ -10,6 +10,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-20
 
 ### Added
+- **GH #479 — веб на единый транспорт `@memo/api-client`: второй fetch-стек удалён,
+  локации и галерея на живых данных, зеркала строгие, анонимный `POST /records`
+  закрыт** — branch `479-web-apiclient-transport` (8 коммитов `d0d136eb..aed1b4de`,
+  base `e34f3ad7`; 52 файла, +1055/−1282; спека
+  `docs/specs/2026-10-19-web-apiclient-transport-design.md` рев.10 и план
+  `docs/plans/2026-10-20-web-apiclient-transport-plan.md` рев.2 — оба на main,
+  unchanged by IMPL; гостевое бронирование и клиентская авторизация — #499):
+  - **Зеркала `RecordCreate`/`RecordUpdate` (T1 `d0d136eb`, small):** визиты несут
+    name-based режим (`name`/`age`/`tariff_id`), `status`/`seats` на уровне записи
+    убраны, `RecordUpdate` — собственное зеркало PUT-контракта (расцеплен с
+    `.partial()`), обе схемы `.strict()` — паритет `extra="forbid"` бэкенда;
+    таблица Parity Notes в `docs/domain-rules/records.md` — все ✅.
+  - **Анонимное создание записи закрыто (T2 `abce7884`, small):** `POST /api/v1/records`
+    под `require_permission("records:write")` — аноним → 401; снят из публичного
+    перечисления `auth/public.py`; `verify_fetch_metadata` — за #493.
+  - **Публичная витрина — фильтр общего списка (T3 `c56891c4` + `84994c58`, standard):**
+    `GET /api/v1/photos` принимает `is_public` (применяется только когда передан),
+    `GET /photos/web` и api-client `getWebPhotos` удалены (проба → 404);
+    `PhotoListParams` += `is_public`; master-скоуп и анонимный гость не задеты;
+    кросс-сюитный аудит — 8 pytest-сьютов правились.
+  - **Локации на живых данных (T4 `7437346b`, small):** `useLocations` —
+    `getLocations()` через общий `['locations']` кеш react-query, `LocationView`
+    сужен до контракта, `LocationDTO` удалён.
+  - **Галерея на живых данных (T5 `5bae3b1a`, standard):** `useGallery` —
+    `getPhotos({ is_public: true })` через react-query; мок-стек галереи удалён;
+    маппер `to-gallery-vm` (подписи из тегов) + секция `GuestGallery` с
+    `data-testid="guest-gallery"`.
+  - **Самодельный стек снесён (T6 `1f38756e`, trivial):** `lib/api/client.ts`,
+    свой `ApiError` (`lib/errors.ts`), DTO-оверлеи, мёртвый `useActivities` —
+    удалены с тестами; единственный транспорт веба — `@memo/api-client`.
+  - **Скилл v2.1 (T7 `aed1b4de`, trivial):**
+    `.opencode/skills/frontend-clean-architecture/SKILL.md` — web-транспорт
+    `@memo/api-client`, самодельные fetch-стеки запрещены (−198/+96).
+  - **Tests:** vitest `frontend/web` **336/336**; vitest `packages/api-client`
+    **483/483**; pytest — 8 затронутых сьютов **327/327**; `frontend/admin`
+    type-check чист; web type-check + `next build` чист; визуальный гейт
+    **EXIT=0** (локации в фильтре = сид-справочник, подписи галереи из тегов);
+    пробы: `GET /photos/web` → 404, анонимный `POST /records` → 401.
+  - Status: `docs/status/2026-10-20-web-apiclient-transport-479.md`
 - **GH #482 — Подсистема доменных событий: часть 1 системы оповещений (журнал
   `domain_events`, диспетчер, сценарий `new_record` с рендером)** — branch
   `feat/482-notify-events` (13 коммитов `f7051238..1a601c2c`, base `f7190cae`;

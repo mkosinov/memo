@@ -78,7 +78,7 @@ function toLocationOption(vm: LocationView): { id: string; title: string } {
 
 /** Map GalleryPhotoView → GuestGallery photo */
 function toGuestPhoto(vm: GalleryPhotoView): GuestPhoto {
-  return { url: vm.url, technique: vm.technique };
+  return { url: vm.url, caption: vm.caption };
 }
 
 /**
@@ -141,7 +141,7 @@ export default function Home() {
   }, [selectedDateStr, selectedLocation, selectedTag, schedules, getByDate]);
 
   const { locations } = useLocations();
-  const { photos: galleryPhotos } = useGallery(12);
+  const { photos: galleryPhotos } = useGallery();
 
   // ── Geolocation: detect user location on mount ──
   useEffect(() => {

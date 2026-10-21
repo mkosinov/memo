@@ -1,43 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getLocations as fetchLocations } from '@memo/api-client';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getLocations } from '@memo/api-client';
 import { toLocationViewFromResponse } from '@/app/lib/mappers/to-location-vm';
 import type { LocationView } from '@/app/lib/model/view/location';
-import { ApiError } from '@/app/lib/errors';
 
-export function useLocations() {
-  const [locations, setLocations] = useState<LocationView[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
+export interface UseLocationsResult {
+  locations: LocationView[];
+  isLoading: boolean;
+  error: Error | null;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoading(true);
-    setError(null);
+/** Locations directory via the shared ['locations'] react-query cache —
+ * same key and stale/gc policy as useSchedule, so a page mounting both
+ * hooks issues a single request (GH #479). */
+export function useLocations(): UseLocationsResult {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => getLocations(),
+    staleTime: 300_000,
+    gcTime: 600_000,
+  });
 
-    // Real locations via api-client (GH #491): the former in-repo mock list
-    // hardcoded the pre-UUID seed ids and stopped matching real rows once
-    // the seed switched to UUID ids.
-    fetchLocations()
-      .then((page) => {
-        if (!cancelled) {
-          setLocations(page.items.map(toLocationViewFromResponse));
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err : new ApiError(String(err), 500));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const locations = useMemo(
+    () => data?.items.map(toLocationViewFromResponse) ?? [],
+    [data],
+  );
 
   return { locations, isLoading, error };
 }

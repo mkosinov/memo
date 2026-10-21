@@ -24,8 +24,10 @@
 #   - `rm`    appends its argv to the same journal, then performs the real
 #             removal (/bin/rm) so wipe assertions stay truthful.
 #   - `curl`  answers 200 instantly → ready-waits break on iteration 1,
-#             warmup completes, `wait` on the backgrounded stubbed pnpm
-#             returns → the run finishes in well under a second.
+#             warmup completes instantly. #448 Task 3: the run no longer
+#             ENDS with the frontend pin — stub pins model LIVE servers
+#             and the harness TERMs the script (orchestrator teardown
+#             semantics; see the #448 block below).
 #   - `lsof`  reports every port free. Port state is therefore UNOBSERVABLE
 #             to the script under test — Case 5's "no wipe regardless of
 #             port state" invariant is carried by this stub plus the
@@ -93,6 +95,35 @@
 #   Table form is deliberate: a future shard-count change extends
 #   SHARD_ID_PORT_TABLE (and the Case 13 entry list), never a copy-pasted
 #   case block (panel simplicity remark).
+#
+# Feature #448 Task 3 (fail-fast stack layer, spec §3.2):
+#   The final `wait "$FRONTEND_PID"` block is replaced by a kill -0 watch
+#   over BOTH server pins: either death → `stack shard N: backend|frontend
+#   died on :PORT` + the ALWAYS-printed stack-log path + a capped tail
+#   (last 20 lines, case-insensitive filter suppressing lines with cookie/
+#   authorization/auth-token/api-key/bearer/password/secret/token) →
+#   exit 1; the exit trap still releases the lease, and the trap now also
+#   sweeps masked grandchild holders of THIS stack's ports (_sweep_masked;
+#   the /proc resolver makes re-titled next-server workers visible).
+#
+#   Teardown model change: the uv stub's uvicorn branch and the pnpm stub
+#   now model LIVE servers (sleep by default), so every full run is ended
+#   by the HARNESS TERMing the script — orchestrator teardown semantics —
+#   and the expected exit code becomes 143 (signal-aware trap exits
+#   128+15; a handler that merely RETURNS would resume the watch loop and
+#   turn every normal teardown into a bogus "died" verdict).
+#   → Case 14: backend pin death (REAL background child dying) → rc=1 +
+#     the addressed verdict; 14a pins the capped+filtered fixture tail
+#     and the always-printed path, 14b the missing-file «log not created»
+#     line, 14c the fd-1 readlink default (path == the run's own log).
+#   → Case 15: frontend pin death → rc=1 + the addressed verdict.
+#   → Case 16: trap grandchild sweep — a REAL masked holder (rewritten
+#     argv, live LISTEN) of the stack's frontend port is killed by the
+#     trap; an UNMASKED holder of the stack's backend port survives
+#     (mask ∧ port conjunction). Ports are bind-probed with bounded
+#     retries — no coupon-collector flakiness.
+#   Watch intervals are env-overridden (SHARD_STACK_WATCH_S=1) to keep
+#   the suite tight; stub children are real background processes.
 #
 # ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
 # Every cell carries a LIVE, EXACT assertion (case numbers refer to the
@@ -206,12 +237,18 @@ trap cleanup EXIT
 
 mkdir -p "$STUBS"
 
-# uv stub: inspects $DATABASE_URL; reports file presence at invocation time.
+# uv stub: two call sites reach it.
+#   1. the SERVER start (`uv run uvicorn src.main:app ...`) — under the
+#      #448 Task 3 fail-fast watch this pin must model a LIVE backend:
+#      sleep SHARD_DRYRUN_BACKEND_HOLD_S (default 30) so the kill -0 poll
+#      keeps seeing it alive. SHARD_DRYRUN_BACKEND_DIE_S (death cases)
+#      makes it a real dying child: sleep N, last words, exit 1.
+#   2. the SEED step (`uv run python -m seed.seed`) — foreground; keeps
+#      the original DATABASE_URL/DB-file journal behaviour (Case 1).
+# Both branches first report DB-file presence at invocation time (AFTER
+# the wipe → FILE_ABSENT).
 cat > "$STUBS/uv" <<'EOF'
 #!/bin/sh
-# Intercept the call site that comes AFTER the wipe in e2e-shard-start.sh.
-# If wipe worked → file gone → FILE_ABSENT.
-# If wipe didn't work → file present → "FILE_PRESENT: <first 100 bytes>".
 if [ -n "${DATABASE_URL:-}" ]; then
   FILE="${DATABASE_URL#sqlite+aiosqlite://}"
   if [ -f "$FILE" ]; then
@@ -222,6 +259,22 @@ if [ -n "${DATABASE_URL:-}" ]; then
 else
   echo "NO_DATABASE_URL"
 fi
+case "$*" in
+  *uvicorn*)
+    if [ -n "${SHARD_DRYRUN_BACKEND_DIE_S:-}" ]; then
+      sleep "$SHARD_DRYRUN_BACKEND_DIE_S"
+      echo "UVICORN-PIN: backend pin final words (die-branch)"
+      exit 1
+    fi
+    # Hold as a LIVE pin; the TERM trap reaps the inner sleep so the
+    # script-under-test's teardown (TERM to this sh) never orphans a
+    # sleep-600 child (#448 review iteration 1 — 600 s holding pins).
+    sleep "${SHARD_DRYRUN_BACKEND_HOLD_S:-30}" &
+    _s=$!
+    trap 'kill "$_s" 2>/dev/null; exit 0' TERM INT
+    wait "$_s"
+    ;;
+esac
 exit 0
 EOF
 chmod +x "$STUBS/uv"
@@ -234,9 +287,14 @@ chmod +x "$STUBS/uv"
 # substring greps stay stable. SHARD_RUN_TAG uses ${VAR-<fallback>}
 # expansion (dash, NO colon): the product exports it unconditionally, so an
 # untagged child must journal [] (EMPTY, set) — distinct from UNSET (a
-# failed/missing export). Anything else: no-op. #317 Case 7: SHARD_DRYRUN_HOLD_S keeps the stub (the
-# "foreground" frontend) alive so the harness can inspect the run lease
-# while the script under test is still running.
+# failed/missing export). Anything else: no-op. #317 Case 7:
+# SHARD_DRYRUN_HOLD_S keeps the stub (the "foreground" frontend) alive so
+# the harness can inspect the run lease while the script under test is
+# still running. #448 Task 3: the DEFAULT is now a live-server hold (30s)
+# — under the fail-fast watch a pin that exits instantly would read as
+# "frontend died"; runs are ended by the harness TERMing the script.
+# SHARD_DRYRUN_FRONTEND_DIE_S (death cases) makes it a real dying child:
+# sleep N, last words, exit 1.
 cat > "$STUBS/pnpm" <<'EOF'
 #!/bin/sh
 case "$*" in
@@ -246,9 +304,22 @@ case "$*" in
       "${SHARD_RUN_TAG-UNSET}" "$PPID" \
       "${FILES_DIR:-unset}" "${TEST_FILES_DIR:-unset}" \
       >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
-    if [ -n "${SHARD_DRYRUN_HOLD_S:-}" ]; then
-      sleep "$SHARD_DRYRUN_HOLD_S"
+    if [ -n "${SHARD_DRYRUN_FRONTEND_DIE_S:-}" ]; then
+      sleep "$SHARD_DRYRUN_FRONTEND_DIE_S"
+      echo "PNPM-PIN: frontend pin final words (die-branch)"
+      exit 1
     fi
+    # Hold as a LIVE pin; the TERM trap reaps the inner sleep (see the uv
+    # stub) so teardown never orphans a sleep child.
+    if [ -n "${SHARD_DRYRUN_HOLD_S:-}" ]; then
+      _h="$SHARD_DRYRUN_HOLD_S"
+    else
+      _h=30
+    fi
+    sleep "$_h" &
+    _s=$!
+    trap 'kill "$_s" 2>/dev/null; exit 0' TERM INT
+    wait "$_s"
     ;;
 esac
 exit 0
@@ -284,22 +355,117 @@ FAIL=0
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-# run_shard <log> <journal> <db> <shard_id> <shard_port> <backend_port>
-# Sets LAST_RC to the run's exit code (#415: the allowlist table asserts
-# rc=0 for every valid id; earlier callers ignore it).
-run_shard() {
+# ── Run helpers (#448 Task 3 teardown model) ────────────────────────────────
+# Stub pins model LIVE servers (see the stub headers), so a full run is
+# ended by the HARNESS TERMing the script — orchestrator teardown
+# semantics. RUN_EXTRA_ENV: space-joined K=V pairs (no spaces in values)
+# prepended via `env` for case-specific knobs (SHARD_STACK_LOG, *_DIE_S).
+# REAP_DEADLINE_S: bounded TERM→exit wait before kill -9 escalation, so
+# the suite can never hang on a stuck run (rc then reports 137 and the
+# callers' rc assertions fail loudly). Generous on purpose: a legit TERM
+# teardown = at most one watch sleep (interval 1s) + trap work (kills,
+# pgrep sweep, lease removal), but a loaded CI box (parallel suites)
+# stretches that beyond a naive 2× margin — a too-tight deadline once
+# kill -9'd a healthy teardown and cascaded its leftover lease into the
+# runs-dir emptiness asserts of later cases.
+RUN_EXTRA_ENV="${RUN_EXTRA_ENV:-}"
+REAP_DEADLINE_S="${REAP_DEADLINE_S:-15}"
+
+# shard_launch <log> <journal> <db> <shard_id> <shard_port> <backend_port>
+# Launches the stubbed stack in the background; sets SHARD_LAUNCH_PID.
+shard_launch() {
   local log="$1" journal="$2" db="$3" sid="$4" sport="$5" bport="$6"
-  set +e
+  # shellcheck disable=SC2086
   SHARD_ID="$sid" SHARD_PORT="$sport" BACKEND_PORT="$bport" \
     TEST_DB_PATH="$db" \
     BACKEND_URL="http://127.0.0.1:$bport" \
     NEXT_PUBLIC_API_URL="http://127.0.0.1:$bport" \
     SHARD_DRYRUN_JOURNAL="$journal" \
     SHARD_RUNS_DIR="$RUNS_DIR" \
+    SHARD_STACK_WATCH_S="${SHARD_STACK_WATCH_S:-1}" \
     PATH="$STUBS:$PATH" \
-    timeout 15 bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1
-  LAST_RC=$?
-  set -e
+    env $RUN_EXTRA_ENV bash "$SCRIPT_UNDER_TEST" > "$log" 2>&1 &
+  SHARD_LAUNCH_PID=$!
+}
+
+# term_and_reap PID [JOURNAL] — orchestrator-style teardown of a bespoke
+# background run: TERM, bounded reap, kill -9 escalation. Sets LAST_RC.
+# With JOURNAL: first bounded-poll for the pnpm call-site line — NEVER TERM
+# a just-forked child (the fork race: TERM can land before the child has
+# performed its output redirection — the run log then never exists and the
+# script dies before the behavior under test); the journal line proves the
+# redirection is done and the run has reached the watch phase.
+term_and_reap() {
+  local pid="$1" journal="${2:-}" rc=0 i
+  if [ -n "$journal" ]; then
+    for i in $(seq 1 100); do
+      if grep -q '^PNPM_EXEC_NEXT_DEV ' "$journal" 2>/dev/null; then break; fi
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.2
+    done
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+  for i in $(seq 1 $((REAP_DEADLINE_S * 5))); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || rc=$?
+  LAST_RC=$rc
+}
+
+# run_shard <log> <journal> <db> <shard_id> <shard_port> <backend_port>
+# Launch, wait (bounded) for the pnpm call-site journal line — the
+# positive control that the run reached the watch phase — then TERM teardown.
+# LAST_RC = the run's real exit code: 143 = normal TERM teardown
+# (signal-aware trap exits 128+15); 137 = kill -9 escalation (never
+# reached pnpm, or ignored TERM — always a failure downstream); anything
+# else is the script's own verdict and fails the rc=143 assertions.
+run_shard() {
+  local log="$1" journal="$2" db="$3" sid="$4" sport="$5" bport="$6"
+  local reached=false i rc=0
+  shard_launch "$log" "$journal" "$db" "$sid" "$sport" "$bport"
+  local pid="$SHARD_LAUNCH_PID"
+  for i in $(seq 1 100); do
+    if grep -q '^PNPM_EXEC_NEXT_DEV ' "$journal" 2>/dev/null; then
+      reached=true
+      break
+    fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  if [ "$reached" = true ]; then
+    kill -TERM "$pid" 2>/dev/null || true
+  else
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  for i in $(seq 1 $((REAP_DEADLINE_S * 5))); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || rc=$?
+  LAST_RC=$rc
+}
+
+# run_shard_raw <log> <journal> <db> <shard_id> <shard_port> <backend_port>
+# Launch like run_shard but NO harness teardown: waits (bounded,
+# RAW_WAIT_S) for the script to exit BY ITSELF — the fail-fast verdict
+# under test — then escalates kill -9 (LAST_RC=137 fails rc=1 assertions,
+# never hangs the suite).
+RAW_WAIT_S="${RAW_WAIT_S:-15}"
+run_shard_raw() {
+  local log="$1" journal="$2" db="$3" sid="$4" sport="$5" bport="$6"
+  local i rc=0
+  shard_launch "$log" "$journal" "$db" "$sid" "$sport" "$bport"
+  local pid="$SHARD_LAUNCH_PID"
+  for i in $(seq 1 $((RAW_WAIT_S * 5))); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || rc=$?
+  LAST_RC=$rc
 }
 
 # is_uint S — true iff S is a non-empty unsigned integer (lease fields)
@@ -554,8 +720,10 @@ fi
 # script must hard-fail before any machinery. #415 (spec §3.2): canonical
 # shards are now 1-4; port pairs stay caller-provided (1→3002/8001,
 # 2→3003/8002, 3→3004/8003, 4→3005/8004 — pinned here only as table data).
-#   valid ids   → full STUBBED run (run_shard): rc=0 AND the positive
-#                 control (reached next dev), so rc=0 is not vacuous;
+#   valid ids   → full STUBBED run (run_shard): rc=143 (#448 Task 3:
+#                 harness TERM teardown — signal-aware trap exits 128+15)
+#                 AND the positive control (reached next dev), so rc=143
+#                 is not vacuous;
 #   invalid ids → DIRECT call, no stubs (the guard fires before uv/pnpm —
 #                 nothing beyond it is reachable) → rc=1 + `must be 1–4`
 #                 on stderr.
@@ -569,10 +737,10 @@ for entry in $SHARD_ID_PORT_TABLE; do
   CASE6_DB="$CASE6_DIR/test_memo_shard${sid}.db"
   printf 'seed' > "$CASE6_DB"
   run_shard "$CASE6_DIR/run-$sid.log" "$CASE6_DIR/journal-$sid" "$CASE6_DB" "$sid" "$sport" "$bport"
-  if [ "$LAST_RC" -eq 0 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE6_DIR/journal-$sid" 2>/dev/null; then
-    echo "PASS Case 6 (#415): SHARD_ID=$sid accepted — rc=0, reached next dev (ports $sport/$bport)"
+  if [ "$LAST_RC" -eq 143 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE6_DIR/journal-$sid" 2>/dev/null; then
+    echo "PASS Case 6 (#415): SHARD_ID=$sid accepted — rc=143 (TERM teardown), reached next dev (ports $sport/$bport)"
   else
-    echo "FAIL Case 6 (#415): SHARD_ID=$sid rejected or never reached next dev (rc=$LAST_RC)"
+    echo "FAIL Case 6 (#415): SHARD_ID=$sid rc=$LAST_RC (want 143) or never reached next dev"
     echo "── Case 6 id=$sid log ──"
     cat "$CASE6_DIR/run-$sid.log"
     echo "─────────────────"
@@ -624,8 +792,9 @@ fi
 #     only SHARD_PORT + BACKEND_PORT);
 #   - SHARD_RUN_TAG exported (visible to the pnpm child);
 #   - the lease REMOVED after the script exits (its trap).
-# The pnpm stub holds the "foreground" for SHARD_DRYRUN_HOLD_S seconds so
-# the lease can be inspected while the script is still alive.
+# The pnpm stub holds the "foreground" (live-server default hold) so the
+# lease can be inspected while the script is still alive; #448 Task 3:
+# the run is then ended by term_and_reap (harness TERM → rc 143).
 CASE7_DIR="$WORK/case7"; mkdir -p "$CASE7_DIR"
 CASE7_DB="$CASE7_DIR/test_memo_shard1_ab12cd.db"
 printf 'seed' > "$CASE7_DB"
@@ -639,8 +808,8 @@ SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
   NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
   SHARD_RUN_TAG="$CASE7_TAG" \
   SHARD_DRYRUN_JOURNAL="$CASE7_DIR/journal" \
-  SHARD_DRYRUN_HOLD_S=3 \
   SHARD_RUNS_DIR="$RUNS_DIR" \
+  SHARD_STACK_WATCH_S=1 \
   PATH="$STUBS:$PATH" \
   bash "$SCRIPT_UNDER_TEST" > "$CASE7_DIR/run.log" 2>&1 &
 CASE7_PID=$!
@@ -684,10 +853,10 @@ if [ "$CASE7_LEASE_SEEN" = true ]; then
   fi
 fi
 
-# Reap the run; the script must exit 0 (stubbed stack) and remove its lease.
-set +e
-wait "$CASE7_PID"
-CASE7_RC=$?
+# Reap the run via harness TERM (orchestrator teardown); the script must
+# exit 143 (#448 Task 3 signal-aware trap) and remove its lease.
+term_and_reap "$CASE7_PID" "$CASE7_DIR/journal"
+CASE7_RC=$LAST_RC
 set -e
 echo "── Case 7 log ──"
 cat "$CASE7_DIR/run.log"
@@ -695,10 +864,10 @@ echo "── Case 7 journal ──"
 cat "$CASE7_DIR/journal" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if [ "$CASE7_RC" -eq 0 ]; then
-  echo "PASS Case 7 (#317): tagged run exited 0"
+if [ "$CASE7_RC" -eq 143 ]; then
+  echo "PASS Case 7 (#317): tagged run torn down by TERM with rc=143"
 else
-  echo "FAIL Case 7 (#317): tagged run exited $CASE7_RC (expected 0)"
+  echo "FAIL Case 7 (#317): tagged run teardown rc=$CASE7_RC (expected 143)"
   FAIL=1
 fi
 if [ ! -e "$CASE7_LEASE" ]; then
@@ -849,9 +1018,12 @@ SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
   SHARD_RUN_TAG="" \
   SHARD_DRYRUN_JOURNAL="$CASE10_DIR/journal" \
   SHARD_RUNS_DIR="$RUNS_DIR" \
+  SHARD_STACK_WATCH_S=1 \
   PATH="$STUBS:$PATH" \
-  timeout 15 bash "$SCRIPT_UNDER_TEST" > "$CASE10_DIR/run.log" 2>&1
-CASE10_RC=$?
+  bash "$SCRIPT_UNDER_TEST" > "$CASE10_DIR/run.log" 2>&1 &
+CASE10_PID=$!
+term_and_reap "$CASE10_PID" "$CASE10_DIR/journal"
+CASE10_RC=$LAST_RC
 set -e
 
 echo "── Case 10 log ──"
@@ -860,10 +1032,10 @@ echo "── Case 10 journal ──"
 cat "$CASE10_DIR/journal" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if [ "$CASE10_RC" -eq 0 ]; then
-  echo "PASS Case 10 (#317): set-empty tag run exited 0 (legacy path)"
+if [ "$CASE10_RC" -eq 143 ]; then
+  echo "PASS Case 10 (#317): set-empty tag run torn down by TERM, rc=143 (legacy path)"
 else
-  echo "FAIL Case 10 (#317): set-empty tag run exited $CASE10_RC (expected 0)"
+  echo "FAIL Case 10 (#317): set-empty tag teardown rc=$CASE10_RC (expected 143)"
   FAIL=1
 fi
 if grep -Fq "NEXT_DIST_DIR=[.next-shard-1] SHARD_PORT=[3002]" "$CASE10_DIR/journal" 2>/dev/null; then
@@ -915,9 +1087,12 @@ SHARD_ID=2 SHARD_PORT=3003 BACKEND_PORT=8002 \
   SHARD_RUN_TAG="$CASE11_TAG" \
   SHARD_DRYRUN_JOURNAL="$CASE11_DIR/journal" \
   SHARD_RUNS_DIR="$RUNS_DIR" \
+  SHARD_STACK_WATCH_S=1 \
   PATH="$STUBS:$PATH" \
-  timeout 15 bash "$SCRIPT_UNDER_TEST" > "$CASE11_DIR/run.log" 2>&1
-CASE11_RC=$?
+  bash "$SCRIPT_UNDER_TEST" > "$CASE11_DIR/run.log" 2>&1 &
+CASE11_PID=$!
+term_and_reap "$CASE11_PID" "$CASE11_DIR/journal"
+CASE11_RC=$LAST_RC
 set -e
 
 echo "── Case 11 log ──"
@@ -926,10 +1101,10 @@ echo "── Case 11 journal ──"
 cat "$CASE11_DIR/journal" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if [ "$CASE11_RC" -eq 0 ]; then
-  echo "PASS Case 11 (#317): tagged shard-2 run exited 0"
+if [ "$CASE11_RC" -eq 143 ]; then
+  echo "PASS Case 11 (#317): tagged shard-2 run torn down by TERM, rc=143"
 else
-  echo "FAIL Case 11 (#317): tagged shard-2 run exited $CASE11_RC (expected 0)"
+  echo "FAIL Case 11 (#317): tagged shard-2 teardown rc=$CASE11_RC (expected 143)"
   FAIL=1
 fi
 if grep -Fq "NEXT_DIST_DIR=[.next-shard-2_${CASE11_TAG}] SHARD_PORT=[3003]" "$CASE11_DIR/journal" 2>/dev/null; then
@@ -1002,8 +1177,8 @@ SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
   SHARD_RUN_TAG="$CASE12_TAG" \
   SHARD_MANAGED_STACK=1 \
   SHARD_DRYRUN_JOURNAL="$CASE12_DIR/journal" \
-  SHARD_DRYRUN_HOLD_S=3 \
   SHARD_RUNS_DIR="$RUNS_DIR" \
+  SHARD_STACK_WATCH_S=1 \
   PATH="$STUBS:$PATH" \
   bash "$SCRIPT_UNDER_TEST" > "$CASE12_DIR/run-a.log" 2>&1 &
 CASE12A_PID=$!
@@ -1035,8 +1210,8 @@ else
 fi
 
 set +e
-wait "$CASE12A_PID"
-CASE12A_RC=$?
+term_and_reap "$CASE12A_PID" "$CASE12_DIR/journal"
+CASE12A_RC=$LAST_RC
 set -e
 echo "── Case 12a log ──"
 cat "$CASE12_DIR/run-a.log"
@@ -1044,8 +1219,8 @@ echo "── Case 12a journal ──"
 cat "$CASE12_DIR/journal" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if [ "$CASE12A_RC" -eq 0 ] && [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
-  echo "PASS Case 12 (Fix A): managed run exited 0; runs dir still empty after exit (nothing removed — there was nothing)"
+if [ "$CASE12A_RC" -eq 143 ] && [ -z "$(ls -A "$RUNS_DIR" 2>/dev/null || true)" ]; then
+  echo "PASS Case 12 (Fix A): managed run torn down by TERM (rc=143); runs dir still empty after exit (nothing removed — there was nothing)"
 else
   echo "FAIL Case 12 (Fix A): rc=$CASE12A_RC; runs dir after exit:"
   ls -A "$RUNS_DIR" 2>/dev/null || true
@@ -1068,8 +1243,8 @@ SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
   SHARD_RUN_TAG="$CASE12B_TAG" \
   SHARD_MANAGED_STACK=1 \
   SHARD_DRYRUN_JOURNAL="$CASE12_DIR/journal-b" \
-  SHARD_DRYRUN_HOLD_S=3 \
   SHARD_RUNS_DIR="$RUNS_DIR" \
+  SHARD_STACK_WATCH_S=1 \
   PATH="$STUBS:$PATH" \
   bash "$SCRIPT_UNDER_TEST" > "$CASE12_DIR/run-b.log" 2>&1 &
 CASE12B_PID=$!
@@ -1094,8 +1269,8 @@ else
 fi
 
 set +e
-wait "$CASE12B_PID"
-CASE12B_RC=$?
+term_and_reap "$CASE12B_PID" "$CASE12_DIR/journal-b"
+CASE12B_RC=$LAST_RC
 set -e
 echo "── Case 12b log ──"
 cat "$CASE12_DIR/run-b.log"
@@ -1103,10 +1278,10 @@ echo "── Case 12b journal ──"
 cat "$CASE12_DIR/journal-b" 2>/dev/null || echo "(empty)"
 echo "─────────────────"
 
-if [ "$CASE12B_RC" -eq 0 ]; then
-  echo "PASS Case 12 (Fix A): managed run over a pre-existing lease exited 0"
+if [ "$CASE12B_RC" -eq 143 ]; then
+  echo "PASS Case 12 (Fix A): managed run over a pre-existing lease torn down by TERM (rc=143)"
 else
-  echo "FAIL Case 12 (Fix A): managed run over a pre-existing lease exited $CASE12B_RC (expected 0)"
+  echo "FAIL Case 12 (Fix A): managed run over a pre-existing lease teardown rc=$CASE12B_RC (expected 143)"
   FAIL=1
 fi
 if [ "$(cat "$CASE12B_LEASE" 2>/dev/null || true)" = "$CASE12B_LINE" ]; then
@@ -1163,6 +1338,247 @@ for entry in 3:3004:8003 4:3005:8004; do
   assert_no_default_next_rm "$CASE13_SUB/journal" "Case 13 (S5 id=$sid)" || FAIL=1
   assert_fixture_intact "Case 13 (S5 id=$sid)" || FAIL=1
 done
+
+# ── Case 14 (#448 Task 3): backend pin death → rc=1 + addressed verdict ────
+# REAL background children: the uv stub's uvicorn branch sleeps DIE_S then
+# exits 1 (a dying backend pin) while the pnpm pin holds (live frontend).
+# The holding pin is IMMORTAL-IN-BOUNDS (HOLD_S=600): with a short hold the
+# discriminating window is only hold−die seconds — under load the watch
+# loop's deciding look can slip past the holder's natural death, both pins
+# are then dead and the documented backend-first tie-break misattributes
+# the verdict (review iteration 1). 600 s cannot leak: the verdict's own
+# EXIT trap TERMs both pins, and RAW_WAIT_S bounds the case regardless.
+# The watch loop must notice within one interval (SHARD_STACK_WATCH_S=1),
+# print `stack shard 1: backend died on :8011`, ALWAYS print the stack-log
+# path, then the capped tail. Sub-cases:
+#   14a — SHARD_STACK_LOG → fixture (25 benign + 5 secret lines): the tail
+#         is capped at 20 (fixture lines 11..30 → benign 11..25 = 15 lines
+#         echoed; line 10 absent, line 11 = boundary present) and the
+#         secret-bearing lines are suppressed case-insensitively;
+#   14b — SHARD_STACK_LOG → missing file: «log not created» line (path is
+#         still printed);
+#   14c — no SHARD_STACK_LOG: the path defaults to the run's OWN log
+#         (readlink of fd 1 — exactly what the orchestrator's redirect
+#         produces in CI).
+# The verdict section is scoped (sed from the verdict line to EOF) so the
+# echoed tail is inspected separately from the run's own chatter.
+CASE14_DIR="$WORK/case14"; mkdir -p "$CASE14_DIR"
+case14_fixture() {
+  local f="$1" i
+  : > "$f"
+  for i in $(seq 1 25); do printf 'FX line %02d\n' "$i" >> "$f"; done
+  for i in 1 2 3 4 5; do printf 'Authorization: Bearer SECRETMARKER-%d (token)\n' "$i" >> "$f"; done
+}
+
+# 14a — capped + filtered fixture tail, path always printed.
+CASE14_FIX="$CASE14_DIR/stack-a.log"
+case14_fixture "$CASE14_FIX"
+CASE14A_DB="$CASE14_DIR/test_memo_shard1.db"; printf 'seed' > "$CASE14A_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600 SHARD_STACK_LOG=$CASE14_FIX"
+RAW_WAIT_S=12
+run_shard_raw "$CASE14_DIR/run-a.log" "$CASE14_DIR/journal-a" "$CASE14A_DB" 1 3011 8011
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 14a log ──"
+cat "$CASE14_DIR/run-a.log"
+echo "─────────────────"
+sed -n '/stack shard 1: backend died on :8011/,$p' "$CASE14_DIR/run-a.log" > "$CASE14_DIR/section-a" || true
+
+if [ "$LAST_RC" -eq 1 ] && grep -q 'stack shard 1: backend died on :8011' "$CASE14_DIR/section-a"; then
+  echo "PASS Case 14a (#448): backend pin death → rc=1 + addressed verdict"
+else
+  echo "FAIL Case 14a (#448): expected rc=1 + 'stack shard 1: backend died on :8011' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE14_DIR/journal-a" 2>/dev/null; then
+  echo "PASS Case 14a (#448): positive control — the run reached the watch phase"
+else
+  echo "FAIL Case 14a (#448): run never reached next dev (rc=1 could be vacuous)"
+  FAIL=1
+fi
+if grep -Fq "stack log: $CASE14_FIX" "$CASE14_DIR/section-a"; then
+  echo "PASS Case 14a (#448): stack-log path ALWAYS printed"
+else
+  echo "FAIL Case 14a (#448): expected 'stack log: $CASE14_FIX' in the verdict section"
+  FAIL=1
+fi
+CASE14_TAILN="$(grep -c '^FX line ' "$CASE14_DIR/section-a" || true)"
+if [ "$CASE14_TAILN" -eq 15 ] && grep -q '^FX line 11$' "$CASE14_DIR/section-a" \
+   && ! grep -q '^FX line 10$' "$CASE14_DIR/section-a" && grep -q '^FX line 25$' "$CASE14_DIR/section-a"; then
+  echo "PASS Case 14a (#448): tail capped at 20 (15 benign echoed, boundary line 11 in / line 10 out)"
+else
+  echo "FAIL Case 14a (#448): cap wrong — echoed FX lines: $CASE14_TAILN (want 15; line 11 in, line 10 out)"
+  FAIL=1
+fi
+if ! grep -q 'SECRETMARKER' "$CASE14_DIR/section-a"; then
+  echo "PASS Case 14a (#448): secret-bearing lines suppressed (case-insensitive filter)"
+else
+  echo "FAIL Case 14a (#448): SECRETMARKER leaked into the verdict tail"
+  FAIL=1
+fi
+
+# 14b — missing log file → «log not created» (path still printed).
+CASE14B_DB="$CASE14_DIR/test_memo_shard1_b.db"; printf 'seed' > "$CASE14B_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600 SHARD_STACK_LOG=$CASE14_DIR/nope-b.log"
+RAW_WAIT_S=12
+run_shard_raw "$CASE14_DIR/run-b.log" "$CASE14_DIR/journal-b" "$CASE14B_DB" 1 3011 8011
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 14b log ──"
+cat "$CASE14_DIR/run-b.log"
+echo "─────────────────"
+sed -n '/stack shard 1: backend died on :8011/,$p' "$CASE14_DIR/run-b.log" > "$CASE14_DIR/section-b" || true
+if [ "$LAST_RC" -eq 1 ] && grep -Fq "stack log: $CASE14_DIR/nope-b.log" "$CASE14_DIR/section-b" \
+   && grep -q 'log not created' "$CASE14_DIR/section-b"; then
+  echo "PASS Case 14b (#448): missing log → path printed + «log not created»"
+else
+  echo "FAIL Case 14b (#448): expected rc=1 + path line + 'log not created' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+
+# 14c — no SHARD_STACK_LOG: the path defaults to the run's own log file
+# (fd-1 readlink; the same shape the orchestrator's redirect produces).
+CASE14C_DB="$CASE14_DIR/test_memo_shard1_c.db"; printf 'seed' > "$CASE14C_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600"
+RAW_WAIT_S=12
+run_shard_raw "$CASE14_DIR/run-c.log" "$CASE14_DIR/journal-c" "$CASE14C_DB" 1 3011 8011
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 14c log ──"
+cat "$CASE14_DIR/run-c.log"
+echo "─────────────────"
+sed -n '/stack shard 1: backend died on :8011/,$p' "$CASE14_DIR/run-c.log" > "$CASE14_DIR/section-c" || true
+if [ "$LAST_RC" -eq 1 ] && grep -Fq "stack log: $CASE14_DIR/run-c.log" "$CASE14_DIR/section-c"; then
+  echo "PASS Case 14c (#448): default stack-log path = the run's own log (fd-1 readlink)"
+else
+  echo "FAIL Case 14c (#448): expected rc=1 + 'stack log: $CASE14_DIR/run-c.log' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+
+# ── Case 15 (#448 Task 3): frontend pin death → rc=1 + addressed verdict ───
+# Mirror of Case 14 with the dying pin on the frontend side (pnpm die
+# branch); the backend pin holds IMMORTAL-IN-BOUNDS (600 s — same
+# tie-break-race hardening as Case 14; the verdict's EXIT trap TERMs it).
+# Shard 2 + distinct ports so the grep is addressed, not accidental.
+CASE15_DIR="$WORK/case15"; mkdir -p "$CASE15_DIR"
+CASE15_DB="$CASE15_DIR/test_memo_shard2.db"; printf 'seed' > "$CASE15_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_FRONTEND_DIE_S=2 SHARD_DRYRUN_BACKEND_HOLD_S=600"
+RAW_WAIT_S=12
+run_shard_raw "$CASE15_DIR/run.log" "$CASE15_DIR/journal" "$CASE15_DB" 2 3012 8012
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 15 log ──"
+cat "$CASE15_DIR/run.log"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 1 ] && grep -q 'stack shard 2: frontend died on :3012' "$CASE15_DIR/run.log" \
+   && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE15_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 15 (#448): frontend pin death → rc=1 + addressed verdict (run reached watch phase)"
+else
+  echo "FAIL Case 15 (#448): expected rc=1 + 'stack shard 2: frontend died on :3012' + positive control (got rc=$LAST_RC)"
+  FAIL=1
+fi
+
+# ── Case 16 (#448 Task 3): trap grandchild sweep — masked holder dies, ──────
+# unmasked survives. REAL holders: python3 listeners, one with a REWRITTEN
+# argv (exec -a) that carries the next-server title mask and holds the
+# stack's FRONTEND port, one plain python3 holding the stack's BACKEND
+# port. On TERM teardown the script's exit trap must _sweep_masked the
+# masked one (mask ∧ LISTEN-on-our-port conjunction; the /proc resolver
+# sees the re-titled holder — the #448 bug class) and spare the unmasked
+# one (no uvicorn mask → no nomination). Ports are picked with bounded
+# retries via the REAL resolver (_listener_on, sourced at Case 9) and
+# holder readiness is polled — no coupon-collector flakiness.
+CASE16_DIR="$WORK/case16"; mkdir -p "$CASE16_DIR"
+PY3="$(command -v python3)"
+CASE16_HOLDER="$CASE16_DIR/holder.py"
+cat > "$CASE16_HOLDER" <<'EOF'
+import socket, sys, time
+port = int(sys.argv[1])
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+s.listen(1)
+print("HOLDER-READY %d" % port, flush=True)
+time.sleep(600)
+EOF
+
+case16_holder_up() {  # <pid> <log> <port> → rc 0 iff listening & alive
+  local pid="$1" log="$2" port="$3" i
+  for i in $(seq 1 50); do
+    if ! kill -0 "$pid" 2>/dev/null; then return 1; fi
+    if grep -q "HOLDER-READY $port" "$log" 2>/dev/null && _listener_on "$port"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+CASE16_P1=""; CASE16_P2=""; CASE16_MASKED_PID=""; CASE16_PLAIN_PID=""
+for _try in $(seq 1 25); do
+  _c1=$((29170 + (_try * 37) + (RANDOM % 211)))
+  _c2=$((_c1 + 1))
+  if _listener_on "$_c1" "$_c2"; then continue; fi   # busy → next candidate
+  # masked holder: rewritten argv — what a re-titled next-server grandchild
+  # looks like to pgrep -f / ps args / the /proc resolver.
+  ( exec -a "next-server (v99.9) #448-dryrun-holder" "$PY3" "$CASE16_HOLDER" "$_c1" ) \
+    > "$CASE16_DIR/masked.log" 2>&1 &
+  CASE16_MASKED_PID=$!
+  # plain holder: no mask anywhere in its argv → must survive the sweep.
+  "$PY3" "$CASE16_HOLDER" "$_c2" > "$CASE16_DIR/plain.log" 2>&1 &
+  CASE16_PLAIN_PID=$!
+  if case16_holder_up "$CASE16_MASKED_PID" "$CASE16_DIR/masked.log" "$_c1" \
+     && case16_holder_up "$CASE16_PLAIN_PID" "$CASE16_DIR/plain.log" "$_c2"; then
+    CASE16_P1="$_c1"; CASE16_P2="$_c2"
+    break
+  fi
+  # bind race (candidate taken between probe and bind) → retry next pair
+  kill -9 "$CASE16_MASKED_PID" "$CASE16_PLAIN_PID" 2>/dev/null || true
+  wait "$CASE16_MASKED_PID" 2>/dev/null || true
+  wait "$CASE16_PLAIN_PID" 2>/dev/null || true
+  CASE16_MASKED_PID=""; CASE16_PLAIN_PID=""
+done
+
+if [ -n "$CASE16_P1" ]; then
+  echo "  → Case 16 holders up: masked=:$CASE16_P1 (pid $CASE16_MASKED_PID), plain=:$CASE16_P2 (pid $CASE16_PLAIN_PID)"
+  CASE16_DB="$CASE16_DIR/test_memo_shard1.db"; printf 'seed' > "$CASE16_DB"
+  run_shard "$CASE16_DIR/run.log" "$CASE16_DIR/journal" "$CASE16_DB" 1 "$CASE16_P1" "$CASE16_P2"
+  echo "── Case 16 log ──"
+  cat "$CASE16_DIR/run.log"
+  echo "─────────────────"
+
+  # Masked holder must be gone shortly after teardown (bounded poll).
+  CASE16_MASKED_GONE=false
+  for _i in $(seq 1 25); do
+    if ! kill -0 "$CASE16_MASKED_PID" 2>/dev/null; then CASE16_MASKED_GONE=true; break; fi
+    sleep 0.2
+  done
+  if [ "$LAST_RC" -eq 143 ]; then
+    echo "PASS Case 16 (#448): stack torn down by TERM (rc=143)"
+  else
+    echo "FAIL Case 16 (#448): teardown rc=$LAST_RC (expected 143)"
+    FAIL=1
+  fi
+  if [ "$CASE16_MASKED_GONE" = true ]; then
+    echo "PASS Case 16 (#448): masked holder of :$CASE16_P1 swept by the exit trap"
+  else
+    echo "FAIL Case 16 (#448): masked holder (pid $CASE16_MASKED_PID) survived the trap sweep"
+    FAIL=1
+  fi
+  if kill -0 "$CASE16_PLAIN_PID" 2>/dev/null; then
+    echo "PASS Case 16 (#448): unmasked holder of :$CASE16_P2 spared (mask ∧ port conjunction)"
+  else
+    echo "FAIL Case 16 (#448): unmasked holder (pid $CASE16_PLAIN_PID) was killed by the sweep"
+    FAIL=1
+  fi
+  # Harness cleanup — the survivors are OUR processes, always reaped.
+  kill -9 "$CASE16_MASKED_PID" "$CASE16_PLAIN_PID" 2>/dev/null || true
+  wait "$CASE16_MASKED_PID" 2>/dev/null || true
+  wait "$CASE16_PLAIN_PID" 2>/dev/null || true
+else
+  echo "FAIL Case 16 (#448): could not obtain a free port pair for holders (25 tries)"
+  FAIL=1
+fi
 
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"

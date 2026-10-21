@@ -10,6 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-20
 
 ### Added
+- **GH #499 — Клиентские учётки и реальное бронирование из веба (срез
+  «вход + форма»: OTP-вход, `/cabinet`, `POST /my/records`)** — branch
+  `499-web-client-auth-booking` (12 коммитов `94b24a8e..3a620681`, base
+  `4c747c02`; 79 файлов, +6165/−406; спека
+  `docs/specs/2026-10-20-web-client-auth-booking-design.md` рев.2, план
+  `docs/plans/2026-10-21-web-client-auth-booking-plan.md` 9/9, порядок
+  1→2→4→3→5→6→7→8→9):
+  - **Учётки и OTP-фундамент (T1–T2):** роль `client` в `UserRole` (вне
+    матрицы прав — пустой набор) + `User.client_id` (unique FK, зеркало
+    `staff_id`); парольный вход и установка пароля отказывают клиентской
+    роли (`94b24a8e`); таблица `otp_codes` — один код на телефон, код
+    6 цифр TTL 5 мин, `code_hash` = HMAC-SHA-256 с серверным перцем (вне
+    БД), атомарное поглощение, лимиты 15-минутного окна: 5/телефон,
+    20/IP, 5 номеров/IP, 5 неудачных вводов (`2f047e35`, фикс `9cd0603d`).
+  - **Сессия и эндпоинты (T4, T3):** cookie `memo_client_session` +
+    `require_client_session` (перекрёстное предъявление сессий → 401),
+    `GET /my/client`, общий идемпотентный logout (`ba66a2da`);
+    `POST /auth/otp/request` — всегда 202, молчание для сотрудников,
+    `POST /auth/otp/verify` — идемпотентное создание учётки+карточки,
+    `phone_is_confirmed=true`, клиентская сессия на успехе; Origin-сверка,
+    транспорт fail-closed (503 без транспорта в любом окружении,
+    dev-транспорт и `dev_code` — только `ENV=development`) (`0bf7588c`).
+  - **Бронирование (T5):** `POST /api/v1/my/records` — строгая схема
+    (`extra="forbid"`), владелец из сессии, цена сервером из `tariff_id`,
+    1–20 визитов, анти-спам 20/40 за 15 мин, CORS точные origins
+    (`1f4d9e93`).
+  - **Контракт и веб (T6–T9):** api-client zod-зеркала + 4 функции
+    (`721a17fc`); реальные тарифы в оверлее бронирования (`981a5aa1`);
+    вход кодом при отправке + создание записи (`24725bde`, фиксы
+    `02eca526`); экран `/cabinet`, удаление мок-страницы `/booking` и
+    мёртвого API-пути (`077e3d95`); chore `OTP_TRANSPORT=dev` в `.env.dev`
+    (`3a620681`).
+  - **Tests:** backend целевые сьюты зелёные (263/0, 183/0), ruff+mypy
+    clean; api-client 497/0; web vitest 406/0 (47 файлов), tsc/lint clean;
+    визуальный гейт по evidence — scripted-Playwright 8/8 PASS
+    (`/tmp/visual-evidence-499/`, vision кросс-чек 3/3); ревью — все задачи
+    зелёные (Task 2/8 — по одной fix-итерации).
+  - Status: `docs/status/2026-10-21-web-client-auth-booking-499.md`
 - **GH #482 — Подсистема доменных событий: часть 1 системы оповещений (журнал
   `domain_events`, диспетчер, сценарий `new_record` с рендером)** — branch
   `feat/482-notify-events` (13 коммитов `f7051238..1a601c2c`, base `f7190cae`;

@@ -325,6 +325,24 @@ Element shows up, becomes actionable, state updates. Budget-based:
 deliberate and correct: raising it slows the suite and weakens the
 assertion. Never "fix" flakes here by growing timeouts.
 
+Distinguish the two shapes (GH #478):
+
+- **Disappear wait** (element present, waiting for it to go away —
+  dialog closed, spinner gone). Same load sensitivity as a positive
+  wait: it exits on first success, so a bigger budget costs nothing on
+  green paths and its only cost is slower red-path feedback when the
+  element truly stays. The suite-wide async budget covers these too.
+- **Never-appeared probe** (a `waitFor` wrapping
+  `queryBy…​).not.toBeInTheDocument()` while the element is absent from
+  the start). The wait exits immediately and asserts nothing — a late
+  element silently greens the test. Anti-pattern: settle on a side
+  effect first (see the unit toast rule below), then assert.
+
+Unit suites: the async budget lives in `__tests__/setup.ts`
+(`configure({ asyncUtilTimeout: 5000 })`, GH #478) — rely on it, do not
+restate it inline; pass an explicit short `timeout` only where the
+short window IS the assertion.
+
 ### Unit toast asserts (canon since #337, classified per site by #445)
 
 Asserting a toast spy after a user action in unit tests:

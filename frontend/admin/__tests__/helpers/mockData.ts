@@ -300,6 +300,16 @@ export const mockMasterResponseArchived: MasterViewResponse = {
 
 /** Factory for creating MasterViewResponse objects with overrides. */
 
+/** The 6-master `getAllMasters()` list (Menubar / layout tests, GH #478). */
+export const mockMastersApiAll: MasterViewResponse[] = [
+  { id: 'm1', first_name: 'Ольга', last_name: 'Середа', color: '#5B8C7A', specialty: 'живопись', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+  { id: 'm2', first_name: 'Юлия', last_name: 'Большакова', color: '#6B7E9C', specialty: 'керамика', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+  { id: 'm3', first_name: 'Анастасия', last_name: 'П.', color: '#A07060', specialty: 'живопись', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+  { id: 'm4', first_name: 'Дарья', last_name: 'Тюльпина', color: '#7A6E9C', specialty: 'керамика', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+  { id: 'm5', first_name: 'Александра', last_name: 'В.', color: '#8A7840', specialty: 'живопись', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+  { id: 'm7', first_name: 'Ирина', last_name: 'Горох', color: '#9A5870', specialty: 'керамика', avatar_url: null, sort_order: 0, archived: false, created_at: '', updated_at: '' },
+];
+
 // ─── StaffResponse (composite staff card, GH #266 «Сотрудники» screen) ────
 // `archived` = the PERSON flag (staff.is_active inverted); `master.archived` =
 // the schedule flag (masters.is_active inverted) — three independent flags D3.

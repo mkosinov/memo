@@ -29,6 +29,7 @@ import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
 import {
   waitForScheduleReady, waitForRecordsReady, openModal,
+  installReferenceWeekClock,
 } from './fixtures/helpers';
 import { seedId } from './fixtures/seed-ids';
 import { switchToRecordsTab } from './fixtures/scenarios';
@@ -44,6 +45,16 @@ const BACKEND = resolveBackendUrl();
 // shard stack seeds the DB.
 test.beforeAll(() => {
   M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+/**
+ * GH #422: the recalculated badge is asserted on /records, whose default
+ * period is monday..sunday of the PAGE-CLOCK week — pin the clock to the
+ * seed's reference week (install-before-goto) so the own-record fixture
+ * row sits inside the default range.
+ */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
 });
 
 

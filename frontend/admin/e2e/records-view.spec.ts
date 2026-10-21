@@ -2,7 +2,7 @@ import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
-import { waitForRecordsReady, openModal } from './fixtures/helpers';
+import { waitForRecordsReady, openModal, installReferenceWeekClock } from './fixtures/helpers';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import { switchToRecordsTab } from './fixtures/scenarios';
 import {
@@ -56,6 +56,17 @@ function hexToRgb(hex: string): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 }
+
+/**
+ * GH #422: the default records period is monday..sunday of the PAGE-CLOCK
+ * week, and factory records live on the seed's reference week — pin the
+ * clock to it (install-before-goto) so rows created in tests are inside
+ * the default range without each test widening the filters. US-5/US-6
+ * widen the period via explicit date inputs and are unaffected.
+ */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
+});
 
 /**
  * Narrow the records table to exactly one row via the «Поиск» box (server

@@ -8,6 +8,7 @@ import {
   expectDeepLinkChip,
   expectClientSearchEmpty,
   commitDeleteWait,
+  installReferenceWeekClock,
   undoToast,
 } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
@@ -1248,6 +1249,11 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
     try {
       // 1. Full load of /schedule, then SPA-navigate to /clients via the
       //    sidebar link (NOT page.goto) — this primes the list cache.
+      //    GH #422: install the reference-week clock FIRST — step 2's
+      //    sidebar return lands on a BARE /schedule (URL date lost), so
+      //    the grid falls back to the page-clock «today»; without the
+      //    install that's the runner's real October week (empty grid).
+      await installReferenceWeekClock(page);
       await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
       await page.locator('a[aria-label="Клиенты"]').click();

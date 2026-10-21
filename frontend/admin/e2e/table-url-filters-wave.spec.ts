@@ -3,7 +3,7 @@ import { test, expect } from './fixtures/test';
 import { createTestTag, cleanup } from './fixtures/factories';
 import { seedId } from './fixtures/seed-ids';
 import { installReferenceWeekClock } from './fixtures/helpers';
-import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY, addDaysIso } from './fixtures/seed-week';
 import type { APIRequestContext } from '@playwright/test';
 
 /**
@@ -457,9 +457,10 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
     // GH #422: fill the NEXT week's Monday — a fill EQUAL to the default
     // Monday would be stripped from the URL by the hook's canonical
     // serialization (hazard documented in schedule-url-state US-4).
+    const nextMonday = addDaysIso(SEED_WEEK_MONDAY, 7);
     const dateFrom = page.getByLabel('Фильтр по дате от');
-    await dateFrom.fill('2026-06-08');
-    await expect(page).toHaveURL(/from=2026-06-08/, { timeout: 10_000 });
+    await dateFrom.fill(nextMonday);
+    await expect(page).toHaveURL(new RegExp(`from=${nextMonday}`), { timeout: 10_000 });
 
     // «назад» cancels the period change: no params, default week restored.
     await page.goBack();

@@ -30,6 +30,15 @@
 #   audit_orphan_tagged [CURRENT_TAG]   — tail audit (anti-accumulation):
 #     tagged file resources with no live lease = garbage (removed, no
 #     grace); log dirs run-<tag> only when the tag is dead > 24 h.
+#
+# Feature #448, spec §3.1/§3.2 (/proc port resolver — Task 1 primitives;
+# the five lsof call-site replacements are Task 2):
+#   listen_pairs       — ONE sample per call: «pid port» lines from
+#     /proc/net/tcp{,6} LISTEN rows + a single /proc/[0-9]*/fd/* scan;
+#     unattributable holder → «- port» (fail-closed busy); unreadable
+#     /proc/net/tcp → one stderr warning + rc 1 (callers keep lsof).
+#   _watch_interval_s  — normalize SHARD_STACK_WATCH_S / SHARD_RUN_WATCH_S
+#     (default 5 s, hard max 600 s).
 
 CLEANUP_BUDGET_S=10
 
@@ -65,6 +74,143 @@ SHARD_ALLOC_MAX_ATTEMPTS=20
 if [ -z "${SHARD_LEGACY_PORTS:-}" ]; then
   SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
 fi
+
+# ── Feature #448: /proc-резолвер «порт → PID» + константы watchdog ──────────
+# SHARD_PROC_DRYRUN / SHARD_PROC_ROOT — контур тестопригодности резолвера
+# (§3.1 «Тестопригодность»): продовый прогон читает ЛИТЕРАЛЬНЫЙ /proc;
+# подмена корня фикстурой honoured ТОЛЬКО при непустом флаге dryrun-режима
+# набора тестов — во внешнем окружении источником истины нельзя рулить.
+# SHARD_STACK_WATCH_S / SHARD_RUN_WATCH_S — интервалы watchdog-поллинга
+# (слой стека / слой оркестратора, Tasks 3-4): сырые env-значения
+# прогоняются через _watch_interval_s (дефолт 5 с, жёсткий максимум 600 с).
+SHARD_WATCH_DEFAULT_S=5
+SHARD_WATCH_MAX_S=600
+
+# _watch_interval_s VALUE → stdout: нормализованный интервал watchdog-
+# поллинга (сек). §3.2: не-число, пусто, 0, отрицательное или больше
+# жёсткого максимума (600) → дефолт 5. ЕДИНЫЙ нормализатор обеих констант
+# (SHARD_STACK_WATCH_S / SHARD_RUN_WATCH_S): вызывающий слой подаёт сырую
+# env-строку, получает гарантированное целое 1..600. stdout — одно число;
+# rc всегда 0. bash 3.2: ERE через переменную (портабельная форма =~);
+# 10# — ведущие нули не трактуются как восьмеричные.
+_watch_interval_s() {
+  local v="${1:-}" n
+  local num_re='^[0-9]+$'
+  if [[ "$v" =~ $num_re ]]; then
+    n=$((10#$v))
+    if [ "$n" -ge 1 ] && [ "$n" -le "$SHARD_WATCH_MAX_S" ]; then
+      printf '%s\n' "$n"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$SHARD_WATCH_DEFAULT_S"
+  return 0
+}
+
+# _proc_fd_owners ROOT → stdout строки «pid socket:[inode]» — ОДИН проход по
+# ROOT/[0-9]*/fd/* (по одному readlink на симлинк; не-сокетные цели отсеет
+# join-awk listen_pairs). Вызывается внутри подстановки <( ) — падение
+# отдельного readlink (нет прав на чужой fd, каталог исчез в гонке) гасится
+# молча: неатрибутируемый inode → «- port» (fail-closed, §3.1). Пустой вывод
+# ВАЛИДЕН (нет процессов/нет прав вовсе). bash 3.2: extract сегментов пути
+# параметрическими расширениями.
+_proc_fd_owners() {
+  local link target pid
+  for link in "$1"/[0-9]*/fd/*; do
+    target="$(readlink "$link" 2>/dev/null)" || continue
+    case "$target" in
+      socket:\[*\])
+        pid="${link%/*}"                 # …/<pid>/fd/<n> → …/<pid>/fd
+        pid="${pid%/fd}"                 # …/<pid>
+        pid="${pid##*/}"                 # <pid>
+        printf '%s %s\n' "$pid" "$target"
+        ;;
+    esac
+  done
+}
+
+# listen_pairs → stdout строки «pid port» — ОДИН сэмпл на вызов, без lsof
+# (§3.1 «Резолвер»). Источник — /proc/net/tcp + /proc/net/tcp6 (обе таблицы,
+# отсутствие tcp6 — не ошибка): строки состояния 0A (LISTEN); порт —
+# hex-часть локального адреса после ПОСЛЕДНЕГО двоеточия → dec (как в lsof-
+# выборке _masked_pids); inode → владелец одиночным проходом /proc/[0-9]*/
+# fd/* по симлинку socket:[inode]. lsof слеп к перетитулованным process.title
+# (пробелы/вложенные скобки ломают разбор /proc/<pid>/stat); резолвер stat
+# не читает — только fd-симлинки, поэтому невидимые держатели видимы.
+#
+# Fail-closed (§3.1): LISTEN-строка, чей inode не сопоставился ни одному
+# процессу (чужой uid без прав чтения fd, чужой PID-namespace при общем
+# netns), НЕ выбрасывается: печатается строка «- port» — порт занят,
+# держатель неизвестен. «-» — ПРЕДНАМЕРЕННЫЙ маркер пустого pid (не пустое
+# поле: `read -r pid port` на строке с ведущим пробелом кладёт порт в pid,
+# и номер порта попадает в holders-конъюнкцию как «кандидат на убийство»);
+# «-» же не матчится ни с одним pgrep-кандидатом — убийства нет, занятость
+# есть. Свободен только порт без LISTEN-строки вовсе.
+#
+# Не-Linux фолбэк: /proc/net/tcp нечитаем → ОДНОКРАТНОЕ предупреждение в
+# stderr, rc 1, stdout пуст — вызывающие точки (пять замен, Task 2) при
+# не-нулевом rc используют прежний lsof-вызов. stdout несёт ТОЛЬКО пары;
+# диагностика — в stderr. Один сэмпл = одно чтение таблиц + один проход по
+# fd (тысячи readlink — миллисекунды; кэширование не строим, §3.1).
+#
+# join на awk, файл 1 — таблицы (заголовок ядра гарантирует непустоту →
+# идиома NR==FNR корректна и при ПУСТОМ fd-скане: все строки тогда уходят
+# в «- port»), файл 2 — «pid socket:[inode]» из _proc_fd_owners. Печать
+# дедуплицирована по (inode, pid) — dup'd fd не размножает строки; сокет,
+# разделённый форком (два pid держат один fd), печатается обоими — как у
+# lsof. bash 3.2: без assoc-массивов, awk — переносимый (mawk/BSD/gawk).
+listen_pairs() {
+  local root="/proc"
+  if [ -n "${SHARD_PROC_DRYRUN:-}" ] && [ -n "${SHARD_PROC_ROOT:-}" ]; then
+    root="${SHARD_PROC_ROOT}"
+  fi
+  local tcp_tbl="$root/net/tcp"
+  if [ ! -r "$tcp_tbl" ]; then
+    echo "⚠️ listen_pairs: $tcp_tbl unreadable — non-Linux? Port checks fall back to the lsof path." >&2
+    return 1
+  fi
+  if ! awk '
+    function hextodec(h,   i, c, d, v) {
+      v = 0
+      for (i = 1; i <= length(h); i++) {
+        c = tolower(substr(h, i, 1))
+        d = index("0123456789abcdef", c) - 1
+        if (d < 0) return -1
+        v = v * 16 + d
+      }
+      return v
+    }
+    NR == FNR {
+      if ($4 == "0A" && NF >= 10) {
+        port = $2
+        sub(/^.*:/, "", port)                  # после последнего «:»
+        port = hextodec(port)
+        if (port > 0) lport[$10] = port
+      }
+      next
+    }
+    $2 ~ /^socket:\[/ {
+      ino = substr($2, 9, length($2) - 9)      # socket:[<inode>]
+      if (ino in lport) {
+        if (!((ino, $1) in printed)) {
+          print $1, lport[ino]
+          printed[ino, $1] = 1
+        }
+        seen[ino] = 1
+      }
+      next
+    }
+    END {
+      for (ino in lport) {
+        if (!(ino in seen)) print "-", lport[ino]
+      }
+    }
+  ' <(cat "$tcp_tbl" "$root/net/tcp6" 2>/dev/null) <(_proc_fd_owners "$root"); then
+    echo "⚠️ listen_pairs: table parse failed — treating as no /proc (lsof fallback)." >&2
+    return 1
+  fi
+  return 0
+}
 
 # ── Внутренний хелпер: выборка «порт + маска команды» ───────────────────────
 # Использование: _masked_pids PORTS_VAR PGPATTERN GATE1 [GATE2 ...]

@@ -135,6 +135,32 @@
 #     skip the sweep ladder naturally — dead manual lease (front back 0 0):
 #     holder on a REAL lease port killed via the ladder, masked innocent
 #     on an unrelated port survives, tagged files + lease removed.
+#
+# Spec coverage (Feature #448, /proc port resolver + fail-fast run — LIB
+# primitives, docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md
+# §3.1/§3.2; Task 1 adds the PRIMITIVES, the five lsof call-site replacements
+# are Task 2 in the same PR):
+#   → Case 23 (§3.1, US-1): listen_pairs on a /proc-form FIXTURE (make_proc_
+#     fixture & co) — tcp + tcp6 tables; LISTEN rows resolved, non-LISTEN
+#     (ESTABLISHED/TIME_WAIT) never reported; hex→dec port decode (incl.
+#     alpha-heavy hex); inode→pid attribution incl. the fork shape (two pids
+#     share one listening socket); duplicate fd of one owner does not
+#     duplicate output; ownerless LISTEN inode → «- port» fail-closed busy
+#     line; missing tcp6 is NOT an error (tcp rows still resolved).
+#   → Case 24 (§3.1, fallback + testability gate): unreadable /proc root →
+#     rc≠0, EMPTY stdout, EXACTLY ONE stderr warning (callers keep the lsof
+#     path — Task 2's five sites); the SHARD_PROC_ROOT override is honoured
+#     ONLY under a non-empty SHARD_PROC_DRYRUN — without the flag the sample
+#     comes from the real /proc and the fixture port never leaks in.
+#   → Case 25 (§3.2): _watch_interval_s normalizer — non-number/empty, 0,
+#     negative, 601, float, padded → 5; 1..600 pass through (incl. 007 → 7);
+#     caller shape: env SHARD_STACK_WATCH_S normalized through it.
+#   → Case 26 (§3.1, US-3 conjunction): masked holder on a port → attributed
+#     by the live resolver (Linux-only assert) and KILLED by _sweep_masked;
+#     unmasked holder on a port → resolver sees the pair (mask is the
+#     consumer's business) but the sweep spares it; unattributable fixture
+#     row → sample line is exactly «- <port>» (busy, «-» is never a pgrep
+#     candidate — no kill) with NO numeric pid claiming the port.
 
 set -euo pipefail
 
@@ -433,6 +459,46 @@ wait_marker() {
 check_port_survivor() {
   kill -0 "$2" 2>/dev/null || return 1
   lsof -ti :"$1" 2>/dev/null | grep -qx "$2"
+}
+
+# ── #448 Task 1: /proc-form fixture helpers (reused by Task 2 call sites) ───
+# The resolver reads three things under one root: net/tcp + net/tcp6 (kernel
+# table format) and <pid>/fd/<n> symlinks with target socket:[inode]. The
+# fixture mirrors that shape in a temp dir; the library honours the root
+# override ONLY in dryrun mode (non-empty SHARD_PROC_DRYRUN + SHARD_PROC_ROOT
+# — production reads the literal /proc and cannot be steered by the env).
+# Fixture ports live in 20001-20009/2748: outside the repo service ports
+# (3000-3003, 8000-8002, 3100, 8101), the shard window (28000-32700) and the
+# harness triplet window (38200-46099) — nothing real binds them, so
+# absence-assertions against the live /proc stay deterministic.
+
+# make_proc_fixture DIR — skeleton: net/tcp + net/tcp6, each with the kernel
+# header line. The header is LOAD-BEARING: an empty tables stream would
+# break the resolver's NR==FNR awk join (empty first file), while the real
+# kernel always emits it — the fixture must mirror that invariant.
+make_proc_fixture() {
+  mkdir -p "$1/net"
+  printf '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n' > "$1/net/tcp"
+  printf '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n' > "$1/net/tcp6"
+}
+
+# proc_fix_row DIR TABLE INODE HEXPORT [STATE] — append one socket row to
+# DIR/net/TABLE (tcp|tcp6). Zero-filled local/remote addresses + the given
+# hex port; state defaults to 0A (LISTEN); the inode lands in field 10
+# exactly like a kernel row. sl is a cosmetic constant (field 1 is never
+# parsed by the resolver).
+proc_fix_row() {
+  local dir="$1" tbl="$2" ino="$3" hexport="$4" state="${5:-0A}"
+  printf '  0: 00000000000000000000000000000000:%s 00000000000000000000000000000000:0000 %s 00000000:00000000 00:00000000 00000000     0        0 %s 1 0000000000 100 0 0 10 0\n' \
+    "$hexport" "$state" "$ino" >> "$dir/net/$tbl"
+}
+
+# proc_fix_owner DIR PID INODE — fake process: DIR/PID/fd/<inode> symlink →
+# socket:[INODE] (fd entry names are irrelevant to the scan — the glob takes
+# any entry under <pid>/fd/; one per owner suffices, the inode is unique).
+proc_fix_owner() {
+  mkdir -p "$1/$2/fd"
+  ln -sf "socket:[$3]" "$1/$2/fd/$3"
 }
 
 # ── Case 0: meta self-check — the sweep really detects a violating holder ─
@@ -2014,6 +2080,228 @@ else
   echo "FAIL Case 22 (#317 Task 7): rc=$SW22_RC elapsed=${EL22}s out='$SW22_OUT' holder=$(kill -0 "$H22" 2>/dev/null && echo alive || echo dead)"
   echo "── Case 22 sweep stderr ──"
   cat "$WORK/case22.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 23 (#448 §3.1, US-1): listen_pairs on the /proc fixture ────────────
+echo "── Case 23 (#448): listen_pairs — LISTEN/non-LISTEN, hex→dec, tcp6, unowned → «- port» ──"
+fresh_root "case23"
+source_lib
+CASE23_OK=true
+declare -F listen_pairs >/dev/null 2>&1 || CASE23_OK=false
+FIX23="$WORK/procfix-case23"
+make_proc_fixture "$FIX23"
+# tcp: two owned LISTEN rows (4E21/4E22 → 20001/20002), one ESTABLISHED row
+# (state 01 — never reported), one ownerless LISTEN row with an alpha-heavy
+# hex port (0ABC → 2748) → fail-closed «- port» busy marker.
+proc_fix_row   "$FIX23" tcp 90001 4E21 0A
+proc_fix_owner "$FIX23" 4242 90001
+proc_fix_row   "$FIX23" tcp 90002 4E22 0A
+proc_fix_owner "$FIX23" 4343 90002
+proc_fix_row   "$FIX23" tcp 90003 4E23 01
+proc_fix_owner "$FIX23" 4242 90003
+proc_fix_row   "$FIX23" tcp 90004 0ABC 0A
+# tcp6: LISTEN row shared by TWO pids (fork shape — both keep the fd) and a
+# TIME_WAIT row (state 06 — never reported).
+proc_fix_row   "$FIX23" tcp6 90005 4E25 0A
+proc_fix_owner "$FIX23" 4444 90005
+proc_fix_owner "$FIX23" 4445 90005
+proc_fix_row   "$FIX23" tcp6 90006 4E26 06
+proc_fix_owner "$FIX23" 4444 90006
+# duplicate fd of one owner (dup'd socket) must not duplicate output lines.
+ln -sf "socket:[90001]" "$FIX23/4242/fd/90001x"
+
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP23=$(listen_pairs 2>"$WORK/case23.err"); LP23_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+
+[ "$LP23_RC" -eq 0 ] || CASE23_OK=false
+LP23_SORTED="$(printf '%s\n' "$LP23" | sort)"
+WANT23="$(printf '%s\n' \
+  '4242 20001' \
+  '4343 20002' \
+  '- 2748' \
+  '4444 20005' \
+  '4445 20005' | sort)"
+[ "$LP23_SORTED" = "$WANT23" ] || CASE23_OK=false
+# non-LISTEN ports never appear in the sample
+case "$LP23" in *20003*|*20006*) CASE23_OK=false ;; esac
+
+# missing tcp6 is NOT an error: tcp rows still resolved, rc 0
+rm -f "$FIX23/net/tcp6"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP23B=$(listen_pairs 2>"$WORK/case23b.err"); LP23B_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP23B_RC" -eq 0 ] || CASE23_OK=false
+LP23B_SORTED="$(printf '%s\n' "$LP23B" | sort)"
+WANT23B="$(printf '%s\n' '4242 20001' '4343 20002' '- 2748' | sort)"
+[ "$LP23B_SORTED" = "$WANT23B" ] || CASE23_OK=false
+
+if $CASE23_OK; then
+  echo "PASS Case 23 (#448): fixture sample — LISTEN attributed (tcp+tcp6, fork shape), non-LISTEN dropped, hex→dec, dup fd deduped, unowned → «- 2748»; missing tcp6 ok"
+else
+  echo "FAIL Case 23 (#448): rc=$LP23_RC/$LP23B_RC"
+  echo "── Case 23 sample ──"
+  printf '%s\n' "$LP23"
+  echo "── want (sorted) ──"
+  printf '%s\n' "$WANT23"
+  cat "$WORK/case23.err" "$WORK/case23b.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 24 (#448 §3.1): non-Linux fallback + dryrun-gate inertness ─────────
+echo "── Case 24 (#448): unreadable root → one warning + rc≠0; override honoured only in dryrun ──"
+fresh_root "case24"
+source_lib
+CASE24_OK=true
+FIX24="$WORK/procfix-case24"          # no net/ at all → net/tcp unreadable
+mkdir -p "$FIX24"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX24"
+set +e
+LP24=$(listen_pairs 2>"$WORK/case24.err"); LP24_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP24_RC" -ne 0 ] || CASE24_OK=false            # callers (Task 2) keep the lsof path
+[ -z "$LP24" ] || CASE24_OK=false                  # stdout empty on fallback
+WARN24=$(wc -l < "$WORK/case24.err" 2>/dev/null || printf '0')
+WARN24=$((WARN24))
+[ "$WARN24" -eq 1 ] || CASE24_OK=false             # ONE warning, not a per-port storm
+grep -q '⚠️ listen_pairs' "$WORK/case24.err" 2>/dev/null || CASE24_OK=false   # the LIB's warning (bash's «command not found» noise must not satisfy this)
+
+# Production inertness: the root override is honoured ONLY in dryrun mode —
+# without the flag the sample comes from the REAL /proc (or the non-Linux
+# fallback); the fixture port must not leak into the output either way.
+# NB: FIX23 still carries the 20001 LISTEN row — a wrongly honoured override
+# would emit «4242 20001» and fail the absence assert (non-vacuous).
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP24B=$(listen_pairs 2>/dev/null); LP24B_RC=$?
+set -e
+unset SHARD_PROC_ROOT
+case "$LP24B" in *20001*) CASE24_OK=false ;; esac   # override inert without the flag
+
+if $CASE24_OK; then
+  echo "PASS Case 24 (#448): fallback rc≠0 + empty stdout + single warning; SHARD_PROC_ROOT inert without SHARD_PROC_DRYRUN (live rc=$LP24B_RC)"
+else
+  echo "FAIL Case 24 (#448): rc=$LP24_RC warnings=$WARN24 inert_out_has_20001=$(printf '%s' "$LP24B" | grep -c 20001 || true)"
+  echo "── Case 24 stderr ──"
+  cat "$WORK/case24.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 25 (#448 §3.2): _watch_interval_s normalizer ───────────────────────
+echo "── Case 25 (#448): watch-interval normalizer — junk/0/neg/>600 → 5; 1..600 pass ──"
+fresh_root "case25"
+source_lib
+CASE25_OK=true
+declare -F _watch_interval_s >/dev/null 2>&1 || CASE25_OK=false
+wi_check() {
+  WI_LAST_IN="$1"; WI_LAST_WANT="$2"
+  set +e
+  WI_OUT=$(_watch_interval_s "$1" 2>/dev/null); WI_RC=$?
+  set -e
+  [ "$WI_RC" -eq 0 ] || return 1
+  [ "$WI_OUT" = "$2" ] || return 1
+  return 0
+}
+wi_check ''    5   || CASE25_OK=false
+wi_check 'abc' 5   || CASE25_OK=false
+wi_check '0'   5   || CASE25_OK=false
+wi_check '-3'  5   || CASE25_OK=false
+wi_check '601' 5   || CASE25_OK=false
+wi_check '5.5' 5   || CASE25_OK=false
+wi_check ' 5'  5   || CASE25_OK=false
+wi_check '1'   1   || CASE25_OK=false
+wi_check '5'   5   || CASE25_OK=false
+wi_check '7'   7   || CASE25_OK=false
+wi_check '007' 7   || CASE25_OK=false
+wi_check '600' 600 || CASE25_OK=false
+# caller shape (Tasks 3-4): the layers read the env and normalize through it
+SHARD_STACK_WATCH_S=9
+wi_check "${SHARD_STACK_WATCH_S:-}" 9 || CASE25_OK=false
+unset SHARD_STACK_WATCH_S
+if $CASE25_OK; then
+  echo "PASS Case 25 (#448): normalizer — invalid/0/negative/601 → 5; 1..600 pass; env caller shape ok"
+else
+  echo "FAIL Case 25 (#448): last input '$WI_LAST_IN' → '$WI_OUT' (want '$WI_LAST_WANT', rc=$WI_RC)"
+  FAIL=1
+fi
+
+# ── Case 26 (#448 §3.1, US-3): kill conjunction on real processes ───────────
+echo "── Case 26 (#448): port+mask → kill; port without mask → spared; unattributable → busy, no kill ──"
+fresh_root "case26"
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")
+source_lib
+CASE26_OK=true
+
+# (a) порт + маска → убить: real uvicorn-argv holder on a backend port. The
+# live-resolver attribution assert is Linux-only (non-Linux = the fallback
+# contract of Case 24); the kill contract runs everywhere (lsof path today,
+# resolver path after Task 2 — the conjunction is the consumer's, unchanged).
+H26="$(spawn_uvicorn_holder "$TEST_BACKEND_PORT_A" -)"
+register_pid "$H26"
+wait_holder_bound "$H26" "$TEST_BACKEND_PORT_A"
+if [ -r /proc/net/tcp ]; then
+  set +e
+  LP26=$(listen_pairs 2>/dev/null); LP26_RC=$?
+  set -e
+  [ "$LP26_RC" -eq 0 ] || CASE26_OK=false
+  printf '%s\n' "$LP26" | grep -qx "$H26 $TEST_BACKEND_PORT_A" || CASE26_OK=false
+else
+  echo "  (non-Linux: live-resolver assert skipped — fallback contract is Case 24's)"
+fi
+_sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+wait_pid_gone "$H26" 5 || CASE26_OK=false
+port_free "$TEST_BACKEND_PORT_A" || CASE26_OK=false
+
+# (b) порт без маски → не убивать: plain-argv holder survives the same sweep;
+# the resolver still attributes the pair (the mask is the consumer's gate).
+P26="$(spawn_plain_holder "$TEST_BACKEND_PORT_B")"
+register_pid "$P26"
+wait_holder_bound "$P26" "$TEST_BACKEND_PORT_B"
+if [ -r /proc/net/tcp ]; then
+  set +e
+  LP26B=$(listen_pairs 2>/dev/null); LP26B_RC=$?
+  set -e
+  [ "$LP26B_RC" -eq 0 ] || CASE26_OK=false
+  printf '%s\n' "$LP26B" | grep -qx "$P26 $TEST_BACKEND_PORT_B" || CASE26_OK=false
+fi
+_sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+check_port_survivor "$TEST_BACKEND_PORT_B" "$P26" || CASE26_OK=false
+
+# (c) неатрибутируемый → не убивать, порт занят: fixture row with an ownerless
+# inode → the sample line is exactly «- <port>» (busy marker; «-» never
+# matches a pgrep candidate — no kill) and no numeric pid claims the port.
+FIX26="$WORK/procfix-case26"
+make_proc_fixture "$FIX26"
+proc_fix_row "$FIX26" tcp 91001 4E28 0A      # 20008 → busy, holder unknown
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX26"
+set +e
+LP26C=$(listen_pairs 2>"$WORK/case26.err"); LP26C_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP26C_RC" -eq 0 ] || CASE26_OK=false
+[ "$LP26C" = "- 20008" ] || CASE26_OK=false
+# 6.5: the plain holder survived on purpose — finish it here (it is ours).
+kill -9 "$P26" 2>/dev/null || true
+wait "$P26" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$P26/}")
+
+if $CASE26_OK; then
+  echo "PASS Case 26 (#448): masked holder killed (resolver-attributed on Linux); unmasked spared; unattributable → «- 20008» busy, no numeric pid"
+else
+  echo "FAIL Case 26 (#448): holder=$(kill -0 "$H26" 2>/dev/null && echo alive || echo dead) plain=$(kill -0 "$P26" 2>/dev/null && echo alive || echo dead) unattr='$LP26C' rc=$LP26C_RC"
   echo "─────────────────"
   FAIL=1
 fi

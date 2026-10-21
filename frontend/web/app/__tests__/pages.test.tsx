@@ -20,6 +20,7 @@ vi.mock("@memo/api-client", () => {
     requestOtpCode: vi.fn(),
     verifyOtpCode: vi.fn(),
     createMyRecord: vi.fn(),
+    logout: vi.fn(),
   };
 });
 
@@ -31,7 +32,6 @@ import CorporatePage from "../corporate/page";
 import ShopPage from "../shop/page";
 import AboutPage from "../about/page";
 import CabinetPage from "../cabinet/page";
-import BookingPage from "../booking/page";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ describe("Simple placeholder pages", () => {
   }
 });
 
-// ── Cabinet page ────────────────────────────────────────────
+// ── Cabinet page (behavior covered in depth by cabinet.test.tsx) ──
 
 describe("Cabinet page", () => {
   it("renders without errors", () => {
@@ -92,34 +92,5 @@ describe("Cabinet page", () => {
   it('renders title "Личный кабинет"', () => {
     renderPage(CabinetPage);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Личный кабинет");
-  });
-
-  it("renders phone input", () => {
-    renderPage(CabinetPage);
-    expect(screen.getByPlaceholderText("+7 (999) 999-99-99")).toBeInTheDocument();
-  });
-
-  it('renders "Войти" button', () => {
-    renderPage(CabinetPage);
-    expect(screen.getByRole("button", { name: /войти/i })).toBeInTheDocument();
-  });
-});
-
-// ── Booking page ────────────────────────────────────────────
-
-describe("Booking page", () => {
-  it("renders without errors", () => {
-    renderPage(BookingPage);
-    expect(screen.getByRole("main")).toBeInTheDocument();
-  });
-
-  it("renders Header", () => {
-    renderPage(BookingPage);
-    expect(screen.getByRole("banner")).toBeInTheDocument();
-  });
-
-  it("renders booking form title", () => {
-    renderPage(BookingPage);
-    expect(screen.getByText("Оформление записи")).toBeInTheDocument();
   });
 });

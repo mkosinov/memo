@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Transport endpoint for the notify queue — Redis Streams (part 2,
     # spec §3.3). Empty = transport not configured. SecretStr: the URL
     # carries credentials and must never surface in repr/logs/errors.
-    REDIS_URL: SecretStr = ""
+    REDIS_URL: SecretStr = SecretStr("")
     # Wall-clock zone of the business — the single time interpretation
     # for the future/past predicate and message text (spec §3.2).
     # Explicit zone, never the server TZ (panel finding).

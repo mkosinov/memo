@@ -118,9 +118,20 @@ markers = [
     "api: API endpoint tests (CRUD, status codes)",
     "integration: Complex flows, multi-step scenarios",
     "misc: Infrastructure, health, CORS, admin",
+    # GH #483 §3.6 — notify transport contour: real Redis, needs REDIS_URL;
+    # declarative skipif keeps the standard no-Redis run green (US-7/S2).
+    "redis: Notify transport integration tests against a real Redis (need REDIS_URL; skipped without it)",
 ]
 addopts = []
 
 # ── Coverage ───────────────────────────────────────────────────────
 [tool.coverage.run]
-omit = ["src/seed/*"]
+# GH #483 §3.6 — the notify transport modules are measured by the
+# dedicated `notify-tests` CI contour (pytest -m redis), NOT by the
+# standard backend job: there their contour tests skip without Redis,
+# and counting near-unexecuted modules would drag the 80% gate down.
+omit = [
+    "src/seed/*",
+    "src/notify/redis_queue.py",
+    "src/notify/worker.py",
+]

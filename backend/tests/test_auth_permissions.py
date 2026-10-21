@@ -200,12 +200,10 @@ class TestPublicRoutes:
     """PUBLIC_ROUTES — the whole anonymous allowlist (spec §2.7), exactly."""
 
     def test_equals_spec_allowlist_exactly(self) -> None:
-        # T7 addition: ``GET /api/v1/photos/web`` — the public gallery the
-        # spec §1 "live consumer" list keeps working (frontend/web
-        # ``useGallery`` → anonymous ``GET /photos/web``); spec §2.7 wording
-        # "(site + gallery)" names exactly this surface.
         # #348 addition: the public password-setup pair (spec §5/§7) —
         # the authority is the one-time token itself.
+        # GH #479 (Изменение 4): ``GET /api/v1/photos/web`` was removed —
+        # the gallery rides the public list with ``?is_public=true``.
         assert frozenset({
             ("GET", "/api/v1/health"),
             # GH #266 D8: /masters is read-only acting masters; GET /{id}
@@ -221,8 +219,9 @@ class TestPublicRoutes:
             ("GET", "/api/v1/activities/{id}"),
             ("GET", "/api/v1/photos"),
             ("GET", "/api/v1/photos/{id}"),
-            ("GET", "/api/v1/photos/web"),
-            ("POST", "/api/v1/records"),
+            # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed
+            # from the allowlist — the route carries records:write now;
+            # guest booking is #499.
             ("POST", "/api/v1/auth/login"),
             ("POST", "/api/v1/auth/logout"),
             ("GET", "/api/v1/auth/me"),

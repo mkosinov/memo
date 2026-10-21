@@ -1,7 +1,4 @@
-"""Tests for the Photos API endpoints (public gallery + admin CRUD + list contract)."""
-
-import asyncio
-from datetime import datetime
+"""Tests for the Photos API endpoints (is_public list filter + admin CRUD + list contract)."""
 
 import pytest
 
@@ -21,92 +18,20 @@ FIXTURE_PHOTOS = (
 )
 
 
-class TestPhotosWebEndpoint:
-    """GET /api/v1/photos/web — public photos endpoint."""
+class TestPhotosWebRemoved:
+    """GH #479 Изменение 4 — the public showcase route is gone.
 
-    def test_web_returns_only_public_photos(self, api_client) -> None:
-        """GET /api/v1/photos/web returns only photos with is_public=true."""
-        # Insert test photos directly
-        asyncio.run(_insert_photo_direct(
-            id="public-01",
-            filename="public.jpg",
-            is_public=True,
-        ))
-        asyncio.run(_insert_photo_direct(
-            id="private-01",
-            filename="private.jpg",
-            is_public=False,
-        ))
+    The gallery now rides the common list with ``?is_public=true`` (see
+    the ``is_public_*`` filter-matrix cases in ``TestPhotosListContract``);
+    ``/web`` itself must 404 (the request falls through to
+    ``GET /photos/{photo_id}`` with ``photo_id="web"`` → the same 404 as
+    any missing photo).
+    """
 
+    def test_web_route_gone_404(self, api_client) -> None:
+        """GET /api/v1/photos/web → 404 (route removed, GH #479)."""
         response = api_client.get("/api/v1/photos/web")
-
-        assert response.status_code == 200
-        photos = response.json()
-        assert isinstance(photos, list)
-        filenames = [p["filename"] for p in photos]
-        assert "public.jpg" in filenames
-        assert "private.jpg" not in filenames
-
-    def test_web_filter_by_activity_id(self, api_client, create_activity) -> None:
-        """GET /api/v1/photos/web?activity_id=X returns only photos for that activity."""
-        # Create real activities to satisfy FK constraints
-        activity_a = create_activity()
-        activity_b = create_activity()
-
-        asyncio.run(_insert_photo_direct(
-            id="act-a-01",
-            filename="activity_a.jpg",
-            activity_id=activity_a["id"],
-            is_public=True,
-        ))
-        asyncio.run(_insert_photo_direct(
-            id="act-b-01",
-            filename="activity_b.jpg",
-            activity_id=activity_b["id"],
-            is_public=True,
-        ))
-
-        response = api_client.get(
-            "/api/v1/photos/web",
-            params={"activity_id": activity_a["id"]},
-        )
-
-        assert response.status_code == 200
-        photos = response.json()
-        filenames = [p["filename"] for p in photos]
-        assert "activity_a.jpg" in filenames
-        assert "activity_b.jpg" not in filenames
-
-    def test_web_returns_empty_list_when_no_public_photos(self, api_client) -> None:
-        """GET /api/v1/photos/web returns [] when no public photos exist."""
-        asyncio.run(_insert_photo_direct(
-            id="private-only",
-            filename="private.jpg",
-            is_public=False,
-        ))
-
-        response = api_client.get("/api/v1/photos/web")
-
-        assert response.status_code == 200
-        assert response.json() == []
-
-    def test_web_response_matches_photo_response_schema(self, api_client) -> None:
-        """GET /api/v1/photos/web returns items conforming to PhotoResponse schema."""
-        from src.schemas.photo import PhotoResponse
-
-        asyncio.run(_insert_photo_direct(
-            id="schema-test",
-            filename="schema_test.jpg",
-            is_public=True,
-        ))
-
-        response = api_client.get("/api/v1/photos/web")
-        assert response.status_code == 200
-        photos = response.json()
-        assert len(photos) == 1
-        # Validate with schema
-        photo = PhotoResponse.model_validate(photos[0])
-        assert photo.filename == "schema_test.jpg"
+        assert response.status_code == 404
 
 
 # Owner IDs for the two-owners 422 tests — the multiple-owner validator
@@ -126,9 +51,10 @@ class TestPhotosListParams:
         {"q": "x" * 101},
         {"sort_by": "client_id"},
         {"sort_order": "up"},
+        {"is_public": "banana"},  # GH #479: bool | None — non-bool → 422
     ])
     def test_photos_list_params_422(self, api_client, bad) -> None:
-        """Invalid page/per_page/q/sort values return 422."""
+        """Invalid page/per_page/q/sort/is_public values return 422."""
         response = api_client.get(PHOTOS_URL, params=bad)
         assert response.status_code == 422
 
@@ -266,6 +192,19 @@ def _cases(fx: dict) -> dict[str, tuple[dict, set[str], int]]:
             {fx["p_client"]["id"], fx["p_client2"]["id"]},
             2,
         ),
+        # GH #479 Изменение 4: is_public filter — the /web showcase
+        # successor. "Not set" behaviour is the plain case above (no
+        # filter applied); only p_client is public in the fixture.
+        "is_public_true": (
+            {"is_public": "true"},
+            {fx["p_client"]["id"]},
+            1,
+        ),
+        "is_public_false": (
+            {"is_public": "false"},
+            _all_ids(fx) - {fx["p_client"]["id"]},
+            6,
+        ),
     }
 
 
@@ -286,6 +225,8 @@ class TestPhotosListContract:
         "unknown_filter_empty",
         "two_owner_filters_empty",
         "q_and_filter",
+        "is_public_true",
+        "is_public_false",
     ])
     def test_photos_filter_matrix(
         self, api_client, photos_fixture, name: str,
@@ -568,15 +509,6 @@ class TestPhotosCRUD:
         filenames = [p["filename"] for p in response.json()["items"]]
         assert "will-delete.jpg" not in filenames
 
-    def test_list_public_photos_unchanged(self, api_client) -> None:
-        """GET /api/v1/photos/web still returns only public photos."""
-        api_client.post(PHOTOS_URL, json={"filename": "private.jpg", "is_public": False})
-        api_client.post(PHOTOS_URL, json={"filename": "public.jpg", "is_public": True})
-        response = api_client.get("/api/v1/photos/web")
-        assert response.status_code == 200
-        photos = response.json()
-        assert all(p["is_public"] for p in photos)
-
 
 class TestPhotoPatch:
     """Tests for PATCH /api/v1/photos/{id}."""
@@ -697,29 +629,6 @@ class TestPhotoPatch:
         )
         assert response.status_code == 200
         assert response.json()["filename"] == original_filename
-
-
-async def _insert_photo_direct(
-    id: str,
-    filename: str,
-    is_public: bool = False,
-    activity_id: str | None = None,
-) -> None:
-    """Insert a Photo directly into the database."""
-    from src.db import db_manager
-    from src.models.photo import Photo
-
-    async with db_manager.async_session() as session:
-        photo = Photo(
-            id=id,
-            filename=filename,
-            is_public=is_public,
-            activity_id=activity_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        session.add(photo)
-        await session.commit()
 
 
 # ─── GH #232 Task 2: ?id= set narrowing — photos view builder representative ───

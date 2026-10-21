@@ -575,33 +575,59 @@ export const PaymentTotalsResponseSchema = z.object({
 
 export type PaymentTotalsResponse = z.infer<typeof PaymentTotalsResponseSchema>;
 
-// ─── RecordCreate (request body) ─────────────────────────────────────────
+// ─── RecordCreate / RecordUpdate (request bodies) ────────────────────────
 
+// Nested visit payload within a record create/update (backend VisitItem).
+// Two modes: name-based (web) — name (+ optional age) find-or-creates a
+// Visitor by client; id-based (admin) — visitor_id links an existing one.
+// price stays required (server-side tariff pricing is #499). Backend
+// VisitItem is a plain model (extra keys ignored) — no .strict() at this
+// nesting level; the record-level schemas below carry the extra="forbid"
+// parity.
+const VisitItemSchema = z.object({
+  name: z.string().optional(),
+  age: z.number().nullable().optional(),
+  visitor_id: z.string().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number(),
+  custom_price: z.number().nullable().optional(),
+  // #480 §3.2: nested visit status is rewired to the named contract enum
+  // (was an inline z.enum literal).
+  status: VisitStatusSchema.optional(),
+});
+
+// .strict() mirrors backend RecordCreate extra="forbid": NO record-level
+// status (derived from visit statuses server-side) and NO seats (= len(visits),
+// recomputed by the backend) — a stray key fails loudly here instead of
+// 422-ing at the server. phone = phone-based client resolution (web);
+// client_id = id-based link (admin). visits is required, as on the backend.
 export const RecordCreateSchema = z.object({
   activity_id: z.string(),
-  client_id: z.string().optional(),
   phone: z.string().optional(),
-  // NO status field (#480 §3.2): record status is DERIVED from visits
-  // server-side; the backend rejects the field in Record payloads with 422
-  // (extra="forbid", backend/src/schemas/record.py). There is no client-side
-  // record PATCH schema either — the dead Wave-5 mirror is gone.
-  seats: z.number().optional(),
-  comment: z.string().optional(),
+  client_id: z.string().optional(),
+  comment: z.string().nullable().optional(),
   custom_price: z.number().nullable().optional(),
   /** GH #482: «отправлять оповещения» — optional mirror of the backend's
    * `notify: bool = False`; fixed at creation, read by the dispatcher. */
   notify: z.boolean().optional(),
-  visits: z.array(z.object({
-    visitor_id: z.string().optional(),
-    price: z.number(),
-    custom_price: z.number().nullable().optional(),
-    status: VisitStatusSchema.optional(),
-  })).optional(),
-});
+  visits: z.array(VisitItemSchema),
+}).strict();
 
 export type RecordCreate = z.infer<typeof RecordCreateSchema>;
 
-export const RecordUpdateSchema = RecordCreateSchema.partial();
+// PUT /records/{id} — own shape, deliberately NOT RecordCreateSchema.partial():
+// the backend RecordUpdate is a separate full-replacement contract
+// (activity_id required, visits replaced wholesale; NO phone — phone-based
+// client resolution is create-only). .strict() mirrors backend
+// extra="forbid": status/seats are rejected here exactly as the server
+// rejects them (422).
+export const RecordUpdateSchema = z.object({
+  activity_id: z.string(),
+  client_id: z.string().optional(),
+  comment: z.string().nullable().optional(),
+  custom_price: z.number().nullable().optional(),
+  visits: z.array(VisitItemSchema),
+}).strict();
 export type RecordUpdate = z.infer<typeof RecordUpdateSchema>;
 
 // ─── PaymentCreate (request body) ────────────────────────────────────────

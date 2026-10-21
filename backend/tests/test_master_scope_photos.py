@@ -12,7 +12,8 @@ Spec D6 (docs/specs/2026-09-10-master-role-design.md) + domain rules
   (чужое → 404, неразличимо с «не существует», 404-fast-path);
 * create с чужим activity_id → 404 (валидация цели);
 * PUT не может перепривязать фото на чужую активность;
-* /photos/web — публичный, без изменений;
+* публичная витрина — общий список с ``?is_public=true`` (#479),
+  анонимный доступ без скоупа;
 * admin → без скоупа (regression-pinned).
 
 The master session comes from the ``make_master`` conftest factory;
@@ -58,6 +59,17 @@ def _seed_photo(api_client, filename: str, **owner) -> dict:
     })
     assert resp.status_code == 201, resp.text
     return resp.json()
+
+
+@pytest.fixture
+def anon_client(app):
+    """A FRESH TestClient with an empty cookie jar (anonymous view) —
+    the gallery visitor's eye (the ``test_auth_guards`` pattern)."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    yield client
+    client.close()
 
 
 @pytest.fixture
@@ -343,19 +355,28 @@ class TestPhotoDeleteScope:
         assert query_db(f"SELECT id FROM photos WHERE id='{photo['id']}'")
 
 
-class TestPhotosWebUnchanged:
-    """GET /api/v1/photos/web stays public and unscoped."""
+class TestPublicGalleryFilter:
+    """GH #479 Изменение 4 — the gallery rides ``GET /photos?is_public=true``.
 
-    def test_web_master_gets_public_photos_of_foreign_activity(
-        self, photo_scope_world, api_client,
+    Successor of the removed ``/photos/web`` showcase pin: the public
+    filter of the common list stays UNSCOPED for anonymous visitors —
+    a FOREIGN master's public photo is served (the master scope narrows
+    only authenticated masters, never the anonymous gallery view).
+    """
+
+    def test_anonymous_public_filter_sees_foreign_public_photo(
+        self, photo_scope_world, api_client, anon_client,
     ) -> None:
-        """The foreign activity photo is public → still on /web for master."""
-        api_client.patch(
+        """Anonymous ``?is_public=true`` → the foreign master's public
+        photo IS listed (public-only, unscoped)."""
+        patch = api_client.patch(
             f"/api/v1/photos/{photo_scope_world['foreign']['photo']['id']}",
             json={"is_public": True},
         )
-        mc = photo_scope_world["master"]["client"]
-        resp = mc.get("/api/v1/photos/web")
+        assert patch.status_code == 200, patch.text
+        resp = anon_client.get("/api/v1/photos", params={"is_public": "true"})
         assert resp.status_code == 200, resp.text
-        ids = [p["id"] for p in resp.json()]
+        items = resp.json()["items"]
+        ids = [p["id"] for p in items]
         assert photo_scope_world["foreign"]["photo"]["id"] in ids
+        assert all(p["is_public"] for p in items)

@@ -10,9 +10,9 @@ contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
 - ``GET`` dictionaries: masters, locations, services, tags, activities,
-  photos (public site + gallery; the public gallery surface is
-  ``GET /api/v1/photos/web`` — ``frontend/web`` ``useGallery``);
-- ``POST /api/v1/records`` — anonymous booking until #8;
+  photos (public site; the web gallery rides the same list with
+  ``?is_public=true`` — GH #479 Изменение 4 retired the separate
+  ``GET /api/v1/photos/web`` showcase);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout / me) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -21,7 +21,9 @@ Exactly this list, no more, no less:
   on invalid tokens).
 
 NOT here: ``GET /api/v1/events`` (SSE, GH #239) — it gets a session guard
-in T7; and user-settings — own-only since #247.
+in T7; user-settings — own-only since #247; and ``POST /api/v1/records``
+— the anonymous full-contract booking is CLOSED (GH #479 Изменение 5:
+``records:write`` guard; guest booking itself is #499).
 
 Spec: docs/specs/2026-09-08-auth-design.md §2.7, §3.7
 Domain rules: docs/domain-rules/auth.md (Public Access)
@@ -46,8 +48,11 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v1/activities/{id}"),
     ("GET", "/api/v1/photos"),
     ("GET", "/api/v1/photos/{id}"),
-    ("GET", "/api/v1/photos/web"),
-    ("POST", "/api/v1/records"),
+    # GH #479 (Изменение 4): ("GET", "/api/v1/photos/web") was removed —
+    # the gallery rides the public list above with ?is_public=true.
+    # GH #479 (Изменение 5): ("POST", "/api/v1/records") was removed —
+    # the full contract now carries the records:write guard; guest
+    # booking is a separate contract (#499).
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/logout"),
     ("GET", "/api/v1/auth/me"),

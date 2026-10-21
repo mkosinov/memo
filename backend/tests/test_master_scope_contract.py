@@ -16,7 +16,7 @@ Two allowlists, both staleness-checked against the live route table:
   master may reach WITHOUT scope, each with a one-line justification:
   dictionary reads (masters/locations/services/tags — reference data, not
   master-owned), the auth surface, own-data endpoints (``/my``,
-  ``/user-settings``), public surfaces (``/photos/web``, health) and the
+  ``/user-settings``), public surfaces (health) and the
   SSE transport (``/events`` — a transport, not an entity).
 
 A route in a scope-wired router that is NOT a read path (mutations carry
@@ -142,8 +142,6 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("PUT", "/api/v1/user-settings"): "own settings — per-user",
     ("PATCH", "/api/v1/user-settings"): "own settings — per-user",
     ("DELETE", "/api/v1/user-settings/{id}"): "own settings — per-user",
-    # ── Public surfaces ──
-    ("GET", "/api/v1/photos/web"): "public gallery (is_public only)",
     # ── Admin-only surfaces: master holds NO permission token for these
     #    (ROLE_PERMISSIONS has no staff/positions/materials/:write entries)
     #    → the permission gate answers 403 before scope would ever run.

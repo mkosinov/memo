@@ -42,6 +42,9 @@ import {
   RecordResponseSchema,
   RecordCreateSchema,
   type RecordResponse,
+  RecordUpdateSchema,
+  type RecordCreate,
+  type RecordUpdate,
   ClientResponseSchema,
   type ClientResponse,
   ClientUpdateSchema,
@@ -87,8 +90,6 @@ import {
   VisitCreateSchema,
   VisitPatchSchema,
   PaymentCreateSchema,
-  RecordUpdateSchema,
-  type RecordCreate,
 } from './schemas';
 import backendFixtures from './__fixtures__/backend-responses.json';
 
@@ -191,17 +192,27 @@ describe('Request enum fields rewired to named schemas (#480 §3.2)', () => {
   it('RecordCreateSchema no longer accepts the dead top-level status (backend 422s on it)', () => {
     // The Wave-5 mirror is gone (#480 §3.2): record status is DERIVED from
     // visits server-side; RecordCreate/RecordUpdate payloads reject the field
-    // with extra="forbid". A stray key is stripped here, absent from the type.
-    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1', status: 'confirmed' });
-    expect(parsed).not.toHaveProperty('status');
+    // with extra="forbid". GH #479 made the mirror .strict() — a stray key
+    // throws here exactly as the server 422s.
+    expect(() =>
+      RecordCreateSchema.parse({ activity_id: 'a-1', visits: [], status: 'confirmed' }),
+    ).toThrow();
     // @ts-expect-error status is not part of RecordCreate anymore
-    const typed: RecordCreate = { activity_id: 'a-1', status: 'waiting' };
+    const typed: RecordCreate = { activity_id: 'a-1', visits: [], status: 'waiting' };
     expect(typed.activity_id).toBe('a-1');
   });
 
-  it('RecordUpdateSchema (= partial of create) loses the dead status automatically', () => {
-    const parsed = RecordUpdateSchema.parse({ status: 'confirmed' });
-    expect(parsed).not.toHaveProperty('status');
+  it('RecordUpdateSchema (own PUT contract since #479) rejects the dead status', () => {
+    // Own strict PUT contract, deliberately NOT Create.partial() (GH #479):
+    // the dead status throws instead of stripping (#480 §3.2 + backend
+    // extra="forbid" parity).
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [{ visitor_id: 'v-1', price: 1000 }],
+        status: 'confirmed',
+      }),
+    ).toThrow();
   });
 });
 
@@ -1578,12 +1589,19 @@ describe('RecordResponseSchema', () => {
 
 describe('RecordCreateSchema (#482)', () => {
   it('keeps the notify flag in the parsed payload', () => {
-    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1', notify: true });
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      notify: true,
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
     expect(parsed.notify).toBe(true);
   });
 
   it('keeps notify optional — legacy payloads without the flag still parse', () => {
-    const parsed = RecordCreateSchema.parse({ activity_id: 'a-1' });
+    const parsed = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ price: 1000 }], // visits required (GH #479 mirror: list[VisitItem])
+    });
     expect(parsed.notify).toBeUndefined();
   });
 });
@@ -1677,6 +1695,151 @@ describe('RecordViewResponseSchema', () => {
   it('RecordView is a valid type', () => {
     const r: RecordView = validRecordView;
     expect(r.paid).toBe(5000);
+  });
+});
+
+// ─── RecordCreateSchema / RecordUpdateSchema (GH #479 — mirror alignment) ──
+
+describe('RecordCreateSchema', () => {
+  it('parses a canonical admin create (visitor_id-based visits)', () => {
+    const result = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [
+        { visitor_id: 'v-1', tariff_id: 't-1', price: 3500 },
+        { tariff_id: 't-1', price: 3500 }, // anonymous seat — no visitor_id
+      ],
+    });
+    expect(result.visits).toHaveLength(2);
+    expect(result.visits[0]?.visitor_id).toBe('v-1');
+    expect(result.visits[0]?.tariff_id).toBe('t-1');
+  });
+
+  it('accepts name-based visits (name/age/tariff_id — web contract)', () => {
+    const result = RecordCreateSchema.parse({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      visits: [
+        { name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 },
+        { name: 'Петр', age: null, tariff_id: null, price: 2500 },
+      ],
+    });
+    expect(result.visits[0]?.name).toBe('Мария');
+    expect(result.visits[0]?.age).toBe(8);
+    expect(result.visits[0]?.tariff_id).toBe('t-kid');
+    expect(result.visits[1]?.age).toBeNull();
+    expect(result.visits[1]?.tariff_id).toBeNull();
+  });
+
+  it('keeps visit price required (optional price is #499)', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [{ name: 'Мария', tariff_id: 't-kid' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects record-level status (backend 422 parity, extra="forbid")', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        status: 'confirmed',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects record-level seats (seats = len(visits), server-computed)', () => {
+    expect(() =>
+      RecordCreateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        seats: 2,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a payload without visits (backend: required list)', () => {
+    expect(() => RecordCreateSchema.parse({ activity_id: 'a-1' })).toThrow();
+  });
+
+  it('RecordCreate type rejects status/seats (dropped from the mirror)', () => {
+    const data: RecordCreate = {
+      activity_id: 'a-1',
+      visits: [{ visitor_id: 'v-1', price: 1000 }],
+    };
+    // @ts-expect-error status no longer exists on RecordCreate
+    expect(data.status).toBeUndefined();
+    // @ts-expect-error seats no longer exists on RecordCreate
+    expect(data.seats).toBeUndefined();
+  });
+});
+
+describe('RecordUpdateSchema', () => {
+  it('parses a full-replacement PUT payload (activity_id + visits)', () => {
+    const result = RecordUpdateSchema.parse({
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      comment: 'перенос',
+      custom_price: 5000,
+      visits: [{ visitor_id: 'v-1', tariff_id: 't-1', price: 3500 }],
+    });
+    expect(result.activity_id).toBe('a-1');
+    expect(result.custom_price).toBe(5000);
+  });
+
+  it('accepts name-based visits (shared VisitItem contract)', () => {
+    const result = RecordUpdateSchema.parse({
+      activity_id: 'a-1',
+      visits: [{ name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 }],
+    });
+    expect(result.visits[0]?.name).toBe('Мария');
+  });
+
+  it('requires activity_id (own PUT contract, NOT Create.partial())', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({ visits: [{ price: 1000 }] }),
+    ).toThrow();
+  });
+
+  it('rejects a payload without visits (full replacement needs the list)', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({ activity_id: 'a-1', comment: null }),
+    ).toThrow();
+  });
+
+  it('rejects record-level status/seats and create-only phone', () => {
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        status: 'confirmed',
+      }),
+    ).toThrow();
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        seats: 2,
+      }),
+    ).toThrow();
+    expect(() =>
+      RecordUpdateSchema.parse({
+        activity_id: 'a-1',
+        visits: [],
+        phone: '+79991234567',
+      }),
+    ).toThrow();
+  });
+
+  it('RecordUpdate type rejects seats (dropped from the mirror)', () => {
+    const data: RecordUpdate = {
+      activity_id: 'a-1',
+      visits: [{ price: 1000 }],
+    };
+    // @ts-expect-error seats no longer exists on RecordUpdate
+    expect(data.seats).toBeUndefined();
   });
 });
 

@@ -348,16 +348,9 @@ export async function getLocations(params?: ListParams): Promise<PaginatedRespon
   return api(`/api/v1/locations${listQuery(params)}`, LocationListResponseSchema);
 }
 
-// ─── Photos ─────────────────────────────────────────────────────────────────
-
-export async function getWebPhotos(params?: { activity_id?: string }): Promise<PhotoResponse[]> {
-  const search = new URLSearchParams();
-  if (params?.activity_id) search.set('activity_id', params.activity_id);
-  const qs = search.toString();
-  return api(`/api/v1/photos/web${qs ? `?${qs}` : ''}`, z.array(PhotoResponseSchema));
-}
-
-// ─── Photos list (GH #211: paginated with filters/sort) ────────────────────
+// ─── Photos (GH #211: paginated list with filters/sort) ─────────────────────
+// GH #479: getWebPhotos (GET /api/v1/photos/web showcase) removed — the route
+// no longer exists; use getPhotos({ is_public: true }) for public galleries.
 
 export interface PhotoListParams {
   page?: number;
@@ -368,6 +361,7 @@ export interface PhotoListParams {
   activity_id?: string;
   service_id?: string;
   tag_id?: string[];
+  is_public?: boolean; // GH #479: mirror of backend PhotoListParams (bool | None; None = no filter)
   sort_by?: 'filename' | 'is_public' | 'created_at';
   sort_order?: 'asc' | 'desc';
 }

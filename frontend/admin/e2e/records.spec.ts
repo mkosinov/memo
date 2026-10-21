@@ -463,6 +463,20 @@ test.describe('Records Page — Table and Filters', () => {
       await page.getByRole('button', { name: '2', exact: true }).click();
       await pageTwoWait;
 
+      // expect.poll guard: pageTwoWait (waitForResponse) resolves at response
+      // RECEIPT, but RecordsContext keeps the previous page's rows rendered
+      // (placeholderData: keepPreviousData) until the page-2 query commits —
+      // a one-shot read raced that commit and compared page-1 names against
+      // themselves (GH #479, PR #507 shard 2). Mirrors the sort-test poll
+      // above.
+      await expect
+        .poll(
+          async () =>
+            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('\n'),
+          { timeout: 3_000 },
+        )
+        .not.toBe(pageOneNames.join('\n'));
+
       // Page 2 rows are disjoint from page 1 rows
       const pageTwoNames = await page
         .locator('tbody tr td:nth-child(2)')

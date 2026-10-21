@@ -266,7 +266,13 @@ case "$*" in
       echo "UVICORN-PIN: backend pin final words (die-branch)"
       exit 1
     fi
-    sleep "${SHARD_DRYRUN_BACKEND_HOLD_S:-30}"
+    # Hold as a LIVE pin; the TERM trap reaps the inner sleep so the
+    # script-under-test's teardown (TERM to this sh) never orphans a
+    # sleep-600 child (#448 review iteration 1 — 600 s holding pins).
+    sleep "${SHARD_DRYRUN_BACKEND_HOLD_S:-30}" &
+    _s=$!
+    trap 'kill "$_s" 2>/dev/null; exit 0' TERM INT
+    wait "$_s"
     ;;
 esac
 exit 0
@@ -303,11 +309,17 @@ case "$*" in
       echo "PNPM-PIN: frontend pin final words (die-branch)"
       exit 1
     fi
+    # Hold as a LIVE pin; the TERM trap reaps the inner sleep (see the uv
+    # stub) so teardown never orphans a sleep child.
     if [ -n "${SHARD_DRYRUN_HOLD_S:-}" ]; then
-      sleep "$SHARD_DRYRUN_HOLD_S"
+      _h="$SHARD_DRYRUN_HOLD_S"
     else
-      sleep 30
+      _h=30
     fi
+    sleep "$_h" &
+    _s=$!
+    trap 'kill "$_s" 2>/dev/null; exit 0' TERM INT
+    wait "$_s"
     ;;
 esac
 exit 0
@@ -1330,6 +1342,12 @@ done
 # ── Case 14 (#448 Task 3): backend pin death → rc=1 + addressed verdict ────
 # REAL background children: the uv stub's uvicorn branch sleeps DIE_S then
 # exits 1 (a dying backend pin) while the pnpm pin holds (live frontend).
+# The holding pin is IMMORTAL-IN-BOUNDS (HOLD_S=600): with a short hold the
+# discriminating window is only hold−die seconds — under load the watch
+# loop's deciding look can slip past the holder's natural death, both pins
+# are then dead and the documented backend-first tie-break misattributes
+# the verdict (review iteration 1). 600 s cannot leak: the verdict's own
+# EXIT trap TERMs both pins, and RAW_WAIT_S bounds the case regardless.
 # The watch loop must notice within one interval (SHARD_STACK_WATCH_S=1),
 # print `stack shard 1: backend died on :8011`, ALWAYS print the stack-log
 # path, then the capped tail. Sub-cases:
@@ -1356,7 +1374,7 @@ case14_fixture() {
 CASE14_FIX="$CASE14_DIR/stack-a.log"
 case14_fixture "$CASE14_FIX"
 CASE14A_DB="$CASE14_DIR/test_memo_shard1.db"; printf 'seed' > "$CASE14A_DB"
-RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=8 SHARD_STACK_LOG=$CASE14_FIX"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600 SHARD_STACK_LOG=$CASE14_FIX"
 RAW_WAIT_S=12
 run_shard_raw "$CASE14_DIR/run-a.log" "$CASE14_DIR/journal-a" "$CASE14A_DB" 1 3011 8011
 RUN_EXTRA_ENV=""
@@ -1401,7 +1419,7 @@ fi
 
 # 14b — missing log file → «log not created» (path still printed).
 CASE14B_DB="$CASE14_DIR/test_memo_shard1_b.db"; printf 'seed' > "$CASE14B_DB"
-RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=8 SHARD_STACK_LOG=$CASE14_DIR/nope-b.log"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600 SHARD_STACK_LOG=$CASE14_DIR/nope-b.log"
 RAW_WAIT_S=12
 run_shard_raw "$CASE14_DIR/run-b.log" "$CASE14_DIR/journal-b" "$CASE14B_DB" 1 3011 8011
 RUN_EXTRA_ENV=""
@@ -1421,7 +1439,7 @@ fi
 # 14c — no SHARD_STACK_LOG: the path defaults to the run's own log file
 # (fd-1 readlink; the same shape the orchestrator's redirect produces).
 CASE14C_DB="$CASE14_DIR/test_memo_shard1_c.db"; printf 'seed' > "$CASE14C_DB"
-RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=8"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_HOLD_S=600"
 RAW_WAIT_S=12
 run_shard_raw "$CASE14_DIR/run-c.log" "$CASE14_DIR/journal-c" "$CASE14C_DB" 1 3011 8011
 RUN_EXTRA_ENV=""
@@ -1439,11 +1457,12 @@ fi
 
 # ── Case 15 (#448 Task 3): frontend pin death → rc=1 + addressed verdict ───
 # Mirror of Case 14 with the dying pin on the frontend side (pnpm die
-# branch); the backend pin holds (live-server default). Shard 2 + distinct
-# ports so the grep is addressed, not accidental.
+# branch); the backend pin holds IMMORTAL-IN-BOUNDS (600 s — same
+# tie-break-race hardening as Case 14; the verdict's EXIT trap TERMs it).
+# Shard 2 + distinct ports so the grep is addressed, not accidental.
 CASE15_DIR="$WORK/case15"; mkdir -p "$CASE15_DIR"
 CASE15_DB="$CASE15_DIR/test_memo_shard2.db"; printf 'seed' > "$CASE15_DB"
-RUN_EXTRA_ENV="SHARD_DRYRUN_FRONTEND_DIE_S=2 SHARD_DRYRUN_BACKEND_HOLD_S=8"
+RUN_EXTRA_ENV="SHARD_DRYRUN_FRONTEND_DIE_S=2 SHARD_DRYRUN_BACKEND_HOLD_S=600"
 RAW_WAIT_S=12
 run_shard_raw "$CASE15_DIR/run.log" "$CASE15_DIR/journal" "$CASE15_DB" 2 3012 8012
 RUN_EXTRA_ENV=""

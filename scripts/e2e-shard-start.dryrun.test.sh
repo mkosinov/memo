@@ -1986,6 +1986,7 @@ if [ -n "$CASE17E_PORT" ]; then
   set +e
   NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_REDIS_PORT="$CASE17E_PORT" \
     TEST_DB_PATH="$CASE17E_DB" \
+    PATH="$STUBS:$PATH" \
     bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-redis-busy.out" 2>&1
   _grc=$?
   set -e

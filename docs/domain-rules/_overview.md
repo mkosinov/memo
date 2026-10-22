@@ -21,6 +21,7 @@
 | Visit | Attendance | belongs to Record, Visitor | Low |
 | Payment | Transaction | belongs to Record | Low |
 | Notify | Подсистема оповещений — журнал доменных событий, задачи доставок | см. [notify.md](notify.md) | Medium |
+| AuditLog | Append-only журнал действий (кто/что/когда менял); API — только чтение, admin-only | см. [audit_log.md](audit_log.md) | Low |
 
 ## Shared Enums
 

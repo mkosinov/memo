@@ -61,4 +61,10 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # attempts feed the shared §3.4 per-IP failure counter.
     ("POST", "/api/v1/auth/password-setup/validate"),
     ("POST", "/api/v1/auth/password-setup"),
+    # GH #499 (spec §4.2): the client OTP pair — exact (method, path)
+    # pairs, no wildcard; the authority is the code itself (rate-limited
+    # + one-time). verify issues the CLIENT session cookie; both carry
+    # their own Origin-vs-CORS line (verify_origin).
+    ("POST", "/api/v1/auth/otp/request"),
+    ("POST", "/api/v1/auth/otp/verify"),
 })

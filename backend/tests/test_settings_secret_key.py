@@ -25,5 +25,10 @@ class TestSecretKeySettings:
         assert s.SECRET_KEY == "dev-sqladmin-secret"
 
     def test_explicit_secret_key_is_kept(self) -> None:
-        s = Settings(_env_file=None, ENV="production", SECRET_KEY="real-key")
+        # OTP_PEPPER is explicit only to satisfy the #499 fail-fast —
+        # this test targets the SECRET_KEY validator, not the pepper.
+        s = Settings(
+            _env_file=None, ENV="production",
+            SECRET_KEY="real-key", OTP_PEPPER="real-pepper",
+        )
         assert s.SECRET_KEY == "real-key"

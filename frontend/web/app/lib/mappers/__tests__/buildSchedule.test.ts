@@ -81,6 +81,43 @@ function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
 }
 
 describe('buildWebSchedule', () => {
+  it('carries service tariffs onto the DTO as view-shaped array', () => {
+    const activities = [makeActivity()];
+    const services = new Map([
+      [
+        'service-1',
+        makeService({
+          tariffs: [
+            { id: 'tariff-1', service_id: 'service-1', title: 'Взрослый', description: null, price: 3500, audience: 'adult' },
+            { id: 'tariff-2', service_id: 'service-1', title: 'Детский (5–11 лет)', description: null, price: 2450, audience: 'kid' },
+          ],
+        }),
+      ],
+    ]);
+    const masters = new Map([['master-1', makeMaster()]]);
+    const locations = new Map([['loc-1', makeLocation()]]);
+
+    const result = buildWebSchedule(activities, services, masters, locations);
+    const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+    expect(dto.tariffs).toEqual([
+      { id: 'tariff-1', title: 'Взрослый', price: 3500 },
+      { id: 'tariff-2', title: 'Детский (5–11 лет)', price: 2450 },
+    ]);
+  });
+
+  it('yields empty tariffs array for a service without tariffs', () => {
+    const activities = [makeActivity()];
+    const services = new Map([['service-1', makeService({ tariffs: [] })]]);
+    const masters = new Map([['master-1', makeMaster()]]);
+    const locations = new Map([['loc-1', makeLocation()]]);
+
+    const result = buildWebSchedule(activities, services, masters, locations);
+    const dto = result.byId.get('act-1') as WebScheduleDTO;
+
+    expect(dto.tariffs).toEqual([]);
+  });
+
   it('returns ScheduleIndex with byId Map and byLocation record', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);

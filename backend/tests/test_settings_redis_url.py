@@ -32,6 +32,7 @@ class TestProductionGate:
                 _env_file=None,
                 ENV="production",
                 SECRET_KEY="test-secret-key",
+                OTP_PEPPER="test-otp-pepper",
                 NOTIFY_ENABLED=True,
                 REDIS_URL="",
             )
@@ -42,6 +43,7 @@ class TestProductionGate:
                 _env_file=None,
                 ENV="production",
                 SECRET_KEY="test-secret-key",
+                OTP_PEPPER="test-otp-pepper",
                 NOTIFY_ENABLED=True,
                 REDIS_URL=f"redis://default:{_SECRET}@localhost:6379/0",
             )
@@ -52,6 +54,7 @@ class TestProductionGate:
                 _env_file=None,
                 ENV="production",
                 SECRET_KEY="test-secret-key",
+                OTP_PEPPER="test-otp-pepper",
                 NOTIFY_ENABLED=True,
                 REDIS_URL="rediss://localhost:6379/0",
             )
@@ -62,6 +65,7 @@ class TestProductionGate:
             _env_file=None,
             ENV="production",
             SECRET_KEY="test-secret-key",
+            OTP_PEPPER="test-otp-pepper",
             NOTIFY_ENABLED=True,
             REDIS_URL=url,
         )
@@ -72,6 +76,7 @@ class TestProductionGate:
             _env_file=None,
             ENV="production",
             SECRET_KEY="test-secret-key",
+            OTP_PEPPER="test-otp-pepper",
             NOTIFY_ENABLED=False,
             REDIS_URL="",
         )
@@ -94,6 +99,7 @@ class TestSecretNotDisclosed:
                 _env_file=None,
                 ENV="production",
                 SECRET_KEY="test-secret-key",
+                OTP_PEPPER="test-otp-pepper",
                 NOTIFY_ENABLED=True,
                 REDIS_URL=f"redis://default:{_SECRET}@localhost:6379/0",
             )

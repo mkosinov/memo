@@ -13,7 +13,7 @@ const menuItems = [
   { label: "Корпоративы", href: "#corporate" },
   { label: "Магазин", href: "#shop" },
   { label: "О нас", href: "#about" },
-  { label: "Личный кабинет", href: "#account" },
+  { label: "Личный кабинет", href: "/cabinet" },
 ];
 
 export function HamburgerMenu({ isOpen, onClose }: HamburgerMenuProps) {

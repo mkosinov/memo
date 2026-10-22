@@ -133,10 +133,20 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     #    authority is the one-time token; no session, no master scope. ──
     ("POST", "/api/v1/auth/password-setup/validate"): "public token probe (#348 §7) — token authority",
     ("POST", "/api/v1/auth/password-setup"): "public one-time consume (#348 §7) — token authority",
+    # ── Public OTP pair (#499 §4.2): anonymous by design — the authority
+    #    is the rate-limited one-time code; verify issues the CLIENT
+    #    session cookie (own-cabinet surface, no master scope). ──
+    ("POST", "/api/v1/auth/otp/request"): "public OTP request (#499 §4.2) — code authority, anonymous by design",
+    ("POST", "/api/v1/auth/otp/verify"): "public OTP verify (#499 §4.2) — code authority; issues the client session",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",
     ("POST", "/api/v1/my/portrait"): "own portrait (#262)",
+    # Client cabinet (#499 §4.3/§5): the router binds
+    # require_client_session (memo_client_session, role=client) —
+    # own-card data/booking, per-user, not master-scoped.
+    ("GET", "/api/v1/my/client"): "client cabinet (#499 §4.3) — client session, own card",
+    ("POST", "/api/v1/my/records"): "client booking (#499 §5) — client session, own-card booking",
     ("GET", "/api/v1/user-settings"): "own settings — per-user",
     ("POST", "/api/v1/user-settings"): "own settings — per-user",
     ("PUT", "/api/v1/user-settings"): "own settings — per-user",

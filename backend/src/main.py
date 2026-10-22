@@ -21,6 +21,7 @@ from src.api.v1.locations import router as locations_router
 from src.api.v1.masters import router as masters_router
 from src.api.v1.materials import router as materials_router
 from src.api.v1.my import router as my_router
+from src.api.v1.my_client import router as my_client_router
 from src.api.v1.payments import router as payments_router
 from src.api.v1.photos import router as photos_router
 from src.api.v1.position import router as position_router
@@ -270,6 +271,10 @@ def create_app() -> FastAPI:
     app.include_router(audit_logs_router, prefix="/api/v1/audit-logs")
     # GH #262 — own-data profile (session-guarded, no permission token).
     app.include_router(my_router, prefix="/api/v1/my")
+    # GH #499 (spec §4.3) — client-cabinet own-data behind
+    # require_client_session (a SEPARATE router: the staff /my binds
+    # require_session router-wide, which would 401 every client session).
+    app.include_router(my_client_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
     # GH #247 — login / logout / me are PUBLIC_ROUTES by design (spec §3.6);

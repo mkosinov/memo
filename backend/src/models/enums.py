@@ -6,6 +6,10 @@ import enum
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     MASTER = "master"
+    # #499 (spec §3): client accounts (OTP phone-verification flow). NOT in
+    # ROLE_PERMISSIONS — client endpoints authorize by the client-session
+    # fact, not permission tokens; the matrix invariant stays «admin+master».
+    CLIENT = "client"
 
 
 class RecordStatus(str, enum.Enum):

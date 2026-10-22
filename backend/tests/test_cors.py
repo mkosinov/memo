@@ -5,6 +5,39 @@ import pytest
 pytestmark = pytest.mark.misc
 
 
+class TestCorsConfig:
+    """#499 §5: exact origins with credentials — ``*`` is banned at the
+    config level (the app always mounts CORS with allow_credentials=True,
+    and a wildcard there degrades to reflect-any-origin)."""
+
+    def test_wildcard_origins_rejected_at_config(self) -> None:
+        from pydantic import ValidationError
+
+        from src.core.config import Settings
+
+        with pytest.raises(ValidationError, match=r"(?i)credentials"):
+            Settings(_env_file=None, CORS_ORIGINS=["*"])
+
+    def test_wildcard_env_string_rejected_at_config(self) -> None:
+        """The ``*`` STRING (env-var shape) parses into ``["*"]`` and is
+        rejected by the same validator — a deployment cannot opt out."""
+        from pydantic import ValidationError
+
+        from src.core.config import Settings
+
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, CORS_ORIGINS="*")
+
+    def test_exact_origins_accepted(self) -> None:
+        from src.core.config import Settings
+
+        s = Settings(
+            _env_file=None,
+            CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000",
+        )
+        assert s.CORS_ORIGINS == ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
 class TestCorsHeaders:
     """CORS middleware must add appropriate headers to responses."""
 

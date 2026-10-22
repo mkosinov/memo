@@ -1,5 +1,28 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+// ── Mock the client-branch API (#499): the booking overlay detects the
+// session on open — keep these tests hermetic (anonymous by default).
+vi.mock("@memo/api-client", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    ApiError,
+    getMyClient: vi.fn().mockRejectedValue(new ApiError(401, "unauthorized")),
+    requestOtpCode: vi.fn(),
+    verifyOtpCode: vi.fn(),
+    createMyRecord: vi.fn(),
+    logout: vi.fn(),
+  };
+});
 
 // ── Page imports ────────────────────────────────────────────
 import ServicesPage from "../services/page";
@@ -9,7 +32,6 @@ import CorporatePage from "../corporate/page";
 import ShopPage from "../shop/page";
 import AboutPage from "../about/page";
 import CabinetPage from "../cabinet/page";
-import BookingPage from "../booking/page";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -54,7 +76,7 @@ describe("Simple placeholder pages", () => {
   }
 });
 
-// ── Cabinet page ────────────────────────────────────────────
+// ── Cabinet page (behavior covered in depth by cabinet.test.tsx) ──
 
 describe("Cabinet page", () => {
   it("renders without errors", () => {
@@ -70,34 +92,5 @@ describe("Cabinet page", () => {
   it('renders title "Личный кабинет"', () => {
     renderPage(CabinetPage);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Личный кабинет");
-  });
-
-  it("renders phone input", () => {
-    renderPage(CabinetPage);
-    expect(screen.getByPlaceholderText("+7 (999) 999-99-99")).toBeInTheDocument();
-  });
-
-  it('renders "Войти" button', () => {
-    renderPage(CabinetPage);
-    expect(screen.getByRole("button", { name: /войти/i })).toBeInTheDocument();
-  });
-});
-
-// ── Booking page ────────────────────────────────────────────
-
-describe("Booking page", () => {
-  it("renders without errors", () => {
-    renderPage(BookingPage);
-    expect(screen.getByRole("main")).toBeInTheDocument();
-  });
-
-  it("renders Header", () => {
-    renderPage(BookingPage);
-    expect(screen.getByRole("banner")).toBeInTheDocument();
-  });
-
-  it("renders booking form title", () => {
-    renderPage(BookingPage);
-    expect(screen.getByText("Оформление записи")).toBeInTheDocument();
   });
 });

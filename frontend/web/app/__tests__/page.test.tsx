@@ -2,6 +2,28 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Home from "../page";
 
+// ── Mock the client-branch API (#499): the booking overlay detects the
+// session on open — keep these tests hermetic (anonymous by default).
+vi.mock("@memo/api-client", () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code?: string,
+    ) {
+      super(message);
+      this.name = "ApiError";
+    }
+  }
+  return {
+    ApiError,
+    getMyClient: vi.fn().mockRejectedValue(new ApiError(401, "unauthorized")),
+    requestOtpCode: vi.fn(),
+    verifyOtpCode: vi.fn(),
+    createMyRecord: vi.fn(),
+  };
+});
+
 // ── Mock hooks ──────────────────────────────────────────────
 const mocks = vi.hoisted(() => ({
   selectDate: vi.fn(),
@@ -33,6 +55,7 @@ const mockSchedules = [
     tagColors: ["#C49A2E"],
     nextTimes: [{ id: "act-1b", date: "22 мая", time: "14:00" }],
     priceHint: "Включает материалы",
+    tariffs: [{ id: "tariff-a", title: "Взрослый", price: 3500 }],
     materialDetails: "Акварель и бумага",
     locationHint: "5 минут от метро",
   },
@@ -325,6 +348,15 @@ describe("Home (page.tsx)", () => {
       fireEvent.click(bookButton);
       expect(screen.getByText("Оформление записи")).toBeInTheDocument();
       expect(screen.queryByText("Анна Иванова")).not.toBeInTheDocument();
+    });
+
+    it("passes service tariffs through to the booking overlay counters (#499)", () => {
+      renderHome();
+      tapCardTrigger();
+      fireEvent.click(screen.getByRole("button", { name: /участвовать/i }));
+      const counter = screen.getByTestId("tariff-counter-tariff-a");
+      expect(counter).toHaveTextContent("Взрослый");
+      expect(counter).toHaveTextContent("3 500 ₽");
     });
 
     it("closes BookingOverlay when back button is clicked", () => {

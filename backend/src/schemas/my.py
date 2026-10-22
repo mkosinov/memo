@@ -17,7 +17,7 @@ owns the master section, #266 D5).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -50,6 +50,92 @@ class PortraitResponse(BaseModel):
     """POST /my/portrait success body (GH #262 Task 2, spec §4)."""
 
     avatar_url: str
+
+
+class MyClientResponse(BaseModel):
+    """GET /api/v1/my/client — the client cabinet's «who am I» (#499 §4.3).
+
+    ``phone`` is the confirmed account phone; ``name`` comes from the
+    linked client card (``users.client_id``) and may be ``null`` — a
+    cardless account, or a card with no name set (spec §4.2: the OTP
+    verify response uses the same shape).
+    """
+
+    phone: str
+    name: str | None = None
+
+
+# ─── #499 §5 — client booking: POST /api/v1/my/records ─────────────────────────
+
+# Wire bounds mirror the existing VisitItem (records schema): no explicit
+# string/age limits there, so none are invented here — the strictness of
+# this branch is the FIELD SET (extra="forbid" everywhere), not bounds.
+MY_RECORD_MAX_VISITS = 20
+
+
+class MyVisitCreate(BaseModel):
+    """One seat of the client booking form (spec §5).
+
+    Strict (``extra="forbid"``): the wire never carries ``visitor_id`` /
+    ``price`` / ``custom_price`` / ``status`` — visitors resolve by
+    ``name`` (or anonymously), the price is computed SERVER-side from
+    ``tariff_id``, and the status is the server default. ``name`` left
+    out → an anonymous visit (the existing semantics).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    age: int | None = None
+    tariff_id: str | None = None
+
+
+class MyRecordCreate(BaseModel):
+    """``POST /api/v1/my/records`` body (#499 §5) — the strict booking wire.
+
+    From the wire there is deliberately NO ``client_id`` / ``visitor_id`` /
+    ``price`` / ``custom_price`` / ``notify`` / ``status``: the owner comes
+    ONLY from the client session, visit prices are computed server-side
+    from the service's tariffs, and notifications are never opted into on
+    this branch. ``phone`` is the record's contact phone — domain
+    validation only (422 ``PHONE_INVALID``), never a client lookup key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    activity_id: str
+    phone: str
+    comment: str | None = None
+    visits: list[MyVisitCreate] = Field(min_length=1, max_length=MY_RECORD_MAX_VISITS)
+
+
+class MyVisitResponse(BaseModel):
+    """One created visit as the booking form sees it — no service fields.
+
+    ``name``/``age`` echo the wire (visit rows carry no names — visitors
+    do); ``tariff_id``/``price`` are what the server persisted.
+    """
+
+    name: str | None = None
+    age: int | None = None
+    tariff_id: str | None = None
+    price: int
+
+
+class MyRecordResponse(BaseModel):
+    """201 body of the client booking (spec §5).
+
+    ``start`` is the activity's date (from the record's activity) — ISO
+    datetime exactly as ``ActivityResponse.start`` serializes it. No
+    ``record_id`` on visits, no timestamps, no statuses — the minimum
+    the success screen renders.
+    """
+
+    id: str
+    activity_id: str
+    start: datetime
+    comment: str | None = None
+    visits: list[MyVisitResponse]
 
 
 class MyProfileUpdate(BaseModel):

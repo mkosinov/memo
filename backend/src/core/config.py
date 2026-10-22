@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # Signs the sqladmin session cookie (GH #247 §2.8). API sessions are
     # random opaque tokens — no SECRET_KEY involved there.
     SECRET_KEY: str = ""
+    # Keys the HMAC-SHA-256 of otp_codes.code_hash (#499 §4.1) — a
+    # deployment secret outside the DB, so a leaked dump cannot brute
+    # the 6-digit code space.
+    OTP_PEPPER: str = ""
+    # #499 §4.2 — the OTP code transport selector. Fail-closed: empty
+    # (the default) → NO transport → ``POST /auth/otp/request`` answers
+    # 503 in every environment. ``dev`` → the dev transport, active
+    # only under the exact ``ENV == "development"`` (staging/preview
+    # stay 503). The production transport arrives with #476/#485.
+    OTP_TRANSPORT: str = ""
     # ── Notify subsystem (#482 part 1, spec §3.9; family #476 §4.5) ──────
     # Disabled by default: nothing boots until the stack opts in (the
     # dispatcher process arrives in part 2).
@@ -75,6 +85,20 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _resolve_otp_pepper(self) -> "Settings":
+        """Production fails fast on an empty OTP pepper; otherwise an empty
+        value resolves to the fixed dev constant (the SECRET_KEY pattern —
+        stable across dev restarts, #499 §4.1)."""
+        if self.ENV == "production" and not self.OTP_PEPPER:
+            raise ValueError(
+                "OTP_PEPPER must be set when ENV=production "
+                "(it keys the otp_codes.code_hash HMAC)"
+            )
+        if not self.OTP_PEPPER:
+            self.OTP_PEPPER = "dev-otp-pepper"
+        return self
+
+    @model_validator(mode="after")
     def _require_redis_url_in_production(self) -> "Settings":
         """An enabled production notify subsystem demands an authenticated
         TLS transport: ``rediss://`` with credentials (GH #483 spec §3.3 —
@@ -110,6 +134,24 @@ class Settings(BaseSettings):
                 return ["*"]
             return [origin.strip() for origin in v.split(",")]
         return v
+
+    @model_validator(mode="after")
+    def _reject_wildcard_cors(self) -> "Settings":
+        """#499 §5: exact origins only — ``*`` is banned at the config level.
+
+        The app ALWAYS mounts CORSMiddleware with ``allow_credentials=True``
+        (cookie sessions), and a wildcard there degrades the credentials
+        posture (Starlette would answer ``Access-Control-Allow-Origin: *``,
+        which browsers reject for credentialed requests — and any relaxed
+        fallback would reflect-any-origin). A deployment must list its
+        exact origins; the dev/test env files carry the localhost list.
+        """
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must list exact origins — '*' is forbidden "
+                "with credentials (the app always enables allow_credentials)"
+            )
+        return self
 
 
 _env_file = os.environ.get("ENV_FILE")

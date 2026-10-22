@@ -184,10 +184,15 @@ class TestRoundtrip:
         command.upgrade(cfg, "head")
         assert set(NOTIFY_TABLES) <= _table_names(url)
 
-        command.downgrade(cfg, "-1")
+        # Downgrade to the notify migration's PARENT explicitly — «-1»
+        # stopped being the notify step once later migrations appended to
+        # the chain (users.client_id, #499 f8d2a4c6b9e1): a relative step
+        # would exercise the newest migration instead of this one's
+        # downgrade, silently voiding the assertions below.
+        command.downgrade(cfg, "4ba65fe87015")
         remaining = _table_names(url)
         for name in NOTIFY_TABLES:
-            assert name not in remaining, f"{name} survived downgrade -1"
+            assert name not in remaining, f"{name} survived the notify downgrade"
         assert "notify_enabled" not in _columns(url, "clients")
         assert "notify" not in _columns(url, "records")
 

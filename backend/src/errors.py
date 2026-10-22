@@ -44,6 +44,10 @@ class ErrorCode(str, Enum):
     # 429 — brute-force throttle (GH #247 auth)
     AUTH_LOCKED_OUT = "AUTH_LOCKED_OUT"
 
+    # 503 — OTP code transport not configured (#499 §4.2, fail-closed;
+    # the production transport arrives with the #476 notify family)
+    NOTIFY_TRANSPORT_UNAVAILABLE = "NOTIFY_TRANSPORT_UNAVAILABLE"
+
     # 422 — password policy violation (GH #247 auth, spec §5)
     PASSWORD_POLICY = "PASSWORD_POLICY"
 
@@ -69,6 +73,10 @@ class ErrorCode(str, Enum):
     COPY_WEEK_START_NOT_MONDAY = "COPY_WEEK_START_NOT_MONDAY"  # week_start is not a Monday
     COPY_WEEK_INVALID_LOCATION = "COPY_WEEK_INVALID_LOCATION"  # unknown location id in the request
     COPY_WEEK_SOURCE_TOO_LARGE = "COPY_WEEK_SOURCE_TOO_LARGE"  # > 100 rows to insert — copy in passes
+
+    # 422 — client booking (#499 §5): server-side price from tariffs
+    TARIFF_REQUIRED = "TARIFF_REQUIRED"      # paid service, visit without tariff_id
+    TARIFF_NOT_FOUND = "TARIFF_NOT_FOUND"    # tariff_id foreign to the activity's service
 
     # 422 — validation / integrity
     VALIDATION_ERROR = "VALIDATION_ERROR"
@@ -117,6 +125,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
     ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
+    ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE: "Вход временно недоступен",
     ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
     ErrorCode.ACCOUNT_DEACTIVATED: "Учётка деактивирована",
     ErrorCode.PASSWORD_LINK_INVALID: "Ссылка недействительна или истекла",
@@ -137,6 +146,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
         "сузив выбор локаций"
     ),
     ErrorCode.VALIDATION_ERROR: "Проверьте правильность заполнения полей",
+    ErrorCode.TARIFF_REQUIRED: "Выберите тариф для каждого места",
+    ErrorCode.TARIFF_NOT_FOUND: "Тариф не найден",
     ErrorCode.INTEGRITY_VIOLATION: "Нарушение целостности данных",
     ErrorCode.EXPECTED_STATE_REQUIRED: (
         "Не указано ожидаемое состояние зависимостей"

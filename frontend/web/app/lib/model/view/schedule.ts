@@ -1,3 +1,5 @@
+import type { TariffView } from './tariff';
+
 export interface NextTimeOption {
   id: string;
   date: string;
@@ -18,6 +20,8 @@ export interface ScheduleView {
   size: string;
   priceMin: number;
   priceMax: number;
+  /** Service tariffs for the booking overlay (#499); empty/undefined for tariff-free services. */
+  tariffs?: TariffView[];
   masterName: string;
   masterAvatar?: string;
   date: string;

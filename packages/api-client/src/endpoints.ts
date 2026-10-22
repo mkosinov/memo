@@ -115,6 +115,13 @@ import {
   type ChangePassword,
   type VisitStatus,
   type ArchiveStatus,
+  OtpRequestResponseSchema,
+  type OtpRequestResponse,
+  MyClientSchema,
+  type MyClient,
+  type MyRecordCreate,
+  MyRecordResponseSchema,
+  type MyRecordResponse,
 } from './schemas';
 import { ApiError } from './client';
 
@@ -1299,6 +1306,48 @@ export async function uploadPortrait(file: File): Promise<PortraitResponse> {
   return api('/api/v1/my/portrait', PortraitResponseSchema, {
     method: 'POST',
     body: form,
+  });
+}
+
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5) ────────────────
+// The client branch rides the same transport (credentials included); its
+// session cookie is memo_client_session. /auth/* 401s never fire the staff
+// unauthorized handler (client.ts), so a wrong OTP code surfaces as a plain
+// thrown ApiError(401) for the login form to render.
+
+// 202 ALWAYS for any valid phone (staff numbers are indistinguishable — no
+// enumeration oracle, spec §4.2); 503 NOTIFY_TRANSPORT_UNAVAILABLE when no
+// transport is configured (fail-closed).
+export async function requestOtpCode(phone: string): Promise<OtpRequestResponse> {
+  return api('/api/v1/auth/otp/request', OtpRequestResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+// 200 {phone, name} + the memo_client_session cookie on success; any refusal
+// is the unified 401 (and rides the IP counter server-side).
+export async function verifyOtpCode(phone: string, code: string): Promise<MyClient> {
+  return api('/api/v1/auth/otp/verify', MyClientSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
+  });
+}
+
+// The client cabinet's «who am I» (spec §4.3) — same shape as the verify
+// response.
+export async function getMyClient(): Promise<MyClient> {
+  return api('/api/v1/my/client', MyClientSchema);
+}
+
+// Client booking (spec §5): 201 MyRecordResponse; 404 unknown activity, 409
+// capacity, 422 PHONE_INVALID/TARIFF_REQUIRED/TARIFF_NOT_FOUND, 429 soft
+// anti-spam (20 records / 40 visits per 15 min). Logout stays the existing
+// POST /auth/logout — it revokes whichever session cookie is presented.
+export async function createMyRecord(data: MyRecordCreate): Promise<MyRecordResponse> {
+  return api('/api/v1/my/records', MyRecordResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 

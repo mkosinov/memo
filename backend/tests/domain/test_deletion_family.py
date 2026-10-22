@@ -302,6 +302,10 @@ class TestFKMatrixFamily:
             # GH #482: notify_tasks.client_id FK (ON DELETE SET NULL) —
             # task history survives the client hard delete (spec §3.6).
             "notify_tasks",
+            # GH #499: users.client_id — the client-account link, the
+            # users.staff_id mirror (auto-cascade on the hard delete;
+            # archival never touches the link, spec §3).
+            "users",
         }
         assert {d.entity for d in FK_MATRIX[Record]} == {
             "visits",

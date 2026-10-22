@@ -28,6 +28,7 @@ from fastapi import Depends, HTTPException
 # resolves dependency signatures via get_type_hints at registration time.
 from starlette.requests import Request
 
+from src.core.config import settings
 from src.db import db_manager
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import UserRole
@@ -79,6 +80,11 @@ class AuthedUser:
     # master_id until the frontend migrates).
     staff_id: str | None
     permissions: frozenset[str]
+    # #499 (spec §3): optional 1:1 client-card link — mirrors staff_id.
+    # Defaults so existing principals/tests construct unchanged; the
+    # client cabinet (GET /api/v1/my/client) and the #499 booking owner
+    # resolve their card through it, never from request data.
+    client_id: str | None = None
 
 
 async def verify_fetch_metadata(request: Request) -> None:
@@ -101,10 +107,42 @@ async def verify_fetch_metadata(request: Request) -> None:
         )
 
 
+async def verify_origin(request: Request) -> None:
+    """Login-CSRF line for the anonymous session-ISSUING routes (#499 §4.2).
+
+    When the browser sends ``Origin`` (cross-origin fetches and all
+    modern form posts), it must be in the CORS list — the same list the
+    CORS middleware allows credentials for. A mismatch means a foreign
+    page is driving the request: 403 before any code work (issuing a
+    session must not be available to someone else's page). A missing
+    header passes — non-browser clients and same-origin navigations
+    (the JSON-only + CORS posture remains the primary line; anonymous
+    routes are exempt from ``Sec-Fetch-Site``).
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    allowed = settings.CORS_ORIGINS
+    if "*" not in allowed and origin not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=ErrorDetail(
+                code=ErrorCode.AUTH_FORBIDDEN,
+                message="Cross-origin request rejected",
+            ).model_dump(),
+        )
+
+
 # ─── Session dependencies (T5) ─────────────────────────────────────────────────
 
 #: Cookie name carrying the opaque session token (spec §2.2).
 SESSION_COOKIE = "memo_session"
+
+#: #499 (spec §4.3): client sessions ride the SAME session rows but a
+#: SEPARATE cookie name — a client and a staff session coexist in one
+#: browser without clobbering each other (site and admin share the API
+#: origin). Same attributes as ``memo_session``; only the name differs.
+CLIENT_SESSION_COOKIE = "memo_client_session"
 
 
 def _unauthorized() -> HTTPException:
@@ -169,9 +207,30 @@ async def require_session(request: Request) -> AuthedUser:
     401 ``AUTH_UNAUTHORIZED`` for a missing cookie, unknown token, or an
     expired/archived session — the frontend treats all three as "no
     session" and redirects to login (spec §5).
+
+    #499 (spec §3): deliberately UNCHANGED — reads only ``memo_session``
+    and checks no role; client-session separation lives in
+    ``require_client_session`` below.
     """
     authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
+        raise _unauthorized()
+    return authed
+
+
+async def require_client_session(request: Request) -> AuthedUser:
+    """Resolve the ``memo_client_session`` cookie into a client principal.
+
+    #499 (spec §3/§4.3): same session rows, same resolve core (sliding
+    window, lazy expiry, archived-account refusal) — but ONLY the client
+    cookie name is read (a staff ``memo_session`` is invisible here) and
+    the resolved role must be ``client`` (a staff token copied into the
+    client cookie name resolves, then fails the role barrier). Both
+    cross-presentation shapes are the SAME 401 ``AUTH_UNAUTHORIZED`` as
+    no session at all. The staff resolver above stays untouched.
+    """
+    authed = await resolve_authed(request.cookies.get(CLIENT_SESSION_COOKIE))
+    if authed is None or authed.role != UserRole.CLIENT.value:
         raise _unauthorized()
     return authed
 

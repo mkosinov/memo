@@ -105,6 +105,17 @@ class TestRolePermissions:
         assert ROLE_PERMISSIONS.get("client", set()) == set()
         assert has_permission(set(), "records:read") is False
 
+    def test_client_role_exists_outside_matrix(self) -> None:
+        """#499 (spec §3): the third role ``client`` exists in UserRole but
+        deliberately has NO matrix entry — client endpoints authorize by the
+        client-session fact, not permissions; the defensive ``.get`` lookup
+        yields the empty set. The «exactly admin + master» invariant above
+        is what keeps this honest."""
+        assert hasattr(UserRole, "CLIENT"), "UserRole.CLIENT missing"
+        assert UserRole.CLIENT.value == "client"
+        assert UserRole.CLIENT.value not in ROLE_PERMISSIONS
+        assert ROLE_PERMISSIONS.get(UserRole.CLIENT.value, frozenset()) == frozenset()
+
 
 class TestHasPermission:
     """The matcher is exactly ``"*" in perms or perm in perms`` — no other wildcards."""
@@ -202,6 +213,9 @@ class TestPublicRoutes:
     def test_equals_spec_allowlist_exactly(self) -> None:
         # #348 addition: the public password-setup pair (spec §5/§7) —
         # the authority is the one-time token itself.
+        # #499 addition: the client OTP pair (spec §4.2) — the authority
+        # is the rate-limited one-time code; verify issues the client
+        # session cookie.
         # GH #479 (Изменение 4): ``GET /api/v1/photos/web`` was removed —
         # the gallery rides the public list with ``?is_public=true``.
         assert frozenset({
@@ -227,6 +241,8 @@ class TestPublicRoutes:
             ("GET", "/api/v1/auth/me"),
             ("POST", "/api/v1/auth/password-setup/validate"),
             ("POST", "/api/v1/auth/password-setup"),
+            ("POST", "/api/v1/auth/otp/request"),
+            ("POST", "/api/v1/auth/otp/verify"),
         }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:

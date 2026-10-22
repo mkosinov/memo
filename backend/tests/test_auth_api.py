@@ -119,6 +119,16 @@ def _master_user(_password_hashes, _master_profile):
     )
 
 
+@pytest.fixture
+def _client_user(_password_hashes):
+    """Insert a client-role user WITH a real password hash — proves the
+    #499 login refusal is the role barrier, not just the null-guard."""
+    return _insert_user(
+        phone="+79990000003", role="client",
+        password_hash=_password_hashes["password"],
+    )
+
+
 def _insert_user(phone: str, role: str, password_hash: str, staff_id: str | None = None) -> dict:
     """Direct-SQL user insert (conftest ``_user`` fixture pattern)."""
     import uuid as _uuid
@@ -221,6 +231,20 @@ class TestLogin:
         resp = _login(anon_client, "+79995555555")
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_INVALID_CREDENTIALS.value
+
+    def test_login_client_role_401_even_with_correct_password(
+        self, anon_client, _client_user,
+    ) -> None:
+        """#499 (spec §3): client accounts never log in via password. The
+        refusal is the ORDINARY invalid-credentials one (unified with the
+        unknown-phone / wrong-password branches — a distinct answer would
+        leak that the account exists) and fires even with a CORRECT
+        password: the role barrier sits on top of the null-guard, so a
+        stray hash (e.g. sqladmin) buys nothing. No session cookie lands."""
+        resp = _login(anon_client, _client_user["phone"])
+        assert resp.status_code == 401
+        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_INVALID_CREDENTIALS.value
+        assert "memo_session=" not in _cookie_header(resp)
 
     def test_login_missing_fields_422(self, anon_client) -> None:
         resp = anon_client.post("/api/v1/auth/login", json={"phone": "+79990000001"})

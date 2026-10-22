@@ -76,6 +76,7 @@ from sqlalchemy import update as sa_update
 
 from src.auth.password_setup import PasswordSetupToken, token_digest
 from src.auth.passwords import hash_password, validate_password
+from src.models.enums import UserRole
 from src.services.decorators import transactional
 from src.services.user import get_user_service
 
@@ -208,8 +209,12 @@ async def set_password_by_link(
         raise PasswordLinkInvalidError()
 
     # ── account-active check (token issued before archiving, spec §4) ──
+    # #499 (spec §3): role client rejects here too — the «client account
+    # without a password» invariant. Client accounts are passwordless by
+    # construction; even an admin-issued link never sets one. Same unified
+    # error, same rollback shape as the archive path.
     user = await get_user_service().get_by_id(db_session, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.role == UserRole.CLIENT.value:
         # The raised exception rolls the consume back — the row keeps
         # used_at IS NULL: an archive never burns the link; a later
         # reactivation finds it live again.

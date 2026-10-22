@@ -364,8 +364,13 @@ fi
 
 # ── Start FastAPI backend ──────────────────────────────────────────────────
 # Backend starts first so Alembic can create/migrate tables.
+# CORS (#499 §5): exact origins only — `*` is rejected by the config
+# validator. The shard's front origin rides the REAL env var (overrides
+# the .env.test list), so dynamic local-shard ports (28000-32700) work;
+# both host spellings are listed (baseURL may be localhost or 127.0.0.1).
 cd "$BACKEND_DIR"
 ENV_FILE=.env.test DATABASE_URL="$DATABASE_URL" PYTHONPATH=src \
+  CORS_ORIGINS="http://localhost:$SHARD_PORT,http://127.0.0.1:$SHARD_PORT" \
   uv run uvicorn src.main:app --host 0.0.0.0 --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 echo "[shard-$SHARD_ID] Backend PID: $BACKEND_PID"

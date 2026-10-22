@@ -7,6 +7,8 @@ export interface ButtonProps {
   onClick?: () => void;
   disabled?: boolean;
   className?: string;
+  /** Native button type — "submit" lets the button drive a form (#499 cabinet). */
+  type?: "button" | "submit";
 }
 
 const variantClasses: Record<ButtonProps["variant"], string> = {
@@ -29,10 +31,11 @@ export function Button({
   onClick,
   disabled = false,
   className = "",
+  type = "button",
 }: ButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={[

@@ -37,6 +37,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
   - `client_id` / `activity_id` — direct equality
   - `location_id` — DIRECT equality only (activity-owned photos at that location do NOT match)
   - `service_id` — variant A: direct `service_id` OR via `activity.service_id` (LEFT OUTER JOIN)
+  - `is_public` — direct equality, applied only when sent (`None` = no filter); the retired `/photos/web` showcase successor — the web gallery sends `is_public=true` (#479)
   - `tag_id` — repeatable (`?tag_id=a&tag_id=b`), AND semantics (photo must have ALL selected tags); duplicates deduped
   - All filters AND-combine with each other and with q; unknown filter ids → silent empty page (NOT 404)
   - `sort_by` whitelist: `filename | is_public | created_at` (422 on unknown); default `created_at desc` + `id asc` tiebreak
@@ -52,15 +53,14 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 
 ## Master role (#263)
 
-Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная галерея `/photos/web` не трогается.
+Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная витрина — общий список с `?is_public=true` (#479): анонимный гость без скоупа, скоуп сужает только вход мастера.
 
 Mechanics (T5): the list builder folds in a correlated EXISTS (`EXISTS(activities WHERE activities.id = photo.activity_id AND master_id = master_key)`) — an admin (`master_key=None`) adds no predicate, a master without a masters row matches an empty set. Point ops (get/PUT/PATCH/DELETE) gate via one scope-aware query (photo → activity); foreign/owner-less → the same 404 as missing (404-fast-path). POST/PUT/PATCH validate the TARGET `activity_id` the same way (create with a foreign activity → 404; PUT/PATCH re-target to a foreign activity → 404, photo unchanged); PATCH sending `activity_id: null` detaches the photo (legal for one's own photo). The `service_id` filter's LEFT JOIN path is untouched and AND-combines with the scope.
 
 ## API Endpoints
 | Method | Path | Params | Description |
 |--------|------|--------|-------------|
-| GET | /api/v1/photos/web | — | List public photos (gallery; bare array, unpaginated) |
-| GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total) |
+| GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `is_public` (#479; bool, only when sent), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total); the public gallery rides it with `is_public=true` |
 | GET | /api/v1/photos/{id} | — | Get |
 | POST | /api/v1/photos | — | Create |
 | PUT | /api/v1/photos/{id} | — | Full update (filename + is_public required) |

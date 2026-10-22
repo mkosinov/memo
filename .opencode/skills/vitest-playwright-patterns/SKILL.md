@@ -325,6 +325,44 @@ Element shows up, becomes actionable, state updates. Budget-based:
 deliberate and correct: raising it slows the suite and weakens the
 assertion. Never "fix" flakes here by growing timeouts.
 
+Distinguish the two shapes (GH #478):
+
+- **Disappear wait** (element present, waiting for it to go away —
+  dialog closed, spinner gone). Same load sensitivity as a positive
+  wait: it exits on first success, so a bigger budget costs nothing on
+  green paths and its only cost is slower red-path feedback when the
+  element truly stays. The suite-wide async budget covers these too.
+- **Never-appeared probe** (a `waitFor` wrapping
+  `queryBy…​).not.toBeInTheDocument()` while the element is absent from
+  the start). The wait exits immediately and asserts nothing — a late
+  element silently greens the test. Anti-pattern: settle on a side
+  effect first (see the unit toast rule below), then assert.
+
+Unit suites: the async budget lives in `__tests__/setup.ts`
+(`configure({ asyncUtilTimeout: 5000 })`, GH #478) — rely on it, do not
+restate it inline; pass an explicit short `timeout` only where the
+short window IS the assertion.
+
+### Unit toast asserts (canon since #337, classified per site by #445)
+
+Asserting a toast spy after a user action in unit tests:
+
+- Positive assert after an async chain (mutation promise settling, a
+  timer-driven deferred flow): `await waitFor(() => expect(showToast).toHaveBeenCalledWith(...))`.
+  A bare sync assert right after `act()` is the #337/#445 flake: under load
+  the promise chain may not settle within the single act flush, and the
+  assert observes 0 calls.
+- Negative assert ("no toast"): keep it sync and short (class 2 above), but
+  give it a settle anchor first — a preceding `waitFor` on the pipeline's
+  side effect (the deferred call, `console.error`, a state reset) — otherwise
+  a late toast silently greens the test.
+- Sync-deterministic sites stay sync: the toast fired synchronously inside
+  the handler, or the test invokes the mutation callbacks manually
+  (`callbacks.onSuccess()`). Classify per site; do not blanket-convert.
+- Fake timers + `waitFor`: start them with
+  `vi.useFakeTimers({ shouldAdvanceTime: true })` so the waitFor polling can
+  tick (the `PhotosTableDeleteFlow.test.tsx` pattern).
+
 ### 3. Semantic time — the FEATURE is a timer
 
 Undo window, cache staleTime, SSE reconnect backoff. Never wait real

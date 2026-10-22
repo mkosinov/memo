@@ -3,7 +3,8 @@
 import React, { useState, useCallback } from 'react';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import PhoneInput, { type PickedClient } from '@/app/components/shared/PhoneInput';
-import { getClientsPaged } from '@memo/api-client';
+import { getClientsPaged, ChannelSchema } from '@memo/api-client';
+import type { Channel } from '@memo/api-client';
 import type { Tariff } from '@memo/domain';
 import type { CreateRecordInput } from '@/hooks/useRecordMutations';
 import { resolveDefaultTariff } from '@/lib/tariff-resolver';
@@ -13,6 +14,11 @@ interface NewVisitor {
   name: string;
   age: string;
   tariffId: string;
+}
+
+/** Contract channel guard — narrows select change events (#480 §3.4). */
+function isChannel(value: string): value is Channel {
+  return (ChannelSchema.options as readonly string[]).includes(value);
 }
 
 /** Record submit payload — disjoint pick/unpicked union, defined once by
@@ -35,7 +41,9 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
   const [phoneNoCountry, setPhoneNoCountry] = useState(false);
   const [name, setName] = useState('');
   const [notify, setNotify] = useState(false);
-  const [channel, setChannel] = useState('telegram');
+  // #480 §3.4: typed against the contract union; the option list below stays
+  // EXPLICIT (UI order telegram/max/whatsapp ≠ ChannelSchema declaration).
+  const [channel, setChannel] = useState<Channel>('telegram');
   const [visitors, setVisitors] = useState<NewVisitor[]>([]);
   const [seatsCount, setSeatsCount] = useState(1);
 
@@ -276,7 +284,11 @@ export function NewRecordTab({ serviceTariffs, onSubmit, showToast }: NewRecordT
           className={inputClass}
           style={inputStyle}
           value={channel}
-          onChange={(e) => setChannel(e.target.value)}
+          onChange={(e) => {
+            // Options are contract channels — narrow the DOM string through
+            // the schema-derived set (#480 §3.4).
+            if (isChannel(e.target.value)) setChannel(e.target.value);
+          }}
           data-testid="select-channel"
         >
           <option value="telegram">Telegram</option>

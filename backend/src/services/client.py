@@ -102,6 +102,12 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
         # behavior-neutral for every inherited path.
         self._repository: ClientRepository = repository
 
+    # GH #482: clients.notify_enabled is NOT NULL (default true) — patch
+    # bodies carrying null for it are stripped like other not-null fields.
+    # (Suppressed RUF012 keeps the frozen lint budget flat — location and
+    # activity already pay for their identical sets.)
+    NOT_NULL_FIELDS = {"notify_enabled"}  # noqa: RUF012
+
     # GH #212 search matrix (spec §5.2): substring over name/phone/email,
     # exact id equality when q parses as a full UUID (deep-link #216).
     search_fields = [
@@ -233,6 +239,44 @@ class ClientService(ArchiveService[ClientCreate, ClientUpdate, ClientResponse]):
             await db_session.flush()
             # GH #239 §3.3: conditional mark — only when actually created
             mark_changed("clients")
+        return client
+
+    async def get_or_create_active_by_phone(
+        self,
+        db_session: AsyncSession,
+        phone: str,
+    ) -> Client:
+        """#499 §3 (OTP login): active-only exact-phone find-or-create.
+
+        The client-account variant of ``get_or_create_by_phone``: the
+        lookup matches the phone-lookup domain rule (ACTIVE cards only —
+        archived rows are invisible to the lookup) and, unlike the
+        record-flow helper, tolerates DUPLICATE phones by binding to the
+        FIRST active card under a stable sort (creation order, id
+        tiebreak — deterministic across calls). On a miss a card is
+        created with the same defaults as the record-flow helper
+        («Гость» / whatsapp). Non-transactional scenario building block:
+        the caller owns the commit; ``mark_changed("clients")`` fires
+        only on the creation branch (no-op outside ``@transactional``).
+        """
+        client = (
+            await db_session.execute(
+                select(Client)
+                .where(Client.phone == phone, Client.is_active == True)  # noqa: E712
+                .order_by(Client.created_at.asc(), Client.id.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if client is not None:
+            return client
+        client = Client(
+            phone=phone,
+            name="Гость",
+            channel="whatsapp",
+        )
+        db_session.add(client)
+        await db_session.flush()
+        mark_changed("clients")
         return client
 
     # ── GH #327 Task 3 — own-edge delete building block (no transaction) ──

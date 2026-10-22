@@ -21,6 +21,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { getMe, login } from '@memo/api-client';
+import type { AuthMe } from '@memo/api-client';
 import LoginPage from '../app/login/page';
 import { UIProvider } from '../contexts/UIContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
@@ -28,7 +29,7 @@ import { AuthProvider, useAuth } from '../contexts/AuthContext';
 const mockGetMe = vi.mocked(getMe);
 const mockLogin = vi.mocked(login);
 
-const mockAuthMe = {
+const mockAuthMe: AuthMe = {
   user: {
     id: 'user-uuid-1',
     phone: '+79990000001',

@@ -113,6 +113,15 @@ import {
   PortraitResponseSchema,
   type PortraitResponse,
   type ChangePassword,
+  type VisitStatus,
+  type ArchiveStatus,
+  OtpRequestResponseSchema,
+  type OtpRequestResponse,
+  MyClientSchema,
+  type MyClient,
+  type MyRecordCreate,
+  MyRecordResponseSchema,
+  type MyRecordResponse,
 } from './schemas';
 import { ApiError } from './client';
 
@@ -123,7 +132,7 @@ export interface ListParams {
   per_page?: number;
   /** Archive filter — soft-delete entities only (masters/locations/services/materials).
    *  Ignored by endpoints that don't declare it (tags, visitors). */
-  status?: 'active' | 'all' | 'archived' | null;
+  status?: ArchiveStatus | null;
   /** Server-side sort — dictionary list endpoints only (#205); must be in the endpoint's whitelist. */
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
@@ -346,16 +355,9 @@ export async function getLocations(params?: ListParams): Promise<PaginatedRespon
   return api(`/api/v1/locations${listQuery(params)}`, LocationListResponseSchema);
 }
 
-// ─── Photos ─────────────────────────────────────────────────────────────────
-
-export async function getWebPhotos(params?: { activity_id?: string }): Promise<PhotoResponse[]> {
-  const search = new URLSearchParams();
-  if (params?.activity_id) search.set('activity_id', params.activity_id);
-  const qs = search.toString();
-  return api(`/api/v1/photos/web${qs ? `?${qs}` : ''}`, z.array(PhotoResponseSchema));
-}
-
-// ─── Photos list (GH #211: paginated with filters/sort) ────────────────────
+// ─── Photos (GH #211: paginated list with filters/sort) ─────────────────────
+// GH #479: getWebPhotos (GET /api/v1/photos/web showcase) removed — the route
+// no longer exists; use getPhotos({ is_public: true }) for public galleries.
 
 export interface PhotoListParams {
   page?: number;
@@ -366,6 +368,7 @@ export interface PhotoListParams {
   activity_id?: string;
   service_id?: string;
   tag_id?: string[];
+  is_public?: boolean; // GH #479: mirror of backend PhotoListParams (bool | None; None = no filter)
   sort_by?: 'filename' | 'is_public' | 'created_at';
   sort_order?: 'asc' | 'desc';
 }
@@ -550,7 +553,7 @@ export async function getRecords(params?: {
   location_id?: string;
   service_id?: string;
   master_id?: string;
-  status?: string;
+  status?: VisitStatus;
   q?: string;
   sort_by?: string;
   sort_order?: string;
@@ -587,7 +590,7 @@ export async function getRecordsView(params?: {
   location_id?: string;
   service_id?: string;
   master_id?: string;
-  status?: string;
+  status?: VisitStatus;
   q?: string;
   sort_by?: string;
   sort_order?: string;
@@ -1303,6 +1306,48 @@ export async function uploadPortrait(file: File): Promise<PortraitResponse> {
   return api('/api/v1/my/portrait', PortraitResponseSchema, {
     method: 'POST',
     body: form,
+  });
+}
+
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5) ────────────────
+// The client branch rides the same transport (credentials included); its
+// session cookie is memo_client_session. /auth/* 401s never fire the staff
+// unauthorized handler (client.ts), so a wrong OTP code surfaces as a plain
+// thrown ApiError(401) for the login form to render.
+
+// 202 ALWAYS for any valid phone (staff numbers are indistinguishable — no
+// enumeration oracle, spec §4.2); 503 NOTIFY_TRANSPORT_UNAVAILABLE when no
+// transport is configured (fail-closed).
+export async function requestOtpCode(phone: string): Promise<OtpRequestResponse> {
+  return api('/api/v1/auth/otp/request', OtpRequestResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+// 200 {phone, name} + the memo_client_session cookie on success; any refusal
+// is the unified 401 (and rides the IP counter server-side).
+export async function verifyOtpCode(phone: string, code: string): Promise<MyClient> {
+  return api('/api/v1/auth/otp/verify', MyClientSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
+  });
+}
+
+// The client cabinet's «who am I» (spec §4.3) — same shape as the verify
+// response.
+export async function getMyClient(): Promise<MyClient> {
+  return api('/api/v1/my/client', MyClientSchema);
+}
+
+// Client booking (spec §5): 201 MyRecordResponse; 404 unknown activity, 409
+// capacity, 422 PHONE_INVALID/TARIFF_REQUIRED/TARIFF_NOT_FOUND, 429 soft
+// anti-spam (20 records / 40 visits per 15 min). Logout stays the existing
+// POST /auth/logout — it revokes whichever session cookie is presented.
+export async function createMyRecord(data: MyRecordCreate): Promise<MyRecordResponse> {
+  return api('/api/v1/my/records', MyRecordResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 

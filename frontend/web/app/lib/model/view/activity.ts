@@ -1,3 +1,5 @@
+import type { TariffView } from './tariff';
+
 export type ActivityTag = 'взрослым' | 'вместе' | 'детям';
 
 export interface NextTimeOption {
@@ -29,6 +31,8 @@ export interface ActivityView {
   categoryColor: string;
   nextTimes?: NextTimeOption[];
   priceDetails?: string;
+  /** Service tariffs for the booking overlay (#499); empty/undefined for tariff-free services. */
+  tariffs?: TariffView[];
   materialDetails?: string;
   locationDetails?: string;
 }

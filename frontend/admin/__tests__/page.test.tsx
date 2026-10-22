@@ -7,9 +7,12 @@ import { UserSettingsProvider } from '../contexts/UserSettingsContext';
 import SchedulePage from '../app/(main)/schedule/page';
 import React from 'react';
 
-vi.mock('@memo/api-client', () => {
+// #480 §3.4: components import enum schemas at module level — spread the
+// actual module, the fn mocks below stay as overrides.
+vi.mock('@memo/api-client', async (importOriginal) => {
   const wrap = (items: any[]) => ({ items, total: items.length, page: 1, per_page: 100 });
   return ({
+  ...(await importOriginal<typeof import('@memo/api-client')>()),
   getAllMasters: vi.fn().mockResolvedValue([]),
   getAllLocations: vi.fn().mockResolvedValue([]),
   getAllServices: vi.fn().mockResolvedValue([]),

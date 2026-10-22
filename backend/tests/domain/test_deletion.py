@@ -342,9 +342,12 @@ class TestFKMatrixService:
 
 
 class TestFKMatrixClient:
-    def test_has_exactly_four_deps(self) -> None:
+    def test_has_exactly_six_deps(self) -> None:
         assert {dep.entity for dep in FK_MATRIX[Client]} == {
-            "records", "visitors", "client_tags", "photos",
+            "records", "visitors", "client_tags", "photos", "notify_tasks",
+            # GH #499: users.client_id — the client-account link (the
+            # users.staff_id mirror).
+            "users",
         }
 
     def test_records_nullify_user_choice(self) -> None:
@@ -372,6 +375,25 @@ class TestFKMatrixClient:
         assert dep.action == "nullify"
         assert dep.auto is True
         assert dep.allowed_actions == ["nullify"]
+        assert dep.nullable is True
+
+    def test_notify_tasks_nullify_auto(self) -> None:
+        """GH #482: the task history survives the client hard delete —
+        ``notify_tasks.client_id`` is ON DELETE SET NULL (spec §3.6)."""
+        dep = _deps_map(Client)["notify_tasks"]
+        assert dep.action == "nullify"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["nullify"]
+        assert dep.nullable is True
+
+    def test_users_cascade_auto(self) -> None:
+        """GH #499 (spec §3): the linked client account dies with the
+        card — the users.staff_id mirror (TestFKMatrixMaster). Archival
+        never touches the link; this is the hard-delete contract only."""
+        dep = _deps_map(Client)["users"]
+        assert dep.action == "cascade"
+        assert dep.auto is True
+        assert dep.allowed_actions == ["cascade"]
         assert dep.nullable is True
 
 

@@ -1,9 +1,48 @@
 """Tests for the Clients CRUD API endpoints."""
 
+import uuid
+
 import pytest
 
-from tests.conftest import query_db
+from tests.conftest import query_db, query_db_params
 from tests.generic_contract import _serialized_keys
+
+
+def _insert_linked_client_user(client_id: str, phone: str) -> str:
+    """A ``users`` row linked to the card via ``client_id`` (#499 §3) —
+    direct SQL, the ``test_user_client_link.py`` insert pattern."""
+    user_id = str(uuid.uuid4())
+    query_db_params(
+        "INSERT INTO users (id, phone, password_hash, role, staff_id, client_id,"
+        " email_is_confirmed, phone_is_confirmed, is_active, created_at, updated_at)"
+        " VALUES (:id, :phone, NULL, 'client', NULL, :client_id, 0, 0, 1,"
+        " datetime('now'), datetime('now'))",
+        {"id": user_id, "phone": phone, "client_id": client_id},
+    )
+    return user_id
+
+
+def _insert_user_session(user_id: str) -> None:
+    """A live ``memo_client_session`` row for the account (the realistic
+    state at delete time — the owner logged in via OTP)."""
+    query_db_params(
+        "INSERT INTO sessions (token, user_id, created_at, last_extended_at,"
+        " idle_deadline, absolute_deadline)"
+        " VALUES (:token, :user_id, datetime('now'), datetime('now'),"
+        " datetime('now', '+7 days'), datetime('now', '+30 days'))",
+        {"token": f"tok-{user_id}", "user_id": user_id},
+    )
+
+
+def _insert_user_settings(user_id: str) -> None:
+    """A ``user_settings`` row for the account (FK ``user_id``, no ondelete)."""
+    query_db_params(
+        "INSERT INTO user_settings (id, user_id, theme, language,"
+        " column_order_staff, column_order_locations, created_at, updated_at)"
+        " VALUES (:id, :user_id, 'light', 'ru', '[]', '[]',"
+        " datetime('now'), datetime('now'))",
+        {"id": str(uuid.uuid4()), "user_id": user_id},
+    )
 
 pytestmark = pytest.mark.api
 
@@ -824,6 +863,53 @@ class TestDeleteUnifiedRoute:
 
         assert resp.status_code == 204
         assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    # ── #499: the linked client account (users.client_id) ─────────────────
+
+    def test_dry_run_linked_client_account_returns_users_node(
+        self, api_client, create_client
+    ) -> None:
+        """#499: the client account linked via ``users.client_id`` is a
+        matrix dep — the ``staff_id`` mirror: auto-cascade, no user
+        choice; the preview tree names it with count + the auto flag."""
+        client = create_client()
+        user_id = _insert_linked_client_user(client["id"], "+79995550201")
+
+        resp = self._dry_run(api_client, client["id"])
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        users = next(d for d in body["dependencies"] if d["entity"] == "users")
+        assert users["count"] == 1
+        assert users["allowed_actions"] == ["cascade"]
+        assert users["auto"] is True
+        # Preview never modifies rows — the account and the card survive.
+        assert query_db(f"SELECT id FROM users WHERE id='{user_id}'")
+        assert api_client.get(f"/api/v1/clients/{client['id']}").status_code == 200
+
+    def test_commit_cascades_linked_client_account(
+        self, api_client, create_client
+    ) -> None:
+        """#499: the hard delete takes the linked account with the card
+        (the staff-edge mirror: card gone + account kept = orphan). The
+        account's settings and live client session die FIRST — their FKs
+        carry no ``ondelete`` and the test engine enforces PRAGMA
+        foreign_keys=ON, so the cascade must be service-level."""
+        client = create_client()
+        user_id = _insert_linked_client_user(client["id"], "+79995550202")
+        _insert_user_session(user_id)
+        _insert_user_settings(user_id)
+
+        resp = api_client.request(
+            "DELETE", f"/api/v1/clients/{client['id']}", json={"expected": {}},
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert not query_db(f"SELECT id FROM clients WHERE id='{client['id']}'")
+        assert not query_db(f"SELECT id FROM users WHERE id='{user_id}'")
+        assert not query_db(f"SELECT token FROM sessions WHERE user_id='{user_id}'")
+        assert not query_db(f"SELECT id FROM user_settings WHERE user_id='{user_id}'")
 
     # ── body commit: existence + expected id-set verification ──────────────
 

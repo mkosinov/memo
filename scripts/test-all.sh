@@ -59,6 +59,8 @@ if [ "${SEQUENTIAL:-0}" = "1" ]; then
   (cd packages/api-client && pnpm run type-check)
   echo "  → vitest..."
   (cd frontend/admin && pnpm run test)
+  echo "  → vitest (workspace packages)..."
+  bash scripts/run-workspace-tests.sh
   echo "  → playwright..."
   (cd frontend/admin && CI= pnpm exec playwright test --workers=1)
   echo "  → backend pytest..."
@@ -196,14 +198,19 @@ acquire_seed_lock() {
 # then exit 128+sig; they clear the EXIT trap first so cleanup never runs
 # twice. release_seed_lock is idempotent (flag-guarded) — it covers an
 # interrupt inside the master-DB critical section below.
+# #448 Task 4: stop_run_watchdog goes FIRST — a live watchdog during the
+# wrapper-TERM teardown would see those orchestrator-caused deaths and
+# plant a FALSE marker (no-op before the watchdog starts: RUN_WATCHDOG_PID
+# is empty; idempotent after the normal-flow stop, which clears the PID).
 SHARD_BACKEND_PIDS=()
 on_signal() {
   trap - EXIT
+  stop_run_watchdog
   cleanup_shards
   release_seed_lock
   exit $((128 + $1))
 }
-trap 'cleanup_shards; release_seed_lock' EXIT
+trap 'stop_run_watchdog; cleanup_shards; release_seed_lock' EXIT
 trap 'on_signal 2' INT
 trap 'on_signal 15' TERM
 
@@ -234,13 +241,14 @@ wipe_shard_dirs
 # frontend/admin. dev.sh admin mode serves :3001 from the SAME .next dir;
 # deleting it under a running server corrupts that stack (same lesson as
 # the port-guarded pkill above — never touch what a live stack owns).
+# Busy probe (#448 Task 2): one _listener_on call = ONE /proc-resolver
+# sample against the three ports — an lsof-INVISIBLE dev server (rewritten
+# process.title, the #448 bug class) is seen and protects the dir; the
+# non-Linux fallback inside _listener_on keeps the legacy per-port lsof.
 NEXT_DIR_IN_USE=false
-for port in 3001 3002 3003; do
-  if lsof -ti :"$port" >/dev/null 2>&1; then
-    NEXT_DIR_IN_USE=true
-    break
-  fi
-done
+if _listener_on 3001 3002 3003; then
+  NEXT_DIR_IN_USE=true
+fi
 if [ "$NEXT_DIR_IN_USE" = false ]; then
   echo "  → removing stale frontend/admin/.next (prevents baked NEXT_PUBLIC_API_URL poisoning)..."
   rm -rf frontend/admin/.next
@@ -276,6 +284,12 @@ bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh"
 
 # Track all background PIDs for waiting
 ALL_PIDS=()
+# #448 Task 4: Playwright stage PIDs only (the stages bound to the shard
+# stacks) — published to the fail-fast watchdog via a pid file after both
+# stages start. Wrappers themselves are NEVER added to ALL_PIDS (§3.2:
+# ввод обёрток в финальный wait повесил бы его — обёртка не завершается
+# сама; их смерть видит watchdog, не wait).
+PW_STAGE_PIDS=()
 
 # ── Backend pytest (independent) ───────────────────────────────────────────
 echo "  → backend pytest..."
@@ -311,6 +325,16 @@ ALL_PIDS+=($!)
 echo "  → vitest..."
 (
   cd frontend/admin && pnpm run test > "$LOG_DIR/vitest.log" 2>&1
+) &
+ALL_PIDS+=($!)
+
+# ── Vitest (other workspace packages: domain, api-client, web) ─────────────
+# GH #420: the local full suite must cover ALL tests, not just admin's.
+# Same shared script as the CI workspace-tests job — the package list is
+# derived from the workspace globs, no hand lists to go stale.
+echo "  → vitest (workspace packages)..."
+(
+  bash scripts/run-workspace-tests.sh > "$LOG_DIR/vitest-workspace.log" 2>&1
 ) &
 ALL_PIDS+=($!)
 
@@ -377,8 +401,11 @@ for i in $(seq 0 1); do
   # narrow the allocate→bind TOCTOU window). Busy here means someone bound
   # the port between the allocation check and now — fatal with a clear
   # message, no blind retry (spec §4). exit 1 → the trap cleans up.
+  # Probe (#448 Task 2): _listener_on — the /proc-resolver sample sees
+  # lsof-invisible holders too (rewritten process.title); non-Linux keeps
+  # the legacy per-port `lsof -ti` inside the helper.
   for port in "$FRONTEND_PORT" "$BACKEND_PORT"; do
-    if lsof -ti :"$port" >/dev/null 2>&1; then
+    if _listener_on "$port"; then
       echo "❌ порт $port занят между проверкой и стартом; перезапусти test-all" >&2
       exit 1
     fi
@@ -405,6 +432,23 @@ for i in $(seq 0 1); do
   # For now, we kill the entire process group on cleanup.
   SHARD_BACKEND_PIDS+=($!)
 done
+
+# ── #448 Task 4: orchestrator fail-fast watchdog ────────────────────────────
+# Background loop (scripts/lib/shard-helpers.sh, spec §3.2), started right
+# after the stack wrappers and BEFORE the readiness waits — an early-dying
+# stack cannot slip through. Each SHARD_RUN_WATCH_S tick it kill-0-probes
+# SHARD_BACKEND_PIDS (direct children of THIS shell). A dead wrapper →
+# diagnosis (shard, ports, capped stack-log tail) + marker file in $LOG_DIR
+# + TERM to BOTH Playwright stages with the TERM→grace→KILL escalation
+# (rev4 hard form — the neighbor stops too); the marker turns the run red
+# even if every stage was green (US-6). Stage pid lists are published later
+# (atomic mv, after both stages start): a missing file means «stages not
+# started yet» to the watchdog — it keeps watching the wrappers alone.
+RUN_WATCHDOG_MARKER="$LOG_DIR/stack-wrapper-died.marker"
+RUN_TERM_STAGES="$LOG_DIR/watchdog-term-stages.list"
+RUN_EXIT_STAGES="$LOG_DIR/watchdog-exit-stages.list"
+run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" &
+RUN_WATCHDOG_PID=$!
 
 # Wait for all shard stacks to be ready (check frontend ports)
 echo "  → waiting for shard frontends to be ready..."
@@ -483,7 +527,19 @@ for i in $(seq 0 1); do
       > "$LOG_DIR/pw-shard-${SHARD_NUM}.log" 2>&1
   ) &
   ALL_PIDS+=($!)
+  PW_STAGE_PIDS+=($!)
 done
+
+# #448 Task 4: publish the stage lists for the watchdog. Atomic mv (tmp in
+# the same dir): the watchdog re-reads these every tick, and a torn line
+# could TERM a wrong pid. TERM list = the 2 Playwright stages only (the
+# stages bound to the stacks); EXIT list = every parallel stage — the
+# watchdog must live until the END of the final wait (§3.2), not just until
+# the Playwright stages finish.
+printf '%s\n' ${PW_STAGE_PIDS[@]+"${PW_STAGE_PIDS[@]}"} > "$RUN_TERM_STAGES.tmp" \
+  && mv -f "$RUN_TERM_STAGES.tmp" "$RUN_TERM_STAGES"
+printf '%s\n' ${ALL_PIDS[@]+"${ALL_PIDS[@]}"} > "$RUN_EXIT_STAGES.tmp" \
+  && mv -f "$RUN_EXIT_STAGES.tmp" "$RUN_EXIT_STAGES"
 
 # ── Wait for all parallel stages ───────────────────────────────────────────
 FAIL=0
@@ -492,6 +548,21 @@ for pid in "${ALL_PIDS[@]}"; do
     FAIL=1
   fi
 done
+
+# ── #448 Task 4: hard termination order ─────────────────────────────────────
+# final stage waits → STOP the watchdog → marker check → verdict. The stop
+# precedes BOTH the check and the EXIT-trap teardown: teardown TERMs the
+# wrappers, and a still-live watchdog would see those (orchestrator-caused)
+# deaths and plant a FALSE marker in a green run. Wrapper deaths observed
+# BEFORE this point — including after an already-green stage (US-6: a run
+# that rode green on a dead stack) — are real and red the run here.
+stop_run_watchdog
+if [ -e "$RUN_WATCHDOG_MARKER" ]; then
+  echo ""
+  echo "❌ Stack wrapper died mid-run — the run is red even if all stages were green (US-6)."
+  echo "   Marker: $RUN_WATCHDOG_MARKER (see the watchdog diagnosis above and the stack log tail)."
+  FAIL=1
+fi
 
 if [ $FAIL -ne 0 ]; then
   echo ""

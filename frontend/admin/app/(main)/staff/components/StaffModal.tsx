@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
-import type { StaffResponse, PositionResponse } from '@memo/api-client';
+import type { StaffResponse, PositionResponse, UserRole } from '@memo/api-client';
 import { Modal } from '@/app/components/shared/modal/Modal';
 import {
   PhoneField,
@@ -38,8 +38,8 @@ export interface StaffFormData {
   sort_order: number;
   position_ids: string[];
   master: { specialty: string; color: string; archived?: boolean } | null;
-  create_user: { phone: string; role?: 'admin' | 'master' } | false;
-  role?: 'admin' | 'master';
+  create_user: { phone: string; role?: UserRole } | false;
+  role?: UserRole;
 }
 
 export interface StaffModalProps {
@@ -87,14 +87,14 @@ function storedToPhoneValue(stored: string | null | undefined): PhoneFieldValue 
 }
 
 /** Fixed position-id anchors (D4 #266) → role (GH #263 D10). */
-const POSITION_ROLE_TEMPLATE: Record<string, 'admin' | 'master'> = {
+const POSITION_ROLE_TEMPLATE: Record<string, UserRole> = {
   admin: 'admin',
   master: 'master',
 };
 
 /** Highest template role among position ids (admin > master) — mirrors the
  *  backend `_template_role`; null = no anchor present (keep current role). */
-function templateRoleOf(positionIds: string[]): 'admin' | 'master' | null {
+function templateRoleOf(positionIds: string[]): UserRole | null {
   if (positionIds.some((id) => POSITION_ROLE_TEMPLATE[id] === 'admin')) return 'admin';
   if (positionIds.some((id) => POSITION_ROLE_TEMPLATE[id] === 'master')) return 'master';
   return null;
@@ -108,6 +108,21 @@ function Label({ htmlFor, children }: { htmlFor: string; children: React.ReactNo
   );
 }
 
+/** Role labels keyed by UserRole. The Record spans the FULL enum — #499
+ *  widened it with 'client' (web self-registration), so every role carries
+ *  a label; the select below still lists STAFF roles only. */
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Администратор',
+  master: 'Мастер',
+  client: 'Клиент',
+};
+
+/** Role select options — an EXPLICIT list, NOT UserRoleSchema.options
+ *  (#499 leg 3): the enum now includes 'client', but clients are not staff
+ *  and must never appear in the staff role select. Declaration order
+ *  admin, master (#480 §3.4 pin). */
+const STAFF_ROLE_OPTIONS: readonly UserRole[] = ['admin', 'master'];
+
 /**
  * Role select (GH #263 D10) — auto-filled from the position template,
  * manually editable. Empty value = «не выбрано» → no explicit role in the
@@ -119,8 +134,8 @@ function RoleField({
   onChange,
 }: {
   baseId: string;
-  role: 'admin' | 'master' | '';
-  onChange: (role: 'admin' | 'master' | '') => void;
+  role: UserRole | '';
+  onChange: (role: UserRole | '') => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -129,13 +144,16 @@ function RoleField({
         id={`${baseId}-role`}
         data-testid="staff-role-field"
         value={role}
-        onChange={(e) => onChange(e.target.value as 'admin' | 'master' | '')}
+        onChange={(e) => onChange(e.target.value as UserRole | '')}
         className={TEXT_INPUT}
         style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
       >
         <option value="">— не выбрана —</option>
-        <option value="admin">Администратор</option>
-        <option value="master">Мастер</option>
+        {STAFF_ROLE_OPTIONS.map((value) => (
+          <option key={value} value={value}>
+            {ROLE_LABELS[value]}
+          </option>
+        ))}
       </select>
       <span className="text-xs" style={{ color: 'var(--ink-light)' }}>
         Подставляется по должностям (админ &gt; мастер); можно изменить вручную.
@@ -172,7 +190,7 @@ export function StaffModal({
   // within this dialog session («ручная правка остаётся»); the flag resets
   // on open (fresh mount) and on successful submit. Empty string = no
   // explicit role → the backend template decides.
-  const [role, setRole] = useState<'admin' | 'master' | ''>(
+  const [role, setRole] = useState<UserRole | ''>(
     () => templateRoleOf(staff?.position_ids ?? []) ?? '',
   );
   const [roleDirty, setRoleDirty] = useState(false);
@@ -238,7 +256,7 @@ export function StaffModal({
   );
 
   const handleRoleChange = useCallback(
-    (next: 'admin' | 'master' | '') => {
+    (next: UserRole | '') => {
       setRole(next);
       setRoleDirty(true);
       markDirty();

@@ -1,5 +1,37 @@
 import { z } from 'zod';
 
+// ─── Contract enums (#480 — named enum dictionaries) ────────────────────────
+// Single reuse layer for the contract's six enums: request schemas below
+// reference the named dictionaries instead of inline literals, and UIs derive
+// value lists from `XSchema.options` (zod ^3.23 tuple in DECLARATION order —
+// the client-side order, not the enums.py order). Parity with the backend
+// (`backend/src/models/enums.py`, `backend/src/domain/visit_status.py`) is by
+// value SET, not order. There is deliberately NO RecordStatus dictionary:
+// record status carries VisitStatus values — it is derived from visits
+// server-side (docs/domain-rules/records.md, "Single enum: VisitStatus").
+
+export const VisitStatusSchema = z.enum(['waiting', 'visited', 'missed', 'cancelled']);
+export type VisitStatus = z.infer<typeof VisitStatusSchema>;
+
+export const PaymentMethodSchema = z.enum(['cash', 'card', 'transfer']);
+export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
+
+// Declaration order is the client's UI-list order (telegram, whatsapp, max) —
+// deliberately NOT the enums.py order (TELEGRAM, MAX, WHATSAPP), #480 §3.1.
+export const ChannelSchema = z.enum(['telegram', 'whatsapp', 'max']);
+export type Channel = z.infer<typeof ChannelSchema>;
+
+export const UserRoleSchema = z.enum(['admin', 'master', 'client']); // mirrors backend UserRole order
+export type UserRole = z.infer<typeof UserRoleSchema>;
+
+export const TariffAudienceSchema = z.enum(['kid', 'adult', 'all']);
+export type TariffAudience = z.infer<typeof TariffAudienceSchema>;
+
+// Soft-delete list filter (?status=active|archived|all) — a query enum of the
+// dictionary list endpoints, not a row state.
+export const ArchiveStatusSchema = z.enum(['active', 'archived', 'all']);
+export type ArchiveStatus = z.infer<typeof ArchiveStatusSchema>;
+
 // ─── Staff (GH #266 — composite staff card, full directory CRUD) ───────────
 // The /api/v1/staff card carries an optional master section (the 1:0..1
 // masters extension, D5), a list of position ids (M2M staff_positions), and —
@@ -27,7 +59,7 @@ export type StaffMasterSection = z.infer<typeof StaffMasterSectionSchema>;
 export const StaffAccountSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3): role writes go through the enum
   password_is_set: z.boolean(),
   is_active: z.boolean(),
   link_expires_at: z.string().nullable(),
@@ -78,7 +110,7 @@ export const CreateUserSectionSchema = z
     phone: z.string().min(1).max(20),
     // GH #263 D10: manual role override — a sent value beats the position
     // template; omitted → the backend template decides (admin > master).
-    role: z.enum(['admin', 'master']).nullable().optional(),
+    role: UserRoleSchema.nullable().optional(),
   })
   .strict();
 export type CreateUserSection = z.infer<typeof CreateUserSectionSchema>;
@@ -111,7 +143,7 @@ export type StaffCreate = z.input<typeof StaffCreateSchema>;
 // UPDATE-only — a sent value beats the position template; omitted → the
 // template decides (anchors admin > master, fixed position ids, D4 #266).
 export const StaffUpdateSchema = StaffCardSchema.extend({
-  role: z.enum(['admin', 'master']).nullable().optional(),
+  role: UserRoleSchema.nullable().optional(),
 });
 export type StaffUpdate = z.input<typeof StaffUpdateSchema>;
 
@@ -247,7 +279,7 @@ export const TariffResponseSchema = z.object({
   price: z.number(),
   // Backend always serializes audience (Task 1) — required, so a degraded
   // response fails loudly instead of silently resetting marks to «all».
-  audience: z.enum(['kid', 'adult', 'all']),
+  audience: TariffAudienceSchema,
 });
 
 export type TariffResponse = z.infer<typeof TariffResponseSchema>;
@@ -398,7 +430,7 @@ export const VisitResponseSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number(),
   custom_price: z.number().nullable(),
-  status: z.string(),
+  status: VisitStatusSchema, // strict (#480 §3.3)
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -413,7 +445,7 @@ export const VisitCreateSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number().int().min(0),
   custom_price: z.number().nullable().optional(),
-  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+  status: VisitStatusSchema.optional(),
 });
 
 export type VisitCreate = z.infer<typeof VisitCreateSchema>;
@@ -425,7 +457,7 @@ export const VisitPatchSchema = z.object({
   tariff_id: z.string().nullable().optional(),
   price: z.number().int().min(0).optional(),
   custom_price: z.number().nullable().optional(),
-  status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
+  status: VisitStatusSchema.optional(),
 });
 
 export type VisitPatch = z.infer<typeof VisitPatchSchema>;
@@ -436,7 +468,9 @@ export const RecordResponseSchema = z.object({
   id: z.string(),
   activity_id: z.string(),
   client_id: z.string().nullable(),
-  status: z.string(),
+  // strict (#480 §3.3): record status is DERIVED from visits server-side and
+  // carries VisitStatus values (domain rule "Single enum: VisitStatus").
+  status: VisitStatusSchema,
   seats: z.number(),
   comment: z.string().nullable(),
   custom_price: z.number().nullable(),
@@ -503,7 +537,7 @@ export const ClientUpdateSchema = z.object({
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
-  channel: z.enum(['telegram', 'whatsapp', 'max']).nullable(),
+  channel: ChannelSchema.nullable(),
 }).strict();
 
 export type ClientUpdate = z.infer<typeof ClientUpdateSchema>;
@@ -525,7 +559,10 @@ export const PaymentResponseSchema = z.object({
   id: z.string(),
   record_id: z.string(),
   amount: z.number(),
-  method: z.string().nullable(),
+  // strict (#480 §3.3, mirror fix): backend PaymentResponse inherits
+  // PaymentBase.method: PaymentMethod | None — the client was looser than
+  // the contract.
+  method: PaymentMethodSchema.nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -538,27 +575,59 @@ export const PaymentTotalsResponseSchema = z.object({
 
 export type PaymentTotalsResponse = z.infer<typeof PaymentTotalsResponseSchema>;
 
-// ─── RecordCreate (request body) ─────────────────────────────────────────
+// ─── RecordCreate / RecordUpdate (request bodies) ────────────────────────
 
+// Nested visit payload within a record create/update (backend VisitItem).
+// Two modes: name-based (web) — name (+ optional age) find-or-creates a
+// Visitor by client; id-based (admin) — visitor_id links an existing one.
+// price stays required (server-side tariff pricing is #499). Backend
+// VisitItem is a plain model (extra keys ignored) — no .strict() at this
+// nesting level; the record-level schemas below carry the extra="forbid"
+// parity.
+const VisitItemSchema = z.object({
+  name: z.string().optional(),
+  age: z.number().nullable().optional(),
+  visitor_id: z.string().optional(),
+  tariff_id: z.string().nullable().optional(),
+  price: z.number(),
+  custom_price: z.number().nullable().optional(),
+  // #480 §3.2: nested visit status is rewired to the named contract enum
+  // (was an inline z.enum literal).
+  status: VisitStatusSchema.optional(),
+});
+
+// .strict() mirrors backend RecordCreate extra="forbid": NO record-level
+// status (derived from visit statuses server-side) and NO seats (= len(visits),
+// recomputed by the backend) — a stray key fails loudly here instead of
+// 422-ing at the server. phone = phone-based client resolution (web);
+// client_id = id-based link (admin). visits is required, as on the backend.
 export const RecordCreateSchema = z.object({
   activity_id: z.string(),
-  client_id: z.string().optional(),
   phone: z.string().optional(),
-  status: z.enum(['pending', 'confirmed', 'cancelled', 'no_show']).optional(),
-  seats: z.number().optional(),
-  comment: z.string().optional(),
+  client_id: z.string().optional(),
+  comment: z.string().nullable().optional(),
   custom_price: z.number().nullable().optional(),
-  visits: z.array(z.object({
-    visitor_id: z.string().optional(),
-    price: z.number(),
-    custom_price: z.number().nullable().optional(),
-    status: z.enum(['waiting', 'visited', 'missed', 'cancelled']).optional(),
-  })).optional(),
-});
+  /** GH #482: «отправлять оповещения» — optional mirror of the backend's
+   * `notify: bool = False`; fixed at creation, read by the dispatcher. */
+  notify: z.boolean().optional(),
+  visits: z.array(VisitItemSchema),
+}).strict();
 
 export type RecordCreate = z.infer<typeof RecordCreateSchema>;
 
-export const RecordUpdateSchema = RecordCreateSchema.partial();
+// PUT /records/{id} — own shape, deliberately NOT RecordCreateSchema.partial():
+// the backend RecordUpdate is a separate full-replacement contract
+// (activity_id required, visits replaced wholesale; NO phone — phone-based
+// client resolution is create-only). .strict() mirrors backend
+// extra="forbid": status/seats are rejected here exactly as the server
+// rejects them (422).
+export const RecordUpdateSchema = z.object({
+  activity_id: z.string(),
+  client_id: z.string().optional(),
+  comment: z.string().nullable().optional(),
+  custom_price: z.number().nullable().optional(),
+  visits: z.array(VisitItemSchema),
+}).strict();
 export type RecordUpdate = z.infer<typeof RecordUpdateSchema>;
 
 // ─── PaymentCreate (request body) ────────────────────────────────────────
@@ -566,7 +635,7 @@ export type RecordUpdate = z.infer<typeof RecordUpdateSchema>;
 export const PaymentCreateSchema = z.object({
   record_id: z.string(),
   amount: z.number(),
-  method: z.enum(['cash', 'card', 'transfer']).optional(),
+  method: PaymentMethodSchema.optional(),
   /** Optional client-supplied timestamp (ISO 8601). If omitted, backend defaults to now. */
   created_at: z.string().optional(),
 });
@@ -600,7 +669,7 @@ export const TariffCreateSchema = z.object({
   price: z.number().min(0),
   // GH #284: absent → "all" (mirrors backend TariffBase). Carrying audience on
   // the write shape is what keeps marks alive across the PUT re-create.
-  audience: z.enum(['kid', 'adult', 'all']).optional().default('all'),
+  audience: TariffAudienceSchema.optional().default('all'),
 });
 
 export type TariffCreate = z.infer<typeof TariffCreateSchema>;
@@ -727,7 +796,7 @@ export type UserSettingsUpdate = z.infer<typeof UserSettingsUpdateSchema>;
 export const AuthUserSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3) — auth path is fail-closed
   master_id: z.string().nullable(),
   email: z.string().nullable(),
 });
@@ -759,7 +828,7 @@ export type AuthMe = z.infer<typeof AuthMeSchema>;
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 
 export const MyProfileSchema = z.object({
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3)
   has_staff: z.boolean(),
   has_master: z.boolean(),
   // Public half — the linked staff card / master section; null when
@@ -815,6 +884,90 @@ export const ChangePasswordSchema = z.object({
 });
 export type ChangePassword = z.input<typeof ChangePasswordSchema>;
 
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5 — mirrors backend
+// src/schemas/auth.py + my.py). The client branch rides the SAME transport
+// (credentials included); its session cookie is memo_client_session.
+
+// POST /auth/otp/request body — strictly {phone}; the phone rule belongs to
+// the shared domain validator server-side (a blank phone answers the
+// domain 422 PHONE_INVALID, not a schema error — the PasswordSetupRequest
+// precedent), so no bounds here either.
+export const OtpRequestSchema = z.strictObject({
+  phone: z.string(),
+});
+export type OtpRequest = z.infer<typeof OtpRequestSchema>;
+
+// 202 body of a code request — `{}` on the wire; `dev_code` surfaces ONLY
+// via the dev transport (exact ENV == development, spec §4.2) and is
+// ABSENT in every other shape (the endpoint serializes exclude_none) —
+// optional, never null.
+export const OtpRequestResponseSchema = z.object({
+  dev_code: z.string().optional(),
+});
+export type OtpRequestResponse = z.infer<typeof OtpRequestResponseSchema>;
+
+// POST /auth/otp/verify body — `code` needs ≥1 char at the schema level:
+// a present-but-wrong code is the unified 401, a missing/empty one is a
+// malformed request.
+export const OtpVerifySchema = z.strictObject({
+  phone: z.string(),
+  code: z.string().min(1),
+});
+export type OtpVerify = z.infer<typeof OtpVerifySchema>;
+
+// GET /my/client and the OTP verify 200 body (the same shape, spec §4.2/§4.3):
+// `phone` is the confirmed account phone; `name` comes from the linked
+// client card — null for a cardless account or a nameless card.
+export const MyClientSchema = z.object({
+  phone: z.string(),
+  name: z.string().nullable(),
+});
+export type MyClient = z.infer<typeof MyClientSchema>;
+
+// POST /my/records body (spec §5) — the strict booking wire. From the wire
+// there is deliberately NO client_id/visitor_id/price/custom_price/notify/
+// status: the owner comes ONLY from the client session, prices are computed
+// server-side from tariff_id, notifications are never opted into here.
+export const MY_RECORD_MAX_VISITS = 20;
+
+export const MyVisitCreateSchema = z.strictObject({
+  // Absent name → an anonymous visit (the existing semantics).
+  name: z.string().nullable().optional(),
+  age: z.number().nullable().optional(),
+  tariff_id: z.string().nullable().optional(),
+});
+export type MyVisitCreate = z.infer<typeof MyVisitCreateSchema>;
+
+export const MyRecordCreateSchema = z.strictObject({
+  activity_id: z.string(),
+  // The record's contact phone — domain validation server-side (422
+  // PHONE_INVALID), never a client lookup key.
+  phone: z.string(),
+  comment: z.string().nullable().optional(),
+  visits: z.array(MyVisitCreateSchema).min(1).max(MY_RECORD_MAX_VISITS),
+});
+export type MyRecordCreate = z.infer<typeof MyRecordCreateSchema>;
+
+// 201 body of the booking (spec §5): `start` is the activity's datetime
+// exactly as ActivityResponse.start serializes it; visits carry NO
+// record_id/timestamps/statuses — the minimum the success screen renders.
+export const MyVisitResponseSchema = z.object({
+  name: z.string().nullable(),
+  age: z.number().nullable(),
+  tariff_id: z.string().nullable(),
+  price: z.number(), // server-computed from the tariff (0 = tariff-less service)
+});
+export type MyVisitResponse = z.infer<typeof MyVisitResponseSchema>;
+
+export const MyRecordResponseSchema = z.object({
+  id: z.string(),
+  activity_id: z.string(),
+  start: z.string(),
+  comment: z.string().nullable(),
+  visits: z.array(MyVisitResponseSchema),
+});
+export type MyRecordResponse = z.infer<typeof MyRecordResponseSchema>;
+
 // ─── Users vertical (#348 spec §5 — admin-side account operations) ─────────
 // Mirrors backend src/schemas/user.py. Errors: 404 USER_NOT_FOUND; the phone
 // edit answers domain codes PHONE_TAKEN / PHONE_INVALID; link issue refuses a
@@ -833,7 +986,7 @@ export type UserPhonePatch = z.input<typeof UserPhonePatchSchema>;
 export const UserResponseSchema = z.object({
   id: z.string(),
   phone: z.string(),
-  role: z.string(),
+  role: UserRoleSchema, // strict (#480 §3.3)
   staff_id: z.string().nullable(), // null = a pure admin (no card)
   password_is_set: z.boolean(), // false = passwordless (#348)
   is_active: z.boolean(),

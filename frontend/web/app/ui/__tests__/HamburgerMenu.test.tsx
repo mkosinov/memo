@@ -43,6 +43,12 @@ describe("HamburgerMenu", () => {
     }
   });
 
+  it("links «Личный кабинет» to /cabinet (US-5)", () => {
+    render(<HamburgerMenu isOpen onClose={vi.fn()} />);
+    const link = screen.getByText("Личный кабинет").closest("a");
+    expect(link).toHaveAttribute("href", "/cabinet");
+  });
+
   it("renders backdrop", () => {
     render(<HamburgerMenu isOpen onClose={vi.fn()} />);
     expect(screen.getByTestId("menu-overlay")).toBeInTheDocument();

@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRecordsView } from '@memo/api-client';
-import type { PaginatedResponse, RecordView } from '@memo/api-client';
+import type { PaginatedResponse, RecordView, VisitStatus } from '@memo/api-client';
 import type { SortOrder } from './createPagedListContext';
 import type { RecordsUrlAdapter, RecordsUrlPatch, RecordsUrlStateView } from '@/app/(main)/records/useRecordsUrlState';
 import { defaultRecordsPeriod } from '@/app/(main)/records/useRecordsUrlState';
@@ -33,7 +33,8 @@ export interface RecordFilters {
   locationId: string;
   serviceId: string;
   masterId: string;
-  status: string;
+  /** VisitStatus | '' (#480 §3.4) — '' = all statuses (param absent). */
+  status: VisitStatus | '';
   /** Server-side search (GH #212 Task 12) — sent to getRecordsView as `q`. */
   search: string;
 }
@@ -209,6 +210,8 @@ export function RecordsProvider({
       location_id: filters.locationId || undefined,
       service_id: filters.serviceId || undefined,
       master_id: filters.masterId || undefined,
+      // #480 §3.4: the filters bag is VisitStatus-typed end-to-end (the URL
+      // enum preset + RecordFilters) — no bridge cast needed anymore.
       status: filters.status || undefined,
       // GH #212 Task 12 — server-side search. The ≥2-char clamp mirrors the
       // server min_length=2 (shorter values are treated as unset — no 422s).

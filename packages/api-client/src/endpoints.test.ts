@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getWebPhotos, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate } from './schemas';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -334,44 +334,6 @@ describe('getMaterials', () => {
 
 // ─── Photos ─────────────────────────────────────────────────────────────────
 
-// spec §10.2: GET /photos/web is UNCHANGED — bare array, no pagination envelope.
-describe('getWebPhotos', () => {
-  it('calls /api/v1/photos/web without query params', async () => {
-    vi.mocked(api).mockResolvedValue([]);
-    await getWebPhotos();
-    expect(api).toHaveBeenCalledWith('/api/v1/photos/web', expect.anything());
-  });
-
-  it('calls /api/v1/photos/web with activity_id param', async () => {
-    vi.mocked(api).mockResolvedValue([]);
-    await getWebPhotos({ activity_id: 'activity-1' });
-    expect(api).toHaveBeenCalledWith(
-      '/api/v1/photos/web?activity_id=activity-1',
-      expect.anything(),
-    );
-  });
-
-  it('still parses a bare array (GH #211 did not paginate /photos/web)', async () => {
-    const photo = {
-      id: 'photo-1',
-      filename: 'workshop-2024.jpg',
-      client_id: null,
-      service_id: null,
-      activity_id: 'activity-1',
-      location_id: null,
-      is_public: true,
-      tags: [],
-      client_name: null,
-      created_at: '2024-06-01T12:00:00Z',
-      updated_at: '2024-06-01T12:00:00Z',
-    };
-    vi.mocked(api).mockResolvedValue([photo]);
-    const result = await getWebPhotos({ activity_id: 'activity-1' });
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(1);
-  });
-});
-
 // GH #211: getPhotos now fetches the paginated server list with filters/sort.
 describe('getPhotos', () => {
   it('calls /api/v1/photos without query string when no params', async () => {
@@ -422,6 +384,25 @@ describe('getPhotos', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getPhotos({ page: 1, tag_id: [] });
     expect(api).toHaveBeenCalledWith('/api/v1/photos?page=1', expect.anything());
+  });
+
+  // GH #479: is_public mirrors backend PhotoListParams (bool | None; None = no filter).
+  it('serializes is_public=true filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: true, per_page: 12 });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?is_public=true&per_page=12', expect.anything());
+  });
+
+  it('serializes is_public=false explicitly (false is not omitted)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: false });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?is_public=false', expect.anything());
+  });
+
+  it('omits is_public when not provided (backend None = unfiltered)', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPhotos({ is_public: undefined, per_page: 12 });
+    expect(api).toHaveBeenCalledWith('/api/v1/photos?per_page=12', expect.anything());
   });
 });
 
@@ -743,6 +724,55 @@ describe('getRecordsView', () => {
   });
 });
 
+// ─── Query param enum typing (#480 §3.2 — closed set) ───────────────────────
+// Exactly three query spots carry enum types: getRecords/getRecordsView status
+// → VisitStatus (backend record.py:189 VisitStatus | None); the dictionary-list
+// archive filter → ArchiveStatus. Extension of this set is a spec revision.
+
+describe('query param enums (#480 §3.2)', () => {
+  it('getRecords accepts every VisitStatus value as the status filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of VisitStatusSchema.options) {
+      await getRecords({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/records?status=${status}`, expect.anything());
+    }
+  });
+
+  it('getRecordsView accepts every VisitStatus value as the status filter', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of VisitStatusSchema.options) {
+      await getRecordsView({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/records/view?status=${status}`, expect.anything());
+    }
+  });
+
+  it('getRecords/getRecordsView status params are typed as VisitStatus, not free strings', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    const status: VisitStatus = 'missed';
+    await getRecords({ status });
+    await getRecordsView({ status });
+    // @ts-expect-error 'confirmed' is a dead Record-status value, not a VisitStatus
+    getRecords({ status: 'confirmed' });
+    // @ts-expect-error free strings are no longer allowed on the records status filter
+    getRecordsView({ status: 'anything' });
+  });
+
+  it('ListParams archive filter accepts every ArchiveStatus value and null', async () => {
+    vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
+    for (const status of ArchiveStatusSchema.options) {
+      await getStaff({ status });
+      expect(api).toHaveBeenCalledWith(`/api/v1/staff?status=${status}`, expect.anything());
+    }
+    // Typed const pins the param type; null = no filter — omitted from the
+    // URL (falsy guard in listQuery).
+    const archived: ArchiveStatus = 'archived';
+    await getStaff({ status: archived });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff?status=archived', expect.anything());
+    await getStaff({ status: null });
+    expect(api).toHaveBeenCalledWith('/api/v1/staff', expect.anything());
+  });
+});
+
 // ─── Clients With Stats ──────────────────────────────────────────────────────
 
 describe('getClientsWithStats', () => {
@@ -944,9 +974,20 @@ describe('getPaymentTotals', () => {
 // ─── Records CRUD ─────────────────────────────────────────────────────────
 
 describe('createRecord', () => {
-  it('calls POST /api/v1/records with body', async () => {
+  it('calls POST /api/v1/records with the contract body (name-based visit included)', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'r-1' });
-    const data = { activity_id: 'a-1', seats: 2, status: 'confirmed' as const };
+    // GH #479 mirror: no record-level status/seats; visits carry
+    // name/age/tariff_id (name-based mode) alongside visitor_id-based ones.
+    // No `status` key on purpose (#480 §3.2): the backend rejects it with 422
+    // (extra="forbid") — record status is derived from visits.
+    const data: RecordCreate = {
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [
+        { visitor_id: 'v-1', tariff_id: 't-1', price: 3500 },
+        { name: 'Мария', age: 8, tariff_id: 't-kid', price: 2500 },
+      ],
+    };
     await createRecord(data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records',
@@ -960,15 +1001,22 @@ describe('createRecord', () => {
 });
 
 describe('updateRecord', () => {
-  it('calls PUT /api/v1/records/:id with partial body', async () => {
+  it('calls PUT /api/v1/records/:id with the full-replacement body', async () => {
     vi.mocked(api).mockResolvedValue({ id: 'r-1' });
-    await updateRecord('r-1', { seats: 3 });
+    // GH #479 mirror: own PUT contract — activity_id required, visits
+    // replaced wholesale; no status/seats/phone.
+    const data: RecordUpdate = {
+      activity_id: 'a-1',
+      client_id: 'c-1',
+      visits: [{ visitor_id: 'v-1', tariff_id: 't-1', price: 3500 }],
+    };
+    await updateRecord('r-1', data);
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records/r-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ seats: 3 }),
+        body: JSON.stringify(data),
       }),
     );
   });
@@ -1010,14 +1058,14 @@ describe('dryRunDeleteRecord', () => {
 
 describe('patchRecord', () => {
   it('calls PATCH /api/v1/records/:id with partial body', async () => {
-    vi.mocked(api).mockResolvedValue({ id: 'r-1', status: 'confirmed' });
-    await patchRecord('r-1', { status: 'confirmed' });
+    vi.mocked(api).mockResolvedValue({ id: 'r-1', status: 'waiting' });
+    await patchRecord('r-1', { status: 'waiting' });
     expect(api).toHaveBeenCalledWith(
       '/api/v1/records/r-1',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'waiting' }),
       }),
     );
   });
@@ -1673,7 +1721,76 @@ describe('changePassword', () => {
         body: JSON.stringify({ current_password: 'old123', new_password: 'new456' }),
       },
     );
-   });
+  });
+});
+
+// ─── Web-client auth & booking (GH #499 spec §4.2/§4.3/§5) ─────────────────
+
+describe('requestOtpCode', () => {
+  it('calls POST /api/v1/auth/otp/request with {phone}', async () => {
+    vi.mocked(api).mockResolvedValue({});
+    await requestOtpCode('+79991234567');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/otp/request',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79991234567' }),
+      },
+    );
+  });
+});
+
+describe('verifyOtpCode', () => {
+  it('calls POST /api/v1/auth/otp/verify with {phone, code}', async () => {
+    vi.mocked(api).mockResolvedValue({ phone: '+79991234567', name: null });
+    await verifyOtpCode('+79991234567', '123456');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/otp/verify',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79991234567', code: '123456' }),
+      },
+    );
+  });
+});
+
+describe('getMyClient', () => {
+  it('calls GET /api/v1/my/client', async () => {
+    vi.mocked(api).mockResolvedValue({ phone: '+79991234567', name: 'Иван Петров' });
+    await getMyClient();
+    expect(api).toHaveBeenCalledWith('/api/v1/my/client', expect.anything());
+  });
+});
+
+describe('createMyRecord', () => {
+  it('calls POST /api/v1/my/records with the booking body', async () => {
+    vi.mocked(api).mockResolvedValue({
+      id: 'r-1',
+      activity_id: 'a-1',
+      start: '2026-10-25T12:00:00',
+      comment: null,
+      visits: [{ name: null, age: null, tariff_id: null, price: 0 }],
+    });
+    await createMyRecord({
+      activity_id: 'a-1',
+      phone: '+79991234567',
+      visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
+    });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/my/records',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          activity_id: 'a-1',
+          phone: '+79991234567',
+          visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
+        }),
+      },
+    );
+  });
 });
 
 // ─── Users vertical (#348 spec §5 — admin-side account ops) ────────────────

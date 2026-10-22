@@ -58,6 +58,8 @@ from src.schemas.record import (
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Alias import keeps the builtin ``list`` usable in the class body
@@ -260,6 +262,18 @@ def _total_price_sq() -> ScalarSelect[Any]:
         .where(Visit.record_id == Record.id)
         .scalar_subquery()
     )
+
+
+def record_total_price(visits: Iterable[Visit]) -> int:
+    """Sum of the record's visit prices — the Python twin of the SQL total.
+
+    GH #482 (spec §3.2): the SINGLE semantics point of the record total
+    for Python consumers (the ``new_record`` snapshot's ``total_price``).
+    Mirrors ``_total_price_sq`` exactly: ``COALESCE(SUM(visit.price), 0)``
+    — ``custom_price`` is NOT included (parity with the lists), ``None``
+    prices are skipped like SQL ``SUM`` skips NULLs, no visits → 0.
+    """
+    return sum(v.price for v in visits if v.price is not None)
 
 
 def _paid_sum_sq() -> ScalarSelect[Any]:
@@ -475,6 +489,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         seats: int,
         comment: str | None = None,
         custom_price: int | None = None,
+        notify: bool = False,
     ) -> Record:
         """Insert ONE record row — WITHOUT committing, no recalculation.
 
@@ -488,6 +503,10 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         boundary, the visit batch, and the recalculation timing belong
         to the scenario. Value-typed parameters — no foreign
         ORM/schema objects.
+
+        ``notify`` (GH #482 §3.3): the scenario has already applied the
+        actor gate; the value is FIXED here at creation (no edit path
+        ever rewrites it).
         """
         record = Record(
             activity_id=activity_id,
@@ -496,6 +515,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             seats=seats,
             comment=comment,
             custom_price=custom_price,
+            notify=notify,
         )
         db_session.add(record)
         await db_session.flush()
@@ -510,8 +530,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         client_id: str | None,
         comment: str | None,
         custom_price: int | None,
-        existing: Record | None = None,
-    ) -> Record | None:
+        existing: Record,
+    ) -> Record:
         """Apply the scalar field writes of a full update — WITHOUT
         committing, no visit handling, no recalculation.
 
@@ -520,33 +540,27 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         re-insert orchestration moved to the ``update_record`` scenario
         (usecases, Corridor 2 — canon docs/domain-rules/service-layer.md
         rules 2, 5). This is the owner service's own-entity row op
-        (rule 1): load (missing → None), write the PUT scalar fields +
-        ``updated_at``, flush. The transaction boundary, the visit
+        (rule 1): write the PUT scalar fields + ``updated_at`` to the
+        caller's row, flush. The transaction boundary, the visit
         batch, and the recalculation timing belong to the scenario.
         Value-typed parameters — no foreign ORM/schema objects. The
-        single exception (GH #380, "one read per mutation"):
+        single row exception (GH #380 "one read per mutation", made
+        mandatory by GH #470 — the self-read fallback had no callers):
         ``existing`` — the service's OWN row, already read in the same
         session/transaction by the caller (e.g. for the journal
-        "before"-snapshot). Omitted/``None`` → the method loads the
-        row itself, exactly as before.
+        "before"-snapshot).
 
         Raises:
-            ValueError: ``existing`` is passed but its ``id`` does not
-                match the requested ``id`` — a caller programming
-                error (the row belongs to another record), not user
-                input.
+            ValueError: ``existing.id`` does not match the requested
+                ``id`` — a caller programming error (the row belongs
+                to another record), not user input.
         """
-        if existing is not None:
-            if existing.id != id:
-                raise ValueError(
-                    f"update_row: existing row id {existing.id!r} does "
-                    f"not match the requested id {id!r}"
-                )
-            record: Record | None = existing
-        else:
-            record = await self.get(db_session, id)
-        if not record:
-            return None
+        if existing.id != id:
+            raise ValueError(
+                f"update_row: existing row id {existing.id!r} does "
+                f"not match the requested id {id!r}"
+            )
+        record = existing
 
         record.activity_id = activity_id
         record.client_id = client_id
@@ -562,8 +576,8 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         id: str,
         fields: dict[str, str | int | None],
         *,
-        existing: Record | None = None,
-    ) -> Record | None:
+        existing: Record,
+    ) -> Record:
         """Apply the EXPLICITLY-SENT scalar fields of a partial update —
         WITHOUT committing, no visit handling, no recalculation.
 
@@ -573,30 +587,25 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         canon rules 2, 5). ``fields`` is the caller's
         ``model_dump(exclude_unset=True)`` restricted to the scalar keys
         (``comment`` / ``custom_price``) — only those are written, plus
-        ``updated_at``. Missing id → None. Value-typed input only. The
-        single exception (GH #380, "one read per mutation"):
-        ``existing`` — the service's OWN row, already read in the same
-        session/transaction by the caller (e.g. for the journal
-        "before"-snapshot). Omitted/``None`` → the method loads the
-        row itself, exactly as before.
+        ``updated_at``. A missing row is the caller's concern — the
+        scenario reads ``existing`` itself and returns None before the
+        call. Value-typed input only. The single row exception (GH #380
+        "one read per mutation", made mandatory by GH #470 — the
+        self-read fallback had no callers): ``existing`` — the
+        service's OWN row, already read in the same session/transaction
+        by the caller.
 
         Raises:
-            ValueError: ``existing`` is passed but its ``id`` does not
-                match the requested ``id`` — a caller programming
-                error (the row belongs to another record), not user
-                input.
+            ValueError: ``existing.id`` does not match the requested
+                ``id`` — a caller programming error (the row belongs
+                to another record), not user input.
         """
-        if existing is not None:
-            if existing.id != id:
-                raise ValueError(
-                    f"patch_row: existing row id {existing.id!r} does "
-                    f"not match the requested id {id!r}"
-                )
-            record: Record | None = existing
-        else:
-            record = await self.get(db_session, id)
-        if not record:
-            return None
+        if existing.id != id:
+            raise ValueError(
+                f"patch_row: existing row id {existing.id!r} does "
+                f"not match the requested id {id!r}"
+            )
+        record = existing
 
         # Per-key value types come from ``RecordPatch`` (comment is
         # ``str | None``, custom_price is ``int | None``); the dict-level

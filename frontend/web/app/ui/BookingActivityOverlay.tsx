@@ -1,56 +1,197 @@
 "use client";
 
 import type { ActivityView } from "@/app/lib/model/view/activity";
-import { useState, useCallback } from "react";
+import type { MyRecordCreate } from "@memo/api-client";
+import { useState, useCallback, useEffect } from "react";
 import { Overlay } from "./Overlay";
 import { Button } from "./Button";
 import { Counter } from "./Counter";
 import { ContactForm } from "./ContactForm";
+import { OtpStep } from "./OtpStep";
+import {
+  buildMyRecordCreate,
+  SEATS_KEY,
+  visitorRowKey,
+  type VisitorFormValue,
+} from "@/app/lib/model/domain/booking";
+import { useClientSession } from "@/app/hooks/useClientSession";
+import { useOtpLogin } from "@/app/hooks/useOtpLogin";
+import { useCreateMyRecord } from "@/app/hooks/useCreateMyRecord";
 
-export interface Tariff {
-  label: string;
-  price: number;
-}
+/** State of the tariffs data (#499): drives loading/error blocks in place of counters. */
+export type TariffsStatus = "ready" | "loading" | "error";
 
 export interface BookingActivityOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   activityId: string;
   activities: ActivityView[];
+  tariffsStatus?: TariffsStatus;
 }
 
-function computeTariffs(maxPrice: number): Tariff[] {
-  return [
-    { label: "Взрослый", price: maxPrice },
-    { label: "Детский (5–11 лет)", price: Math.round(maxPrice * 0.7) },
-  ];
+interface SeatCounter {
+  id: string;
+  label: string;
+  price: number;
+  testId?: string;
 }
 
-export function BookingActivityOverlay({ isOpen, onClose, activityId, activities }: BookingActivityOverlayProps) {
+/** One row of the optional visitors-names table: a seat with its read-only tariff. */
+interface VisitorRow {
+  key: string;
+  tariffLabel: string;
+}
+
+const SEATS_LABEL = "Места";
+const NO_TARIFF_LABEL = "—";
+
+function formatPrice(price: number): string {
+  return `${price.toLocaleString("ru-RU")} ₽`;
+}
+
+/** Overlay content machine (#499): form → (OTP step for anonymous) → success. */
+type Step = "form" | "otp" | "success";
+
+export function BookingActivityOverlay({
+  isOpen,
+  onClose,
+  activityId,
+  activities,
+  tariffsStatus = "ready",
+}: BookingActivityOverlayProps) {
   const activity = activities.find((a) => a.id === activityId);
-  const tariffs = activity ? computeTariffs(activity.priceMax) : [];
-  const [counts, setCounts] = useState<Record<number, number>>(() =>
-    Object.fromEntries(tariffs.map((_, i) => [i, 0])),
-  );
+  const tariffs = activity?.tariffs ?? [];
+  const hasTariffs = tariffs.length > 0;
+
+  // One counter per tariff (US-1); tariff-free service gets a single seats counter (US-2).
+  const counters: SeatCounter[] = hasTariffs
+    ? tariffs.map((t) => ({
+        id: t.id,
+        label: t.title,
+        price: t.price,
+        testId: `tariff-counter-${t.id}`,
+      }))
+    : [{ id: SEATS_KEY, label: SEATS_LABEL, price: 0 }];
+
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [visitors, setVisitors] = useState<Record<string, VisitorFormValue>>({});
+  const [showVisitors, setShowVisitors] = useState(false);
   const [isFormValid, setIsFormValid] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const total = tariffs.reduce(
-    (sum, tariff, i) => sum + counts[i] * tariff.price,
+  // Contact-form state is owned here: the OTP step replaces the form without
+  // losing it, and the phone becomes session-owned once authenticated (#499).
+  const [contactName, setContactName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [comment, setComment] = useState("");
+
+  const session = useClientSession(isOpen && !!activity);
+  const otp = useOtpLogin();
+  const submission = useCreateMyRecord();
+
+  const [step, setStep] = useState<Step>("form");
+  /** The snapshot submitted on «Записаться» — reused by the post-login auto retry. */
+  const [pendingPayload, setPendingPayload] = useState<MyRecordCreate | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStep("form");
+      setPendingPayload(null);
+      otp.reset();
+      submission.reset();
+    }
+  }, [isOpen, otp.reset, submission.reset]);
+
+  const authenticated = session.client !== null;
+  const phoneValue = session.client !== null ? session.client.phone : formPhone;
+
+  const total = counters.reduce(
+    (sum, counter) => sum + (counts[counter.id] ?? 0) * counter.price,
     0,
   );
-  const totalCount = Object.values(counts).reduce((sum, c) => sum + c, 0);
-  const canSubmit = totalCount > 0 && isFormValid && !!activity;
+  const totalCount = counters.reduce(
+    (sum, counter) => sum + (counts[counter.id] ?? 0),
+    0,
+  );
+  const tariffsReady = tariffsStatus === "ready";
+  const canSubmit =
+    totalCount > 0 &&
+    isFormValid &&
+    !!activity &&
+    tariffsReady &&
+    session.status !== "checking" &&
+    submission.status !== "submitting";
+
+  /** One row per selected seat; the trailing seats of each counter keep a stable key. */
+  const visitorRows: VisitorRow[] = hasTariffs
+    ? tariffs.flatMap((t) =>
+        Array.from({ length: counts[t.id] ?? 0 }, (_, k) => ({
+          key: visitorRowKey(t.id, k),
+          tariffLabel: t.title,
+        })),
+      )
+    : Array.from({ length: counts[SEATS_KEY] ?? 0 }, (_, k) => ({
+        key: visitorRowKey(SEATS_KEY, k),
+        tariffLabel: NO_TARIFF_LABEL,
+      }));
 
   const handleValidityChange = useCallback((valid: boolean) => {
     setIsFormValid(valid);
   }, []);
 
+  const handleCountChange = (counterId: string, value: number) => {
+    setCounts((prev) => ({ ...prev, [counterId]: value }));
+  };
+
+  const handleVisitorChange = (rowKey: string, field: keyof VisitorFormValue, value: string) => {
+    setVisitors((prev) => ({
+      ...prev,
+      [rowKey]: { ...(prev[rowKey] ?? { name: "", age: "" }), [field]: value },
+    }));
+  };
+
+  /** Send (or re-send) the record; 201 → success screen, refusal → booking-error block. */
+  const sendRecord = async (payload: MyRecordCreate) => {
+    const ok = await submission.submit(payload);
+    if (ok) setStep("success");
+  };
+
   const handleSubmit = () => {
     setSubmitted(true);
-    if (canSubmit) {
-      setIsSuccess(true);
+    if (!canSubmit || !activity) return;
+    const payload = buildMyRecordCreate({
+      activityId: activity.id,
+      phone: phoneValue,
+      comment,
+      counts,
+      visitors,
+      tariffs,
+    });
+    setPendingPayload(payload);
+    if (authenticated) {
+      void sendRecord(payload);
+    } else {
+      setStep("otp");
+    }
+  };
+
+  /** Verified: the session now exists — re-submit the pending record automatically. */
+  const handleVerifyCode = async (code: string) => {
+    const client = await otp.verify(phoneValue, code);
+    if (!client) return; // the step shows its own error
+    setStep("form");
+    void session.refresh(); // the phone field becomes readonly-from-session
+    if (pendingPayload) await sendRecord(pendingPayload);
+  };
+
+  const handleOtpBack = () => {
+    setStep("form");
+    otp.reset();
+  };
+
+  const handleRetry = () => {
+    if (pendingPayload && submission.status !== "submitting") {
+      void sendRecord(pendingPayload);
     }
   };
 
@@ -60,11 +201,14 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
 
   if (!activity) return null;
 
-  if (isSuccess) {
+  if (step === "success") {
     const time = `${activity.dateFormatted}, ${activity.time}`;
     return (
       <Overlay isOpen={isOpen} onClose={onClose} size="full">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <div
+          data-testid="booking-success"
+          className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4"
+        >
           {/* Palette icon */}
           <div className="w-20 h-20 rounded-full bg-[#004D56] flex items-center justify-center mb-6">
             <svg
@@ -89,20 +233,46 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
             <p className="text-base">{activity.title}</p>
             <p className="text-sm">{time} · {activity.location.title}</p>
             <p className="text-sm">
-              {tariffs
-                .filter((_, i) => counts[i] > 0)
-                .map((tariff, i) => `${tariff.label}: ${counts[i]}`)
-                .join(" · ")}
+              {hasTariffs
+                ? tariffs
+                    .filter((t) => (counts[t.id] ?? 0) > 0)
+                    .map((t) => `${t.title}: ${counts[t.id]}`)
+                    .join(" · ")
+                : `${SEATS_LABEL}: ${totalCount}`}
             </p>
-            <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
-              Итого: {total.toLocaleString("ru-RU")} ₽
-            </p>
+            {hasTariffs ? (
+              <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
+                Итого: {formatPrice(total)}
+              </p>
+            ) : (
+              <p className="text-lg font-semibold text-[#1a1a1a] mt-2">
+                Стоимость уточняется
+              </p>
+            )}
           </div>
 
           <Button variant="primary" size="lg" onClick={onClose}>
             Готово
           </Button>
         </div>
+      </Overlay>
+    );
+  }
+
+  if (step === "otp") {
+    return (
+      <Overlay isOpen={isOpen} onClose={onClose} size="full">
+        <OtpStep
+          phone={phoneValue}
+          requesting={otp.stage === "requesting"}
+          codeSent={otp.stage === "entering" || otp.stage === "verifying"}
+          verifying={otp.stage === "verifying"}
+          error={otp.error}
+          devCode={otp.devCode}
+          onRequestCode={() => void otp.requestCode(phoneValue)}
+          onVerify={handleVerifyCode}
+          onBack={handleOtpBack}
+        />
       </Overlay>
     );
   }
@@ -136,29 +306,136 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
         </div>
       </div>
 
-      {/* Counters */}
-      <div className="space-y-4 mb-6">
-        {tariffs.map((tariff, index) => (
-          <Counter
-            key={tariff.label}
-            label={tariff.label}
-            subLabel={`${tariff.price.toLocaleString("ru-RU")} ₽`}
-            value={counts[index]}
-            onChange={(value) => setCounts((prev) => ({ ...prev, [index]: value }))}
-            min={0}
-          />
-        ))}
-      </div>
+      {/* Counters / tariffs status */}
+      {!tariffsReady ? (
+        <div className="mb-6" data-testid={tariffsStatus === "loading" ? "booking-tariffs-loading" : "booking-tariffs-error"}>
+          {tariffsStatus === "loading" ? (
+            <p className="text-sm text-[#555555]">Загрузка тарифов…</p>
+          ) : (
+            <p className="text-sm text-[#C8503C]">
+              Не удалось загрузить тарифы. Попробуйте позже.
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="space-y-4 mb-6">
+            {counters.map((counter) => (
+              <Counter
+                key={counter.id}
+                label={counter.label}
+                subLabel={hasTariffs ? formatPrice(counter.price) : undefined}
+                testId={counter.testId}
+                value={counts[counter.id] ?? 0}
+                onChange={(value) => handleCountChange(counter.id, value)}
+                min={0}
+              />
+            ))}
+          </div>
 
-      {/* Total */}
-      <div className="text-lg font-semibold text-[#1a1a1a] mb-6">
-        Итого: {total.toLocaleString("ru-RU")} ₽
-      </div>
+          {/* Visitors names table toggle */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setShowVisitors((prev) => !prev)}
+              className="text-sm text-[#004D56] underline underline-offset-2 hover:opacity-80 transition"
+            >
+              Указать имена посетителей
+            </button>
+          </div>
+
+          {showVisitors && (
+            <div className="mb-6">
+              <table
+                data-testid="visitors-names-table"
+                className="w-full text-sm border-collapse"
+              >
+                <thead>
+                  <tr className="text-left text-[#888888]">
+                    <th className="py-1 pr-2 font-medium">Имя</th>
+                    <th className="py-1 pr-2 font-medium">Возраст</th>
+                    <th className="py-1 font-medium">Тариф</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visitorRows.map((row) => (
+                    <tr key={row.key} className="border-t border-[#E0E0E1]/60">
+                      <td className="py-1.5 pr-2">
+                        <input
+                          type="text"
+                          aria-label="Имя посетителя"
+                          placeholder="Имя"
+                          value={visitors[row.key]?.name ?? ""}
+                          onChange={(e) => handleVisitorChange(row.key, "name", e.target.value)}
+                          className="w-full rounded-lg border border-[#E0E0E1] px-2 py-1.5 text-sm text-[#1a1a1a] placeholder-[#cccccc] transition focus:border-[#004D56] focus:outline-none"
+                        />
+                      </td>
+                      <td className="py-1.5 pr-2 w-24">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label="Возраст посетителя"
+                          placeholder="Возраст"
+                          value={visitors[row.key]?.age ?? ""}
+                          onChange={(e) => handleVisitorChange(row.key, "age", e.target.value)}
+                          className="w-full rounded-lg border border-[#E0E0E1] px-2 py-1.5 text-sm text-[#1a1a1a] placeholder-[#cccccc] transition focus:border-[#004D56] focus:outline-none"
+                        />
+                      </td>
+                      {/* Read-only tariff column */}
+                      <td className="py-1.5 text-[#555555]">{row.tariffLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-[#888888] mt-2">
+                Пустые имена останутся анонимными — уточним детали на месте.
+              </p>
+            </div>
+          )}
+
+          {/* Total / price hint */}
+          {hasTariffs ? (
+            <div className="text-lg font-semibold text-[#1a1a1a] mb-6">
+              Итого: {formatPrice(total)}
+            </div>
+          ) : (
+            <div
+              data-testid="booking-price-hint"
+              className="text-sm text-[#555555] mb-6"
+            >
+              Стоимость уточняется
+            </div>
+          )}
+        </>
+      )}
 
       {/* Contact form */}
       <div className="mb-6">
-        <ContactForm onValidityChange={handleValidityChange} submitted={submitted} />
+        <ContactForm
+          onValidityChange={handleValidityChange}
+          submitted={submitted}
+          name={contactName}
+          onNameChange={setContactName}
+          phone={phoneValue}
+          onPhoneChange={setFormPhone}
+          phoneReadOnly={authenticated}
+          comment={comment}
+          onCommentChange={setComment}
+        />
       </div>
+
+      {/* Booking refusal (US-3): message + re-send */}
+      {submission.status === "error" && submission.error && (
+        <div
+          data-testid="booking-error"
+          className="mb-6 rounded-lg border border-[#C8503C]/40 bg-[#C8503C]/5 px-4 py-3"
+        >
+          <p className="text-sm text-[#C8503C] mb-3">{submission.error}</p>
+          <Button variant="outline" size="sm" onClick={handleRetry}>
+            Отправить еще раз
+          </Button>
+        </div>
+      )}
 
       {/* Submit button */}
       <Button
@@ -168,7 +445,7 @@ export function BookingActivityOverlay({ isOpen, onClose, activityId, activities
         disabled={!canSubmit}
         className="w-full"
       >
-        Записаться
+        {submission.status === "submitting" ? "Отправляем…" : "Записаться"}
       </Button>
     </Overlay>
   );

@@ -45,10 +45,12 @@ from sqlalchemy import select
 
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import (
+    CLIENT_SESSION_COOKIE,
     SESSION_COOKIE,
     AuthedUser,
     require_session,
     verify_fetch_metadata,
+    verify_origin,
 )
 from src.auth.service import (
     get_auth_service,
@@ -58,7 +60,10 @@ from src.auth.service import (
 from src.auth.session import ABSOLUTE_CAP
 from src.core.config import settings
 from src.db import SessionDep
+from src.domain.errors import PhoneInvalidError
+from src.domain.phones import validate_phone
 from src.errors import ErrorCode, ErrorDetail
+from src.models.client import Client
 from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.auth import (
@@ -67,9 +72,19 @@ from src.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     MasterSnapshot,
+    OtpRequestRequest,
+    OtpRequestResponse,
+    OtpVerifyRequest,
     PasswordSetupRequest,
     PasswordSetupValidateRequest,
     PasswordSetupValidateResponse,
+)
+from src.schemas.my import MyClientResponse
+from src.usecases.otp_login import (
+    InvalidOtpError,
+    OtpTransportUnavailableError,
+    request_otp_code,
+    verify_otp_login,
 )
 from src.usecases.password_setup import (
     PasswordLinkInvalidError,
@@ -165,12 +180,23 @@ async def login(
 
 @router.post("/logout", status_code=204)
 async def logout(request: Request, db_session: SessionDep) -> Response:
-    """Delete the session row and clear the cookie. Idempotent (spec §3.6)."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if token is not None:
-        await get_auth_service().logout(db_session, token)
+    """Delete the presented session row(s) and clear the cookie. Idempotent.
+
+    #499 (spec §4.2): the ONE logout for both session kinds — whichever
+    cookie is presented, that session is revoked (both cookies → both
+    rows die); a client-only logout never touches the staff session.
+    Both cookies are always cleared client-side: a browser holding one
+    kind has nothing left to keep, and clearing a cookie that was never
+    set is a no-op. No cookie at all → still 204 (spec §3.6).
+    """
+    auth_service = get_auth_service()
+    for cookie_name in (CLIENT_SESSION_COOKIE, SESSION_COOKIE):
+        token = request.cookies.get(cookie_name)
+        if token is not None:
+            await auth_service.logout(db_session, token)
 
     resp = Response(status_code=204)
+    resp.delete_cookie(key=CLIENT_SESSION_COOKIE, path="/")
     resp.delete_cookie(key=SESSION_COOKIE, path="/")
     return resp
 
@@ -309,3 +335,140 @@ async def password_setup(
     except PasswordLinkInvalidError as exc:
         raise register_ip_failure(_client_ip(request)) or _link_invalid() from exc
     return Response(status_code=204)
+
+
+# ─── client OTP pair (#499, spec §4.2) ────────────────────────────────────────
+
+
+def _phone_invalid(message: str) -> HTTPException:
+    """422 ``PHONE_INVALID`` — the shared account-phone domain rule."""
+    return HTTPException(
+        status_code=422,
+        detail=ErrorDetail(
+            code=ErrorCode.PHONE_INVALID,
+            message=message,
+        ).model_dump(),
+    )
+
+
+def _transport_unavailable() -> HTTPException:
+    """503 — no OTP transport configured (fail-closed, §4.2)."""
+    return HTTPException(
+        status_code=503,
+        detail=ErrorDetail(
+            code=ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE,
+            message="Вход временно недоступен",
+        ).model_dump(),
+    )
+
+
+def _invalid_otp() -> HTTPException:
+    """401 — the ONE answer for wrong/expired/unknown/replayed codes."""
+    return HTTPException(
+        status_code=401,
+        detail=ErrorDetail(
+            code=ErrorCode.AUTH_INVALID_CREDENTIALS,
+            message=InvalidOtpError.MESSAGE,
+        ).model_dump(),
+    )
+
+
+@router.post(
+    "/otp/request",
+    status_code=202,
+    response_model=OtpRequestResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_origin)],
+)
+async def otp_request(
+    payload: OtpRequestRequest,
+    request: Request,
+    db_session: SessionDep,
+) -> OtpRequestResponse:
+    """Request a phone-verification code — ALWAYS 202 on a valid number.
+
+    PUBLIC_ROUTE + Origin-vs-CORS line (#499 §4.2). Domain phone
+    validation (422 ``PHONE_INVALID``); without a configured transport
+    the endpoint is fail-closed 503 ``NOTIFY_TRANSPORT_UNAVAILABLE`` in
+    EVERY environment (the code is neither written nor counted); a
+    staff phone is silently skipped (no code, no send — the 202 is
+    byte-identical, no enumeration oracle). ``dev_code`` appears only
+    when the dev transport handled the send (exact ENV=development).
+    """
+    try:
+        phone = validate_phone(payload.phone)
+    except PhoneInvalidError as exc:
+        raise _phone_invalid(str(exc)) from exc
+
+    try:
+        code = await request_otp_code(
+            db_session,
+            phone=phone,
+            client_ip=_client_ip(request),
+        )
+    except OtpTransportUnavailableError as exc:
+        raise _transport_unavailable() from exc
+
+    if code is None:  # the silent staff skip — indistinguishable 202
+        return OtpRequestResponse()
+    return OtpRequestResponse(dev_code=code)
+
+
+@router.post(
+    "/otp/verify",
+    response_model=MyClientResponse,
+    dependencies=[Depends(verify_origin)],
+)
+async def otp_verify(
+    payload: OtpVerifyRequest,
+    request: Request,
+    response: Response,
+    db_session: SessionDep,
+) -> MyClientResponse:
+    """Verify the code → find-or-create the client account → client session.
+
+    PUBLIC_ROUTE + Origin-vs-CORS line (#499 §4.2). The Task 2 verify
+    (HMAC + TTL + attempt gates) absorbs the code ATOMICALLY with the
+    §3 account flow (card find-or-create by exact phone — active cards,
+    first active on duplicates; ``UserSettings`` in the same
+    transaction; ``phone_is_confirmed=true``; concurrent verify on one
+    new phone is idempotent) and the session row — one commit. Success
+    sets the ``memo_client_session`` cookie (the login attributes, the
+    #499 name) and answers ``{phone, name}``; any code refusal is the
+    single 401 (429 when a gate tripped).
+    """
+    try:
+        phone = validate_phone(payload.phone)
+    except PhoneInvalidError as exc:
+        raise _phone_invalid(str(exc)) from exc
+
+    try:
+        user, token = await verify_otp_login(
+            db_session,
+            phone=phone,
+            code=payload.code,
+            client_ip=_client_ip(request),
+        )
+    except InvalidOtpError as exc:
+        raise _invalid_otp() from exc
+
+    response.set_cookie(
+        key=CLIENT_SESSION_COOKIE,
+        value=token,
+        max_age=int(ABSOLUTE_CAP.total_seconds()),
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+        path="/",
+    )
+
+    # The name comes from the linked card regardless of its archive flag
+    # (the /my/client rule — the owner is the account, the card is data).
+    name: str | None = None
+    if user.client_id is not None:
+        name = (
+            await db_session.execute(
+                select(Client.name).where(Client.id == user.client_id)
+            )
+        ).scalar_one_or_none()
+    return MyClientResponse(phone=user.phone, name=name)

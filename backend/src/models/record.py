@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+import sqlalchemy as sa
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.abstract import AbstractModel
@@ -25,6 +26,12 @@ class Record(AbstractModel):
     seats: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # GH #482: form flag «отправлять оповещения» — fixed at creation (only
+    # an authenticated actor can set it true; spec §3.3), read LIVE by the
+    # dispatcher. No UI edits it after creation.
+    notify: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false(),
+    )
 
     visits: Mapped[list[Visit]] = relationship(
         "Visit", back_populates="record", lazy="selectin"

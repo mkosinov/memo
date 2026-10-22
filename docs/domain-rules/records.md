@@ -12,6 +12,7 @@ A Record is data that comes from the booking flow. It links a Client to an Activ
 | seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
+| notify | boolean | ❌ | — | — | false | «отправлять оповещения» (#482): fixed at creation — saved as `true` ONLY when an audit actor is in context (anonymous booking → `false`); never edited after creation; read live by the notify dispatcher. Internal state: not exposed in API responses |
 | visits | array | ✅ | — | — | — | List of VisitItems |
 
 An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it is created as a Visit row with `visitor_id = NULL` (#257) and carries a real tariff/price/status like any other visit — there is no separate counter field anymore.
@@ -117,12 +118,14 @@ An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it i
 - **Client resolution (dual flow):**
   - Phone-based (web): find-or-create Client by phone
   - Client-ID-based (admin): link directly
+  - Session-based (#499, спека): клиентская ветка `POST /api/v1/my/records` — владелец из клиентской сессии (без phone-flow), цена визита вычисляется сервером из `tariff_id` (обязателен при платной услуге; услуга без тарифов — 0), схема строгая `extra="forbid"`
 - **Visitor resolution (triple flow):**
   - Name-based: find-or-create Visitor by (client_id, name)
   - ID-based: link existing Visitor
   - Anonymous: no Visitor linked — the Visit row is created with `visitor_id = NULL` and still carries a real tariff/price/status (#257)
 - **Seats = len(visits):** Always recomputed by `recompute_record_seats()` — recalculates on record create/update/patch and on `VisitService.create/delete`; never user-set
-- **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits
+- **Create sequence:** check capacity → resolve client → resolve visitors → create Record → create Visits → recompute seats/status → mark the `new_record` domain event (#482: the `@transactional` wrapper inserts the journal row in the same commit)
+- **notify flag gate (#482):** `RecordCreate.notify` (default `false`) is saved into the column as `true` ONLY when `audit.current_actor()` is not None — the booking route is public, so an anonymous call with `notify: true` is recorded as `false`
 - **Update (PUT):** Full replacement — record's own visit rows hard-deleted, new Visits created, seats recomputed; capacity re-checked (409 when over)
 - **Patch:** Partial update. If `visits` in payload → old visit rows hard-deleted, new created, seats recomputed and capacity re-checked (409). A comment/custom_price-only patch skips the capacity query.
 - **Delete (unified contract, #285 rev7/rev8, GH #139):**
@@ -269,10 +272,10 @@ A partial id fragment (e.g. first 8 chars) NEVER matches by id. The `q` predicat
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
-|--------------------|----------------|-------|
-| visits: required | visits: optional | ❌ |
-| VisitItem has name/age | VisitItem missing name/age | ❌ |
-| seats: not in schema | seats: in schema | ❌ (ignored) |
+|--------------------|-----------------|-------|
+| visits: required | visits: required | ✅ (GH #479) |
+| VisitItem has name/age/tariff_id | VisitItem mirrors name/age/tariff_id | ✅ (GH #479) |
+| seats: not in schema (extra="forbid") | seats: rejected by `.strict()` mirror | ✅ (GH #479) |
 | **Record.status: derived, no input field** | **Record.status: derived, no input field** | ✅ (after migration) |
 | VisitStatus enum (waiting/visited/missed/cancelled) | VisitStatus enum | ✅ |
-| ~~RecordStatus enum (pending/confirmed/...)~~ | ~~RecordStatus enum~~ | ❌ MIGRATION NEEDED |
+| ~~RecordStatus enum (pending/confirmed/...)~~ | removed from the write mirrors (GH #479) | ✅ |

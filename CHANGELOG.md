@@ -7,9 +7,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-10-20
+## [Unreleased] — 2026-10-22
 
 ### Added
+- **GH #483 — Инфраструктура доставки оповещений: часть 2 системы оповещений
+  (Redis-очередь, скелет воркера, dev/CI-контуры)** — branch
+  `483-notify-infra` (11 коммитов `6a68bf9b..a31e50c6`, base `a806e3aa`;
+  21 файл, +3498/−63; спека
+  `docs/specs/2026-10-21-notify-infra-483-design.md` рев.3, план
+  `docs/plans/2026-10-21-notify-infra-483-plan.md` 9/9; семья #476 — часть
+  2/5, часть 1 = #482 на main; по умолчанию поведение прежнее — инвариант
+  S2):
+  - **Транспорт (T1–T3):** зависимость `redis>=8.1.0` + смоук Redis Streams
+    против Redis 7.0.15 (`6a68bf9b`); `REDIS_URL` — SecretStr +
+    production-гейт `rediss://` с кредами (`3df375f6`); адаптер `RedisQueue`
+    — Streams + потребительские группы (ADR 013) + маркированный контур
+    `pytest -m redis` с coverage omit (`6b52891d`).
+  - **Диспетчер и воркер (T4–T5):** выбор адаптера `RedisQueue` с
+    fail-fast-гейтами (код 2), `to_thread` в точках вызова очереди,
+    транспортный сбой постановки не жжёт attempts (`9240a110`); скелет
+    воркера `python -m src.notify.worker` — гейты, SIGTERM/SIGINT, холостой
+    цикл — потребление очереди, часть 3 (ADR 009) (`c5465aa7`).
+  - **Живучесть (T6):** маркированный S4 — переживание FLUSHDB своего
+    индекса: перезаливка состаренной queued-задачи, окно
+    `NOTIFY_REENQUEUE_AFTER`, без дублей (`abe9112a`).
+  - **`dev.sh --notify` (T7):** эфемерный Redis (без save/AOF, гаснет со
+    стеком) + диспетчер + воркер дочерними процессами; занятый 6379 —
+    остановка; без флага поведение не меняется (`3be67c23`); смоук вскрыл
+    2 интеграционных бага — фиксы: диспетчер создаёт потребительские
+    группы при старте (на свежем Redis XAUTOCLAIM падал NOGROUP,
+    `c723aeef`) и `|| true` в cleanup против сирот под `set -e`
+    (`9c78076f`).
+  - **Включённый e2e-режим + Playwright S1 (T8):** `NOTIFY_E2E_ENABLED=1` +
+    `SHARD_ID=notify` на порт-паре 8005/3006 вне шардов, dryrun Case
+    17a–17e; спека S1 — запись с чекбоксом «отправлять оповещения»,
+    sync-point на queued-задаче, очередь проверяет маркированный тест
+    (payload §4.2) (`6b81762a`; fix-итерация `14c57041` — TS2339 в
+    finally-блоке спеки + предпосылки транспорта до `write_run_lease`
+    против класса lease-leak).
+  - **CI (T9):** джоба `notify-tests` — сервис-контейнер Redis 7.4.11
+    (healthcheck ping), юнит-слой `pytest -m redis` + страж пустого
+    зелёного, e2e-слой под `NOTIFY_TESTS_E2E_ENABLED=1`; `backend-tests` и
+    4 шарда байт-нетронуты (`a31e50c6`).
+  - **Tests:** backend `pytest -m "not redis"` **3517p/15s**, маркированный
+    контур `pytest -m redis` **28p** + 1 условный skip, admin vitest
+    **3107/3107** (188 файлов), `tsc --noEmit` **0**, dry-run
+    e2e-shard-start **107 PASS**, ruff **113/113**, mypy **0**, визуальный
+    гейт N/A → exit 0; сценарии S1–S5 ✅; реальная зелень `notify-tests`
+    доказывается на PR CI.
+  - Status: `docs/status/2026-10-22-notify-infra-483.md`
+
+## [Unreleased] — 2026-10-21
+
+### Added
+- **GH #499 — Клиентские учётки и реальное бронирование из веба (срез
+  «вход + форма»: OTP-вход, `/cabinet`, `POST /my/records`)** — branch
+  `499-web-client-auth-booking` (12 коммитов `94b24a8e..3a620681`, base
+  `4c747c02`; 79 файлов, +6165/−406; спека
+  `docs/specs/2026-10-20-web-client-auth-booking-design.md` рев.2, план
+  `docs/plans/2026-10-21-web-client-auth-booking-plan.md` 9/9, порядок
+  1→2→4→3→5→6→7→8→9):
+  - **Учётки и OTP-фундамент (T1–T2):** роль `client` в `UserRole` (вне
+    матрицы прав — пустой набор) + `User.client_id` (unique FK, зеркало
+    `staff_id`); парольный вход и установка пароля отказывают клиентской
+    роли (`94b24a8e`); таблица `otp_codes` — один код на телефон, код
+    6 цифр TTL 5 мин, `code_hash` = HMAC-SHA-256 с серверным перцем (вне
+    БД), атомарное поглощение, лимиты 15-минутного окна: 5/телефон,
+    20/IP, 5 номеров/IP, 5 неудачных вводов (`2f047e35`, фикс `9cd0603d`).
+  - **Сессия и эндпоинты (T4, T3):** cookie `memo_client_session` +
+    `require_client_session` (перекрёстное предъявление сессий → 401),
+    `GET /my/client`, общий идемпотентный logout (`ba66a2da`);
+    `POST /auth/otp/request` — всегда 202, молчание для сотрудников,
+    `POST /auth/otp/verify` — идемпотентное создание учётки+карточки,
+    `phone_is_confirmed=true`, клиентская сессия на успехе; Origin-сверка,
+    транспорт fail-closed (503 без транспорта в любом окружении,
+    dev-транспорт и `dev_code` — только `ENV=development`) (`0bf7588c`).
+  - **Бронирование (T5):** `POST /api/v1/my/records` — строгая схема
+    (`extra="forbid"`), владелец из сессии, цена сервером из `tariff_id`,
+    1–20 визитов, анти-спам 20/40 за 15 мин, CORS точные origins
+    (`1f4d9e93`).
+  - **Контракт и веб (T6–T9):** api-client zod-зеркала + 4 функции
+    (`721a17fc`); реальные тарифы в оверлее бронирования (`981a5aa1`);
+    вход кодом при отправке + создание записи (`24725bde`, фиксы
+    `02eca526`); экран `/cabinet`, удаление мок-страницы `/booking` и
+    мёртвого API-пути (`077e3d95`); chore `OTP_TRANSPORT=dev` в `.env.dev`
+    (`3a620681`).
+  - **Tests:** backend целевые сьюты зелёные (263/0, 183/0), ruff+mypy
+    clean; api-client 497/0; web vitest 406/0 (47 файлов), tsc/lint clean;
+    визуальный гейт по evidence — scripted-Playwright 8/8 PASS
+    (`/tmp/visual-evidence-499/`, vision кросс-чек 3/3); ревью — все задачи
+    зелёные (Task 2/8 — по одной fix-итерации).
+  - Status: `docs/status/2026-10-21-web-client-auth-booking-499.md`
+- **GH #373 — Канон-тесты сида переехали из vitest админки в pytest бэкенда
+  (устранение нагрузочного флейк-класса «seed-reset в полном витест-прогоне»)**
+  — branch `seed-canon-pytest-373` (4 коммита `52d096f8..17ed0ae0`, base
+  `ab7b0f76`; 4 файла, +744/−221; спека
+  `docs/specs/2026-10-21-seed-canon-pytest-move-design.md` рев.2.1 и план
+  `docs/plans/2026-10-21-seed-canon-pytest-move-plan.md` 4/4 — оба на main,
+  unchanged by IMPL; test-infra — семантика канона не менялась, переехало
+  только место закрепления):
+  - **pytest-дом (T1–T2):** полная семантика отката к сиду — 7 SQL-тестов —
+    закреплена в `backend/tests/test_seed_canon.py` (маркер `misc`): обвязка
+    (реальная схема + реальный `seed_data()`, генератор — реальный скрипт
+    списком аргументов, `shell=False`, применение канона через sqlite `.read`,
+    всё под `tmp_path`) + total restore (`52d096f8`); остальные 6 семантик —
+    словари/`sort_order`, users, user_settings, исключения, notify_templates,
+    идемпотентность (`1639ebb8`).
+  - **vitest-дом (T3):** `frontend/admin/__tests__/seed-reset.test.ts`
+    сокращён 26 → 19 — SQL-группа удалена, осталась лёгкая TypeScript-обёртка
+    (резолверы путей, аватары, громкая ошибка) с инвариантом «никаких внешних
+    процессов» (`09bcf30e`).
+  - **Доки/гигиена (T4):** coverage map в `docs/tests_workflow.md` +
+    `.gitignore` `*.canon.sql` (`17ed0ae0`).
+  - **Мотивация:** 7 тяжёлых SQL-тестов под пулом процессов полного
+    vitest-прогона раздувались с 2.3 с до 39 с против таймаута 30 с → ложный
+    красный «фронт сломан»; бюджеты/таймауты сознательно не поднимались,
+    e2e-слой и CI-джобы не тронуты.
+  - **Tests:** `test_seed_canon.py` **7 passed**; регрессия `test_seed.py`
+    **29 passed**; admin vitest полный **3100/3100** (188 файлов);
+    `seed-reset.test.ts` **19 passed**; grep-страж
+    `execSync|spawn|child_process` — 0 совпадений; ruff clean; ревью T1
+    compliance + quality, T2/T3 compliance, T4 spot-check — все ✅; визуальный гейт N/A → exit 0.
+  - Status: `docs/status/2026-10-21-seed-canon-pytest-373.md`
+- **GH #480 — Экспорт TS-юнионов перечислений контракта из `@memo/api-client`
+  (удаление локальных копий в админке)** — branch
+  `480-api-client-enum-unions` (6 коммитов `b7dc85fc..a6a4b61e`, base
+  `eb62de07`; 51 файл, +1111/−307; спека
+  `docs/specs/2026-10-20-api-client-enum-unions-design.md` рев.2 и план
+  `docs/plans/2026-10-21-api-client-enum-unions-plan.md` — оба на main,
+  unchanged by IMPL; pure refactor — без UI-дельты):
+  - **Контракт (T1–T2):** перечисления контракта — именованные
+    экспортируемые zod-схемы в `@memo/api-client` + перепайка request-стороны
+    эндпоинтов (`b7dc85fc`); строгие enum-ответы §3.3 + fail-closed парсинг
+    авторизации (`79cc514e`).
+  - **Админка (T3):** локальные дубликаты перечислений в `frontend/admin`
+    заменены на импорты схем api-client §3.4 (`acb33d5c`).
+  - **Чистка (T4):** мёртвые Wave-5 экспорты удалены из `@memo/domain`
+    §3.5 (`94334a68`).
+  - **Защитные тесты (T5):** backend parity pydantic↔TS словарей
+    (`backend/tests/test_api_client_enum_parity.py`) + pin полноты наборов
+    статус-списков админки против `VisitStatusSchema.options` (§6)
+    (`248bc23b`, `a6a4b61e`).
+  - **Approved deviation:** мёртвая опция оплаты «Онлайн» удалена из
+    `RecordPaymentsTable.tsx` — бэкенд всегда отклонял её с 422; строка
+    §3.4 требует `PaymentMethodSchema.options` = cash/card/transfer;
+    «ничего не меняется» §4 опиралось на ошибочную ячейку колонки «Сегодня».
+  - **Tests:** api-client vitest **503/503** + tsc чист; admin vitest
+    **3107/3107** + tsc чист; domain **37/37** + dts build; backend parity
+    pytest **6/6**; admin e2e полный прогон **508/510** (2 флейка —
+    изолированно зелёные, одно — известная records-pagination гонка #479);
+    сценарии 1–7 спеки зелёные; визуальный гейт N/A → exit 0.
+  - Status: `docs/status/2026-10-21-api-client-enum-unions-480.md`
+- **GH #479 — веб на единый транспорт `@memo/api-client`: второй fetch-стек удалён,
+  локации и галерея на живых данных, зеркала строгие, анонимный `POST /records`
+  закрыт** — branch `479-web-apiclient-transport` (8 коммитов `d0d136eb..aed1b4de`,
+  base `e34f3ad7`; 52 файла, +1055/−1282; спека
+  `docs/specs/2026-10-19-web-apiclient-transport-design.md` рев.10 и план
+  `docs/plans/2026-10-20-web-apiclient-transport-plan.md` рев.2 — оба на main,
+  unchanged by IMPL; гостевое бронирование и клиентская авторизация — #499):
+  - **Зеркала `RecordCreate`/`RecordUpdate` (T1 `d0d136eb`, small):** визиты несут
+    name-based режим (`name`/`age`/`tariff_id`), `status`/`seats` на уровне записи
+    убраны, `RecordUpdate` — собственное зеркало PUT-контракта (расцеплен с
+    `.partial()`), обе схемы `.strict()` — паритет `extra="forbid"` бэкенда;
+    таблица Parity Notes в `docs/domain-rules/records.md` — все ✅.
+  - **Анонимное создание записи закрыто (T2 `abce7884`, small):** `POST /api/v1/records`
+    под `require_permission("records:write")` — аноним → 401; снят из публичного
+    перечисления `auth/public.py`; `verify_fetch_metadata` — за #493.
+  - **Публичная витрина — фильтр общего списка (T3 `c56891c4` + `84994c58`, standard):**
+    `GET /api/v1/photos` принимает `is_public` (применяется только когда передан),
+    `GET /photos/web` и api-client `getWebPhotos` удалены (проба → 404);
+    `PhotoListParams` += `is_public`; master-скоуп и анонимный гость не задеты;
+    кросс-сюитный аудит — 8 pytest-сьютов правились.
+  - **Локации на живых данных (T4 `7437346b`, small):** `useLocations` —
+    `getLocations()` через общий `['locations']` кеш react-query, `LocationView`
+    сужен до контракта, `LocationDTO` удалён.
+  - **Галерея на живых данных (T5 `5bae3b1a`, standard):** `useGallery` —
+    `getPhotos({ is_public: true })` через react-query; мок-стек галереи удалён;
+    маппер `to-gallery-vm` (подписи из тегов) + секция `GuestGallery` с
+    `data-testid="guest-gallery"`.
+  - **Самодельный стек снесён (T6 `1f38756e`, trivial):** `lib/api/client.ts`,
+    свой `ApiError` (`lib/errors.ts`), DTO-оверлеи, мёртвый `useActivities` —
+    удалены с тестами; единственный транспорт веба — `@memo/api-client`.
+  - **Скилл v2.1 (T7 `aed1b4de`, trivial):**
+    `.opencode/skills/frontend-clean-architecture/SKILL.md` — web-транспорт
+    `@memo/api-client`, самодельные fetch-стеки запрещены (−198/+96).
+  - **Tests:** vitest `frontend/web` **336/336**; vitest `packages/api-client`
+    **483/483**; pytest — 8 затронутых сьютов **327/327**; `frontend/admin`
+    type-check чист; web type-check + `next build` чист; визуальный гейт
+    **EXIT=0** (локации в фильтре = сид-справочник, подписи галереи из тегов);
+    пробы: `GET /photos/web` → 404, анонимный `POST /records` → 401.
+  - Status: `docs/status/2026-10-20-web-apiclient-transport-479.md`
+- **GH #482 — Подсистема доменных событий: часть 1 системы оповещений (журнал
+  `domain_events`, диспетчер, сценарий `new_record` с рендером)** — branch
+  `feat/482-notify-events` (13 коммитов `f7051238..1a601c2c`, base `f7190cae`;
+  42 файла, +4629/−14; спека `docs/specs/2026-10-19-notify-events-482-design.md`
+  рев.2, план `docs/plans/2026-10-20-notify-events-482-plan.md` 10/10; семья
+  #476 — система оповещений; без Redis по построению):
+  - **Фундамент (T1–T3):** миграция `c970adc6b3d6` + ORM-модели
+    `backend/src/notify/models.py` с каскадными хвостами удаления
+    (`f7051238`); notify-настройки, `business_now()`, зависимость
+    `jinja2>=3.1.6` (`60ef558e`); очередевой порт `NotifyQueue` + `FakeQueue`
+    с reliable-list паттерном — шов к части 2, Redis-реализация подменяется
+    без изменения диспетчера (`30175968`).
+  - **Журнал и событие (T4–T6):** аккумулятор журнала `domain_events` —
+    третий аккумулятор `@transactional` (врезка в `services/decorators.py`
+    рядом с событиями #239 и аудитом #344), транзакционные гарантии пинются
+    отдельным сюитом (`8b25872d`); сборщик снапшота `new_record` +
+    `record_total_price` (`8ed09885`); флаг «отправлять оповещения» по цепочке
+    front→back (`useRecordMutations` → api-client zod → `RecordCreate` → гейт
+    актёра) + метка события в сценарии `create_record`;
+    `docs/domain-rules/records.md` синхронизирован (`0f9d977d`).
+  - **Рендер и сценарий (T7–T8):** песочница jinja2 — шаблоны из БД,
+    экранирование разметки; харденинг после ревью: полный wrap в
+    `RenderError` + экранирование backslash-ов (`45086fa2`, `f8341ad9`);
+    обработчик + реестр сценариев `new_record` — live-предикат,
+    frozen-каналы, постановка задач по §4.2 (`d1537016`, `88fca574`).
+  - **Диспетчер (T9):** три TaskGroup-цикла, политика попыток, re-enqueue,
+    парсинг приоритетов; batch-resilience после ревью качества — падение
+    обработчика не роняет батч, + observability (`6710caba`, `fb2f085c`).
+  - **Канон сида (T10):** blacklist notify-журнальных таблиц в
+    `gen_seed_canon.py` + гарды исключения в seed-reset (`1a601c2c`).
+  - **Tests:** полный backend `uv run pytest` **3504p/0f/15s** (skip — без
+    Redis, US-7 по построению), admin vitest зелёный (seed-reset **26/26**,
+    useRecordMutations **80/80**), api-client **472/472**, lint-рахет
+    **114==114**, mypy **0**, визуальный гейт exit 0 (секция N/A спеки);
+    US-1…US-8 проверены; каждая задача two-stage ревью, финальное
+    full-feature ревью ✅ COMPLIANT.
+  - Status: `docs/status/2026-10-20-notify-events-482.md`
 - **GH #412 — Фильтры Записей/Клиентов/Фото в строку таблицы (единый
   DataTable)** — branch `412-filters-inline` (11 коммитов
   `59a2814f..7765edcf` + merge `a41095e7` origin/main, base `f7190cae`;
@@ -292,6 +516,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **copy-last-week (C4):** опорная пара закреплена 06-01 → 06-08 — MAX-резолвция недели сида ограничена функциональным окном (`< SEED_WEEK_MONDAY+7`) и сверена с `SEED_WEEK_MONDAY`: без ограничения визуальные ev_fixed-филлеры (06-15…21, сеются ПОЗЖЕ функциональных недель) уводили источник копирования на визуальную неделю и детерминированно роняли S1–S7. S8 смотрит на W2+28 — ближайшую неделю за визуальной, у которой пусты и вид, и неделя-источник. Ожидания не менялись.
   - **Для dev/playground:** расписание «на сегодня» пусто — данные смотрятся выбором даты; опорные недели: функциональные 2026-05-18…06-07 (опорная 06-01…07, 9 занятий), визуальная 2026-06-15…21.
   - **Tests:** локально — btn-create-activity-сценарии **10/10**, `copy-last-week` **8/8** после перепривязки, `tsc --noEmit` exit 0; полный e2e в CI (4 шарда + флейк-гейт) — арбитр миграции в PR.
+- **GH #448 — /proc-резолвер портов + fail-fast прогона: класс «невидимый держатель порта»
+  устранён** — branch `448-shard-port-resolver-failfast` (6 коммитов `a91b88aa..f4417af1`,
+  base `099f8098`; 5 файлов, +1963/−126; спека
+  `docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md` рев.4.1 и план
+  `docs/plans/2026-10-21-shard-port-resolver-failfast-448-plan.md` 5/5 — оба на main,
+  unchanged by IMPL; воркер next-server переписывает `process.title`, lsof слеп к такому
+  процессу — все проверки портов контура прогонов переведены на собственный резолвер,
+  смерть ребёнка прогона останавливает его красным за секунды; прод-код, API, БД и
+  e2e-спеки не затронуты):
+  - **Резолвер `listen_pairs` (T1 `a91b88aa`):** «порт → PID» без lsof — один сэмпл на вызов,
+    `/proc/net/tcp`+`/proc/net/tcp6` (отсутствие tcp6 — не ошибка), строки LISTEN `0A`,
+    hex→dec, inode → владелец проходом `/proc/[0-9]*/fd/*` по симлинку `socket:[inode]`
+    (stat не парсится — `process.title` для резолвера не существует); fail-closed: LISTEN без
+    атрибутируемого PID = «порт занят»; не-Linux фолбэк на lsof (macOS статус-кво); пути /proc
+    переопределяемы только в dryrun-режиме; нормализатор `_watch_interval_s` (мусор → дефолт 5).
+  - **Пять lsof-точек → резолвер (T2 `04e34fc8` + `062bcdf3`):** `_masked_pids`,
+    `allocate_shard_ports`, `_legacy_ports_free`, TOCTOU-recheck и `.next`-вайп-гард — конъюнкция
+    с pgrep+args-гейтами дословно, fd-скан одним `ls` (19.5s→0.4s); ревью-фикс — bounded retry
+    (≤5) контролей 9a/9b.
+  - **Fail-fast слой стека (T3 `710acb35` + `25971434`):** ожидание ЛЮБОГО из двух серверов
+    (kill-0 поллинг, bash 3.2) вместо `wait "$FRONTEND_PID"` — смерть → вердикт
+    «stack shard N: … died on :PORT» + путь лога всегда + кап-хвост 20 строк с фильтром
+    секретов (`_capped_log_tail`) + exit 1; exit-trap добирает внуков-держателей портов стека;
+    ревью-фикс — die-кейсы на HOLD_S=600, teardown не сиротит sleep (12 сирот/3 прогона → 0).
+  - **Fail-fast слой оркестратора (T4 `f4417af1`):** watchdog `run_watchdog`/`stop_run_watchdog`
+    — тик kill -0 по стек-обёрткам, провал подтверждается wait-рептингом (зомби отвечает
+    kill -0), вердикт = диагноз + маркер в LOG_DIR + TERM ОБЕИМ Playwright-стадиям
+    (TERM→грейс→SIGKILL, жёсткая форма rev4); `test-all.sh` — старт до readiness, порядок
+    «финальный wait → ОСТАНОВ watchdog → проверка маркера → вердикт», маркер → FAIL=1 (US-6:
+    смерть обёртки после зелёной её стадии краснит прогон).
+  - **Tests:** shard-helpers dryrun **33/33**; e2e-shard-start dryrun **ALL PASS** (75+
+    ассертов, детерминированно ×3+ прогонов); полный локальный test-all (тег `978ca3`):
+    pytest **3484p/15s**, Playwright шарды **239+240p**, lint/typecheck×2/vitest-workspace
+    **336** зелёные; admin vitest **3081p** + 3 посторонних load-флейка (изолированный
+    повтор 83/83, прецедент #478); визуальный гейт exit 0 (секция N/A спеки); DoD §7
+    закрыт, grep-чистота (lsof — только не-Linux-фолбэк).
+  - Status: `docs/status/2026-10-21-shard-port-resolver-failfast-448.md`
 
 ## [Unreleased] — 2026-10-09
 

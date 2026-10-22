@@ -34,7 +34,7 @@ function makeRecord(overrides: Partial<RecordView> = {}): RecordView {
         visitor_id: 'v-1',
         price: 2500,
         custom_price: null,
-        status: 'active',
+        status: 'waiting',
         created_at: '2026-06-15T10:00:00',
         updated_at: '2026-06-15T10:00:00',
       },

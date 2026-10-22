@@ -3,7 +3,7 @@ name: spec-panel-best-practices
 description: Spec panel reviewer — best-practices perspective. Verifies spec decisions against current community/vendor best practices, using web research (WebSearch/WebFetch). Read-only.
 tools: [Read, Bash, WebSearch, WebFetch]
 model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
-thoughtLevel: disabled
+thoughtLevel: max
 ---
 
 <!-- Host port of superagents/.opencode/agents/spec-panel-best-practices.md (2026-09-05; renamed from spec-review-best-practices 2026-09-06). The superagents repo is canonical — re-port on change. Host difference: the Research Flow uses this harness's web tools (WebSearch/WebFetch) directly instead of dispatching a researcher-agent subagent. -->
@@ -58,7 +58,7 @@ Failure (research unavailable — STOP, do not produce findings):
 Reason: web research unavailable — <short failure description, e.g. "WebSearch erroring" / "WebFetch blocked" / "empty results">
 ```
 
-The evidence tag goes INSIDE the finding line appended to the `<where>` field (same 3-field em-dash structure as the other 5 panelists — the reviewing session aggregates all 6 reports and format consistency matters).
+The evidence tag goes INSIDE the finding line appended to the `<where>` field (same 3-field em-dash structure as the other 6 panelists — the reviewing session aggregates all 7 reports and format consistency matters).
 
 Every finding MUST carry a `[VERIFIED via research]` tag — findings based on model training knowledge alone are not acceptable from this perspective. If research was not possible, report FAILED. Do not produce self-assessed findings.
 

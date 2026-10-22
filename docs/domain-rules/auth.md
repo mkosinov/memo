@@ -3,8 +3,10 @@
 ## Description
 Staff authentication for the API and the admin app. Users (roles `admin` / `master`) log in by **phone + password**; the server keeps sessions in the DB and identifies the caller by an opaque `HttpOnly` cookie. Permissions are derived from the role by a code-defined matrix — no DB tables for roles.
 
+Клиентская аутентификация (роль `client`, вход по коду на телефон) спроектирована в #499 — см. раздел «Клиентская аутентификация».
+
 ## Roles & Permissions
-Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
+Two staff roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`. Третья роль — `client` (#499, спека) — в матрице НЕ участвует: отсутствие роли в матрице даёт пустой набор прав (`ROLE_PERMISSIONS.get(role, frozenset())`), см. «Клиентская аутентификация».
 
 | Entity | admin | master |
 |---|---|---|
@@ -22,10 +24,12 @@ Two roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `master`.
 
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
-- `GET` dictionaries: masters, locations, services, tags, activities, photos — incl. `GET /api/v1/photos/web` (the public gallery the site's home page consumes)
-- `POST /api/v1/records` — anonymous booking, **until #8** adds client phone verification
+- `GET` dictionaries: masters, locations, services, tags, activities, photos (the web gallery rides the photo list with `?is_public=true` — the separate `GET /api/v1/photos/web` showcase was removed in #479)
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
+- `POST /api/v1/auth/otp/request` + `POST /api/v1/auth/otp/verify` — клиентский OTP-вход (#499, спека; добавляются в `PUBLIC_ROUTES` явно — allowlist точный, не маска)
+
+`POST /api/v1/records` left this list (#479): the full creation contract is staff-only (`records:write`); a guest booking contract is a separate effort (#499).
 
 A contract test enforces: every `/api/v1` route has an auth dependency or is allowlisted. `GET /api/v1/events` (SSE, #239) requires a session (transport, not entity — no permission token).
 
@@ -63,6 +67,17 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - **Маска контактов** в каждом клиент-содержащем ответе для роли master: `phone` → последние 4 цифры (`+7 909 •••-••-1234`), `email` → `null`; имя и канал видны. Полный номер — только ключ поиска, не данные ответа.
 - Фронт-скрытие меню/кнопок — косметика; защита — сервер (D9 спеки).
 
+## Клиентская аутентификация (#499 — спека, Gate B OK 2026-10-21; внедрение — IMPL)
+
+- Роль `client` в `UserRole`, **вне** матрицы `ROLE_PERMISSIONS` (инвариант-тест матрицы «ровно admin + master» не меняется); клиентские эндпоинты авторизуются фактом клиентской сессии, не правами.
+- `User → optional 1:1 Client` (`client_id`, unique, nullable) — зеркалит `staff_id`. Учётка создаётся **только** потоком OTP-подтверждения телефона: `user(role=client, phone)` + карточка клиента «найди-или-создай по точному телефону» (активные; при дублях — первая активная). `users.phone` уникален — конкурентные `verify` идемпотентны (конфликт вставки → перечитать и продолжить). При успехе выставляется `phone_is_confirmed = true`; строка `UserSettings` создаётся в той же транзакции (правило #319).
+- **Инвариант «клиентская учётка без пароля»**: `password-setup` отклоняет роль `client`; `/auth/login` отказывает роли `client` (двойной рубеж поверх null-guard без-парольного входа).
+- Подтверждение телефона: таблица `otp_codes` — один код на телефон (ротация отправкой), код 6 цифр, TTL 5 минут, `code_hash` = HMAC-SHA-256 с серверным перцем (вне БД, сравнение за постоянное время); успешная проверка **атомарно поглощает код** (одноразовость). Лимиты — одно окно 15 минут (in-memory, паттерн счётчиков неудач входа): 5 отправок/телефон, 20/IP, 5 разных номеров/IP, 5 неудачных вводов/телефон (ротация кода бюджет попыток не сбрасывает); отказы `verify` — в IP-счётчик.
+- Эндпоинты: `POST /api/v1/auth/otp/request` — **всегда 202** на валидный номер (телефон сотрудника не отличается: код молча не отправляется и не пишется — оракула перечисления нет); `POST /api/v1/auth/otp/verify` → клиентская сессия. Обе точки — Origin-сверка против CORS-списка при наличии заголовка (несовпадение → 403).
+- Транспорт кода **fail-closed**: без настроенного транспорта — 503 `NOTIFY_TRANSPORT_UNAVAILABLE` в любом окружении; dev-транспорт и `dev_code` в ответе — только при точном `ENV == "development"`, сырой код в логи не пишется. Реальный транспорт — система оповещений #476.
+- Клиентская сессия: та же таблица/механика (sliding 7/30, отзыв удалением строки), **отдельная cookie** `memo_client_session` (сосуществует с `memo_session` в одном браузере); резолверы читают каждый своё имя cookie + проверяют роль — перекрёстное предъявление даёт 401. `GET /api/v1/my/client` → `{phone, name}`. Выход — общий `POST /api/v1/auth/logout`: удаляет предъявленную сессию любого вида.
+- Бронирование: `POST /api/v1/my/records` — строгая схема `MyRecordCreate` (`extra="forbid"`; из провода нет `client_id`/`visitor_id`/`price`/`custom_price`/`notify`), владелец только из сессии, цена визита сервером из `tariff_id` (обязателен, если у услуги есть тарифы — нулевая цена платной услуги недостижима; без тарифов — 0), 1–20 визитов, наследует проверки создания (404 активность, 409 вместимость), анти-спам 20 записей/40 визитов за 15 минут на учётку. Спека: `docs/specs/2026-10-20-web-client-auth-booking-design.md`.
+
 ## Sessions
 - Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_session` carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.
 - Lifetime: **sliding** — idle window 7 days (any authenticated request extends it; written at most once per hour) + **absolute cap 30 days** from creation, then a fresh login. Cookie Max-Age = the cap; the row governs validity.
@@ -93,8 +108,13 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | POST | /api/v1/auth/password-setup | public | установка пароля по одноразовой ссылке (#348) |
 | PATCH | /api/v1/users/{id} | admin | правка телефона учётки (#348) |
 | POST | /api/v1/users/{id}/password-link | admin | выдать одноразовую ссылку установки пароля (#348) |
+| POST | /api/v1/auth/otp/request | public | клиентский OTP: всегда 202 на валидный номер (#499, спека) |
+| POST | /api/v1/auth/otp/verify | public | код → клиентская сессия `memo_client_session` (#499, спека) |
+| GET | /api/v1/my/client | клиентская сессия | `{phone, name}` — кто вошёл (#499, спека) |
+| POST | /api/v1/my/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |
 
 ## Relationships
 - User → optional 1:1 Staff (`staff_id` FK; бывш. `master_id` — реструктуризация #266: учётка привязывается к карточке сотрудника любой роли).
+- User → optional 1:1 Client (`client_id` FK; #499, спека — клиентская учётка привязывается к карточке клиента).
 - Session → belongs to User (hard-deleted rows).
 - UserSettings → addressed by the **session** user only: the `user_id` query parameter is removed (own-only since #247, breaking change).

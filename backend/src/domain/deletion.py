@@ -84,6 +84,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.session import Session
 from src.models.activity import Activity
 from src.models.client import Client
 from src.models.location import Location
@@ -335,6 +336,36 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             action="nullify",
             auto=True,
             allowed_actions=["nullify"],
+        ),
+        # GH #482: delivery-task history survives the client hard delete —
+        # the FK is ON DELETE SET NULL at the DB level (spec §3.6); no
+        # NULLIFY_HANDLERS entry (phase 6 dispatch skips None handlers and
+        # the client event grid stays byte-identical; the service-level
+        # handler decision belongs to the dispatcher part).
+        FKDependency(
+            entity="notify_tasks",
+            relation="Оповещение",
+            nullable=True,
+            action="nullify",
+            auto=True,
+            allowed_actions=["nullify"],
+        ),
+        # GH #499 (spec §3): users.client_id — the client-account link,
+        # the users.staff_id mirror. Auto-cascade on the HARD delete: the
+        # account is the card's login identity — card gone + account kept
+        # = orphan, so it goes with the card (no user choice; the same
+        # rationale as the Staff users edge). Archival NEVER touches the
+        # link (spec §3: the owner is the ACCOUNT, the link survives the
+        # card's is_active flip) — the matrix is the hard-delete contract
+        # only. Executed by the delete_client scenario (GH #327: Client
+        # cascade deps run as scenario phases, not CASCADE_HANDLERS).
+        FKDependency(
+            entity="users",
+            relation="Пользователь",
+            nullable=True,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
         ),
     ],
     Record: [
@@ -752,6 +783,13 @@ async def _count_c_photos(s: AsyncSession, entity_id: str) -> _CountResult:
     return r.scalar_one(), None
 
 
+async def _count_c_users(s: AsyncSession, entity_id: str) -> _CountResult:
+    """GH #499: the client-account link (users.client_id) — the
+    users.staff_id mirror (_count_m_users): one account per card."""
+    r = await s.execute(select(func.count()).select_from(User).where(User.client_id == entity_id))
+    return r.scalar_one(), None
+
+
 async def _count_r_visits(s: AsyncSession, entity_id: str) -> _CountResult:
     r = await s.execute(select(func.count()).select_from(Visit).where(Visit.record_id == entity_id))
     return r.scalar_one(), None
@@ -916,6 +954,7 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Client, "visitors"): _count_c_visitors,
     (Client, "client_tags"): _count_c_client_tags,
     (Client, "photos"): _count_c_photos,
+    (Client, "users"): _count_c_users,
     (Record, "visits"): _count_r_visits,
     (Record, "payments"): _count_r_payments,
     (Record, "record_tags"): _count_r_record_tags,
@@ -1999,6 +2038,51 @@ async def _h_cascade_master_users(
         )
     )
     await session.execute(delete(User).where(User.staff_id == entity_id))
+
+
+async def _h_cascade_client_users(
+    _self: GenericService[Any, Any, Any],
+    session: AsyncSession,
+    entity_id: str,
+) -> int:
+    """Client → users auto-cascade (#499, the ``_h_cascade_master_users``
+    mirror): hard-delete the account linked via ``users.client_id``. The
+    account is the card's login identity — deleting the card but keeping
+    the account = orphan, so it goes with the card (no user choice).
+
+    Children die FIRST, in one executor flush: settings (bulk, FK without
+    ``ondelete`` — GH #319 canon rule), the LIVE client session
+    (``sessions.user_id`` FK without ``ondelete`` — unlike the staff
+    edge, a client account is deleted while its OTP login session may
+    still be warm), profiles (FK carries ON DELETE CASCADE — the
+    service-level delete keeps the executor deterministic regardless of
+    PRAGMA state).
+
+    NOT wired into ``CASCADE_HANDLERS`` — GH #327: Client cascade deps
+    run as ``delete_client`` scenario phases; the scenario calls this
+    directly. Returns the deleted-account count so the scenario marks
+    ``"users"`` by real rowcount (the #345 event grid pins the
+    account-free commit set — the ``archive_staff`` rowcount precedent).
+    """
+    user_ids_result = await session.execute(
+        select(User.id).where(User.client_id == entity_id)
+    )
+    user_ids = list(user_ids_result.scalars().all())
+
+    # Settings first (FK user_settings.user_id, no ondelete).
+    await UserSettingsService.delete_by_user_ids(session, user_ids)
+
+    # The live client session (FK sessions.user_id, no ondelete).
+    if user_ids:
+        await session.execute(delete(Session).where(Session.user_id.in_(user_ids)))
+
+    await session.execute(
+        delete(UserProfile).where(
+            UserProfile.user_id.in_(select(User.id).where(User.client_id == entity_id))
+        )
+    )
+    await session.execute(delete(User).where(User.client_id == entity_id))
+    return len(user_ids)
 
 
 async def _h_cascade_master_extension(

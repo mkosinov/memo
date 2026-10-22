@@ -18,6 +18,16 @@ describe("Counter", () => {
     expect(screen.getByText("1500 ₽")).toBeInTheDocument();
   });
 
+  it("renders data-testid on the counter row when testId is provided", () => {
+    render(
+      <Counter label="Adults" testId="tariff-counter-42" value={1} onChange={vi.fn()} />
+    );
+    const row = screen.getByTestId("tariff-counter-42");
+    expect(row).toBeInTheDocument();
+    // Label and price live inside the same row ("price next to the counter")
+    expect(row).toHaveTextContent("Adults");
+  });
+
   it("increments value when plus is clicked", () => {
     const handleChange = vi.fn();
     render(

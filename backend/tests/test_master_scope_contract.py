@@ -16,7 +16,7 @@ Two allowlists, both staleness-checked against the live route table:
   master may reach WITHOUT scope, each with a one-line justification:
   dictionary reads (masters/locations/services/tags — reference data, not
   master-owned), the auth surface, own-data endpoints (``/my``,
-  ``/user-settings``), public surfaces (``/photos/web``, health) and the
+  ``/user-settings``), public surfaces (health) and the
   SSE transport (``/events`` — a transport, not an entity).
 
 A route in a scope-wired router that is NOT a read path (mutations carry
@@ -133,17 +133,25 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     #    authority is the one-time token; no session, no master scope. ──
     ("POST", "/api/v1/auth/password-setup/validate"): "public token probe (#348 §7) — token authority",
     ("POST", "/api/v1/auth/password-setup"): "public one-time consume (#348 §7) — token authority",
+    # ── Public OTP pair (#499 §4.2): anonymous by design — the authority
+    #    is the rate-limited one-time code; verify issues the CLIENT
+    #    session cookie (own-cabinet surface, no master scope). ──
+    ("POST", "/api/v1/auth/otp/request"): "public OTP request (#499 §4.2) — code authority, anonymous by design",
+    ("POST", "/api/v1/auth/otp/verify"): "public OTP verify (#499 §4.2) — code authority; issues the client session",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",
     ("POST", "/api/v1/my/portrait"): "own portrait (#262)",
+    # Client cabinet (#499 §4.3/§5): the router binds
+    # require_client_session (memo_client_session, role=client) —
+    # own-card data/booking, per-user, not master-scoped.
+    ("GET", "/api/v1/my/client"): "client cabinet (#499 §4.3) — client session, own card",
+    ("POST", "/api/v1/my/records"): "client booking (#499 §5) — client session, own-card booking",
     ("GET", "/api/v1/user-settings"): "own settings — per-user",
     ("POST", "/api/v1/user-settings"): "own settings — per-user",
     ("PUT", "/api/v1/user-settings"): "own settings — per-user",
     ("PATCH", "/api/v1/user-settings"): "own settings — per-user",
     ("DELETE", "/api/v1/user-settings/{id}"): "own settings — per-user",
-    # ── Public surfaces ──
-    ("GET", "/api/v1/photos/web"): "public gallery (is_public only)",
     # ── Admin-only surfaces: master holds NO permission token for these
     #    (ROLE_PERMISSIONS has no staff/positions/materials/:write entries)
     #    → the permission gate answers 403 before scope would ever run.

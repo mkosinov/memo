@@ -66,6 +66,7 @@ function toActivityView(s: ScheduleView): ActivityView {
     categoryColor: s.tagColors[0] || "#888888",
     nextTimes: s.nextTimes,
     priceDetails: s.priceHint,
+    tariffs: s.tariffs,
     materialDetails: s.materialDetails,
     locationDetails: s.locationHint,
   };
@@ -78,7 +79,7 @@ function toLocationOption(vm: LocationView): { id: string; title: string } {
 
 /** Map GalleryPhotoView → GuestGallery photo */
 function toGuestPhoto(vm: GalleryPhotoView): GuestPhoto {
-  return { url: vm.url, technique: vm.technique };
+  return { url: vm.url, caption: vm.caption };
 }
 
 /**
@@ -118,12 +119,16 @@ export default function Home() {
   const dateEndStr = dateEnd.toISOString().split("T")[0];
 
   // ── Data hooks ──
-  const { schedules, getByDate, isLoading } = useSchedule({
+  const { schedules, getByDate, isLoading, error } = useSchedule({
     dateStart,
     dateEnd: dateEndStr,
     location: selectedLocation ?? undefined,
     tag: selectedTag ?? undefined,
   });
+
+  // Tariffs data state for the booking overlay (#499): services feed the tariffs,
+  // so the schedule query states stand in for the tariffs states.
+  const tariffsStatus = isLoading ? "loading" : error ? "error" : ("ready" as const);
 
   // Client-side filtering by date and tag
   const selectedDateStr = selectedDate
@@ -141,7 +146,7 @@ export default function Home() {
   }, [selectedDateStr, selectedLocation, selectedTag, schedules, getByDate]);
 
   const { locations } = useLocations();
-  const { photos: galleryPhotos } = useGallery(12);
+  const { photos: galleryPhotos } = useGallery();
 
   // ── Geolocation: detect user location on mount ──
   useEffect(() => {
@@ -386,6 +391,7 @@ export default function Home() {
           onClose={handleCloseBooking}
           activityId={bookingActivity.id}
           activities={adaptedActivities}
+          tariffsStatus={tariffsStatus}
         />
       )}
 

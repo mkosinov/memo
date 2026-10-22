@@ -99,3 +99,45 @@ class PasswordSetupRequest(BaseModel):
 
     token: str = Field(min_length=1)
     password: str = Field(min_length=1)
+
+
+class OtpRequestRequest(BaseModel):
+    """``POST /api/v1/auth/otp/request`` body (#499 §4.2).
+
+    Strict body (extra keys → 422). ``phone`` carries no schema length
+    bounds: the SHARED domain validator (:func:`src.domain.phones.validate_phone`)
+    owns the rule, so a blank/overlong phone answers the domain code
+    ``PHONE_INVALID`` instead of a generic schema error (the
+    ``PasswordSetupRequest`` precedent).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+
+
+class OtpRequestResponse(BaseModel):
+    """202 body of a code request — ``{}``, or ``{"dev_code": ...}``.
+
+    ``dev_code`` surfaces ONLY when the dev transport handled the send
+    (exact ``ENV == "development"``, §4.2); the endpoint serializes with
+    ``exclude_none`` so the field is absent in every other shape — a
+    staff phone (no code exists) and all non-dev environments.
+    """
+
+    dev_code: str | None = None
+
+
+class OtpVerifyRequest(BaseModel):
+    """``POST /api/v1/auth/otp/verify`` body (#499 §4.2).
+
+    Strict body (extra keys → 422). ``phone`` — same domain-validator
+    rule as the request body; ``code`` needs at least one character at
+    the schema level (a present-but-wrong code is the unified 401, a
+    missing/empty one is a malformed request).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+    code: str = Field(min_length=1)

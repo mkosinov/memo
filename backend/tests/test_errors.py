@@ -19,11 +19,11 @@ from src.errors import ERROR_MESSAGES, ErrorCode, ErrorDetail
 
 @pytest.mark.pure_unit
 class TestErrorCodeEnum:
-    """Verify ErrorCode has all 38 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week + 2 GH #286 deferred-delete + 2 GH #348 user accounts)."""
+    """Verify ErrorCode has all 44 codes (18 base + 5 GH #247 auth + 6 GH #266 staff + 2 GH #262 files + 3 GH #242 copy-week + 2 GH #286 deferred-delete + 2 GH #348 user accounts + 3 GH #499 client booking)."""
 
     def test_total_code_count(self):
-        """All 41 error codes are present (base + auth + staff #266 + files #262 + copy-week #242 + deferred-delete #286 + user-accounts #348)."""
-        assert len(ErrorCode) == 41
+        """All 44 error codes are present (base + auth + staff #266 + files #262 + copy-week #242 + deferred-delete #286 + user-accounts #348 + client-booking #499)."""
+        assert len(ErrorCode) == 44
 
     def test_expected_codes_exist(self):
         """Every code from spec §5 (plus auth/staff additions) exists."""
@@ -82,6 +82,10 @@ class TestErrorCodeEnum:
             "PHONE_TAKEN",                 # 422 — create/edit: another account holds the exact string
             "PHONE_INVALID",               # 422 — create/edit: blank or over 20 chars after trim
             "USER_NOT_FOUND",              # 404 — /users/{id} отсутствует
+            # GH #499 — client booking (§4.2/§5)
+            "NOTIFY_TRANSPORT_UNAVAILABLE",  # 503 — OTP transport not configured (fail-closed)
+            "TARIFF_REQUIRED",               # 422 — paid service, visit without tariff_id
+            "TARIFF_NOT_FOUND",              # 422 — tariff_id foreign to the activity's service
         }
         actual = {code.value for code in ErrorCode}
         assert actual == expected
@@ -146,8 +150,8 @@ class TestErrorMessages:
             assert code in ERROR_MESSAGES, f"Missing ERROR_MESSAGES entry for {code.value}"
 
     def test_total_count_matches(self):
-        """ERROR_MESSAGES has exactly 41 entries (one per ErrorCode)."""
-        assert len(ERROR_MESSAGES) == 41
+        """ERROR_MESSAGES has exactly 44 entries (one per ErrorCode)."""
+        assert len(ERROR_MESSAGES) == 44
 
     def test_all_values_are_strings(self):
         """Every message is a non-empty string."""

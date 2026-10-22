@@ -44,19 +44,23 @@ services.
 EVENT GRID (GH #239; GH #375 lifted the ``"visits"`` suppression — a
 deliberate contract change, no longer byte-parity with the
 pre-refactor executor): success publishes EXACTLY ``{"clients",
-"records", "photos", "visitors", "client_tags", "visits"}`` — the
-dependency marks are UNCONDITIONAL (by dispatch fact, not row count;
-a clean client with empty resolutions ``{}`` publishes the same set);
-``"visits"`` rides the phase-7 dispatch (the erased visits are named
-in the package, #375). The 404 branch publishes ``{"clients"}``; the
-422/409 branches (validation + stale exceptions) publish NOTHING (the
-accumulator resets).
+"records", "photos", "visitors", "client_tags", "visits"}`` plus
+``"users"`` WHEN a linked client account died in the #499 phase-8
+cascade (rowcount, not dispatch fact — the account-free set stays
+byte-identical to the #345 pin) — the dependency marks are
+UNCONDITIONAL (by dispatch fact, not row count; a clean client with
+empty resolutions ``{}`` publishes the same set); ``"visits"`` rides
+the phase-7 dispatch (the erased visits are named in the package,
+#375). The 404 branch publishes ``{"clients"}``; the 422/409 branches
+(validation + stale exceptions) publish NOTHING (the accumulator
+resets).
 
 AUDIT (GH #344 §4.5): the deferred-delete COMMIT journals ONE
 ``("delete", "clients", id)`` row with the label + before-snapshot —
 staged next to ``mark_changed``, BEFORE the row disappears, exactly
 where the former executor staged it. The cascade children (visitors,
-visits, join rows) are never journaled (§4.2 "one action — one row").
+visits, join rows, the #499 linked account) are never journaled (§4.2
+"one action — one row").
 """
 
 from __future__ import annotations
@@ -69,6 +73,7 @@ from src.domain.deletion import (
     BlockingDepsError,
     InvalidResolutionError,
     StaleDependenciesError,
+    _h_cascade_client_users,
     collect_dependencies,
     collect_dependency_ids,
     has_blocking_deps,
@@ -142,13 +147,18 @@ async def delete_client(
        removed by their OWNER service (canon rule 1), replacing the
        DB-level ``ondelete=CASCADE`` reliance of the interim state —
        net DB effects identical;
-    8. audit journal row (§4.5) — the client's own ``delete`` row with
-       the label + before-snapshot captured from the probe;
-    9. the client row via the own-edge brick
-       ``ClientService.delete_row_with_tags`` (client_tags join rows
-       BEFORE the row — FK with no ondelete), then
-       ``mark_changed("client_tags")``;
-    10. ``True`` (route → 204).
+     8. users cascade (#499) — the client account linked via
+        ``users.client_id`` dies with the card (the staff-edge mirror;
+        ``_h_cascade_client_users``: settings → the live client session
+        → profiles → the account; ``mark_changed("users")`` by REAL
+        ROWCOUNT only — an account-free delete publishes no "users");
+     9. audit journal row (§4.5) — the client's own ``delete`` row with
+        the label + before-snapshot captured from the probe;
+     10. the client row via the own-edge brick
+        ``ClientService.delete_row_with_tags`` (client_tags join rows
+        BEFORE the row — FK with no ondelete), then
+        ``mark_changed("client_tags")``;
+     11. ``True`` (route → 204).
 
     Service singletons are resolved by their factories INSIDE the body
     on EVERY call (never captured at module level): the API atomicity
@@ -234,7 +244,19 @@ async def delete_client(
     # too (mark by dispatch fact, like the nullify marks above).
     mark_changed("visits")
 
-    # ── Phase 8: audit journal row (§4.5) — next to the disappearance ─
+    # ── Phase 8: users cascade — the #499 client account dies with the
+    #    card (the staff-edge mirror; settings + the live client session
+    #    + profiles deleted first — their FKs carry no usable ondelete).
+    #    The GH #327 Client rule: cascade deps are scenario phases, NOT
+    #    CASCADE_HANDLERS dispatch. ``users`` is marked by REAL ROWCOUNT
+    #    (not dispatch fact): the #345 event-grid pin covers the
+    #    account-free commit, and archive_staff set the rowcount
+    #    precedent — an account-free delete publishes no "users". ─────
+    deleted_users = await _h_cascade_client_users(client_service, db_session, id)
+    if deleted_users:
+        mark_changed("users")
+
+    # ── Phase 9: audit journal row (§4.5) — next to the disappearance ──
     # LAZY audit import — cycle discipline (usecases sit inside the
     # services walk graph, see src/events/entities.py WARNING). The
     # helpers read label/snapshot fields via getattr, so the Pydantic
@@ -249,9 +271,9 @@ async def delete_client(
         changes=snapshot_pairs_before("clients", client),
     )
 
-    # ── Phase 9: own-edge — client_tags join rows + the client row ───
+    # ── Phase 10: own-edge — client_tags join rows + the client row ────
     await client_service.delete_row_with_tags(db_session, id)
     mark_changed("client_tags")
 
-    # ── Phase 10: success (route → 204) ───────────────────────────────
+    # ── Phase 11: success (route → 204) ────────────────────────────────
     return True

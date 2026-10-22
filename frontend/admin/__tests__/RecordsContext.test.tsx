@@ -73,7 +73,7 @@ function makeRecord(
     id,
     activity_id: 'ev_1',
     client_id: 'c1',
-    status: 'confirmed',
+    status: 'waiting',
     seats: 1,
     comment: null,
     custom_price: null,
@@ -216,7 +216,7 @@ describe('RecordsContext — canonical cache seeding', () => {
   });
 
   it('does NOT overwrite an already-present ["record", id] entry (fresher data wins)', async () => {
-    const rec1 = makeRecord('r1', { status: 'confirmed' });
+    const rec1 = makeRecord('r1', { status: 'waiting' });
     vi.mocked(getRecordsView).mockResolvedValue(envelope([rec1]));
 
     const { Wrapper, queryClient } = createWrapper();

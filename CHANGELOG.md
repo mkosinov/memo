@@ -10,6 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-21
 
 ### Added
+- **GH #373 — Канон-тесты сида переехали из vitest админки в pytest бэкенда
+  (устранение нагрузочного флейк-класса «seed-reset в полном витест-прогоне»)**
+  — branch `seed-canon-pytest-373` (4 коммита `52d096f8..17ed0ae0`, base
+  `ab7b0f76`; 4 файла, +744/−221; спека
+  `docs/specs/2026-10-21-seed-canon-pytest-move-design.md` рев.2.1 и план
+  `docs/plans/2026-10-21-seed-canon-pytest-move-plan.md` 4/4 — оба на main,
+  unchanged by IMPL; test-infra — семантика канона не менялась, переехало
+  только место закрепления):
+  - **pytest-дом (T1–T2):** полная семантика отката к сиду — 7 SQL-тестов —
+    закреплена в `backend/tests/test_seed_canon.py` (маркер `misc`): обвязка
+    (реальная схема + реальный `seed_data()`, генератор — реальный скрипт
+    списком аргументов, `shell=False`, применение канона через sqlite `.read`,
+    всё под `tmp_path`) + total restore (`52d096f8`); остальные 6 семантик —
+    словари/`sort_order`, users, user_settings, исключения, notify_templates,
+    идемпотентность (`1639ebb8`).
+  - **vitest-дом (T3):** `frontend/admin/__tests__/seed-reset.test.ts`
+    сокращён 26 → 19 — SQL-группа удалена, осталась лёгкая TypeScript-обёртка
+    (резолверы путей, аватары, громкая ошибка) с инвариантом «никаких внешних
+    процессов» (`09bcf30e`).
+  - **Доки/гигиена (T4):** coverage map в `docs/tests_workflow.md` +
+    `.gitignore` `*.canon.sql` (`17ed0ae0`).
+  - **Мотивация:** 7 тяжёлых SQL-тестов под пулом процессов полного
+    vitest-прогона раздувались с 2.3 с до 39 с против таймаута 30 с → ложный
+    красный «фронт сломан»; бюджеты/таймауты сознательно не поднимались,
+    e2e-слой и CI-джобы не тронуты.
+  - **Tests:** `test_seed_canon.py` **7 passed**; регрессия `test_seed.py`
+    **29 passed**; admin vitest полный **3100/3100** (188 файлов);
+    `seed-reset.test.ts` **19 passed**; grep-страж
+    `execSync|spawn|child_process` — 0 совпадений; ruff clean; ревью T1
+    compliance + quality, T2/T3 compliance, T4 spot-check — все ✅; визуальный гейт N/A → exit 0.
+  - Status: `docs/status/2026-10-21-seed-canon-pytest-373.md`
 - **GH #480 — Экспорт TS-юнионов перечислений контракта из `@memo/api-client`
   (удаление локальных копий в админке)** — branch
   `480-api-client-enum-unions` (6 коммитов `b7dc85fc..a6a4b61e`, base

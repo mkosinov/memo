@@ -76,9 +76,12 @@ cleanup() {
     [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null
     [ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null
     [ -n "$ADMIN_PID" ] && kill "$ADMIN_PID" 2>/dev/null
-    [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null
-    [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null
-    [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null
+    # `|| true`: a child may already be dead (e.g. a failed dispatcher) —
+    # its `kill` would return 1 and, under set -e, abort cleanup BEFORE
+    # the remaining children get killed (orphaned redis/worker).
+    [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+    [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+    [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
     wait 2>/dev/null
     echo -e "${GREEN}Done.${NC}"
     exit 0

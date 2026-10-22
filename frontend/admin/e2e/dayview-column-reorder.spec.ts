@@ -89,14 +89,20 @@ async function getColumnHeaders(page: import('@playwright/test').Page): Promise<
 /**
  * Move the focused, currently-grabbed column one slot LEFT and settle before
  * dropping. Empirically (probe-verified on this grid): the first ArrowLeft
- * commits over → the left sibling but its translate lands on a later press,
- * so press twice, then wait until the dragged rect rests displaced (non-zero
- * transform) — dropping inside the re-measure window resolves over=null and
- * the reorder is a no-op.
+ * commits over → the left sibling and WIPES the pickup transform (dnd-kit
+ * re-measures; the settle translate lands only on the next press), so press
+ * twice, then wait until the dragged rect rests displaced toward the sibling
+ * — dropping inside the re-measure window resolves over=null and the reorder
+ * is a no-op. Every press is gated on its own DOM observable (#479/#138
+ * poll-guard pattern, GH #499): under CI load a fixed nap between the two
+ * presses can desynchronize the choreography and turn the drop into a no-op.
  */
 async function settleMoveLeftThenDrop(page: import('@playwright/test').Page, header: ReturnType<typeof page.locator>) {
-  await page.keyboard.press('ArrowLeft'); // over → the left sibling
-  await page.waitForTimeout(150);
+  await page.keyboard.press('ArrowLeft'); // over → the left sibling…
+  // …committed once the pickup transform (translate3d(0px, …)) is wiped.
+  await expect
+    .poll(() => header.evaluate((el) => el.style.transform), { timeout: 5_000 })
+    .toBe('');
   await page.keyboard.press('ArrowLeft'); // settle translate onto the sibling's rect
   await expect
     .poll(() => header.evaluate((el) => el.style.transform), { timeout: 5_000 })

@@ -40,12 +40,55 @@
 #                    redirects the whole stack into; a terminal/pipe run
 #                    has no tail-able log → «log not created».
 #
+#   NOTIFY_E2E_ENABLED Optional (#483 Task 8, spec §3.5): '1' switches
+#                    the script from a numbered shard to THE ENABLED
+#                    notify e2e stack. Requires SHARD_ID=notify (the
+#                    enabled stack's own identifier — not a shard
+#                    number). In this mode:
+#                      - own port pair OUTSIDE the shard ranges:
+#                        backend 8005 / web 3006 by default, overridable
+#                        via NOTIFY_E2E_BACKEND_PORT / NOTIFY_E2E_SHARD_PORT
+#                        (collisions with 8001-8004 / 3002-3005 are fatal);
+#                      - BACKEND_URL / NEXT_PUBLIC_API_URL default to the
+#                        own backend address (explicit caller values win);
+#                      - an OWN SHARD_RUN_TAG is derived from the backend
+#                        port (printf '%06x' — deterministic, parallel
+#                        enabled runs on different pairs never collide
+#                        with each other or with shard tags) and the
+#                        manual 2-port run lease is written/removed as
+#                        for any tagged manual stack;
+#                      - NOTIFY_ENABLED=true is exported and REDIS_URL is
+#                        taken ONLY from an explicitly passed value (CI
+#                        service container). Without one, a local
+#                        EPHEMERAL redis-server child is spawned on
+#                        NOTIFY_E2E_REDIS_PORT (default 6380 — never the
+#                        dev/phase 6379) with --save "" --appendonly no.
+#                        Local-transport prerequisites (numeric port,
+#                        redis-server binary present, port free) are
+#                        validated BEFORE the run lease is written — a
+#                        rejected run leaves no lease and no wiped
+#                        storage; silently reusing a foreign answering
+#                        instance is forbidden (payloads carry PII).
+#                      - the notify DISPATCHER runs as a child process
+#                        (.venv/bin/python -m src.notify.dispatcher,
+#                        exec'd like dev.sh so TERM reaches it; the
+#                        worker skeleton is NOT part of the e2e stack);
+#                      - the trap cleanup is extended to the new
+#                        children (dispatcher, redis).
+#                    Unset/empty → byte-identical legacy shard behavior:
+#                    every enabled-mode branch is behind the flag (S2).
+#
 # Usage:
 #   SHARD_ID=1 SHARD_PORT=3002 BACKEND_PORT=8001 \
 #     TEST_DB_PATH=backend/test_memo_shard1.db \
 #     BACKEND_URL=http://127.0.0.1:8001 \
 #     NEXT_PUBLIC_API_URL=http://127.0.0.1:8001 \
 #     bash scripts/e2e-shard-start.sh
+#
+#   Enabled notify stack (#483):
+#     NOTIFY_E2E_ENABLED=1 SHARD_ID=notify \
+#       TEST_DB_PATH=backend/test_memo_notify_e2e.db \
+#       bash scripts/e2e-shard-start.sh
 #
 # The script:
 #   1. Starts FastAPI backend on BACKEND_PORT
@@ -58,6 +101,78 @@
 # Playwright connects via reuseExistingServer: true.
 
 set -euo pipefail
+
+# ── #483 Task 8: enabled notify e2e mode (spec §3.5) ──────────────────────
+# Validated/normalized BEFORE the legacy required-var loop so the enabled
+# mode can DEFAULT its own port pair and URL vars (the loop then sees a
+# complete variable set in both modes). Default mode: every branch below
+# is skipped — zero behavior change (S2).
+REDIS_PID=""
+DISPATCHER_PID=""
+NOTIFY_E2E_ENABLED="${NOTIFY_E2E_ENABLED:-}"
+case "$NOTIFY_E2E_ENABLED" in
+  ""|1) ;;
+  *)
+    echo "ERROR: NOTIFY_E2E_ENABLED must be '1' or unset (got '$NOTIFY_E2E_ENABLED')" >&2
+    exit 1
+    ;;
+esac
+if [ "$NOTIFY_E2E_ENABLED" != "1" ] && [ "$SHARD_ID" = "notify" ]; then
+  echo "ERROR: SHARD_ID=notify (the enabled notify stack) requires NOTIFY_E2E_ENABLED=1" >&2
+  exit 1
+fi
+if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
+  if [ "$SHARD_ID" != "notify" ]; then
+    echo "ERROR: NOTIFY_E2E_ENABLED=1 requires SHARD_ID=notify (got '$SHARD_ID')" >&2
+    exit 1
+  fi
+  # Own port pair: explicit SHARD_PORT/BACKEND_PORT win, then the
+  # NOTIFY_E2E_* knobs, then the defaults — outside the shard ranges.
+  SHARD_PORT="${SHARD_PORT:-${NOTIFY_E2E_SHARD_PORT:-3006}}"
+  BACKEND_PORT="${BACKEND_PORT:-${NOTIFY_E2E_BACKEND_PORT:-8005}}"
+  case "$SHARD_PORT" in
+    3002|3003|3004|3005)
+      echo "ERROR: NOTIFY_E2E web port $SHARD_PORT collides with the shard range 3002-3005" >&2
+      exit 1
+      ;;
+  esac
+  case "$BACKEND_PORT" in
+    8001|8002|8003|8004)
+      echo "ERROR: NOTIFY_E2E backend port $BACKEND_PORT collides with the shard range 8001-8004" >&2
+      exit 1
+      ;;
+  esac
+  # Required URL vars point at the OWN pair (explicit caller values win —
+  # CI/local overrides stay possible; the backend-url.ts guard still
+  # demands same hosts at the Playwright boundary).
+  BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:$BACKEND_PORT}"
+  NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://127.0.0.1:$BACKEND_PORT}"
+  # ── local-transport prerequisites (spec §3.5) ────────────────────────────
+  # REDIS_URL unset → this stack spawns its OWN ephemeral redis-server.
+  # All three prerequisites are validated HERE — BEFORE the run lease is
+  # written and before any storage is touched — so a rejected run leaves
+  # NO lease and NO wiped DB (review round 1: a pre-trap exit after
+  # write_run_lease leaks the lease file; these guards fire pre-lease).
+  if [ -z "${REDIS_URL:-}" ]; then
+    NOTIFY_E2E_REDIS_PORT="${NOTIFY_E2E_REDIS_PORT:-6380}"
+    case "$NOTIFY_E2E_REDIS_PORT" in
+      ''|*[!0-9]*)
+        echo "ERROR: NOTIFY_E2E_REDIS_PORT must be a number (got '$NOTIFY_E2E_REDIS_PORT')" >&2
+        exit 1
+        ;;
+    esac
+    if ! command -v redis-server >/dev/null 2>&1; then
+      echo "ERROR: redis-server not found on PATH — the local notify transport cannot start" >&2
+      echo "       Install redis-server or set REDIS_URL explicitly (a conscious choice of another instance)" >&2
+      exit 1
+    fi
+    if timeout 1 bash -c "(: </dev/tcp/127.0.0.1/$NOTIFY_E2E_REDIS_PORT) 2>/dev/null"; then
+      echo "ERROR: port $NOTIFY_E2E_REDIS_PORT already in use — notify e2e stack cannot start" >&2
+      echo "       Free the port, set NOTIFY_E2E_REDIS_PORT, or set REDIS_URL explicitly" >&2
+      exit 1
+    fi
+  fi
+fi
 
 # ── Validate env vars ──────────────────────────────────────────────────────
 for var in SHARD_ID SHARD_PORT BACKEND_PORT TEST_DB_PATH BACKEND_URL NEXT_PUBLIC_API_URL; do
@@ -72,8 +187,10 @@ done
 # the root cause. #415 (spec §3.2) — canonical shards are now 1-4 (four
 # native CI shards); ports stay caller-provided (1→3002/8001 ...
 # 4→3005/8004). Fail here, at the source.
+# #483 (spec §3.5) — the enabled notify stack's identifier 'notify' joins
+# the allowlist (coherence with NOTIFY_E2E_ENABLED already enforced above).
 case "$SHARD_ID" in
-  1|2|3|4) ;;
+  1|2|3|4|notify) ;;
   *)
     echo "ERROR: SHARD_ID must be 1–4 (canonical shards; got '$SHARD_ID')" >&2
     exit 1
@@ -87,6 +204,13 @@ esac
 # `..`, spaces) are excluded by format — the same ^[0-9a-f]{6}$ regex
 # write_run_lease enforces. Fatal BEFORE any resource/dir creation.
 SHARD_RUN_TAG="${SHARD_RUN_TAG:-}"
+if [ "$NOTIFY_E2E_ENABLED" = "1" ] && [ -z "$SHARD_RUN_TAG" ]; then
+  # #483: the enabled stack derives its OWN tag from the backend port —
+  # deterministic (%06x of the port), so parallel enabled runs on different
+  # port pairs get different tags/leases and never collide with shard tags
+  # (those are random hex) or each other. 8005 → 001f45.
+  SHARD_RUN_TAG="$(printf '%06x' "$BACKEND_PORT")"
+fi
 if [ -n "$SHARD_RUN_TAG" ]; then
   _run_tag_re='^[0-9a-f]{6}$'
   if ! [[ "$SHARD_RUN_TAG" =~ $_run_tag_re ]]; then
@@ -214,6 +338,30 @@ rm -rf "$ABS_FILES_DIR"
 # (each shard compiles into its own .next-shard-<id>, exported above); the
 # legacy port-guarded wipe of the shared frontend/admin/.next is retired.
 
+# ── #483: enabled-mode notify transport (spec §3.5) ───────────────────────
+# AFTER the wipes (a rejected non-test DB must touch no storage), BEFORE
+# the backend — mirrors dev.sh ordering: the dispatcher's fail-fast PING
+# gate needs the transport up. REDIS_URL comes ONLY from an explicit value
+# (CI service container); a local run spawns its OWN ephemeral redis-server
+# child — silently reusing a foreign answering instance is forbidden
+# (payloads carry PII). The local-transport prerequisites (binary present,
+# port free, numeric port) were validated in the enabled-mode preamble —
+# BEFORE the lease write — so this block only spawns.
+if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
+  export NOTIFY_ENABLED=true
+  if [ -n "${REDIS_URL:-}" ]; then
+    echo "[notify-e2e] REDIS_URL set explicitly — not starting a local redis-server"
+  else
+    echo "[notify-e2e] Starting redis-server (ephemeral: --save \"\" --appendonly no) on :$NOTIFY_E2E_REDIS_PORT..."
+    redis-server --bind 127.0.0.1 --port "$NOTIFY_E2E_REDIS_PORT" --save "" --appendonly no &
+    REDIS_PID=$!
+    export REDIS_URL="redis://localhost:$NOTIFY_E2E_REDIS_PORT/0"
+    # Let redis accept connections before the dispatcher's PING gate fires.
+    sleep 1
+  fi
+  export REDIS_URL
+fi
+
 # ── Start FastAPI backend ──────────────────────────────────────────────────
 # Backend starts first so Alembic can create/migrate tables.
 cd "$BACKEND_DIR"
@@ -225,8 +373,15 @@ echo "[shard-$SHARD_ID] Backend PID: $BACKEND_PID"
 # Cleanup on exit
 cleanup() {
   echo "[shard-$SHARD_ID] Shutting down (backend PID: $BACKEND_PID)..."
+  # #483: notify children — `|| true` on every kill: a child may already
+  # be dead (a failed dispatcher) and, under set -e, its kill would abort
+  # cleanup BEFORE the remaining children get killed (dev.sh 9c78076f).
+  [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
+  [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   remove_own_lease
 }
 trap cleanup EXIT INT TERM
@@ -264,6 +419,21 @@ echo "[shard-$SHARD_ID] Database seeded."
 # file from a previous stack is removed by the generator itself.
 python3 "$ROOT_DIR/scripts/gen_seed_canon.py" "$ABS_DB_PATH" "$ABS_DB_PATH.canon.sql"
 
+# ── #483: notify dispatcher child (spec §3.5) ─────────────────────────────
+# Enabled mode ONLY (default mode never spawns it — S2). Same spawn form as
+# dev.sh: project venv python with `exec` inside the subshell so $! is the
+# REAL process and the TERM teardown reaches it (`uv run` does not forward
+# signals — it would orphan the dispatcher). The worker skeleton is NOT
+# part of the e2e stack (spec §3.5 names only the dispatcher). Inherits
+# DATABASE_URL / REDIS_URL / NOTIFY_ENABLED exports; ENV_FILE matches the
+# backend's own launch env below.
+if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
+  echo "[notify-e2e] Starting notify dispatcher..."
+  (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.notify.dispatcher) &
+  DISPATCHER_PID=$!
+  echo "[notify-e2e] Dispatcher PID: $DISPATCHER_PID"
+fi
+
 
 # ── Start Next.js frontend ────────────────────────────────────────────────
 cd "$ADMIN_DIR"
@@ -284,10 +454,18 @@ STACK_FRONTEND_PORTS=("$SHARD_PORT")
 STACK_BACKEND_PORTS=("$BACKEND_PORT")
 _orig_cleanup() {
   echo "[shard-$SHARD_ID] Shutting down..."
+  # #483: notify children FIRST (the dispatcher stops enqueueing before
+  # its transport disappears), then the servers; every kill/wait guarded
+  # with `|| true` — set -e must never abort cleanup mid-way (dev.sh
+  # 9c78076f precedent).
+  [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$FRONTEND_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$FRONTEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
+  [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   _sweep_masked STACK_FRONTEND_PORTS "next dev -p $SHARD_PORT" "next dev -p $SHARD_PORT" "next-server (v"
   _sweep_masked STACK_FRONTEND_PORTS "next-server" "next dev -p $SHARD_PORT" "next-server (v"
   _sweep_masked STACK_BACKEND_PORTS "uvicorn" "uvicorn"

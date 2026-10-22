@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-22
+
+### Added
+- **GH #483 — Инфраструктура доставки оповещений: часть 2 системы оповещений
+  (Redis-очередь, скелет воркера, dev/CI-контуры)** — branch
+  `483-notify-infra` (11 коммитов `6a68bf9b..a31e50c6`, base `a806e3aa`;
+  21 файл, +3498/−63; спека
+  `docs/specs/2026-10-21-notify-infra-483-design.md` рев.3, план
+  `docs/plans/2026-10-21-notify-infra-483-plan.md` 9/9; семья #476 — часть
+  2/5, часть 1 = #482 на main; по умолчанию поведение прежнее — инвариант
+  S2):
+  - **Транспорт (T1–T3):** зависимость `redis>=8.1.0` + смоук Redis Streams
+    против Redis 7.0.15 (`6a68bf9b`); `REDIS_URL` — SecretStr +
+    production-гейт `rediss://` с кредами (`3df375f6`); адаптер `RedisQueue`
+    — Streams + потребительские группы (ADR 013) + маркированный контур
+    `pytest -m redis` с coverage omit (`6b52891d`).
+  - **Диспетчер и воркер (T4–T5):** выбор адаптера `RedisQueue` с
+    fail-fast-гейтами (код 2), `to_thread` в точках вызова очереди,
+    транспортный сбой постановки не жжёт attempts (`9240a110`); скелет
+    воркера `python -m src.notify.worker` — гейты, SIGTERM/SIGINT, холостой
+    цикл — потребление очереди, часть 3 (ADR 009) (`c5465aa7`).
+  - **Живучесть (T6):** маркированный S4 — переживание FLUSHDB своего
+    индекса: перезаливка состаренной queued-задачи, окно
+    `NOTIFY_REENQUEUE_AFTER`, без дублей (`abe9112a`).
+  - **`dev.sh --notify` (T7):** эфемерный Redis (без save/AOF, гаснет со
+    стеком) + диспетчер + воркер дочерними процессами; занятый 6379 —
+    остановка; без флага поведение не меняется (`3be67c23`); смоук вскрыл
+    2 интеграционных бага — фиксы: диспетчер создаёт потребительские
+    группы при старте (на свежем Redis XAUTOCLAIM падал NOGROUP,
+    `c723aeef`) и `|| true` в cleanup против сирот под `set -e`
+    (`9c78076f`).
+  - **Включённый e2e-режим + Playwright S1 (T8):** `NOTIFY_E2E_ENABLED=1` +
+    `SHARD_ID=notify` на порт-паре 8005/3006 вне шардов, dryrun Case
+    17a–17e; спека S1 — запись с чекбоксом «отправлять оповещения»,
+    sync-point на queued-задаче, очередь проверяет маркированный тест
+    (payload §4.2) (`6b81762a`; fix-итерация `14c57041` — TS2339 в
+    finally-блоке спеки + предпосылки транспорта до `write_run_lease`
+    против класса lease-leak).
+  - **CI (T9):** джоба `notify-tests` — сервис-контейнер Redis 7.4.11
+    (healthcheck ping), юнит-слой `pytest -m redis` + страж пустого
+    зелёного, e2e-слой под `NOTIFY_TESTS_E2E_ENABLED=1`; `backend-tests` и
+    4 шарда байт-нетронуты (`a31e50c6`).
+  - **Tests:** backend `pytest -m "not redis"` **3517p/15s**, маркированный
+    контур `pytest -m redis` **28p** + 1 условный skip, admin vitest
+    **3107/3107** (188 файлов), `tsc --noEmit` **0**, dry-run
+    e2e-shard-start **107 PASS**, ruff **113/113**, mypy **0**, визуальный
+    гейт N/A → exit 0; сценарии S1–S5 ✅; реальная зелень `notify-tests`
+    доказывается на PR CI.
+  - Status: `docs/status/2026-10-22-notify-infra-483.md`
+
 ## [Unreleased] — 2026-10-21
 
 ### Added

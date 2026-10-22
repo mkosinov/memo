@@ -87,6 +87,12 @@ class NotifyQueue(Protocol):
         and inbound) back into delivery."""
         ...
 
+    def ensure_consumer_groups(self) -> None:
+        """Consumer-start duty (§3.1): create this consumer's groups on
+        the up-streams (``XGROUP CREATE ... MKSTREAM``; only BUSYGROUP
+        suppressed) — ``reclaim_hanging`` needs them to exist."""
+        ...
+
     def claim_inbound(self) -> list[InboundEvent]:
         """Reliable claim for ``notify:inbound`` channel replies."""
         ...
@@ -168,3 +174,6 @@ class FakeQueue:
         self._servicing_statuses = []
         self._inbound = self._servicing_inbound + self._inbound
         self._servicing_inbound = []
+
+    def ensure_consumer_groups(self) -> None:
+        """No-op: plain lists need no consumer groups (§3.1 seam)."""

@@ -411,12 +411,17 @@ async def run_dispatcher(
     queue: NotifyQueue,
     stop: asyncio.Event,
 ) -> None:
-    """The three cycles of the dispatcher: reclaim hanging queue items at
-    process start (§4.4), then one ``asyncio.TaskGroup`` — a stop-event
-    winds all loops down correctly (§3.8). The sync adapter's start call
-    goes through ``asyncio.to_thread`` (§3.1); a failure there is a
-    process-start failure — loud, before any cycle begins."""
+    """The three cycles of the dispatcher: ensure the consumer groups
+    and reclaim hanging queue items at process start (§3.1, §4.4), then
+    one ``asyncio.TaskGroup`` — a stop-event winds all loops down
+    correctly (§3.8). The sync adapter's start calls go through
+    ``asyncio.to_thread`` (§3.1); a failure there is a process-start
+    failure — loud, before any cycle begins."""
     interval = settings.NOTIFY_POLL_INTERVAL
+    # Consumer-start duty (§3.1): the groups MUST exist before the
+    # XAUTOCLAIM of ``reclaim_hanging`` — on a fresh Redis they don't,
+    # and the start would die with NOGROUP before any cycle begins.
+    await asyncio.to_thread(queue.ensure_consumer_groups)
     await asyncio.to_thread(queue.reclaim_hanging)
 
     async def polling_iteration() -> None:

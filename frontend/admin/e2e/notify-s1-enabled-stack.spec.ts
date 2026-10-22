@@ -73,9 +73,13 @@ test.describe('Notify enabled stack — S1 (GH #483)', () => {
     const testPhone = `+7${nationalDigits}`;
     const testClientName = `Notify S1 Client ${uid}`;
 
-    let recordRow: Record<string, any> | null = null;
-    let clientRow: Record<string, any> | null = null;
-    let taskRow: Record<string, any> | null = null;
+    // `any` (house pattern, activity-details-modal.spec.ts): the rows are
+    // assigned inside expect.poll callbacks, which control-flow analysis
+    // cannot see — a `T | null` annotation narrows to `null`/`never` in
+    // the finally block and breaks the optional-chain cleanup accesses.
+    let recordRow: any = null;
+    let clientRow: any = null;
+    let taskRow: any = null;
 
     try {
       // 2. ACTION — open the activity modal → «+» tab → fill the form

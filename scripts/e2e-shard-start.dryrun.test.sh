@@ -149,7 +149,14 @@
 #     CUSTOM port; BOTH children killed by the trap (TERMED lines).
 #   → Case 17c: guard negatives (direct calls): enabled×shard-id, notify
 #     id×default mode, garbage flag value, both shard-range port
-#     collisions — each exit 1 with its diagnostic BEFORE any machinery.
+#     collisions, non-numeric NOTIFY_E2E_REDIS_PORT — each exit 1 with
+#     its diagnostic BEFORE any machinery. Plus a bespoke missing-binary
+#     guard call (PATH emptied for the child; bash invoked by absolute
+#     path — env resolves the command via the NEW environment).
+#   → Case 17e: BUSY redis port (a REAL listener on NOTIFY_E2E_REDIS_PORT)
+#     — the guard fires BEFORE the lease write and the wipes: exit 1 +
+#     diagnostic, NO lease in the runs dir, the provided DB file
+#     byte-intact.
 #   → Case 17d (S2): default-mode control — REDIS_URL in the env is
 #     ignored, NO redis-server / dispatcher child is ever spawned; the
 #     legacy run (names, lease-less, wipe) is byte-identical.
@@ -1891,7 +1898,8 @@ for spec in \
   "notify-no-flag SHARD_ID=notify requires+NOTIFY_E2E_ENABLED=1" \
   "bad-flag NOTIFY_E2E_ENABLED=yes SHARD_ID=notify NOTIFY_E2E_ENABLED+must+be" \
   "web-port-collision NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_SHARD_PORT=3003 collides" \
-  "backend-port-collision NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_BACKEND_PORT=8002 collides"
+  "backend-port-collision NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_BACKEND_PORT=8002 collides" \
+  "redis-port-non-numeric NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_REDIS_PORT=6380x NOTIFY_E2E_REDIS_PORT+must+be+a+number"
 do
   _label="${spec%% *}"; _rest="${spec#* }"
   _want="${_rest##* }"
@@ -1911,6 +1919,101 @@ do
     FAIL=1
   fi
 done
+
+# 17c-2 — redis-server MISSING from PATH (a CI runner without redis): the
+# binary guard must fire LOUDLY (a background spawn of a missing binary
+# would fail silently under set -e → degraded stack). PATH is emptied for
+# the CHILD, so the child bash must be invoked by absolute path — env(1)
+# resolves the command via the NEW environment. Everything before the
+# guard is builtin-only (flag guards, port defaults, tag derivation).
+CASE17_EMPTY_PATH="$CASE17_DIR/empty-path"; mkdir -p "$CASE17_EMPTY_PATH"
+set +e
+env PATH="$CASE17_EMPTY_PATH" NOTIFY_E2E_ENABLED=1 SHARD_ID=notify \
+  TEST_DB_PATH="$CASE17_DIR/test_memo_notify_e2e.db" \
+  /bin/bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-redis-missing.out" 2>&1
+_grc=$?
+set -e
+if [ "$_grc" -eq 1 ] && grep -q "redis-server not found" "$CASE17_DIR/guard-redis-missing.out"; then
+  echo "PASS Case 17c-2 (#483): missing redis-server binary rejected (exit 1 + diagnostic)"
+else
+  echo "FAIL Case 17c-2 (#483): expected exit 1 + 'redis-server not found' (got rc=$_grc)"
+  cat "$CASE17_DIR/guard-redis-missing.out"
+  FAIL=1
+fi
+
+# 17e — BUSY redis port: a REAL listener holds NOTIFY_E2E_REDIS_PORT; the
+# guard must abort BEFORE the lease write and the wipes — exit 1 +
+# diagnostic, NO lease in the runs dir (the derived tag 001f45.run from
+# the default backend port 8005), the provided DB file byte-intact.
+# Holder pattern of Case 16: bind-probed port, bounded retries, readiness
+# polled; the holder is harness-owned and always reaped.
+CASE17_HOLDER="$CASE17_DIR/holder.py"
+cat > "$CASE17_HOLDER" <<'EOF'
+import socket, sys, time
+port = int(sys.argv[1])
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+s.listen(1)
+print("HOLDER-READY %d" % port, flush=True)
+time.sleep(600)
+EOF
+PY3="$(command -v python3)"
+CASE17E_PORT=""; CASE17E_HOLDER_PID=""
+for _try in $(seq 1 25); do
+  _p=$((29370 + (_try * 41) + (RANDOM % 199)))
+  if _listener_on "$_p"; then continue; fi   # busy → next candidate
+  "$PY3" "$CASE17_HOLDER" "$_p" > "$CASE17_DIR/holder-e.log" 2>&1 &
+  CASE17E_HOLDER_PID=$!
+  for _i in $(seq 1 50); do
+    if ! kill -0 "$CASE17E_HOLDER_PID" 2>/dev/null; then break; fi
+    if grep -q "HOLDER-READY $_p" "$CASE17_DIR/holder-e.log" 2>/dev/null && _listener_on "$_p"; then
+      CASE17E_PORT="$_p"; break
+    fi
+    sleep 0.2
+  done
+  [ -n "$CASE17E_PORT" ] && break
+  # bind race (candidate taken between probe and bind) → retry next port
+  kill -9 "$CASE17E_HOLDER_PID" 2>/dev/null || true
+  wait "$CASE17E_HOLDER_PID" 2>/dev/null || true
+  CASE17E_HOLDER_PID=""
+done
+
+if [ -n "$CASE17E_PORT" ]; then
+  echo "  → Case 17e holder up on :$CASE17E_PORT (pid $CASE17E_HOLDER_PID)"
+  CASE17E_DB="$CASE17_DIR/test_memo_notify_e2e_busy.db"
+  printf 'seed' > "$CASE17E_DB"
+  set +e
+  NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_REDIS_PORT="$CASE17E_PORT" \
+    TEST_DB_PATH="$CASE17E_DB" \
+    bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-redis-busy.out" 2>&1
+  _grc=$?
+  set -e
+  if [ "$_grc" -eq 1 ] && grep -q "already in use" "$CASE17_DIR/guard-redis-busy.out"; then
+    echo "PASS Case 17e (#483): busy redis port rejected (exit 1 + diagnostic)"
+  else
+    echo "FAIL Case 17e (#483): expected exit 1 + 'already in use' (got rc=$_grc)"
+    cat "$CASE17_DIR/guard-redis-busy.out"
+    FAIL=1
+  fi
+  if [ ! -e "$RUNS_DIR/001f45.run" ]; then
+    echo "PASS Case 17e (#483): no lease left behind (guard fires BEFORE the lease write)"
+  else
+    echo "FAIL Case 17e (#483): lease $RUNS_DIR/001f45.run leaked by the busy-port exit"
+    FAIL=1
+  fi
+  if [ "$(cat "$CASE17E_DB" 2>/dev/null || true)" = "seed" ]; then
+    echo "PASS Case 17e (#483): storage untouched — DB file byte-intact (guard fires BEFORE the wipes)"
+  else
+    echo "FAIL Case 17e (#483): DB file was modified/wiped before the busy-port guard"
+    FAIL=1
+  fi
+  kill -9 "$CASE17E_HOLDER_PID" 2>/dev/null || true
+  wait "$CASE17E_HOLDER_PID" 2>/dev/null || true
+else
+  echo "FAIL Case 17e (#483): could not obtain a free port for the holder (25 tries)"
+  FAIL=1
+fi
 
 # 17d (S2) — default-mode control: REDIS_URL in the env is IGNORED, no
 # notify children, legacy names/lease-less run byte-identical.

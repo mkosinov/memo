@@ -62,10 +62,13 @@
 #                        service container). Without one, a local
 #                        EPHEMERAL redis-server child is spawned on
 #                        NOTIFY_E2E_REDIS_PORT (default 6380 — never the
-#                        dev/phase 6379) with --save "" --appendonly no;
-#                        a BUSY redis port stops the run with a message
-#                        (silently reusing a foreign instance is
-#                        forbidden — payloads carry PII, spec §3.5);
+#                        dev/phase 6379) with --save "" --appendonly no.
+#                        Local-transport prerequisites (numeric port,
+#                        redis-server binary present, port free) are
+#                        validated BEFORE the run lease is written — a
+#                        rejected run leaves no lease and no wiped
+#                        storage; silently reusing a foreign answering
+#                        instance is forbidden (payloads carry PII).
 #                      - the notify DISPATCHER runs as a child process
 #                        (.venv/bin/python -m src.notify.dispatcher,
 #                        exec'd like dev.sh so TERM reaches it; the
@@ -144,6 +147,31 @@ if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   # demands same hosts at the Playwright boundary).
   BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:$BACKEND_PORT}"
   NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://127.0.0.1:$BACKEND_PORT}"
+  # ── local-transport prerequisites (spec §3.5) ────────────────────────────
+  # REDIS_URL unset → this stack spawns its OWN ephemeral redis-server.
+  # All three prerequisites are validated HERE — BEFORE the run lease is
+  # written and before any storage is touched — so a rejected run leaves
+  # NO lease and NO wiped DB (review round 1: a pre-trap exit after
+  # write_run_lease leaks the lease file; these guards fire pre-lease).
+  if [ -z "${REDIS_URL:-}" ]; then
+    NOTIFY_E2E_REDIS_PORT="${NOTIFY_E2E_REDIS_PORT:-6380}"
+    case "$NOTIFY_E2E_REDIS_PORT" in
+      ''|*[!0-9]*)
+        echo "ERROR: NOTIFY_E2E_REDIS_PORT must be a number (got '$NOTIFY_E2E_REDIS_PORT')" >&2
+        exit 1
+        ;;
+    esac
+    if ! command -v redis-server >/dev/null 2>&1; then
+      echo "ERROR: redis-server not found on PATH — the local notify transport cannot start" >&2
+      echo "       Install redis-server or set REDIS_URL explicitly (a conscious choice of another instance)" >&2
+      exit 1
+    fi
+    if timeout 1 bash -c "(: </dev/tcp/127.0.0.1/$NOTIFY_E2E_REDIS_PORT) 2>/dev/null"; then
+      echo "ERROR: port $NOTIFY_E2E_REDIS_PORT already in use — notify e2e stack cannot start" >&2
+      echo "       Free the port, set NOTIFY_E2E_REDIS_PORT, or set REDIS_URL explicitly" >&2
+      exit 1
+    fi
+  fi
 fi
 
 # ── Validate env vars ──────────────────────────────────────────────────────
@@ -311,24 +339,19 @@ rm -rf "$ABS_FILES_DIR"
 # legacy port-guarded wipe of the shared frontend/admin/.next is retired.
 
 # ── #483: enabled-mode notify transport (spec §3.5) ───────────────────────
-# AFTER the wipes (a rejected non-test DB must touch no storage AND spawn
-# no children), BEFORE the backend — mirrors dev.sh ordering: the
-# dispatcher's fail-fast PING gate needs the transport up. REDIS_URL comes
-# ONLY from an explicit value (CI service container); a local run spawns
-# its OWN ephemeral redis-server child — silently reusing a foreign
-# answering instance is forbidden (payloads carry PII), and a busy port
-# stops the run with a message (dev.sh precedent), never a quiet fallback.
+# AFTER the wipes (a rejected non-test DB must touch no storage), BEFORE
+# the backend — mirrors dev.sh ordering: the dispatcher's fail-fast PING
+# gate needs the transport up. REDIS_URL comes ONLY from an explicit value
+# (CI service container); a local run spawns its OWN ephemeral redis-server
+# child — silently reusing a foreign answering instance is forbidden
+# (payloads carry PII). The local-transport prerequisites (binary present,
+# port free, numeric port) were validated in the enabled-mode preamble —
+# BEFORE the lease write — so this block only spawns.
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   export NOTIFY_ENABLED=true
   if [ -n "${REDIS_URL:-}" ]; then
     echo "[notify-e2e] REDIS_URL set explicitly — not starting a local redis-server"
   else
-    NOTIFY_E2E_REDIS_PORT="${NOTIFY_E2E_REDIS_PORT:-6380}"
-    if timeout 1 bash -c "(: </dev/tcp/127.0.0.1/$NOTIFY_E2E_REDIS_PORT) 2>/dev/null"; then
-      echo "[notify-e2e] ERROR: port $NOTIFY_E2E_REDIS_PORT already in use — notify e2e stack cannot start" >&2
-      echo "[notify-e2e]        Free the port, set NOTIFY_E2E_REDIS_PORT, or set REDIS_URL explicitly" >&2
-      exit 1
-    fi
     echo "[notify-e2e] Starting redis-server (ephemeral: --save \"\" --appendonly no) on :$NOTIFY_E2E_REDIS_PORT..."
     redis-server --bind 127.0.0.1 --port "$NOTIFY_E2E_REDIS_PORT" --save "" --appendonly no &
     REDIS_PID=$!

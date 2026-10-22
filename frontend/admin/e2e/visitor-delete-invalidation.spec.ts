@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test';
-import type { APIRequestContext, Locator, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test';
 import {
   cleanup,
   cleanupRecord,
@@ -14,6 +14,7 @@ import {
   clickRowDelete,
   commitDeleteWait,
   confirmDeleteDialog,
+  installReferenceWeekClock,
   openRowActionDropdown,
   undoToast,
   waitForClientsReady,
@@ -72,6 +73,20 @@ async function columnIndex(page: Page, header: string): Promise<number> {
     if (((await ths.nth(i).textContent()) ?? '').includes(header)) return i;
   }
   throw new Error(`records table column "${header}" not found`);
+}
+
+/**
+ * GH #422: the observer reads /records, whose default period is
+ * monday..sunday of the PAGE-CLOCK week — and page.clock is PER-PAGE, so
+ * a beforeEach on the actor's `page` fixture can't cover a context-newPage
+ * observer. Every observer gets its own reference-week install here,
+ * BEFORE its first navigation (install-before-goto — the observer loads
+ * last by design, right before the delete).
+ */
+async function newRecordsObserver(context: BrowserContext): Promise<Page> {
+  const observer = await context.newPage();
+  await installReferenceWeekClock(observer);
+  return observer;
 }
 
 /** Exact-cell price matcher: 6500 → /^6[\s\u00a0\u202f]?500₽$/ — tolerant
@@ -182,7 +197,7 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
   }) => {
     // 1. SETUP + ACTOR — the shared US-1/US-2 head (factories, DB
     // pre-asserts, the open client card with the visitor row).
-    const observer = await page.context().newPage();
+    const observer = await newRecordsObserver(page.context());
     const { client, activity, record, visitor, visitorRow } =
       await openCardWithVisitTarget(page, request, 'US-1');
     try {
@@ -264,7 +279,7 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
   }) => {
     // 1. SETUP + ACTOR — the shared US-1/US-2 head (same shape: the
     // client's single record holds the target visitor's 2 visits).
-    const observer = await page.context().newPage();
+    const observer = await newRecordsObserver(page.context());
     const { client, activity, record, visitor, visitorRow } =
       await openCardWithVisitTarget(page, request, 'US-2');
     try {
@@ -361,7 +376,7 @@ test.describe('Visitor/client delete invalidates open screens (GH #375 US-1–US
       queryDBRows(`SELECT id FROM visits WHERE record_id='${record.id}'`),
     ).toHaveLength(2);
 
-    const observer = await page.context().newPage();
+    const observer = await newRecordsObserver(page.context());
     try {
       // ACTOR page — the /clients row.
       await waitForClientsReady(page, { waitForName: client.name });

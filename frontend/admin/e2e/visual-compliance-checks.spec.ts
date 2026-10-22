@@ -10,9 +10,9 @@
  *   3. The undo toast "Удалено. Отменить" is visible after deleting a saved row
  *   4. Payment totals in the /records table reflect an added payment without reload
  *
- * Approach: each test creates its own activity TODAY via factories so the
- * current week (13-19 July 2026) has a card to click. The seed data is in
- * June 2026 and not visible in the default week.
+ * Approach: each test creates its own activity via factories on the seed's
+ * REFERENCE week (GH #422 — factory default start), so the grid opened on
+ * that week has a card to click.
  *
  * Run with:
  *   pnpm exec playwright test e2e/visual-compliance-checks.spec.ts --reporter=list
@@ -30,7 +30,20 @@ import {
   cleanupRecord,
 } from './fixtures/factories';
 import { switchToRecordsTab } from './fixtures/scenarios';
-import { gotoScheduleWeek, clickActivityCard, closeModal } from './fixtures/helpers';
+import {
+  gotoScheduleWeek,
+  clickActivityCard,
+  closeModal,
+  installReferenceWeekClock,
+} from './fixtures/helpers';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+
+// GH #422: Check 4 asserts on the /records TABLE whose default period is
+// the page-clock week — pin it to the reference week the factory record
+// lives on (install-before-goto).
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
+});
 
 const SHOTS = '/tmp/visual-compliance-manual';
 
@@ -49,9 +62,9 @@ test.describe.configure({ mode: 'serial' });
  * client tab. Mirrors the pattern from unify-caches.spec.ts.
  */
 async function openClientTabFor(page: Page, recordId: string, activityId: string) {
-  // 1. Deep-link to the week containing our activity (today; #138 URL state).
-  const today = new Date().toISOString().slice(0, 10);
-  await gotoScheduleWeek(page, today);
+  // 1. Deep-link to the week containing our activity (the factory's
+  // reference week; #138 URL state, GH #422).
+  await gotoScheduleWeek(page, SEED_WEEK_MONDAY);
   await page.waitForSelector(`[data-testid="activity-${activityId}"]`, { timeout: 30_000 });
 
   // 2. Click the specific activity card by its data-testid.

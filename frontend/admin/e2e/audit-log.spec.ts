@@ -27,6 +27,7 @@
  * The #239 invariant neighbours (server-push specs) are untouched; this
  * spec only READS journal rows and mutates through ordinary entity UIs.
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
@@ -520,7 +521,7 @@ test.describe('GH #344 §9 С4 — мастер не допущен к журн�
     page,
   }) => {
     // No «Журнал» nav item in the master's menu.
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
     await expect(menubar.getByRole('link', { name: 'Журнал' })).toHaveCount(0);

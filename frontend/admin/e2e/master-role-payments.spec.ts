@@ -23,11 +23,13 @@
  * DELETE wire response before asserting the badge.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
 import {
   waitForScheduleReady, waitForRecordsReady, openModal,
+  installReferenceWeekClock,
 } from './fixtures/helpers';
 import { seedId } from './fixtures/seed-ids';
 import { switchToRecordsTab } from './fixtures/scenarios';
@@ -43,6 +45,16 @@ const BACKEND = resolveBackendUrl();
 // shard stack seeds the DB.
 test.beforeAll(() => {
   M1 = seedId('staff', 'last_name', 'Середа');
+});
+
+/**
+ * GH #422: the recalculated badge is asserted on /records, whose default
+ * period is monday..sunday of the PAGE-CLOCK week — pin the clock to the
+ * seed's reference week (install-before-goto) so the own-record fixture
+ * row sits inside the default range.
+ */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
 });
 
 
@@ -72,7 +84,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       expect((await readBadge()).trim()).toBe('Не оплачено');
 
       // ── 1. CREATE 1500 ₽ → Частично (1 500 ₽) ──────────────────────────
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);
       await expect(page.locator('[data-testid="record-payments-table"]')).toBeVisible();
@@ -95,7 +107,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       expect((await readBadge()).trim()).toMatch(/Частично \(1[\s\u00A0]?500/);
 
       // ── 2. EDIT the saved row to 3500 ₽ → ✓ Оплачено ───────────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);
@@ -118,7 +130,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       expect((await readBadge()).trim()).toBe('✓ Оплачено');
 
       // ── 3. DELETE the payment → Не оплачено again ──────────────────────
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openModal(page, { recordId: record.id });
       await switchToRecordsTab(page);

@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page, Response } from '@playwright/test';
 import { waitForScheduleReady, openAddTab } from './fixtures/helpers';
@@ -33,7 +34,7 @@ function waitForPhoneSearch(page: Page, digits: string): Promise<Response> {
 
 test.describe('Phone field country selector — record form (GH #414 scenario 4)', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   test('country switch mid-entry regroups; «+375 …» paste binds Belarus and finds the client', async ({

@@ -15,6 +15,7 @@
  *  - S4c: services screen — no «+ Добавить услугу», no «Материалы» tab, no
  *    «Материал» filter select (materials:read not granted).
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { useMasterSession } from './fixtures/master-session';
 
@@ -48,7 +49,7 @@ test.describe('GH #263 S4 — master menu + access guard', () => {
   });
 
   test('S4b: menu hides admin-only items, keeps allowed ones', async ({ page }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
 

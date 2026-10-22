@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal, withUndoWindow } from './fixtures/helpers';
 import { switchToRecordsTab } from './fixtures/scenarios';
@@ -21,7 +22,7 @@ import { queryDBRow } from './fixtures/db-query';
 test('US-M06: Admin can manage multiple payments (add and delete)', async ({
   page,
 }) => {
-  await page.goto('/schedule');
+  await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
   await waitForScheduleReady(page);
 
   await openModal(page);
@@ -106,7 +107,7 @@ test('S1: delete payment — undo toast, «Отменить» returns the row, n
   const payment = await createTestPayment(request, record.id, { amount: 1000 });
 
   try {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openRecordTab(page, record.id);
 

@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay, waitForScheduleReady } from './fixtures/helpers';
 
@@ -183,7 +184,7 @@ test.describe('DayView Column Visibility', () => {
     // Reset backend user settings to include all masters
     await resetUserSettings(request);
     // Now navigate — localStorage is clean, backend is clean
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToDayView(page, '2026-06-05');
   });
 
@@ -223,7 +224,7 @@ test.describe('DayView Column Visibility — Master Filter', () => {
     // Reset backend user settings to include all masters
     await resetUserSettings(request);
     // Now navigate — localStorage is clean, backend is clean
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToDayView(page, '2026-06-05');
   });
 
@@ -447,7 +448,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
   test('switching to locations mode and filtering shows only selected locations', async ({ page, request }) => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     // #138: the column mode is URL state (col=locations) — deep-link
     // directly instead of clicking the view selector.
     await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });
@@ -501,7 +502,7 @@ test.describe('DayView Column Visibility — Location Filter', () => {
   test('location filter: adding location makes its column appear', async ({ page, request }) => {
     await clearUserSettingsStorage(page);
     await resetUserSettings(request);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     // #138: the column mode is URL state (col=locations) — deep-link
     // directly instead of clicking the view selector.
     await gotoScheduleDay(page, '2026-06-05', { col: 'locations' });

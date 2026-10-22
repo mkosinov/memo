@@ -17,15 +17,20 @@
  * Seed anchors (backend/src/seed/seed.py; the per-test reset keeps them):
  *   week-before-last (W0) — 28 rows, 3 private (former aliases ev_2/12/23)
  *   last week (W1)        — 8 rows
- *   current week (W2)     — 9 rows, copy SOURCE for the empty next week
+ *   current week (W2)     — 9 rows, copy SOURCE for the empty next week;
+ *   W2 is the seed's reference functional week SEED_WEEK_MONDAY (C4,
+ *   GH #422 — see the beforeAll cross-check)
  * GH #491: seed ids are UUIDs — there is no id pattern to grep, so the
  * seed↔copy discriminator is the seed created_at batch (every seed row
  * precedes the first seeded record; copies are created by the API later),
- * and the week Mondays are resolved FROM THE DB (not Date.now()) so a
- * midnight rollover between stack boot and test run cannot shift windows.
+ * and the week Mondays are resolved FROM THE DB (not Date.now()) — bounded
+ * to the functional weeks and cross-checked against SEED_WEEK_MONDAY
+ * (GH #422) — so neither a midnight rollover between stack boot and test
+ * run nor the visual-week fillers can shift the windows.
  *
  * Test weeks: S1/S2/S3/S5/S7 copy into the empty next week (N = W2+7);
- * S4 into last week (W1); S8 views N2 = W2+14 (its source week is empty).
+ * S4 into last week (W1); S8 views N2 = W2+28 (beyond the visual week —
+ * its own view and its source week are both empty).
  *
  * S5/S6 archive a seed entity through the штатный admin API path — the same
  * call the locations/staff tables make (dedicated POST /{id}/archive routes,
@@ -35,6 +40,7 @@
  * update-rejects-is-active.spec.ts).
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY, addDaysIso } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { waitForScheduleReady, waitForScheduleGrid } from './fixtures/helpers';
@@ -100,13 +106,28 @@ test.beforeAll(() => {
     [M7]: { specialty: 'керамика', color: '#9A5870' },
   };
 
-  // Latest SEED activity day lands in the current seed week (the fixed
-  // reference week ended 2026-06-21, long before any relative week).
+  // C4 (GH #422): the copy pair is anchored to the seed's reference
+  // functional week — source W2 = SEED_WEEK_MONDAY, receiver = W2+7, the
+  // designed always-empty buffer week before the visual one (spec §1).
+  // An unbounded MAX() cannot pick it: the visual week (06-15…21 ev_fixed
+  // fillers) is seeded AFTER every functional week, so it would resolve W2
+  // to 06-15 and break the S1–S7 expectations. The bound keeps the
+  // DB-resolution character (the query still proves the seed anchors the
+  // functional weeks) while the cross-check pins the anchor to the single
+  // TS-side source of the reference Monday.
+  const bound = addDaysIso(SEED_WEEK_MONDAY, 7);
   const row = queryDBRow(
-    `SELECT MAX(substr(start,1,10)) AS d FROM activities WHERE ${SEED_GUARD}`,
+    `SELECT MAX(substr(start,1,10)) AS d FROM activities WHERE ${SEED_GUARD} AND substr(start,1,10) < '${bound}'`,
   );
-  if (!row || !row.d) throw new Error('copy-last-week: no seed activities found');
+  if (!row || !row.d) {
+    throw new Error('copy-last-week: no seed activities found in the functional weeks');
+  }
   W2 = mondayOf(String(row.d));
+  if (W2 !== SEED_WEEK_MONDAY) {
+    throw new Error(
+      `copy-last-week: seed reference week drifted — DB resolves ${W2}, expected ${SEED_WEEK_MONDAY} (reseed the stack)`,
+    );
+  }
   W1 = addDays(W2, -7);
   W0 = addDays(W2, -14);
 });
@@ -283,7 +304,7 @@ function expectNoSlot(masterId: string, serviceId: string, slot: string): void {
 
 test('S1: чистая неделя ← копия прошлой — карточки на тех же слотах, числа совпадают, тост, попап закрыт', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page); // current week = source, 9 cards
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY); // current week = source, 9 cards
   await switchToWeek(page, target); // empty target week
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);
 
@@ -321,7 +342,7 @@ test('S1: чистая неделя ← копия прошлой — карто
 
 test('S2: повторное копирование не дублирует — copied=0, тост «Всё уже есть», сетка не меняется', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);
 
@@ -396,7 +417,7 @@ test('S3: merge в частично занятую неделю — несовп
     capacity: 4,
   });
 
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(2);
 
@@ -435,7 +456,7 @@ test('S3: merge в частично занятую неделю — несовп
 });
 
 test('S4: индивидуальные не копируются — подсказка «K индивидуальных…», приватных в целевой нет', async ({ page }) => {
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, W1); // target = last week; source = week-before-last
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(8);
 
@@ -497,7 +518,7 @@ test('S5: архивная локация пропускается — заня�
 
   try {
     const target = addDays(W2, 7);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToWeek(page, target);
 
     await openCopyPopover(page);
@@ -544,7 +565,7 @@ test('S6: ремап архивного мастера — первый акти
   }
   try {
     const target = addDays(W2, 7);
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     await switchToWeek(page, target);
 
     await openCopyPopover(page);
@@ -611,7 +632,7 @@ test('S6: ремап архивного мастера — первый акти
 
 test('S7: снятая галка локации — её занятия не скопированы, запрос уходит с явным списком', async ({ page }) => {
   const target = addDays(W2, 7);
-  await waitForScheduleReady(page);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, target);
 
   await openCopyPopover(page);
@@ -657,8 +678,12 @@ test('S7: снятая галка локации — её занятия не с
 });
 
 test('S8: пустая прошлая неделя — пустое состояние попапа, «Скопировать» неактивна', async ({ page }) => {
-  const far = addDays(W2, 14); // its source week (N..N+6) holds nothing in seed
-  await waitForScheduleReady(page);
+  // N2 sits two weeks beyond the copy target: W2+14 is the VISUAL week
+  // (06-15…21, 10 ev_fixed rows — populated, GH #422), so the nearest
+  // week whose own view AND source week are both empty is W2+28; its
+  // source week (N..N+6) holds nothing in seed.
+  const far = addDays(W2, 28);
+  await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   await switchToWeek(page, far);
 
   await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);

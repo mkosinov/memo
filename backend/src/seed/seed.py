@@ -17,6 +17,15 @@ registry at insert time. Built-in position rows (master/admin/smm) keep
 their system-code ids — a migration-seeded dictionary with runtime logic
 keyed to the short codes, not seed-owned data.
 
+Fixed-week invariant (GH #422): every seed date is pinned — the three
+functional weeks derive from ``FUNC_WEEK_START`` (2026-06-01), the visual
+week from ``WEEK_FIXED_START`` (2026-06-15); nothing is computed from the
+current date. This relies on an API invariant: write paths accept
+activities and records dated in the past, and the fixed seed deliberately
+lives in the past. Introducing server-side ``date >= now`` validation
+would break dev, playground and e2e simultaneously — recompute the fixed
+weeks before adding such validation.
+
 Usage:
     uv run python -m seed.seed          # direct module
     uv run python -m seed               # via __main__
@@ -107,19 +116,16 @@ class _SeedIds:
 type _ActivityRow = tuple[int, str, float, float, str, str, int, bool]
 
 
-def _get_week_monday(dt: datetime) -> datetime:
-    """Return the Monday of the week containing *dt*."""
-    return dt - timedelta(days=dt.weekday())
+# Functional half of the seed is pinned to a fixed reference week (GH #422):
+# FUNC_WEEK_START is the single source of the three activity weeks — no
+# calendar derivation, so a seed run produces identical data on any day.
+# E2E and dev open these weeks explicitly (?date=…, SEED_WEEK_MONDAY on
+# the TS side); the seed no longer chases "the current week".
+FUNC_WEEK_START = datetime(2026, 6, 1)  # Monday, 2026-06-01
 
-
-_today = datetime.now()
-_THIS_WEEK_MONDAY = _get_week_monday(_today)
-_LAST_WEEK_MONDAY = _THIS_WEEK_MONDAY - timedelta(days=7)
-_WEEK_BEFORE_MONDAY = _THIS_WEEK_MONDAY - timedelta(days=14)
-
-WEEK_START = _WEEK_BEFORE_MONDAY  # week before last — records r1-r6 link here
-WEEK2_START = _LAST_WEEK_MONDAY   # last week
-WEEK3_START = _THIS_WEEK_MONDAY   # current week (so e2e tests find activities)
+WEEK_START = FUNC_WEEK_START - timedelta(days=14)  # 2026-05-18 — oldest functional week
+WEEK2_START = FUNC_WEEK_START - timedelta(days=7)  # 2026-05-25 — middle functional week
+WEEK3_START = FUNC_WEEK_START                      # 2026-06-01 — reference functional week
 
 # Fixed reference week for visual regression baselines.
 # Activities and records r1-r6 in this week have stable dates so that
@@ -196,26 +202,26 @@ _ACTIVITIES_RAW: list[_ActivityRow] = [
     (6, "m5", 16.5, 2, "Роспись одежды", "p1389", 8, False),
 ]
 
-# Activities for week 2 (June 9-15, 2026)
+# Activities for week 2 (2026-05-25…31)
 _ACTIVITIES_RAW_WEEK2: list[_ActivityRow] = [
-    # ПН (day 0) — June 9
+    # ПН (day 0) — May 25
     (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
-    # ВТ (day 1) — June 10
+    # ВТ (day 1) — May 26
     (1, "m3", 11, 2, "Картина акрилом", "alpika", 10, False),
-    # СР (day 2) — June 11
+    # СР (day 2) — May 27
     (2, "m2", 10, 2, "Роспись одежды", "alpika", 10, False),
-    # ЧТ (day 3) — June 12
+    # ЧТ (day 3) — May 28
     (3, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
-    # ПТ (day 4) — June 13
+    # ПТ (day 4) — May 29
     (4, "m5", 14, 2.5, "Картина маслом", "p1389", 8, False),
-    # СБ (day 5) — June 14
+    # СБ (day 5) — May 30
     (5, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
     (5, "m3", 14, 2, "Картина акрилом", "alpika", 10, False),
-    # ВС (day 6) — June 15
+    # ВС (day 6) — May 31
     (6, "m2", 11, 1.5, "Ручная лепка", "alpika", 6, False),
 ]
 
-# Activities for week 3 (current week — always fresh relative to today)
+# Activities for week 3 (reference functional week, 2026-06-01…07)
 _ACTIVITIES_RAW_WEEK3: list[_ActivityRow] = [
     # ПН (day 0)
     (0, "m1", 10, 3, "Морской пейзаж", "grand", 8, False),
@@ -463,7 +469,8 @@ async def _seed_tags(session: AsyncSession, ids: _SeedIds) -> None:
 
 async def _seed_activities(session: AsyncSession, ids: _SeedIds) -> None:
     # Alias prefixes keep the registry layout of the former literal ids
-    # (ev_0… for the three relative weeks, ev_fixed_0… for the fixed week).
+    # (ev_0… for the three fixed functional weeks, ev_fixed_0… for the
+    # visual fixed week).
     await _seed_activities_for(session, ids, "ev", [
         (WEEK_START, _ACTIVITIES_RAW),
         (WEEK2_START, _ACTIVITIES_RAW_WEEK2),

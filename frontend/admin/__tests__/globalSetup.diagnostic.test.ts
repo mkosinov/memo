@@ -94,7 +94,7 @@ describe('globalSetup #152 diagnostics', () => {
     await expect(globalSetupFunc()).rejects.toThrow(/Seed data is missing/);
   });
 
-  it('throws when current-week activities API returns empty', async () => {
+  it('throws when seed reference-week activities API returns empty', async () => {
     vi.mocked(sqliteExecWithRetry)
       .mockReturnValueOnce('')
       .mockReturnValueOnce('activities\nrecords')
@@ -104,7 +104,7 @@ describe('globalSetup #152 diagnostics', () => {
       json: async () => [],
     } as any);
 
-    await expect(globalSetupFunc()).rejects.toThrow(/No activities for the current week/);
+    await expect(globalSetupFunc()).rejects.toThrow(/No activities for the seed reference week/);
     expect(fetchMock).toHaveBeenCalled();
   });
 

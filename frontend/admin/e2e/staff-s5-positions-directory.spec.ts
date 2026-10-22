@@ -11,6 +11,7 @@
  * dropdown, which is what a position write could have leaked into.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { cleanup } from './fixtures/factories';
 import { waitForPositionsReady, waitForScheduleReady, waitForToast } from './fixtures/helpers';
@@ -238,7 +239,7 @@ test.describe('S5 — positions dictionary', () => {
         .sort();
       expect(actingAfter).toEqual(actingBefore);
 
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const mastersFilter = page.locator(
         '[data-testid="center-content"] button[aria-label="Мастера"]',
       );

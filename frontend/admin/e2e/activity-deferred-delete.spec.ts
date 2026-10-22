@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page, Request } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -100,7 +101,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -142,7 +143,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -218,7 +219,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -252,7 +253,10 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
         'Записи — будут удалены:',
       );
       await expect(recordLine).toHaveCount(1);
-      await expect(recordLine).toContainText(new Date().toISOString().slice(0, 10));
+      // GH #422: the one-liner's date is the created activity's own start
+      // date (backend label = Activity.start date part, ISO YYYY-MM-DD) —
+      // read it from the factory response instead of the wall clock.
+      await expect(recordLine).toContainText(activity.start.slice(0, 10));
       await expect(page.locator('[data-testid="dep-visits"]')).toContainText(
         'Посещения — будут удалены:',
       );
@@ -285,7 +289,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -362,7 +366,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -435,7 +439,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -509,7 +513,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const activity = await createTestActivity(request);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -547,7 +551,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await waitForScheduleReady(page);
+      await waitForScheduleReady(page, SEED_WEEK_MONDAY);
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 

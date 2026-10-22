@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
 import {
@@ -66,7 +67,7 @@ async function deleteActivityViaUI(
   opts?: { confirm?: boolean },
 ) {
   // B must be watching the schedule for the delete to be a real UI action.
-  await waitForScheduleReady(pageB);
+  await waitForScheduleReady(pageB, SEED_WEEK_MONDAY);
 
   const panel = pageB.locator('[data-testid="right-panel"]');
   if (!(await panel.isVisible().catch(() => false))) {
@@ -330,7 +331,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
 
       // … then A moves on to /schedule (SPA navigation keeps the cache) and
       // sees the new activity card.
-      await waitForScheduleReady(pageA);
+      await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
       const card = pageA.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
@@ -398,7 +399,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
     request,
   }) => {
     // A is watching the current week.
-    await waitForScheduleReady(pageA);
+    await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
 
     // Bare request-level write — NO X-Memo-Tab-Id header (future #6 client
     // flow simulation): origin is null, so A's toast must NOT be suppressed.
@@ -445,7 +446,7 @@ twoPages.describe('Server push invalidation — external updates (GH #239 §6)',
       predicate: (r) => r.url().includes('/api/v1/events'),
       timeout: 15_000,
     });
-    const loaded = pageA.goto('/schedule'); // cold start under the abort
+    const loaded = pageA.goto(`/schedule?date=${SEED_WEEK_MONDAY}`); // cold start under the abort
     loaded.catch(() => {}); // no unhandled rejection if t0 never observes; re-awaited below
     await firstConnectFail; // t0: the debounce armed with the first onerror
 

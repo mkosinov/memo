@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import {
@@ -37,7 +38,7 @@ test('US-S03: occupied = sum of visits for active records (excludes cancelled)',
     });
 
     // ACT: load schedule
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
 
     // ASSERT: occupied should be 4/20 (sum of visits: 1 + 3 = 4)

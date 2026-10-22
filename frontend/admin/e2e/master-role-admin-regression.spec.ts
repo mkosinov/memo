@@ -16,10 +16,11 @@
  * layer. The default project storageState is the ADMIN session (#247 T14),
  * so this spec simply does NOT call useMasterSession().
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { adminApiContext } from './fixtures/admin-context';
-import { waitForRecordsReady } from './fixtures/helpers';
+import { waitForRecordsReady, installReferenceWeekClock } from './fixtures/helpers';
 import {
   createTestClient, createTestActivity, createTestRecord,
   createTestMaster, createTestPhoto, createTestService,
@@ -27,6 +28,17 @@ import {
 } from './fixtures/factories';
 
 const BACKEND = resolveBackendUrl();
+
+/**
+ * GH #422: the default records period is monday..sunday of the PAGE-CLOCK
+ * week, and factory records live on the seed's reference week — pin the
+ * clock to it (install-before-goto) so S7b's foreign-master row lands in
+ * the default range. The clock is inert for S7a (API-only), S7c (/photos)
+ * and S7d (explicit ?date= navigation).
+ */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
+});
 
 test.describe('GH #263 S7 — admin regression: no scope, no mask', () => {
   test('S7a: /clients shows unmasked phones (seed + foreign master client)', async ({
@@ -139,7 +151,7 @@ test.describe('GH #263 S7 — admin regression: no scope, no mask', () => {
   test('S7d: admin menu keeps all sections (Клиенты/Сотрудники/Мастера…)', async ({
     page,
   }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     const menubar = page.locator('[data-testid="menubar"]');
     await expect(menubar).toBeVisible({ timeout: 30_000 });
 

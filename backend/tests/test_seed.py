@@ -448,6 +448,48 @@ async def test_seed_fixed_week_dates_in_range(db_manager: DBManager) -> None:
             )
 
 
+async def test_seed_activities_pinned_to_functional_weeks(db_manager: DBManager) -> None:
+    """GH #422: all ev_* activities land exactly in the three fixed weeks.
+
+    Guard canon #341: expected spans and counts are LITERALS here —
+    deliberately NOT imported from the seed's WEEK_*/FUNC_WEEK_START
+    constants, so editing a seed week constant fails loudly in this test
+    instead of silently following the constant (importing them would make
+    the guard vacuous).
+
+    ev_* spans (inclusive Mon…Sun), counts from the seed's week lists:
+      week 1 (WEEK_START):  2026-05-18…24 — 28 activities
+      week 2 (WEEK2_START): 2026-05-25…31 —  8 activities
+      week 3 (WEEK3_START): 2026-06-01…07 —  9 activities
+    Together with the 10 ev_fixed_* in 2026-06-15…21 (guarded above) these
+    account for every seeded activity: nothing may sit outside all four
+    spans (the 2026-06-08…14 gap included).
+    """
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT CASE "
+                "WHEN start >= '2026-05-18' AND start < '2026-05-25' THEN 'w1' "
+                "WHEN start >= '2026-05-25' AND start < '2026-06-01' THEN 'w2' "
+                "WHEN start >= '2026-06-01' AND start < '2026-06-08' THEN 'w3' "
+                "WHEN start >= '2026-06-15' AND start < '2026-06-22' THEN 'fixed' "
+                "ELSE 'outside' END AS bucket, COUNT(*) AS n "
+                "FROM activities GROUP BY bucket"
+            )
+        )
+        buckets = {row.bucket: row.n for row in result}
+
+    expected = {"w1": 28, "w2": 8, "w3": 9, "fixed": 10}
+    assert buckets == expected, (
+        f"Seed activity week distribution drifted from the fixed weeks "
+        f"(expected {expected}, got {buckets})"
+    )
+
+
 async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
     """Seed photos carry fixed rising created_at (2026-06-15..21, noon).
 

@@ -20,6 +20,7 @@
  * resolution (name / sort order / fixed-week slot) instead of a literal id.
  */
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -151,7 +152,7 @@ test.describe('S3 — migration smoke: seed staff, activities and records intact
     expect(r1Row!.master_color).toBe('#5B8C7A');
 
     // ── 7. Расписание живо: the schedule screen renders this week's cards ──
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     const cardCount = await page.locator('[data-testid^="activity-"]').count();
     expect(cardCount).toBeGreaterThan(0);
   });

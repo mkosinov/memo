@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal, waitForClientsReady } from './fixtures/helpers';
@@ -37,7 +38,7 @@ test.describe('Wave 6 — Record status derived from visits', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await waitForScheduleReady(page);
       await openModal(page, { recordId: record.id });
 
@@ -87,7 +88,7 @@ test.describe('Wave 6 — Record status derived from visits', () => {
   test('Scenario 2: add payment from activity modal updates totals', async ({
     page,
   }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openModal(page);
 
@@ -187,7 +188,7 @@ test.describe('Wave 6 — Record status derived from visits', () => {
   test('Scenario 4: add visitor from modal shows in list', async ({
     page,
   }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openModal(page);
 

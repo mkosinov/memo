@@ -1,9 +1,10 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { waitForRecordsReady, withUndoWindow } from './fixtures/helpers';
+import { waitForRecordsReady, withUndoWindow, installReferenceWeekClock } from './fixtures/helpers';
 import { queryDBRow } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import {
   createTestClient,
   createTestActivity,
@@ -26,7 +27,15 @@ const BACKEND = resolveBackendUrl();
  * No page.route mocking, no waitForTimeout for server-sync waits.
  *
  * Requires: backend on :8000 (frontend via playwright webServer).
+ *
+ * GH #422: the default records period is monday..sunday of the PAGE-CLOCK
+ * week, and factory records live on the seed's reference week — pin the
+ * clock to it (install-before-goto) so rows created in tests are inside
+ * the default range without each test widening the filters.
  */
+test.beforeEach(async ({ page }) => {
+  await installReferenceWeekClock(page);
+});
 
 /** Read the server total from the "N всего" pagination label. */
 async function readServerTotal(page: Page): Promise<number> {
@@ -432,13 +441,21 @@ test.describe('Records Page — Table and Filters', () => {
   // ── 12. Pagination — server total + page 2 disjoint ──────────────────────
 
   test('12. Pagination — server total and page navigation', async ({ page, request }) => {
-    // Seed 12 records (> default per_page=10) on current-week activities.
-    // Seed records r1-r6 live in the fixed week 2026-06-15, so the current-week
-    // server total is driven by our 12 records alone.
+    // Seed 12 records (> default per_page=10) on reference-week activities.
+    // Seed records r1-r6 live in the fixed week 2026-06-15, so the default
+    // period's server total is driven by our 12 records alone. GH #422:
+    // each record gets a DISTINCT start (10:00, 10:05, …) — the shared
+    // factory-default timestamp made the date-sort ties undeterministic
+    // under server pagination (page 1/2 could overlap).
     const ts = Date.now();
     const seeded = [];
     for (let i = 0; i < 12; i++) {
-      seeded.push(await createTestRecordWithClient(request, `PgClient-${ts}-${i}`));
+      const minute = String(i * 5).padStart(2, '0');
+      seeded.push(
+        await createTestRecordWithClient(request, `PgClient-${ts}-${i}`, {
+          start: `${SEED_WEEK_MONDAY}T10:${minute}:00`,
+        }),
+      );
     }
 
     try {
@@ -448,8 +465,8 @@ test.describe('Records Page — Table and Filters', () => {
       const total = await readServerTotal(page);
       expect(total).toBeGreaterThanOrEqual(12);
 
-      // Page 1: collect client names (unique per seeded record; the date
-      // column is useless for disjointness — all activities share "now")
+      // Page 1: collect client names (unique per seeded record; also the
+      // date keys are distinct now — GH #422 — but names stay the anchor)
       const pageOneNames = await page
         .locator('tbody tr td:nth-child(2)')
         .allTextContents();
@@ -463,19 +480,21 @@ test.describe('Records Page — Table and Filters', () => {
       await page.getByRole('button', { name: '2', exact: true }).click();
       await pageTwoWait;
 
-      // expect.poll guard: pageTwoWait (waitForResponse) resolves at response
-      // RECEIPT, but RecordsContext keeps the previous page's rows rendered
-      // (placeholderData: keepPreviousData) until the page-2 query commits —
-      // a one-shot read raced that commit and compared page-1 names against
-      // themselves (GH #479, PR #507 shard 2). Mirrors the sort-test poll
-      // above.
+      // Settle BEFORE reading: waitForResponse resolves at response RECEIPT,
+      // while React commits the page-2 rows a frame later — a raw read in
+      // that gap returns the STALE page-1 names → false overlap flake
+      // (#479 read-before-render family, same race as the sort poll in
+      // test 11; hit by the cold-compile leg of the PR #515 verification).
+      // Poll until the rendered names actually leave the page-1 signature,
+      // then read and assert — a genuine overlap never becomes disjoint and
+      // still fails the strictness below.
       await expect
         .poll(
           async () =>
-            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('\n'),
-          { timeout: 3_000 },
+            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('|'),
+          { timeout: 10_000 },
         )
-        .not.toBe(pageOneNames.join('\n'));
+        .not.toBe(pageOneNames.join('|'));
 
       // Page 2 rows are disjoint from page 1 rows
       const pageTwoNames = await page
@@ -1170,9 +1189,16 @@ test.describe('Records Page — Table and Filters', () => {
     ).toContainText('Посетил');
 
     // The table is filtered: every row is Anna's, every badge «visited».
+    // Settle BEFORE enumerating: under CI load the table transiently renders
+    // a superset (RecordsContext keepPreviousData + the mirror/adoption
+    // query-key transition — the June window alone is 6 rows, window+status
+    // without q is 4) before the fully-filtered result commits; a rows.all()
+    // snapshot of that tail then loses its nth → «element(s) not found»
+    // (PR #515 flake; same race family as test 12's #479, fixed via #507).
+    // toHaveCount(2) waits out the transient WITHOUT loosening the contract:
+    // the seed pins exactly the two visited «Анна» rows (r1/r4).
     const rows = page.locator('tbody tr');
-    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
-    expect(await rows.count()).toBeGreaterThan(0);
+    await expect(rows).toHaveCount(2, { timeout: 20_000 });
     for (const row of await rows.all()) {
       await expect(row).toContainText('Анна');
     }

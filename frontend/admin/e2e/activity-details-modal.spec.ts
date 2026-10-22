@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
@@ -27,7 +28,7 @@ const BACKEND = resolveBackendUrl();
 
 test.describe('ActivityDetailsModal — Real User Scenarios', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── Scenario 1: Create record — verify DB persistence ─────────────────
@@ -168,7 +169,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       expect(beforeRow).not.toBeNull();
 
       // Reload to pick up new data
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
       // 2. ACTION — open modal, navigate to client tab, click delete
@@ -236,7 +237,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const { client, record } = await createCascadeSeedRecord(request, activity);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
       // 2. ACTION — open modal → client tab → «Удалить запись» → dialog →
@@ -302,7 +303,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       expect(beforePayments.length).toBe(0);
 
       // Reload to pick up new data
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
       // 2. ACTION — open modal, go to client tab, add payment
@@ -484,7 +485,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
     const record = await createTestRecord(request, activity.id, client.id);
 
     try {
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
 
       // 2. ACTION — open modal → client tab → «Удалить запись» → dialog
@@ -647,7 +648,7 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       // Reload /schedule so the freshly created activity is fetched into the
       // current week (beforeEach already primed a now-stale activityRange
       // cache). Mirrors scenarios 2/3/8.
-      await page.goto('/schedule');
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
       await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
       // Open that activity's modal, scoped to the record (navigates to the

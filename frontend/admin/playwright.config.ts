@@ -95,6 +95,11 @@ export default defineConfig({
     // 127.0.0.1 too — localhost would make every API fetch cross-site
     // (cookie silently dropped) and trip the backend CSRF line.
     baseURL: `http://127.0.0.1:${SHARD_PORT}`,
+    // GH #422: pin the browser timezone so date rendering (week/day views,
+    // "today" highlighting) stops depending on the runner's locale — CI is
+    // already UTC; local runs align with it. Visual baselines were recorded
+    // in CI-UTC and do not change.
+    timezoneId: 'UTC',
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 720 },
     navigationTimeout: 60_000,

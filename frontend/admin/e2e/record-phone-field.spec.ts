@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page, Response } from '@playwright/test';
 import {
@@ -52,7 +53,7 @@ function ruDigits(): string {
 
 test.describe('Record-form phone — create flows (GH #414 scenarios 1–3)', () => {
   test.beforeEach(async ({ page }) => {
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
   });
 
   // ── Scenario 1: запись с новым номером RU — компакт в базе, группировка ──

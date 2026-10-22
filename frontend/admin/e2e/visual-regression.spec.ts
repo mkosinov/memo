@@ -97,7 +97,7 @@ test.describe('Activity Modal — Visual Regression', () => {
     // visual regression baselines date-stable.
     // Must be called BEFORE page.goto() — clock.install injects an init script.
     await page.clock.install({ time: new Date('2026-06-15T10:00:00') });
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, '2026-06-15');
   });
 
   test('activity modal — settings tab', async ({ page }) => {

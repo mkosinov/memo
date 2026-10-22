@@ -2,6 +2,8 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { createTestTag, cleanup } from './fixtures/factories';
 import { seedId } from './fixtures/seed-ids';
+import { installReferenceWeekClock } from './fixtures/helpers';
+import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY, addDaysIso } from './fixtures/seed-week';
 import type { APIRequestContext } from '@playwright/test';
 
 /**
@@ -387,24 +389,20 @@ test.describe('#349 Task 10 — single-char q: field restored, wire without q', 
 });
 
 // ─── #349 Task 7 — records: period (datePair) + table filters ─────────────
-// Not in WAVE_PAGES: the seed records live in June 2026, so the BARE
-// /records route (default current-week period) renders ZERO rows — the
-// parameterized smoke (rows visible on the bare route) cannot apply. The
+// Not in WAVE_PAGES: the parameterized smoke expects rows on the BARE route,
+// which is only meaningful when the page-clock week HAS seed rows — the
+// describe's frozen clock pins it to the reference week (GH #422). The
 // dedicated cases below cover the wave contract page-specifically.
 
-/** ISO monday..sunday of the CURRENT week — the records default period. */
-function defaultWeekISO(): { monday: string; sunday: string } {
-  const day = new Date();
-  const today = new Date(day.getFullYear(), day.getMonth(), day.getDate());
-  const dow = (today.getDay() + 6) % 7; // 0 = Monday
-  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
-  const sunday = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000);
-  const iso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { monday: iso(monday), sunday: iso(sunday) };
-}
-
 test.describe('#349 Task 7 — records: period + filters in one URL', () => {
+  // GH #422: the records default period is monday..sunday of the PAGE-CLOCK
+  // week — pin it to the seed's reference week (install-before-goto) so the
+  // default-period asserts below are SEED_WEEK derivatives, not the
+  // runner's calendar.
+  test.beforeEach(async ({ page }) => {
+    await installReferenceWeekClock(page);
+  });
+
   // Seed facts: all records' activities are 2026-06-15..20; «Анна Иванова»
   // has two visited records at location «Гранд Отель Поляна» — the combined
   // link below yields exactly those rows deterministically (GH #491: the
@@ -451,29 +449,33 @@ test.describe('#349 Task 7 — records: period + filters in one URL', () => {
     page,
   }) => {
     await page.goto('/records');
-    // The default week is empty of seed rows — wait for the bar itself.
+    // The default week is the reference week (frozen clock) — wait for the
+    // bar itself (row count is not the subject here).
     await expect(page.getByLabel('Фильтр по дате от')).toBeVisible({ timeout: 20_000 });
 
     // A period change is a HISTORY STEP: editing «Дата от» pushes ?from=.
+    // GH #422: fill the NEXT week's Monday — a fill EQUAL to the default
+    // Monday would be stripped from the URL by the hook's canonical
+    // serialization (hazard documented in schedule-url-state US-4).
+    const nextMonday = addDaysIso(SEED_WEEK_MONDAY, 7);
     const dateFrom = page.getByLabel('Фильтр по дате от');
-    await dateFrom.fill('2026-06-01');
-    await expect(page).toHaveURL(/from=2026-06-01/, { timeout: 10_000 });
+    await dateFrom.fill(nextMonday);
+    await expect(page).toHaveURL(new RegExp(`from=${nextMonday}`), { timeout: 10_000 });
 
     // «назад» cancels the period change: no params, default week restored.
     await page.goBack();
     await expect(page).toHaveURL(/\/records$/, { timeout: 10_000 });
-    const { monday, sunday } = defaultWeekISO();
-    await expect(dateFrom).toHaveValue(monday);
-    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(sunday);
+    await expect(dateFrom).toHaveValue(SEED_WEEK_MONDAY);
+    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(SEED_WEEK_SUNDAY);
   });
 
   test('dirty period (from > to) → default week, URL never rewritten', async ({ page }) => {
     await page.goto('/records?from=2030-12-31&to=2020-01-01');
 
-    // Both sides fall back to the default current-week monday..sunday…
-    const { monday, sunday } = defaultWeekISO();
-    await expect(page.getByLabel('Фильтр по дате от')).toHaveValue(monday, { timeout: 20_000 });
-    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(sunday);
+    // Both sides fall back to the default week (the frozen clock's
+    // reference monday..sunday)…
+    await expect(page.getByLabel('Фильтр по дате от')).toHaveValue(SEED_WEEK_MONDAY, { timeout: 20_000 });
+    await expect(page.getByLabel('Фильтр по дате до')).toHaveValue(SEED_WEEK_SUNDAY);
 
     // …and the dirty URL stays as-is (silent read, no rewrite).
     await expect(page).toHaveURL(/from=2030-12-31&to=2020-01-01/);

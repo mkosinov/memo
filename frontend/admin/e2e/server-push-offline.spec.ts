@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import {
   waitForRecordsReady,
@@ -190,8 +191,10 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       // OWN write through A's UI — carries A's real tab header, the backend
       // echoes it as origin {type:'tab', id:<A's tab id>}.
       const marker = `${baseMarker}${markerSuffix}`;
-      const today = new Date().toISOString().slice(0, 10);
-      await openAddTab(pageA, { date: today });
+      // GH #422: quick-add targets a card on the reference week (the grid
+      // the fixture's clock pins «today» to — the record stays inside the
+      // records default period).
+      await openAddTab(pageA, { date: SEED_WEEK_MONDAY });
 
       // GH #414: the composite phone field treats a «+»-fill as a PASTE —
       // RU binds, the national remainder commits; the anchor `input-phone`
@@ -285,7 +288,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
 
     // Schedule load: activity GETs pass (only /events is aborted), the page
     // is interactive while the channel is dead.
-    await waitForScheduleReady(pageA);
+    await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
 
     // S1 — the persistent toast appears within the 8s CEILING (5s debounce
     // + ES error latency; probe: ~4.4s from ready). Scoped by text: the
@@ -341,7 +344,7 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
     await ctxA.route('**/api/v1/records**', (route) => route.abort('connectionreset'));
 
     try {
-      await waitForScheduleReady(pageA);
+      await waitForScheduleReady(pageA, SEED_WEEK_MONDAY);
       // Let the debounce-armed flag settle (isChannelDown flips on the FIRST
       // onerror — near-instant — but the loss toast itself is not needed here).
       await pageA.waitForTimeout(1_000);
@@ -373,8 +376,9 @@ serverPushPages.describe('Server push invalidation — offline & own mutations (
       // chain in useRecordMutations — NOT a query, so the §5.4 gate cannot
       // swallow it). After the navigation phase's observed ZERO, exactly
       // ONE action-error toast must appear.
-      const today = new Date().toISOString().slice(0, 10);
-      await openAddTab(pageA, { date: today });
+      // GH #422: quick-add targets a reference-week card (openAddTab needs
+      // a visible activity — only the seed weeks have them).
+      await openAddTab(pageA, { date: SEED_WEEK_MONDAY });
       // «+»-fill = paste under GH #414 — the composite field commits the
       // national remainder; the create chain below stays the same.
       await pageA.getByTestId('input-phone').fill(`+7999${Date.now().toString().slice(-7)}`);

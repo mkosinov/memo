@@ -1,10 +1,11 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
 
 test('US-M03: Admin can add visitor and see it in modal without F5', async ({
   page,
 }) => {
-  await page.goto('/schedule');
+  await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
   await waitForScheduleReady(page);
 
   // Open an activity via custom event (bypasses @dnd-kit pointer interception)

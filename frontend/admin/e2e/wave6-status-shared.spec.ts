@@ -1,3 +1,4 @@
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, openModal, waitForRecordsReady } from './fixtures/helpers';
 
@@ -41,7 +42,7 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
   test('Scenario 5: same StatusPicker in activity modal ClientTab', async ({
     page,
   }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openModal(page);
 
@@ -77,7 +78,7 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     page,
   }) => {
     // Navigate to schedule and open modal to check StatusPicker structure
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openModal(page);
 

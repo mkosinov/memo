@@ -1,4 +1,5 @@
 import { resolveBackendUrl } from './lib/backend-url';
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import type { Page, APIRequestContext } from '@playwright/test';
 import {
@@ -169,7 +170,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
     // the fixed-week seed record explicitly — the untargeted scan picks the
     // earliest record, and parallel specs' leaked factory records could
     // steal the modal.
-    await waitForScheduleReady(page);
+    await waitForScheduleReady(page, SEED_WEEK_MONDAY);
     const activity = await openModal(page, { recordId: seedFixedWeekRecordId() });
     expect(activity).toBeTruthy();
     const activityId = (activity as { id: string }).id;
@@ -300,7 +301,7 @@ test.describe('Combobox dictionary scenarios (US-1…US-6)', () => {
   // ── US-5: stamps panel — master by surname ──────────────────────────────
 
   test('US-5: stamps panel master searchable by surname («Фамилия Имя»)', async ({ page }) => {
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15_000 });
 
     // Right panel starts collapsed → open it via the topbar stamp toggle

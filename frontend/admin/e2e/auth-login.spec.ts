@@ -15,6 +15,7 @@
  * seeded admin used by every other e2e test (lockout itself is
  * unit/API-covered).
  */
+import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { seedStaffUser, E2E_PASSWORD } from './fixtures/factories';
 import { waitForScheduleReady, openModal } from './fixtures/helpers';
@@ -47,7 +48,7 @@ test.describe('User Scenario 1 — admin signs in', () => {
     await expect(page.getByRole('heading', { name: 'Управление материалами' })).toBeVisible({ timeout: 15_000 });
 
     // «Платежи» — the payments table inside the activity modal's client tab.
-    await page.goto('/schedule');
+    await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
     await waitForScheduleReady(page);
     await openModal(page);
     await switchToRecordsTab(page);

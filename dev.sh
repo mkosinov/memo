@@ -40,12 +40,19 @@ _ensure_port_free() {
 # ── Parse arguments ────────────────────────────────────────────────
 RESTART=false
 ADMIN_MODE=false
+NOTIFY_MODE=false
 for arg in "$@"; do
     case "$arg" in
         -r|--restart) RESTART=true ;;
         --admin|-a)   ADMIN_MODE=true ;;
+        --notify)     NOTIFY_MODE=true ;;
     esac
 done
+
+# Notify child PIDs (--notify section below); empty when the flag is off
+REDIS_PID=""
+DISPATCHER_PID=""
+WORKER_PID=""
 
 # ── Kill dev processes (--restart) ────────────────────────────────
 if $RESTART; then
@@ -69,11 +76,42 @@ cleanup() {
     [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null
     [ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null
     [ -n "$ADMIN_PID" ] && kill "$ADMIN_PID" 2>/dev/null
+    # `|| true`: a child may already be dead (e.g. a failed dispatcher) —
+    # its `kill` would return 1 and, under set -e, abort cleanup BEFORE
+    # the remaining children get killed (orphaned redis/worker).
+    [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+    [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+    [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
     wait 2>/dev/null
     echo -e "${GREEN}Done.${NC}"
     exit 0
 }
 trap cleanup SIGINT SIGTERM
+
+# ── Notify contour (--notify, spec §3.5) ──────────────────────────
+# The notify contour uses a DEDICATED Redis: silently reusing someone
+# else's answering instance is forbidden (stream payloads carry PII).
+if $NOTIFY_MODE; then
+    export NOTIFY_ENABLED=true
+    if [ -n "${REDIS_URL:-}" ]; then
+        # Explicit REDIS_URL — a conscious choice of another instance:
+        # no port check, no own redis-server.
+        echo -e "${BLUE}Notify: REDIS_URL set explicitly — not starting a local redis-server${NC}"
+    else
+        export REDIS_URL="redis://localhost:6379/0"
+        if _port_in_use 6379; then
+            echo -e "${YELLOW}  ✗ Port 6379 already in use — notify contour cannot start${NC}" >&2
+            echo -e "${YELLOW}    Free the port or set REDIS_URL explicitly (a conscious choice of another instance)${NC}" >&2
+            exit 1
+        fi
+        echo -e "${BLUE}Starting redis-server (ephemeral: --save \"\" --appendonly no) on :6379...${NC}"
+        redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no &
+        REDIS_PID=$!
+        # Let redis accept connections before the dispatcher/worker
+        # fail-fast gates (empty URL / failed PING → exit 2) fire.
+        sleep 1
+    fi
+fi
 
 # ── Seed DB if not exists ──────────────────────────────────────────
 if [ ! -f "$BACKEND_DIR/memo.db" ]; then
@@ -95,6 +133,19 @@ if _ensure_port_free 8000; then
     export ENV_FILE=.env.dev
     (cd "$BACKEND_DIR" && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload) &
     BACKEND_PID=$!
+fi
+
+# ── Start notify dispatcher + worker (--notify) ───────────────────
+# Spawned via the project venv python with `exec` so $! is the real
+# process: `uv run` does not forward SIGTERM to its child, which would
+# orphan the dispatcher/worker on stack shutdown.
+if $NOTIFY_MODE; then
+    echo -e "${BLUE}Starting notify dispatcher...${NC}"
+    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.dispatcher) &
+    DISPATCHER_PID=$!
+    echo -e "${BLUE}Starting notify worker (skeleton)...${NC}"
+    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.worker) &
+    WORKER_PID=$!
 fi
 
 # ── Start frontend/web ─────────────────────────────────────────────
@@ -119,6 +170,9 @@ echo -e "${GREEN}  Backend:   http://localhost:8000${NC}"
 echo -e "${GREEN}  Web:       http://localhost:3000${NC}"
 if [ -n "$ADMIN_PID" ]; then
     echo -e "${GREEN}  Admin:     http://localhost:3001${NC}"
+fi
+if $NOTIFY_MODE; then
+    echo -e "${GREEN}  Notify:    dispatcher + worker${NC}"
 fi
 echo -e "${GREEN}  API docs:  http://localhost:8000/docs${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

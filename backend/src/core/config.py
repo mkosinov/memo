@@ -2,8 +2,9 @@
 
 import os
 from typing import Annotated
+from urllib.parse import urlparse
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import NoDecode
 
@@ -51,6 +52,10 @@ class Settings(BaseSettings):
     NOTIFY_CHANNEL_PRIORITY: str = "telegram"
     # Seconds; a queued task older than this is re-enqueued (spec §3.8).
     NOTIFY_REENQUEUE_AFTER: int = 120
+    # Transport endpoint for the notify queue — Redis Streams (part 2,
+    # spec §3.3). Empty = transport not configured. SecretStr: the URL
+    # carries credentials and must never surface in repr/logs/errors.
+    REDIS_URL: SecretStr = SecretStr("")
     # Wall-clock zone of the business — the single time interpretation
     # for the future/past predicate and message text (spec §3.2).
     # Explicit zone, never the server TZ (panel finding).
@@ -91,6 +96,33 @@ class Settings(BaseSettings):
             )
         if not self.OTP_PEPPER:
             self.OTP_PEPPER = "dev-otp-pepper"
+        return self
+
+    @model_validator(mode="after")
+    def _require_redis_url_in_production(self) -> "Settings":
+        """An enabled production notify subsystem demands an authenticated
+        TLS transport: ``rediss://`` with credentials (GH #483 spec §3.3 —
+        unencrypted and unauthenticated are rejected alike). Error
+        messages state the requirement only — never the URL value."""
+        if self.ENV != "production" or not self.NOTIFY_ENABLED:
+            return self
+        url = self.REDIS_URL.get_secret_value()
+        if not url:
+            raise ValueError(
+                "REDIS_URL must be set when ENV=production and "
+                "NOTIFY_ENABLED=true (notify transport not configured)"
+            )
+        parsed = urlparse(url)
+        if parsed.scheme != "rediss":
+            raise ValueError(
+                "REDIS_URL must use rediss:// (TLS) when ENV=production "
+                "and NOTIFY_ENABLED=true"
+            )
+        if not (parsed.username or parsed.password):
+            raise ValueError(
+                "REDIS_URL must include credentials when ENV=production "
+                "and NOTIFY_ENABLED=true"
+            )
         return self
 
     @field_validator("CORS_ORIGINS", mode="before")

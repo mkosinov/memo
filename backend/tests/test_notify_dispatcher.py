@@ -29,12 +29,17 @@ Covered (spec §5, US-5–US-8):
 
 import asyncio
 import logging
+import os
+import subprocess
+import sys
+import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
@@ -42,9 +47,11 @@ from src.core.config import settings
 from src.notify import dispatcher
 from src.notify.models import DomainEvent, NotifyTask
 from src.notify.queue import FakeQueue
+from src.notify.redis_queue import TRANSPORT_NOT_CONFIGURED_MESSAGE, NotifyTransportError
 from src.notify.render import RenderError
 from src.notify.scenarios import SCENARIOS
-from tests.conftest import query_db, query_db_params
+from tests.conftest import BACKEND_DIR, query_db, query_db_params
+from tests.notify_redis_support import capture_notify_logs
 
 pytestmark = pytest.mark.integration
 
@@ -178,6 +185,52 @@ def _task_row(task_id: str, *cols: str) -> dict:
     return rows[0]
 
 
+def _age_task(task_id: str, age_seconds: int = 300) -> None:
+    """Rewind ``updated_at`` behind the re-enqueue predicate (raw SQL —
+    determinism without waiting out ``NOTIFY_REENQUEUE_AFTER``)."""
+    stale = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=age_seconds)
+    query_db_params(
+        "UPDATE notify_tasks SET updated_at = :u WHERE id = :i",
+        {"u": stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "i": task_id},
+    )
+
+
+class _TransportBrokenQueue(FakeQueue):
+    """FakeQueue whose transport-facing calls raise the typed transport
+    error — a deterministic dead-Redis stand-in (no server, no marks).
+    The message mirrors the adapter's real failure text (class + message,
+    no bodies)."""
+
+    def __init__(self, *, fail_enqueue: bool = True, fail_claim: bool = True) -> None:
+        super().__init__()
+        self._fail_enqueue = fail_enqueue
+        self._fail_claim = fail_claim
+
+    def enqueue_task(self, payload: dict) -> None:
+        if self._fail_enqueue:
+            raise NotifyTransportError(
+                "notify queue transport failed during enqueue_task:"
+                " ConnectionError: mock-dead-redis"
+            )
+        super().enqueue_task(payload)
+
+    def claim_statuses(self):
+        if self._fail_claim:
+            raise NotifyTransportError(
+                "notify queue transport failed during claim notify:statuses:"
+                " ConnectionError: mock-dead-redis"
+            )
+        return super().claim_statuses()
+
+    def claim_inbound(self):
+        if self._fail_claim:
+            raise NotifyTransportError(
+                "notify queue transport failed during claim notify:inbound:"
+                " ConnectionError: mock-dead-redis"
+            )
+        return super().claim_inbound()
+
+
 def _event_row(event_id: str) -> dict:
     rows = query_db(
         "SELECT processed_at, attempts, processing_error FROM domain_events"
@@ -240,6 +293,119 @@ class TestMain:
         monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "")
         with pytest.raises(ValueError, match="NOTIFY_CHANNEL_PRIORITY"):
             await dispatcher.main(FakeQueue())
+
+
+# ── main(): transport adapter selection — GH #483 Task 4 (spec §3.1, S3) ────
+
+
+class TestMainTransportGates:
+    """Enabled without a configured/working transport is a LOUD exit code
+    2 (spec §3.1, S3) — the part-1 FakeQueue fallback is gone."""
+
+    async def test_enabled_empty_url_exits_code_2_with_stable_message(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        monkeypatch.setattr(settings, "REDIS_URL", SecretStr(""))
+        with (
+            capture_notify_logs("memo.notify.redis_queue") as messages,
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            await dispatcher.main()
+        assert exit_info.value.code == 2
+        assert any(TRANSPORT_NOT_CONFIGURED_MESSAGE in m for m in messages)
+
+    async def test_enabled_unreachable_redis_exits_code_2_loudly_without_url_leak(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        monkeypatch.setattr(
+            settings, "REDIS_URL", SecretStr("redis://default:topsecret@127.0.0.1:1/0")
+        )
+        with (
+            capture_notify_logs("memo.notify.redis_queue") as messages,
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            await dispatcher.main()
+        assert exit_info.value.code == 2
+        # loud: the PING refusal is journalled with the exception class
+        assert any("transport unavailable" in m for m in messages)
+        # hygiene: the URL value never appears (spec §3.3)
+        assert all("topsecret" not in m for m in messages)
+
+    async def test_adapter_selection_unwraps_secret_url_and_runs_built_queue(
+        self, monkeypatch
+    ) -> None:
+        """Non-empty ``REDIS_URL`` → ``connect_or_exit(<unwrapped url>)``;
+        the queue it returns is what the cycles run."""
+        monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        monkeypatch.setattr(settings, "REDIS_URL", SecretStr("redis://localhost:6379/0"))
+        built = FakeQueue()
+        seen: dict[str, str] = {}
+        ran: dict[str, object] = {}
+
+        def fake_connect(url: str, **kwargs: object) -> FakeQueue:
+            seen["url"] = url
+            return built
+
+        async def fake_run(
+            session_factory: object, queue: FakeQueue, stop: asyncio.Event
+        ) -> None:
+            ran["queue"] = queue
+
+        monkeypatch.setattr(dispatcher, "connect_or_exit", fake_connect)
+        monkeypatch.setattr(dispatcher, "run_dispatcher", fake_run)
+
+        await dispatcher.main()
+
+        assert seen["url"] == "redis://localhost:6379/0"
+        assert ran["queue"] is built
+
+    async def test_injected_queue_skips_adapter_selection(self, monkeypatch) -> None:
+        """Part-1 test seam (unchanged): an explicitly injected queue is
+        used as is — the gates never run for it."""
+        monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        injected = FakeQueue()
+        ran: dict[str, object] = {}
+
+        def forbidden_connect(url: str, **kwargs: object) -> FakeQueue:
+            raise AssertionError("adapter selection must not run for an injected queue")
+
+        async def fake_run(
+            session_factory: object, queue: FakeQueue, stop: asyncio.Event
+        ) -> None:
+            ran["queue"] = queue
+
+        monkeypatch.setattr(dispatcher, "connect_or_exit", forbidden_connect)
+        monkeypatch.setattr(dispatcher, "run_dispatcher", fake_run)
+
+        await dispatcher.main(injected)
+
+        assert ran["queue"] is injected
+
+
+class TestMainExitCodePropagation:
+    """S3: the PROCESS exits 2 — ``__main__`` must not swallow the gate's
+    ``SystemExit(2)`` (part 1 returned None and the code was lost)."""
+
+    def test_python_m_exits_code_2_when_transport_not_configured(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k not in ("REDIS_URL", "ENV")}
+        env.update(ENV="development", NOTIFY_ENABLED="true", REDIS_URL="")
+        proc = subprocess.run(
+            [sys.executable, "-m", "src.notify.dispatcher"],
+            cwd=str(BACKEND_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        assert proc.returncode == 2
+        assert TRANSPORT_NOT_CONFIGURED_MESSAGE in proc.stdout + proc.stderr
 
 
 # ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
@@ -586,6 +752,116 @@ class TestReenqueue:
         assert queue.tasks == []
 
 
+# ── enqueue-point transport failure — GH #483 Task 4 (spec §3.1) ────────────
+
+
+class TestEnqueueTransportFailure:
+    """A TYPED transport failure at the enqueue point is not a scenario
+    failure: the event's ``attempts`` must not burn (the re-enqueue cycle
+    owns recovery); scenario errors keep the 1→2→3 policy unchanged."""
+
+    async def test_transport_error_does_not_burn_attempts_scenarios_still_do(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
+        dead = await _stage_event(db_session, occurred_at=base)
+        boom = await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
+
+        async def transport_dead(event, session, queue) -> None:
+            # the §3.4 contract shape: task + processed_at committed,
+            # enqueue AFTER the commit — the failure leaves a queued task
+            session.add(
+                NotifyTask(
+                    event_id=event.id,
+                    scenario="new_record",
+                    status="queued",
+                    text="готовый текст",
+                    channels=[{"name": "telegram", "address": "+7OLD"}],
+                )
+            )
+            event.processed_at = datetime.now(UTC).replace(tzinfo=None)
+            await session.commit()
+            raise NotifyTransportError(
+                "notify queue transport failed during enqueue_task:"
+                " ConnectionError: mock-dead-redis"
+            )
+
+        async def scenario_boom(event, session, queue) -> None:
+            raise RenderError("template exploded")
+
+        async def selective(event, session, queue) -> None:
+            if event.id == dead.id:
+                await transport_dead(event, session, queue)
+            else:
+                await scenario_boom(event, session, queue)
+
+        monkeypatch.setitem(SCENARIOS, "new_record", selective)
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
+
+        # transport failure: attempts did NOT move, no processing_error,
+        # the queued task waits for the re-enqueue cycle (§3.1)
+        dead_row = _event_row(dead.id)
+        assert dead_row["attempts"] == 0
+        assert dead_row["processing_error"] is None
+        assert dead_row["processed_at"] is not None  # closed by its own handler
+        task_rows = query_db(
+            f"SELECT status, reenqueues FROM notify_tasks WHERE event_id = '{dead.id}'"
+        )
+        assert task_rows[0]["status"] == "queued"
+        assert task_rows[0]["reenqueues"] == 0
+
+        # contrast, same sweep: a scenario error DID burn an attempt
+        boom_row = _event_row(boom.id)
+        assert boom_row["attempts"] == 1
+        assert boom_row["processing_error"] is None  # attempt 1 — not written yet
+
+        # loud + log hygiene: exception class in the journal, no message
+        # bodies, no addresses (§3.1)
+        assert any("transport" in m and "ConnectionError" in m for m in messages)
+        assert all("готовый текст" not in m for m in messages)
+        assert all("+7OLD" not in m for m in messages)
+
+
+class TestReenqueueTransportFailure:
+    """A failed enqueue still counts the re-enqueue (a dead transport must
+    not churn forever) — the EXISTING cap path ends the task as
+    «не доставлено» (spec §3.1)."""
+
+    async def test_failed_enqueue_counts_toward_cap_and_cap_fails(
+        self, db_engine, db_session
+    ) -> None:
+        task = await _stage_queued_task(
+            db_session, reenqueues=dispatcher.REENQUEUE_CAP - 1, age_seconds=300
+        )
+        factory = _session_factory(db_engine)
+        broken = _TransportBrokenQueue()
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.reenqueue_stale_tasks(factory, broken)
+
+        # the enqueue FAILED, but the counter moved and the task is queued
+        row = _task_row(task.id, "status", "reenqueues")
+        assert row["reenqueues"] == dispatcher.REENQUEUE_CAP
+        assert row["status"] == "queued"
+        assert broken.tasks == []  # nothing reached the stream
+        assert any("enqueue failed" in m for m in messages)
+        # log hygiene: identifiers only — no text, no addresses
+        assert all("готовый текст" not in m for m in messages)
+        assert all("+7OLD" not in m for m in messages)
+
+        # next window: the cap path terminates the task — no more churn
+        _age_task(task.id)
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.reenqueue_stale_tasks(factory, broken)
+
+        row = _task_row(task.id, "status", "reenqueues")
+        assert row["status"] == "failed"
+        assert any(dispatcher.REENQUEUE_FAILED_MESSAGE in m for m in messages)
+        assert broken.tasks == []
+
+
 # ── loop resilience (§3.8 concurrency model) ────────────────────────────────
 
 
@@ -611,3 +887,108 @@ class TestLoopResilience:
 
         assert journal.count("bad") == 5  # the loop survived 5 crashes
         assert journal.count("good") >= 3  # the sibling kept running
+
+
+# ── GH #483 Task 4: sync adapter called off the event loop (spec §3.1) ──────
+
+
+class TestQueueCallsOffEventLoop:
+    """The adapter is SYNC (redis-py): every queue call the dispatcher
+    makes from its async cycles must run through ``asyncio.to_thread`` —
+    observable as "never on the event loop thread"."""
+
+    async def test_all_dispatcher_queue_call_points_run_off_the_loop_thread(
+        self, db_engine, db_session
+    ) -> None:
+        loop_thread = threading.get_ident()
+        seen: list[tuple[str, int]] = []
+
+        class SpyQueue(FakeQueue):
+            def _tick(self, op: str) -> None:
+                seen.append((op, threading.get_ident()))
+
+            def enqueue_task(self, payload: dict) -> None:
+                self._tick("enqueue_task")
+                super().enqueue_task(payload)
+
+            def claim_statuses(self):
+                self._tick("claim_statuses")
+                return super().claim_statuses()
+
+            def ack_status(self, item):
+                self._tick("ack_status")
+                super().ack_status(item)
+
+            def claim_inbound(self):
+                self._tick("claim_inbound")
+                return super().claim_inbound()
+
+            def ack_inbound(self, item):
+                self._tick("ack_inbound")
+                super().ack_inbound(item)
+
+            def reclaim_hanging(self) -> None:
+                self._tick("reclaim_hanging")
+                super().reclaim_hanging()
+
+        spy = SpyQueue()
+        task = await _stage_queued_task(db_session)
+        factory = _session_factory(db_engine)
+
+        # enqueue point — the re-enqueue sweep
+        _age_task(task.id)
+        await dispatcher.reenqueue_stale_tasks(factory, spy)
+        # claim + ack on both up-streams
+        spy.push_status(_status_item(task.id, "sending"))
+        spy.push_inbound({"channel": "telegram", "text": "hi"})
+        await dispatcher.statuses_once(factory, spy)
+        await dispatcher.inbound_once(spy)
+        # process start
+        stop = asyncio.Event()
+        stop.set()
+        await dispatcher.run_dispatcher(factory, spy, stop)
+
+        assert {op for op, _ in seen} == {
+            "enqueue_task",
+            "claim_statuses",
+            "ack_status",
+            "claim_inbound",
+            "ack_inbound",
+            "reclaim_hanging",
+        }
+        assert all(tid != loop_thread for _, tid in seen)
+
+
+class TestTransportFailureDoesNotKillCycles:
+    """Spec §3.1: a connection failure never takes a cycle down — the
+    typed error surfaces LOUD to the loop guard and the next tick
+    retries. Also guards the ``to_thread`` transition: an unawaited
+    wrapper would silence the claim instead of raising."""
+
+    async def test_dead_claim_propagates_loud_never_reads_as_empty(self) -> None:
+        broken = _TransportBrokenQueue()
+
+        def unused_session_factory() -> None:
+            raise AssertionError("session must not be touched on a dead claim")
+
+        with pytest.raises(NotifyTransportError):
+            await dispatcher.statuses_once(unused_session_factory, broken)  # type: ignore[arg-type]
+        with pytest.raises(NotifyTransportError):
+            await dispatcher.inbound_once(broken)
+
+    async def test_run_loop_retries_after_transport_failures(self) -> None:
+        stop = asyncio.Event()
+        ticks: list[int] = []
+
+        async def dead_transport() -> None:
+            ticks.append(1)
+            if len(ticks) >= 3:
+                stop.set()
+            raise NotifyTransportError(
+                "notify queue transport failed during claim notify:statuses:"
+                " ConnectionError: mock-dead-redis"
+            )
+
+        await dispatcher.run_loop("statuses", stop, 0.001, dead_transport)
+
+        assert len(ticks) == 3  # every failed tick was followed by a retry

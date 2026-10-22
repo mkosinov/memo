@@ -272,6 +272,7 @@ What a spec author must know:
   The next `test-all.sh` run re-copies the reseeded master to both shard DBs.
 - **Local runs are serial.** `workers: 1` is pinned in `playwright.config.ts` (CI was already serial) and the fixture throws a labeled error when `workers > 1` — an accidental parallel override fails loudly instead of silently reintroducing reset races.
 - **Retries snapshot the DB first.** When a test is retried (`testInfo.retry > 0`; CI sets `retries: 1`), the fixture saves a consistent pre-reset copy (`db-before-reset.sqlite`) into the test's output dir — the crashed state survives the reset as failure evidence.
+- **Семантика канона закреплена pytest-сьютом (GH #373).** Контракт `resetToSeed` — что канон восстанавливает и что намеренно щадит — закреплён в `backend/tests/test_seed_canon.py` (маркер `misc`): реальная схема и реальный сид, генерация канона боевым `scripts/gen_seed_canon.py`, применение той же командой sqlite3, что и обёртка; 7 семантик — полный restore, канонический `sort_order`, пользователи по сиду, очистка `user_settings` целиком, исключения `audit_logs`/`sessions`/таблицы notify-журнала, `notify_templates` в каноне, идемпотентность. Витест-файл обёртки (`frontend/admin/__tests__/seed-reset.test.ts`) проверяет только чистые функции обёртки и громкую ошибку отсутствующего canon-файла. Мотивировка — в [спеке переноса](specs/2026-10-21-seed-canon-pytest-move-design.md).
 
 ## CI vs local
 
@@ -286,8 +287,8 @@ What a spec author must know:
 
 | Test type | G6 quality¹ | G4.5 visual² | G7 pre-push³ | CI Tests⁴ |
 |---|---|---|---|---|
-| backend pytest (unit/api/integration/misc — маркеры как локальные селекторы `pytest -m …`) | ✅ | — | ✅ | ✅ один джоб `backend-tests`: весь набор одним прогоном + coverage ≥ 80 (GH #416) |
-| frontend vitest | ✅ | — | ✅ | ✅ (single run, no shards — GH #420) |
+| backend pytest (unit/api/integration/misc — маркеры как локальные селекторы `pytest -m …`; в `misc` живёт канон сида: `test_seed_canon.py` закрепляет 7 семантик reset-канона — GH #373) | ✅ | — | ✅ | ✅ один джоб `backend-tests`: весь набор одним прогоном + coverage ≥ 80 (GH #416) |
+| frontend vitest (только фронт; из e2e-обвязки в нём остаются лишь тесты чистых функций обёртки, без внешних процессов — GH #373) | ✅ | — | ✅ | ✅ (single run, no shards — GH #420) |
 | workspace vitest (domain, api-client, web) | ✅ (`test:all`) | — | — | ✅ (`workspace-tests` — list derived from workspace globs, GH #420) |
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
@@ -310,6 +311,12 @@ This table is the inventory of what runs where; tests without a row here are sus
 coverage — exactly what GH #420 found (package and web tests ran under no gate at all until
 `workspace-tests` closed the gap). Review holds the line: a PR adding tests or gates without
 touching this table is incomplete.
+
+**Anchor rule (GH #373): тесты живут по предмету, а не по потребителю.** Контракт закрепляется
+в доме того стека, чей это предмет, а не там, где его случилось запускать: семантика канона
+сида — предмет бэкенд-инфраструктуры, её держит pytest-сьют (`backend/tests/test_seed_canon.py`),
+витест обёртки e2e — только чистые функции самой обёртки. Первый вопрос нового теста —
+«чей это предмет?», и лишь потом — «кто его потребляет?».
 
 In CI:
 - `retries: 1` (vs 0 locally) — one automatic retry; a test that passes only on the retry gets status `flaky` and FAILS the job via the blocking flake gate (GH #415, see [E2E (automated)](#e2e-automated)); a retry first snapshots the DB (see [Per-test seed reset](#per-test-seed-reset-gh-252))

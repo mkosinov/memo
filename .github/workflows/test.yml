@@ -47,6 +47,205 @@ jobs:
           retention-days: 7
 
 
+  # GH #483 (spec §3.6): the ENABLED notify contour. Marked `redis` tests
+  # run against a REAL Redis service container; after that unit layer the
+  # SAME job boots the enabled e2e stack (NOTIFY_E2E_ENABLED=1) against the
+  # same container, runs the single S1 Playwright scenario and re-checks
+  # the queue with the marked backend test. The default `backend-tests`
+  # job above stays byte-identical (S2 invariant: the standard run needs
+  # no Redis); its 80% coverage threshold is protected by the
+  # [tool.coverage.run] omit of the notify transport modules (they are
+  # measured HERE instead). Empty-green guard: a `pytest -m redis` run
+  # that collects nothing — or skips everything, e.g. because the service
+  # container never came up — exits 0 and would show a green job that
+  # proves nothing; the guard step turns that into a job failure.
+  notify-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      # Spec §7 fallback: flip to "0" to drop the e2e layer (stack + S1
+      # scenario + marked queue check) without code surgery if the job
+      # proves too heavy until #484; the marked unit layer always stays.
+      NOTIFY_TESTS_E2E_ENABLED: "1"
+
+    services:
+      redis:
+        # redis:7 line (7.4.11 at pinning time), pinned by manifest-list
+        # digest — the contour needs a REAL Redis (Streams, groups).
+        image: redis@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend/admin
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/admin
+
+      # ── Unit layer: marked tests against the service container ────────
+      - name: Run marked notify tests (real Redis)
+        run: uv run pytest -m redis -v --tb=short --junitxml=test-results.xml
+
+      # Empty-green guard (spec §3.6): the job MUST fail when 0 marked
+      # tests were collected or every one of them was skipped — a green
+      # run with zero executions is not evidence about the transport.
+      - name: Empty-green guard
+        run: |
+          python3 - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          try:
+              root = ET.parse("test-results.xml").getroot()
+          except FileNotFoundError:
+              print("GUARD FAILED: backend/test-results.xml not found — the pytest run produced no results.")
+              sys.exit(1)
+
+          ts = root if root.tag == "testsuite" else root.find("testsuite")
+          if ts is None:
+              print("GUARD FAILED: no <testsuite> element in test-results.xml.")
+              sys.exit(1)
+
+          total = int(ts.get("tests", "0"))
+          skipped = int(ts.get("skipped", "0"))
+          failures = int(ts.get("failures", "0"))
+          errors = int(ts.get("errors", "0"))
+          executed = total - skipped
+
+          print(f"Marked run: total={total} executed={executed} skipped={skipped} failures={failures} errors={errors}")
+
+          if total == 0:
+              print("GUARD FAILED: 0 tests collected for `pytest -m redis` — the marker contour is empty (marker name regression in pyproject.toml / test files renamed?).")
+              sys.exit(1)
+          if executed < 1:
+              print("GUARD FAILED: every marked test was SKIPPED — the job is green but proves nothing. Likely cause: REDIS_URL missing/unreachable (service container did not start, wrong URL/port) or the skipif guard tripped.")
+              sys.exit(1)
+          print("Guard OK: at least one marked test EXECUTED against real Redis.")
+          PY
+
+      # ── E2E layer: enabled stack + S1 (gated, spec §7 fallback) ────────
+      # CI guard (as in e2e-tests): fail EARLY if the S1 spec resolves 0
+      # files, before the stack starts.
+      - name: Spec-file guard (notify S1)
+        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+        run: |
+          list_output=$(mktemp)
+          if ! pnpm exec playwright test --project=e2e --list e2e/notify-s1-enabled-stack.spec.ts > "$list_output"; then
+            echo "ERROR: playwright --list failed for e2e/notify-s1-enabled-stack.spec.ts."
+            echo "Likely cause: bad --project arg vs playwright.config.ts or a spec import error."
+            rm -f "$list_output"
+            exit 1
+          fi
+          spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
+          rm -f "$list_output"
+          if [ "$spec_count" -eq 0 ]; then
+            echo "ERROR: notify S1 spec resolved 0 spec files (config/testMatch regression)."
+            exit 1
+          fi
+          echo "Spec-file guard OK: notify S1 spec resolved."
+        working-directory: frontend/admin
+        env:
+          NOTIFY_E2E_ENABLED: "1"
+          SHARD_PORT: "3006"
+          BACKEND_URL: http://127.0.0.1:8005
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8005
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+
+      - name: Start notify e2e stack (enabled contour)
+        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+        run: |
+          NOTIFY_E2E_ENABLED=1 \
+          SHARD_ID=notify \
+          SHARD_PORT=3006 \
+          BACKEND_PORT=8005 \
+          TEST_DB_PATH=backend/test_memo_notify_e2e.db \
+          BACKEND_URL=http://127.0.0.1:8005 \
+          NEXT_PUBLIC_API_URL=http://127.0.0.1:8005 \
+            bash scripts/e2e-shard-start.sh &
+
+          # Wait for frontend to be ready (up to 120s)
+          echo "Waiting for frontend on :3006..."
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3006/" --max-time 30 2>/dev/null || echo "000")
+            if echo "$code" | grep -qE "^(2|3)"; then
+              echo "Frontend ready on :3006 (HTTP $code)"
+              break
+            fi
+            if [ "$i" -eq 120 ]; then
+              echo "ERROR: Frontend failed to start on :3006"
+              exit 1
+            fi
+            sleep 1
+          done
+          # Buffer for Next.js compilation to stabilize
+          sleep 10
+        working-directory: .
+
+      - name: Run Playwright S1 scenario (enabled stack)
+        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+        run: pnpm exec playwright test --project=e2e e2e/notify-s1-enabled-stack.spec.ts --workers=1
+        working-directory: frontend/admin
+        env:
+          NOTIFY_E2E_ENABLED: "1"
+          SHARD_PORT: "3006"
+          BACKEND_URL: http://127.0.0.1:8005
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8005
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+
+      # Spec §3.6: after the S1 scenario — the marked queue check: the
+      # stream holds ≥ 1 task with the §4.2 payload, correlated with the
+      # stack DB (REDIS_URL comes from the job env — the service container).
+      - name: Marked S1 queue check (stream ↔ stack DB)
+        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+        run: uv run pytest tests/test_notify_redis_s1_queue.py -v --tb=short
+        env:
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+
+      - name: Upload Playwright report (notify S1)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-notify
+          path: |
+            frontend/admin/playwright-report/**
+            frontend/admin/test-results/**
+          if-no-files-found: warn
+          retention-days: 7
+
+
   # Рахет-гейт lint/mypy (#306): быстрый сигнал, параллельно тестам —
   # без needs. Скрипт в PR-режиме делает git show <merge-base>:… —
   # checkout требует полную историю (fetch-depth: 0).

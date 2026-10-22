@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-22
+
+### Added
+- **GH #483 — Инфраструктура доставки оповещений: часть 2 системы оповещений
+  (Redis-очередь, скелет воркера, dev/CI-контуры)** — branch
+  `483-notify-infra` (11 коммитов `6a68bf9b..a31e50c6`, base `a806e3aa`;
+  21 файл, +3498/−63; спека
+  `docs/specs/2026-10-21-notify-infra-483-design.md` рев.3, план
+  `docs/plans/2026-10-21-notify-infra-483-plan.md` 9/9; семья #476 — часть
+  2/5, часть 1 = #482 на main; по умолчанию поведение прежнее — инвариант
+  S2):
+  - **Транспорт (T1–T3):** зависимость `redis>=8.1.0` + смоук Redis Streams
+    против Redis 7.0.15 (`6a68bf9b`); `REDIS_URL` — SecretStr +
+    production-гейт `rediss://` с кредами (`3df375f6`); адаптер `RedisQueue`
+    — Streams + потребительские группы (ADR 013) + маркированный контур
+    `pytest -m redis` с coverage omit (`6b52891d`).
+  - **Диспетчер и воркер (T4–T5):** выбор адаптера `RedisQueue` с
+    fail-fast-гейтами (код 2), `to_thread` в точках вызова очереди,
+    транспортный сбой постановки не жжёт attempts (`9240a110`); скелет
+    воркера `python -m src.notify.worker` — гейты, SIGTERM/SIGINT, холостой
+    цикл — потребление очереди, часть 3 (ADR 009) (`c5465aa7`).
+  - **Живучесть (T6):** маркированный S4 — переживание FLUSHDB своего
+    индекса: перезаливка состаренной queued-задачи, окно
+    `NOTIFY_REENQUEUE_AFTER`, без дублей (`abe9112a`).
+  - **`dev.sh --notify` (T7):** эфемерный Redis (без save/AOF, гаснет со
+    стеком) + диспетчер + воркер дочерними процессами; занятый 6379 —
+    остановка; без флага поведение не меняется (`3be67c23`); смоук вскрыл
+    2 интеграционных бага — фиксы: диспетчер создаёт потребительские
+    группы при старте (на свежем Redis XAUTOCLAIM падал NOGROUP,
+    `c723aeef`) и `|| true` в cleanup против сирот под `set -e`
+    (`9c78076f`).
+  - **Включённый e2e-режим + Playwright S1 (T8):** `NOTIFY_E2E_ENABLED=1` +
+    `SHARD_ID=notify` на порт-паре 8005/3006 вне шардов, dryrun Case
+    17a–17e; спека S1 — запись с чекбоксом «отправлять оповещения»,
+    sync-point на queued-задаче, очередь проверяет маркированный тест
+    (payload §4.2) (`6b81762a`; fix-итерация `14c57041` — TS2339 в
+    finally-блоке спеки + предпосылки транспорта до `write_run_lease`
+    против класса lease-leak).
+  - **CI (T9):** джоба `notify-tests` — сервис-контейнер Redis 7.4.11
+    (healthcheck ping), юнит-слой `pytest -m redis` + страж пустого
+    зелёного, e2e-слой под `NOTIFY_TESTS_E2E_ENABLED=1`; `backend-tests` и
+    4 шарда байт-нетронуты (`a31e50c6`).
+  - **Tests:** backend `pytest -m "not redis"` **3517p/15s**, маркированный
+    контур `pytest -m redis` **28p** + 1 условный skip, admin vitest
+    **3107/3107** (188 файлов), `tsc --noEmit` **0**, dry-run
+    e2e-shard-start **107 PASS**, ruff **113/113**, mypy **0**, визуальный
+    гейт N/A → exit 0; сценарии S1–S5 ✅; реальная зелень `notify-tests`
+    доказывается на PR CI.
+  - Status: `docs/status/2026-10-22-notify-infra-483.md`
+
 ## [Unreleased] — 2026-10-21
 
 ### Added
@@ -48,6 +98,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`/tmp/visual-evidence-499/`, vision кросс-чек 3/3); ревью — все задачи
     зелёные (Task 2/8 — по одной fix-итерации).
   - Status: `docs/status/2026-10-21-web-client-auth-booking-499.md`
+- **GH #373 — Канон-тесты сида переехали из vitest админки в pytest бэкенда
+  (устранение нагрузочного флейк-класса «seed-reset в полном витест-прогоне»)**
+  — branch `seed-canon-pytest-373` (4 коммита `52d096f8..17ed0ae0`, base
+  `ab7b0f76`; 4 файла, +744/−221; спека
+  `docs/specs/2026-10-21-seed-canon-pytest-move-design.md` рев.2.1 и план
+  `docs/plans/2026-10-21-seed-canon-pytest-move-plan.md` 4/4 — оба на main,
+  unchanged by IMPL; test-infra — семантика канона не менялась, переехало
+  только место закрепления):
+  - **pytest-дом (T1–T2):** полная семантика отката к сиду — 7 SQL-тестов —
+    закреплена в `backend/tests/test_seed_canon.py` (маркер `misc`): обвязка
+    (реальная схема + реальный `seed_data()`, генератор — реальный скрипт
+    списком аргументов, `shell=False`, применение канона через sqlite `.read`,
+    всё под `tmp_path`) + total restore (`52d096f8`); остальные 6 семантик —
+    словари/`sort_order`, users, user_settings, исключения, notify_templates,
+    идемпотентность (`1639ebb8`).
+  - **vitest-дом (T3):** `frontend/admin/__tests__/seed-reset.test.ts`
+    сокращён 26 → 19 — SQL-группа удалена, осталась лёгкая TypeScript-обёртка
+    (резолверы путей, аватары, громкая ошибка) с инвариантом «никаких внешних
+    процессов» (`09bcf30e`).
+  - **Доки/гигиена (T4):** coverage map в `docs/tests_workflow.md` +
+    `.gitignore` `*.canon.sql` (`17ed0ae0`).
+  - **Мотивация:** 7 тяжёлых SQL-тестов под пулом процессов полного
+    vitest-прогона раздувались с 2.3 с до 39 с против таймаута 30 с → ложный
+    красный «фронт сломан»; бюджеты/таймауты сознательно не поднимались,
+    e2e-слой и CI-джобы не тронуты.
+  - **Tests:** `test_seed_canon.py` **7 passed**; регрессия `test_seed.py`
+    **29 passed**; admin vitest полный **3100/3100** (188 файлов);
+    `seed-reset.test.ts` **19 passed**; grep-страж
+    `execSync|spawn|child_process` — 0 совпадений; ruff clean; ревью T1
+    compliance + quality, T2/T3 compliance, T4 spot-check — все ✅; визуальный гейт N/A → exit 0.
+  - Status: `docs/status/2026-10-21-seed-canon-pytest-373.md`
 - **GH #480 — Экспорт TS-юнионов перечислений контракта из `@memo/api-client`
   (удаление локальных копий в админке)** — branch
   `480-api-client-enum-unions` (6 коммитов `b7dc85fc..a6a4b61e`, base
@@ -427,6 +508,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     VC smoke ✓ (US-2 exit 0 / US-3 exit 3), US-4 canary exit 0 (1 автоматизируемый PASSED,
     8 пунктов на ручную сверку).
   - Status: `docs/status/2026-10-10-visual-compliance-section-311.md`
+
+### Test Infra
+- **GH #448 — /proc-резолвер портов + fail-fast прогона: класс «невидимый держатель порта»
+  устранён** — branch `448-shard-port-resolver-failfast` (6 коммитов `a91b88aa..f4417af1`,
+  base `099f8098`; 5 файлов, +1963/−126; спека
+  `docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md` рев.4.1 и план
+  `docs/plans/2026-10-21-shard-port-resolver-failfast-448-plan.md` 5/5 — оба на main,
+  unchanged by IMPL; воркер next-server переписывает `process.title`, lsof слеп к такому
+  процессу — все проверки портов контура прогонов переведены на собственный резолвер,
+  смерть ребёнка прогона останавливает его красным за секунды; прод-код, API, БД и
+  e2e-спеки не затронуты):
+  - **Резолвер `listen_pairs` (T1 `a91b88aa`):** «порт → PID» без lsof — один сэмпл на вызов,
+    `/proc/net/tcp`+`/proc/net/tcp6` (отсутствие tcp6 — не ошибка), строки LISTEN `0A`,
+    hex→dec, inode → владелец проходом `/proc/[0-9]*/fd/*` по симлинку `socket:[inode]`
+    (stat не парсится — `process.title` для резолвера не существует); fail-closed: LISTEN без
+    атрибутируемого PID = «порт занят»; не-Linux фолбэк на lsof (macOS статус-кво); пути /proc
+    переопределяемы только в dryrun-режиме; нормализатор `_watch_interval_s` (мусор → дефолт 5).
+  - **Пять lsof-точек → резолвер (T2 `04e34fc8` + `062bcdf3`):** `_masked_pids`,
+    `allocate_shard_ports`, `_legacy_ports_free`, TOCTOU-recheck и `.next`-вайп-гард — конъюнкция
+    с pgrep+args-гейтами дословно, fd-скан одним `ls` (19.5s→0.4s); ревью-фикс — bounded retry
+    (≤5) контролей 9a/9b.
+  - **Fail-fast слой стека (T3 `710acb35` + `25971434`):** ожидание ЛЮБОГО из двух серверов
+    (kill-0 поллинг, bash 3.2) вместо `wait "$FRONTEND_PID"` — смерть → вердикт
+    «stack shard N: … died on :PORT» + путь лога всегда + кап-хвост 20 строк с фильтром
+    секретов (`_capped_log_tail`) + exit 1; exit-trap добирает внуков-держателей портов стека;
+    ревью-фикс — die-кейсы на HOLD_S=600, teardown не сиротит sleep (12 сирот/3 прогона → 0).
+  - **Fail-fast слой оркестратора (T4 `f4417af1`):** watchdog `run_watchdog`/`stop_run_watchdog`
+    — тик kill -0 по стек-обёрткам, провал подтверждается wait-рептингом (зомби отвечает
+    kill -0), вердикт = диагноз + маркер в LOG_DIR + TERM ОБЕИМ Playwright-стадиям
+    (TERM→грейс→SIGKILL, жёсткая форма rev4); `test-all.sh` — старт до readiness, порядок
+    «финальный wait → ОСТАНОВ watchdog → проверка маркера → вердикт», маркер → FAIL=1 (US-6:
+    смерть обёртки после зелёной её стадии краснит прогон).
+  - **Tests:** shard-helpers dryrun **33/33**; e2e-shard-start dryrun **ALL PASS** (75+
+    ассертов, детерминированно ×3+ прогонов); полный локальный test-all (тег `978ca3`):
+    pytest **3484p/15s**, Playwright шарды **239+240p**, lint/typecheck×2/vitest-workspace
+    **336** зелёные; admin vitest **3081p** + 3 посторонних load-флейка (изолированный
+    повтор 83/83, прецедент #478); визуальный гейт exit 0 (секция N/A спеки); DoD §7
+    закрыт, grep-чистота (lsof — только не-Linux-фолбэк).
+  - Status: `docs/status/2026-10-21-shard-port-resolver-failfast-448.md`
 
 ## [Unreleased] — 2026-10-09
 

@@ -1,6 +1,6 @@
 ---
 description: Spec panel reviewer — feasibility perspective. Finds technical risks, hidden complexity, and unrealistic assumptions in spec documents.
-mode: all
+mode: subagent
 model: opencode/nemotron-3-ultra-free
 temperature: 0.1
 permission:

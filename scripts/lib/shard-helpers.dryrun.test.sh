@@ -61,9 +61,12 @@
 #     ports are a SUBSET of the usable ports (held/busy never returned);
 #     a rare coupon-collector timeout in the narrowed window is retried
 #     (bounded) — flake-free; the fail-fast contract itself is Case 9's.
-#   → Case 9 (§3.2): lsof stub reporting every port held → fail-fast
-#     rc≠0, message names the window and the attempt budget, ≤20 lsof
-#     calls; control with the real lsof succeeds.
+#   → Case 9 (§3.2 + #448 Task 2): fail-fast rc≠0, message names the window,
+#     the attempt budget and the /proc-tables hint (the lsof advice is gone).
+#     Busy-everything comes from the /proc FIXTURE (lsof-invisible holders —
+#     the #448 bug class); the non-Linux fallback branch keeps the legacy
+#     per-port `lsof -ti` with the PATH-stub call counter ≤ attempts budget
+#     on its own unreadable-root fixture; live-proc control succeeds.
 #   → Case 10 (#317 §3.3): write_run_lease format (one 8-field line, stamp
 #     = write time); sweep_dead_runs on a dead-PID lease — TERM-stubborn
 #     masked holder killed via the kill -9 rung, tagged files + lease of the
@@ -105,10 +108,12 @@
 #     OWN lease (guarded by file presence), never a foreign one; no-tag
 #     caller shape touches no lease at all; kill_port_orphans is GONE
 #     (unmasked port kills banned — startup cleaning is sweep_dead_runs').
-#   → Case 17 (#317 Task 7): _legacy_ports_free — the single lsof-based
-#     gate on ports {3002,3003,8001,8002} (overridable via SHARD_LEGACY_PORTS
-#     for deterministic fake-holder steering); free → rc 0, one holder →
-#     rc 1, holder gone → rc 0 again.
+#   → Case 17 (#317 Task 7 + #448 Task 2): _legacy_ports_free — the single
+#     busy-gate on ports {3002,3003,8001,8002} (overridable via
+#     SHARD_LEGACY_PORTS for deterministic fake-holder steering); free →
+#     rc 0, one holder → rc 1, holder gone → rc 0 again; on the /proc
+#     FIXTURE: attributed busy → rc 1, lsof-INVISIBLE ownerless busy →
+#     rc 1 (port_free proves the invisibility), fixture-free → rc 0.
 #   → Case 18 (#317 Task 7, §3.3 wipe, US-1/US-4/US-5/US-7): tagged wipe —
 #     own .next-shard-*_<tag> always removed; untagged legacy + lookalikes
 #     (.next-shard-N / .next-shard-stale / invalid-suffix) removed only
@@ -135,6 +140,58 @@
 #     skip the sweep ladder naturally — dead manual lease (front back 0 0):
 #     holder on a REAL lease port killed via the ladder, masked innocent
 #     on an unrelated port survives, tagged files + lease removed.
+#
+# Spec coverage (Feature #448, /proc port resolver + fail-fast run — LIB
+# primitives, docs/specs/2026-10-20-shard-port-resolver-failfast-448-design.md
+# §3.1/§3.2; Task 1 added the PRIMITIVES, Task 2 migrated the five lsof call
+# sites onto them — _masked_pids / allocate / _legacy_ports_free in the lib,
+# TOCTOU-recheck + .next-wipe guard in test-all.sh via _listener_on):
+#   → Case 23 (§3.1, US-1): listen_pairs on a /proc-form FIXTURE (make_proc_
+#     fixture & co) — tcp + tcp6 tables; LISTEN rows resolved, non-LISTEN
+#     (ESTABLISHED/TIME_WAIT) never reported; hex→dec port decode (incl.
+#     alpha-heavy hex); inode→pid attribution incl. the fork shape (two pids
+#     share one listening socket); duplicate fd of one owner does not
+#     duplicate output; ownerless LISTEN inode → «- port» fail-closed busy
+#     line; missing tcp6 is NOT an error (tcp rows still resolved).
+#   → Case 24 (§3.1, fallback + testability gate): unreadable /proc root →
+#     rc≠0, EMPTY stdout, EXACTLY ONE stderr warning (callers keep the lsof
+#     path — Task 2's five sites); the SHARD_PROC_ROOT override is honoured
+#     ONLY under a non-empty SHARD_PROC_DRYRUN — without the flag the sample
+#     comes from the real /proc and the fixture port never leaks in.
+#   → Case 25 (§3.2): _watch_interval_s normalizer — non-number/empty, 0,
+#     negative, 601, float, padded → 5; 1..600 pass through (incl. 007 → 7);
+#     caller shape: env SHARD_STACK_WATCH_S normalized through it.
+#   → Case 26 (§3.1, US-3 conjunction): masked holder on a port → attributed
+#     by the live resolver (Linux-only assert) and KILLED by _sweep_masked;
+#     unmasked holder on a port → resolver sees the pair (mask is the
+#     consumer's business) but the sweep spares it; unattributable fixture
+#     row → sample line is exactly «- <port>» (busy, «-» is never a pgrep
+#     candidate — no kill) with NO numeric pid claiming the port.
+#   → Case 27 (#448 Task 2, US-2): _listener_on — the busy-probe behind the
+#     legacy gate / TOCTOU recheck / .next-wipe guard — on the /proc fixture:
+#     attributed busy → rc 0, ownerless busy (lsof-INVISIBLE, proven via
+#     port_free — the #448 bug class) → rc 0, free → rc≠0, any-busy arg set →
+#     rc 0, no args → rc≠0; fixture inert without SHARD_PROC_DRYRUN;
+#     unreadable root → the legacy per-port `lsof -ti` fallback fires
+#     (PATH-stub call counter ≥ 1 proves lsof really ran).
+#   → Case 28 (#448 Task 2, US-2): allocate_shard_ports on the fixture —
+#     fully fixture-busy window (incl. lsof-invisible ownerless rows) →
+#     rc≠0 fail-fast; wider window → 4 distinct in-window ports never
+#     including the fixture-busy ones (busy/free discrimination is the
+#     resolver's — lsof sees those ports FREE).
+#   → Case 29 (#448 Task 4, US-4/US-5, rev4 hard form): run_watchdog on real
+#     background children — wrapper death while both stages live → diagnosis
+#     (shard, ports, capped stack-log tail) + marker + TERM to BOTH stages
+#     (the neighbor stage too — rev4); the neighbor WRAPPER survives; the
+#     pre-file phase (stage lists not yet published) watches on without a
+#     premature self-exit.
+#   → Case 30 (#448 Task 4, US-6): wrapper death AFTER a stage already
+#     finished → marker still set + the surviving stage TERMed; one finished
+#     stage alone does not end the watch.
+#   → Case 31 (#448 Task 4): no deaths → clean self-exit (rc 0) once every
+#     stage pid is gone, no marker, wrapper untouched.
+#   → Case 32 (#448 Task 4): TERM-ignoring stuck stage → escalation to
+#     SIGKILL within the (shrunk) grace budget; the normal stage TERMed.
 
 set -euo pipefail
 
@@ -416,6 +473,54 @@ time.sleep(60)
   printf '%s' "$!"
 }
 
+# ── #448 Task 4: orchestrator-watchdog stubs (real background children) ─────
+# The watchdog cases deviate from the $( )-call convention ON PURPOSE: the
+# fake wrappers/stages must be DIRECT children of THIS shell — exactly the
+# test-all.sh shape (stack wrappers = SHARD_BACKEND_PIDS subshells, stages =
+# ALL_PIDS subshells; run_watchdog itself is a background subshell SIBLING of
+# both lists: kill -0 reaches them, `wait` inside the watchdog answers 127 —
+# the PARENT does the reaping, which is what makes kill -0 fail there). Only
+# direct children allow the parent-side `kill -9 $pid; wait $pid` moves the
+# cases assert with. So: call the spawn helpers PLAINLY (no command
+# substitution — a $( ) would orphan the child and break wait/reaping) and
+# take the PID from `$!` right after the call; the helper's stdout printf
+# goes to /dev/null (spawn rules 1-2 keep applying: detached stdio,
+# registration in the parent).
+
+# spawn_term_logging_stage MARKER — TERM-sensitive fake Playwright stage:
+# python3 sleeping 300 s; on SIGTERM writes MARKER and exits 0. The marker
+# proves the TERM rung reached THIS stage (SIGKILL writes nothing) — the
+# neighbor-stage assertion of the rev4 hard form.
+spawn_term_logging_stage() {
+  local marker="$1"
+  (
+    exec -a pw-fake-stage python3 -c '
+import signal, sys, time
+marker = sys.argv[1]
+def on_term(signum, frame):
+    open(marker, "w").write("term")
+    sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+time.sleep(300)
+' "$marker"
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
+# spawn_term_ignoring_stage — stuck stage (SIGTERM → SIG_IGN): only the KILL
+# rung of the watchdog ladder can stop it; its death alone proves the
+# escalation fired (TERM cannot kill it). Same direct-child call shape.
+spawn_term_ignoring_stage() {
+  (
+    exec -a pw-stuck-stage python3 -c '
+import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(300)
+'
+  ) >/dev/null 2>&1 </dev/null &
+  printf '%s' "$!"
+}
+
 # wait_marker <marker_file> [timeout_s] — poll until the marker exists
 # (bounded; default 5 s). Proves a spawned fixture reached its milestone.
 wait_marker() {
@@ -433,6 +538,46 @@ wait_marker() {
 check_port_survivor() {
   kill -0 "$2" 2>/dev/null || return 1
   lsof -ti :"$1" 2>/dev/null | grep -qx "$2"
+}
+
+# ── #448 Task 1: /proc-form fixture helpers (reused by Task 2 call sites) ───
+# The resolver reads three things under one root: net/tcp + net/tcp6 (kernel
+# table format) and <pid>/fd/<n> symlinks with target socket:[inode]. The
+# fixture mirrors that shape in a temp dir; the library honours the root
+# override ONLY in dryrun mode (non-empty SHARD_PROC_DRYRUN + SHARD_PROC_ROOT
+# — production reads the literal /proc and cannot be steered by the env).
+# Fixture ports live in 20001-20009/2748: outside the repo service ports
+# (3000-3003, 8000-8002, 3100, 8101), the shard window (28000-32700) and the
+# harness triplet window (38200-46099) — nothing real binds them, so
+# absence-assertions against the live /proc stay deterministic.
+
+# make_proc_fixture DIR — skeleton: net/tcp + net/tcp6, each with the kernel
+# header line. The header is LOAD-BEARING: an empty tables stream would
+# break the resolver's NR==FNR awk join (empty first file), while the real
+# kernel always emits it — the fixture must mirror that invariant.
+make_proc_fixture() {
+  mkdir -p "$1/net"
+  printf '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n' > "$1/net/tcp"
+  printf '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n' > "$1/net/tcp6"
+}
+
+# proc_fix_row DIR TABLE INODE HEXPORT [STATE] — append one socket row to
+# DIR/net/TABLE (tcp|tcp6). Zero-filled local/remote addresses + the given
+# hex port; state defaults to 0A (LISTEN); the inode lands in field 10
+# exactly like a kernel row. sl is a cosmetic constant (field 1 is never
+# parsed by the resolver).
+proc_fix_row() {
+  local dir="$1" tbl="$2" ino="$3" hexport="$4" state="${5:-0A}"
+  printf '  0: 00000000000000000000000000000000:%s 00000000000000000000000000000000:0000 %s 00000000:00000000 00:00000000 00000000     0        0 %s 1 0000000000 100 0 0 10 0\n' \
+    "$hexport" "$state" "$ino" >> "$dir/net/$tbl"
+}
+
+# proc_fix_owner DIR PID INODE — fake process: DIR/PID/fd/<inode> symlink →
+# socket:[INODE] (fd entry names are irrelevant to the scan — the glob takes
+# any entry under <pid>/fd/; one per owner suffices, the inode is unique).
+proc_fix_owner() {
+  mkdir -p "$1/$2/fd"
+  ln -sf "socket:[$3]" "$1/$2/fd/$3"
 }
 
 # ── Case 0: meta self-check — the sweep really detects a violating holder ─
@@ -917,10 +1062,68 @@ else
   FAIL=1
 fi
 
-# ── Case 9 (#317 §3.2): window exhausted → bounded fail-fast ────────────────
-echo "── Case 9 (#317 §3.2): fail-fast after ≤20 attempts, actionable message ──"
+# ── Case 9 (#317 §3.2 + #448 Task 2): window exhausted → bounded fail-fast ──
+echo "── Case 9 (#317+#448): fail-fast after ≤20 attempts; fixture-busy window, /proc hint ──"
 fresh_root "case9"
 source_lib
+# Controls (9a/9b) assume the live box has nothing on 20001-20004 — the
+# Task-1-vetted fixture range; if a foreign process sits there, skip them.
+CONT9=true
+for p9c in 20001 20002 20003 20004; do
+  port_free "$p9c" || CONT9=false
+done
+# 9a (resolver path): pinned 4-port window, ALL four ports fixture-busy.
+# The holders are lsof-INVISIBLE (fixture rows only, no real socket) — the
+# exact #448 bug class: the old lsof check called them free and the run died
+# on EADDRINUSE; the resolver-driven allocator must exhaust and fail-fast
+# with the /proc-tables hint (no lsof advice left in the message).
+FIX9A="$WORK/procfix-case9a"
+make_proc_fixture "$FIX9A"
+proc_fix_row   "$FIX9A" tcp 92001 4E21 0A     # 20001 busy, attributed
+proc_fix_owner "$FIX9A" 5151 92001
+proc_fix_row   "$FIX9A" tcp 92002 4E22 0A     # 20002 busy, ownerless → invisible
+proc_fix_row   "$FIX9A" tcp6 92003 4E23 0A    # 20003 busy (tcp6 table)
+proc_fix_row   "$FIX9A" tcp6 92004 4E24 0A    # 20004 busy (tcp6 table)
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX9A"
+set +e
+P9=$(allocate_shard_ports 2>&1); R9=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+CASE9A_OK=true
+[ "$R9" -ne 0 ] || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q "20001-20004" || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q "$SHARD_ALLOC_MAX_ATTEMPTS" || CASE9A_OK=false
+printf '%s\n' "$P9" | grep -q '/proc/net/tcp' || CASE9A_OK=false   # /proc hint
+if printf '%s\n' "$P9" | grep -q 'lsof'; then CASE9A_OK=false; fi  # lsof advice gone
+# 9a control: same pinned window against the LIVE /proc (fixture inert) —
+# the real 20001-20004 are free, so the allocation must succeed: proves the
+# FIXTURE rows drove the failure, not the window pinning. Bounded
+# coupon-collector retry (the Case 8/28 pattern): collecting all 4 ports of
+# a 4-wide window in 20 draws misses a coupon ~1.3% of runs — retried, not
+# treated as a property violation.
+R9C=-1 RETRY9C=0
+if [ "$CONT9" = true ]; then
+  while [ "$RETRY9C" -lt 5 ]; do
+    RETRY9C=$((RETRY9C + 1))
+    set +e
+    P9C=$(allocate_shard_ports 2>&1); R9C=$?
+    set -e
+    [ "$R9C" -eq 0 ] && break
+  done
+  [ "$R9C" -eq 0 ] || CASE9A_OK=false
+fi
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+# 9b (non-Linux fallback branch): fixture root WITHOUT net/tcp → listen_pairs
+# rc 1 → the allocator keeps the legacy per-port `lsof -ti`; the PATH stub
+# reports every port held → rc≠0, and the call counter stays within the
+# attempts budget — the #317 contract, preserved byte-for-byte for non-Linux
+# runs on its own fixture.
+FIX9B="$WORK/procfix-case9b"
+mkdir -p "$FIX9B"                             # no net/ at all
 cat > "$STUBS/lsof" <<EOF
 #!/bin/sh
 printf 'x' >> "$STUBS/lsof_calls"
@@ -928,26 +1131,50 @@ exit 0
 EOF
 chmod +x "$STUBS/lsof"
 rm -f "$STUBS/lsof_calls"
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX9B"
 set +e
-P9=$(PATH="$STUBS:$PATH" allocate_shard_ports 2>&1); R9=$?
+P9B=$(PATH="$STUBS:$PATH" allocate_shard_ports 2>&1); R9B=$?
 set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
 LSOF_N=$(wc -c < "$STUBS/lsof_calls" 2>/dev/null || printf '0')
 LSOF_N=$((LSOF_N))
-CASE9_OK=true
-[ "$R9" -ne 0 ] || CASE9_OK=false
-printf '%s\n' "$P9" | grep -q "$SHARD_PORT_WINDOW_LOW-$SHARD_PORT_WINDOW_HIGH" || CASE9_OK=false
-printf '%s\n' "$P9" | grep -q "$SHARD_ALLOC_MAX_ATTEMPTS" || CASE9_OK=false
-[ "$LSOF_N" -le "$SHARD_ALLOC_MAX_ATTEMPTS" ] || CASE9_OK=false
-# control: same call with the REAL lsof succeeds (the stub drove the failure)
-set +e
-P9B=$(allocate_shard_ports 2>&1); R9B=$?
-set -e
-[ "$R9B" -eq 0 ] || CASE9_OK=false
+CASE9B_OK=true
+[ "$R9B" -ne 0 ] || CASE9B_OK=false
+[ "$LSOF_N" -le "$SHARD_ALLOC_MAX_ATTEMPTS" ] || CASE9B_OK=false
+[ "$LSOF_N" -gt 0 ] || CASE9B_OK=false         # the legacy lsof really ran
+# 9b control: unreadable root + the REAL lsof → fallback sees the fixture-only
+# ports free → rc 0 (the stub drove the failure, not the broken resolver).
+# Same bounded coupon-collector retry as the 9a control (4-wide window).
+R9D=-1 RETRY9D=0
+if [ "$CONT9" = true ]; then
+  SHARD_PROC_DRYRUN=1
+  SHARD_PROC_ROOT="$FIX9B"
+  while [ "$RETRY9D" -lt 5 ]; do
+    RETRY9D=$((RETRY9D + 1))
+    set +e
+    P9D=$(allocate_shard_ports 2>&1); R9D=$?
+    set -e
+    [ "$R9D" -eq 0 ] && break
+  done
+  unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+  [ "$R9D" -eq 0 ] || CASE9B_OK=false
+fi
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
 rm -f "$STUBS/lsof" "$STUBS/lsof_calls"
+CASE9_OK=true
+$CASE9A_OK || CASE9_OK=false
+$CASE9B_OK || CASE9_OK=false
 if $CASE9_OK; then
-  echo "PASS Case 9 (#317): stubbed-held window → rc≠0, message names window+attempts, lsof calls=$LSOF_N ≤ 20; real-lsof control rc=0"
+  echo "PASS Case 9 (#317+#448): fixture-busy window (incl. lsof-invisible) → rc≠0, message names window+attempts+/proc hint; fallback branch: lsof calls=$LSOF_N ≤ $SHARD_ALLOC_MAX_ATTEMPTS; controls rc=$R9C/$R9D (tries $RETRY9C/$RETRY9D)"
 else
-  echo "FAIL Case 9 (#317): rc=$R9 lsof_calls=$LSOF_N control_rc=$R9B out='$P9'"
+  echo "FAIL Case 9 (#317+#448): 9a rc=$R9 (hint=/proc-net-tcp) 9b rc=$R9B lsof_calls=$LSOF_N controls=$R9C/$R9D tries=$RETRY9C/$RETRY9D cont9=$CONT9"
+  echo "── Case 9 outputs ──"
+  printf '9a: %s\n9b: %s\n' "$P9" "$P9B"
+  echo "─────────────────"
   FAIL=1
 fi
 
@@ -1555,11 +1782,33 @@ wait "$H17" 2>/dev/null || true
 TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$H17/}")
 set +e; _legacy_ports_free; R17C=$?; set -e
 [ "$R17C" -eq 0 ] || CASE17_OK=false
+# (d) #448 Task 2: the gate on the /proc fixture — attributed busy → rc≠0;
+# lsof-INVISIBLE ownerless busy → rc≠0 (port_free proves lsof is blind —
+# the #448 bug class; the resolver gate still closes); fixture-free → rc 0.
+FIX17="$WORK/procfix-case17"
+make_proc_fixture "$FIX17"
+proc_fix_row   "$FIX17" tcp 93001 4E21 0A     # 20001: attributed LISTEN
+proc_fix_owner "$FIX17" 6161 93001
+proc_fix_row   "$FIX17" tcp 93002 0ABC 0A     # 2748: ownerless (invisible)
+SHARD_LEGACY_PORTS=(20001 2748)
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX17"
+set +e; _legacy_ports_free; R17D=$?; set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R17D" -ne 0 ] || CASE17_OK=false
+port_free 20001 || CASE17_OK=false            # busy to the resolver, free to lsof
+port_free 2748  || CASE17_OK=false
+SHARD_LEGACY_PORTS=(20009 20003)              # fixture-free ports → gate open
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX17"
+set +e; _legacy_ports_free; R17E=$?; set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R17E" -eq 0 ] || CASE17_OK=false
 SHARD_LEGACY_PORTS=(3002 3003 8001 8002)
 if $CASE17_OK; then
-  echo "PASS Case 17 (#317 Task 7): legacy gate free → busy (holder on $LG17_C) → free; single helper, overridden ports"
+  echo "PASS Case 17 (#317+#448): legacy gate free → busy (holder on $LG17_C) → free; fixture: attributed+invisible busy → rc≠0, fixture-free → rc=0"
 else
-  echo "FAIL Case 17 (#317 Task 7): helper_defined=$(declare -F _legacy_ports_free >/dev/null 2>&1 && echo yes || echo no) rc=$R17A/$R17B/$R17C"
+  echo "FAIL Case 17 (#317+#448): helper_defined=$(declare -F _legacy_ports_free >/dev/null 2>&1 && echo yes || echo no) rc=$R17A/$R17B/$R17C fixture=$R17D/$R17E"
   FAIL=1
 fi
 
@@ -2014,6 +2263,563 @@ else
   echo "FAIL Case 22 (#317 Task 7): rc=$SW22_RC elapsed=${EL22}s out='$SW22_OUT' holder=$(kill -0 "$H22" 2>/dev/null && echo alive || echo dead)"
   echo "── Case 22 sweep stderr ──"
   cat "$WORK/case22.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 23 (#448 §3.1, US-1): listen_pairs on the /proc fixture ────────────
+echo "── Case 23 (#448): listen_pairs — LISTEN/non-LISTEN, hex→dec, tcp6, unowned → «- port» ──"
+fresh_root "case23"
+source_lib
+CASE23_OK=true
+declare -F listen_pairs >/dev/null 2>&1 || CASE23_OK=false
+FIX23="$WORK/procfix-case23"
+make_proc_fixture "$FIX23"
+# tcp: two owned LISTEN rows (4E21/4E22 → 20001/20002), one ESTABLISHED row
+# (state 01 — never reported), one ownerless LISTEN row with an alpha-heavy
+# hex port (0ABC → 2748) → fail-closed «- port» busy marker.
+proc_fix_row   "$FIX23" tcp 90001 4E21 0A
+proc_fix_owner "$FIX23" 4242 90001
+proc_fix_row   "$FIX23" tcp 90002 4E22 0A
+proc_fix_owner "$FIX23" 4343 90002
+proc_fix_row   "$FIX23" tcp 90003 4E23 01
+proc_fix_owner "$FIX23" 4242 90003
+proc_fix_row   "$FIX23" tcp 90004 0ABC 0A
+# tcp6: LISTEN row shared by TWO pids (fork shape — both keep the fd) and a
+# TIME_WAIT row (state 06 — never reported).
+proc_fix_row   "$FIX23" tcp6 90005 4E25 0A
+proc_fix_owner "$FIX23" 4444 90005
+proc_fix_owner "$FIX23" 4445 90005
+proc_fix_row   "$FIX23" tcp6 90006 4E26 06
+proc_fix_owner "$FIX23" 4444 90006
+# duplicate fd of one owner (dup'd socket) must not duplicate output lines.
+ln -sf "socket:[90001]" "$FIX23/4242/fd/90001x"
+
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP23=$(listen_pairs 2>"$WORK/case23.err"); LP23_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+
+[ "$LP23_RC" -eq 0 ] || CASE23_OK=false
+LP23_SORTED="$(printf '%s\n' "$LP23" | sort)"
+WANT23="$(printf '%s\n' \
+  '4242 20001' \
+  '4343 20002' \
+  '- 2748' \
+  '4444 20005' \
+  '4445 20005' | sort)"
+[ "$LP23_SORTED" = "$WANT23" ] || CASE23_OK=false
+# non-LISTEN ports never appear in the sample
+case "$LP23" in *20003*|*20006*) CASE23_OK=false ;; esac
+
+# missing tcp6 is NOT an error: tcp rows still resolved, rc 0
+rm -f "$FIX23/net/tcp6"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP23B=$(listen_pairs 2>"$WORK/case23b.err"); LP23B_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP23B_RC" -eq 0 ] || CASE23_OK=false
+LP23B_SORTED="$(printf '%s\n' "$LP23B" | sort)"
+WANT23B="$(printf '%s\n' '4242 20001' '4343 20002' '- 2748' | sort)"
+[ "$LP23B_SORTED" = "$WANT23B" ] || CASE23_OK=false
+
+if $CASE23_OK; then
+  echo "PASS Case 23 (#448): fixture sample — LISTEN attributed (tcp+tcp6, fork shape), non-LISTEN dropped, hex→dec, dup fd deduped, unowned → «- 2748»; missing tcp6 ok"
+else
+  echo "FAIL Case 23 (#448): rc=$LP23_RC/$LP23B_RC"
+  echo "── Case 23 sample ──"
+  printf '%s\n' "$LP23"
+  echo "── want (sorted) ──"
+  printf '%s\n' "$WANT23"
+  cat "$WORK/case23.err" "$WORK/case23b.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 24 (#448 §3.1): non-Linux fallback + dryrun-gate inertness ─────────
+echo "── Case 24 (#448): unreadable root → one warning + rc≠0; override honoured only in dryrun ──"
+fresh_root "case24"
+source_lib
+CASE24_OK=true
+FIX24="$WORK/procfix-case24"          # no net/ at all → net/tcp unreadable
+mkdir -p "$FIX24"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX24"
+set +e
+LP24=$(listen_pairs 2>"$WORK/case24.err"); LP24_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP24_RC" -ne 0 ] || CASE24_OK=false            # callers (Task 2) keep the lsof path
+[ -z "$LP24" ] || CASE24_OK=false                  # stdout empty on fallback
+WARN24=$(wc -l < "$WORK/case24.err" 2>/dev/null || printf '0')
+WARN24=$((WARN24))
+[ "$WARN24" -eq 1 ] || CASE24_OK=false             # ONE warning, not a per-port storm
+grep -q '⚠️ listen_pairs' "$WORK/case24.err" 2>/dev/null || CASE24_OK=false   # the LIB's warning (bash's «command not found» noise must not satisfy this)
+
+# Production inertness: the root override is honoured ONLY in dryrun mode —
+# without the flag the sample comes from the REAL /proc (or the non-Linux
+# fallback); the fixture port must not leak into the output either way.
+# NB: FIX23 still carries the 20001 LISTEN row — a wrongly honoured override
+# would emit «4242 20001» and fail the absence assert (non-vacuous).
+SHARD_PROC_ROOT="$FIX23"
+set +e
+LP24B=$(listen_pairs 2>/dev/null); LP24B_RC=$?
+set -e
+unset SHARD_PROC_ROOT
+case "$LP24B" in *20001*) CASE24_OK=false ;; esac   # override inert without the flag
+
+if $CASE24_OK; then
+  echo "PASS Case 24 (#448): fallback rc≠0 + empty stdout + single warning; SHARD_PROC_ROOT inert without SHARD_PROC_DRYRUN (live rc=$LP24B_RC)"
+else
+  echo "FAIL Case 24 (#448): rc=$LP24_RC warnings=$WARN24 inert_out_has_20001=$(printf '%s' "$LP24B" | grep -c 20001 || true)"
+  echo "── Case 24 stderr ──"
+  cat "$WORK/case24.err" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 25 (#448 §3.2): _watch_interval_s normalizer ───────────────────────
+echo "── Case 25 (#448): watch-interval normalizer — junk/0/neg/>600 → 5; 1..600 pass ──"
+fresh_root "case25"
+source_lib
+CASE25_OK=true
+declare -F _watch_interval_s >/dev/null 2>&1 || CASE25_OK=false
+wi_check() {
+  WI_LAST_IN="$1"; WI_LAST_WANT="$2"
+  set +e
+  WI_OUT=$(_watch_interval_s "$1" 2>/dev/null); WI_RC=$?
+  set -e
+  [ "$WI_RC" -eq 0 ] || return 1
+  [ "$WI_OUT" = "$2" ] || return 1
+  return 0
+}
+wi_check ''    5   || CASE25_OK=false
+wi_check 'abc' 5   || CASE25_OK=false
+wi_check '0'   5   || CASE25_OK=false
+wi_check '-3'  5   || CASE25_OK=false
+wi_check '601' 5   || CASE25_OK=false
+wi_check '5.5' 5   || CASE25_OK=false
+wi_check ' 5'  5   || CASE25_OK=false
+wi_check '1'   1   || CASE25_OK=false
+wi_check '5'   5   || CASE25_OK=false
+wi_check '7'   7   || CASE25_OK=false
+wi_check '007' 7   || CASE25_OK=false
+wi_check '600' 600 || CASE25_OK=false
+# caller shape (Tasks 3-4): the layers read the env and normalize through it
+SHARD_STACK_WATCH_S=9
+wi_check "${SHARD_STACK_WATCH_S:-}" 9 || CASE25_OK=false
+unset SHARD_STACK_WATCH_S
+if $CASE25_OK; then
+  echo "PASS Case 25 (#448): normalizer — invalid/0/negative/601 → 5; 1..600 pass; env caller shape ok"
+else
+  echo "FAIL Case 25 (#448): last input '$WI_LAST_IN' → '$WI_OUT' (want '$WI_LAST_WANT', rc=$WI_RC)"
+  FAIL=1
+fi
+
+# ── Case 26 (#448 §3.1, US-3): kill conjunction on real processes ───────────
+echo "── Case 26 (#448): port+mask → kill; port without mask → spared; unattributable → busy, no kill ──"
+fresh_root "case26"
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")
+source_lib
+CASE26_OK=true
+
+# (a) порт + маска → убить: real uvicorn-argv holder on a backend port. The
+# live-resolver attribution assert is Linux-only (non-Linux = the fallback
+# contract of Case 24); the kill contract runs everywhere (lsof path today,
+# resolver path after Task 2 — the conjunction is the consumer's, unchanged).
+H26="$(spawn_uvicorn_holder "$TEST_BACKEND_PORT_A" -)"
+register_pid "$H26"
+wait_holder_bound "$H26" "$TEST_BACKEND_PORT_A"
+if [ -r /proc/net/tcp ]; then
+  set +e
+  LP26=$(listen_pairs 2>/dev/null); LP26_RC=$?
+  set -e
+  [ "$LP26_RC" -eq 0 ] || CASE26_OK=false
+  printf '%s\n' "$LP26" | grep -qx "$H26 $TEST_BACKEND_PORT_A" || CASE26_OK=false
+else
+  echo "  (non-Linux: live-resolver assert skipped — fallback contract is Case 24's)"
+fi
+_sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+wait_pid_gone "$H26" 5 || CASE26_OK=false
+port_free "$TEST_BACKEND_PORT_A" || CASE26_OK=false
+
+# (b) порт без маски → не убивать: plain-argv holder survives the same sweep;
+# the resolver still attributes the pair (the mask is the consumer's gate).
+P26="$(spawn_plain_holder "$TEST_BACKEND_PORT_B")"
+register_pid "$P26"
+wait_holder_bound "$P26" "$TEST_BACKEND_PORT_B"
+if [ -r /proc/net/tcp ]; then
+  set +e
+  LP26B=$(listen_pairs 2>/dev/null); LP26B_RC=$?
+  set -e
+  [ "$LP26B_RC" -eq 0 ] || CASE26_OK=false
+  printf '%s\n' "$LP26B" | grep -qx "$P26 $TEST_BACKEND_PORT_B" || CASE26_OK=false
+fi
+_sweep_masked SHARD_BACKEND_PORTS "uvicorn" "uvicorn"
+check_port_survivor "$TEST_BACKEND_PORT_B" "$P26" || CASE26_OK=false
+
+# (c) неатрибутируемый → не убивать, порт занят: fixture row with an ownerless
+# inode → the sample line is exactly «- <port>» (busy marker; «-» never
+# matches a pgrep candidate — no kill) and no numeric pid claims the port.
+FIX26="$WORK/procfix-case26"
+make_proc_fixture "$FIX26"
+proc_fix_row "$FIX26" tcp 91001 4E28 0A      # 20008 → busy, holder unknown
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX26"
+set +e
+LP26C=$(listen_pairs 2>"$WORK/case26.err"); LP26C_RC=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$LP26C_RC" -eq 0 ] || CASE26_OK=false
+[ "$LP26C" = "- 20008" ] || CASE26_OK=false
+# 6.5: the plain holder survived on purpose — finish it here (it is ours).
+kill -9 "$P26" 2>/dev/null || true
+wait "$P26" 2>/dev/null || true
+TEST_OWN_PIDS=("${TEST_OWN_PIDS[@]/$P26/}")
+
+if $CASE26_OK; then
+  echo "PASS Case 26 (#448): masked holder killed (resolver-attributed on Linux); unmasked spared; unattributable → «- 20008» busy, no numeric pid"
+else
+  echo "FAIL Case 26 (#448): holder=$(kill -0 "$H26" 2>/dev/null && echo alive || echo dead) plain=$(kill -0 "$P26" 2>/dev/null && echo alive || echo dead) unattr='$LP26C' rc=$LP26C_RC"
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 27 (#448 Task 2, US-2): _listener_on — probe of legacy gate / ──────
+# TOCTOU-recheck / .next-wipe guard — on the /proc fixture
+echo "── Case 27 (#448): _listener_on — busy/free/invisible on fixture; legacy lsof fallback ──"
+fresh_root "case27"
+source_lib
+CASE27_OK=true
+declare -F _listener_on >/dev/null 2>&1 || CASE27_OK=false
+FIX27="$WORK/procfix-case27"
+make_proc_fixture "$FIX27"
+proc_fix_row   "$FIX27" tcp 94001 4E22 0A     # 20002: attributed LISTEN
+proc_fix_owner "$FIX27" 7171 94001
+proc_fix_row   "$FIX27" tcp 94002 0ABC 0A     # 2748: ownerless (lsof-invisible)
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX27"
+set +e
+_listener_on 20002;           R27A=$?
+_listener_on 2748;            R27B=$?
+_listener_on 20007;           R27C=$?
+_listener_on 20007 20009;     R27D=$?
+_listener_on 20007 2748;      R27E=$?
+_listener_on;                 R27F=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+[ "$R27A" -eq 0 ]  || CASE27_OK=false         # busy (attributed)
+[ "$R27B" -eq 0 ]  || CASE27_OK=false         # busy-invisible (ownerless)
+[ "$R27C" -ne 0 ]  || CASE27_OK=false         # free
+[ "$R27D" -ne 0 ]  || CASE27_OK=false         # all-free arg set
+[ "$R27E" -eq 0 ]  || CASE27_OK=false         # any-busy wins
+[ "$R27F" -ne 0 ]  || CASE27_OK=false         # no args → not busy
+# invisibility proof: lsof sees BOTH fixture-busy ports free (bug class #448)
+port_free 20002 || CASE27_OK=false
+port_free 2748  || CASE27_OK=false
+# dryrun gate: without the flag the fixture is inert — the live /proc has
+# nothing on the fixture ports → not busy
+set +e
+_listener_on 20002 2748; R27G=$?
+set -e
+[ "$R27G" -ne 0 ]  || CASE27_OK=false
+# non-Linux fallback branch: unreadable root → the probe keeps the legacy
+# per-port `lsof -ti` (PATH stub counts the calls; rc 0 = busy per the stub)
+FIX27B="$WORK/procfix-case27b"
+mkdir -p "$FIX27B"                            # no net/ at all
+cat > "$STUBS/lsof" <<EOF
+#!/bin/sh
+printf 'x' >> "$STUBS/lsof27_calls"
+exit 0
+EOF
+chmod +x "$STUBS/lsof"
+rm -f "$STUBS/lsof27_calls"
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX27B"
+set +e
+P27H=$(PATH="$STUBS:$PATH" _listener_on 20002 2>&1); R27H=$?
+set -e
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+C27=$(wc -c < "$STUBS/lsof27_calls" 2>/dev/null || printf '0')
+C27=$((C27))
+rm -f "$STUBS/lsof" "$STUBS/lsof27_calls"
+[ "$R27H" -eq 0 ]  || CASE27_OK=false         # stub says busy
+[ "$C27" -ge 1 ]   || CASE27_OK=false         # legacy lsof really called
+if $CASE27_OK; then
+  echo "PASS Case 27 (#448): _listener_on — busy/invisible-busy → rc 0, free/empty → rc≠0; fixture inert without dryrun; fallback lsof calls=$C27"
+else
+  echo "FAIL Case 27 (#448): rc A=$R27A B=$R27B C=$R27C D=$R27D E=$R27E F=$R27F G=$R27G H=$R27H fallback_calls=$C27"
+  FAIL=1
+fi
+
+# ── Case 28 (#448 Task 2, US-2): allocator avoids fixture-busy ports, ───────
+# including the lsof-INVISIBLE holder (ownerless row) — the main #448 scenario
+echo "── Case 28 (#448): allocate_shard_ports — fixture-busy (incl. invisible) never returned ──"
+fresh_root "case28"
+source_lib
+CASE28_OK=true
+FIX28="$WORK/procfix-case28"
+make_proc_fixture "$FIX28"
+# phase 1 — pinned 4-port window, 20001 attributed-busy + 20002 ownerless-busy
+# (BOTH lsof-free: fixture-only holders): only 2 usable ports remain → the
+# bounded allocator must fail-fast (rc≠0). The old lsof path called all four
+# free and happily «allocated» the invisible holder's port.
+proc_fix_row   "$FIX28" tcp 95001 4E21 0A
+proc_fix_owner "$FIX28" 8181 95001            # 20001
+proc_fix_row   "$FIX28" tcp6 95002 4E22 0A    # 20002 ownerless → invisible
+SHARD_PORT_WINDOW_LOW=20001
+SHARD_PORT_WINDOW_HIGH=20004
+SHARD_PROC_DRYRUN=1
+SHARD_PROC_ROOT="$FIX28"
+set +e
+P28=$(allocate_shard_ports 2>&1); R28=$?
+set -e
+[ "$R28" -ne 0 ] || CASE28_OK=false
+# phase 2 — wider 8-port window over the same fixture (6 usable): 4 distinct
+# in-window ports, NEVER the fixture-busy ones; bounded coupon-collector retry.
+SHARD_PORT_WINDOW_HIGH=20008
+P28B="" R28B=1 RETRY28=0
+while [ "$RETRY28" -lt 5 ]; do
+  RETRY28=$((RETRY28 + 1))
+  set +e
+  P28B=$(allocate_shard_ports 2>&1); R28B=$?
+  set -e
+  [ "$R28B" -eq 0 ] && break
+done
+unset SHARD_PROC_DRYRUN SHARD_PROC_ROOT
+SHARD_PORT_WINDOW_LOW=28000
+SHARD_PORT_WINDOW_HIGH=32700
+if [ "$R28B" -eq 0 ]; then
+  P28_N=$(printf '%s' "$P28B" | wc -w | tr -d ' ')
+  P28_U=$(printf '%s\n' $P28B | sort -u | wc -l | tr -d ' ')
+  [ "$P28_N" -eq 4 ] || CASE28_OK=false
+  [ "$P28_U" -eq 4 ] || CASE28_OK=false
+  for p28 in $P28B; do
+    { [ "$p28" -ge 20001 ] && [ "$p28" -le 20008 ]; } || CASE28_OK=false
+    [ "$p28" -ne 20001 ] || CASE28_OK=false   # attributed-busy avoided
+    [ "$p28" -ne 20002 ] || CASE28_OK=false   # INVISIBLE-busy avoided
+  done
+else
+  CASE28_OK=false
+fi
+# lsof is blind to both fixture holders — the discrimination was the resolver's
+port_free 20001 || CASE28_OK=false
+port_free 20002 || CASE28_OK=false
+if $CASE28_OK; then
+  echo "PASS Case 28 (#448): fully-busy 4-window → rc≠0; 8-window → 4 distinct ports avoiding fixture-busy 20001+20002 (lsof-free, invisible), tries=$RETRY28"
+else
+  echo "FAIL Case 28 (#448): phase1 rc=$R28 out='$P28'; phase2 rc=$R28B tries=$RETRY28 out='$P28B'"
+  FAIL=1
+fi
+
+# ── Case 29 (#448 Task 4, US-4/US-5, rev4 hard form): wrapper death while ───
+# both stages live → diagnosis + marker + TERM to BOTH stages (neighbor too)
+echo "── Case 29 (#448 T4): wrapper death, stages live → marker + TERM BOTH stages ──"
+fresh_root "case29"
+LOG_DIR="$WORK/case29-logs"
+mkdir -p "$LOG_DIR"
+echo "[shard-1] ERROR: stack shard 1: backend died on :CASE29" > "$LOG_DIR/shard-stack-1.log"
+source_lib
+CASE29_OK=true
+# Direct children (see the Task-4 stub note): call plainly, PID from $!.
+spawn_sleep_wrapper >/dev/null; W29A=$!
+register_pid "$W29A"
+spawn_sleep_wrapper >/dev/null; W29B=$!
+register_pid "$W29B"
+spawn_term_logging_stage "$WORK/case29.stageA.term" >/dev/null; S29A=$!
+register_pid "$S29A"
+spawn_term_logging_stage "$WORK/case29.stageB.term" >/dev/null; S29B=$!
+register_pid "$S29B"
+P29F2="$(extra_free_port "$TEST_FRONTEND_PORT" "$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")"
+SHARD_BACKEND_PIDS=("$W29A" "$W29B")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT" "$P29F2")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A" "$TEST_BACKEND_PORT_B")
+MARKER29="$LOG_DIR/stack-wrapper-died.marker"
+TF29="$WORK/case29.term-pids"
+XF29="$WORK/case29.exit-pids"
+WD29_ERR="$WORK/case29.wd.err"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER29" "$TF29" "$XF29" 2> "$WD29_ERR" &
+WD29=$!
+register_pid "$WD29"
+# (a) pre-file phase (readiness window): stage lists NOT yet published — the
+# watchdog must keep watching (no premature self-exit on an absent list).
+sleep 2
+kill -0 "$WD29" 2>/dev/null || CASE29_OK=false
+[ ! -e "$MARKER29" ] || CASE29_OK=false
+# (b) publish the stage lists (re-read every tick; production writes them
+# atomically after the Playwright stages start).
+printf '%s\n%s\n' "$S29A" "$S29B" > "$TF29"
+printf '%s\n%s\n' "$S29A" "$S29B" > "$XF29"
+sleep 2
+kill -0 "$WD29" 2>/dev/null || CASE29_OK=false      # everything alive → still watching
+[ ! -e "$MARKER29" ] || CASE29_OK=false             # no false verdict while alive
+# (c) wrapper death: kill -9 + parent-side `wait` — the orchestrator-context
+# reap that makes kill -0 fail for the watchdog sibling.
+kill -9 "$W29A" 2>/dev/null || true
+wait "$W29A" 2>/dev/null || true
+wait_marker "$MARKER29" 10 || CASE29_OK=false
+wait_marker "$WORK/case29.stageA.term" 10 || CASE29_OK=false   # own stage TERMed
+wait_marker "$WORK/case29.stageB.term" 10 || CASE29_OK=false   # NEIGHBOR stage TERMed (rev4)
+wait_pid_gone "$WD29" 15 || CASE29_OK=false
+wait "$WD29" 2>/dev/null || true
+kill -0 "$W29B" 2>/dev/null || CASE29_OK=false       # neighbor WRAPPER untouched (stages die, not stacks)
+grep -q "stack shard 1" "$WD29_ERR" || CASE29_OK=false              # diagnosis: shard
+grep -q ":$TEST_BACKEND_PORT_A" "$WD29_ERR" || CASE29_OK=false      # diagnosis: port
+grep -q "stack log:" "$WD29_ERR" || CASE29_OK=false                 # diagnosis: log path line
+grep -q "CASE29" "$WD29_ERR" || CASE29_OK=false                     # the capped tail itself
+grep -q "shard=1" "$MARKER29" 2>/dev/null || CASE29_OK=false        # marker names the shard
+if $CASE29_OK; then
+  echo "PASS Case 29 (#448 T4): wrapper death → marker + TERM both stages (neighbor too); diagnosis shard/ports/log-tail; pre-file phase no premature exit"
+else
+  echo "FAIL Case 29 (#448 T4): wd=$(kill -0 "$WD29" 2>/dev/null && echo alive || echo dead) marker=$([ -e "$MARKER29" ] && echo yes || echo no) A=$([ -e "$WORK/case29.stageA.term" ] && echo term || echo no) B=$([ -e "$WORK/case29.stageB.term" ] && echo term || echo no) w2=$(kill -0 "$W29B" 2>/dev/null && echo alive || echo dead)"
+  sed -n '1,10p' "$WD29_ERR" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 30 (#448 Task 4, US-6): wrapper death AFTER a stage finished → ─────
+# marker still set (a green stage on a dead stack reds the run)
+echo "── Case 30 (#448 T4): wrapper death after a stage finished → marker ──"
+fresh_root "case30"
+LOG_DIR="$WORK/case30-logs"
+mkdir -p "$LOG_DIR"
+: > "$LOG_DIR/shard-stack-1.log"
+source_lib
+CASE30_OK=true
+spawn_sleep_wrapper >/dev/null; W30=$!
+register_pid "$W30"
+sleep 0.3 >/dev/null 2>&1 </dev/null &
+S30A=$!                       # stage A: exits on its own (green) and is reaped
+register_pid "$S30A"
+wait "$S30A" 2>/dev/null || true
+spawn_term_logging_stage "$WORK/case30.stageB.term" >/dev/null; S30B=$!
+register_pid "$S30B"
+SHARD_BACKEND_PIDS=("$W30")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER30="$LOG_DIR/stack-wrapper-died.marker"
+TF30="$WORK/case30.term-pids"
+XF30="$WORK/case30.exit-pids"
+WD30_ERR="$WORK/case30.wd.err"
+printf '%s\n%s\n' "$S30A" "$S30B" > "$TF30"
+printf '%s\n%s\n' "$S30A" "$S30B" > "$XF30"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER30" "$TF30" "$XF30" 2> "$WD30_ERR" &
+WD30=$!
+register_pid "$WD30"
+sleep 2
+kill -0 "$WD30" 2>/dev/null || CASE30_OK=false   # one finished stage ≠ all-gone: B live → watching on
+[ ! -e "$MARKER30" ] || CASE30_OK=false
+kill -9 "$W30" 2>/dev/null || true
+wait "$W30" 2>/dev/null || true
+wait_marker "$MARKER30" 10 || CASE30_OK=false
+wait_marker "$WORK/case30.stageB.term" 10 || CASE30_OK=false   # surviving stage TERMed
+wait_pid_gone "$WD30" 15 || CASE30_OK=false
+wait "$WD30" 2>/dev/null || true
+grep -q "shard=1" "$MARKER30" 2>/dev/null || CASE30_OK=false
+if $CASE30_OK; then
+  echo "PASS Case 30 (#448 T4): death after a finished stage → marker + TERM the survivor; finished stage alone does not end the watch"
+else
+  echo "FAIL Case 30 (#448 T4): wd=$(kill -0 "$WD30" 2>/dev/null && echo alive || echo dead) marker=$([ -e "$MARKER30" ] && echo yes || echo no) B=$([ -e "$WORK/case30.stageB.term" ] && echo term || echo no)"
+  sed -n '1,10p' "$WD30_ERR" 2>/dev/null || true
+  echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 31 (#448 Task 4): no deaths → clean self-exit once all stages ──────
+# gone, no marker, wrapper untouched
+echo "── Case 31 (#448 T4): no deaths → self-exit, no marker ──"
+fresh_root "case31"
+LOG_DIR="$WORK/case31-logs"
+mkdir -p "$LOG_DIR"
+source_lib
+CASE31_OK=true
+spawn_sleep_wrapper >/dev/null; W31=$!
+register_pid "$W31"
+sleep 0.5 >/dev/null 2>&1 </dev/null &
+S31A=$!
+sleep 0.5 >/dev/null 2>&1 </dev/null &
+S31B=$!
+register_pid "$S31A"
+register_pid "$S31B"
+wait "$S31A" 2>/dev/null || true
+wait "$S31B" 2>/dev/null || true
+SHARD_BACKEND_PIDS=("$W31")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER31="$LOG_DIR/stack-wrapper-died.marker"
+TF31="$WORK/case31.term-pids"
+XF31="$WORK/case31.exit-pids"
+printf '%s\n%s\n' "$S31A" "$S31B" > "$TF31"
+printf '%s\n%s\n' "$S31A" "$S31B" > "$XF31"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER31" "$TF31" "$XF31" 2> "$WORK/case31.wd.err" &
+WD31=$!
+register_pid "$WD31"
+wait_pid_gone "$WD31" 15 || CASE31_OK=false      # self-exit ≤ one interval + slack after stages gone
+set +e
+wait "$WD31" 2>/dev/null
+RC31=$?
+set -e
+[ "$RC31" -eq 0 ] || CASE31_OK=false             # clean exit code
+[ ! -e "$MARKER31" ] || CASE31_OK=false          # no marker
+kill -0 "$W31" 2>/dev/null || CASE31_OK=false    # wrapper NOT signaled
+if $CASE31_OK; then
+  echo "PASS Case 31 (#448 T4): green shape — self-exit rc=0 after all stages gone; no marker; wrapper untouched"
+else
+  echo "FAIL Case 31 (#448 T4): wd_rc=$RC31 marker=$([ -e "$MARKER31" ] && echo yes || echo no) w=$(kill -0 "$W31" 2>/dev/null && echo alive || echo dead)"
+  FAIL=1
+fi
+
+# ── Case 32 (#448 Task 4): stuck stage (TERM-ignoring) → escalation to ──────
+# SIGKILL within the grace budget; marker set; watchdog exits
+echo "── Case 32 (#448 T4): stuck stage → KILL rung within the grace budget ──"
+fresh_root "case32"
+LOG_DIR="$WORK/case32-logs"
+mkdir -p "$LOG_DIR"
+source_lib
+CLEANUP_BUDGET_S=2   # shrink the ladder budget for a fast case (read at call time)
+BUDGET32=$CLEANUP_BUDGET_S
+CASE32_OK=true
+spawn_sleep_wrapper >/dev/null; W32=$!
+register_pid "$W32"
+spawn_term_logging_stage "$WORK/case32.stageA.term" >/dev/null; S32A=$!
+register_pid "$S32A"
+spawn_term_ignoring_stage >/dev/null; S32B=$!
+register_pid "$S32B"
+SHARD_BACKEND_PIDS=("$W32")
+SHARD_FRONTEND_PORTS=("$TEST_FRONTEND_PORT")
+SHARD_BACKEND_PORTS=("$TEST_BACKEND_PORT_A")
+MARKER32="$LOG_DIR/stack-wrapper-died.marker"
+TF32="$WORK/case32.term-pids"
+XF32="$WORK/case32.exit-pids"
+WD32_ERR="$WORK/case32.wd.err"
+printf '%s\n%s\n' "$S32A" "$S32B" > "$TF32"
+printf '%s\n%s\n' "$S32B" "$S32A" > "$XF32"
+SHARD_RUN_WATCH_S=1 run_watchdog "$MARKER32" "$TF32" "$XF32" 2> "$WD32_ERR" &
+WD32=$!
+register_pid "$WD32"
+sleep 1.5
+[ ! -e "$MARKER32" ] || CASE32_OK=false
+kill -9 "$W32" 2>/dev/null || true
+wait "$W32" 2>/dev/null || true
+wait_marker "$MARKER32" 10 || CASE32_OK=false
+T32A=$SECONDS
+wait_marker "$WORK/case32.stageA.term" 10 || CASE32_OK=false   # normal stage: TERM rung
+wait_pid_gone "$S32B" 10 || CASE32_OK=false                    # stuck stage DEAD → the KILL rung fired
+T32B=$SECONDS
+[ $((T32B - T32A)) -le $((BUDGET32 + 3)) ] || CASE32_OK=false  # within budget + poll slack
+wait_pid_gone "$WD32" 15 || CASE32_OK=false
+wait "$WD32" 2>/dev/null || true
+grep -q "SIGKILL" "$WD32_ERR" || CASE32_OK=false               # the KILL rung announced itself
+CLEANUP_BUDGET_S=10   # restore (source-time default)
+if $CASE32_OK; then
+  echo "PASS Case 32 (#448 T4): stuck stage ignored TERM → SIGKILL ≤ ${BUDGET32}s budget (+slack); normal stage TERMed; marker set"
+else
+  echo "FAIL Case 32 (#448 T4): marker=$([ -e "$MARKER32" ] && echo yes || echo no) A=$([ -e "$WORK/case32.stageA.term" ] && echo term || echo no) stuck=$(kill -0 "$S32B" 2>/dev/null && echo alive || echo dead) killtime=$((T32B - T32A))s (budget $BUDGET32)"
+  sed -n '1,10p' "$WD32_ERR" 2>/dev/null || true
   echo "─────────────────"
   FAIL=1
 fi

@@ -37,7 +37,7 @@
 #
 # Обход (прогон без замка, однострочное уведомление; подавляется при
 # CI=true): каталог замка отсутствует или недоступен для записи, ИЛИ нет
-# бинарря flock, ИЛИ MEMO_TEST_LOCK_DISABLE=1. Каталог замка НИКОГДА не
+# бинарника flock, ИЛИ MEMO_TEST_LOCK_DISABLE=1. Каталог замка НИКОГДА не
 # создаётся. Файл замка создаётся пустым при первом захвате, но никогда
 # не удаляется и не пересоздаётся (unlink молча ломает взаимное
 # исключение — два владельца на двух inode).
@@ -80,7 +80,7 @@ heavy_test_lock_notice() {
 #   rc 0  — замок захвачен (экспортирован MEMO_TEST_LOCK_HELD=1) ИЛИ
 #           сквозной запуск (HELD=1 уже стоит) ИЛИ обход (замок недоступен;
 #           прогон идёт без замка, уведомление однострочное);
-#   rc 75 — потолок MEMO_TEST_LOCK_S исчерпан: машина занята чужим тяжёлым
+#   rc 75 — потолок MEMO_LOCK_WAIT_S исчерпан: машина занята чужим тяжёлым
 #           прогоном. Вызывающий под set -e завершится кодом 75 (отличим
 #           от падения тестов для автоматизации).
 heavy_test_lock_acquire() {
@@ -96,13 +96,13 @@ heavy_test_lock_acquire() {
     heavy_test_lock_notice "MEMO_TEST_LOCK_DISABLE=1"
     return 0
   fi
-  # Обход: нет бинарря flock (не-Linux/урезанный PATH хоста).
+  # Обход: нет бинарника flock (не-Linux/урезанный PATH хоста).
   if ! command -v flock >/dev/null 2>&1; then
-    heavy_test_lock_notice "нет бинарря flock"
+    heavy_test_lock_notice "нет бинарника flock"
     return 0
   fi
   local _path="${MEMO_TEST_LOCK_PATH:-/root/workspace/.memo-heavy-tests.lock}"
-  # dirname без внешнего бинарря (чистый bash): сам код ОБХОДА не должен
+  # dirname без внешнего бинарника (чистый bash): сам код ОБХОДА не должен
   # зависеть от coreutils — деградированный PATH это его рабочий случай.
   local _dir
   case "$_path" in

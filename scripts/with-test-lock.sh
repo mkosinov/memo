@@ -4,7 +4,7 @@
 # vitest). Канон запуска — docs/tests_workflow.md; test-all.sh этой
 # обёрткой НЕ оборачивается (у него встроенный самозахват).
 #
-#Usage: scripts/with-test-lock.sh <команда...>
+# Usage: scripts/with-test-lock.sh <команда...>
 #
 # Захватывает flock на ${MEMO_TEST_LOCK_PATH:-/root/workspace/.memo-heavy-
 # tests.lock} (немедленная попытка → статус-строка и повторы каждые

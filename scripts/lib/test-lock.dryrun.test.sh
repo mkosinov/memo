@@ -54,13 +54,21 @@ for _f in "$WRAP_SRC" "$LIB_SRC"; do
 done
 
 WORK="$(mktemp -d -t testlock-dryrun-XXXXXX)"
-# Orphan sleep markers are their DURATIONS (3003/3004): exec drops a `#`
-# comment from the final cmdline, so a comment marker is invisible on the
-# orphaned sleep. pgrep/pkill use the [N] bracket form — a literal pattern
-# would self-match the probing shell's own argv and kill the suite.
+# Orphan sleep markers are their DURATIONS (3001$$ / 3002$$): exec drops
+# a `#` comment from the final cmdline, so a comment marker is invisible
+# on the orphaned sleep — the duration is the only part of the marker
+# that survives into the orphan's own argv. The embedded suite pid ($$)
+# makes the markers UNIQUE PER RUN: two concurrent copies of this suite
+# can never cross-kill each other's holders/orphans. pgrep/pkill use the
+# [0] bracket form — a literal pattern would self-match the probing
+# shell's own argv and kill the suite itself.
+SLEEP_L3="3001$$"
+SLEEP_L4="3002$$"
+PAT_L3="sleep 3[0]01$$"
+PAT_L4="sleep 3[0]02$$"
 cleanup() {
-  pkill -f 'sleep 300[3]' 2>/dev/null || true
-  pkill -f 'sleep 300[4]' 2>/dev/null || true
+  pkill -f "$PAT_L3" 2>/dev/null || true
+  pkill -f "$PAT_L4" 2>/dev/null || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -200,7 +208,7 @@ L3_LOCK="$L3_DIR/heavy.lock"
 (
   echo "$BASHPID" > "$L3_DIR/holder.pid"
   exec env MEMO_TEST_LOCK_PATH="$L3_LOCK" \
-    bash "$WRAP_SRC" bash -c 'exec sleep 3003'
+    bash "$WRAP_SRC" bash -c "exec sleep $SLEEP_L3"
 ) > "$L3_DIR/holder.log" 2>&1 &
 L3_HOLDER_BG=$!
 disown "$L3_HOLDER_BG" 2>/dev/null || true   # no job-control "Killed" noise
@@ -259,9 +267,9 @@ if kill -0 "$L3_HOLDER_PID" 2>/dev/null; then
 else
   pass "L3: holder is dead (kill -9 delivered)"
 fi
-if pgrep -f 'sleep 300[3]' >/dev/null 2>&1; then
+if pgrep -f "$PAT_L3" >/dev/null 2>&1; then
   pass "L3: orphaned command child still running (lock released by kernel, not by child death)"
-  pkill -f 'sleep 300[3]' 2>/dev/null || true
+  pkill -f "$PAT_L3" 2>/dev/null || true
 else
   flunk "L3: orphan died with the holder — could not demonstrate lockless orphan"
 fi
@@ -273,7 +281,7 @@ L4_DIR="$WORK/l4"; mkdir -p "$L4_DIR"
 L4_LOCK="$L4_DIR/heavy.lock"
 (
   exec env MEMO_TEST_LOCK_PATH="$L4_LOCK" \
-    bash "$WRAP_SRC" bash -c 'exec sleep 3004'
+    bash "$WRAP_SRC" bash -c "exec sleep $SLEEP_L4"
 ) > "$L4_DIR/holder.log" 2>&1 &
 L4_HOLDER_BG=$!
 disown "$L4_HOLDER_BG" 2>/dev/null || true   # no job-control noise on kill
@@ -292,7 +300,7 @@ L4_ELAPSED=$(( SECONDS - L4_T0 ))
 # Holder teardown: the wrapper first (its argv), then the orphaned sleep
 # by its marker duration — both bracket-guarded against self-match.
 kill "$L4_HOLDER_BG" 2>/dev/null || true
-pkill -f 'sleep 300[4]' 2>/dev/null || true
+pkill -f "$PAT_L4" 2>/dev/null || true
 
 if [ "$L4_RC" -eq 75 ]; then
   pass "L4: ceiling exhaustion exits with code 75 (got $L4_RC)"

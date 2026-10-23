@@ -25,10 +25,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import signal
 from typing import TYPE_CHECKING
 
 from src.core.config import settings
+from src.notify.process import install_signal_handlers
 from src.notify.redis_queue import connect_or_exit
 
 if TYPE_CHECKING:
@@ -48,18 +48,7 @@ IDLE_TICK_SECONDS = 1.0
 SKELETON_MESSAGE = "worker skeleton: delivery logic ships in #484"
 
 
-# ── concurrency: signal handlers + idle loop (§3.4, dispatcher §3.8) ────────
-
-
-def _install_signal_handlers(stop: asyncio.Event) -> None:
-    """SIGTERM/SIGINT → the stop-event (§3.4, as the dispatcher §3.8);
-    the idle loop then winds down and the process exits 0.
-    ``add_signal_handler`` is main-thread Unix — silently unsupported
-    elsewhere (KeyboardInterrupt remains the fallback)."""
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, stop.set)
+# ── concurrency: signal handlers (process.py §3.7) + idle loop (§3.4) ───────
 
 
 async def idle_loop(queue: NotifyQueue, stop: asyncio.Event) -> None:
@@ -67,8 +56,9 @@ async def idle_loop(queue: NotifyQueue, stop: asyncio.Event) -> None:
     the queue (spec §3.4 — consumption is part 3; ``queue`` is received
     now so the part-3 loop replaces this body without re-plumbing the
     entry). Only the stop-event ends the process: SIGTERM/SIGINT set it
-    (see :func:`_install_signal_handlers`), and the wait-for-stop form
-    reacts within one tick instead of sleeping through a whole interval.
+    (see :func:`src.notify.process.install_signal_handlers`), and the
+    wait-for-stop form reacts within one tick instead of sleeping
+    through a whole interval.
     """
     while not stop.is_set():
         with contextlib.suppress(asyncio.TimeoutError):
@@ -98,7 +88,7 @@ async def main(queue: NotifyQueue | None = None) -> None:
         queue = connect_or_exit(settings.REDIS_URL.get_secret_value())
 
     stop = asyncio.Event()
-    _install_signal_handlers(stop)
+    install_signal_handlers(stop)
     logger.info(SKELETON_MESSAGE)
     await idle_loop(queue, stop)
 

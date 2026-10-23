@@ -40,10 +40,8 @@ standalone entries do (``seed``).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
-import signal
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -54,6 +52,7 @@ import src.models  # noqa: F401 — registration first; breaks the models↔noti
 from src.core.config import settings
 from src.db.database import DBManager
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
+from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.scenarios import SCENARIOS
@@ -382,28 +381,8 @@ async def inbound_once(queue: NotifyQueue) -> None:
         await asyncio.to_thread(queue.ack_inbound, item)
 
 
-# ── concurrency model: loops + stop (§3.8) ──────────────────────────────────
-
-
-async def run_loop(
-    name: str,
-    stop: asyncio.Event,
-    interval: float,
-    iteration: Callable[[], Awaitable[None]],
-) -> None:
-    """Run ``iteration`` until the stop-event, each iteration isolated in
-    its own ``try/except``: a crash is logged and the loop (and its
-    siblings in the TaskGroup) keep running — a silently dead cycle in a
-    live process would be an invisible stop of notifications (panel
-    finding, §3.8). Only ``Exception`` is caught; cancellation and
-    KeyboardInterrupt propagate so shutdown stays correct."""
-    while not stop.is_set():
-        try:
-            await iteration()
-        except Exception:
-            logger.exception("notify dispatcher: %s loop iteration failed", name)
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=interval)
+# ── concurrency model: loops + stop (§3.7 — run_loop/signals live in
+# src/notify/process.py; §3.8) ───────────────────────────────────────────────
 
 
 async def run_dispatcher(
@@ -435,19 +414,9 @@ async def run_dispatcher(
         await inbound_once(queue)
 
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(run_loop("polling", stop, interval, polling_iteration))
-        tg.create_task(run_loop("statuses", stop, interval, statuses_iteration))
-        tg.create_task(run_loop("inbound", stop, interval, inbound_iteration))
-
-
-def _install_signal_handlers(stop: asyncio.Event) -> None:
-    """SIGTERM/SIGINT → the stop-event (§3.8); the TaskGroup then winds
-    the loops down. ``add_signal_handler`` is main-thread Unix — silently
-    unsupported elsewhere (KeyboardInterrupt remains the fallback)."""
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, stop.set)
+        tg.create_task(run_loop("polling", stop, interval, polling_iteration, log=logger))
+        tg.create_task(run_loop("statuses", stop, interval, statuses_iteration, log=logger))
+        tg.create_task(run_loop("inbound", stop, interval, inbound_iteration, log=logger))
 
 
 # ── process entry ───────────────────────────────────────────────────────────
@@ -487,7 +456,7 @@ async def main(queue: NotifyQueue | None = None) -> None:
     database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./memo.db")
     manager = DBManager(database_url)
     stop = asyncio.Event()
-    _install_signal_handlers(stop)
+    install_signal_handlers(stop)
     try:
         await run_dispatcher(manager.async_session, queue, stop)
     finally:

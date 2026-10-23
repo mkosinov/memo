@@ -1,7 +1,8 @@
 """#482 Task 2 (spec §3.9, §3.2): notify settings + business wall clock.
 
 Pure unit tests — no DB, no app. Covers:
-- the five notify settings introduced in part 1 (defaults, spec §3.9);
+- the notify settings of parts 1 and 3 (defaults, spec §3.9; the part-3
+  delivery-worker retry cap NOTIFY_SEND_RETRIES — family #476 §4.5);
 - NOTIFY_ENABLED forced off in the testing profile (family #476 §3.3 /
   US-7: the standard test run must never boot the enabled subsystem —
   it would require Redis);
@@ -51,7 +52,7 @@ def _server_tz(tz: str) -> Iterator[None]:
 
 
 class TestNotifySettingsDefaults:
-    """Spec §3.9: the five settings shipped by part 1."""
+    """Spec §3.9 (part 1) + family §4.5 (part 3): the notify settings."""
 
     def test_defaults(self) -> None:
         s = Settings(_env_file=None)
@@ -59,6 +60,7 @@ class TestNotifySettingsDefaults:
         assert s.NOTIFY_POLL_INTERVAL == 1
         assert s.NOTIFY_CHANNEL_PRIORITY == "telegram"
         assert s.NOTIFY_REENQUEUE_AFTER == 120
+        assert s.NOTIFY_SEND_RETRIES == 3
         assert s.BUSINESS_TIMEZONE == "Europe/Moscow"
 
 

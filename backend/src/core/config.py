@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     NOTIFY_CHANNEL_PRIORITY: str = "telegram"
     # Seconds; a queued task older than this is re-enqueued (spec §3.8).
     NOTIFY_REENQUEUE_AFTER: int = 120
+    #: Max send attempts per channel in the delivery worker — transport
+    #: failures only (family #476 §4.5; part 3, GH #484).
+    NOTIFY_SEND_RETRIES: int = 3
     # Transport endpoint for the notify queue — Redis Streams (part 2,
     # spec §3.3). Empty = transport not configured. SecretStr: the URL
     # carries credentials and must never surface in repr/logs/errors.

@@ -32,6 +32,7 @@ from pydantic import SecretStr
 
 from src.core.config import settings
 from src.notify import worker
+from src.notify.process import install_signal_handlers
 from src.notify.queue import FakeQueue
 from src.notify.redis_queue import TRANSPORT_NOT_CONFIGURED_MESSAGE
 from tests.conftest import BACKEND_DIR
@@ -183,7 +184,7 @@ class TestSignalHandlers:
         monkeypatch.setattr(loop, "add_signal_handler", spy_add)
 
         stop = asyncio.Event()
-        worker._install_signal_handlers(stop)
+        install_signal_handlers(stop)
 
         assert set(installed) == {signal.SIGTERM, signal.SIGINT}
         for sig, callback in installed.items():

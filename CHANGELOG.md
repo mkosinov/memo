@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-23
+
+### Added
+- **GH #513 — Клиентский кабинет: чтение /my (записи/фото/платежи) + три
+  экрана** — branch `513-cabinet-read` (15 коммитов `c6fae56b..691ff5bf`,
+  base `ecbbe07f`; 83 файла, +6374/−159; спека
+  `docs/specs/2026-10-22-web-client-cabinet-read-design.md`, план
+  `docs/plans/2026-10-22-web-client-cabinet-read-plan.md` 10/10; срез
+  чтения после #499/#523; гостевая галерея, админка и публичные контракты
+  не меняются):
+  - **Backend (T1–T3):** `GET /api/v1/my/records` — per-endpoint схемы
+    `MyRecordItem`/`MyVisitItem` (дата/время занятия из начала+длительности,
+    услуга, посетители со статусом и ценой-снапшотом `custom_price` ?? 
+    `price`, без обращений к тарифам — инвариант #357), сортировка по началу
+    занятия убыв. + `id` возр. (`c6fae56b`; фиксы `1f87b41c` — allowlist
+    мастер-скоуп контракта, `3b5282eb`, `3f062aca`); `GET /api/v1/my/photos`
+    — все свои фото, включая непубличные, с `is_public` (`2badd7c2`);
+    `GET /api/v1/my/payments` — платежи с контекстом занятия (`ee70168d`);
+    все три — владелец из клиентской сессии `require_client_session`
+    (#499), кирпич `PaginationParams`; lint_budget ratchet.
+  - **api-client (T4):** `listMyRecords` / `listMyPhotos` /
+    `listMyPayments` — per-endpoint типы, статус-юнионы переиспользованы
+    (`3f8c1d39`).
+  - **Сид-дельта (T5):** непубличные фото c1 (`cabinet-draft.jpg`) и c2
+    (`maria-canvas.jpg`) — предпосылки сценариев С2/С3; канон-тесты сида
+    обновлены (`83ba745b`).
+  - **Web (T6–T9):** первый playwright-проект в `frontend/web` — стек на
+    портах из динамического окна, OTP-сессия-фикстура с восстановлением
+    кода из БД, `storageState` (`486ca51d`); `cabinet-nav` + экран «Мои
+    записи» (`my-record-card`, `my-visit-status`) — С1, С5 (`b240201c`);
+    «Мои фото» (`my-photo-card`, бейдж «Опубликовано»/«Не опубликовано»,
+    статический render-path + 3 JPEG) — С3 (`30560b0f`; рефактор общих
+    cabinet-фикстур `53a6e091`); «Мои платежи» (`my-payment-row`,
+    `ListPagination`) — С4 (`f3c42096`).
+  - **Харнес-шов + замыкание (T10):** e2e-изоляция С2
+    (`cabinet-isolation.spec.ts`) + opt-in `VISUAL_STORAGE_STATE` в
+    `scripts/visual-compliance-check.sh` для аутентифицированных визуальных
+    проверок с валидацией формы storageState (битый shape → exit 2), смоук
+    скрипта 8/8 (`8cfc9da1`, `691ff5bf`).
+  - **Tests:** backend полный pytest **3677p/0f (44 skipped)** на
+    `ee70168d` + таргет-сьют канона сида **43/0**; web vitest **486/486**;
+    web e2e **9/9** одиночным прогоном (С1–С5 + смоуки); визуальный гейт
+    **exit 0 (5/5)**; admin нетронут (базлайн **3100/0**).
+  - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
+
 ## [Unreleased] — 2026-10-22
 
 ### Added

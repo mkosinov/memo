@@ -1,66 +1,71 @@
-"""GH #483 Task 5 — the notify worker skeleton (spec §3.4; ADR 009).
+"""GH #484 (part 3 of the notify family #476; spec §3.1/§3.3/§3.7) —
+the notify WORKER process: the delivery loop consuming ``notify:tasks``.
 
-Standalone entry ``python -m src.notify.worker`` — the SECOND process
-entry of the notify family: unlike the dispatcher the worker has NO
-database (ADR 009) and, as a skeleton, does not consume
-``notify:tasks`` either — consuming with empty delivery logic would
-create the group and strand every entry in its PEL unprocessed; the
-``XREADGROUP`` loop and the ``worker`` consumer group ship in part 3
-(#484). What the skeleton fixes (S5): the process starts, the fail-fast
-gates and the signal handlers work, the transport link is up.
+Standalone entry ``python -m src.notify.worker`` — the second process
+entry of the family. The worker has NO database and NO rendering
+(ADR 009): ready text and addresses arrive in the payload, only §4.3
+status events go up.
 
-- Disabled subsystem (``NOTIFY_ENABLED=false``, the default): journal
-  line + quiet exit 0 — symmetric to the dispatcher (family §3.3).
-- Enabled: the SAME fail-fast gates as the dispatcher (spec §3.1) —
-  ``connect_or_exit(REDIS_URL)`` refuses the process LOUDLY
-  (``SystemExit(2)``, stable message, the URL value never disclosed)
-  when the transport is not configured or does not answer PING;
-  then SIGTERM/SIGINT handlers set the stop-event, one startup line
-  «worker skeleton: delivery logic ships in #484» is journalled, and
-  the process idles until a signal — quiet, exit 0 on shutdown.
+Startup (spec §3.1/§3.3, strictly in order):
 
-Part 3, task 4: the module now carries the DELIVERY CORE —
-``parse_task_payload`` (the §4.2 validator) and ``deliver_task`` (the
-§3.4 channel sweep with retries) — pure functions over the injected
-seams, no DB, no rendering (ADR 009). The delivery LOOP consuming
-``notify:tasks`` is the next task: it wires the core into
-``run_loop`` with claiming, acking, and the periodic reclaim.
+- ``NOTIFY_ENABLED=false`` (the default) — journal line, quiet exit 0;
+- ``parse_channel_priority`` → ``validate_priority_channels`` — an
+  unregistered priority name is a LOUD ``SystemExit(2)`` BEFORE the
+  group is created or anything is consumed (§3.3);
+- the transport gate — ``connect_or_exit(REDIS_URL)`` refuses the
+  process loudly (``SystemExit(2)``, stable message, the URL value
+  never disclosed) and carries ``reclaim_min_idle_ms =
+  NOTIFY_REENQUEUE_AFTER x 1000`` (the setting is seconds, XAUTOCLAIM
+  wants milliseconds);
+- channel instances — injected (the test seam) or built from the
+  priority names;
+- ``ensure_worker_group`` (``id=0`` — the accumulated backlog stays
+  deliverable; the point of part 3) → ``reclaim_hanging_tasks`` (both
+  via ``to_thread`` — XAUTOCLAIM needs the group to exist) → signal
+  handlers → ``run_loop("delivery", ...)``.
+
+The loop (spec §3.1): each iteration claims a non-blocking batch,
+validates every payload (brak → identifiers-only journal + ack, no
+status — §3.1), delivers valid ones through the §3.4 core with
+statuses published via ``to_thread(queue.publish_status)``, and acks
+the task only AFTER the whole publication; then the PERIODIC
+``reclaim_hanging_tasks`` returns entries abandoned mid-flight (a
+crashed iteration, a transport outage) within minutes instead of at
+the next restart. A ``NotifyTransportError`` propagates to the
+``run_loop`` guard: the record keeps its delivery ticket, attempts
+never continue status-less (monitoring beats haste, §3.1).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.config import settings
-from src.notify.channels.base import (
-    Channel,
-    ChannelAppError,
-    ChannelTransportError,
+from src.notify.channels.base import ChannelAppError, ChannelTransportError
+from src.notify.channels.registry import (
+    build_instances,
+    parse_channel_priority,
+    validate_priority_channels,
 )
-from src.notify.process import install_signal_handlers
+from src.notify.process import install_signal_handlers, run_loop
 from src.notify.redis_queue import connect_or_exit
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from src.notify.queue import NotifyQueue, StatusEvent, TaskPayload, WorkerQueue
+    from src.notify.channels.base import Channel
+    from src.notify.queue import StatusEvent, TaskPayload, WorkerQueue
 
 # The notify family logger convention (src/notify/journal.py):
 # "memo.notify.<module>", independent of import paths.
 logger = logging.getLogger("memo.notify.worker")
 
 # ── module constants (spec §3.4 — deliberately NOT settings) ────────────────
-
-#: Idle tick of the skeleton loop: a periodic no-op wait, the pulse the
-#: part-3 delivery loop will replace.
-IDLE_TICK_SECONDS = 1.0
-
-#: The one startup line of the skeleton (spec §3.4 verbatim).
-SKELETON_MESSAGE = "worker skeleton: delivery logic ships in #484"
 
 #: Pause before a transport retry when the channel gave no
 #: ``retry_after`` (spec §3.4 — a module constant, not a setting).
@@ -279,47 +284,106 @@ async def deliver_task(
     await publish(_status_event(task_id, "failed", last_name, "not_delivered"))
 
 
-# ── concurrency: signal handlers (process.py §3.7) + idle loop (§3.4) ───────
+# ── the delivery loop (spec §3.1: periodic reclaim, ack after statuses) ─────
 
 
-async def idle_loop(queue: NotifyQueue, stop: asyncio.Event) -> None:
-    """The skeleton's idle wait: tick until the stop-event, NEVER read
-    the queue (spec §3.4 — consumption is part 3; ``queue`` is received
-    now so the part-3 loop replaces this body without re-plumbing the
-    entry). Only the stop-event ends the process: SIGTERM/SIGINT set it
-    (see :func:`src.notify.process.install_signal_handlers`), and the
-    wait-for-stop form reacts within one tick instead of sleeping
-    through a whole interval.
+async def _sleep_through(stop: asyncio.Event, pause: float) -> None:
+    """The production clock seam (§3.4): a retry pause is interrupted by
+    the stop-event — SIGTERM never waits out a pause's tail."""
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=pause)
+
+
+async def delivery_once(
+    queue: WorkerQueue, channels: dict[str, Channel], stop: asyncio.Event
+) -> None:
+    """One delivery pass of the loop (spec §3.1): claim a non-blocking
+    batch, deliver every task, then the PERIODIC hanging-task reclaim —
+    an entry abandoned mid-flight (a crashed iteration, a transport
+    outage) returns to delivery within minutes, not at the next restart.
+
+    Per task: ``parse_task_payload`` — brak → loud journal (task_id and
+    keys, never the message text) + ``ack_task`` WITHOUT a status event,
+    the batch continues; a valid task goes through the §3.4 core and is
+    acked only AFTER the whole status publication (§3.1: a crash in
+    between gives a rare delivery duplicate — both accepted, §4.4).
+
+    A ``NotifyTransportError`` anywhere here (claim, publish, ack,
+    reclaim) propagates to the ``run_loop`` guard: the record keeps its
+    delivery ticket — attempts never continue status-less (monitoring
+    beats haste, §3.1); the periodic reclaim of a LATER iteration
+    returns it.
     """
-    while not stop.is_set():
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=IDLE_TICK_SECONDS)
+    items = await asyncio.to_thread(queue.claim_tasks)
+    for item in items:
+        try:
+            task = parse_task_payload(item)
+        except InvalidTaskPayload as exc:
+            logger.error(
+                "notify worker: brak task payload (task_id=%r, keys=%s): %s"
+                " — acking without a status event",
+                item.get("task_id"),
+                sorted(str(key) for key in item),
+                exc,
+            )
+            await asyncio.to_thread(queue.ack_task, item)
+            continue
+        await deliver_task(
+            task,
+            channels,
+            queue,
+            retries=settings.NOTIFY_SEND_RETRIES,
+            sleep=functools.partial(_sleep_through, stop),
+            stop=stop,
+            publish=lambda event: asyncio.to_thread(queue.publish_status, event),
+        )
+        await asyncio.to_thread(queue.ack_task, item)
+    await asyncio.to_thread(queue.reclaim_hanging_tasks)
 
 
 # ── process entry ───────────────────────────────────────────────────────────
 
 
-async def main(queue: NotifyQueue | None = None) -> None:
+async def main(
+    queue: WorkerQueue | None = None, channels: dict[str, Channel] | None = None
+) -> None:
     """``python -m src.notify.worker``. Disabled (``NOTIFY_ENABLED=false``,
-    the default): log and return 0. Enabled: the fail-fast transport
-    gate (spec §3.1), SIGTERM/SIGINT handlers, then the idle loop — the
-    skeleton never consumes ``notify:tasks`` (part 3, #484). An
-    explicitly injected queue (the test seam) skips gate selection.
+    the default): log and return 0. Enabled: the startup checks of
+    §3.1/§3.3 in order — parse and validate the channel priority (an
+    unregistered name is a loud ``SystemExit(2)`` before the group is
+    created), select the transport adapter (``connect_or_exit`` carries
+    ``reclaim_min_idle_ms = NOTIFY_REENQUEUE_AFTER x 1000``), resolve
+    the channel instances (injected — the test seam — or built from the
+    priority), create the ``worker`` group and reclaim the hanging
+    tasks, install the signal handlers, then run the delivery loop
+    until SIGTERM/KeyboardInterrupt. An explicitly injected queue skips
+    adapter selection entirely.
     """
     if not settings.NOTIFY_ENABLED:
         logger.info("notify worker: NOTIFY_ENABLED=false — exiting (the queue stays untouched)")
         return
 
+    names = parse_channel_priority(settings.NOTIFY_CHANNEL_PRIORITY)
+    validate_priority_channels(names)
+
     if queue is None:
-        # No FakeQueue fallback: an enabled worker with no configured or
-        # unreachable transport must not idle silently — the gate exits
-        # code 2 before the loop starts (spec §3.1, S5).
-        queue = connect_or_exit(settings.REDIS_URL.get_secret_value())
+        queue = connect_or_exit(
+            settings.REDIS_URL.get_secret_value(),
+            reclaim_min_idle_ms=settings.NOTIFY_REENQUEUE_AFTER * 1000,
+        )
+
+    channels = channels or build_instances(names)
 
     stop = asyncio.Event()
+    await asyncio.to_thread(queue.ensure_worker_group)
+    await asyncio.to_thread(queue.reclaim_hanging_tasks)
     install_signal_handlers(stop)
-    logger.info(SKELETON_MESSAGE)
-    await idle_loop(queue, stop)
+    logger.info("notify worker starting (channel priority: %s)", names)
+
+    async def iteration() -> None:
+        await delivery_once(queue, channels, stop)
+
+    await run_loop("delivery", stop, settings.NOTIFY_POLL_INTERVAL, iteration, log=logger)
 
 
 if __name__ == "__main__":

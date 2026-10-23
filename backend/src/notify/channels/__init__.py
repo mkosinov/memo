@@ -12,3 +12,12 @@
 Real channels (part 4) register the same way: a module + one bottom-of-
 module registration line + settings, the core never changes.
 """
+
+from src.notify.channels import mock  # noqa: F401 — the registration import
+
+# The registry populates at IMPORT time (ADR 011: a channel module
+# registers itself at its bottom) — THIS package import is the hook
+# pulling every shipped channel module in: ``from
+# src.notify.channels.registry import ...`` (the worker's only channel
+# import) imports the package first, so the process entry sees a filled
+# registry. A part-4 channel adds one import line here.

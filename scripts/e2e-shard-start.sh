@@ -38,7 +38,36 @@
 #                    stdout target (fd 1 readlink) — exactly the
 #                    $LOG_DIR/shard-stack-N.log the orchestrator
 #                    redirects the whole stack into; a terminal/pipe run
-#                    has no tail-able log → «log not created».
+#                    has no tail-able log → «log not created». Resolved
+#                    BEFORE the readiness loops (#472): readiness-phase
+#                    deaths print the same tail as the watch phase.
+#
+#   READY_BUDGET_BACKEND_S / READY_BUDGET_FRONTEND_S  Optional (#472):
+#                    wall-clock readiness deadlines (seconds) for the two
+#                    readiness poll loops below. Single source of the
+#                    values + semantics: scripts/lib/shard-helpers.sh
+#                    (defaults 60/120, env-overridable). Every poll step
+#                    is bounded by the REMAINING budget (curl --max-time
+#                    capped at the remainder, sleep truncated), and
+#                    liveness (kill -0) is checked on every step — a dead
+#                    server pin is an immediate fatal verdict with the
+#                    stack-log tail, never a budget burnout.
+#
+#   SHARD_READY_MARKER  Optional (#472): readiness marker path — set ONLY
+#                    by test-all.sh (the orchestrator). Any stale file at
+#                    the path is removed BEFORE any server starts (a
+#                    leftover marker must never fake readiness); the fresh
+#                    marker is (re)created right after the frontend
+#                    readiness poll succeeds and BEFORE warmup — readiness
+#                    is published the moment it holds, warmup keeps
+#                    running in parallel (the orchestrator starts its
+#                    stages on the marker; its 30 s buffer is untouched).
+#                    Unset (CI / manual runs) → no marker file is ever
+#                    written. Content: `shard=N frontend=:P backend=:P
+#                    pid=P epoch=E` (diagnostics — the orchestrator waits
+#                    for the file's EXISTENCE, test-all.sh owns its
+#                    lifecycle afterwards; this script's teardown does not
+#                    remove it).
 #
 #   NOTIFY_E2E_ENABLED Optional (#483 Task 8, spec §3.5): '1' switches
 #                    the script from a numbered shard to THE ENABLED
@@ -314,6 +343,18 @@ remove_own_lease() {
   fi
 }
 
+# ── #472: orchestrator readiness marker — stale copy removal ──────────────
+# SHARD_READY_MARKER is set only by test-all.sh (see the marker wait there).
+# A file left at the path by an earlier run must never fake readiness:
+# remove it NOW, before any server starts; the fresh marker is (re)created
+# only after the frontend readiness poll succeeds (below). Unset → nothing
+# (no path, no removal, no write — zero behavior for CI/manual runs).
+SHARD_READY_MARKER="${SHARD_READY_MARKER:-}"
+if [ -n "$SHARD_READY_MARKER" ]; then
+  rm -f "$SHARD_READY_MARKER"
+  echo "[shard-$SHARD_ID] Readiness marker: $SHARD_READY_MARKER (stale copy removed; written after frontend readiness)"
+fi
+
 echo "[shard-$SHARD_ID] Starting stack: frontend=:$SHARD_PORT backend=:$BACKEND_PORT db=$ABS_DB_PATH"
 
 # #152: wipe shard DB so seed runs on an empty schema. alembic recreates
@@ -391,16 +432,58 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Wait for backend to be ready (max 60s — 2 parallel FastAPI/uicorn + alembic
-# can take 10-30s each under load, allow plenty of headroom)
+# ── #448 Task 3: stack log path for the death diagnosis ────────────────────
+# The orchestrator redirects this whole script into $LOG_DIR/shard-stack-N.log
+# and both servers inherit that stdout — their last words land there, so THAT
+# file is "the stack log". Explicit SHARD_STACK_LOG wins (manual override /
+# test seam); else resolve our own fd 1 (regular file only — a terminal or
+# pipe run has no tail-able log); else empty → «log not created».
+# #472: resolved BEFORE the readiness loops — a death during readiness
+# prints the same ALWAYS-path + capped tail as a death in the watch phase.
+SHARD_STACK_LOG="${SHARD_STACK_LOG:-}"
+if [ -z "$SHARD_STACK_LOG" ]; then
+  # /proc/$$/fd/1, NOT /proc/self/fd/1: inside the command substitution
+  # fd 1 is the capture pipe; $$ stays the script's pid, so its fd table
+  # names the real stdout target.
+  _fd1_target="$(readlink "/proc/$$/fd/1" 2>/dev/null || true)"
+  case "$_fd1_target" in
+    /*) [ -f "$_fd1_target" ] && SHARD_STACK_LOG="$_fd1_target" || true ;;
+  esac
+fi
+
+# Wait for backend to be ready — WALL-CLOCK DEADLINE (#472), not an
+# iteration counter: the budget is READY_BUDGET_BACKEND_S (single source in
+# shard-helpers.sh; the 60 keeps the old headroom for 2 parallel
+# FastAPI/uvicorn + alembic under load), and every step is bounded by the
+# REMAINING budget — curl --max-time is capped at the remainder, the sleep
+# is truncated — so a listening-but-hung port can no longer stretch 60
+# iterations × a hanging curl into ~11 minutes (Behavioral Delta).
+# Liveness on EVERY step (#472 US-5): a dead BACKEND_PID is an immediate
+# fatal verdict with the stack-log tail (the #448 mechanism) — the budget
+# is never burned on a backend that already died.
 BACKEND_READY=false
-for i in $(seq 1 60); do
-  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time 10 2>/dev/null | grep -qE "^(2|3)"; then
+_rdy_deadline=$(( SECONDS + READY_BUDGET_BACKEND_S ))
+while :; do
+  _rdy_remaining=$(( _rdy_deadline - SECONDS ))
+  [ "$_rdy_remaining" -gt 0 ] || break
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "[shard-$SHARD_ID] ERROR: stack shard $SHARD_ID: backend died on :$BACKEND_PORT before readiness" >&2
+    _capped_log_tail "$SHARD_STACK_LOG" >&2
+    exit 1
+  fi
+  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/docs" --max-time "$_rdy_remaining" 2>/dev/null | grep -qE "^(2|3)"; then
     echo "[shard-$SHARD_ID] Backend ready on :$BACKEND_PORT"
     BACKEND_READY=true
     break
   fi
-  sleep 1
+  # sleep truncated to the remaining budget (cadence 1 s)
+  _rdy_remaining=$(( _rdy_deadline - SECONDS ))
+  [ "$_rdy_remaining" -gt 0 ] || break
+  if [ "$_rdy_remaining" -gt 1 ]; then
+    sleep 1
+  else
+    sleep "$_rdy_remaining"
+  fi
 done
 if [ "$BACKEND_READY" = false ]; then
   echo "[shard-$SHARD_ID] ERROR: Backend failed to start on :$BACKEND_PORT" >&2
@@ -492,21 +575,68 @@ trap _orig_cleanup EXIT
 trap '_stack_on_signal 2' INT
 trap '_stack_on_signal 15' TERM
 
-# Wait for frontend to be ready (max 120s — 2 parallel Next.js dev servers
-# can take 15-30s each under load, allow plenty of headroom.
-# Use --max-time 30 for curl because Next.js dev server compiles routes
-# on first request, which can take 20+ seconds.
-for i in $(seq 1 120); do
-  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
-    echo "[shard-$SHARD_ID] Frontend ready on :$SHARD_PORT"
-    break
-  fi
-  if [ "$i" -eq 120 ]; then
-    echo "[shard-$SHARD_ID] ERROR: Frontend failed to start on :$SHARD_PORT" >&2
+# Wait for frontend to be ready — WALL-CLOCK DEADLINE (#472), same step
+# contract as the backend loop above: the budget is READY_BUDGET_FRONTEND_S
+# (single source in shard-helpers.sh; the 120 keeps the old headroom for
+# 2 parallel Next.js dev servers under load), curl --max-time is capped at
+# the REMAINING budget (Next.js compiles routes on first request, which can
+# take 20+ seconds — the remainder, not a fixed 30, is the honest cap), the
+# sleep is truncated. Liveness on EVERY step (#472 US-5): BOTH pins are
+# checked (backend first — the watch loop's tie-break order); either death
+# is an immediate fatal verdict with the dead one's tail — the frontend
+# window outlives the backend, and a backend that died after ITS loop ended
+# must fail this run here, not in the watch phase seconds later.
+FRONTEND_READY=false
+_rdy_deadline=$(( SECONDS + READY_BUDGET_FRONTEND_S ))
+while :; do
+  _rdy_remaining=$(( _rdy_deadline - SECONDS ))
+  [ "$_rdy_remaining" -gt 0 ] || break
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "[shard-$SHARD_ID] ERROR: stack shard $SHARD_ID: backend died on :$BACKEND_PORT before readiness" >&2
+    _capped_log_tail "$SHARD_STACK_LOG" >&2
     exit 1
   fi
-  sleep 1
+  if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    echo "[shard-$SHARD_ID] ERROR: stack shard $SHARD_ID: frontend died on :$SHARD_PORT before readiness" >&2
+    _capped_log_tail "$SHARD_STACK_LOG" >&2
+    exit 1
+  fi
+  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT/" --max-time "$_rdy_remaining" 2>/dev/null | grep -qE "^(2|3)"; then
+    echo "[shard-$SHARD_ID] Frontend ready on :$SHARD_PORT"
+    FRONTEND_READY=true
+    break
+  fi
+  # sleep truncated to the remaining budget (cadence 1 s)
+  _rdy_remaining=$(( _rdy_deadline - SECONDS ))
+  [ "$_rdy_remaining" -gt 0 ] || break
+  if [ "$_rdy_remaining" -gt 1 ]; then
+    sleep 1
+  else
+    sleep "$_rdy_remaining"
+  fi
 done
+if [ "$FRONTEND_READY" = false ]; then
+  echo "[shard-$SHARD_ID] ERROR: Frontend failed to start on :$SHARD_PORT" >&2
+  exit 1
+fi
+
+# ── #472: publish readiness to the orchestrator ────────────────────────────
+# Written RIGHT after the successful frontend poll and BEFORE warmup — the
+# overlap semantics stay: the orchestrator starts its stages on readiness
+# while warmup runs in parallel (its 30 s stabilization buffer is not
+# touched by this). Atomic tmp+mv in the same dir (repo idiom): the
+# orchestrator polls the file's existence, so no partial marker is ever
+# observed. Unset (CI/manual) → no write. A write failure is fatal under
+# set -e (a marker path that cannot be written means a broken run — the
+# orchestrator would burn its whole ceiling otherwise; dying fast lets it
+# fail within one liveness tick instead).
+if [ -n "$SHARD_READY_MARKER" ]; then
+  printf 'shard=%s frontend=:%s backend=:%s pid=%s epoch=%s\n' \
+    "$SHARD_ID" "$SHARD_PORT" "$BACKEND_PORT" "$$" \
+    "$(date +%s 2>/dev/null || printf '%s' 0)" > "${SHARD_READY_MARKER}.tmp" \
+    && mv -f "${SHARD_READY_MARKER}.tmp" "$SHARD_READY_MARKER"
+  echo "[shard-$SHARD_ID] Readiness marker written: $SHARD_READY_MARKER"
+fi
 
 # Force-compile all major routes by hitting them once
 # Keep this list in sync with frontend/admin/e2e/fixtures/warmup-routes.ts
@@ -528,23 +658,6 @@ for route in "${WARMUP_ROUTES[@]}"; do
   HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SHARD_PORT$route" --max-time 60 2>/dev/null || echo "000")
   echo "  [shard-$SHARD_ID] $route → $HTTP_CODE"
 done
-
-# ── #448 Task 3: stack log path for the death diagnosis ────────────────────
-# The orchestrator redirects this whole script into $LOG_DIR/shard-stack-N.log
-# and both servers inherit that stdout — their last words land there, so THAT
-# file is "the stack log". Explicit SHARD_STACK_LOG wins (manual override /
-# test seam); else resolve our own fd 1 (regular file only — a terminal or
-# pipe run has no tail-able log); else empty → «log not created».
-SHARD_STACK_LOG="${SHARD_STACK_LOG:-}"
-if [ -z "$SHARD_STACK_LOG" ]; then
-  # /proc/$$/fd/1, NOT /proc/self/fd/1: inside the command substitution
-  # fd 1 is the capture pipe; $$ stays the script's pid, so its fd table
-  # names the real stdout target.
-  _fd1_target="$(readlink "/proc/$$/fd/1" 2>/dev/null || true)"
-  case "$_fd1_target" in
-    /*) [ -f "$_fd1_target" ] && SHARD_STACK_LOG="$_fd1_target" || true ;;
-  esac
-fi
 
 echo "[shard-$SHARD_ID] Stack ready. Waiting for shutdown signal..."
 # Fail-fast watch (#448 Task 3, spec §3.2): wait for EITHER server, not just

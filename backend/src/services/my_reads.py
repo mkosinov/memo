@@ -1,17 +1,19 @@
-"""Client-cabinet «my» read composites (GH #513 — spec §«Контракт API»).
+"""Client-cabinet «my» read composites (GH #513) — records, photos,
+payments.
 
 Corridor 3 free functions (canon rule 8 / ADR 007 — the
 ``list_records_view`` precedent in ``services/record.py``): the /my
 reads are owner-filtered display composites with no owning repository
-of their own, so they live as free functions in this module (the
-photos and payments composites of #513 join here in later tasks),
-executed through the owner repo's ``list_custom`` row-tuple mechanics.
+of their own, so they live as free functions in this module, executed
+through the owner repo's ``list_custom``/``list_entity`` mechanics.
 
 Owner scope: the session's ``users.client_id`` is the ONLY visibility
 filter — a cardless account owns nothing (``None`` short-circuits to
 an empty page; it must NEVER become ``client_id IS NULL`` and leak the
-anonymous records). Sorting is fixed per spec: activity start DESC,
-record id ASC; visits inside a record by id ASC. Visit prices are
+anonymous records / ownerless photos / client-less records' payments).
+Sorting is fixed per spec: records by activity start DESC + id ASC;
+photos and payments by ``created_at`` DESC + id ASC (the deterministic
+tie-break canon); visits inside a record by id ASC. Visit prices are
 creation-time snapshots (#357): visit ``custom_price`` when set, else
 the stored ``price`` — the tariff is never consulted on read.
 """

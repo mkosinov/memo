@@ -51,6 +51,7 @@ from sqlalchemy import select
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
 from src.db.database import DBManager
+from src.notify.channels.registry import parse_channel_priority
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
 from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent
@@ -82,33 +83,6 @@ REENQUEUE_FAILED_MESSAGE = "не доставлено: очередь не по�
 #: contract fixed here.
 InboundHandler = Callable[[InboundEvent], Awaitable[None]]
 INBOUND_HANDLERS: dict[str, InboundHandler] = {}
-
-
-# ── settings parsing (§3.8) ─────────────────────────────────────────────────
-
-
-def parse_channel_priority(raw: str) -> list[str]:
-    """Parse ``NOTIFY_CHANNEL_PRIORITY`` (CSV, case-insensitive).
-
-    An empty string (or an empty segment) or duplicate names are a LOUD
-    startup error: the setting must never produce an empty/duplicated
-    channel list in task payloads. Channel NAMES are not validated here
-    — an unregistered channel is the worker's loud startup error
-    (family §3.5, part 3).
-    """
-    names = [part.strip().lower() for part in raw.strip().split(",")]
-    if not any(names):
-        raise ValueError(
-            f"NOTIFY_CHANNEL_PRIORITY is empty — at least one channel is required (got {raw!r})"
-        )
-    if any(not name for name in names):
-        raise ValueError(f"NOTIFY_CHANNEL_PRIORITY has empty segments (got {raw!r})")
-    seen: set[str] = set()
-    for name in names:
-        if name in seen:
-            raise ValueError(f"NOTIFY_CHANNEL_PRIORITY duplicate channel {name!r} (got {raw!r})")
-        seen.add(name)
-    return names
 
 
 # ── small time helpers ──────────────────────────────────────────────────────

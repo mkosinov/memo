@@ -14,8 +14,13 @@ Covered (spec §5, US-5–US-8):
 - statuses: attempt rows appended, derived state per §4.3 (first
   ``sending`` → sending; first ``sent`` of ANY attempt → sent, terminal;
   final ``failed`` → failed), idempotent re-apply (duplicate redelivery
-  harmless), unknown task → logged + NOT acked (at-least-once),
-  ``reclaim_hanging()`` at dispatcher start;
+  harmless), ``reclaim_hanging()`` at dispatcher start;
+- statuses brak rule (#484 spec §3.5, two layers): shape brak
+  (absent/empty/wrong-type ``task_id``, stage out of the vocabulary,
+  missing/empty ``channel``, unparseable ``occurred_at``) AND unknown
+  task/stage after a valid form → logged (identifiers only) + ACKED —
+  the reader never returns to brak; any OTHER error (DB down) → NOT
+  acked, reclaimed at the next process start (hanging path preserved);
 - re-enqueue: by age with the SAVED payload in full, ``updated_at``
   refreshed (no every-tick re-enqueue), cap 10 → ``failed`` with the
   «не доставлено» error;
@@ -591,25 +596,6 @@ class TestStatusesCycle:
         )
         assert _task_row(task.id, "status")["status"] == "sent"
 
-    async def test_unknown_task_logged_not_acked_sibling_processed(
-        self, db_engine, db_session
-    ) -> None:
-        task = await _stage_queued_task(db_session)
-        queue = FakeQueue()
-        bad = _status_item(str(uuid.uuid4()), "sending")
-
-        queue.push_status(bad)
-        queue.push_status(_status_item(task.id, "sending"))
-        with capture_dispatcher_logs() as messages:
-            await dispatcher.statuses_once(_session_factory(db_engine), queue)
-
-        assert any("not applied" in m for m in messages)
-        assert _task_row(task.id, "status")["status"] == "sending"
-
-        # the poison item was NOT acked: reclaim brings it back (§4.4)
-        queue.reclaim_hanging()
-        assert queue.claim_statuses() == [bad]
-
     async def test_reclaimed_hanging_item_is_processed(self, db_engine, db_session) -> None:
         task = await _stage_queued_task(db_session)
         queue = FakeQueue()
@@ -638,6 +624,140 @@ class TestStatusesCycle:
         await dispatcher.run_dispatcher(_session_factory(db_engine), queue, stop)
 
         assert queue.reclaimed is True
+
+
+# ── statuses brak rule — #484 Task 6 (spec §3.5, two layers) ─────────────────
+
+
+class TestStatusesBrakRule:
+    """Layer 1 — shape pre-validation; layer 2 — ``ValueError`` from
+    ``apply_status_event`` (unknown task/stage after a valid form). Both:
+    journal (identifiers only) + ACK — brak leaves delivery forever,
+    siblings of the same batch still proceed. Every OTHER error keeps the
+    old hanging contract: logged, NOT acked, reclaimed at process start."""
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("task_id", None, id="task-id-missing"),
+            pytest.param("task_id", "", id="task-id-empty"),
+            pytest.param("task_id", 3.5, id="task-id-wrong-type"),
+            pytest.param("stage", "delivered", id="stage-out-of-vocabulary"),
+            pytest.param("stage", None, id="stage-missing"),
+            pytest.param("channel", "", id="channel-empty"),
+            pytest.param("channel", None, id="channel-missing"),
+            pytest.param("occurred_at", "not-a-timestamp", id="occurred-at-unparseable"),
+            pytest.param("occurred_at", None, id="occurred-at-missing"),
+            pytest.param("occurred_at", 123, id="occurred-at-wrong-type"),
+        ],
+    )
+    async def test_shape_brak_acked_sibling_processed(
+        self, db_engine, db_session, field, value
+    ) -> None:
+        """Layer 1: any shape violation → the event is acked away BEFORE
+        ``apply_status_event`` and writes nothing; the sibling of the same
+        batch still applies. ``value=None`` removes the key entirely."""
+        task = await _stage_queued_task(db_session)
+        queue = FakeQueue()
+        brak = _status_item(task.id, "sending")  # would apply fine uncorrupted
+        if value is None:
+            brak.pop(field)
+        else:
+            brak[field] = value
+
+        queue.push_status(brak)
+        queue.push_status(_status_item(task.id, "sent"))
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        # the sibling applied; the brak wrote nothing (one attempt row)
+        assert _task_row(task.id, "status")["status"] == "sent"
+        assert (
+            len(query_db(f"SELECT id FROM notify_task_attempts WHERE task_id = '{task.id}'")) == 1
+        )
+        # brak never comes back: nothing hanging after a reclaim
+        queue.reclaim_hanging()
+        assert queue.claim_statuses() == []
+        assert any("malformed" in m for m in messages)
+
+    async def test_nondict_event_is_shape_brak_acked(
+        self, db_engine, db_session
+    ) -> None:
+        """A corrupt entry that is not even a mapping must not crash the
+        reader (that would poison the claim forever) — it is shape brak."""
+        task = await _stage_queued_task(db_session)
+        queue = FakeQueue()
+        queue.push_status("not-even-a-dict")  # type: ignore[arg-type]
+        queue.push_status(_status_item(task.id, "sent"))
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert _task_row(task.id, "status")["status"] == "sent"
+        queue.reclaim_hanging()
+        assert queue.claim_statuses() == []
+        assert any("malformed" in m for m in messages)
+
+    async def test_unknown_task_valid_form_acked_sibling_processed(
+        self, db_engine, db_session
+    ) -> None:
+        """Layer 2: a VALID form naming a task that does not exist →
+        ``ValueError`` from ``apply_status_event`` → acked (redelivery
+        cannot fix it — the row commits before enqueue, #482); the
+        sibling of the same batch still applies."""
+        task = await _stage_queued_task(db_session)
+        queue = FakeQueue()
+        orphan = _status_item(str(uuid.uuid4()), "sending")
+
+        queue.push_status(orphan)
+        queue.push_status(_status_item(task.id, "sending"))
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert _task_row(task.id, "status")["status"] == "sending"
+        queue.reclaim_hanging()
+        assert queue.claim_statuses() == []
+        assert any("acked" in m for m in messages)
+
+    async def test_db_error_leaves_event_unacked_for_reclaim(self) -> None:
+        """The hanging path is PRESERVED: a non-ValueError failure (DB
+        down) logs and leaves the event unacked — the reliable-list
+        reclaim at the next process start redelivers it (§4.4)."""
+        queue = FakeQueue()
+        item = _status_item(str(uuid.uuid4()), "sending")
+        queue.push_status(item)
+
+        def dead_factory():
+            raise RuntimeError("db down")
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.statuses_once(dead_factory, queue)  # type: ignore[arg-type]
+
+        assert any("not applied" in m for m in messages)
+        queue.reclaim_hanging()
+        assert queue.claim_statuses() == [item]  # hanging — never acked
+
+    async def test_s9_reader_acks_brak_and_never_returns_to_it(
+        self, db_engine, db_session
+    ) -> None:
+        """S9 (spec §4): a pass of the REAL ``statuses_once`` over
+        ``FakeQueue.push_status`` brak — the reader confirms the brak and
+        never returns to it; later passes are not disturbed."""
+        task = await _stage_queued_task(db_session)
+        queue = FakeQueue()
+        brak = _status_item(task.id, "sending")
+        brak["occurred_at"] = "not-a-timestamp"
+        queue.push_status(brak)
+
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        queue.reclaim_hanging()
+        assert queue.claim_statuses() == []  # the brak is gone for good
+
+        # a later pass over a valid event applies normally
+        queue.push_status(_status_item(task.id, "sent"))
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+        assert _task_row(task.id, "status")["status"] == "sent"
 
 
 # ── cycle 3: notify:inbound (§3.8, empty pilot registry) ────────────────────

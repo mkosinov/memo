@@ -27,8 +27,12 @@ and the TaskGroup winds down cleanly.
   not a setting) the task is ``failed``.
 - **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
   start, then claim → per event one append-only attempt row + the §4.3
-  derived task state in ONE commit → ack. Unapplied items stay unacked
-  and are reclaimed at the next process start (at-least-once, §4.4).
+  derived task state in ONE commit → ack. Brak leaves delivery by the
+  two-layer rule (#484 spec §3.5): shape pre-validation and a
+  ``ValueError`` from ``apply_status_event`` (unknown task/stage after a
+  valid form) are journalled (identifiers only) and ACKED; any other
+  error keeps the item unacked — the reliable-list reclaim at the next
+  process start redelivers it (at-least-once, §4.4).
 - **Cycle 3 — ``notify:inbound``**: routed by the handler registry
   (channel → handler). The pilot registry is EMPTY: log warning + ack.
 
@@ -101,6 +105,33 @@ def _naive_utc(value: str) -> datetime:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed
+
+
+def _is_malformed_status(item: StatusEvent) -> bool:
+    """Shape pre-validation (spec §3.5): ``task_id`` a non-empty
+    identifier (the task row's UUID string — what the dispatcher's own
+    enqueue seam carries; a positive int is accepted as the worker
+    seam's spelling), ``stage`` in the §4.3 vocabulary, ``channel`` a
+    non-empty string, ``occurred_at`` parseable. Guards the reader
+    against events that would raise a non-ValueError inside
+    ``apply_status_event`` and hang on the stream unacked forever."""
+    try:
+        task_id = item.get("task_id")
+        if isinstance(task_id, bool) or not isinstance(task_id, (str, int)):
+            return True
+        if not task_id:
+            return True
+        if item.get("stage") not in ("sending", "sent", "failed"):
+            return True
+        channel = item.get("channel")
+        if not isinstance(channel, str) or not channel:
+            return True
+        _naive_utc(item["occurred_at"])
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # AttributeError: a corrupt entry that is not even a mapping —
+        # the reader must ack it away, not crash on it.
+        return True
+    return False
 
 
 # ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
@@ -316,16 +347,44 @@ async def statuses_once(
     session_factory: async_sessionmaker[AsyncSession], queue: NotifyQueue
 ) -> None:
     """Claim ``notify:statuses`` → apply each event in its own commit →
-    ack. An unapplied item is logged and left UNACKED: the reliable-list
-    reclaim at the next process start redelivers it (§4.4), and sibling
-    items of the same batch still proceed. The sync adapter is called
-    through ``asyncio.to_thread`` (§3.1) — a transport failure propagates
-    to the loop guard, the next tick retries.
+    ack. The two-layer brak rule (#484 spec §3.5): (1) shape
+    pre-validation, (2) ``ValueError`` from ``apply_status_event``
+    (unknown task/stage after a valid form) — both journalled
+    (identifiers only) and ACKED: redelivery cannot fix a handmade or
+    corrupted payload, and the task row commits before enqueue (#482),
+    so «unknown task» means a lost DB row, not a race worth waiting
+    out. Any OTHER error (DB down, integrity on commit) keeps the old
+    contract: logged, left UNACKED — the reliable-list reclaim at the
+    next process start redelivers it (§4.4), and sibling items of the
+    same batch still proceed. The sync adapter is called through
+    ``asyncio.to_thread`` (§3.1) — a transport failure propagates to
+    the loop guard, the next tick retries.
     """
     for item in await asyncio.to_thread(queue.claim_statuses):
+        if _is_malformed_status(item):
+            logger.error(
+                "notify dispatcher: malformed status event (spec §3.5 shape"
+                " brak) — acked away, identifiers %r",
+                {k: item.get(k) for k in ("task_id", "stage")}
+                if isinstance(item, dict)
+                else item,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
+            continue
         try:
             async with session_factory() as session:
                 await apply_status_event(session, item)
+        except ValueError as exc:
+            # Layer 2 (spec §3.5): a VALID form naming an unknown
+            # task/stage — handmade/broken payload or a lost DB row;
+            # redelivery cannot fix it, so the event leaves delivery.
+            logger.error(
+                "notify dispatcher: status event rejected (%s: %s) — acked"
+                " away (spec §3.5)",
+                type(exc).__name__,
+                exc,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
         except Exception:
             logger.exception(
                 "notify dispatcher: status event %r not applied — left unacked for reclaim",

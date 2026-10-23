@@ -642,6 +642,11 @@ class TestStatusesBrakRule:
             pytest.param("task_id", None, id="task-id-missing"),
             pytest.param("task_id", "", id="task-id-empty"),
             pytest.param("task_id", 3.5, id="task-id-wrong-type"),
+            # Canonical id shape (#484 follow-up): a non-empty UUID string
+            # (NotifyTask.id String(36)) — the int/bool spellings of the
+            # §4.2 sketch are malformed and must be acked away.
+            pytest.param("task_id", 456, id="task-id-int"),
+            pytest.param("task_id", True, id="task-id-bool"),
             pytest.param("stage", "delivered", id="stage-out-of-vocabulary"),
             pytest.param("stage", None, id="stage-missing"),
             pytest.param("channel", "", id="channel-empty"),

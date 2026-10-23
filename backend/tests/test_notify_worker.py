@@ -73,8 +73,13 @@ def _entry(name: str, address: str) -> dict[str, str]:
     return {"name": name, "address": address}
 
 
-def _task(task_id: int = 456, entries: list[dict[str, str]] | None = None) -> TaskPayload:
-    """A family §4.2 payload; ``entries=None`` → one deliverable mock
+def _task(
+    task_id: str = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9c01",
+    entries: list[dict[str, str]] | None = None,
+) -> TaskPayload:
+    """A family §4.2 payload; ``task_id`` — the live seam spelling: a
+    UUID String(36) (``NotifyTask.id``, AbstractModel PK — ints are
+    brak, #484 follow-up). ``entries=None`` → one deliverable mock
     record, ``entries=[]`` → a brak task (empty channel list)."""
     return {
         "task_id": task_id,
@@ -381,7 +386,9 @@ class TestDeliveryOnce:
         next task."""
         queue = RecordingQueue()
         channels, recorder = _mock_channels()
-        good, brak = _task(task_id=101), _task(task_id=789, entries=[])
+        good_id = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9101"
+        brak_id = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9789"
+        good, brak = _task(task_id=good_id), _task(task_id=brak_id, entries=[])
         queue.enqueue_task(brak)
         queue.enqueue_task(good)
 
@@ -394,13 +401,13 @@ class TestDeliveryOnce:
         assert queue.tasks == []  # BOTH acked — nothing hanging
         assert recorder.deliveries == [{"address": "+79990001122", "text": TEXT}]
         statuses = queue.claim_statuses()
-        assert [e["task_id"] for e in statuses] == [101, 101]  # brak published nothing
+        assert [e["task_id"] for e in statuses] == [good_id, good_id]  # brak published nothing
         assert [(e["stage"], e["outcome"]) for e in statuses] == [
             ("sending", "attempt"),
             ("sent", "delivered"),
         ]
         brak_lines = [m for m in messages if "brak" in m]
-        assert brak_lines and "789" in brak_lines[0] and "'channels'" in brak_lines[0]
+        assert brak_lines and brak_id in brak_lines[0] and "'channels'" in brak_lines[0]
         assert all(TEXT not in m for m in messages)  # no body leak
 
     async def test_publish_outage_aborts_iteration_task_keeps_ticket(self) -> None:
@@ -409,7 +416,7 @@ class TestDeliveryOnce:
         keeps its delivery ticket for the periodic reclaim."""
         queue = FlakyQueue()
         channels, _ = _mock_channels()
-        task = _task(task_id=555)
+        task = _task(task_id="7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9555")
         queue.enqueue_task(task)
 
         with pytest.raises(NotifyTransportError):
@@ -434,7 +441,7 @@ class TestProcessLoop:
         _enable(monkeypatch)
         queue = FlakyQueue()
         channels, recorder = _mock_channels()
-        task = _task(task_id=606)
+        task = _task(task_id="7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9606")
         queue.enqueue_task(task)
         captured = _capture_stop(monkeypatch)
 
@@ -472,15 +479,21 @@ class TestProcessLoop:
         _enable(monkeypatch)
         queue = FakeQueue()
         channels, recorder = _mock_channels()
+        # Realistic UUID-string ids — the NotifyTask.id seam spelling.
+        t1 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9101"
+        t2 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9202"
+        t3 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9303"
+        t4 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9404"
+        t5 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9505"
         for task in (
-            _task(101, [_entry("mock", "+70000000001")]),
+            _task(t1, [_entry("mock", "+70000000001")]),
             _task(
-                202,
+                t2,
                 [_entry("mock", "fail-transport:+70000000002"), _entry("mock", "+70000000003")],
             ),
-            _task(303, [_entry("mock", "fail-app:+70000000004")]),
-            _task(404, entries=[]),  # brak
-            _task(505, [_entry("ghost", "+70000000005")]),  # not a priority instance
+            _task(t3, [_entry("mock", "fail-app:+70000000004")]),
+            _task(t4, entries=[]),  # brak
+            _task(t5, [_entry("ghost", "+70000000005")]),  # not a priority instance
         ):
             queue.enqueue_task(task)
         captured = _capture_stop(monkeypatch)
@@ -498,28 +511,28 @@ class TestProcessLoop:
             ("+70000000001", TEXT),
             ("+70000000003", TEXT),
         ]
-        by_task: dict[int, list[tuple[str, object, str]]] = {}
+        by_task: dict[str, list[tuple[str, object, str]]] = {}
         for event in queue.claim_statuses():
             by_task.setdefault(event["task_id"], []).append(
                 (event["stage"], event["outcome"], event["channel"])
             )
-        assert by_task[101] == [
+        assert by_task[t1] == [
             ("sending", "attempt", "mock"),
             ("sent", "delivered", "mock"),
         ]
-        assert by_task[202] == [
+        assert by_task[t2] == [
             ("sending", "attempt", "mock"),
             ("failed", "transport_error", "mock"),
             ("sending", "attempt", "mock"),
             ("sent", "delivered", "mock"),
         ]
-        assert by_task[303] == [
+        assert by_task[t3] == [
             ("sending", "attempt", "mock"),
             ("failed", "app_error", "mock"),
             ("failed", "not_delivered", "mock"),
         ]
-        assert 404 not in by_task  # brak → no status
-        assert by_task[505] == [
+        assert t4 not in by_task  # brak → no status
+        assert by_task[t5] == [
             ("failed", "unknown_channel", "ghost"),
             ("failed", "not_delivered", "ghost"),
         ]

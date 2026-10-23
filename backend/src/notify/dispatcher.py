@@ -108,18 +108,17 @@ def _naive_utc(value: str) -> datetime:
 
 
 def _is_malformed_status(item: StatusEvent) -> bool:
-    """Shape pre-validation (spec §3.5): ``task_id`` a non-empty
-    identifier (the task row's UUID string — what the dispatcher's own
-    enqueue seam carries; a positive int is accepted as the worker
-    seam's spelling), ``stage`` in the §4.3 vocabulary, ``channel`` a
-    non-empty string, ``occurred_at`` parseable. Guards the reader
-    against events that would raise a non-ValueError inside
-    ``apply_status_event`` and hang on the stream unacked forever."""
+    """Shape pre-validation (spec §3.5): ``task_id`` a NON-EMPTY STRING
+    (a UUID String(36) — ``NotifyTask.id``, the only spelling the
+    dispatcher's own enqueue seam puts on tasks; the family §4.2 int
+    example is a sketch artifact — int/bool are malformed), ``stage``
+    in the §4.3 vocabulary, ``channel`` a non-empty string,
+    ``occurred_at`` parseable. Guards the reader against events that
+    would raise a non-ValueError inside ``apply_status_event`` and hang
+    on the stream unacked forever."""
     try:
         task_id = item.get("task_id")
-        if isinstance(task_id, bool) or not isinstance(task_id, (str, int)):
-            return True
-        if not task_id:
+        if not isinstance(task_id, str) or not task_id:
             return True
         if item.get("stage") not in ("sending", "sent", "failed"):
             return True

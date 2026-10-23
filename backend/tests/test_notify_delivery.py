@@ -66,7 +66,11 @@ pytestmark = pytest.mark.unit
 #: payload; the core hands it over verbatim and never journals it.
 TEXT = "Готовый текст оповещения: мастер-класс в субботу"
 
-TASK_ID = 456
+#: The live seam id: ``NotifyTask.id`` is a UUID String(36) (AbstractModel
+#: PK; scenarios/reenqueue enqueue ``task.id`` verbatim) — the canonical
+#: part-3 shape is a non-empty string, ints are brak (#484 follow-up;
+#: the family spec §4.2 example ``"task_id": 456`` is a sketch typo).
+TASK_ID = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9c01"
 
 
 # ── test seams ──────────────────────────────────────────────────────────────
@@ -220,9 +224,12 @@ class TestParseTaskPayload:
         ("case", "payload"),
         [
             ("no task_id", _payload(task_id=None)),
-            ("task_id string", _payload(task_id="456")),
-            ("task_id zero", _payload(task_id=0)),
-            ("task_id negative", _payload(task_id=-1)),
+            ("task_id empty string", _payload(task_id="")),
+            # The int spellings (incl. the §4.2 sketch example 456) are
+            # NOT what the seam carries — NotifyTask.id is String(36).
+            ("task_id int", _payload(task_id=456)),
+            ("task_id negative int", _payload(task_id=-1)),
+            ("task_id bool", _payload(task_id=True)),
             ("no text", _payload(text=None)),
             ("text not a string", _payload(text=123)),
             ("no channels", _payload(channels=None)),

@@ -87,7 +87,7 @@ def _utc_now_iso_z() -> str:
 
 
 def _status_event(
-    task_id: int,
+    task_id: str,
     stage: str,
     channel: str,
     outcome: str,
@@ -115,17 +115,23 @@ class InvalidTaskPayload(ValueError):  # noqa: N818 — the plan/spec fix
 
 def parse_task_payload(raw: dict[str, Any]) -> TaskPayload:
     """Validate a ``notify:tasks`` payload (spec §3.1): ``task_id`` — a
-    positive int, ``text`` — a string, ``channels`` — a non-empty list
-    of ``{name, address}`` records with non-empty string values. ANY
-    violation braks the whole task — the caller logs (identifiers and
-    keys only, never the text) and acks the item away. Delivery-
-    irrelevant ``created_at``/``resend_of`` are deliberately not
-    checked. Returns the same dict untouched: the seam stays plain JSON
-    (§4.2), no new schema objects (ADR 009).
+    NON-EMPTY STRING (a UUID String(36): ``NotifyTask.id``, the
+    AbstractModel PK — the shape scenarios and the re-enqueue cycle
+    actually put on the seam; the family §4.2 example ``"task_id": 456``
+    is a sketch artifact, ints/bools are brak), ``text`` — a string,
+    ``channels`` — a non-empty list of ``{name, address}`` records with
+    non-empty string values. ANY violation braks the whole task — the
+    caller logs (identifiers and keys only, never the text) and acks
+    the item away. Delivery-irrelevant ``created_at``/``resend_of`` are
+    deliberately not checked. Returns the same dict untouched: the seam
+    stays plain JSON (§4.2), no new schema objects (ADR 009).
     """
     task_id = raw.get("task_id")
-    if not isinstance(task_id, int) or task_id <= 0:
-        raise InvalidTaskPayload(f"task_id must be a positive int, got {type(task_id).__name__}")
+    if not isinstance(task_id, str) or not task_id:
+        raise InvalidTaskPayload(
+            f"task_id must be a non-empty string (UUID String(36) NotifyTask.id),"
+            f" got {type(task_id).__name__}"
+        )
     if not isinstance(raw.get("text"), str):
         raise InvalidTaskPayload(f"text must be a string, got {type(raw.get('text')).__name__}")
     channels = raw.get("channels")

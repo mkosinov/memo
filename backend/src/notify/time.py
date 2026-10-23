@@ -21,5 +21,7 @@ def business_now() -> datetime:
     Read from settings at call time — no caching beyond the settings
     object itself. Returns naive datetime to match how ``activity.start``
     is stored; compare directly (``activity.start > business_now()``).
+    NOT for UTC instants (TTL, created/updated stamps, journal, audit) —
+    for those use ``src/util/utc.py::utc_now()``.
     """
     return datetime.now(ZoneInfo(settings.BUSINESS_TIMEZONE)).replace(tzinfo=None)

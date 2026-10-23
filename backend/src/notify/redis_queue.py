@@ -11,7 +11,8 @@ transport only, real retention lives in the DB per ADR 008; Redis
 silently trims the oldest entries at the ceiling, and a write is never
 rejected):
 
-- ``notify:tasks`` (down)  — group ``worker`` (consumed by part 3);
+- ``notify:tasks`` (down)  — group ``worker`` (the worker half below,
+  part 3 #484);
 - ``notify:statuses``      — group ``dispatcher`` (this part);
 - ``notify:inbound``       — group ``dispatcher`` (this part).
 
@@ -69,8 +70,8 @@ INBOUND_STREAM = "notify:inbound"
 
 #: Consumer group of the dispatcher process on the up-streams (part 2).
 DISPATCHER_GROUP = "dispatcher"
-#: Consumer group of the worker on ``notify:tasks`` — its consumer
-#: arrives with part 3; creating it here would be an empty promise.
+#: Consumer group of the worker process on ``notify:tasks`` — the
+#: worker half's group (claim/ack/reclaim, part 3 #484 spec §3.1).
 WORKER_GROUP = "worker"
 
 # ── transport parameters ─────────────────────────────────────────────────────
@@ -191,8 +192,7 @@ class RedisQueue:
             yield
         except RedisError as exc:
             raise NotifyTransportError(
-                f"notify queue transport failed during {operation}: "
-                f"{type(exc).__name__}: {exc}"
+                f"notify queue transport failed during {operation}: {type(exc).__name__}: {exc}"
             ) from exc
 
     # ── producer side (protocol) ─────────────────────────────────────────
@@ -210,7 +210,8 @@ class RedisQueue:
 
     def publish_status(self, event: StatusEvent) -> None:
         """``XADD`` a §4.3 stage event to ``notify:statuses`` (mirrors
-        ``FakeQueue.push_status``; deliberately NOT on the protocol)."""
+        ``FakeQueue.publish_status``; off the DISPATCHER protocol per
+        ADR 013 — typed on ``WorkerQueue`` since part 3, #484 §3.1)."""
         self._publish(STATUSES_STREAM, event)
 
     def publish_inbound(self, event: InboundEvent) -> None:
@@ -230,20 +231,21 @@ class RedisQueue:
     # ── reliable delivery: notify:statuses / notify:inbound ──────────────
 
     def claim_statuses(self) -> list[StatusEvent]:
-        return self._claim(STATUSES_STREAM)
+        return self._claim(STATUSES_STREAM, DISPATCHER_GROUP)
 
     def claim_inbound(self) -> list[InboundEvent]:
-        return self._claim(INBOUND_STREAM)
+        return self._claim(INBOUND_STREAM, DISPATCHER_GROUP)
 
-    def _claim(self, stream: str) -> list[dict[str, Any]]:
-        """Non-blocking ``XREADGROUP >`` with the ``_qid`` envelope.
+    def _claim(self, stream: str, group: str) -> list[dict[str, Any]]:
+        """Non-blocking ``XREADGROUP >`` with the ``_qid`` envelope; the
+        group parameter picks the consuming half (dispatcher up-streams,
+        worker tasks — part 3 #484 §3.1).
 
         Reading id ``0`` (draining one's own PEL) is the FORBIDDEN
         anti-pattern (spec §3.1): inside the loop it keeps hanging
         entries below the reclaim threshold forever — recovery happens
-        only through :meth:`reclaim_hanging`."""
-        group = DISPATCHER_GROUP
-        with self._transport(f"claim {stream}"):
+        only through :meth:`reclaim_hanging` / :meth:`reclaim_hanging_tasks`."""
+        with self._transport(f"claim {stream}/{group}"):
             reply = cast(
                 "list[tuple[str, list[tuple[str, dict[str, str]]]]]",
                 self._client.xreadgroup(
@@ -264,18 +266,42 @@ class RedisQueue:
         return {**json.loads(fields[PAYLOAD_FIELD]), ENVELOPE_KEY: entry_id}
 
     def ack_status(self, item: StatusEvent) -> None:
-        self._ack(STATUSES_STREAM, item)
+        self._ack(STATUSES_STREAM, DISPATCHER_GROUP, item)
 
     def ack_inbound(self, item: InboundEvent) -> None:
-        self._ack(INBOUND_STREAM, item)
+        self._ack(INBOUND_STREAM, DISPATCHER_GROUP, item)
 
-    def _ack(self, stream: str, item: dict[str, Any]) -> None:
+    def _ack(self, stream: str, group: str, item: dict[str, Any]) -> None:
         """``XACK`` by ``_qid`` — a duplicate/late ack is a harmless no-op
         (family §4.4, at-least-once tolerance)."""
-        with self._transport(f"ack {stream}"):
-            self._client.xack(
-                self._stream(stream), DISPATCHER_GROUP, item[ENVELOPE_KEY]
-            )
+        with self._transport(f"ack {stream}/{group}"):
+            self._client.xack(self._stream(stream), group, item[ENVELOPE_KEY])
+
+    # ── worker half: notify:tasks, group ``worker`` (part 3 #484 §3.1) ───
+
+    def claim_tasks(self) -> list[TaskPayload]:
+        """Non-blocking claim of the ``worker`` group (``XREADGROUP >``,
+        ``CLAIM_BATCH``, ``_qid`` envelope)."""
+        return self._claim(TASKS_STREAM, WORKER_GROUP)
+
+    def ack_task(self, item: TaskPayload) -> None:
+        """``XACK`` a delivered task (idempotent, family §4.4)."""
+        self._ack(TASKS_STREAM, WORKER_GROUP, item)
+
+    def ensure_worker_group(self) -> None:
+        """Worker-start duty (spec §3.1): the ``worker`` group on
+        ``notify:tasks`` — ``id=0 MKSTREAM``, so the backlog accumulated
+        before the group existed stays deliverable (deliberate: tasks
+        piled up with no consumer — that is what part 3 consumes;
+        «improving» to ``$`` is forbidden). ONLY the concrete BUSYGROUP
+        error is suppressed; anything else propagates loudly."""
+        self._ensure_group(TASKS_STREAM, WORKER_GROUP)
+
+    def reclaim_hanging_tasks(self) -> None:
+        """Return claimed-but-unacked TASK entries of the ``worker``
+        group back into delivery (§4.4) — tasks only; the statuses and
+        inbound streams are the dispatcher half's own reclaim."""
+        self._reclaim_stream(TASKS_STREAM, WORKER_GROUP)
 
     # ── consumer start / graceful stop ───────────────────────────────────
 
@@ -292,9 +318,7 @@ class RedisQueue:
     def _ensure_group(self, stream: str, group: str) -> None:
         with self._transport(f"ensure group {stream}/{group}"):
             try:
-                self._client.xgroup_create(
-                    self._stream(stream), group, id="0", mkstream=True
-                )
+                self._client.xgroup_create(self._stream(stream), group, id="0", mkstream=True)
             except ResponseError as exc:
                 if str(exc).startswith("BUSYGROUP"):
                     return
@@ -362,19 +386,51 @@ class RedisQueue:
     def close(self) -> None:
         """Graceful stop: drop this consumer from its groups (the graceful
         path holds no PEL entries — no ghost consumers), then release the
-        pool. A flushed group (NOGROUP) is suppressed — the shutdown must
-        stay graceful; other errors stay loud. Idempotent."""
+        pool. The WORKER consumer is dropped only with an EMPTY PEL
+        (part 3 #484, spec §3.1): ``XGROUP DELCONSUMER`` destroys the
+        consumer's PEL records, and an unacked entry there is the
+        designed abort-path state — a hanging entry keeps the consumer
+        registered for the next start's ``reclaim_hanging_tasks``. A
+        flushed group (NOGROUP) is suppressed — the shutdown must stay
+        graceful; other errors stay loud. Idempotent."""
+        self._delconsumer(TASKS_STREAM, WORKER_GROUP, keep_if_pending=True)
         for stream in (STATUSES_STREAM, INBOUND_STREAM):
             self._delconsumer(stream, DISPATCHER_GROUP)
         self._client.close()
         self._pool.disconnect()
 
-    def _delconsumer(self, stream: str, group: str) -> None:
+    def _delconsumer(self, stream: str, group: str, *, keep_if_pending: bool = False) -> None:
+        """Deregister this consumer from the group. With
+        ``keep_if_pending``, a non-empty consumer PEL cancels the
+        deregistration with a warning instead (spec §3.1: DELCONSUMER
+        would destroy the pending records — unrecoverable task loss).
+        A missing group/key (NOGROUP) stays a graceful no-op — the
+        XPENDING pre-check must not out-noise the shutdown it guards."""
         with self._transport(f"delconsumer {stream}/{group}"):
+            consumer = self._consumer(group)
+            full_name = self._stream(stream)
             try:
-                self._client.xgroup_delconsumer(
-                    self._stream(stream), group, self._consumer(group)
-                )
+                if keep_if_pending:
+                    pending = self._client.xpending_range(
+                        full_name,
+                        group,
+                        min="-",
+                        max="+",
+                        count=AUTOCLAIM_COUNT,
+                        consumername=consumer,
+                    )
+                    if pending:
+                        logger.warning(
+                            "notify queue: consumer %s of %s/%s kept on stop — "
+                            "%d pending entries preserved for reclaim "
+                            "(XGROUP DELCONSUMER would destroy them, #484 §3.1)",
+                            consumer,
+                            full_name,
+                            group,
+                            len(pending),
+                        )
+                        return
+                self._client.xgroup_delconsumer(full_name, group, consumer)
             except ResponseError as exc:
                 if _is_missing_group(str(exc)):
                     return

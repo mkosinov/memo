@@ -143,7 +143,7 @@ class MyRecordResponse(BaseModel):
 # ─── #513 — client cabinet read: GET /api/v1/my/records ────────────────────────
 
 
-class MyRecordVisitItem(BaseModel):
+class MyVisitItem(BaseModel):
     """One visit inside ``GET /api/v1/my/records`` items (spec §«Контракт API»).
 
     Per-endpoint visit shape — deliberately NOT ``VisitResponse``: no
@@ -181,7 +181,7 @@ class MyRecordItem(BaseModel):
     # title always present — typed plain ``str`` per the spec table.
     service_title: str
     comment: str | None = None
-    visits: list[MyRecordVisitItem]
+    visits: list[MyVisitItem]
 
 
 class MyProfileUpdate(BaseModel):

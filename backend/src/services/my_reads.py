@@ -31,7 +31,7 @@ from src.models.visitor import Visitor
 from src.repositories.record import get_record_repository
 from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
-from src.schemas.my import MyRecordItem, MyRecordVisitItem
+from src.schemas.my import MyRecordItem, MyVisitItem
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,7 +94,7 @@ async def list_my_records(
 
     # One batched read of the page's visits with resolved visitor names
     # (LEFT JOIN — an anonymous seat keeps ``visitor_name = None``).
-    visits_by_record: dict[str, list[MyRecordVisitItem]] = {}
+    visits_by_record: dict[str, list[MyVisitItem]] = {}
     record_ids = [row.record_id for row in rows]
     if record_ids:
         visit_rows = (
@@ -107,7 +107,7 @@ async def list_my_records(
         ).all()
         for visit, visitor_name in visit_rows:
             visits_by_record.setdefault(visit.record_id, []).append(
-                MyRecordVisitItem(
+                MyVisitItem(
                     id=visit.id,
                     visitor_name=visitor_name,
                     status=visit.status,

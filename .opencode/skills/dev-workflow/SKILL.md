@@ -140,6 +140,17 @@ scripts/with-test-lock.sh bash -c '(cd backend && uv run pytest) && (cd frontend
 Per-command wrapping is also valid — it just serializes pytest→vitest inside
 the session (+1–3 min). Lint/type-check stay outside the lock.
 
+**Push time / pre-push hook:** the installed `scripts/git-hooks/pre-push` is
+a NO-OP (`exit 0`) — it takes no lock, so a `git push` itself never waits
+on a busy machine (CI on `pull_request` is the merge gate). The lock/queue
+semantics at push time live where heavy runs actually start: the G7 fast
+suite (whole pytest + whole vitest under the wrapper — the batch pattern
+above) and any `test-all.sh` run (self-acquisition). There a busy machine
+means waiting up to `MEMO_LOCK_WAIT_S` (1 h) with a status line every
+`MEMO_LOCK_POLL_S` (5 min), then rc 75 «машина занята чужим тяжёлым
+прогоном дольше 60 мин; перезапусти прогон позже» — rerun later. Same
+reconciliation as `docs/tests_workflow.md` ("Pre-push hook").
+
 Not the seed lock: `test-all.sh` separately holds a short best-effort mkdir
 lock around master-DB seeding (`${TMPDIR:-/tmp}/memo-testall-master-seed.lock`,
 #317 §8) — a deliberately different idiom (short & soft vs strict & queued

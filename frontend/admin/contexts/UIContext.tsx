@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 
 export type ToastKind = 'info' | 'success' | 'error' | 'loading';
 
@@ -123,7 +124,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       // #285 D4 (rev8): the lifetime rule is untouched — only `undo` selects
       // the countdown-window lifetime; action toasts (no undo) keep 4500ms.
       // #330 §5.3: persistent toasts get no timer — hidden via hideToast(id).
-      const duration = undoFn ? (cd ?? 5000) : 4500;
+      const duration = undoFn ? (cd ?? UNDO_WINDOW_MS) : 4500;
       const timerId = setTimeout(() => {
         toastTimers.current.delete(id);
         setToasts(prev => prev.filter(t => t.id !== id));

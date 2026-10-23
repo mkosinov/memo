@@ -1299,6 +1299,43 @@ describe('ScheduleDataProvider — deleteActivityDeferred (#286)', () => {
     expect(outcome.refetched).toBe(true);
   });
 
+  it('stale week cache (data AGE past staleTime, no invalidation) → ensure-fresh fetchQuery runs, refetched=true rides on the outcome', async () => {
+    vi.mocked(dryRunDeleteActivity).mockRejectedValue(
+      new ApiError(409, 'has_dependencies', undefined, ACTIVITY_DEPS),
+    );
+    const { queryClient } = await renderReady();
+    const callsBefore = vi.mocked(getActivities).mock.calls.length;
+
+    try {
+      // Fake clock BEFORE the cache fill → the dataUpdatedAt stamp lands on it.
+      vi.useFakeTimers();
+      // Re-fill the week cache under the fake clock (setQueryData, as in (б)).
+      queryClient.setQueryData(weekKey(), [activityA1(0, 600)]);
+      // The app providers' staleness threshold (providers.tsx sets 30_000).
+      queryClient.setQueryDefaults(weekKey(), { staleTime: 30_000 });
+      // Age the DATA past the threshold with ONE clock jump — no timers fire
+      // and the cache is NOT invalidated (the age twin of the test above).
+      vi.setSystemTime(new Date(Date.now() + 31_000));
+
+      act(() => {
+        screen.getByTestId('delete-activity').click();
+      });
+      // Flush the ensure-fresh fetchQuery + dry-run promise chain (С2 pattern).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.getByTestId('delete-outcome').textContent).toContain('needs-confirm');
+      expect(vi.mocked(getActivities).mock.calls.length).toBeGreaterThan(callsBefore);
+      const outcome = JSON.parse(screen.getByTestId('delete-outcome').textContent!) as { refetched: boolean };
+      expect(outcome.refetched).toBe(true);
+    } finally {
+      // The rest of this file runs on real timers — a leaked fake clock
+      // freezes every later waitFor.
+      vi.useRealTimers();
+    }
+  });
+
   it('fresh week cache → no ensure-fresh refetch (refetched=false, zero extra queries)', async () => {
     const { queryClient } = await renderReady();
     const callsBefore = vi.mocked(getActivities).mock.calls.length;

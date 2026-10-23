@@ -24,6 +24,7 @@ import {
 } from '@/lib/cache/rowSnapshotSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 import { staleAwareOnError } from '@/lib/staleAwareOnError';
 import { qk } from '@/lib/queryKeys';
 
@@ -150,7 +151,7 @@ function buildDeferredDeleteAction(
     id: `delete-position-${position.id}`,
     kind: 'delete',
     message: 'Удалено. Отменить',
-    delayMs: 5000,
+    delayMs: UNDO_WINDOW_MS,
     undo,
     commit: () => commitDeferredDelete(qc, position.id, payload, snapshots),
     // D4 family: the shared stale-aware handler, EXPLICIT-PREFIX overload —

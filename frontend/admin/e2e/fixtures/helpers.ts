@@ -8,6 +8,7 @@
 import { type Locator, type Page, type Request, expect } from '@playwright/test';
 import { queryDBRow } from './db-query';
 import { SEED_WEEK_MONDAY } from './seed-week';
+import { UNDO_WINDOW_MS } from '../../lib/constants';
 
 /**
  * GH #422 — pin the page clock to the seed's reference week, BEFORE the
@@ -782,8 +783,9 @@ export function trackBodyDeletes(page: Page, entityBase: string, entityId: strin
  *
  * @param page Playwright page
  * @param fn window body: `(page) => Promise<T>`
- * @param opts.advanceMs rewind span, default 5_500 (the deferred-delete
- *   window; interval ring callbacks fire at most once per rewind)
+ * @param opts.advanceMs rewind span, default `UNDO_WINDOW_MS + 500` ms
+ *   (the deferred-delete window; interval ring callbacks fire at most once
+ *   per rewind)
  * @param opts.drainMs real Node-side wait after the rewind, default 500
  */
 export async function withUndoWindow<T>(
@@ -791,7 +793,7 @@ export async function withUndoWindow<T>(
   fn: (page: Page) => Promise<T>,
   opts?: { advanceMs?: number; drainMs?: number },
 ): Promise<T> {
-  const advanceMs = opts?.advanceMs ?? 5_500;
+  const advanceMs = opts?.advanceMs ?? UNDO_WINDOW_MS + 500;
   const drainMs = opts?.drainMs ?? 500;
   // pauseAt = install fakes + set time + pause in one operation; a bare
   // install() would NOT stop time — the window would keep ticking. The

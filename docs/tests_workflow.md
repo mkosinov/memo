@@ -13,8 +13,13 @@
 | Frontend e2e (Playwright) | `cd frontend/admin && pnpm test:e2e` | `frontend/admin/` | Full user flows in browser |
 | Type check | `cd frontend/admin && pnpm type-check` | `frontend/admin/` | TypeScript validation |
 | Lint | `pnpm lint` (from repo root) | repo root | ESLint via Turbo |
-| **Full local suite (on demand)** | `pnpm test:all` (from repo root) | repo root | All of the above + visual compliance |
+| **Full local suite (on demand)** | `bash scripts/test-all.sh` (repo root) | repo root | All of the above + visual compliance; self-acquires the heavy lock (GH #472) |
 | Re-record visual baselines | `cd frontend/admin && pnpm run test:e2e:update` | `frontend/admin/` | Update visual regression baselines |
+
+> **Heavy-run lock (GH #472):** whole suites — the full run, ALL of backend
+> pytest, ALL admin/workspace vitest — serialize on a container-wide lock
+> (`scripts/with-test-lock.sh`; `test-all.sh` self-acquires it). See
+> [Heavy-run lock (GH #472)](#heavy-run-lock-gh-472) before launching one.
 
 ## Test environment
 
@@ -27,7 +32,7 @@
 A single Playwright project `e2e` (per `frontend/admin/playwright.config.ts`, GH #415); sharding is native — the `--shard=i/N` run flag makes Playwright split spec FILES deterministically across N runs. The project name no longer encodes test composition: which spec runs in which shard is decided by `--shard` alone.
 
 - **CI** (`e2e-tests` in `test.yml`): 4 shards, `--shard=i/4` — each matrix job starts its OWN stack on fixed ports: shard 1 → 3002/8001, 2 → 3003/8002, 3 → 3004/8003, 4 → 3005/8004.
-- **Local** (`pnpm test:all` via `scripts/test-all.sh`): 2 shards, `--shard=1/2` and `--shard=2/2`, run in parallel from the SAME cwd (`frontend/admin`); per-shard env outputs `E2E_RESULTS_JSON=results-shard<N>.json` and `E2E_REPORT_DIR=playwright-report-shard<N>` (read by the config's reporters) keep the two runs from overwriting each other's `results.json`/`playwright-report/`.
+- **Local** (`bash scripts/test-all.sh`): 2 shards, `--shard=1/2` and `--shard=2/2`, run in parallel from the SAME cwd (`frontend/admin`); per-shard env outputs `E2E_RESULTS_JSON=results-shard<N>.json` and `E2E_REPORT_DIR=playwright-report-shard<N>` (read by the config's reporters) keep the two runs from overwriting each other's `results.json`/`playwright-report/`.
 - 2 local shards instead of 5 is deliberate — CPU contention on 4-core machines (5 parallel Next.js dev servers caused 30s+ page loads).
 
 Where the stacks live depends on the environment (GH #317): **locally** every run gets a unique run tag and 4 dynamic ports from the 28000-32700 window (details in [Run tag & dynamic ports](#run-tag--dynamic-ports-gh-317) below); **in CI** the ports stay fixed by the shard matrix (front 3002–3005, back 8001–8004) and the tag is empty — each workflow job passes its shard's env explicitly.
@@ -100,7 +105,7 @@ All e2e DB access funnels through the single resolver `e2e/lib/db-path.ts`
 
 Where each run mode gets its env from:
 
-- **Full run (`pnpm test:all`)**: `test-all.sh` exports `TEST_DB_PATH` explicitly
+- **Full run (`bash scripts/test-all.sh`)**: `test-all.sh` exports `TEST_DB_PATH` explicitly
   per shard (plus `SHARD_RUN_TAG`, GH #317), and an exported env var always beats a line in `.env.test`
   (`playwright.config.ts` loads `.env.test` via `process.loadEnvFile`, which
   never overrides already-set variables). No conflict is possible in this mode.
@@ -156,15 +161,75 @@ already export both vars with the same host, so the guard is a no-op there.
   (`e2e/lib/backend-url.ts`).
 
 ### Full (on demand)
-- `pnpm test:all` (from repo root) — runs `scripts/test-all.sh` which orchestrates all stages in parallel
+- `bash scripts/test-all.sh` (from repo root) — orchestrates all stages in parallel. (The root `pnpm test:all` is `turbo test:all` — it routes to admin's own `test:all` script, NOT to `scripts/test-all.sh`.)
 - Typical runtime: ~10-15 minutes
-- Skip visual compliance: `VISUAL_COMPLIANCE=0 pnpm test:all`
-- Sequential mode (debugging): `SEQUENTIAL=1 pnpm test:all`
+- Skip visual compliance: `VISUAL_COMPLIANCE=0 bash scripts/test-all.sh`
+- Sequential mode (debugging): `SEQUENTIAL=1 bash scripts/test-all.sh`
+- The run **self-acquires the heavy lock** at the very start — before the `SEQUENTIAL` branch, so both run shapes serialize. On a busy machine it queues with a status line every 5 min and exits **75** past 1 h — see [Heavy-run lock (GH #472)](#heavy-run-lock-gh-472)
+
+### Heavy-run lock (GH #472)
+
+Two heavy suites on one container CPU-starve each other into flaky timeouts,
+so every heavy entry point serializes on a machine-wide `flock`
+(`scripts/lib/test-lock.sh`): the full local suite acquires the lock itself,
+standalone heavy sets are launched through the `scripts/with-test-lock.sh`
+wrapper.
+
+**Heaviness is a property of the SET, not the invocation syntax.** The whole
+suite is heavy however you spell it; a single file or spec is not. The rule
+is fixed per entry point:
+
+| Entry point | Canonical command | Lock |
+|---|---|---|
+| Full local suite | `bash scripts/test-all.sh` (every env form: `VISUAL_COMPLIANCE=0`, `SEQUENTIAL=1`) | **self-acquired** — run directly, never wrap |
+| Whole backend pytest | `scripts/with-test-lock.sh bash -c 'cd backend && uv run pytest'` | wrapper |
+| Whole admin vitest | `scripts/with-test-lock.sh bash -c 'cd frontend/admin && pnpm test'` | wrapper |
+| Admin vitest + Playwright — `npm run test:all` in `frontend/admin` (a DIFFERENT `test:all`, not the root one) | `scripts/with-test-lock.sh bash -c 'cd frontend/admin && npm run test:all'` | wrapper |
+| Workspace vitest sweep, run standalone | `scripts/with-test-lock.sh bash scripts/run-workspace-tests.sh` | wrapper |
+| Single files/specs, type-check, lint, standalone Playwright | as-is | no lock (fast iteration / investigation — spec'd residual risk) |
+
+Inside `test-all.sh` the stages (pytest, vitest, shards) already run under
+its acquired lock — nothing extra to do there.
+
+**Mechanics** (`scripts/lib/test-lock.sh`, shared by the wrapper and the
+self-acquisition):
+
+- Lock file `${MEMO_TEST_LOCK_PATH:-/root/workspace/.memo-heavy-tests.lock}` — fixed absolute path on the container volume, outside every worktree, shared by all sessions; the file is never deleted or recreated.
+- Queue: first attempt immediate; busy → status line `[lock] занят, ожидание 15/60 мин (прошло 900 с)` and retry every `MEMO_LOCK_POLL_S` (default 300 s); ceiling `MEMO_LOCK_WAIT_S` (default 3600 s) counted by actual waited time (the sleep is clipped to the remainder).
+- Ceiling exhausted → exit code **75** (distinct from any test failure — automation can tell «busy» from «red») with «машина занята чужим тяжёлым прогоном дольше 60 мин; перезапусти прогон позже». The answer is literally to rerun later.
+- The lock fd lives in the owner process only (`test-all.sh` or the wrapper); every spawned command/stage runs with the fd closed (`9>&-`) — `kill -9` of the owner frees the lock instantly, surviving orphans never hold it.
+- Reentrancy: the owner exports `MEMO_TEST_LOCK_HELD=1`; a nested heavy call under it skips acquiring and runs through.
+- Bypass — the run proceeds WITHOUT the lock, one notice line (`[lock] обход без замка: … — прогон НЕ сериализован`), suppressed under real `CI=true` — when the lock dir is missing/not writable (it is never auto-created), `flock` is absent, or `MEMO_TEST_LOCK_DISABLE=1`.
+
+**Never wrap `test-all.sh` in `with-test-lock.sh`** — the script self-acquires
+before the `SEQUENTIAL=1` branch, so both run shapes serialize; the wrapper
+exists for entry points WITHOUT a built-in acquire (its own header says the
+same).
+
+**Session gate (G7 fast suite) batch pattern:** one wrapper call for the
+whole heavy batch beats per-command wrapping — pytest and vitest run
+back-to-back under a single acquire instead of re-queueing between them:
+
+```bash
+scripts/with-test-lock.sh bash -c '(cd backend && uv run pytest) && (cd frontend/admin && pnpm run test)'
+```
+
+Per-command wrapping is also valid — it just serializes pytest→vitest inside
+the session (+1–3 min, the accepted price). Lint and type-check stay outside
+the lock.
+
+**Not the seed lock:** `test-all.sh` also takes a short mkdir lock
+(`${TMPDIR:-/tmp}/memo-testall-master-seed.lock`, #317 §8) around master-DB
+seeding — best-effort, dropped after 60 s of waiting with a warning. The two
+are deliberately different idioms (short & soft vs strict & queued for the
+whole run); they are NOT to be unified.
 
 ### Pre-push hook
 - Source: `scripts/git-hooks/pre-push`
 - Installed by `pnpm install` (postinstall via `scripts/install-hooks.sh`, which is worktree-aware), but **disabled — a no-op** (`exit 0`)
-- Local pre-push checking is done by the container harness at G7 (fast suite: backend pytest + vitest + type-check + lint — see `finishing-a-development-branch` skill); full local runs are on demand (`pnpm test:all`)
+- Local pre-push checking is done by the container harness at G7 (fast suite: backend pytest + vitest + type-check + lint — see `finishing-a-development-branch` skill); full local runs are on demand (`bash scripts/test-all.sh`)
+- **Backend lint budget (GH #521):** if the PR diff touches `backend/`, the G7 fast suite must also run `cd backend && uv run python scripts/lint_budget.py` — one command covering ruff (src/tests/scripts) + mypy + the budget ratchet against the branch base (the same script CI's `backend-lint` job runs; no separate ruff/mypy invocations needed)
+- Busy machine: the no-op hook takes no lock and never waits — a push itself is never blocked by a heavy run. The queue/exit-75 behavior lives where heavy runs actually start: the G7 fast suite (whole pytest + whole vitest under `with-test-lock.sh`, batch pattern above) and any `test-all.sh` run
 - Re-install manually: `bash scripts/install-hooks.sh`
 - Skip once (moot while the hook is a no-op): `git push --no-verify`
 
@@ -293,7 +358,7 @@ What a spec author must know:
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
 | web checks (lint + type-check + vitest) | — | — | — | ✅ (`web-checks` workflow — path-filtered: only PRs touching `frontend/web/**`, GH #314) |
-| backend lint (ruff/mypy ratchet) | — | — | — | ✅ (`backend-lint`) |
+| backend lint (ruff/mypy ratchet) | — | — | ✅ (diff touches `backend/`: `cd backend && uv run python scripts/lint_budget.py` — GH #521) | ✅ (`backend-lint`) |
 | script guards (z-token, skip-tracker, shard dryrun; parser/smoke of visual scripts) | — | — | — | ✅ (z-token in `frontend-checks`; skip-tracker warning-only; `shard-script-checks` — GH #415; parser/smoke local-only via `test:all`) |
 | e2e Playwright (4 CI shards) | — | — | forbidden⁶ | ✅ |
 | visual compliance | ✅ (UI) | ✅ | — | ✅ (inside e2e) |

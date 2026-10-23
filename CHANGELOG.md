@@ -101,6 +101,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     гейт N/A → exit 0; сценарии S1–S5 ✅; реальная зелень `notify-tests`
     доказывается на PR CI.
   - Status: `docs/status/2026-10-22-notify-infra-483.md`
+- **GH #464 — e2e: убрать 33-секундное ожидание устаревания из S3 + единая
+  константа окна отмены `UNDO_WINDOW_MS`** — branch `464-e2e-stale-prime`
+  (3 коммита `60b29f0d..798bc66d`, base `d1e18b2a`; 17 файлов, +81/−35;
+  спека `docs/specs/2026-10-22-e2e-stale-prime-464-design.md` рев.1, план
+  `docs/plans/2026-10-22-e2e-stale-prime-464-plan.md` 3/3 — оба на main;
+  продукт не меняется — окно отмены остаётся 5 000 мс):
+  - **Юнит-тест временной ветки (T1, `60b29f0d`, small):** новая пара к тесту
+    `isInvalidated` в `ScheduleDataContext.test.tsx` — кэш старше порога по
+    возрасту данных (`dataUpdatedAt`) → ensure-fresh `deleteActivityDeferred`,
+    `refetched=true`; фейковые таймеры до заполнения кэша, порог приложения
+    `staleTime: 30_000`, состаривание одним `setSystemTime(+31_000)`,
+    дискриминируемость проверена RED-пробой с откатом; сьют файла 45/45.
+  - **Константа `UNDO_WINDOW_MS = 5_000` (T2, `cbf7e317`, standard):**
+    `lib/constants.ts` — единый источник интервала: 13 литералов
+    `delayMs: 5000` в 12 файлах (хуки мутаций + `ScheduleDataContext`),
+    фолбэк undo-тоста `UIContext`, дефолт `advanceMs` e2e-хелпера
+    `withUndoWindow` (5 500 = константа + 500); литералы `__tests__/` и
+    `playwright.config.ts` не тронуты.
+  - **S3 без выдержки (T3, `798bc66d`, small):** `waitForTimeout(33_000)` и
+    недостижимый на свежем кэше ассерт баннера удалены (баннер покрыт
+    юнит-тестами диалога); остальные 7 сценариев файла не тронуты.
+  - **Tests:** admin vitest **3101/3101** (188 файлов), `tsc --noEmit` **0**,
+    e2e `activity-deferred-delete.spec.ts` **8/8**; S3 **45.3s → 3.7s**
+    (−41.6s; ~−33s ожидание, сверх — прогрев Next-роутов в замере «до»),
+    файл 2.7m → 1.4m; визуальный гейт N/A → exit 0; сценарии 1–4 спеки ✅.
+  - Status: `docs/status/2026-10-22-e2e-stale-prime-464.md`
 
 ## [Unreleased] — 2026-10-21
 

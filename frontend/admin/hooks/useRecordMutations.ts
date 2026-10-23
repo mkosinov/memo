@@ -35,6 +35,7 @@ import {
   upsertVisit,
 } from '@/lib/cache/recordCacheSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 import { invalidateEntities } from '@/lib/invalidate';
 import { qk } from '@/lib/queryKeys';
 import { resolveDefaultTariff } from '@/lib/tariff-resolver';
@@ -577,7 +578,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         id: `delete-visit-${visitId}`,
         kind: 'delete',
         message: 'Удалено. Отменить',
-        delayMs: 5000,
+        delayMs: UNDO_WINDOW_MS,
         // Undo: write the snapshotted visit back via the helper — at its
         // ORIGINAL index (#243 S5; negative index → helper appends, add-path
         // semantics). The helper guards `old == null` (spec §7) — if the
@@ -626,7 +627,7 @@ export function useRecordMutations(activityId: string, recordId: string = '') {
         id: `delete-payment-${paymentId}`,
         kind: 'delete',
         message: 'Удалено. Отменить',
-        delayMs: 5000,
+        delayMs: UNDO_WINDOW_MS,
         // Undo: restore the snapshotted payment into BOTH keys at their
         // original positions (#243 S5; negative index → helper appends).
         undo: () => {

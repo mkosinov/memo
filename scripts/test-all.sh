@@ -30,8 +30,51 @@
 #                         Used for debugging. Skips the whole tag/port
 #                         machinery (no shards are started by it).
 #   VISUAL_COMPLIANCE_URL Override dev server URL for visual compliance.
+#   MEMO_TEST_LOCK_PATH   Heavy-run lock file (default:
+#                         /root/workspace/.memo-heavy-tests.lock).
+#   MEMO_LOCK_POLL_S      Lock queue retry interval (default: 300 s).
+#   MEMO_LOCK_WAIT_S      Lock queue ceiling, wall time (default: 3600 s).
+#   MEMO_TEST_LOCK_DISABLE=1  Run without the lock (bypass notice).
+#
+# Heavy-run lock (#472, spec «Механизм замка»): this script self-acquires
+# the container's heavy lock at the very start — BEFORE the SEQUENTIAL
+# branch, so both run shapes serialize. The lock fd (9) lives in THIS
+# process: every spawned stage runs with 9>&- (background stages AND
+# foreground children — a surviving orphan must never keep the lock after
+# the owner dies; kill -9 of this script releases the lock instantly via
+# the kernel). A busy machine queues this run with a status line per
+# attempt; past the ceiling the run exits 75 («машина занята…») —
+# distinguishable from test failures for automation. Bypass (no lock,
+# one-line notice, suppressed under CI=true): lock dir missing/not
+# writable, no flock binary, or MEMO_TEST_LOCK_DISABLE=1; the lock dir is
+# never created. Nested heavy calls under this run skip re-acquiring via
+# the exported MEMO_TEST_LOCK_HELD=1 (reentrancy guard, US-1).
+#
+# Readiness wait (#472, spec «Починка ожидания готовности»): the shards'
+# readiness is NOT HTTP-polled here. Each stack wrapper
+# (scripts/e2e-shard-start.sh) publishes a ready-marker file
+# ($LOG_DIR/shard-stack-N.ready.marker) right after ITS frontend readiness
+# poll succeeds (before its warmup); this script waits for both markers
+# with the ceiling READY_ORCHESTRATOR_S (single source:
+# scripts/lib/shard-helpers.sh — the wrapper budgets + 180 s pre-bind
+# slack) and checks wrapper liveness on every tick (kill -0 + the #448
+# watchdog death marker): a wrapper dying mid-wait fails the run within
+# one tick with the stack-log tails; ceiling exhaustion fails with both
+# tails. READY_BUDGET_BACKEND_S / READY_BUDGET_FRONTEND_S env-overrides
+# flow into the derived ceiling.
 
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# ── Heavy-run lock: self-acquisition (#472, spec «Точки входа» п.1) ─────────
+# Placed BEFORE `export CI=true` on purpose: the bypass notice must honor
+# the REAL CI environment (GitHub sets CI=true → suppressed), not this
+# script's own pnpm-TTY export (a local pre-push run still prints it).
+# rc 75 (busy past the ceiling) aborts the run here via set -e.
+source "$ROOT/scripts/lib/test-lock.sh"
+heavy_test_lock_acquire
 
 # Set CI=true so pnpm doesn't require TTY for module purge confirmation.
 # Pre-push hook runs in non-TTY context (git push is not interactive).
@@ -39,9 +82,6 @@ export CI=true
 
 # CI runners are UTC; local parity keeps date-sensitive tests deterministic.
 export TZ=UTC
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
 
 # LOG_DIR is defined after the run tag is generated below (#317 §3.1):
 # each run logs into its own ${TMPDIR:-/tmp}/test-all-logs/run-<tag> dir
@@ -51,20 +91,22 @@ cd "$ROOT"
 if [ "${SEQUENTIAL:-0}" = "1" ]; then
   echo "🔍 Running local test suite (SEQUENTIAL mode)..."
 
+  # Every child below runs with 9>&- (heavy-lock fd, #472): a surviving
+  # orphan of a killed run must never keep the container lock held.
   echo "  → lint..."
-  pnpm run lint
+  pnpm run lint 9>&-
   echo "  → type-check..."
-  (cd frontend/admin && pnpm run type-check)
+  (cd frontend/admin && pnpm run type-check) 9>&-
   echo "  → type-check (api-client)..."
-  (cd packages/api-client && pnpm run type-check)
+  (cd packages/api-client && pnpm run type-check) 9>&-
   echo "  → vitest..."
-  (cd frontend/admin && pnpm run test)
+  (cd frontend/admin && pnpm run test) 9>&-
   echo "  → vitest (workspace packages)..."
-  bash scripts/run-workspace-tests.sh
+  bash scripts/run-workspace-tests.sh 9>&-
   echo "  → playwright..."
-  (cd frontend/admin && CI= pnpm exec playwright test --workers=1)
+  (cd frontend/admin && CI= pnpm exec playwright test --workers=1) 9>&-
   echo "  → backend pytest..."
-  (cd backend && uv run pytest)
+  (cd backend && uv run pytest) 9>&-
   if [ "${VISUAL_COMPLIANCE:-1}" != "0" ]; then
     echo "  → visual-compliance-check..."
     # ... (same as below)
@@ -262,9 +304,24 @@ fi
 # macOS without coreutils — skip with a warning instead of failing.
 if command -v timeout >/dev/null; then
   echo "  → shard-start dryrun test..."
-  bash "$ROOT/scripts/e2e-shard-start.dryrun.test.sh"
+  bash "$ROOT/scripts/e2e-shard-start.dryrun.test.sh" 9>&-
 else
   echo "  ⚠️  skip dryrun test (no timeout binary)"
+fi
+
+# ── Heavy-lock dryrun test (env-seam, small constants; #472 Task 4) ─────────
+# Scenario suite for the lock itself: US-1 serialization (two competing
+# runs) + nesting, US-2 holder death, US-3 ceiling rc 75, US-4 short-run-
+# no-queue, US-7 bypass, F9 same-inode across two sessions. Runs on TEMP
+# lock paths with small POLL/WAIT — the real lock held by THIS run is
+# never touched, and the suite sanitizes the CI=/MEMO_TEST_LOCK_HELD=
+# exports it inherits from this script. flock may be missing on non-Linux
+# hosts — skip with a warning, like the timeout guard above.
+if command -v flock >/dev/null; then
+  echo "  → test-lock dryrun test..."
+  bash "$ROOT/scripts/lib/test-lock.dryrun.test.sh" 9>&-
+else
+  echo "  ⚠️  skip test-lock dryrun test (no flock binary)"
 fi
 
 # ── Visual-compliance parser node-tests (env-free, milliseconds) ───────────
@@ -273,14 +330,14 @@ fi
 # grammar. Synchronous like the dryrun test above — a red suite aborts the
 # run before any expensive stage starts.
 echo "  → visual-compliance parser tests..."
-node "$ROOT/scripts/test-visual-compliance-parser.js"
+node "$ROOT/scripts/test-visual-compliance-parser.js" 9>&-
 
 # ── Visual-compliance smoke tests (env-free, no dev server) ────────────────
 # Stage-order guard for scripts/visual-compliance-check.sh (GH #311, US-2/US-3):
 # N/A-marker spec → exit 0 + «not applicable» BEFORE any server contact;
 # missing/empty/prose-only section → exit 3. Both paths need no :3001 stack.
 echo "  → visual-compliance smoke tests..."
-bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh"
+bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh" 9>&-
 
 # Track all background PIDs for waiting
 ALL_PIDS=()
@@ -295,19 +352,19 @@ PW_STAGE_PIDS=()
 echo "  → backend pytest..."
 (
   cd backend && uv run pytest > "$LOG_DIR/pytest.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Lint (turbo, cached) ──────────────────────────────────────────────────
 echo "  → lint..."
-pnpm run lint > "$LOG_DIR/lint.log" 2>&1 &
+pnpm run lint > "$LOG_DIR/lint.log" 2>&1 9>&- &
 ALL_PIDS+=($!)
 
 # ── Type-check (admin) ─────────────────────────────────────────────────────
 echo "  → type-check..."
 (
   cd frontend/admin && pnpm run type-check > "$LOG_DIR/typecheck.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Type-check (api-client) ────────────────────────────────────────────────
@@ -318,14 +375,14 @@ ALL_PIDS+=($!)
 echo "  → type-check (api-client)..."
 (
   cd packages/api-client && pnpm run type-check > "$LOG_DIR/typecheck-api-client.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Vitest (admin unit tests) ──────────────────────────────────────────────
 echo "  → vitest..."
 (
   cd frontend/admin && pnpm run test > "$LOG_DIR/vitest.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Vitest (other workspace packages: domain, api-client, web) ─────────────
@@ -335,7 +392,7 @@ ALL_PIDS+=($!)
 echo "  → vitest (workspace packages)..."
 (
   bash scripts/run-workspace-tests.sh > "$LOG_DIR/vitest-workspace.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Playwright shards: per-shard DB + backend + frontend ───────────────────
@@ -374,7 +431,7 @@ if [ ! -f "$MASTER_DB" ] || [ "$(sqlite3 "$MASTER_DB" "SELECT COUNT(*) FROM sqli
     cd backend
     DATABASE_URL="sqlite+aiosqlite:///$(pwd)/test_memo.db" \
       PYTHONPATH=src uv run python -m seed.seed
-  )
+  ) 9>&-
 fi
 
 # Create per-shard DB copies from master — tagged (#317 §3.1:
@@ -414,6 +471,9 @@ for i in $(seq 0 1); do
   (
     cd "$ROOT"
     # Fix A (#317 §3.3): SHARD_MANAGED_STACK=1 — the orchestrator owns the tag's 4-port lease; managed stacks neither write nor remove it.
+    # #472: SHARD_READY_MARKER — the wrapper creates this file right after
+    # its own frontend readiness poll succeeds (before warmup); the marker
+    # wait below polls these files instead of duplicating the HTTP probing.
     SHARD_ID="$SHARD_NUM" \
     SHARD_RUN_TAG="$SHARD_RUN_TAG" \
     SHARD_PORT="$FRONTEND_PORT" \
@@ -421,9 +481,10 @@ for i in $(seq 0 1); do
     TEST_DB_PATH="$ROOT/$SHARD_DB" \
     BACKEND_URL="$BACKEND_URL" \
     NEXT_PUBLIC_API_URL="$BACKEND_URL" \
+    SHARD_READY_MARKER="$LOG_DIR/shard-stack-${SHARD_NUM}.ready.marker" \
     SHARD_MANAGED_STACK=1 \
       bash scripts/e2e-shard-start.sh
-  ) > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
+  ) 9>&- > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
 
   # Track the backend PID (parent of the startup script's children)
   # The startup script runs backend in background, frontend in foreground.
@@ -447,53 +508,103 @@ done
 RUN_WATCHDOG_MARKER="$LOG_DIR/stack-wrapper-died.marker"
 RUN_TERM_STAGES="$LOG_DIR/watchdog-term-stages.list"
 RUN_EXIT_STAGES="$LOG_DIR/watchdog-exit-stages.list"
-run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" &
+run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" 9>&- &
 RUN_WATCHDOG_PID=$!
 
-# Wait for all shard stacks to be ready (check frontend ports)
-echo "  → waiting for shard frontends to be ready..."
-SHARD_READY=("" "")
-# 2 parallel Next.js dev servers need time to compile first request.
-# --max-time 30 + 60 iterations = up to 30 min total (usually ~1-2 min).
-for _ in $(seq 1 60); do
-  ALL_READY=true
-  for i in $(seq 0 1); do
-    if [ "${SHARD_READY[$i]}" = "ready" ]; then continue; fi
-    FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
-      SHARD_READY[$i]="ready"
-      echo "    shard $((i + 1)) ready (frontend :${FRONTEND_PORT})"
-    else
-      ALL_READY=false
+# ── Wait for both shards' readiness MARKERS (#472) ─────────────────────────
+# No duplicate HTTP polling: each wrapper publishes readiness by creating
+# the SHARD_READY_MARKER we handed it — right after ITS own frontend poll
+# succeeds, before its warmup (overlap semantics preserved: stages start on
+# readiness, warmup runs in parallel, the 30 s buffer below stays). This
+# wait polls file EXISTENCE with the ceiling READY_ORCHESTRATOR_S (single
+# source: scripts/lib/shard-helpers.sh — backend + frontend budgets + 180 s
+# pre-bind slack; derived, no duplicate literals). EVERY tick also checks:
+#   - wrapper liveness, kill -0 (#448 seam; a reaped wrapper answers
+#     ESRCH): a wrapper dying mid-wait fails the run WITHIN ONE TICK with
+#     the dead stack's log tail — the ceiling is never burned on a dead
+#     wrapper (US-5, orchestrator layer);
+#   - the #448 run-watchdog death marker (belt and braces: the watchdog's
+#     own tick may catch the death first and it has already TERMed stages).
+# Ceiling exhaustion (wrapper alive, marker never came) → fail with BOTH
+# stack-log tails + the EADDRINUSE diagnosis carried over from the legacy
+# failure path (#317 §3.2 — a port grabbed in the allocate→bind TOCTOU
+# window is still the most likely shape of a never-ready stack).
+READY_MARKER_1="$LOG_DIR/shard-stack-1.ready.marker"
+READY_MARKER_2="$LOG_DIR/shard-stack-2.ready.marker"
+echo "  → waiting for shard readiness markers (ceiling ${READY_ORCHESTRATOR_S}s)..."
+_rdy_deadline=$(( SECONDS + READY_ORCHESTRATOR_S ))
+_rdy_fail=""
+while :; do
+  if [ -e "$READY_MARKER_1" ] && [ -e "$READY_MARKER_2" ]; then
+    echo "    both shards ready (markers shard-stack-{1,2}.ready.marker in $LOG_DIR)"
+    break
+  fi
+  if [ "$SECONDS" -ge "$_rdy_deadline" ]; then
+    _rdy_fail="ceiling"
+    break
+  fi
+  # liveness on every tick — wrapper death beats the ceiling (US-5)
+  for _i in 0 1; do
+    if ! kill -0 "${SHARD_BACKEND_PIDS[$_i]}" 2>/dev/null; then
+      _rdy_fail="wrapper-$(( _i + 1 ))"
+      break
     fi
   done
-  if [ "$ALL_READY" = true ]; then break; fi
-  sleep 1
-done
-# Check for any shards that failed to start
-for i in $(seq 0 1); do
-  if [ "${SHARD_READY[$i]}" != "ready" ]; then
-    SHARD_NUM=$((i + 1))
-    STACK_LOG="$LOG_DIR/shard-stack-${SHARD_NUM}.log"
-    echo "❌ Shard ${SHARD_NUM} frontend failed to start on :${SHARD_FRONTEND_PORTS[$i]}"
-    echo "   Check: $STACK_LOG"
-    # EADDRINUSE in the stack's start log → the port was grabbed between
-    # the pre-start check and the bind (#317 §3.2 — conscious no-retry, §4).
-    # Node prints it as `... EADDRINUSE: address already in use 0.0.0.0:PORT`
-    # — the trailing :PORT segment names the port; fallback names both.
-    CLASH_LINE="$(grep 'EADDRINUSE' "$STACK_LOG" 2>/dev/null | tail -1 || true)"
-    if [ -n "$CLASH_LINE" ]; then
-      CLASH_PORT="${CLASH_LINE##*:}"
-      case "$CLASH_PORT" in
-        ''|*[!0-9]*)
-          CLASH_PORT="${SHARD_FRONTEND_PORTS[$i]} (или ${SHARD_BACKEND_PORTS[$i]})"
-          ;;
-      esac
-      echo "❌ порт $CLASH_PORT занят между проверкой и стартом; перезапусти test-all" >&2
-    fi
-    exit 1
+  if [ -n "$_rdy_fail" ]; then break; fi
+  if [ -e "$RUN_WATCHDOG_MARKER" ]; then
+    _rdy_fail="watchdog"
+    break
+  fi
+  # tick truncated to the remaining ceiling (cadence 1 s)
+  _rdy_rem=$(( _rdy_deadline - SECONDS ))
+  if [ "$_rdy_rem" -gt 1 ]; then
+    sleep 1
+  else
+    sleep "$_rdy_rem"
   fi
 done
+if [ -n "$_rdy_fail" ]; then
+  case "$_rdy_fail" in
+    wrapper-1|wrapper-2)
+      _n="${_rdy_fail#wrapper-}"
+      _i=$(( _n - 1 ))
+      echo "" >&2
+      echo "❌ stack wrapper shard $_n died during the readiness wait (frontend :${SHARD_FRONTEND_PORTS[$_i]}, backend :${SHARD_BACKEND_PORTS[$_i]}) — stopping the run" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-$_n.log" >&2
+      ;;
+    watchdog)
+      echo "" >&2
+      echo "❌ run watchdog reported a dead stack wrapper during the readiness wait — stopping the run" >&2
+      echo "   Marker: $RUN_WATCHDOG_MARKER (see the watchdog diagnosis above)" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-1.log" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-2.log" >&2
+      ;;
+    *)
+      echo "" >&2
+      echo "❌ shard readiness markers not present after the ${READY_ORCHESTRATOR_S}s ceiling — frontend(s) never became ready" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-1.log" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-2.log" >&2
+      ;;
+  esac
+  # EADDRINUSE diagnosis (#317 §3.2, preserved from the legacy failure
+  # path): Node prints `... EADDRINUSE: address already in use 0.0.0.0:PORT`
+  # — the trailing :PORT segment names the port; fallback names both of
+  # the shard's. Checked on every failure mode (cheap, additive).
+  for _n in 1 2; do
+    _sl="$LOG_DIR/shard-stack-$_n.log"
+    _cl="$(grep 'EADDRINUSE' "$_sl" 2>/dev/null | tail -1 || true)"
+    if [ -n "$_cl" ]; then
+      _cp="${_cl##*:}"
+      case "$_cp" in
+        ''|*[!0-9]*)
+          _cp="${SHARD_FRONTEND_PORTS[$(( _n - 1 ))]} (или ${SHARD_BACKEND_PORTS[$(( _n - 1 ))]})"
+          ;;
+      esac
+      echo "❌ порт $_cp занят между проверкой и стартом; перезапусти test-all" >&2
+    fi
+  done
+  exit 1
+fi
 
 # Extra buffer for Next.js compilation to stabilize
 echo "  → waiting 30s for Next.js compilation to stabilize..."
@@ -525,7 +636,7 @@ for i in $(seq 0 1); do
     E2E_REPORT_DIR="playwright-report-shard${SHARD_NUM}" \
     CI= pnpm exec playwright test --project=e2e --shard=${SHARD_NUM}/2 --workers=1 \
       > "$LOG_DIR/pw-shard-${SHARD_NUM}.log" 2>&1
-  ) &
+  ) 9>&- &
   ALL_PIDS+=($!)
   PW_STAGE_PIDS+=($!)
 done
@@ -586,7 +697,7 @@ if [ "${VISUAL_COMPLIANCE:-1}" != "0" ]; then
       "$VISUAL_COMPLIANCE_URL" \
       "$SPEC_FILE" \
       /tmp/visual-compliance \
-      mobile || {
+      mobile 9>&- || {
         echo "❌ Visual compliance failed. See /tmp/visual-compliance/report.md"
         exit 1
       }

@@ -16,6 +16,7 @@ import {
 } from '@/lib/cache/rowSnapshotSync';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 import { invalidateEntities } from '@/lib/invalidate';
 import { staleAwareOnError } from '@/lib/staleAwareOnError';
 import { qk } from '@/lib/queryKeys';
@@ -142,7 +143,7 @@ function buildDeferredDeleteAction(
     id: `delete-visitor-${visitor.id}`,
     kind: 'delete',
     message: 'Удалено. Отменить',
-    delayMs: 5000,
+    delayMs: UNDO_WINDOW_MS,
     // Undo: pure by-key restore — no server calls (the dry-run guarantees
     // nothing was deleted during the window), no invalidations.
     undo,

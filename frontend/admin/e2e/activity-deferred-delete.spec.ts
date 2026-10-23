@@ -20,8 +20,8 @@ import { clickFabRobust } from './fixtures/server-push';
  * ensure-fresh → dry-run preview (?dry_run=true, NO body) → on the clean
  * path an optimistic removal + 5s undo toast → commit DELETE with the
  * `{expected}` body; on a 409 dependency tree the needs-confirm DeleteDialog
- * opens (items one-liners + refetch-note banner when the ensure-fresh
- * actually refetched) → confirm enqueues the same deferred pipeline.
+ * opens (dependency items one-liners) → confirm enqueues the same deferred
+ * pipeline.
  *
  * Request-level rule inherited from #285: the click's dry-run has
  * postData() === null — every "was the delete sent" assertion keys on the
@@ -202,14 +202,9 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
     }
   });
 
-  // ── S3: needs-confirm dialog — one-liners + stale-prime refresh banner ───
+  // ── S3: needs-confirm dialog — dependency one-liners (table path) ────────
 
-  // The ensure-fresh prime (D3 step 1) refetches the week cache when it is
-  // invalidated or older than the 30s staleTime — only a REAL refetch sets
-  // `refetched` and only then the dialog renders the
-  // «Карточка обновлена по данным сервера» banner. In e2e the reachable
-  // trigger is TIME: the page sits idle past the staleTime before the click.
-  test('S3: activity with a record — dialog shows one-liners, stale prime shows the refresh banner', async ({
+  test('S3: activity with a record — dialog shows dependency one-liners (table path)', async ({
     page,
     request,
   }) => {
@@ -223,10 +218,6 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
-      // Stale prime: idle past the app-wide staleTime (30s) so the ensure-
-      // fresh refetch fires on the delete click (D3 step 1 → refetched=true).
-      await page.waitForTimeout(33_000);
-
       await enableDeleteMode(page);
       await clickCard(page, activity.id);
 
@@ -236,11 +227,6 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       await expect(dialog).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('[data-testid="delete-dialog-title"]')).toHaveText(
         'Удаление занятия',
-      );
-
-      // Stale prime — the banner is the dialog's FIRST line.
-      await expect(page.locator('[data-testid="delete-dialog-refetch-note"]')).toHaveText(
-        'Карточка обновлена по данным сервера',
       );
 
       // One-liners (GH #285 D9в builders, activity tree): the records group

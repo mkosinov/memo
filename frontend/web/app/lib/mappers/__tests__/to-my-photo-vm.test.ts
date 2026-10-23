@@ -41,4 +41,19 @@ describe("toMyPhotoCardView (GET /my/photos item → «Мои фото» card vi
 
     expect(vm?.url).toBe("https://cdn.example.com/work.jpg");
   });
+
+  // ── #517 canon, inherited via the shared allowlist (merge of #555):
+  //    normalization happens BEFORE the checks in the cabinet grid too. ──
+  it("rejects whitespace-smuggled schemes (GH #517 normalization)", () => {
+    expect(toMyPhotoCardView(myPhotoItem({ filename: " javascript:alert(1)" }))).toBeNull();
+    expect(
+      toMyPhotoCardView(myPhotoItem({ filename: "ja\x00vascript:alert(1)" })),
+    ).toBeNull();
+  });
+
+  it("trims outer whitespace on an otherwise-legit path (GH #517 normalization)", () => {
+    const vm = toMyPhotoCardView(myPhotoItem({ filename: "  /images/cabinet-draft.jpg  " }));
+
+    expect(vm?.url).toBe("/images/cabinet-draft.jpg");
+  });
 });

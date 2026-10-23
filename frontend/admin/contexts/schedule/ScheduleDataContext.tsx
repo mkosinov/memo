@@ -26,6 +26,7 @@ import type {
   DependencyNode,
 } from '@memo/api-client';
 import { transformMaster, transformService, transformLocation } from '@/lib/transformers';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 import { qk } from '@/lib/queryKeys';
 import { invalidateEntities } from '@/lib/invalidate';
 import {
@@ -395,7 +396,7 @@ export function ScheduleDataProvider({
         id: `delete-activity-${id}`,
         kind: 'delete',
         message: 'Удалено. Отменить',
-        delayMs: 5000,
+        delayMs: UNDO_WINDOW_MS,
         undo,
         commit: async () => {
           await deleteActivityWithExpected(id, { expected });

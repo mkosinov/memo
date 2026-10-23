@@ -17,6 +17,7 @@ import {
   mapRowListCache,
   type RowSnapshot,
 } from '@/lib/cache/rowSnapshotSync';
+import { UNDO_WINDOW_MS } from '@/lib/constants';
 import { expectedFromDependencies } from '@/lib/expectedFromDependencies';
 import { usePendingActions } from '@/contexts/PendingActionsContext';
 import { useUI } from '@/contexts/UIContext';
@@ -137,7 +138,7 @@ function buildDeferredDeleteAction(
     id: `delete-tag-${tag.id}`,
     kind: 'delete',
     message: 'Удалено. Отменить',
-    delayMs: 5000,
+    delayMs: UNDO_WINDOW_MS,
     // Undo (D4): pure by-key restore — no server calls (the dry-run
     // guarantees nothing was deleted during the window), no invalidations.
     undo,

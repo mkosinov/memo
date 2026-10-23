@@ -2,9 +2,10 @@ import { vi } from "vitest";
 import type { Mock } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { MyRecordItem, MyPhotoItem } from "@memo/api-client";
+import type { MyRecordItem, MyPhotoItem, MyPaymentItem } from "@memo/api-client";
 import type { MyRecordCardView } from "@/app/lib/model/view/my-records";
 import type { MyPhotoCardView } from "@/app/lib/model/view/my-photos";
+import type { MyPaymentRowView } from "@/app/lib/model/view/my-payments";
 
 /**
  * Shared cabinet (#513) test fixtures — the single home of the contract and
@@ -42,6 +43,23 @@ export function myPhotoItem(overrides: Partial<MyPhotoItem> = {}): MyPhotoItem {
     is_public: true,
     tags: ["масло"],
     created_at: "2026-06-15T12:00:00",
+    ...overrides,
+  };
+}
+
+/** GET /my/payments items[] row (#513): the record context is ALWAYS
+ *  present (payments ride records); method is nullable by model. */
+export function myPaymentItem(overrides: Partial<MyPaymentItem> = {}): MyPaymentItem {
+  return {
+    id: "pay-1",
+    amount: 6000,
+    method: "card",
+    created_at: "2026-06-16T12:00:00",
+    record: {
+      id: "rec-1",
+      activity_date: "2026-06-16",
+      service_title: "Мини-картина акрилом",
+    },
     ...overrides,
   };
 }
@@ -84,6 +102,21 @@ export function myPhotoCardView(
   };
 }
 
+/** «Мои платежи» row view as produced by toMyPaymentRowView (#513). */
+export function myPaymentRowView(
+  overrides: Partial<MyPaymentRowView> = {},
+): MyPaymentRowView {
+  return {
+    id: "pay-1",
+    amountFormatted: "6 000 ₽",
+    methodLabel: "Карта",
+    dateFormatted: "16 июня",
+    serviceTitle: "Мини-картина акрилом",
+    lessonDateFormatted: "16 июня",
+    ...overrides,
+  };
+}
+
 // ── Page-test helpers (cabinet section pages) ───────────────────────────────
 
 export type CabinetSessionStatus =
@@ -108,10 +141,12 @@ export function cabinetAuthValue(status: CabinetSessionStatus) {
   };
 }
 
-/** The common shape every useMy* cabinet list hook returns (cards + the
- *  pagination meta the ListPagination eats). */
+/** The common shape every useMy* cabinet list hook returns: one list
+ *  field (cards — records/photos; rows — payments) plus the pagination
+ *  meta the ListPagination eats. */
 export interface CabinetListHookResult {
-  cards: unknown[];
+  cards?: unknown[];
+  rows?: unknown[];
   total: number;
   page: number;
   pageCount: number;
@@ -120,14 +155,16 @@ export interface CabinetListHookResult {
 }
 
 /** Wires a mocked useMy* list hook (page composition tests): merges the
- *  given partial state over the empty-list defaults. Assert call args via
- *  the mock itself (`expect(hook).toHaveBeenLastCalledWith(2, true)`). */
+ *  given partial state over the empty-list defaults (both list fields —
+ *  a page reads only its own). Assert call args via the mock itself
+ *  (`expect(hook).toHaveBeenLastCalledWith(2, true)`). */
 export function mockCabinetListHook(
   hook: Mock,
   state: Partial<CabinetListHookResult> = {},
 ): void {
   hook.mockImplementation(() => ({
     cards: [],
+    rows: [],
     total: 0,
     page: 1,
     pageCount: 1,

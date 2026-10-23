@@ -27,6 +27,10 @@
 #   5 (rev4): url-hint lines without selector hints → exit 3 (a url="…"
 #             navigation hint is NOT a machine-usable hint — the parser
 #             emits it in the separate `url` field with zero targets)
+#   6-8 (VISUAL_STORAGE_STATE): set-but-missing path, non-JSON content,
+#             and JSON-valid-but-wrong-shape state → exit 2 at the
+#             storageState validation stage (before spec parse, server
+#             pre-flight, Playwright, and report generation)
 #
 # Wired into scripts/test-all.sh by a separate task; self-contained here.
 
@@ -167,6 +171,57 @@ if [ "$RUN_EXIT" -eq 3 ]; then
     echo "PASS Case 5 (rev4): url-only hints → exit 3 (url is not a machine hint)"
 else
     echo "FAIL Case 5 (rev4): expected exit 3, got $RUN_EXIT"
+    FAIL=1
+fi
+
+# ── Cases 6-8 (VISUAL_STORAGE_STATE): exit 2 before any later stage ─────────
+# The storageState validation runs between arguments and the spec-file check:
+# every broken mode must exit 2 IMMEDIATELY (the dummy discard-port URL is
+# never contacted, no report is written). The spec arg is an existing fixture
+# (spec-na.md) so a passing storageState stage would run on to later stages
+# and produce a DIFFERENT exit code — pinning that the exit-2 comes from the
+# storageState stage itself.
+run_case_state() {
+    local name="$1" state="$2"
+    local out="$WORK/$name.out"
+    set +e
+    timeout 30 env VISUAL_STORAGE_STATE="$state" \
+        bash "$CHECK_SCRIPT" "$DEV_URL" "$WORK/spec-na.md" "$WORK/out-$name" mobile \
+        > "$out" 2>&1
+    RUN_EXIT=$?
+    set -e
+    echo "── $name log (exit $RUN_EXIT) ──"
+    cat "$out"
+    echo "─────────────────"
+}
+
+# Case 6: set-but-missing path → exit 2
+run_case_state "case6-state-missing" "$WORK/no-such-state.json"
+if [ "$RUN_EXIT" -eq 2 ] && grep -q "does not exist" "$WORK/case6-state-missing.out"; then
+    echo "PASS Case 6 (storageState): missing file → exit 2 + loud message"
+else
+    echo "FAIL Case 6 (storageState): expected exit 2 + 'does not exist', got exit $RUN_EXIT"
+    FAIL=1
+fi
+
+# Case 7: non-JSON content → exit 2
+printf 'not json {' > "$WORK/state-bad-json.json"
+run_case_state "case7-state-nonjson" "$WORK/state-bad-json.json"
+if [ "$RUN_EXIT" -eq 2 ] && grep -q "not valid JSON" "$WORK/case7-state-nonjson.out"; then
+    echo "PASS Case 7 (storageState): non-JSON → exit 2 + loud message"
+else
+    echo "FAIL Case 7 (storageState): expected exit 2 + 'not valid JSON', got exit $RUN_EXIT"
+    FAIL=1
+fi
+
+# Case 8: JSON-valid-but-wrong-shape → exit 2 (regression pin: must NOT
+# reach browser.newContext and crash the runner as a bogus exit 1)
+printf '{"cookies":"x"}' > "$WORK/state-wrong-shape.json"
+run_case_state "case8-state-shape" "$WORK/state-wrong-shape.json"
+if [ "$RUN_EXIT" -eq 2 ] && grep -q "not a Playwright storageState" "$WORK/case8-state-shape.out"; then
+    echo "PASS Case 8 (storageState): wrong shape → exit 2 + loud message"
+else
+    echo "FAIL Case 8 (storageState): expected exit 2 + shape message, got exit $RUN_EXIT"
     FAIL=1
 fi
 

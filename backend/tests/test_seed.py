@@ -211,11 +211,13 @@ async def test_seed_activity_tags_exist(db_manager: DBManager) -> None:
 
 
 async def test_seed_populates_photos(db_manager: DBManager) -> None:
-    """Seed script creates 7 photos with mutually exclusive owners (GH #211).
+    """Seed script creates 9 photos with mutually exclusive owners (GH #211).
 
-    Layout: 2 client-owned (same client), 1 service-owned, 2 activity-owned
-    (guest photos, activities co-located at L1='alpika'), 1 location-owned
-    (L1 interior shot), 1 owner-less tag-pair photo ([T1=tag1, T2=tag2]).
+    Layout: 3 client-owned by c1 (2 public + 1 private — the #513 cabinet
+    delta), 1 client-owned by c2 (private — second-client isolation С2),
+    1 service-owned, 2 activity-owned (guest photos, activities co-located
+    at L1='alpika'), 1 location-owned (L1 interior shot), 1 owner-less
+    tag-pair photo ([T1=tag1, T2=tag2]).
     """
     from src.seed.seed import seed_data
 
@@ -223,7 +225,7 @@ async def test_seed_populates_photos(db_manager: DBManager) -> None:
 
     async with db_manager.async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM photos"))
-        assert result.scalar() == 7
+        assert result.scalar() == 9
 
         # ≥1 location-owned photo (location gallery owner slot in use)
         result = await session.execute(
@@ -491,7 +493,7 @@ async def test_seed_activities_pinned_to_functional_weeks(db_manager: DBManager)
 
 
 async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
-    """Seed photos carry fixed rising created_at (2026-06-15..21, noon).
+    """Seed photos carry fixed rising created_at (2026-06-15..23, noon).
 
     Guard test: expectations are hardcoded literals ON PURPOSE (not imported
     from PHOTO_FIXED_DATES) so a later edit of the seed constant fails loudly
@@ -512,6 +514,8 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
         _dt(2026, 6, 19, 12, 0, 0),
         _dt(2026, 6, 20, 12, 0, 0),
         _dt(2026, 6, 21, 12, 0, 0),
+        _dt(2026, 6, 22, 12, 0, 0),
+        _dt(2026, 6, 23, 12, 0, 0),
     ]
 
     async with db_manager.async_session() as session:
@@ -519,7 +523,7 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
             text("SELECT created_at FROM photos ORDER BY created_at")
         )
         rows = result.all()
-        assert len(rows) == 7
+        assert len(rows) == 9
 
         dates: list[_dt] = []
         for row in rows:
@@ -533,7 +537,61 @@ async def test_seed_photos_fixed_dates(db_manager: DBManager) -> None:
 
         # Determinism contract: the exact date set, strictly rising order.
         assert dates == expected, f"Photo created_at set drifted, got {dates}"
-        assert len(set(dates)) == 7, "Photo created_at values must be unique"
+        assert len(set(dates)) == 9, "Photo created_at values must be unique"
+
+
+async def test_seed_cabinet_photos_delta(db_manager: DBManager) -> None:
+    """#513 cabinet seed delta: c1 owns ONE non-public photo (С3 — the
+    cabinet shows it with «Не опубликовано», the guest gallery must not
+    show it), c2 owns ONE photo (С2 — second-client isolation on the
+    photos screen; c2 already carries record+visit+payment).
+
+    Everything else stays public — the public gallery feed is unchanged
+    by this delta. No new tag links ride along (photo_tags stays at 5).
+    Expectations are hardcoded literals ON PURPOSE (guard-test canon,
+    same as the fixed-dates pin above).
+    """
+    from src.seed.seed import seed_data
+
+    await seed_data(db_manager)
+
+    async with db_manager.async_session() as session:
+        # c1 «Анна Иванова»: 3 photos total — 2 public (ph1, ph2) +
+        # exactly 1 private with the pinned filename.
+        result = await session.execute(
+            text(
+                "SELECT filename, is_public FROM photos "
+                "WHERE client_id = (SELECT id FROM clients "
+                "WHERE phone = '+79001234567') ORDER BY created_at"
+            )
+        )
+        c1_rows = result.all()
+        assert len(c1_rows) == 3
+        assert [row.is_public for row in c1_rows] == [True, True, False]
+        assert c1_rows[-1].filename == "/images/cabinet-draft.jpg"
+
+        # c2 «Мария Петрова»: exactly 1 photo, non-public, pinned filename.
+        result = await session.execute(
+            text(
+                "SELECT filename, is_public FROM photos "
+                "WHERE client_id = (SELECT id FROM clients "
+                "WHERE phone = '+79002345678')"
+            )
+        )
+        c2_rows = result.all()
+        assert len(c2_rows) == 1
+        assert not c2_rows[0].is_public
+        assert c2_rows[0].filename == "/images/maria-canvas.jpg"
+
+        # Public gallery is untouched: exactly the 7 original photos.
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM photos WHERE is_public = 1")
+        )
+        assert result.scalar() == 7
+
+        # No tag links on the delta rows (photo_tags stays at 5).
+        result = await session.execute(text("SELECT COUNT(*) FROM photo_tags"))
+        assert result.scalar() == 5
 
 
 async def test_seed_records_link_to_fixed_week(db_manager: DBManager) -> None:

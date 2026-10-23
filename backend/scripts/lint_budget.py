@@ -94,6 +94,12 @@ TOOL_TIMEOUT_SECONDS = 600
 # 2026-10-19 (GH #491 — seed on UUID ids): ruff 115 → 114 — B905 1 → 0:
 # the bare zip() lived in seed-pinned test data asserts (records by
 # literal id) rewritten to business-key joins with no zip.
+# 2026-10-23 (GH #513 — client cabinet read /my/records): ruff 113 → 111 —
+# TC003 8 → 6: schemas/my.py datetime import line (date/datetime + the
+# new time) gained justified noqa comments (runtime pydantic model
+# fields, schemas/user.py precedent), suppressing the two pre-existing
+# diagnostics on that line; the new VisitStatus import is noqa'd too
+# (TC001 stays at 5).
 RUFF_BUDGET: dict[str, int] = {
     "B006": 0,
     "B011": 2,
@@ -112,7 +118,7 @@ RUFF_BUDGET: dict[str, int] = {
     "SIM118": 2,
     "TC001": 5,
     "TC002": 14,
-    "TC003": 8,
+    "TC003": 6,
     "UP040": 1,
     "UP042": 8,
     "UP046": 3,

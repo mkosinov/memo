@@ -6,8 +6,10 @@ import type { GalleryPhotoView } from '@/app/lib/model/view/gallery';
  * (absolute or relative) and full http(s) URLs render; everything else —
  * foreign schemes (javascript:, data:), protocol-relative foreign hosts,
  * empty strings — is dropped from the gallery. Normalize-first also catches
- * glued forms: "ja<ctrl>vascript:" collapses into a scheme the check rejects. */
-function toAllowedUrl(filename: string): string | null {
+ * glued forms: "ja<ctrl>vascript:" collapses into a scheme the check rejects.
+ * Exported for the «Мои фото» mapper (#513): the cabinet grid renders by the
+ * SAME mechanism, so it shares one allowlist — no per-screen drift. */
+export function toAllowedUrl(filename: string): string | null {
   const candidate = filename.replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (/^https?:\/\//i.test(candidate)) return candidate;
   if (candidate.startsWith('//')) return null;

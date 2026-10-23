@@ -24,6 +24,12 @@ vi.mock("@memo/api-client", () => {
   };
 });
 
+// ── /cabinet redirects an authenticated client to /cabinet/records
+// (#513 Task 7) — the smoke render needs a router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn() }),
+}));
+
 // ── Page imports ────────────────────────────────────────────
 import ServicesPage from "../services/page";
 import LocationsPage from "../locations/page";

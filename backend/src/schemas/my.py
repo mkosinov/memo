@@ -17,10 +17,13 @@ owns the master section, #266 D5).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time  # noqa: TC003 — runtime pydantic model fields
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.domain.visit_status import VisitStatus  # noqa: TC001 — runtime pydantic model field
+from src.models.enums import PaymentMethod  # noqa: TC001 — runtime pydantic model field
 
 
 class MyProfileResponse(BaseModel):
@@ -136,6 +139,104 @@ class MyRecordResponse(BaseModel):
     start: datetime
     comment: str | None = None
     visits: list[MyVisitResponse]
+
+
+# ─── #513 — client cabinet read: GET /api/v1/my/records ────────────────────────
+
+
+class MyVisitItem(BaseModel):
+    """One visit inside ``GET /api/v1/my/records`` items (spec §«Контракт API»).
+
+    Per-endpoint visit shape — deliberately NOT ``VisitResponse``: no
+    ``tariff_id``/``visitor_id``/``record_id``/``custom_price``/timestamps
+    (the spec's «не входят» list). ``visitor_name`` is the linked
+    Visitor's name (``null`` for an anonymous seat — legal per domain);
+    ``price`` is the creation-time SNAPSHOT: visit ``custom_price`` when
+    set, else the stored ``price`` — never derived from the tariff on
+    read (#357 invariant).
+    """
+
+    id: str
+    visitor_name: str | None = None
+    status: VisitStatus
+    price: int
+
+
+class MyRecordItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/records`` (spec §«Контракт API»).
+
+    ``activity_date``/``activity_start``/``activity_end`` are computed
+    from the record's activity (the model stores only start + duration
+    in minutes; end = start + duration, time-of-day after a midnight
+    rollover, date always the start's date). No service fields:
+    ``client_id``/``activity_id``/``seats``/record ``status``/
+    record ``custom_price`` and the visits' service fields stay out —
+    the client sees per-visit status/price only.
+    """
+
+    id: str
+    activity_date: date
+    activity_start: time
+    activity_end: time
+    # FK-enforced join (activities.service_id → services.id) keeps the
+    # title always present — typed plain ``str`` per the spec table.
+    service_title: str
+    comment: str | None = None
+    visits: list[MyVisitItem]
+
+
+# ─── #513 — client cabinet read: GET /api/v1/my/photos ────────────────────────
+
+
+class MyPhotoItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/photos`` (spec §«Контракт API»).
+
+    Per-endpoint photo shape — deliberately NOT ``PhotoResponse``: no
+    ``client_id``/``client_name`` (the requester IS the client),
+    ``service_id``/``activity_id``/``location_id`` owner slots, no
+    ``updated_at`` (the spec's «не входят» list). ``tags`` are resolved
+    server-side to tag NAMES (string[]) — tag objects with ids stay in
+    the admin contract.
+    """
+
+    id: str
+    filename: str
+    is_public: bool
+    tags: list[str]
+    created_at: datetime
+
+
+# ─── #513 — client cabinet read: GET /api/v1/my/payments ───────────────────────
+
+
+class MyPaymentRecordContext(BaseModel):
+    """Brief record context inside a payment item (spec §«Контракт API»).
+
+    ALWAYS present: ``record_id`` is a mandatory FK and payments are
+    deleted with the record, so the ``null`` branch does not exist.
+    Exactly these three fields — full record data stays out.
+    """
+
+    id: str
+    activity_date: date
+    # FK-enforced join (activities.service_id → services.id) keeps the
+    # title always present — typed plain ``str`` per the spec table.
+    service_title: str
+
+
+class MyPaymentItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/payments`` (spec §«Контракт API»).
+
+    Ownership is THROUGH the record (a payment is "mine" iff its record
+    belongs to the session's client). ``method`` is nullable by model
+    (``null`` → «Способ не указан» on the screen). No ``updated_at``.
+    """
+
+    id: str
+    amount: int
+    method: PaymentMethod | None = None
+    created_at: datetime
+    record: MyPaymentRecordContext
 
 
 class MyProfileUpdate(BaseModel):

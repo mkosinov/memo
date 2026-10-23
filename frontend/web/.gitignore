@@ -1,0 +1,15 @@
+# Playwright E2E (web) — mirrors admin's ignore set (GH #415), web-adapted.
+/test-results/
+/playwright-report*/
+/blob-report/
+/playwright/.cache/
+*.actual.png
+*.diff.png
+/results*.json
+
+# Next.js build output — the e2e stack isolates its own dist dir (NEXT_DIST_DIR).
+/dist/
+/dist-e2e*/
+
+# Local env files
+.env*.local

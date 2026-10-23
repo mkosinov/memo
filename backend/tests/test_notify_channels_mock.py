@@ -20,6 +20,7 @@ Covered (S9, unit — no Redis, no DB):
 """
 
 import pytest
+from redis.exceptions import RedisError
 
 from src.core.config import settings
 from src.notify.channels.base import (
@@ -30,6 +31,7 @@ from src.notify.channels.base import (
 from src.notify.channels.mock import (
     InMemoryRecorder,
     MockChannel,
+    RedisListRecorder,
     is_mock_allowed,
 )
 
@@ -110,6 +112,31 @@ class TestInMemoryRecorder:
         snapshot.clear()
 
         assert recorder.deliveries == [{"address": "a@example.com", "text": "текст"}]
+
+
+class TestRedisListRecorder:
+    def test_construction_is_lazy_no_connection_until_record(self) -> None:
+        """A bogus URL must not connect at construction time — the pool
+        connects on first use (the ``connect_or_exit`` gate owns the
+        reachability probe)."""
+        RedisListRecorder("redis://127.0.0.1:1/0")
+
+    def test_redis_outage_surfaces_as_transport_error(self, monkeypatch) -> None:
+        """The recorder IS the mock's transport: a dead Redis is a
+        RETRIABLE ``ChannelTransportError`` (spec §3.2/§3.6), not an
+        unclassified channel bug; the original class rides along."""
+        recorder = RedisListRecorder("redis://127.0.0.1:1/0")
+
+        def refused(*args: object, **kwargs: object) -> None:
+            raise RedisError("Connection refused")
+
+        monkeypatch.setattr(recorder._client, "lpush", refused)
+
+        with pytest.raises(ChannelTransportError) as exc_info:
+            recorder.record("a@example.com", "текст")
+
+        assert "RedisError" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, RedisError)
 
 
 class TestMockRegistrationGate:

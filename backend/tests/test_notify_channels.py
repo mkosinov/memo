@@ -36,6 +36,7 @@ from src.notify.channels.registry import (
     parse_channel_priority,
     validate_priority_channels,
 )
+from tests.notify_redis_support import capture_notify_logs
 
 pytestmark = pytest.mark.unit
 
@@ -106,22 +107,34 @@ class TestValidatePriorityChannels:
     def test_registered_name_is_silent(self) -> None:
         validate_priority_channels(["stub"], registry={"stub": _StubChannel})
 
-    def test_unregistered_name_exits_2_with_the_stable_message(self) -> None:
-        with pytest.raises(SystemExit) as exit_info:
+    def test_unregistered_name_logs_and_exits_2_with_the_stable_message(self) -> None:
+        """The ``connect_or_exit`` precedent (architect decision on the
+        part-3 gate): the STABLE message goes to the module logger, the
+        process exits with code 2 — a tuple-form ``SystemExit(2, msg)``
+        would make the interpreter exit 1 and break the §3.3 contract."""
+        with (
+            capture_notify_logs("memo.notify.registry") as messages,
+            pytest.raises(SystemExit) as exit_info,
+        ):
             validate_priority_channels(["x"])
-        assert exit_info.value.code == (2, "notify worker: channel 'x' is not registered")
+        assert exit_info.value.code == 2
+        assert "notify worker: channel 'x' is not registered" in messages
 
     def test_message_constant_formats_the_name(self) -> None:
         assert NOT_REGISTERED_MESSAGE.format("x") == "notify worker: channel 'x' is not registered"
 
-    def test_gate_checks_every_name_before_the_first_failure_order(self) -> None:
-        """The gate is not reached only for the first bogus name — the
-        message names the FIRST unregistered entry (iteration order)."""
-        with pytest.raises(SystemExit) as exit_info:
+    def test_gate_names_the_first_unregistered_entry(self) -> None:
+        """The message names the FIRST unregistered entry (iteration
+        order) — the gate checks every priority name."""
+        with (
+            capture_notify_logs("memo.notify.registry") as messages,
+            pytest.raises(SystemExit) as exit_info,
+        ):
             validate_priority_channels(
                 ["stub", "ghost"], registry={"stub": _StubChannel}
             )
-        assert exit_info.value.code == (2, "notify worker: channel 'ghost' is not registered")
+        assert exit_info.value.code == 2
+        assert "notify worker: channel 'ghost' is not registered" in messages
 
 
 # ── §3.3: instance building ──────────────────────────────────────────────────

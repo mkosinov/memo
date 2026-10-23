@@ -18,9 +18,14 @@ here, its behavior unchanged.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from src.notify.channels.base import Channel
+
+# The notify family logger convention (src/notify/journal.py):
+# "memo.notify.<module>", independent of import paths.
+logger = logging.getLogger("memo.notify.registry")
 
 #: Zero-argument factory of a channel instance (the registry value).
 ChannelFactory = Callable[[], Channel]
@@ -68,12 +73,16 @@ def validate_priority_channels(
     names: list[str], registry: dict[str, ChannelFactory] | None = None
 ) -> None:
     """Loud startup gate (spec §3.3): every priority name must be
-    registered — SystemExit(2) with a STABLE message before the group
-    is created or the queue consumed."""
+    registered — the STABLE message is logged (module logger) and the
+    process exits with code 2 BEFORE the group is created or the queue
+    consumed. The ``connect_or_exit`` precedent: a tuple-form
+    ``SystemExit(2, msg)`` would make the interpreter exit 1 and break
+    the exit-code contract."""
     known = registry if registry is not None else CHANNELS
     for name in names:
         if name not in known:
-            raise SystemExit(2, NOT_REGISTERED_MESSAGE.format(name))
+            logger.error(NOT_REGISTERED_MESSAGE.format(name))
+            raise SystemExit(2)
 
 
 def build_instances(names: list[str]) -> dict[str, Channel]:

@@ -82,6 +82,62 @@ class TestPhotosListParams:
         assert "at most one owner" in str(response.json()["detail"])
 
 
+class TestPhotosFilenameValidation:
+    """GH #517 defense-in-depth: ``filename`` is sanitized on the way in —
+    outer whitespace stripped, control characters rejected with 422
+    (POST/PUT payload schemas; PATCH partial schema)."""
+
+    def test_create_strips_outer_whitespace(self, api_client) -> None:
+        """POST filename with outer spaces → 201, stored without them."""
+        response = api_client.post(PHOTOS_URL, json={"filename": "  /images/a.jpg  "})
+        assert response.status_code == 201
+        assert response.json()["filename"] == "/images/a.jpg"
+
+    @pytest.mark.parametrize("junk", [
+        "a\x00b.jpg",  # NUL
+        "a\x1fb.jpg",  # US
+        "a\x7fb.jpg",  # DEL
+        " \x00 ",      # control only
+    ])
+    def test_create_control_chars_422(self, api_client, junk) -> None:
+        """POST with control characters in filename → 422."""
+        response = api_client.post(PHOTOS_URL, json={"filename": junk})
+        assert response.status_code == 422
+        assert "control characters" in str(response.json()["detail"])
+
+    def test_put_control_chars_422(self, api_client) -> None:
+        """PUT with a control character in filename → 422."""
+        create = api_client.post(PHOTOS_URL, json={"filename": "victim.jpg"})
+        photo_id = create.json()["id"]
+
+        response = api_client.put(f"{PHOTOS_URL}/{photo_id}", json={
+            "filename": "x\x00y.jpg",
+            "is_public": False,
+        })
+        assert response.status_code == 422
+
+    def test_patch_control_chars_422(self, api_client) -> None:
+        """PATCH with a control character in filename → 422 (partial schema too)."""
+        create = api_client.post(PHOTOS_URL, json={"filename": "victim.jpg"})
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"{PHOTOS_URL}/{photo_id}", json={
+            "filename": "x\x00y.jpg",
+        })
+        assert response.status_code == 422
+
+    def test_patch_strips_outer_whitespace(self, api_client) -> None:
+        """PATCH filename with outer spaces → 200, stored without them."""
+        create = api_client.post(PHOTOS_URL, json={"filename": "victim.jpg"})
+        photo_id = create.json()["id"]
+
+        response = api_client.patch(f"{PHOTOS_URL}/{photo_id}", json={
+            "filename": "  /images/b.jpg  ",
+        })
+        assert response.status_code == 200
+        assert response.json()["filename"] == "/images/b.jpg"
+
+
 @pytest.fixture()
 def photos_fixture(
     api_client, create_client, create_location, create_service,

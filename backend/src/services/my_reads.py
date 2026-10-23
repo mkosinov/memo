@@ -22,16 +22,19 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from src.models.activity import Activity
+from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
 from src.models.visit import Visit
 from src.models.visitor import Visitor
+from src.repositories.generic import get_base_repository
 from src.repositories.record import get_record_repository
 from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
-from src.schemas.my import MyRecordItem, MyVisitItem
+from src.schemas.my import MyPhotoItem, MyRecordItem, MyVisitItem
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +137,59 @@ async def list_my_records(
             visits=visits_by_record.get(row.record_id, []),
         )
         for row in rows
+    ]
+    return PaginatedResponse(
+        items=items, total=total, page=params.page, per_page=params.per_page,
+    )
+
+
+async def list_my_photos(
+    db_session: AsyncSession,
+    client_id: str | None,
+    params: PaginationParams,
+) -> PaginatedResponse[MyPhotoItem]:
+    """Return the client cabinet's own photos page (#513).
+
+    ALL the client's photos regardless of publicity (the public
+    gallery's ``is_public=true`` filter does NOT apply here — the
+    cabinet is the owner's private view). Owner filter = the session's
+    ``users.client_id``; owner-less photos (``client_id NULL``, legal
+    per domain) belong to no one and never appear — a cardless account
+    short-circuits to an empty page (the Task 1 pattern). Fixed sort:
+    ``created_at`` DESC, id ASC (the deterministic tie-break canon).
+    Tags resolve to NAMES via ``selectinload`` (one batched query, no
+    N+1; names sorted for a stable wire).
+    """
+    if client_id is None:
+        return PaginatedResponse(
+            items=[], total=0, page=params.page, per_page=params.per_page,
+        )
+
+    stmt = (
+        select(Photo)
+        .options(selectinload(Photo.tags))
+        .where(Photo.client_id == client_id)
+    )
+    id_pred = ids_in_predicate(Photo.id, params.id)
+    if id_pred is not None:
+        stmt = stmt.where(id_pred)
+
+    photos, total = await get_base_repository().list_entity(
+        db_session,
+        stmt,
+        order_by=[Photo.created_at.desc(), Photo.id.asc()],
+        limit=params.per_page,
+        offset=(params.page - 1) * params.per_page,
+    )
+    items = [
+        MyPhotoItem(
+            id=photo.id,
+            filename=photo.filename,
+            is_public=bool(photo.is_public),
+            tags=sorted(tag.title for tag in photo.tags),
+            created_at=photo.created_at,
+        )
+        for photo in photos
     ]
     return PaginatedResponse(
         items=items, total=total, page=params.page, per_page=params.per_page,

@@ -44,12 +44,12 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 
 # Spec §4.5: the exact count of paginated GET routes — the 11 #371
 # conversions plus the 5 already-model-shaped lists (clients, records
-# list, records view, masters, photos) and the client-cabinet
-# GET /api/v1/my/records (#513 — PaginationParams brick as-is). A new
-# paginated list changes the count: extend the pin CONSCIOUSLY, with
-# the ``id`` contract in place (the missing-``id`` check below fails
-# first if not).
-EXPECTED_PAGINATED_LISTS = 17
+# list, records view, masters, photos) and the client-cabinet reads
+# GET /api/v1/my/records + GET /api/v1/my/photos (#513 —
+# PaginationParams brick as-is). A new paginated list changes the
+# count: extend the pin CONSCIOUSLY, with the ``id`` contract in place
+# (the missing-``id`` check below fails first if not).
+EXPECTED_PAGINATED_LISTS = 18
 
 # Spec §4.4: deleted shapes — zero occurrences allowed anywhere in
 # src (code, comments, docstrings).

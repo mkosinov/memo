@@ -184,6 +184,27 @@ class MyRecordItem(BaseModel):
     visits: list[MyVisitItem]
 
 
+# ─── #513 — client cabinet read: GET /api/v1/my/photos ────────────────────────
+
+
+class MyPhotoItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/photos`` (spec §«Контракт API»).
+
+    Per-endpoint photo shape — deliberately NOT ``PhotoResponse``: no
+    ``client_id``/``client_name`` (the requester IS the client),
+    ``service_id``/``activity_id``/``location_id`` owner slots, no
+    ``updated_at`` (the spec's «не входят» list). ``tags`` are resolved
+    server-side to tag NAMES (string[]) — tag objects with ids stay in
+    the admin contract.
+    """
+
+    id: str
+    filename: str
+    is_public: bool
+    tags: list[str]
+    created_at: datetime
+
+
 class MyProfileUpdate(BaseModel):
     """PUT body — only sent keys apply; ``null`` clears a nullable field.
 

@@ -1,4 +1,5 @@
-"""Client-cabinet «my» READ surface — GET /api/v1/my/records (GH #513).
+"""Client-cabinet «my» READ surface (GH #513) — GET /api/v1/my/records,
+GET /api/v1/my/photos.
 
 The read twin of ``my_client.py`` (the /my writes of #499/#523): the
 same ``require_client_session`` guard (cookie ``memo_client_session``,
@@ -6,8 +7,8 @@ role ``client`` — a staff token copied into the client cookie is the
 same 401 as no session), a deliberately thin router. The composition —
 owner filter by the session's ``users.client_id``, fixed sorting,
 snapshot visit prices — lives in ``services/my_reads.py`` (Corridor 3
-free functions). The photos and payments lists (the other #513 read
-endpoints) join this router in later tasks.
+free functions). The payments list (the last #513 read endpoint) joins
+this router in a later task.
 """
 
 from typing import Annotated
@@ -17,9 +18,9 @@ from fastapi import APIRouter, Depends, Query
 from src.auth.permissions import AuthedUser, require_client_session
 from src.db import SessionDep
 from src.schemas.common import PaginatedResponse
-from src.schemas.my import MyRecordItem
+from src.schemas.my import MyPhotoItem, MyRecordItem
 from src.schemas.pagination import PaginationParams
-from src.services.my_reads import list_my_records
+from src.services.my_reads import list_my_photos, list_my_records
 
 router = APIRouter(tags=["my"])
 
@@ -41,5 +42,24 @@ async def get_my_records(
     is the creation-time snapshot, never the tariff (#357).
     """
     return await list_my_records(
+        db_session=db_session, client_id=authed.client_id, params=params
+    )
+
+
+@router.get("/photos", response_model=PaginatedResponse[MyPhotoItem])
+async def get_my_photos(
+    authed: _ClientUser,
+    db_session: SessionDep,
+    params: Annotated[PaginationParams, Query()],
+) -> PaginatedResponse[MyPhotoItem]:
+    """All the client's photos regardless of publicity (spec §«Контракт
+    API → GET /my/photos»).
+
+    The owner is the session's client card; the input is the bare
+    ``PaginationParams`` brick (``?id=`` narrowing ANDs with the owner
+    filter); sorting is fixed (``created_at`` DESC, id ASC); tags
+    resolve server-side to names (string[]).
+    """
+    return await list_my_photos(
         db_session=db_session, client_id=authed.client_id, params=params
     )

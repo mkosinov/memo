@@ -276,9 +276,9 @@ def create_app() -> FastAPI:
     # require_client_session (a SEPARATE router: the staff /my binds
     # require_session router-wide, which would 401 every client session).
     app.include_router(my_client_router, prefix="/api/v1/my")
-    # GH #513 — client-cabinet read lists (records now; photos/payments
-    # join the same router in later tasks), behind the same client
-    # session guard as my_client above.
+    # GH #513 — client-cabinet read lists (records + photos now;
+    # payments joins the same router in a later task), behind the same
+    # client session guard as my_client above.
     app.include_router(my_reads_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)

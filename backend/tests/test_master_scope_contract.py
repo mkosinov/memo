@@ -148,6 +148,7 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/my/client"): "client cabinet (#499 §4.3) — client session, own card",
     ("POST", "/api/v1/my/records"): "client booking (#499 §5) — client session, own-card booking",
     ("GET", "/api/v1/my/records"): "client cabinet read (#513) — client session, own records",
+    ("GET", "/api/v1/my/photos"): "client cabinet read (#513) — client session, own photos",
     ("GET", "/api/v1/user-settings"): "own settings — per-user",
     ("POST", "/api/v1/user-settings"): "own settings — per-user",
     ("PUT", "/api/v1/user-settings"): "own settings — per-user",

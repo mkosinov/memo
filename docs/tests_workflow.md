@@ -228,6 +228,7 @@ whole run); they are NOT to be unified.
 - Source: `scripts/git-hooks/pre-push`
 - Installed by `pnpm install` (postinstall via `scripts/install-hooks.sh`, which is worktree-aware), but **disabled — a no-op** (`exit 0`)
 - Local pre-push checking is done by the container harness at G7 (fast suite: backend pytest + vitest + type-check + lint — see `finishing-a-development-branch` skill); full local runs are on demand (`bash scripts/test-all.sh`)
+- **Backend lint budget (GH #521):** if the PR diff touches `backend/`, the G7 fast suite must also run `cd backend && uv run python scripts/lint_budget.py` — one command covering ruff (src/tests/scripts) + mypy + the budget ratchet against the branch base (the same script CI's `backend-lint` job runs; no separate ruff/mypy invocations needed)
 - Busy machine: the no-op hook takes no lock and never waits — a push itself is never blocked by a heavy run. The queue/exit-75 behavior lives where heavy runs actually start: the G7 fast suite (whole pytest + whole vitest under `with-test-lock.sh`, batch pattern above) and any `test-all.sh` run
 - Re-install manually: `bash scripts/install-hooks.sh`
 - Skip once (moot while the hook is a no-op): `git push --no-verify`
@@ -357,7 +358,7 @@ What a spec author must know:
 | lint (ESLint, admin scope) | — | — | ✅ | ✅ (`frontend-checks`) |
 | type-check (tsc, admin) | ~⁵ | — | ✅ | ✅ (`frontend-checks`) |
 | web checks (lint + type-check + vitest) | — | — | — | ✅ (`web-checks` workflow — path-filtered: only PRs touching `frontend/web/**`, GH #314) |
-| backend lint (ruff/mypy ratchet) | — | — | — | ✅ (`backend-lint`) |
+| backend lint (ruff/mypy ratchet) | — | — | ✅ (diff touches `backend/`: `cd backend && uv run python scripts/lint_budget.py` — GH #521) | ✅ (`backend-lint`) |
 | script guards (z-token, skip-tracker, shard dryrun; parser/smoke of visual scripts) | — | — | — | ✅ (z-token in `frontend-checks`; skip-tracker warning-only; `shard-script-checks` — GH #415; parser/smoke local-only via `test:all`) |
 | e2e Playwright (4 CI shards) | — | — | forbidden⁶ | ✅ |
 | visual compliance | ✅ (UI) | ✅ | — | ✅ (inside e2e) |

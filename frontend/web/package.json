@@ -9,7 +9,11 @@
     "lint": "eslint 'app/**/*.{ts,tsx}' --max-warnings 999",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:stack": "bash scripts/test-e2e.sh",
+    "test:all": "vitest run && playwright test"
   },
   "dependencies": {
     "@memo/api-client": "workspace:*",

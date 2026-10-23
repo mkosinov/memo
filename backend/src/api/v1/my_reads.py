@@ -1,5 +1,5 @@
 """Client-cabinet «my» READ surface (GH #513) — GET /api/v1/my/records,
-GET /api/v1/my/photos.
+GET /api/v1/my/photos, GET /api/v1/my/payments.
 
 The read twin of ``my_client.py`` (the /my writes of #499/#523): the
 same ``require_client_session`` guard (cookie ``memo_client_session``,
@@ -7,8 +7,7 @@ role ``client`` — a staff token copied into the client cookie is the
 same 401 as no session), a deliberately thin router. The composition —
 owner filter by the session's ``users.client_id``, fixed sorting,
 snapshot visit prices — lives in ``services/my_reads.py`` (Corridor 3
-free functions). The payments list (the last #513 read endpoint) joins
-this router in a later task.
+free functions).
 """
 
 from typing import Annotated
@@ -18,9 +17,9 @@ from fastapi import APIRouter, Depends, Query
 from src.auth.permissions import AuthedUser, require_client_session
 from src.db import SessionDep
 from src.schemas.common import PaginatedResponse
-from src.schemas.my import MyPhotoItem, MyRecordItem
+from src.schemas.my import MyPaymentItem, MyPhotoItem, MyRecordItem
 from src.schemas.pagination import PaginationParams
-from src.services.my_reads import list_my_photos, list_my_records
+from src.services.my_reads import list_my_payments, list_my_photos, list_my_records
 
 router = APIRouter(tags=["my"])
 
@@ -61,5 +60,25 @@ async def get_my_photos(
     resolve server-side to names (string[]).
     """
     return await list_my_photos(
+        db_session=db_session, client_id=authed.client_id, params=params
+    )
+
+
+@router.get("/payments", response_model=PaginatedResponse[MyPaymentItem])
+async def get_my_payments(
+    authed: _ClientUser,
+    db_session: SessionDep,
+    params: Annotated[PaginationParams, Query()],
+) -> PaginatedResponse[MyPaymentItem]:
+    """Payments of the client's records (spec §«Контракт API →
+    GET /my/payments»).
+
+    Ownership is THROUGH the record (a payment is "mine" iff its record
+    belongs to the session's client); each item carries the brief
+    always-present record context ``{id, activity_date,
+    service_title}``; sorting is fixed (``created_at`` DESC, id ASC);
+    ``method`` is nullable (``null`` → «Способ не указан»).
+    """
+    return await list_my_payments(
         db_session=db_session, client_id=authed.client_id, params=params
     )

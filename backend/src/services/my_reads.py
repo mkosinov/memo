@@ -25,16 +25,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.models.activity import Activity
+from src.models.payment import Payment
 from src.models.photo import Photo
 from src.models.record import Record
 from src.models.service import Service
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.repositories.generic import get_base_repository
+from src.repositories.payment import get_payment_repository
 from src.repositories.record import get_record_repository
 from src.repositories.search import ids_in_predicate
 from src.schemas.common import PaginatedResponse
-from src.schemas.my import MyPhotoItem, MyRecordItem, MyVisitItem
+from src.schemas.my import (
+    MyPaymentItem,
+    MyPaymentRecordContext,
+    MyPhotoItem,
+    MyRecordItem,
+    MyVisitItem,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -190,6 +198,77 @@ async def list_my_photos(
             created_at=photo.created_at,
         )
         for photo in photos
+    ]
+    return PaginatedResponse(
+        items=items, total=total, page=params.page, per_page=params.per_page,
+    )
+
+
+async def list_my_payments(
+    db_session: AsyncSession,
+    client_id: str | None,
+    params: PaginationParams,
+) -> PaginatedResponse[MyPaymentItem]:
+    """Return the client cabinet's own payments page (#513).
+
+    Ownership is THROUGH the record: a payment is "mine" iff its record
+    belongs to the session's client (``Record.client_id``) — payments of
+    client-less records belong to no one and never appear; a cardless
+    account short-circuits to an empty page (the Task 1 pattern). Each
+    item carries the brief record context (``{id, activity_date,
+    service_title}``) that is ALWAYS present (``record_id`` is a
+    mandatory FK, payments die with the record). Fixed sort:
+    ``created_at`` DESC, id ASC (the deterministic tie-break canon).
+    """
+    if client_id is None:
+        return PaginatedResponse(
+            items=[], total=0, page=params.page, per_page=params.per_page,
+        )
+
+    service_title = (
+        select(Service.title)
+        .where(Activity.service_id == Service.id)
+        .correlate(Activity)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Payment.id.label("payment_id"),
+            Payment.amount,
+            Payment.method,
+            Payment.created_at,
+            Record.id.label("record_id"),
+            Activity.start.label("activity_start"),
+            service_title.label("service_title"),
+        )
+        .join(Record, Payment.record_id == Record.id)
+        .join(Activity, Record.activity_id == Activity.id)
+        .where(Record.client_id == client_id)
+    )
+    id_pred = ids_in_predicate(Payment.id, params.id)
+    if id_pred is not None:
+        stmt = stmt.where(id_pred)
+
+    rows, total = await get_payment_repository().list_custom(
+        db_session,
+        stmt,
+        order_by=[Payment.created_at.desc(), Payment.id.asc()],
+        limit=params.per_page,
+        offset=(params.page - 1) * params.per_page,
+    )
+    items = [
+        MyPaymentItem(
+            id=row.payment_id,
+            amount=row.amount,
+            method=row.method,
+            created_at=row.created_at,
+            record=MyPaymentRecordContext(
+                id=row.record_id,
+                activity_date=row.activity_start.date(),
+                service_title=row.service_title,
+            ),
+        )
+        for row in rows
     ]
     return PaginatedResponse(
         items=items, total=total, page=params.page, per_page=params.per_page,

@@ -23,6 +23,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.visit_status import VisitStatus  # noqa: TC001 — runtime pydantic model field
+from src.models.enums import PaymentMethod  # noqa: TC001 — runtime pydantic model field
 
 
 class MyProfileResponse(BaseModel):
@@ -203,6 +204,39 @@ class MyPhotoItem(BaseModel):
     is_public: bool
     tags: list[str]
     created_at: datetime
+
+
+# ─── #513 — client cabinet read: GET /api/v1/my/payments ───────────────────────
+
+
+class MyPaymentRecordContext(BaseModel):
+    """Brief record context inside a payment item (spec §«Контракт API»).
+
+    ALWAYS present: ``record_id`` is a mandatory FK and payments are
+    deleted with the record, so the ``null`` branch does not exist.
+    Exactly these three fields — full record data stays out.
+    """
+
+    id: str
+    activity_date: date
+    # FK-enforced join (activities.service_id → services.id) keeps the
+    # title always present — typed plain ``str`` per the spec table.
+    service_title: str
+
+
+class MyPaymentItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/payments`` (spec §«Контракт API»).
+
+    Ownership is THROUGH the record (a payment is "mine" iff its record
+    belongs to the session's client). ``method`` is nullable by model
+    (``null`` → «Способ не указан» on the screen). No ``updated_at``.
+    """
+
+    id: str
+    amount: int
+    method: PaymentMethod | None = None
+    created_at: datetime
+    record: MyPaymentRecordContext
 
 
 class MyProfileUpdate(BaseModel):

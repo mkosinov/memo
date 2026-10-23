@@ -436,7 +436,7 @@ describe('ClientsFilters — flat toolbar root (#412 US-2)', () => {
     expect(children[6]).toHaveTextContent('Сбросить фильтры');
   });
 
-  it('field groups keep their inner от/до pair structure (10 inputs + select + reset)', () => {
+  it('field groups keep their inner от/до pair structure (9 inputs + select + reset)', () => {
     render(<ClientsFilters />);
     const root = screen.getByTestId('clients-filters');
     expect(root.querySelectorAll('input')).toHaveLength(9);

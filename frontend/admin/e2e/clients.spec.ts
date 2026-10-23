@@ -1337,7 +1337,7 @@ test.describe('GH #140 — clients-list isolation & staleness', () => {
       await expect(panel).toBeVisible();
 
       // Every control stays visible: search + status select + 4 от/до pairs
-      // (10 inputs in 6 groups) + «Сбросить фильтры».
+      // (9 inputs: search + 6 numeric + 2 dates) + «Сбросить фильтры» = 11.
       const controls = panel.locator('input, select, button');
       await expect(controls).toHaveCount(11);
       for (const control of await controls.all()) {

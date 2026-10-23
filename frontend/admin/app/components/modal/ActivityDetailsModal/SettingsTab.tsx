@@ -6,7 +6,7 @@ import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { MasterPicker } from '@/app/components/shared/MasterPicker';
 import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
 import type { ScheduleAdminDTO } from '@memo/domain';
-import { formatTime, hhmmToMinutes, composeLocalISO } from '@/lib/datetime';
+import { formatTime, hhmmToMinutes, composeLocalISO, snapMinutes, buildDateTimeLocal } from '@/lib/datetime';
 
 /** Update payload accepted by ScheduleDataContext.updateActivity (GH #142 minutes contract). */
 type ActivityUpdates = Parameters<ReturnType<typeof useScheduleData>['updateActivity']>[1];
@@ -14,19 +14,6 @@ type ActivityUpdates = Parameters<ReturnType<typeof useScheduleData>['updateActi
 interface SettingsTabProps {
   activity: ScheduleAdminDTO;
   onUpdate: (updates: ActivityUpdates) => void;
-}
-
-/** Snap minutes to the nearest grid slot. */
-function snapMinutes(minutes: number, gridFrequency: number): number {
-  return Math.round(minutes / gridFrequency) * gridFrequency;
-}
-
-/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from a date key + integer minutes, snapped to grid. */
-function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency: number): string {
-  if (!dateStr) return '';
-  const snapped = snapMinutes(startMinutes, gridFrequency);
-  // composeLocalISO yields "YYYY-MM-DDTHH:MM:00" — slice off the ":00" seconds for datetime-local.
-  return composeLocalISO(dateStr, snapped).slice(0, 16);
 }
 
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {

@@ -85,6 +85,17 @@ describe('MasterPicker (raw masters)', () => {
     expect(container.querySelector('.w-48')).toBeInTheDocument();
   });
 
+  it('forwards containerTestId onto the Combobox outer wrapper', () => {
+    const { container } = render(
+      <MasterPicker masters={MASTERS} value="" onChange={vi.fn()} containerTestId="select-master" />,
+    );
+    const wrapper = screen.getByTestId('select-master');
+    expect(wrapper).toBe(container.firstElementChild);
+    expect(wrapper.querySelector('[data-testid="combobox-trigger"]')).toBe(
+      screen.getByTestId('combobox-trigger'),
+    );
+  });
+
   it('filters options by a last-name fragment and selects the match', () => {
     const onChange = vi.fn();
     render(<MasterPicker masters={MASTERS} value="" onChange={onChange} />);

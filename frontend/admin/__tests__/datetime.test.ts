@@ -22,6 +22,8 @@ import {
   shiftDateKey,
   generateTimeSlots,
   calculateGridTimeRange,
+  snapMinutes,
+  buildDateTimeLocal,
 } from '@/lib/datetime';
 
 // ─── parseLocalISO ────────────────────────────────────────────────────────────
@@ -195,6 +197,38 @@ describe('generateTimeSlots', () => {
   it('returns an empty array when start >= end', () => {
     expect(generateTimeSlots(30, 660, 660)).toEqual([]);
     expect(generateTimeSlots(30, 700, 660)).toEqual([]);
+  });
+});
+
+// ─── snapMinutes / buildDateTimeLocal (GH #280 — moved verbatim from SettingsTab) ──
+
+describe('snapMinutes', () => {
+  it('rounds to the NEAREST grid slot', () => {
+    expect(snapMinutes(617, 30)).toBe(630);  // 20.57 slots → 21
+    expect(snapMinutes(607, 15)).toBe(600);  // 40.47 slots → 40
+    expect(snapMinutes(608, 15)).toBe(615);  // 40.53 slots → 41
+  });
+
+  it('keeps values already on the grid untouched', () => {
+    expect(snapMinutes(600, 30)).toBe(600);
+    expect(snapMinutes(540, 30)).toBe(540);
+    expect(snapMinutes(0, 60)).toBe(0);
+  });
+});
+
+describe('buildDateTimeLocal', () => {
+  it('builds "YYYY-MM-DDTHH:MM" from date key + minutes, snapped to grid', () => {
+    expect(buildDateTimeLocal('2026-10-24', 617, 30)).toBe('2026-10-24T10:30');
+    expect(buildDateTimeLocal('2026-10-24', 600, 30)).toBe('2026-10-24T10:00');
+    expect(buildDateTimeLocal('2026-01-05', 760, 15)).toBe('2026-01-05T12:45');
+  });
+
+  it('returns "" for an empty date key (no activity date yet)', () => {
+    expect(buildDateTimeLocal('', 600, 30)).toBe('');
+  });
+
+  it('always yields a 16-char datetime-local value (seconds sliced off)', () => {
+    expect(buildDateTimeLocal('2026-01-05', 760, 15)).toHaveLength(16);
   });
 });
 

@@ -90,6 +90,22 @@ export function hhmmToMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
+/** Snap minutes to the nearest grid slot (moved verbatim from SettingsTab, GH #280). */
+export function snapMinutes(minutes: number, gridFrequency: number): number {
+  return Math.round(minutes / gridFrequency) * gridFrequency;
+}
+
+/**
+ * Build a datetime-local string "YYYY-MM-DDTHH:MM" from a date key + integer
+ * minutes, snapped to grid (moved verbatim from SettingsTab, GH #280).
+ */
+export function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency: number): string {
+  if (!dateStr) return '';
+  const snapped = snapMinutes(startMinutes, gridFrequency);
+  // composeLocalISO yields "YYYY-MM-DDTHH:MM:00" — slice off the ":00" seconds for datetime-local.
+  return composeLocalISO(dateStr, snapped).slice(0, 16);
+}
+
 /** The Monday (local midnight) of the week containing `date`. Semantics identical to the legacy `utils.getMonday`. */
 export function getMonday(date: Date): Date {
   const d = new Date(date);

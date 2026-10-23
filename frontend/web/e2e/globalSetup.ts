@@ -165,13 +165,15 @@ export default async function globalSetup() {
     clientAuthStatePath(),
   );
 
-  // Warm up the cabinet route so the first spec doesn't race the Next
+  // Warm up the cabinet routes so the first spec doesn't race the Next
   // dev-server's on-demand compilation (the admin WARMUP_ROUTES lesson —
-  // web has exactly one route that matters for #513 today).
-  try {
-    await fetch(`http://127.0.0.1:${webPort}/cabinet`, { signal: AbortSignal.timeout(60_000) });
-    console.log(`[web-e2e globalSetup] Warmed up /cabinet on :${webPort}`);
-  } catch {
-    // best-effort: the request still triggered the dev compile
+  // /cabinet plus the #513 Task 7 records section).
+  for (const route of ['/cabinet', '/cabinet/records']) {
+    try {
+      await fetch(`http://127.0.0.1:${webPort}${route}`, { signal: AbortSignal.timeout(60_000) });
+      console.log(`[web-e2e globalSetup] Warmed up ${route} on :${webPort}`);
+    } catch {
+      // best-effort: the request still triggered the dev compile
+    }
   }
 }

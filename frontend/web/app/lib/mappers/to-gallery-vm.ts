@@ -3,8 +3,10 @@ import type { GalleryPhotoView } from '@/app/lib/model/view/gallery';
 
 /** URL allowlist (GH #479): same-origin paths (absolute or relative) and full
  * http(s) URLs render; everything else — foreign schemes (javascript:, data:),
- * protocol-relative foreign hosts, empty strings — is dropped from the gallery. */
-function toAllowedUrl(filename: string): string | null {
+ * protocol-relative foreign hosts, empty strings — is dropped from the gallery.
+ * Exported for the «Мои фото» mapper (#513): the cabinet grid renders by the
+ * SAME mechanism, so it shares one allowlist — no per-screen drift. */
+export function toAllowedUrl(filename: string): string | null {
   if (/^https?:\/\//i.test(filename)) return filename;
   if (filename.startsWith('//')) return null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(filename)) return null;

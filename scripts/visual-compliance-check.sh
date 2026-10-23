@@ -20,7 +20,8 @@
 #      localStorage) — required when the spec's checks target AUTHENTICATED
 #      views (the runner never drives a login form itself). Unset (default)
 #      = anonymous context, exactly the historical behavior. A set-but-
-#      missing/unreadable/non-JSON file is an infrastructure failure (exit 2).
+#      missing, non-JSON, or wrong-shape (not { cookies: [...], origins: [...] })
+#      file is an infrastructure failure (exit 2).
 #
 # Exit codes (single canon of the gate's codes — callers follow this table):
 #   0  Green: all automatable checks passed (MANUAL_REVIEW items do not fail
@@ -29,12 +30,16 @@
 #      Playwright, and report stages)
 #   1  Red: one or more automatable checks genuinely failed
 #   2  Infrastructure/usage failure: bad arguments, missing dependency,
-#      spec file not found, parser crash, or dev server unreachable
+#      spec file not found, parser crash, or dev server unreachable —
+#      including a set-but-invalid VISUAL_STORAGE_STATE (missing file,
+#      non-JSON, or wrong shape; see the env block above)
 #   3  Spec gap (return the card to design): the visual checks section is
 #      missing, empty, or contains no machine-usable hints — the spec
 #      section must be (re)designed in the design phase, not patched here
 #
-# Stage order: arguments → spec file exists → parse → branch
+# Stage order: arguments → VISUAL_STORAGE_STATE validation (when set:
+#      exists → JSON → storageState shape) → spec file exists → parse →
+#      branch
 #   (N/A → print verdict, exit 0 immediately) →
 #   (no section / empty / zero machine hints → exit 3) →
 #   (applicable with hints → deps → server pre-flight → Playwright → report)
@@ -80,6 +85,19 @@ if [ -n "$VISUAL_STORAGE_STATE" ]; then
     fi
     if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$VISUAL_STORAGE_STATE" 2>/dev/null; then
         echo "ERROR: VISUAL_STORAGE_STATE is not valid JSON: $VISUAL_STORAGE_STATE" >&2
+        exit 2
+    fi
+    # Shape check (Playwright storageState contract): both `cookies` and
+    # `origins` must be arrays. A JSON-valid-but-wrong-shape file would
+    # otherwise throw inside browser.newContext — OUTSIDE the runner's
+    # try block — and surface as an unhandled rejection misclassified as
+    # "checks failed" (exit 1). Failing HERE keeps it an exit-2 infra error.
+    if ! node -e '
+        const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        if (!j || typeof j !== "object" || Array.isArray(j)) process.exit(1);
+        if (!Array.isArray(j.cookies) || !Array.isArray(j.origins)) process.exit(1);
+    ' "$VISUAL_STORAGE_STATE" 2>/dev/null; then
+        echo "ERROR: VISUAL_STORAGE_STATE is not a Playwright storageState (expected { cookies: [...], origins: [...] }): $VISUAL_STORAGE_STATE" >&2
         exit 2
     fi
     echo "Using storageState for authenticated checks: $VISUAL_STORAGE_STATE"

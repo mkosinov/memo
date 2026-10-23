@@ -79,6 +79,7 @@ from src.auth.passwords import hash_password, validate_password
 from src.models.enums import UserRole
 from src.services.decorators import transactional
 from src.services.user import get_user_service
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,7 +136,7 @@ async def issue_password_link(
     if not user.is_active:
         raise AccountDeactivatedError(user_id)
 
-    now = datetime.utcnow()
+    now = utc_now()
     raw_token = secrets.token_urlsafe(_RAW_TOKEN_BYTES)
     expires_at = now + ttl
 
@@ -199,9 +200,9 @@ async def set_password_by_link(
         .where(
             PasswordSetupToken.token == digest,
             PasswordSetupToken.used_at.is_(None),
-            PasswordSetupToken.expires_at > datetime.utcnow(),
+            PasswordSetupToken.expires_at > utc_now(),
         )
-        .values(used_at=datetime.utcnow())
+        .values(used_at=utc_now())
         .returning(PasswordSetupToken.user_id)
     )
     user_id: str | None = consumed.scalar_one_or_none()
@@ -249,7 +250,7 @@ async def validate_password_link(db_session: AsyncSession, raw_token: str) -> bo
             sa_select(PasswordSetupToken).where(
                 PasswordSetupToken.token == digest,
                 PasswordSetupToken.used_at.is_(None),
-                PasswordSetupToken.expires_at > datetime.utcnow(),
+                PasswordSetupToken.expires_at > utc_now(),
             )
         )
     ).scalar_one_or_none()

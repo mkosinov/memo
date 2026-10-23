@@ -17,6 +17,7 @@ from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.util.utc import utc_now
 
 # Sliding-window session lifetime (spec §2.2):
 IDLE_WINDOW = timedelta(days=7)          # any authenticated request extends it
@@ -41,7 +42,7 @@ class Session(Base):
 
 def new_session(user_id: str) -> Session:
     """Build a fresh Session row for ``user_id`` with computed deadlines."""
-    now = datetime.utcnow()
+    now = utc_now()
     return Session(
         token=secrets.token_urlsafe(32),
         user_id=user_id,

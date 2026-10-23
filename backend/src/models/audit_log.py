@@ -17,6 +17,7 @@ from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.util.utc import utc_now
 
 
 class AuditLog(Base):
@@ -27,7 +28,7 @@ class AuditLog(Base):
         default=lambda: str(uuid.uuid4()),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, index=True, default=datetime.utcnow,
+        DateTime, index=True, default=utc_now,
     )
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"),

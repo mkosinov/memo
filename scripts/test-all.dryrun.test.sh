@@ -74,7 +74,8 @@ fi
 TESTALL_SRC="$REPO_ROOT/scripts/test-all.sh"
 SHARD_SRC="$REPO_ROOT/scripts/e2e-shard-start.sh"
 LIB_SRC="$REPO_ROOT/scripts/lib/shard-helpers.sh"
-for f in "$TESTALL_SRC" "$SHARD_SRC" "$LIB_SRC"; do
+LOCK_LIB_SRC="$REPO_ROOT/scripts/lib/test-lock.sh"
+for f in "$TESTALL_SRC" "$SHARD_SRC" "$LIB_SRC" "$LOCK_LIB_SRC"; do
   if [ ! -f "$f" ]; then
     echo "FATAL: script under test not found: $f" >&2
     exit 1
@@ -95,6 +96,7 @@ trap cleanup EXIT
 cp "$TESTALL_SRC" "$STAGE/scripts/test-all.sh"
 cp "$SHARD_SRC" "$STAGE/scripts/e2e-shard-start.sh"
 cp "$LIB_SRC" "$STAGE/scripts/lib/shard-helpers.sh"
+cp "$LOCK_LIB_SRC" "$STAGE/scripts/lib/test-lock.sh"
 
 # Inline suite children of the orchestrator → `exit 0` stubs (this run's
 # business is the readiness wait, not re-running the wrapper-level suites).
@@ -239,9 +241,11 @@ FAIL=0
 # ── Inner-run launcher ─────────────────────────────────────────────────────
 # launch_test_all <case-dir> — starts the REAL test-all.sh in the staged
 # tree with stub-only children, isolated TMPDIR (logs, master seed lock)
-# and SHARD_RUNS_DIR (leases). Case knobs ride INNER_EXTRA_ENV (the
-# `env $VAR` word-split idiom; values must not contain spaces). Sets
-# INNER_PID and INNER_LOG.
+# and SHARD_RUNS_DIR (leases). The heavy-run lock (#472 Task 3) points at
+# a per-case temp file: the self-acquisition path runs FOR REAL, contention-
+# free (immediate acquire), and the real /root/workspace lock is never
+# touched. Case knobs ride INNER_EXTRA_ENV (the `env $VAR` word-split
+# idiom; values must not contain spaces). Sets INNER_PID and INNER_LOG.
 INNER_EXTRA_ENV="${INNER_EXTRA_ENV:-}"
 INNER_LOG=""
 INNER_PID=""
@@ -256,6 +260,7 @@ launch_test_all() {
       PATH="$STUBS:$PATH" \
       TMPDIR="$cdir/tmp" \
       SHARD_RUNS_DIR="$cdir/runs" \
+      MEMO_TEST_LOCK_PATH="$cdir/heavy.lock" \
       VISUAL_COMPLIANCE=0 \
       SHARD_STACK_WATCH_S=1 \
       SHARD_RUN_WATCH_S=2 \
@@ -287,6 +292,40 @@ reap_test_all() {
 markers_in() {
   find "$1/tmp/test-all-logs" -type f -name 'shard-stack-*.ready.marker' \
     2>/dev/null | sort
+}
+
+# assert_lock_acquired <case-dir> <label> — #472 Task 3: the inner run
+# self-acquired the heavy lock EXACTLY ONCE (per-case temp lock path set
+# by launch_test_all), no bypass notice, no busy queueing (contention-free
+# by construction). The acquisition must cover BOTH run shapes (the red
+# US-5 run and the green US-6 run acquire before any stage starts).
+assert_lock_acquired() {
+  local cdir="$1" label="$2" n
+  n="$(grep -c '\[lock\] замок захвачен' "$cdir/test-all.log" 2>/dev/null || true)"
+  if [ "$n" = "1" ]; then
+    echo "PASS $label (#472): heavy lock self-acquired exactly once"
+  else
+    echo "FAIL $label (#472): expected exactly 1 '[lock] замок захвачен' line, found '$n'"
+    FAIL=1
+  fi
+  if grep -q 'обход без замка' "$cdir/test-all.log" 2>/dev/null; then
+    echo "FAIL $label (#472): unexpected bypass notice (lock path is a writable temp dir)"
+    FAIL=1
+  else
+    echo "PASS $label (#472): no bypass notice"
+  fi
+  if grep -q 'занят, ожидание' "$cdir/test-all.log" 2>/dev/null; then
+    echo "FAIL $label (#472): unexpected busy-queue line (no contention in this case)"
+    FAIL=1
+  else
+    echo "PASS $label (#472): no busy-queue line"
+  fi
+  if [ -e "$cdir/heavy.lock" ]; then
+    echo "PASS $label (#472): lock file created in the case dir"
+  else
+    echo "FAIL $label (#472): lock file missing: $cdir/heavy.lock"
+    FAIL=1
+  fi
 }
 
 # ── Case US-5: wrapper death during the marker wait → one-tick verdict ─────
@@ -343,6 +382,7 @@ else
   echo "FAIL US-5 (#472): unexpected ready markers: $(markers_in "$US5_DIR")"
   FAIL=1
 fi
+assert_lock_acquired "$US5_DIR" "US-5"
 
 # ── Case US-6: late frontend port (pre-bind mode) → marker waited out ──────
 echo "── Case US-6 (#472): frontend answers only at 8 s — orchestrator waits for the markers ──"
@@ -413,6 +453,7 @@ if grep -q 'waiting for shard frontends to be ready' "$US6_DIR/test-all.log" 2>/
 else
   echo "PASS US-6 (#472): no legacy HTTP-poll readiness lines (marker wait only)"
 fi
+assert_lock_acquired "$US6_DIR" "US-6"
 
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"

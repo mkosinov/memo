@@ -30,6 +30,25 @@
 #                         Used for debugging. Skips the whole tag/port
 #                         machinery (no shards are started by it).
 #   VISUAL_COMPLIANCE_URL Override dev server URL for visual compliance.
+#   MEMO_TEST_LOCK_PATH   Heavy-run lock file (default:
+#                         /root/workspace/.memo-heavy-tests.lock).
+#   MEMO_LOCK_POLL_S      Lock queue retry interval (default: 300 s).
+#   MEMO_LOCK_WAIT_S      Lock queue ceiling, wall time (default: 3600 s).
+#   MEMO_TEST_LOCK_DISABLE=1  Run without the lock (bypass notice).
+#
+# Heavy-run lock (#472, spec «Механизм замка»): this script self-acquires
+# the container's heavy lock at the very start — BEFORE the SEQUENTIAL
+# branch, so both run shapes serialize. The lock fd (9) lives in THIS
+# process: every spawned stage runs with 9>&- (background stages AND
+# foreground children — a surviving orphan must never keep the lock after
+# the owner dies; kill -9 of this script releases the lock instantly via
+# the kernel). A busy machine queues this run with a status line per
+# attempt; past the ceiling the run exits 75 («машина занята…») —
+# distinguishable from test failures for automation. Bypass (no lock,
+# one-line notice, suppressed under CI=true): lock dir missing/not
+# writable, no flock binary, or MEMO_TEST_LOCK_DISABLE=1; the lock dir is
+# never created. Nested heavy calls under this run skip re-acquiring via
+# the exported MEMO_TEST_LOCK_HELD=1 (reentrancy guard, US-1).
 #
 # Readiness wait (#472, spec «Починка ожидания готовности»): the shards'
 # readiness is NOT HTTP-polled here. Each stack wrapper
@@ -46,15 +65,23 @@
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# ── Heavy-run lock: self-acquisition (#472, spec «Точки входа» п.1) ─────────
+# Placed BEFORE `export CI=true` on purpose: the bypass notice must honor
+# the REAL CI environment (GitHub sets CI=true → suppressed), not this
+# script's own pnpm-TTY export (a local pre-push run still prints it).
+# rc 75 (busy past the ceiling) aborts the run here via set -e.
+source "$ROOT/scripts/lib/test-lock.sh"
+heavy_test_lock_acquire
+
 # Set CI=true so pnpm doesn't require TTY for module purge confirmation.
 # Pre-push hook runs in non-TTY context (git push is not interactive).
 export CI=true
 
 # CI runners are UTC; local parity keeps date-sensitive tests deterministic.
 export TZ=UTC
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
 
 # LOG_DIR is defined after the run tag is generated below (#317 §3.1):
 # each run logs into its own ${TMPDIR:-/tmp}/test-all-logs/run-<tag> dir
@@ -64,20 +91,22 @@ cd "$ROOT"
 if [ "${SEQUENTIAL:-0}" = "1" ]; then
   echo "🔍 Running local test suite (SEQUENTIAL mode)..."
 
+  # Every child below runs with 9>&- (heavy-lock fd, #472): a surviving
+  # orphan of a killed run must never keep the container lock held.
   echo "  → lint..."
-  pnpm run lint
+  pnpm run lint 9>&-
   echo "  → type-check..."
-  (cd frontend/admin && pnpm run type-check)
+  (cd frontend/admin && pnpm run type-check) 9>&-
   echo "  → type-check (api-client)..."
-  (cd packages/api-client && pnpm run type-check)
+  (cd packages/api-client && pnpm run type-check) 9>&-
   echo "  → vitest..."
-  (cd frontend/admin && pnpm run test)
+  (cd frontend/admin && pnpm run test) 9>&-
   echo "  → vitest (workspace packages)..."
-  bash scripts/run-workspace-tests.sh
+  bash scripts/run-workspace-tests.sh 9>&-
   echo "  → playwright..."
-  (cd frontend/admin && CI= pnpm exec playwright test --workers=1)
+  (cd frontend/admin && CI= pnpm exec playwright test --workers=1) 9>&-
   echo "  → backend pytest..."
-  (cd backend && uv run pytest)
+  (cd backend && uv run pytest) 9>&-
   if [ "${VISUAL_COMPLIANCE:-1}" != "0" ]; then
     echo "  → visual-compliance-check..."
     # ... (same as below)
@@ -275,7 +304,7 @@ fi
 # macOS without coreutils — skip with a warning instead of failing.
 if command -v timeout >/dev/null; then
   echo "  → shard-start dryrun test..."
-  bash "$ROOT/scripts/e2e-shard-start.dryrun.test.sh"
+  bash "$ROOT/scripts/e2e-shard-start.dryrun.test.sh" 9>&-
 else
   echo "  ⚠️  skip dryrun test (no timeout binary)"
 fi
@@ -286,14 +315,14 @@ fi
 # grammar. Synchronous like the dryrun test above — a red suite aborts the
 # run before any expensive stage starts.
 echo "  → visual-compliance parser tests..."
-node "$ROOT/scripts/test-visual-compliance-parser.js"
+node "$ROOT/scripts/test-visual-compliance-parser.js" 9>&-
 
 # ── Visual-compliance smoke tests (env-free, no dev server) ────────────────
 # Stage-order guard for scripts/visual-compliance-check.sh (GH #311, US-2/US-3):
 # N/A-marker spec → exit 0 + «not applicable» BEFORE any server contact;
 # missing/empty/prose-only section → exit 3. Both paths need no :3001 stack.
 echo "  → visual-compliance smoke tests..."
-bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh"
+bash "$ROOT/scripts/visual-compliance-check.smoke.test.sh" 9>&-
 
 # Track all background PIDs for waiting
 ALL_PIDS=()
@@ -308,19 +337,19 @@ PW_STAGE_PIDS=()
 echo "  → backend pytest..."
 (
   cd backend && uv run pytest > "$LOG_DIR/pytest.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Lint (turbo, cached) ──────────────────────────────────────────────────
 echo "  → lint..."
-pnpm run lint > "$LOG_DIR/lint.log" 2>&1 &
+pnpm run lint > "$LOG_DIR/lint.log" 2>&1 9>&- &
 ALL_PIDS+=($!)
 
 # ── Type-check (admin) ─────────────────────────────────────────────────────
 echo "  → type-check..."
 (
   cd frontend/admin && pnpm run type-check > "$LOG_DIR/typecheck.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Type-check (api-client) ────────────────────────────────────────────────
@@ -331,14 +360,14 @@ ALL_PIDS+=($!)
 echo "  → type-check (api-client)..."
 (
   cd packages/api-client && pnpm run type-check > "$LOG_DIR/typecheck-api-client.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Vitest (admin unit tests) ──────────────────────────────────────────────
 echo "  → vitest..."
 (
   cd frontend/admin && pnpm run test > "$LOG_DIR/vitest.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Vitest (other workspace packages: domain, api-client, web) ─────────────
@@ -348,7 +377,7 @@ ALL_PIDS+=($!)
 echo "  → vitest (workspace packages)..."
 (
   bash scripts/run-workspace-tests.sh > "$LOG_DIR/vitest-workspace.log" 2>&1
-) &
+) 9>&- &
 ALL_PIDS+=($!)
 
 # ── Playwright shards: per-shard DB + backend + frontend ───────────────────
@@ -387,7 +416,7 @@ if [ ! -f "$MASTER_DB" ] || [ "$(sqlite3 "$MASTER_DB" "SELECT COUNT(*) FROM sqli
     cd backend
     DATABASE_URL="sqlite+aiosqlite:///$(pwd)/test_memo.db" \
       PYTHONPATH=src uv run python -m seed.seed
-  )
+  ) 9>&-
 fi
 
 # Create per-shard DB copies from master — tagged (#317 §3.1:
@@ -440,7 +469,7 @@ for i in $(seq 0 1); do
     SHARD_READY_MARKER="$LOG_DIR/shard-stack-${SHARD_NUM}.ready.marker" \
     SHARD_MANAGED_STACK=1 \
       bash scripts/e2e-shard-start.sh
-  ) > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
+  ) 9>&- > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
 
   # Track the backend PID (parent of the startup script's children)
   # The startup script runs backend in background, frontend in foreground.
@@ -464,7 +493,7 @@ done
 RUN_WATCHDOG_MARKER="$LOG_DIR/stack-wrapper-died.marker"
 RUN_TERM_STAGES="$LOG_DIR/watchdog-term-stages.list"
 RUN_EXIT_STAGES="$LOG_DIR/watchdog-exit-stages.list"
-run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" &
+run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" 9>&- &
 RUN_WATCHDOG_PID=$!
 
 # ── Wait for both shards' readiness MARKERS (#472) ─────────────────────────
@@ -592,7 +621,7 @@ for i in $(seq 0 1); do
     E2E_REPORT_DIR="playwright-report-shard${SHARD_NUM}" \
     CI= pnpm exec playwright test --project=e2e --shard=${SHARD_NUM}/2 --workers=1 \
       > "$LOG_DIR/pw-shard-${SHARD_NUM}.log" 2>&1
-  ) &
+  ) 9>&- &
   ALL_PIDS+=($!)
   PW_STAGE_PIDS+=($!)
 done
@@ -653,7 +682,7 @@ if [ "${VISUAL_COMPLIANCE:-1}" != "0" ]; then
       "$VISUAL_COMPLIANCE_URL" \
       "$SPEC_FILE" \
       /tmp/visual-compliance \
-      mobile || {
+      mobile 9>&- || {
         echo "❌ Visual compliance failed. See /tmp/visual-compliance/report.md"
         exit 1
       }

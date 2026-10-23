@@ -192,6 +192,17 @@
 #     stage pid is gone, no marker, wrapper untouched.
 #   → Case 32 (#448 Task 4): TERM-ignoring stuck stage → escalation to
 #     SIGKILL within the (shrunk) grace budget; the normal stage TERMed.
+#
+# Spec coverage (Feature #472, readiness-deadline constants — the single
+# source of the stack/orchestrator readiness limits,
+# docs/specs/2026-10-22-test-concurrency-lock-472-design.md «Починка
+# ожидания готовности»):
+#   → Case 33 (#472): READY_BUDGET_BACKEND_S=60 / READY_BUDGET_FRONTEND_S=120
+#     defaults (values preserved from the pre-#472 iteration counters),
+#     env-overridable via the SHARD_RUNS_DIR idiom; READY_ORCHESTRATOR_S is
+#     DERIVED (backend + frontend + 180 s of pre-bind slack → 360) — the
+#     override 5/7 must flow into the derivation (192), proving there are no
+#     duplicated literals anywhere.
 
 set -euo pipefail
 
@@ -535,9 +546,20 @@ wait_marker() {
 
 # check_port_survivor <port> <pid> — true iff pid is alive AND still holds
 # the port (Case 13: never-touched ports keep their holders through a sweep).
+# #472 hardening: the primary eye is the lib's /proc RESOLVER (listen_pairs,
+# #448) — lsof is BLIND to re-titled process.title holders (spaces/parens in
+# comm break its /proc/<pid>/stat parse; a REAL playground next-server on
+# :3100 is exactly that shape and must count as a survivor); lsof stays the
+# non-Linux fallback (listen_pairs rc≠0).
 check_port_survivor() {
-  kill -0 "$2" 2>/dev/null || return 1
-  lsof -ti :"$1" 2>/dev/null | grep -qx "$2"
+  local port="$1" pid="$2" sample
+  kill -0 "$pid" 2>/dev/null || return 1
+  if sample="$(listen_pairs 2>/dev/null)"; then
+    printf '%s\n' "$sample" \
+      | awk -v p="$port" -v h="$pid" '$2 == p && $1 == h { f = 1 } END { if (f) exit 0; exit 1 }'
+    return $?
+  fi
+  lsof -ti :"$port" 2>/dev/null | grep -qx "$pid"
 }
 
 # ── #448 Task 1: /proc-form fixture helpers (reused by Task 2 call sites) ───
@@ -1453,18 +1475,38 @@ wait_holder_bound "$H13_DIE" "$TEST_BACKEND_PORT_A"
 # (argv per port: uvicorn — gate matches, port never in a lease;
 # "next-server (v…" — gate matches; "next dev -p 3001" — nomination
 # matches, gate port never matches). When a FOREIGN service already holds
-# it (playground/dev live on a dev box — e.g. a real uvicorn on :8101),
-# THAT holder becomes the subject: either way, whatever held the port
-# before the sweep must still hold it after — untouched. On CI all three
-# ports are free → all holders are ours (fully deterministic).
+# it (playground/dev live on a dev box — e.g. a real uvicorn on :8101 or a
+# re-titled next-server on :3100), THAT holder becomes the subject: either
+# way, whatever held the port before the sweep must still hold it after —
+# untouched. On CI all three ports are free → all holders are ours (fully
+# deterministic). #472 hardening: the busy probe is the lib's /proc
+# RESOLVER (listen_pairs, #448), not lsof — a real playground next-server
+# rewrites its process.title (spaces/parens in comm), which lsof cannot
+# parse, so the lsof probe would see a HELD port as free, spawn our holder
+# into EADDRINUSE and FATAL; the resolver reads fd symlinks only and sees
+# every holder. Unattributable busy («- port») → the port is skipped: no
+# pid to observe, and such a holder can never be nominated by the
+# pgrep+mask conjunction, so the never-touched contract holds by
+# construction. Non-Linux (listen_pairs rc≠0) → lsof as before.
+port_holder_pid() {
+  local port="$1" sample
+  if sample="$(listen_pairs 2>/dev/null)"; then
+    printf '%s\n' "$sample" | awk -v p="$port" '$2 == p { print $1; exit }'
+    return 0
+  fi
+  lsof -ti :"$port" 2>/dev/null | head -n 1 || true
+  return 0
+}
 P13_PORTS=(3100 8101 3001)
 P13_ARGV=("uvicorn" "next-server (v99.1.1)" "next dev -p 3001")
 P13_PIDS=()
 P13_KINDS=()
 cover_never_port() {
   local port="$1" argv0="$2" holder foreign
-  foreign="$(lsof -ti :"$port" 2>/dev/null | head -n 1 || true)"
-  if [ -n "$foreign" ]; then
+  foreign="$(port_holder_pid "$port")"
+  if [ "$foreign" = "-" ]; then
+    echo "  → Case 13: port $port busy but unattributable — skipped (no pid to observe; cannot be nominated, cannot be swept)" >&2
+  elif [ -n "$foreign" ]; then
     P13_PIDS+=("$foreign")     # foreign holder — observed, never registered
     P13_KINDS+=("foreign")
   else
@@ -2821,6 +2863,32 @@ else
   echo "FAIL Case 32 (#448 T4): marker=$([ -e "$MARKER32" ] && echo yes || echo no) A=$([ -e "$WORK/case32.stageA.term" ] && echo term || echo no) stuck=$(kill -0 "$S32B" 2>/dev/null && echo alive || echo dead) killtime=$((T32B - T32A))s (budget $BUDGET32)"
   sed -n '1,10p' "$WD32_ERR" 2>/dev/null || true
   echo "─────────────────"
+  FAIL=1
+fi
+
+# ── Case 33 (#472): readiness-deadline constants — one source, env knobs ────
+echo "── Case 33 (#472): READY_BUDGET_* defaults 60/120; READY_ORCHESTRATOR_S = sum + 180 ──"
+# The SINGLE source of the readiness limits is the library (spec «Починка
+# ожидания готовности»): both budgets env-overridable (the SHARD_RUNS_DIR
+# `:-` idiom), the orchestrator ceiling DERIVED from them (sum + 180 s of
+# pre-bind slack). Probed in SUBSHELLS with the knobs explicitly unset, so
+# neither the harness's own environment (a leaked override) nor the probe
+# itself can pollute the defaults check; the second probe sets both knobs
+# and pins that the DERIVATION follows the overrides (no duplicated 360
+# literal that would survive an override).
+CASE33_PROBE='
+  unset READY_BUDGET_BACKEND_S READY_BUDGET_FRONTEND_S READY_ORCHESTRATOR_S
+  source "$1"
+  printf "%s %s %s" "$READY_BUDGET_BACKEND_S" "$READY_BUDGET_FRONTEND_S" "$READY_ORCHESTRATOR_S"
+'
+CASE33_DEF="$(bash -c "$CASE33_PROBE" _ "$SHARD_LIB_UNDER_TEST" 2>/dev/null || true)"
+CASE33_OVR="$(READY_BUDGET_BACKEND_S=5 READY_BUDGET_FRONTEND_S=7 \
+  bash -c 'source "$1"; printf "%s %s %s" "$READY_BUDGET_BACKEND_S" "$READY_BUDGET_FRONTEND_S" "$READY_ORCHESTRATOR_S"' \
+  _ "$SHARD_LIB_UNDER_TEST" 2>/dev/null || true)"
+if [ "$CASE33_DEF" = "60 120 360" ] && [ "$CASE33_OVR" = "5 7 192" ]; then
+  echo "PASS Case 33 (#472): defaults 60/120 → READY_ORCHESTRATOR_S=360; override 5/7 → 192 (derived, no duplicate literals)"
+else
+  echo "FAIL Case 33 (#472): defaults='$CASE33_DEF' (want '60 120 360'); overrides='$CASE33_OVR' (want '5 7 192')"
   FAIL=1
 fi
 

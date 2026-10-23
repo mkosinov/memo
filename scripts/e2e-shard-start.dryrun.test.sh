@@ -167,6 +167,46 @@
 #   uvicorn call site's BACKEND_URL/NEXT_PUBLIC_API_URL/DATABASE_URL
 #   (additive — no existing assertion inspects its absence).
 #
+# Feature #472 Task 1 (readiness deadlines + liveness, spec «Починка
+# ожидания готовности» / US-5, stack-wrapper layer):
+#   The two readiness loops (backend /docs, frontend /) move from iteration
+#   counters (seq 1 60 / seq 1 120) to WALL-CLOCK deadlines from the lib
+#   constants READY_BUDGET_BACKEND_S / READY_BUDGET_FRONTEND_S (single
+#   source, env-overridable; pinned by shard-helpers.dryrun.test.sh Case 33):
+#   every step is bounded by the REMAINING budget — curl --max-time is capped
+#   at the remainder, the sleep is truncated — and liveness (kill -0) is
+#   checked on EVERY step: the backend loop pins BACKEND_PID, the frontend
+#   loop pins FRONTEND_PID AND BACKEND_PID (backend first — the watch loop's
+#   tie-break order). A death during readiness = immediate fatal verdict
+#   (`stack shard N: <role> died on :PORT before readiness`) + the ALWAYS-
+#   printed stack-log path + capped tail (_capped_log_tail, #448 Task 3
+#   mechanism reused) — never a budget burnout on an already-dead pin.
+#   curl stub knobs (additive; default behavior byte-identical 200):
+#     SHARD_DRYRUN_CURL_FAIL=backend|frontend — the matching readiness URL
+#       answers 000 instantly (connection-refused shape; the OTHER URL still
+#       answers 200, so the earlier readiness phase passes normally);
+#     SHARD_DRYRUN_CURL_HANG=backend|frontend — the matching URL sleeps the
+#       requested --max-time then fails (curl-timeout shape, exit 28): the
+#       «шаг не длиннее остатка» contract becomes observable (one step may
+#       not outlive the budget — the pre-#472 shape was 60 × max-time 10 =
+#       ~11 min in this mode, the Behavioral Delta's pathological tail).
+#   → Case 18a: backend pin dies BEFORE backend ready → rc=1 + addressed
+#     verdict + stack-log path + fixture tail, within seconds (elapsed
+#     bounded ≪ budget), positive control: uvicorn call site reached.
+#   → Case 18b: backend pin dies DURING the frontend readiness window
+#     (backend readiness passes first) → the frontend loop's BACKEND_PID
+#     check fires: same fast fatal verdict.
+#   → Case 18c: frontend pin dies before frontend ready (backend holds) →
+#     the frontend loop's FRONTEND_PID check fires.
+#   → Case 18d: backend deadline exhaustion with READY_BUDGET_BACKEND_S=3
+#     (pins alive, curl refuses) → `Backend failed to start` at ≈3 s wall
+#     (sleep truncation + env override flowing through the real consumer).
+#   → Case 18e: hang mode (port «listens» but never answers — the stub
+#     honors --max-time) with budget 3 → `Backend failed to start` at ≈3 s,
+#     NOT 60 × 10 s: the deadline cuts the pathological tail.
+#   Cases 18a-e each assert elapsed wall time well under the (default 60/120)
+#   budgets — «фатальный провал за секунды, а не выжигание бюджета» (DoD).
+#
 # ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
 # Every cell carries a LIVE, EXACT assertion (case numbers refer to the
 # blocks below); "names" = NEXT_DIST_DIR + FILES_DIR(=TEST_FILES_DIR) at
@@ -381,8 +421,52 @@ printf 'RM: %s\n' "$*" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
 exec /bin/rm "$@"
 EOF
 
-# curl stub: instant 200 → ready-waits break on the first iteration.
-printf '#!/bin/sh\nprintf "200"\nexit 0\n' > "$STUBS/curl"
+# curl stub: instant 200 by default → ready-waits break on the first
+# iteration. #472 Case 18 knobs model the not-ready polling window
+# deterministically (URL matched by ':<port>' substring — the readiness
+# URLs are http://localhost:$BACKEND_PORT/docs and http://localhost:$SHARD_PORT/):
+#   SHARD_DRYRUN_CURL_FAIL=backend|frontend — the matching URL answers 000
+#     instantly (connection-refused shape); the other URL keeps answering 200;
+#   SHARD_DRYRUN_CURL_HANG=backend|frontend — the matching URL sleeps the
+#     requested --max-time (parsed from argv like real curl; missing/garbage
+#     → 30) then fails with curl's timeout exit code 28 — the deadline
+#     loop's «curl --max-time ограничен остатком» contract under test.
+cat > "$STUBS/curl" <<'EOF'
+#!/bin/sh
+_mode=""
+case "${SHARD_DRYRUN_CURL_FAIL:-}" in
+  backend|frontend) _mode="$SHARD_DRYRUN_CURL_FAIL" _kind="fail" ;;
+esac
+case "${SHARD_DRYRUN_CURL_HANG:-}" in
+  backend|frontend) _mode="$SHARD_DRYRUN_CURL_HANG" _kind="hang" ;;
+esac
+if [ -n "$_mode" ]; then
+  _port="${BACKEND_PORT:-}"
+  if [ "$_mode" = "frontend" ]; then
+    _port="${SHARD_PORT:-}"
+  fi
+  case " $* " in
+    *":$_port"*)
+      if [ "$_kind" = "hang" ]; then
+        _mt=30
+        _prev=""
+        for _a in "$@"; do
+          if [ "$_prev" = "--max-time" ]; then _mt="$_a"; break; fi
+          _prev="$_a"
+        done
+        case "$_mt" in ''|*[!0-9]*) _mt=30 ;; esac
+        sleep "$_mt"
+        printf '000'
+        exit 28
+      fi
+      printf '000'
+      exit 1
+      ;;
+  esac
+fi
+printf '200'
+exit 0
+EOF
 
 # lsof stub: every port looks free (never matches the real environment).
 printf '#!/bin/sh\nexit 1\n' > "$STUBS/lsof"
@@ -2037,6 +2121,208 @@ if [ "$LAST_RC" -eq 143 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE17_DIR/journal
   echo "PASS Case 17d (S2): default mode ignores REDIS_URL — no notify children, caller URLs untouched"
 else
   echo "FAIL Case 17d (S2): default mode changed (rc=$LAST_RC, notify children, or URL derivation leaked)"
+  FAIL=1
+fi
+
+# ── Case 18 (#472 Task 1, spec «Починка ожидания готовности» / US-5): ────────
+# readiness loops = WALL-CLOCK deadlines + kill -0 liveness on every step.
+# REAL background children (the uv/pnpm die/hold branches), the curl stub's
+# #472 knobs hold the polling window open deterministically. Timing asserts:
+# death cases fail within seconds of the pin's death (elapsed ≥ die-S proves
+# the verdict CAME from the death; < 30 proves no 60/120 s budget burn —
+# the pre-#472 code burns the whole budget and gets reaped at RAW_WAIT_S=12
+# with rc=137, failing these cases); budget cases (18d/e) fail AT the
+# shrunk budget (≥ 3 s elapsed proves the deadline was actually waited out).
+CASE18_DIR="$WORK/case18"; mkdir -p "$CASE18_DIR"
+case18_fixture() {  # <file> <tag> — benign stack-log fixture for tail asserts
+  local f="$1" tag="$2" i
+  : > "$f"
+  for i in 1 2 3; do printf 'RDY-FX %s line %d\n' "$tag" "$i" >> "$f"; done
+}
+
+# 18a — backend pin dies BEFORE backend ready: the backend loop's
+# BACKEND_PID check fires → rc=1 + addressed verdict + ALWAYS path + tail.
+CASE18A_FIX="$CASE18_DIR/stack-a.log"
+case18_fixture "$CASE18A_FIX" "18a"
+CASE18A_DB="$CASE18_DIR/test_memo_shard1.db"; printf 'seed' > "$CASE18A_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_CURL_FAIL=backend SHARD_STACK_LOG=$CASE18A_FIX"
+RAW_WAIT_S=12
+CASE18_T0=$SECONDS
+run_shard_raw "$CASE18_DIR/run-a.log" "$CASE18_DIR/journal-a" "$CASE18A_DB" 1 3013 8013
+CASE18A_ELAPSED=$(( SECONDS - CASE18_T0 ))
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 18a log ──"
+cat "$CASE18_DIR/run-a.log"
+echo "─────────────────"
+sed -n '/before readiness/,$p' "$CASE18_DIR/run-a.log" > "$CASE18_DIR/section-a" || true
+if [ "$LAST_RC" -eq 1 ] && grep -q 'stack shard 1: backend died on :8013 before readiness' "$CASE18_DIR/section-a"; then
+  echo "PASS Case 18a (#472): backend death before ready → rc=1 + addressed verdict"
+else
+  echo "FAIL Case 18a (#472): expected rc=1 + 'backend died on :8013 before readiness' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^UVICORN ' "$CASE18_DIR/journal-a" 2>/dev/null; then
+  echo "PASS Case 18a (#472): positive control — backend pin was started (verdict not vacuous)"
+else
+  echo "FAIL Case 18a (#472): no UVICORN journal line — rc=1 could be vacuous"
+  FAIL=1
+fi
+if grep -Fq "stack log: $CASE18A_FIX" "$CASE18_DIR/section-a" && grep -q 'RDY-FX 18a line 3' "$CASE18_DIR/section-a"; then
+  echo "PASS Case 18a (#472): stack-log path ALWAYS printed + dead backend's tail echoed"
+else
+  echo "FAIL Case 18a (#472): expected 'stack log: $CASE18A_FIX' + fixture tail in the verdict section"
+  FAIL=1
+fi
+if [ "$CASE18A_ELAPSED" -ge 2 ] && [ "$CASE18A_ELAPSED" -lt 30 ]; then
+  echo "PASS Case 18a (#472): fatal within seconds of the death (${CASE18A_ELAPSED}s; budget burn would be 60s+)"
+else
+  echo "FAIL Case 18a (#472): elapsed ${CASE18A_ELAPSED}s — want ≥2 (after the 2s death) and <30 (no budget burn)"
+  FAIL=1
+fi
+
+# 18b — backend pin dies DURING the frontend readiness window (backend
+# readiness passed first): the FRONTEND loop's BACKEND_PID check fires.
+CASE18B_FIX="$CASE18_DIR/stack-b.log"
+case18_fixture "$CASE18B_FIX" "18b"
+CASE18B_DB="$CASE18_DIR/test_memo_shard1_b.db"; printf 'seed' > "$CASE18B_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_BACKEND_DIE_S=2 SHARD_DRYRUN_CURL_FAIL=frontend SHARD_STACK_LOG=$CASE18B_FIX"
+RAW_WAIT_S=12
+CASE18_T0=$SECONDS
+run_shard_raw "$CASE18_DIR/run-b.log" "$CASE18_DIR/journal-b" "$CASE18B_DB" 1 3013 8013
+CASE18B_ELAPSED=$(( SECONDS - CASE18_T0 ))
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 18b log ──"
+cat "$CASE18_DIR/run-b.log"
+echo "─────────────────"
+sed -n '/before readiness/,$p' "$CASE18_DIR/run-b.log" > "$CASE18_DIR/section-b" || true
+if [ "$LAST_RC" -eq 1 ] && grep -q 'stack shard 1: backend died on :8013 before readiness' "$CASE18_DIR/section-b"; then
+  echo "PASS Case 18b (#472): backend death during frontend wait → frontend loop's BACKEND_PID check fired"
+else
+  echo "FAIL Case 18b (#472): expected rc=1 + 'backend died on :8013 before readiness' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^UVICORN ' "$CASE18_DIR/journal-b" 2>/dev/null && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE18_DIR/journal-b" 2>/dev/null; then
+  echo "PASS Case 18b (#472): positive control — run reached the frontend readiness phase"
+else
+  echo "FAIL Case 18b (#472): missing UVICORN/PNPM journal lines — the run never reached the frontend phase"
+  FAIL=1
+fi
+if grep -Fq "stack log: $CASE18B_FIX" "$CASE18_DIR/section-b" && grep -q 'RDY-FX 18b line 3' "$CASE18_DIR/section-b"; then
+  echo "PASS Case 18b (#472): stack-log path + tail in the verdict"
+else
+  echo "FAIL Case 18b (#472): expected 'stack log: $CASE18B_FIX' + fixture tail in the verdict section"
+  FAIL=1
+fi
+if [ "$CASE18B_ELAPSED" -ge 2 ] && [ "$CASE18B_ELAPSED" -lt 30 ]; then
+  echo "PASS Case 18b (#472): fatal within seconds of the death (${CASE18B_ELAPSED}s; budget burn would be 120s+)"
+else
+  echo "FAIL Case 18b (#472): elapsed ${CASE18B_ELAPSED}s — want ≥2 and <30 (no budget burn)"
+  FAIL=1
+fi
+
+# 18c — frontend pin dies before frontend ready (backend holds): the
+# frontend loop's FRONTEND_PID check fires.
+CASE18C_FIX="$CASE18_DIR/stack-c.log"
+case18_fixture "$CASE18C_FIX" "18c"
+CASE18C_DB="$CASE18_DIR/test_memo_shard1_c.db"; printf 'seed' > "$CASE18C_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_FRONTEND_DIE_S=2 SHARD_DRYRUN_CURL_FAIL=frontend SHARD_STACK_LOG=$CASE18C_FIX"
+RAW_WAIT_S=12
+CASE18_T0=$SECONDS
+run_shard_raw "$CASE18_DIR/run-c.log" "$CASE18_DIR/journal-c" "$CASE18C_DB" 1 3013 8013
+CASE18C_ELAPSED=$(( SECONDS - CASE18_T0 ))
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 18c log ──"
+cat "$CASE18_DIR/run-c.log"
+echo "─────────────────"
+sed -n '/before readiness/,$p' "$CASE18_DIR/run-c.log" > "$CASE18_DIR/section-c" || true
+if [ "$LAST_RC" -eq 1 ] && grep -q 'stack shard 1: frontend died on :3013 before readiness' "$CASE18_DIR/section-c"; then
+  echo "PASS Case 18c (#472): frontend death before ready → rc=1 + addressed verdict"
+else
+  echo "FAIL Case 18c (#472): expected rc=1 + 'frontend died on :3013 before readiness' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^UVICORN ' "$CASE18_DIR/journal-c" 2>/dev/null && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE18_DIR/journal-c" 2>/dev/null; then
+  echo "PASS Case 18c (#472): positive control — run reached the frontend readiness phase"
+else
+  echo "FAIL Case 18c (#472): missing UVICORN/PNPM journal lines — the run never reached the frontend phase"
+  FAIL=1
+fi
+if [ "$CASE18C_ELAPSED" -ge 2 ] && [ "$CASE18C_ELAPSED" -lt 30 ]; then
+  echo "PASS Case 18c (#472): fatal within seconds of the death (${CASE18C_ELAPSED}s; budget burn would be 120s+)"
+else
+  echo "FAIL Case 18c (#472): elapsed ${CASE18C_ELAPSED}s — want ≥2 and <30 (no budget burn)"
+  FAIL=1
+fi
+
+# 18d — backend DEADLINE EXHAUSTION with READY_BUDGET_BACKEND_S=3 (pins
+# alive, curl refused): the loop must fail at ≈3 s wall (sleep truncation +
+# the env override flowing through the real consumer), with the legacy
+# 'Backend failed to start' message.
+CASE18D_DB="$CASE18_DIR/test_memo_shard1_d.db"; printf 'seed' > "$CASE18D_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_CURL_FAIL=backend READY_BUDGET_BACKEND_S=3"
+RAW_WAIT_S=12
+CASE18_T0=$SECONDS
+run_shard_raw "$CASE18_DIR/run-d.log" "$CASE18_DIR/journal-d" "$CASE18D_DB" 1 3013 8013
+CASE18D_ELAPSED=$(( SECONDS - CASE18_T0 ))
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 18d log ──"
+cat "$CASE18_DIR/run-d.log"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 1 ] && grep -q 'Backend failed to start on :8013' "$CASE18_DIR/run-d.log"; then
+  echo "PASS Case 18d (#472): deadline exhaustion → rc=1 + legacy 'Backend failed to start' message"
+else
+  echo "FAIL Case 18d (#472): expected rc=1 + 'Backend failed to start on :8013' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^UVICORN ' "$CASE18_DIR/journal-d" 2>/dev/null; then
+  echo "PASS Case 18d (#472): positive control — backend pin was started (failure is the deadline's, not a crash)"
+else
+  echo "FAIL Case 18d (#472): no UVICORN journal line — rc=1 could be vacuous"
+  FAIL=1
+fi
+if [ "$CASE18D_ELAPSED" -ge 3 ] && [ "$CASE18D_ELAPSED" -lt 30 ]; then
+  echo "PASS Case 18d (#472): wall-clock deadline honored (${CASE18D_ELAPSED}s ≈ the 3s budget, not 60 iterations)"
+else
+  echo "FAIL Case 18d (#472): elapsed ${CASE18D_ELAPSED}s — want ≥3 (budget waited out) and <30"
+  FAIL=1
+fi
+
+# 18e — HANG mode (port «listens» but never answers; the stub honors the
+# requested --max-time) with budget 3: the pre-#472 shape burned 60 ×
+# max-time-10 ≈ 11 min here (Behavioral Delta's pathological tail); the
+# deadline loop must fail at ≈3 s — curl --max-time is capped at the
+# REMAINING budget, one step may not outlive it.
+CASE18E_DB="$CASE18_DIR/test_memo_shard1_e.db"; printf 'seed' > "$CASE18E_DB"
+RUN_EXTRA_ENV="SHARD_DRYRUN_CURL_HANG=backend READY_BUDGET_BACKEND_S=3"
+RAW_WAIT_S=12
+CASE18_T0=$SECONDS
+run_shard_raw "$CASE18_DIR/run-e.log" "$CASE18_DIR/journal-e" "$CASE18E_DB" 1 3013 8013
+CASE18E_ELAPSED=$(( SECONDS - CASE18_T0 ))
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 18e log ──"
+cat "$CASE18_DIR/run-e.log"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 1 ] && grep -q 'Backend failed to start on :8013' "$CASE18_DIR/run-e.log"; then
+  echo "PASS Case 18e (#472): hung-but-listening port cut at the deadline → rc=1 + legacy message"
+else
+  echo "FAIL Case 18e (#472): expected rc=1 + 'Backend failed to start on :8013' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if grep -q '^UVICORN ' "$CASE18_DIR/journal-e" 2>/dev/null; then
+  echo "PASS Case 18e (#472): positive control — backend pin was started"
+else
+  echo "FAIL Case 18e (#472): no UVICORN journal line — rc=1 could be vacuous"
+  FAIL=1
+fi
+if [ "$CASE18E_ELAPSED" -ge 3 ] && [ "$CASE18E_ELAPSED" -lt 30 ]; then
+  echo "PASS Case 18e (#472): pathological tail cut (${CASE18E_ELAPSED}s ≈ the 3s budget; pre-#472 shape ≈ 11 min)"
+else
+  echo "FAIL Case 18e (#472): elapsed ${CASE18E_ELAPSED}s — want ≥3 (one max-time-capped step) and <30"
   FAIL=1
 fi
 

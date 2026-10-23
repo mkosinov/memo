@@ -123,6 +123,11 @@ const ROLE_LABELS: Record<UserRole, string> = {
  *  admin, master (#480 §3.4 pin). */
 const STAFF_ROLE_OPTIONS: readonly UserRole[] = ['admin', 'master'];
 
+/** Role guard — narrows select change events to the options list above. */
+function isStaffRole(value: string): value is UserRole {
+  return (STAFF_ROLE_OPTIONS as readonly string[]).includes(value);
+}
+
 /**
  * Role select (GH #263 D10) — auto-filled from the position template,
  * manually editable. Empty value = «не выбрано» → no explicit role in the
@@ -144,7 +149,10 @@ function RoleField({
         id={`${baseId}-role`}
         data-testid="staff-role-field"
         value={role}
-        onChange={(e) => onChange(e.target.value as UserRole | '')}
+        onChange={(e) => {
+          const next = e.target.value;
+          onChange(isStaffRole(next) ? next : '');
+        }}
         className={TEXT_INPUT}
         style={{ borderColor: 'var(--line)', color: 'var(--ink)' }}
       >

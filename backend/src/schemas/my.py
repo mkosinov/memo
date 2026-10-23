@@ -17,10 +17,12 @@ owns the master section, #266 D5).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time  # noqa: TC003 — runtime pydantic model fields
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.domain.visit_status import VisitStatus  # noqa: TC001 — runtime pydantic model field
 
 
 class MyProfileResponse(BaseModel):
@@ -136,6 +138,50 @@ class MyRecordResponse(BaseModel):
     start: datetime
     comment: str | None = None
     visits: list[MyVisitResponse]
+
+
+# ─── #513 — client cabinet read: GET /api/v1/my/records ────────────────────────
+
+
+class MyRecordVisitItem(BaseModel):
+    """One visit inside ``GET /api/v1/my/records`` items (spec §«Контракт API»).
+
+    Per-endpoint visit shape — deliberately NOT ``VisitResponse``: no
+    ``tariff_id``/``visitor_id``/``record_id``/``custom_price``/timestamps
+    (the spec's «не входят» list). ``visitor_name`` is the linked
+    Visitor's name (``null`` for an anonymous seat — legal per domain);
+    ``price`` is the creation-time SNAPSHOT: visit ``custom_price`` when
+    set, else the stored ``price`` — never derived from the tariff on
+    read (#357 invariant).
+    """
+
+    id: str
+    visitor_name: str | None = None
+    status: VisitStatus
+    price: int
+
+
+class MyRecordItem(BaseModel):
+    """``items[]`` element of ``GET /api/v1/my/records`` (spec §«Контракт API»).
+
+    ``activity_date``/``activity_start``/``activity_end`` are computed
+    from the record's activity (the model stores only start + duration
+    in minutes; end = start + duration, time-of-day after a midnight
+    rollover, date always the start's date). No service fields:
+    ``client_id``/``activity_id``/``seats``/record ``status``/
+    record ``custom_price`` and the visits' service fields stay out —
+    the client sees per-visit status/price only.
+    """
+
+    id: str
+    activity_date: date
+    activity_start: time
+    activity_end: time
+    # FK-enforced join (activities.service_id → services.id) keeps the
+    # title always present — typed plain ``str`` per the spec table.
+    service_title: str
+    comment: str | None = None
+    visits: list[MyRecordVisitItem]
 
 
 class MyProfileUpdate(BaseModel):

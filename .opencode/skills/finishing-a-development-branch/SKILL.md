@@ -24,6 +24,12 @@ gate" policy: **CI is the merge gate, not a local full run.**
   shards. Merge only on green CI.
 - **LOCAL pre-push gate:** fast suites only — unit/integration tests + typecheck/lint (per
   project). **NO local e2e as a gate.**
+- **Backend lint budget gate (memo, GH #521):** if the PR diff touches `backend/`, the local
+  pre-push gate MUST also include — BEFORE the push —
+  `cd backend && uv run python scripts/lint_budget.py`
+  (one command: ruff over src/tests/scripts + `mypy src --no-incremental` + the budget ratchet
+  against the branch base; CI's `backend-lint` job runs the same script. Motivating incident:
+  PR #514 — ruff TC003 8→9 was caught by CI only, on a locally "green" fast suite).
 - **Local e2e runs remain allowed as an INVESTIGATION tool** (e.g. flake A/B classification on
   base), never as a merge gate.
 - **FALLBACK (outage protocol):** if CI is unavailable (quota/outage — verify with a real run,
@@ -40,6 +46,13 @@ is an investigation tool only). The authoritative merge gate is CI.
 ```bash
 # Fast suites only — project's unit/integration + typecheck/lint
 npm test / cargo test / pytest / go test ./...
+```
+
+**memo: backend lint budget gate (GH #521).** If the PR diff touches `backend/`, the fast
+suite is NOT complete without the backend lint budget check — run it in this same step:
+
+```bash
+cd backend && uv run python scripts/lint_budget.py
 ```
 
 **If tests fail:**

@@ -309,6 +309,21 @@ else
   echo "  ⚠️  skip dryrun test (no timeout binary)"
 fi
 
+# ── Heavy-lock dryrun test (env-seam, small constants; #472 Task 4) ─────────
+# Scenario suite for the lock itself: US-1 serialization (two competing
+# runs) + nesting, US-2 holder death, US-3 ceiling rc 75, US-4 short-run-
+# no-queue, US-7 bypass, F9 same-inode across two sessions. Runs on TEMP
+# lock paths with small POLL/WAIT — the real lock held by THIS run is
+# never touched, and the suite sanitizes the CI=/MEMO_TEST_LOCK_HELD=
+# exports it inherits from this script. flock may be missing on non-Linux
+# hosts — skip with a warning, like the timeout guard above.
+if command -v flock >/dev/null; then
+  echo "  → test-lock dryrun test..."
+  bash "$ROOT/scripts/lib/test-lock.dryrun.test.sh" 9>&-
+else
+  echo "  ⚠️  skip test-lock dryrun test (no flock binary)"
+fi
+
 # ── Visual-compliance parser node-tests (env-free, milliseconds) ───────────
 # Unit + fixture suite for scripts/visual-compliance-parser.js (GH #311,
 # US-1/US-2): §10 checkbox parsing, { applicable, checks } contract, N/A

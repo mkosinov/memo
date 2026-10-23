@@ -22,7 +22,8 @@
 # introduced here). The suite children the orchestrator runs inline
 # (e2e-shard-start.dryrun.test.sh, visual-compliance smoke, workspace
 # vitest) are staged as `exit 0` stubs — the nested harness suites are
-# THAT suite's business, not this run's. Everything the inner run creates
+# THAT suite's business, not this run's (the same goes for the #472 Task 4
+# test-lock dryrun suite the orchestrator runs inline). Everything the inner run creates
 # (logs dir, run leases, master DB) is isolated via TMPDIR/SHARD_RUNS_DIR
 # into the per-case temp dir; the REAL /tmp/memo-shard-runs is never read
 # or written. Port allocation samples /proc LISTEN tables (the #448
@@ -102,6 +103,8 @@ cp "$LOCK_LIB_SRC" "$STAGE/scripts/lib/test-lock.sh"
 # business is the readiness wait, not re-running the wrapper-level suites).
 printf '#!/usr/bin/env bash\n# stubbed for the orchestrator dryrun (#472)\nexit 0\n' \
   > "$STAGE/scripts/e2e-shard-start.dryrun.test.sh"
+printf '#!/usr/bin/env bash\n# stubbed for the orchestrator dryrun (#472)\nexit 0\n' \
+  > "$STAGE/scripts/lib/test-lock.dryrun.test.sh"
 printf '#!/usr/bin/env bash\n# stubbed for the orchestrator dryrun (#472)\nexit 0\n' \
   > "$STAGE/scripts/visual-compliance-check.smoke.test.sh"
 printf '#!/usr/bin/env bash\n# stubbed for the orchestrator dryrun (#472)\nexit 0\n' \

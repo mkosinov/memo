@@ -28,6 +28,19 @@
 # → Case L5 (US-7 bypass): MEMO_TEST_LOCK_DISABLE=1, a missing lock dir,
 #   and a flock-less PATH each run WITHOUT the lock with a one-line notice;
 #   CI=true suppresses the notice; the lock dir is never created.
+# → Case S1 (US-1 serialization, step one): two COMPETING heavy runs —
+#   A holds, B queues with status lines and starts ≤ one poll interval
+#   after A's NORMAL release; execution order pinned by a shared order log
+#   (A-START…A-END…B-START…B-END). US-1 step two — nesting — is L2/L2b.
+# → Case S4 (US-4): while the lock is held, a wrapped HEAVY probe queues
+#   and dies on the ceiling (rc 75 — positive control), but a SHORT run
+#   (unwrapped single-file command, the canon for `pytest tests/x.py` /
+#   one spec) starts immediately with zero [lock] lines.
+# → Case F9 (panel remark): two simulated sessions (separate processes,
+#   separate cwds, same absolute lock path) see the SAME (device, inode)
+#   of the lock file; session 2 is EXCLUDED while session 1 holds; after
+#   the handover the next owner stats the SAME inode — the never-unlink
+#   contract (unlink would fork the lock into two inodes = two owners).
 #
 # Not covered here: the orchestrator-level self-acquisition inside
 # scripts/test-all.sh (staged-tree coverage lives in
@@ -53,6 +66,15 @@ for _f in "$WRAP_SRC" "$LIB_SRC"; do
   fi
 done
 
+# Env hygiene: every case rides EXPLICIT env seams (env VAR=… per call).
+# Inside test-all.sh (#472 Task 4) the suite inherits CI=true (pnpm TTY
+# export) and MEMO_TEST_LOCK_HELD=1 (the orchestrator's self-acquisition)
+# — left in place they corrupt the cases: wrappers passthrough instead of
+# queueing, bypass notices get suppressed, a user-exported POLL/WAIT
+# leaks in. Strip every lock/CI seam so each case owns its environment.
+unset MEMO_TEST_LOCK_HELD MEMO_TEST_LOCK_DISABLE MEMO_TEST_LOCK_PATH \
+      MEMO_LOCK_POLL_S MEMO_LOCK_WAIT_S CI
+
 WORK="$(mktemp -d -t testlock-dryrun-XXXXXX)"
 # Orphan sleep markers are their DURATIONS (3001$$ / 3002$$): exec drops
 # a `#` comment from the final cmdline, so a comment marker is invisible
@@ -64,11 +86,14 @@ WORK="$(mktemp -d -t testlock-dryrun-XXXXXX)"
 # shell's own argv and kill the suite itself.
 SLEEP_L3="3001$$"
 SLEEP_L4="3002$$"
+SLEEP_S4="3004$$"
 PAT_L3="sleep 3[0]01$$"
 PAT_L4="sleep 3[0]02$$"
+PAT_S4="sleep 3[0]04$$"
 cleanup() {
   pkill -f "$PAT_L3" 2>/dev/null || true
   pkill -f "$PAT_L4" 2>/dev/null || true
+  pkill -f "$PAT_S4" 2>/dev/null || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -405,6 +430,245 @@ if grep -q 'обход без замка' "$L5_DIR/d.log"; then
 else
   pass "L5d: notice suppressed under CI=true"
 fi
+
+# ── Case S1 (US-1, шаг 1): два конкурирующих прогона сериализуются ──────────
+# Scenario-level pin of the queue: B must WAIT behind a live A (status
+# lines, no B-START while A runs), then start ≤ one poll interval after
+# A's normal release, in strict A→B execution order. L2/L2b above cover
+# the nesting half of US-1.
+echo "── Case S1 (US-1 step 1): two competing runs serialize, ordered ──"
+S1_DIR="$WORK/s1"; mkdir -p "$S1_DIR"
+S1_LOCK="$S1_DIR/heavy.lock"
+S1_ORDER="$S1_DIR/order.log"
+# Run A: acquires, marks A-START…A-END into the shared order log, ~3 s.
+(
+  exec env MEMO_TEST_LOCK_PATH="$S1_LOCK" MEMO_LOCK_POLL_S=1 MEMO_LOCK_WAIT_S=30 \
+    bash "$WRAP_SRC" bash -c '
+      echo A-START >> "'"$S1_ORDER"'"
+      sleep 3
+      echo A-END >> "'"$S1_ORDER"'"
+      echo A-DONE
+    '
+) > "$S1_DIR/a.log" 2>&1 &
+S1_A_BG=$!
+disown "$S1_A_BG" 2>/dev/null || true
+S1_HELD=false
+for _i in $(seq 1 10); do
+  if ! lock_free "$S1_LOCK" 2>/dev/null; then S1_HELD=true; break; fi
+  sleep 0.5
+done
+if [ "$S1_HELD" = true ]; then
+  pass "S1: positive control — run A holds the lock"
+else
+  flunk "S1: run A never acquired the lock (setup broken)"
+fi
+# Run B: same lock path — must queue behind the live A.
+env MEMO_TEST_LOCK_PATH="$S1_LOCK" MEMO_LOCK_POLL_S=1 MEMO_LOCK_WAIT_S=30 \
+  bash "$WRAP_SRC" bash -c '
+    echo B-START >> "'"$S1_ORDER"'"
+    sleep 0.3
+    echo B-END >> "'"$S1_ORDER"'"
+    echo B-DONE
+  ' \
+  > "$S1_DIR/b.log" 2>&1 &
+S1_B_BG=$!
+# Mid-run: A is still inside its 3 s — B must be queued, not started.
+sleep 2
+if grep -q 'занят, ожидание' "$S1_DIR/b.log" && ! grep -q 'B-START' "$S1_ORDER" 2>/dev/null; then
+  pass "S1: B queued with status lines while A was still running"
+else
+  flunk "S1: B did not queue behind A (b.log: $(tail -3 "$S1_DIR/b.log" 2>/dev/null | tr '\n' ' '))"
+fi
+# Handover latency: A-END → B-START within ≤ one poll interval + margin.
+S1_AEND_AT=-1
+for _i in $(seq 1 40); do
+  if grep -q 'A-END' "$S1_ORDER" 2>/dev/null; then S1_AEND_AT=$SECONDS; break; fi
+  sleep 0.25
+done
+S1_BSTART_AT=-1
+for _i in $(seq 1 40); do
+  if grep -q 'B-START' "$S1_ORDER" 2>/dev/null; then S1_BSTART_AT=$SECONDS; break; fi
+  sleep 0.25
+done
+S1_B_RC=0
+for _i in $(seq 1 40); do
+  kill -0 "$S1_B_BG" 2>/dev/null || break
+  sleep 0.25
+done
+if kill -0 "$S1_B_BG" 2>/dev/null; then
+  kill -9 "$S1_B_BG" 2>/dev/null || true
+  wait "$S1_B_BG" 2>/dev/null || S1_B_RC=$?
+  flunk "S1: run B never finished (killed after 10 s)"
+else
+  wait "$S1_B_BG" 2>/dev/null || S1_B_RC=$?
+fi
+if [ "$S1_B_RC" -eq 0 ] && grep -q 'B-DONE' "$S1_DIR/b.log" \
+   && grep -q 'A-DONE' "$S1_DIR/a.log" 2>/dev/null; then
+  pass "S1: both runs completed (A-DONE, B-DONE, rc=0)"
+else
+  flunk "S1: A/B completion broken (b rc=$S1_B_RC, a.log: $(tail -3 "$S1_DIR/a.log" 2>/dev/null | tr '\n' ' '))"
+fi
+if grep -q 'занят, ожидание' "$S1_DIR/b.log" && grep -q 'замок захвачен после' "$S1_DIR/b.log"; then
+  pass "S1: B printed busy statuses, then the acquired-after-wait line"
+else
+  flunk "S1: B log lacks the busy→acquired sequence (log: $(tail -3 "$S1_DIR/b.log" 2>/dev/null | tr '\n' ' '))"
+fi
+S1_LA="$(grep -n 'A-START' "$S1_ORDER" 2>/dev/null | cut -d: -f1)"
+S1_LAE="$(grep -n 'A-END' "$S1_ORDER" 2>/dev/null | cut -d: -f1)"
+S1_LB="$(grep -n 'B-START' "$S1_ORDER" 2>/dev/null | cut -d: -f1)"
+S1_LBE="$(grep -n 'B-END' "$S1_ORDER" 2>/dev/null | cut -d: -f1)"
+if [ -n "$S1_LA" ] && [ -n "$S1_LAE" ] && [ -n "$S1_LB" ] && [ -n "$S1_LBE" ] \
+   && [ "$S1_LA" -lt "$S1_LAE" ] && [ "$S1_LAE" -lt "$S1_LB" ] && [ "$S1_LB" -lt "$S1_LBE" ]; then
+  pass "S1: strict execution order A-START→A-END→B-START→B-END (lines $S1_LA/$S1_LAE/$S1_LB/$S1_LBE)"
+else
+  flunk "S1: order broken (lines A=$S1_LA A-END=$S1_LAE B=$S1_LB B-END=$S1_LBE) — B ran before/concurrently with A?"
+fi
+if [ "$S1_AEND_AT" -ge 0 ] && [ "$S1_BSTART_AT" -ge "$S1_AEND_AT" ] \
+   && [ $(( S1_BSTART_AT - S1_AEND_AT )) -le 4 ]; then
+  pass "S1: B started ≤1 poll interval after A's release (handover $(( S1_BSTART_AT - S1_AEND_AT ))s, POLL=1)"
+else
+  flunk "S1: handover latency wrong (A-END at $S1_AEND_AT, B-START at $S1_BSTART_AT)"
+fi
+lock_free "$S1_LOCK" && pass "S1: lock free after both runs" || flunk "S1: lock stuck after S1"
+
+# ── Case S4 (US-4): короткий прогон без очереди при занятом замке ──────────
+# The canon: single pytest files / single specs are NOT wrapped, so they
+# never touch the lock. Explicit pin: while the lock is busy, a wrapped
+# HEAVY probe queues (rc 75 — positive control the lock is genuinely
+# blocking), while an unwrapped short command starts immediately with
+# zero [lock] output.
+echo "── Case S4 (US-4): short run starts immediately while lock is held ──"
+S4_DIR="$WORK/s4"; mkdir -p "$S4_DIR"
+S4_LOCK="$S4_DIR/heavy.lock"
+(
+  exec env MEMO_TEST_LOCK_PATH="$S4_LOCK" \
+    bash "$WRAP_SRC" bash -c "exec sleep $SLEEP_S4"
+) > "$S4_DIR/holder.log" 2>&1 &
+S4_HOLDER_BG=$!
+disown "$S4_HOLDER_BG" 2>/dev/null || true
+S4_HELD=false
+for _i in $(seq 1 10); do
+  if ! lock_free "$S4_LOCK" 2>/dev/null; then S4_HELD=true; break; fi
+  sleep 0.5
+done
+if [ "$S4_HELD" = true ]; then
+  pass "S4: positive control — holder keeps the lock busy"
+else
+  flunk "S4: holder never acquired the lock (setup broken)"
+fi
+# Positive control #2: under the SAME busy lock a HEAVY (wrapped) call
+# queues and dies on the 1 s ceiling with rc 75.
+set +e
+env MEMO_TEST_LOCK_PATH="$S4_LOCK" MEMO_LOCK_POLL_S=1 MEMO_LOCK_WAIT_S=1 \
+  bash "$WRAP_SRC" bash -c 'echo HEAVY-RAN' > "$S4_DIR/probe.log" 2>&1
+S4_PROBE_RC=$?
+set -e
+if [ "$S4_PROBE_RC" -eq 75 ] && ! grep -q 'HEAVY-RAN' "$S4_DIR/probe.log" \
+   && grep -q 'занят, ожидание' "$S4_DIR/probe.log"; then
+  pass "S4: positive control — a heavy call on this lock queues and hits the ceiling (rc 75)"
+else
+  flunk "S4: heavy probe rc=$S4_PROBE_RC — lock not busy for wrapped runs? (probe: $(tail -3 "$S4_DIR/probe.log" 2>/dev/null | tr '\n' ' '))"
+fi
+# The short run itself (canon: unwrapped) — immediate, silent re the lock.
+S4_T0=$SECONDS
+set +e
+bash -c 'echo SHORT-DONE' > "$S4_DIR/short.log" 2>&1
+S4_SHORT_RC=$?
+set -e
+S4_SHORT_ELAPSED=$(( SECONDS - S4_T0 ))
+if [ "$S4_SHORT_RC" -eq 0 ] && grep -q 'SHORT-DONE' "$S4_DIR/short.log"; then
+  pass "S4: short run completed while the lock was held"
+else
+  flunk "S4: short run rc=$S4_SHORT_RC — did not run"
+fi
+if grep -q '\[lock\]' "$S4_DIR/short.log"; then
+  flunk "S4: short run printed [lock] lines — it must never touch the lock"
+else
+  pass "S4: short run has zero [lock] lines (no queueing, no statuses)"
+fi
+if [ "$S4_SHORT_ELAPSED" -le 1 ]; then
+  pass "S4: short run started/completed immediately (${S4_SHORT_ELAPSED}s)"
+else
+  flunk "S4: short run took ${S4_SHORT_ELAPSED}s — not immediate"
+fi
+kill "$S4_HOLDER_BG" 2>/dev/null || true
+pkill -f "$PAT_S4" 2>/dev/null || true
+
+# ── Case F9 (замечание панели): две «сессии» — один inode файла замка ──────
+# Two run contexts = two separate processes with their own cwds (two
+# sessions/worktrees sharing the volume, as on the container). Both must
+# operate on the SAME lock file: same (device, inode) from both sides,
+# mutual exclusion between them, and the SAME inode for the NEXT owner
+# after the handover (unlink/recreate would fork the lock into two
+# inodes = two owners — the panel's exact concern).
+echo "── Case F9: two sessions — same lock-file inode (no unlink/recreate) ──"
+F9_DIR="$WORK/f9"; mkdir -p "$F9_DIR/cwd1" "$F9_DIR/cwd2" "$F9_DIR/shared"
+F9_LOCK="$F9_DIR/shared/heavy.lock"
+# Session 1: separate process, own cwd; stats the inode WHILE holding.
+(
+  cd "$F9_DIR/cwd1" || exit 1
+  exec env MEMO_TEST_LOCK_PATH="$F9_LOCK" MEMO_LOCK_POLL_S=1 MEMO_LOCK_WAIT_S=10 \
+    bash "$WRAP_SRC" bash -c '
+      stat -c "%d %i" "'"$F9_LOCK"'" > "'"$F9_DIR"'/s1.stat"
+      echo S1-HOLDING
+      sleep 3
+      echo S1-DONE
+    '
+) > "$F9_DIR/s1.log" 2>&1 &
+F9_S1_BG=$!
+disown "$F9_S1_BG" 2>/dev/null || true
+F9_HELD=false
+for _i in $(seq 1 10); do
+  if ! lock_free "$F9_LOCK" 2>/dev/null; then F9_HELD=true; break; fi
+  sleep 0.5
+done
+if [ "$F9_HELD" = true ]; then
+  pass "F9: positive control — session 1 holds the lock"
+else
+  flunk "F9: session 1 never acquired the lock (setup broken)"
+fi
+# Session 2: separate process, DIFFERENT cwd — same absolute lock path.
+(
+  cd "$F9_DIR/cwd2" || exit 1
+  stat -c "%d %i" "$F9_LOCK" > "$F9_DIR/s2.stat"
+  if ( flock -n 9 ) 9>>"$F9_LOCK" 2>/dev/null; then
+    echo ACQUIRED > "$F9_DIR/s2.probe"
+  else
+    echo EXCLUDED > "$F9_DIR/s2.probe"
+  fi
+) > "$F9_DIR/s2.log" 2>&1
+F9_S1_STAT="$(cat "$F9_DIR/s1.stat" 2>/dev/null || echo missing)"
+F9_S2_STAT="$(cat "$F9_DIR/s2.stat" 2>/dev/null || echo missing)"
+if [ "$F9_S1_STAT" != "missing" ] && [ "$F9_S1_STAT" = "$F9_S2_STAT" ]; then
+  pass "F9: both sessions see the SAME (device, inode): $F9_S1_STAT"
+else
+  flunk "F9: inode mismatch — s1='$F9_S1_STAT' s2='$F9_S2_STAT'"
+fi
+if grep -q '^EXCLUDED$' "$F9_DIR/s2.probe" 2>/dev/null; then
+  pass "F9: session 2 excluded while session 1 holds (one file, one owner)"
+else
+  flunk "F9: session 2 was NOT excluded — mutual exclusion broken on the shared inode"
+fi
+# Handover: after session 1 releases, the NEXT owner must land on the
+# very same inode — the never-recreate contract.
+for _i in $(seq 1 40); do
+  lock_free "$F9_LOCK" 2>/dev/null && break
+  sleep 0.25
+done
+set +e
+env MEMO_TEST_LOCK_PATH="$F9_LOCK" MEMO_LOCK_POLL_S=1 MEMO_LOCK_WAIT_S=10 \
+  bash "$WRAP_SRC" bash -c 'stat -c "%d %i" "'"$F9_LOCK"'" > "'"$F9_DIR"'/s2b.stat"; echo S2B-DONE' \
+  > "$F9_DIR/s2b.log" 2>&1
+F9_S2B_RC=$?
+set -e
+F9_S2B_STAT="$(cat "$F9_DIR/s2b.stat" 2>/dev/null || echo missing)"
+if [ "$F9_S2B_RC" -eq 0 ] && grep -q 'S2B-DONE' "$F9_DIR/s2b.log" \
+   && [ "$F9_S2B_STAT" = "$F9_S1_STAT" ]; then
+  pass "F9: next owner re-acquires the SAME inode ($F9_S2B_STAT) — file never recreated"
+else
+  flunk "F9: re-acquire stat='$F9_S2B_STAT' vs s1='$F9_S1_STAT' (rc=$F9_S2B_RC)"
+fi
+lock_free "$F9_LOCK" && pass "F9: lock free after the handover" || flunk "F9: lock stuck"
 
 echo "──"
 if [ "$FAIL" -eq 0 ]; then

@@ -1,16 +1,26 @@
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
-import { waitForScheduleReady, openModal, waitForRecordsReady } from './fixtures/helpers';
+import {
+  waitForScheduleReady,
+  openModal,
+  installReferenceWeekClock,
+} from './fixtures/helpers';
+import { queryDBRow } from './fixtures/db-query';
 
 /**
- * Wave 6 — User Scenario 5: Same StatusPicker everywhere.
+ * Wave 6 — User Scenario 5: shared status labels across call sites.
  *
- * Verifies that StatusPicker renders with the same labels
- * across all 4 call sites:
- * 1. /records filter (RecordsFilters)
- * 2. /clients modal (ClientCardModal → ClientRecordTab)
- * 3. Activity modal ClientTab (ActivityDetailsModal → ClientTab)
- * 4. RecordsFilters (same as #1 but in filter context)
+ * Verifies the status labels the user sees are the same everywhere:
+ * 1. /records filter (RecordsFilters → StatusFiltersPicker)
+ * 2. Activity modal ClientTab (RecordSummary → StatusPicker)
+ * 3. /clients modal record tab (ClientRecordTab → RecordHeader → StatusBadge)
+ * 4. StatusPicker DOM structure in the activity modal
+ *
+ * GH #520: the spec used to be vacuum — `count > 0` guards silently skipped
+ * everything on the empty default-period week (no page clock) and the
+ * /clients test asserted an always-true `count >= 0` against a
+ * `[data-testid^="status-picker"]` that does not render on /clients at all
+ * (StatusPicker lives in modals; the /clients modal shows a StatusBadge).
  *
  * Uses DOM text comparison instead of visual snapshots for reliability.
  */
@@ -21,21 +31,26 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
   test('Scenario 5: same StatusPicker labels in /records filter', async ({
     page,
   }) => {
-    // Navigate to /records
+    // GH #520: pin the clock to the seed's reference week — the spec lands on
+    // the /records DEFAULT period (the page-clock week); without seeded rows
+    // there the old `count > 0` guard silently skipped the whole block.
+    await installReferenceWeekClock(page);
     await page.goto('/records');
     await page.waitForSelector('h1:has-text("Управление записями")', { timeout: 15_000 });
 
     // Find the StatusPicker in RecordsFilters (testid prefix: "records-filters-status")
     const statusFilter = page.locator('[data-testid="records-filters-status"]');
-    if ((await statusFilter.count()) > 0) {
-      // Click to open the filter
-      const trigger = statusFilter.locator('button').first();
-      await trigger.click();
+    await expect(statusFilter).toBeVisible(); // hard fail (GH #520): was a silent guard
+    await statusFilter.locator('button').first().click();
 
-      // Verify all 4 labels are present
-      for (const label of EXPECTED_LABELS) {
-        await expect(statusFilter).toContainText(label);
-      }
+    // The popover lists «Все статусы» + the 4 config labels — no extras, none missing
+    const options = statusFilter.locator('[data-testid^="records-filters-status-option-"]');
+    await expect(options.first()).toBeVisible();
+    const optionTexts = await options.allTextContents();
+    expect(optionTexts).toHaveLength(EXPECTED_LABELS.length + 1);
+    expect(optionTexts).toContain('Все статусы');
+    for (const label of EXPECTED_LABELS) {
+      expect(optionTexts).toContain(label);
     }
   });
 
@@ -59,19 +74,40 @@ test.describe('Wave 6 — StatusPicker shared across sites', () => {
     expect(testId).toBe('record-status');
   });
 
-  test('Scenario 5: same StatusPicker in /clients modal', async ({
+  test('Scenario 5: status display in /clients modal record tab', async ({
     page,
   }) => {
+    // GH #520: no StatusPicker renders on /clients — the client modal's record
+    // tab shows the status as a RecordHeader StatusBadge. Pick a client that
+    // HAS records (deterministic DB lookup) and open their record tab.
+    const row = queryDBRow(
+      `SELECT c.name AS name FROM clients c
+       JOIN records r ON r.client_id = c.id
+       GROUP BY c.id ORDER BY c.id LIMIT 1`,
+    );
+    expect(row).not.toBeNull();
+
     await page.goto('/clients');
     await page.waitForSelector('h1:has-text("Клиенты")', { timeout: 15_000 });
 
-    // Check if any StatusPicker exists on the page
-    const statusPickers = page.locator('[data-testid^="status-picker"]');
-    const count = await statusPickers.count();
+    const clientRow = page.locator('table tbody tr').filter({ hasText: row!.name });
+    await expect(clientRow).toBeVisible({ timeout: 10_000 });
+    await clientRow.click();
+    const modal = page.locator('[data-testid="client-card-modal"]');
+    await expect(modal).toBeVisible({ timeout: 10_000 });
 
-    // At minimum, the page should be loaded
-    // The StatusPicker appears when a client record is opened
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Record tabs follow the «Клиент» tab in the left panel (clients.spec pattern)
+    const recordTabButton = modal.locator('[data-testid="client-card-left-panel"] button').nth(1);
+    await expect(recordTabButton).toBeVisible({ timeout: 10_000 });
+    await recordTabButton.click();
+    const recordTab = page.locator('[data-testid="client-record-tab"]');
+    await recordTab.waitFor({ state: 'visible', timeout: 10_000 });
+
+    // The record header's badge shows the shared Russian status label
+    const badge = recordTab.locator('[data-testid^="status-badge-"]');
+    await expect(badge.first()).toBeVisible();
+    const badgeText = (await badge.first().textContent())?.trim() ?? '';
+    expect(EXPECTED_LABELS).toContain(badgeText);
   });
 
   test('Scenario 5: StatusPicker DOM structure is consistent', async ({

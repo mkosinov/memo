@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from src.util.utc import utc_now
 from tests.conftest import insert_user, query_db_params
 
 pytestmark = pytest.mark.api
@@ -131,7 +132,7 @@ class TestStaffAccountBlock:
         assert link_expires_at is not None
         # The seeded expiry (now + 24 h) survives to the wire: within a
         # minute of the expected instant, ISO-shaped.
-        expected = datetime.utcnow() + timedelta(hours=24)
+        expected = utc_now() + timedelta(hours=24)
         assert abs(
             datetime.fromisoformat(link_expires_at) - expected
         ) < timedelta(minutes=1)

@@ -479,16 +479,16 @@ def _bulk_seed_tags(db_engine, n: int) -> None:
     """
     import asyncio
     import uuid as _uuid
-    from datetime import datetime
 
     async def _seed() -> None:
         from sqlalchemy import insert
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from src.models.tag import Tag
+        from src.util.utc import utc_now
 
         factory = async_sessionmaker(db_engine, expire_on_commit=False)
-        now = datetime.utcnow()
+        now = utc_now()
         rows = [
             {
                 "id": str(_uuid.uuid4()),

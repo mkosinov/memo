@@ -27,6 +27,7 @@ from src.models import (
     Visit,
     Visitor,
 )
+from src.util.utc import utc_now
 
 
 def _make_engine():
@@ -166,7 +167,7 @@ class TestModelCrud:
         s.close()
 
     def _now(self) -> datetime:
-        return datetime.utcnow()
+        return utc_now()
 
     def test_master_crud(self, session: Session):
         """GH #266: the card (Staff) + the schedule extension (Master) —

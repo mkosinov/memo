@@ -53,6 +53,22 @@
 #                    server pin is an immediate fatal verdict with the
 #                    stack-log tail, never a budget burnout.
 #
+#   SHARD_READY_MARKER  Optional (#472): readiness marker path — set ONLY
+#                    by test-all.sh (the orchestrator). Any stale file at
+#                    the path is removed BEFORE any server starts (a
+#                    leftover marker must never fake readiness); the fresh
+#                    marker is (re)created right after the frontend
+#                    readiness poll succeeds and BEFORE warmup — readiness
+#                    is published the moment it holds, warmup keeps
+#                    running in parallel (the orchestrator starts its
+#                    stages on the marker; its 30 s buffer is untouched).
+#                    Unset (CI / manual runs) → no marker file is ever
+#                    written. Content: `shard=N frontend=:P backend=:P
+#                    pid=P epoch=E` (diagnostics — the orchestrator waits
+#                    for the file's EXISTENCE, test-all.sh owns its
+#                    lifecycle afterwards; this script's teardown does not
+#                    remove it).
+#
 #   NOTIFY_E2E_ENABLED Optional (#483 Task 8, spec §3.5): '1' switches
 #                    the script from a numbered shard to THE ENABLED
 #                    notify e2e stack. Requires SHARD_ID=notify (the
@@ -327,6 +343,18 @@ remove_own_lease() {
   fi
 }
 
+# ── #472: orchestrator readiness marker — stale copy removal ──────────────
+# SHARD_READY_MARKER is set only by test-all.sh (see the marker wait there).
+# A file left at the path by an earlier run must never fake readiness:
+# remove it NOW, before any server starts; the fresh marker is (re)created
+# only after the frontend readiness poll succeeds (below). Unset → nothing
+# (no path, no removal, no write — zero behavior for CI/manual runs).
+SHARD_READY_MARKER="${SHARD_READY_MARKER:-}"
+if [ -n "$SHARD_READY_MARKER" ]; then
+  rm -f "$SHARD_READY_MARKER"
+  echo "[shard-$SHARD_ID] Readiness marker: $SHARD_READY_MARKER (stale copy removed; written after frontend readiness)"
+fi
+
 echo "[shard-$SHARD_ID] Starting stack: frontend=:$SHARD_PORT backend=:$BACKEND_PORT db=$ABS_DB_PATH"
 
 # #152: wipe shard DB so seed runs on an empty schema. alembic recreates
@@ -590,6 +618,24 @@ done
 if [ "$FRONTEND_READY" = false ]; then
   echo "[shard-$SHARD_ID] ERROR: Frontend failed to start on :$SHARD_PORT" >&2
   exit 1
+fi
+
+# ── #472: publish readiness to the orchestrator ────────────────────────────
+# Written RIGHT after the successful frontend poll and BEFORE warmup — the
+# overlap semantics stay: the orchestrator starts its stages on readiness
+# while warmup runs in parallel (its 30 s stabilization buffer is not
+# touched by this). Atomic tmp+mv in the same dir (repo idiom): the
+# orchestrator polls the file's existence, so no partial marker is ever
+# observed. Unset (CI/manual) → no write. A write failure is fatal under
+# set -e (a marker path that cannot be written means a broken run — the
+# orchestrator would burn its whole ceiling otherwise; dying fast lets it
+# fail within one liveness tick instead).
+if [ -n "$SHARD_READY_MARKER" ]; then
+  printf 'shard=%s frontend=:%s backend=:%s pid=%s epoch=%s\n' \
+    "$SHARD_ID" "$SHARD_PORT" "$BACKEND_PORT" "$$" \
+    "$(date +%s 2>/dev/null || printf '%s' 0)" > "${SHARD_READY_MARKER}.tmp" \
+    && mv -f "${SHARD_READY_MARKER}.tmp" "$SHARD_READY_MARKER"
+  echo "[shard-$SHARD_ID] Readiness marker written: $SHARD_READY_MARKER"
 fi
 
 # Force-compile all major routes by hitting them once

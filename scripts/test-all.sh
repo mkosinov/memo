@@ -30,6 +30,19 @@
 #                         Used for debugging. Skips the whole tag/port
 #                         machinery (no shards are started by it).
 #   VISUAL_COMPLIANCE_URL Override dev server URL for visual compliance.
+#
+# Readiness wait (#472, spec «Починка ожидания готовности»): the shards'
+# readiness is NOT HTTP-polled here. Each stack wrapper
+# (scripts/e2e-shard-start.sh) publishes a ready-marker file
+# ($LOG_DIR/shard-stack-N.ready.marker) right after ITS frontend readiness
+# poll succeeds (before its warmup); this script waits for both markers
+# with the ceiling READY_ORCHESTRATOR_S (single source:
+# scripts/lib/shard-helpers.sh — the wrapper budgets + 180 s pre-bind
+# slack) and checks wrapper liveness on every tick (kill -0 + the #448
+# watchdog death marker): a wrapper dying mid-wait fails the run within
+# one tick with the stack-log tails; ceiling exhaustion fails with both
+# tails. READY_BUDGET_BACKEND_S / READY_BUDGET_FRONTEND_S env-overrides
+# flow into the derived ceiling.
 
 set -euo pipefail
 
@@ -414,6 +427,9 @@ for i in $(seq 0 1); do
   (
     cd "$ROOT"
     # Fix A (#317 §3.3): SHARD_MANAGED_STACK=1 — the orchestrator owns the tag's 4-port lease; managed stacks neither write nor remove it.
+    # #472: SHARD_READY_MARKER — the wrapper creates this file right after
+    # its own frontend readiness poll succeeds (before warmup); the marker
+    # wait below polls these files instead of duplicating the HTTP probing.
     SHARD_ID="$SHARD_NUM" \
     SHARD_RUN_TAG="$SHARD_RUN_TAG" \
     SHARD_PORT="$FRONTEND_PORT" \
@@ -421,6 +437,7 @@ for i in $(seq 0 1); do
     TEST_DB_PATH="$ROOT/$SHARD_DB" \
     BACKEND_URL="$BACKEND_URL" \
     NEXT_PUBLIC_API_URL="$BACKEND_URL" \
+    SHARD_READY_MARKER="$LOG_DIR/shard-stack-${SHARD_NUM}.ready.marker" \
     SHARD_MANAGED_STACK=1 \
       bash scripts/e2e-shard-start.sh
   ) > "$LOG_DIR/shard-stack-${SHARD_NUM}.log" 2>&1 &
@@ -450,50 +467,100 @@ RUN_EXIT_STAGES="$LOG_DIR/watchdog-exit-stages.list"
 run_watchdog "$RUN_WATCHDOG_MARKER" "$RUN_TERM_STAGES" "$RUN_EXIT_STAGES" &
 RUN_WATCHDOG_PID=$!
 
-# Wait for all shard stacks to be ready (check frontend ports)
-echo "  → waiting for shard frontends to be ready..."
-SHARD_READY=("" "")
-# 2 parallel Next.js dev servers need time to compile first request.
-# --max-time 30 + 60 iterations = up to 30 min total (usually ~1-2 min).
-for _ in $(seq 1 60); do
-  ALL_READY=true
-  for i in $(seq 0 1); do
-    if [ "${SHARD_READY[$i]}" = "ready" ]; then continue; fi
-    FRONTEND_PORT="${SHARD_FRONTEND_PORTS[$i]}"
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FRONTEND_PORT}/" --max-time 30 2>/dev/null | grep -qE "^(2|3)"; then
-      SHARD_READY[$i]="ready"
-      echo "    shard $((i + 1)) ready (frontend :${FRONTEND_PORT})"
-    else
-      ALL_READY=false
+# ── Wait for both shards' readiness MARKERS (#472) ─────────────────────────
+# No duplicate HTTP polling: each wrapper publishes readiness by creating
+# the SHARD_READY_MARKER we handed it — right after ITS own frontend poll
+# succeeds, before its warmup (overlap semantics preserved: stages start on
+# readiness, warmup runs in parallel, the 30 s buffer below stays). This
+# wait polls file EXISTENCE with the ceiling READY_ORCHESTRATOR_S (single
+# source: scripts/lib/shard-helpers.sh — backend + frontend budgets + 180 s
+# pre-bind slack; derived, no duplicate literals). EVERY tick also checks:
+#   - wrapper liveness, kill -0 (#448 seam; a reaped wrapper answers
+#     ESRCH): a wrapper dying mid-wait fails the run WITHIN ONE TICK with
+#     the dead stack's log tail — the ceiling is never burned on a dead
+#     wrapper (US-5, orchestrator layer);
+#   - the #448 run-watchdog death marker (belt and braces: the watchdog's
+#     own tick may catch the death first and it has already TERMed stages).
+# Ceiling exhaustion (wrapper alive, marker never came) → fail with BOTH
+# stack-log tails + the EADDRINUSE diagnosis carried over from the legacy
+# failure path (#317 §3.2 — a port grabbed in the allocate→bind TOCTOU
+# window is still the most likely shape of a never-ready stack).
+READY_MARKER_1="$LOG_DIR/shard-stack-1.ready.marker"
+READY_MARKER_2="$LOG_DIR/shard-stack-2.ready.marker"
+echo "  → waiting for shard readiness markers (ceiling ${READY_ORCHESTRATOR_S}s)..."
+_rdy_deadline=$(( SECONDS + READY_ORCHESTRATOR_S ))
+_rdy_fail=""
+while :; do
+  if [ -e "$READY_MARKER_1" ] && [ -e "$READY_MARKER_2" ]; then
+    echo "    both shards ready (markers shard-stack-{1,2}.ready.marker in $LOG_DIR)"
+    break
+  fi
+  if [ "$SECONDS" -ge "$_rdy_deadline" ]; then
+    _rdy_fail="ceiling"
+    break
+  fi
+  # liveness on every tick — wrapper death beats the ceiling (US-5)
+  for _i in 0 1; do
+    if ! kill -0 "${SHARD_BACKEND_PIDS[$_i]}" 2>/dev/null; then
+      _rdy_fail="wrapper-$(( _i + 1 ))"
+      break
     fi
   done
-  if [ "$ALL_READY" = true ]; then break; fi
-  sleep 1
-done
-# Check for any shards that failed to start
-for i in $(seq 0 1); do
-  if [ "${SHARD_READY[$i]}" != "ready" ]; then
-    SHARD_NUM=$((i + 1))
-    STACK_LOG="$LOG_DIR/shard-stack-${SHARD_NUM}.log"
-    echo "❌ Shard ${SHARD_NUM} frontend failed to start on :${SHARD_FRONTEND_PORTS[$i]}"
-    echo "   Check: $STACK_LOG"
-    # EADDRINUSE in the stack's start log → the port was grabbed between
-    # the pre-start check and the bind (#317 §3.2 — conscious no-retry, §4).
-    # Node prints it as `... EADDRINUSE: address already in use 0.0.0.0:PORT`
-    # — the trailing :PORT segment names the port; fallback names both.
-    CLASH_LINE="$(grep 'EADDRINUSE' "$STACK_LOG" 2>/dev/null | tail -1 || true)"
-    if [ -n "$CLASH_LINE" ]; then
-      CLASH_PORT="${CLASH_LINE##*:}"
-      case "$CLASH_PORT" in
-        ''|*[!0-9]*)
-          CLASH_PORT="${SHARD_FRONTEND_PORTS[$i]} (или ${SHARD_BACKEND_PORTS[$i]})"
-          ;;
-      esac
-      echo "❌ порт $CLASH_PORT занят между проверкой и стартом; перезапусти test-all" >&2
-    fi
-    exit 1
+  if [ -n "$_rdy_fail" ]; then break; fi
+  if [ -e "$RUN_WATCHDOG_MARKER" ]; then
+    _rdy_fail="watchdog"
+    break
+  fi
+  # tick truncated to the remaining ceiling (cadence 1 s)
+  _rdy_rem=$(( _rdy_deadline - SECONDS ))
+  if [ "$_rdy_rem" -gt 1 ]; then
+    sleep 1
+  else
+    sleep "$_rdy_rem"
   fi
 done
+if [ -n "$_rdy_fail" ]; then
+  case "$_rdy_fail" in
+    wrapper-1|wrapper-2)
+      _n="${_rdy_fail#wrapper-}"
+      _i=$(( _n - 1 ))
+      echo "" >&2
+      echo "❌ stack wrapper shard $_n died during the readiness wait (frontend :${SHARD_FRONTEND_PORTS[$_i]}, backend :${SHARD_BACKEND_PORTS[$_i]}) — stopping the run" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-$_n.log" >&2
+      ;;
+    watchdog)
+      echo "" >&2
+      echo "❌ run watchdog reported a dead stack wrapper during the readiness wait — stopping the run" >&2
+      echo "   Marker: $RUN_WATCHDOG_MARKER (see the watchdog diagnosis above)" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-1.log" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-2.log" >&2
+      ;;
+    *)
+      echo "" >&2
+      echo "❌ shard readiness markers not present after the ${READY_ORCHESTRATOR_S}s ceiling — frontend(s) never became ready" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-1.log" >&2
+      _capped_log_tail "$LOG_DIR/shard-stack-2.log" >&2
+      ;;
+  esac
+  # EADDRINUSE diagnosis (#317 §3.2, preserved from the legacy failure
+  # path): Node prints `... EADDRINUSE: address already in use 0.0.0.0:PORT`
+  # — the trailing :PORT segment names the port; fallback names both of
+  # the shard's. Checked on every failure mode (cheap, additive).
+  for _n in 1 2; do
+    _sl="$LOG_DIR/shard-stack-$_n.log"
+    _cl="$(grep 'EADDRINUSE' "$_sl" 2>/dev/null | tail -1 || true)"
+    if [ -n "$_cl" ]; then
+      _cp="${_cl##*:}"
+      case "$_cp" in
+        ''|*[!0-9]*)
+          _cp="${SHARD_FRONTEND_PORTS[$(( _n - 1 ))]} (или ${SHARD_BACKEND_PORTS[$(( _n - 1 ))]})"
+          ;;
+      esac
+      echo "❌ порт $_cp занят между проверкой и стартом; перезапусти test-all" >&2
+    fi
+  done
+  exit 1
+fi
 
 # Extra buffer for Next.js compilation to stabilize
 echo "  → waiting 30s for Next.js compilation to stabilize..."

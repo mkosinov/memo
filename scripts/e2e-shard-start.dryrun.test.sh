@@ -207,6 +207,28 @@
 #   Cases 18a-e each assert elapsed wall time well under the (default 60/120)
 #   budgets — «фатальный провал за секунды, а не выжигание бюджета» (DoD).
 #
+# Feature #472 Task 2 (orchestrator readiness marker, wrapper layer, spec
+# «Починка ожидания готовности» / US-6 marker seam):
+#   SHARD_READY_MARKER (set ONLY by test-all.sh; unset in CI/manual runs →
+#   no file, no behavior) — the wrapper removes a stale file at the path
+#   BEFORE any server starts (a leftover marker must never fake readiness),
+#   then (re)creates it RIGHT AFTER the successful frontend readiness poll
+#   and BEFORE warmup (overlap semantics preserved: stages start on
+#   readiness, warmup runs in parallel, the 30 s buffer stays). Content:
+#   `shard=N frontend=:P backend=:P pid=P epoch=E` — the orchestrator waits
+#   for the file's EXISTENCE, content is diagnostics. Atomic tmp+mv in the
+#   same dir (repo idiom) — no torn file can ever be observed.
+#   → Case 19a: marker set → stale copy REPLACED by the fresh line (stale
+#     removal + fresh write in one), log order pinned: frontend ready →
+#     marker written → warmup; marker survives the TERM teardown (the
+#     per-run dir owns its lifecycle, not the wrapper).
+#   → Case 19b: marker UNSET → no marker lines in the log, no *.marker
+#     files anywhere in the case dir (CI/manual: no stray files), positive
+#     control: the run reached the frontend readiness phase.
+#   → Case 19c: marker set + backend never ready (curl refused, budget 2) →
+#     rc=1 at the readiness deadline AND the pre-created stale marker is
+#     GONE (removed at start, never recreated — readiness was not reached).
+#
 # ── #317 Task 8: assert matrix (tag × shard id × lease) ────────────────────
 # Every cell carries a LIVE, EXACT assertion (case numbers refer to the
 # blocks below); "names" = NEXT_DIST_DIR + FILES_DIR(=TEST_FILES_DIR) at
@@ -2323,6 +2345,157 @@ if [ "$CASE18E_ELAPSED" -ge 3 ] && [ "$CASE18E_ELAPSED" -lt 30 ]; then
   echo "PASS Case 18e (#472): pathological tail cut (${CASE18E_ELAPSED}s ≈ the 3s budget; pre-#472 shape ≈ 11 min)"
 else
   echo "FAIL Case 18e (#472): elapsed ${CASE18E_ELAPSED}s — want ≥3 (one max-time-capped step) and <30"
+  FAIL=1
+fi
+
+# ── Case 19 (#472 Task 2: orchestrator readiness marker, wrapper layer) ─────
+# The harness shape differs from run_shard: readiness is signaled BY THE
+# MARKER (the file's existence is the product contract), so 19a/19b launch
+# via shard_launch, bounded-poll for the readiness phase, then TERM-tear
+# down via term_and_reap. Curl stub default (instant 200) makes readiness
+# immediate; 19c uses run_shard_raw (the run self-fails at its deadline).
+CASE19_DIR="$WORK/case19"; mkdir -p "$CASE19_DIR"
+
+# 19a — stale REPLACED by fresh; log order frontend-ready → marker → warmup;
+# marker survives teardown. Harness shape: readiness is signaled BY THE
+# MARKER (the file's existence is the product contract), so the run is
+# ended by TERM only AFTER the marker appears (run_shard's pnpm-line poll
+# would race the readiness loop — the curl stub answers 200 instantly).
+CASE19A_MARKER="$CASE19_DIR/ready-a.marker"
+printf 'stale-marker-must-die\n' > "$CASE19A_MARKER"
+CASE19A_DB="$CASE19_DIR/test_memo_shard1.db"; printf 'seed' > "$CASE19A_DB"
+RUN_EXTRA_ENV="SHARD_READY_MARKER=$CASE19A_MARKER"
+run_shard_marker() {
+  local log="$1" journal="$2" db="$3" sid="$4" sport="$5" bport="$6" marker="$7"
+  local i
+  shard_launch "$log" "$journal" "$db" "$sid" "$sport" "$bport"
+  local pid="$SHARD_LAUNCH_PID"
+  # Wait for the FRESH marker (a line starting 'shard=' — the stale fixture
+  # content must NOT read as readiness) AND the warmup line (the mv lands
+  # before its echo; TERM only after the whole readiness section is logged).
+  # Bounded: pre-implementation the wait exhausts (20 s) and the TERM
+  # teardown yields the asserted failures.
+  for i in $(seq 1 100); do
+    if grep -q '^shard=' "$marker" 2>/dev/null && grep -q 'Warming up routes' "$log" 2>/dev/null; then
+      break
+    fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  term_and_reap "$pid"
+}
+run_shard_marker "$CASE19_DIR/run-a.log" "$CASE19_DIR/journal-a" "$CASE19A_DB" 1 3013 8013 "$CASE19A_MARKER"
+RUN_EXTRA_ENV=""
+echo "── Case 19a log ──"
+cat "$CASE19_DIR/run-a.log"
+echo "── Case 19a marker ──"
+cat "$CASE19A_MARKER" 2>/dev/null || echo "(missing)"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 143 ]; then
+  echo "PASS Case 19a (#472): normal TERM teardown after a healthy run (rc=143)"
+else
+  echo "FAIL Case 19a (#472): expected rc=143 (healthy TERM teardown), got rc=$LAST_RC"
+  FAIL=1
+fi
+if grep -Eq '^shard=1 frontend=:3013 backend=:8013 pid=[0-9]+ epoch=[0-9]+$' "$CASE19A_MARKER" 2>/dev/null; then
+  echo "PASS Case 19a (#472): fresh marker written with the diagnostic line (stale content replaced)"
+else
+  echo "FAIL Case 19a (#472): marker missing or not the fresh diagnostic line"
+  FAIL=1
+fi
+# `|| true` inside each substitution: pipefail + a no-match grep would make
+# the assignment's status 1 and set -e would kill the suite (observed RED).
+_case19a_mln="$(grep -n 'Readiness marker written' "$CASE19_DIR/run-a.log" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+_case19a_wln="$(grep -n 'Warming up routes' "$CASE19_DIR/run-a.log" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+_case19a_fln="$(grep -n 'Frontend ready on :3013' "$CASE19_DIR/run-a.log" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+if [ -n "$_case19a_fln" ] && [ -n "$_case19a_mln" ] && [ -n "$_case19a_wln" ] \
+   && [ "$_case19a_fln" -lt "$_case19a_mln" ] && [ "$_case19a_mln" -lt "$_case19a_wln" ]; then
+  echo "PASS Case 19a (#472): order pinned — frontend ready (l$_case19a_fln) → marker (l$_case19a_mln) → warmup (l$_case19a_wln)"
+else
+  echo "FAIL Case 19a (#472): expected frontend-ready < marker-written < warmup in the log (got l$_case19a_fln/$_case19a_mln/$_case19a_wln)"
+  FAIL=1
+fi
+if [ -e "$CASE19A_MARKER" ]; then
+  echo "PASS Case 19a (#472): marker survives stack teardown (per-run dir owns the lifecycle)"
+else
+  echo "FAIL Case 19a (#472): marker removed on teardown — the wrapper must not delete it"
+  FAIL=1
+fi
+
+# 19b — marker UNSET (CI / manual run): no write, no stray files. Own
+# subdir: 19a/19c markers live in the case dir and must not trip 19b's
+# stray-files sweep. The readiness moment has no marker to poll → poll the
+# log's frontend-ready line, add a grace tick for the would-be write
+# moment, then TERM.
+CASE19B_DIR="$CASE19_DIR/case-b"; mkdir -p "$CASE19B_DIR"
+CASE19B_DB="$CASE19B_DIR/test_memo_shard1_b.db"; printf 'seed' > "$CASE19B_DB"
+shard_launch "$CASE19B_DIR/run-b.log" "$CASE19B_DIR/journal-b" "$CASE19B_DB" 1 3013 8013
+CASE19B_PID="$SHARD_LAUNCH_PID"
+for _i in $(seq 1 100); do
+  if grep -q 'Frontend ready on :3013' "$CASE19B_DIR/run-b.log" 2>/dev/null; then break; fi
+  kill -0 "$CASE19B_PID" 2>/dev/null || break
+  sleep 0.2
+done
+sleep 1
+term_and_reap "$CASE19B_PID"
+echo "── Case 19b log ──"
+cat "$CASE19B_DIR/run-b.log"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 143 ]; then
+  echo "PASS Case 19b (#472): unset marker var — healthy run, TERM teardown rc=143"
+else
+  echo "FAIL Case 19b (#472): expected rc=143, got rc=$LAST_RC"
+  FAIL=1
+fi
+if grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE19B_DIR/journal-b" 2>/dev/null; then
+  echo "PASS Case 19b (#472): positive control — run reached the frontend readiness phase"
+else
+  echo "FAIL Case 19b (#472): no PNPM journal line — the absence assertions would be vacuous"
+  FAIL=1
+fi
+if grep -q 'Readiness marker' "$CASE19B_DIR/run-b.log" 2>/dev/null; then
+  echo "FAIL Case 19b (#472): marker lines in the log with the var unset"
+  FAIL=1
+else
+  echo "PASS Case 19b (#472): no marker log lines (var unset → no write path taken)"
+fi
+if find "$CASE19B_DIR" -name '*.marker' -print -quit 2>/dev/null | grep -q .; then
+  echo "FAIL Case 19b (#472): stray marker files created: $(find "$CASE19B_DIR" -name '*.marker')"
+  FAIL=1
+else
+  echo "PASS Case 19b (#472): no stray *.marker files in the case dir"
+fi
+
+# 19c — stale marker removed at stack START; readiness never reached (curl
+# refused, backend budget 2 s) → rc=1 and the stale file is GONE, not
+# recreated: a stale marker can never fake readiness.
+CASE19C_MARKER="$CASE19_DIR/ready-c.marker"
+printf 'stale-marker-must-die\n' > "$CASE19C_MARKER"
+CASE19C_DB="$CASE19_DIR/test_memo_shard1_c.db"; printf 'seed' > "$CASE19C_DB"
+RUN_EXTRA_ENV="SHARD_READY_MARKER=$CASE19C_MARKER SHARD_DRYRUN_CURL_FAIL=backend READY_BUDGET_BACKEND_S=2"
+RAW_WAIT_S=12
+run_shard_raw "$CASE19_DIR/run-c.log" "$CASE19_DIR/journal-c" "$CASE19C_DB" 1 3013 8013
+RUN_EXTRA_ENV=""
+RAW_WAIT_S=15
+echo "── Case 19c log ──"
+cat "$CASE19_DIR/run-c.log"
+echo "─────────────────"
+if [ "$LAST_RC" -eq 1 ] && grep -q 'Backend failed to start on :8013' "$CASE19_DIR/run-c.log"; then
+  echo "PASS Case 19c (#472): readiness failure verdict (rc=1, budget 2 s honored)"
+else
+  echo "FAIL Case 19c (#472): expected rc=1 + 'Backend failed to start on :8013' (got rc=$LAST_RC)"
+  FAIL=1
+fi
+if [ -e "$CASE19C_MARKER" ]; then
+  echo "FAIL Case 19c (#472): stale marker still present — a leftover file could fake readiness"
+  FAIL=1
+else
+  echo "PASS Case 19c (#472): stale marker removed at stack start, never recreated"
+fi
+if grep -q 'Readiness marker' "$CASE19_DIR/run-c.log" 2>/dev/null; then
+  echo "PASS Case 19c (#472): marker path journaled at start (var set → seam active)"
+else
+  echo "FAIL Case 19c (#472): no marker line in the log with the var set"
   FAIL=1
 fi
 

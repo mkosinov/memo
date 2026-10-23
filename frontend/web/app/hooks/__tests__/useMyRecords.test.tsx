@@ -1,9 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import type { Mock } from "vitest";
 import { useMyRecords, MY_RECORDS_PER_PAGE } from "../useMyRecords";
-import type { MyRecordItem } from "@memo/api-client";
+import { myRecordItem, createQueryWrapper } from "@/app/__tests__/fixtures/cabinet";
 
 vi.mock("@memo/api-client", () => ({
   listMyRecords: vi.fn(),
@@ -12,32 +10,6 @@ vi.mock("@memo/api-client", () => ({
 import { listMyRecords } from "@memo/api-client";
 
 const mockedListMyRecords = listMyRecords as unknown as Mock;
-
-/** Contract row factory — the exact GET /my/records items[] shape (#513). */
-function myRecordItem(overrides: Partial<MyRecordItem> = {}): MyRecordItem {
-  return {
-    id: "rec-1",
-    activity_date: "2026-06-16",
-    activity_start: "15:00:00",
-    activity_end: "16:00:00",
-    service_title: "Мини-картина акрилом",
-    comment: null,
-    visits: [
-      { id: "vis-1", visitor_name: "Анна Иванова", status: "visited", price: 2000 },
-    ],
-    ...overrides,
-  };
-}
-
-/** Fresh QueryClient with retry: false — error paths must not wait on retries. */
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  };
-}
 
 describe("useMyRecords", () => {
   beforeEach(() => {
@@ -54,7 +26,7 @@ describe("useMyRecords", () => {
     });
 
     const { result } = renderHook(() => useMyRecords(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -78,7 +50,7 @@ describe("useMyRecords", () => {
     });
 
     const { result } = renderHook(() => useMyRecords(2, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -95,7 +67,7 @@ describe("useMyRecords", () => {
     });
 
     const { result } = renderHook(() => useMyRecords(3, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -107,7 +79,7 @@ describe("useMyRecords", () => {
 
   it("does not fetch while disabled (anonymous visitor — no data)", async () => {
     const { result } = renderHook(() => useMyRecords(1, false), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     // settle the microtask queue: the query must never fire
@@ -126,7 +98,7 @@ describe("useMyRecords", () => {
     });
 
     const { result } = renderHook(() => useMyRecords(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -139,7 +111,7 @@ describe("useMyRecords", () => {
     mockedListMyRecords.mockRejectedValue(new Error("network down"));
 
     const { result } = renderHook(() => useMyRecords(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.error).not.toBeNull());

@@ -1,9 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import type { Mock } from "vitest";
 import { useMyPhotos, MY_PHOTOS_PER_PAGE } from "../useMyPhotos";
-import type { MyPhotoItem } from "@memo/api-client";
+import { myPhotoItem, createQueryWrapper } from "@/app/__tests__/fixtures/cabinet";
 
 vi.mock("@memo/api-client", () => ({
   listMyPhotos: vi.fn(),
@@ -12,29 +10,6 @@ vi.mock("@memo/api-client", () => ({
 import { listMyPhotos } from "@memo/api-client";
 
 const mockedListMyPhotos = listMyPhotos as unknown as Mock;
-
-/** Contract row factory — the exact GET /my/photos items[] shape (#513):
- *  no owner ids, tags resolved to plain names, is_public drives the badge. */
-function myPhotoItem(overrides: Partial<MyPhotoItem> = {}): MyPhotoItem {
-  return {
-    id: "ph-1",
-    filename: "/images/client-work-1.jpg",
-    is_public: true,
-    tags: ["масло"],
-    created_at: "2026-06-15T12:00:00",
-    ...overrides,
-  };
-}
-
-/** Fresh QueryClient with retry: false — error paths must not wait on retries. */
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  };
-}
 
 describe("useMyPhotos", () => {
   beforeEach(() => {
@@ -54,7 +29,7 @@ describe("useMyPhotos", () => {
     });
 
     const { result } = renderHook(() => useMyPhotos(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -79,7 +54,7 @@ describe("useMyPhotos", () => {
     });
 
     const { result } = renderHook(() => useMyPhotos(2, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -96,7 +71,7 @@ describe("useMyPhotos", () => {
     });
 
     const { result } = renderHook(() => useMyPhotos(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.isPending).toBe(false));
@@ -106,7 +81,7 @@ describe("useMyPhotos", () => {
 
   it("does not fetch while disabled (anonymous visitor — no data)", async () => {
     const { result } = renderHook(() => useMyPhotos(1, false), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     // settle the microtask queue: the query must never fire
@@ -120,7 +95,7 @@ describe("useMyPhotos", () => {
     mockedListMyPhotos.mockRejectedValue(new Error("network down"));
 
     const { result } = renderHook(() => useMyPhotos(1, true), {
-      wrapper: createWrapper(),
+      wrapper: createQueryWrapper(),
     });
 
     await waitFor(() => expect(result.current.error).not.toBeNull());

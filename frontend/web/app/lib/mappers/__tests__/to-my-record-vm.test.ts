@@ -1,24 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { toMyRecordCardView } from "../to-my-record-vm";
+import { myRecordItem } from "@/app/__tests__/fixtures/cabinet";
 import type { MyRecordItem } from "@memo/api-client";
-
-/** Contract row factory — the exact GET /my/records items[] shape (#513). */
-function myRecordItem(overrides: Partial<MyRecordItem> = {}): MyRecordItem {
-  return {
-    id: "rec-1",
-    // Backend serializes date/time columns as ISO strings
-    // ("2026-06-16" / "15:00:00").
-    activity_date: "2026-06-16",
-    activity_start: "15:00:00",
-    activity_end: "16:00:00",
-    service_title: "Мини-картина акрилом",
-    comment: null,
-    visits: [
-      { id: "vis-1", visitor_name: "Анна Иванова", status: "visited", price: 2000 },
-    ],
-    ...overrides,
-  };
-}
 
 describe("toMyRecordCardView", () => {
   it("maps all card fields: formatted date, start–end time, service, comment", () => {

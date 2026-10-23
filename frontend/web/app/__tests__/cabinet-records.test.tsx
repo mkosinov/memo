@@ -15,55 +15,24 @@ vi.mock("../hooks/useMyRecords", () => ({
 import CabinetRecordsPage from "../cabinet/records/page";
 import { useCabinetAuth } from "../hooks/useCabinetAuth";
 import { useMyRecords } from "../hooks/useMyRecords";
-import type { MyRecordCardView } from "../lib/model/view/my-records";
+import {
+  myRecordCardView,
+  cabinetAuthValue,
+  type CabinetSessionStatus,
+  mockCabinetListHook,
+} from "./fixtures/cabinet";
 
 const mockedUseCabinetAuth = useCabinetAuth as unknown as Mock;
 const mockedUseMyRecords = useMyRecords as unknown as Mock;
 
-const CLIENT = { phone: "+79001234567", name: "Анна Иванова" };
-
-/** View-model card as produced by toMyRecordCardView. */
-function card(overrides: Partial<MyRecordCardView> = {}): MyRecordCardView {
-  return {
-    id: "rec-1",
-    dateFormatted: "16 июня",
-    timeFormatted: "15:00–16:00",
-    serviceTitle: "Мини-картина акрилом",
-    comment: null,
-    visits: [
-      {
-        id: "vis-1",
-        visitorName: "Анна Иванова",
-        status: "visited",
-        statusLabel: "Состоялось",
-        priceFormatted: "2 000 ₽",
-      },
-    ],
-    ...overrides,
-  };
+function mockSession(status: CabinetSessionStatus) {
+  mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status));
 }
 
-function mockSession(status: "checking" | "anonymous" | "authenticated" | "error") {
-  mockedUseCabinetAuth.mockReturnValue({
-    session: { status, client: status === "authenticated" ? CLIENT : null, refresh: vi.fn() },
-    handleLogout: vi.fn(),
-  });
-}
-
-/** useMyRecords mock — captures (page, enabled) args, returns given state. */
+/** useMyRecords mock — returns the given state; call args are asserted on
+ *  the mock itself. */
 function mockRecords(state: Partial<ReturnType<typeof useMyRecords>> = {}) {
-  return mockedUseMyRecords.mockImplementation(
-    (...args: Parameters<typeof useMyRecords>) => ({
-      cards: [],
-      total: 0,
-      page: 1,
-      pageCount: 1,
-      isPending: false,
-      error: null,
-      ...state,
-      lastArgs: args,
-    }),
-  );
+  return mockCabinetListHook(mockedUseMyRecords, state);
 }
 
 beforeEach(() => {
@@ -138,8 +107,8 @@ describe("Cabinet records page — authenticated", () => {
   it("renders the lesson cards with all fields and the visitor rows", async () => {
     mockRecords({
       cards: [
-        card({ comment: "Позвать за 15 минут" }),
-        card({
+        myRecordCardView({ comment: "Позвать за 15 минут" }),
+        myRecordCardView({
           id: "rec-2",
           dateFormatted: "15 июня",
           timeFormatted: "10:00–12:00",
@@ -214,7 +183,7 @@ describe("Cabinet records page — empty state and pagination", () => {
   });
 
   it("renders pagination when the list spills past one page and switches pages", async () => {
-    mockRecords({ cards: [card()], total: 45, page: 1, pageCount: 3 });
+    mockRecords({ cards: [myRecordCardView()], total: 45, page: 1, pageCount: 3 });
 
     render(<CabinetRecordsPage />);
 

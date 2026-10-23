@@ -15,45 +15,24 @@ vi.mock("../hooks/useMyPhotos", () => ({
 import CabinetPhotosPage from "../cabinet/photos/page";
 import { useCabinetAuth } from "../hooks/useCabinetAuth";
 import { useMyPhotos } from "../hooks/useMyPhotos";
-import type { MyPhotoCardView } from "../lib/model/view/my-photos";
+import {
+  myPhotoCardView,
+  cabinetAuthValue,
+  type CabinetSessionStatus,
+  mockCabinetListHook,
+} from "./fixtures/cabinet";
 
 const mockedUseCabinetAuth = useCabinetAuth as unknown as Mock;
 const mockedUseMyPhotos = useMyPhotos as unknown as Mock;
 
-const CLIENT = { phone: "+79001234567", name: "Анна Иванова" };
-
-/** View-model card as produced by toMyPhotoCardView. */
-function photo(overrides: Partial<MyPhotoCardView> = {}): MyPhotoCardView {
-  return {
-    id: "ph-1",
-    url: "/images/client-work-1.jpg",
-    isPublic: true,
-    isPublicLabel: "Опубликовано",
-    ...overrides,
-  };
+function mockSession(status: CabinetSessionStatus) {
+  mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status));
 }
 
-function mockSession(status: "checking" | "anonymous" | "authenticated" | "error") {
-  mockedUseCabinetAuth.mockReturnValue({
-    session: { status, client: status === "authenticated" ? CLIENT : null, refresh: vi.fn() },
-    handleLogout: vi.fn(),
-  });
-}
-
-/** useMyPhotos mock — captures (page, enabled) args, returns given state. */
+/** useMyPhotos mock — returns the given state; call args are asserted on
+ *  the mock itself. */
 function mockPhotos(state: Partial<ReturnType<typeof useMyPhotos>> = {}) {
-  return mockedUseMyPhotos.mockImplementation(
-    (...args: Parameters<typeof useMyPhotos>) => ({
-      cards: [],
-      total: 0,
-      page: 1,
-      pageCount: 1,
-      isPending: false,
-      error: null,
-      ...state,
-      lastArgs: args,
-    }),
-  );
+  return mockCabinetListHook(mockedUseMyPhotos, state);
 }
 
 beforeEach(() => {
@@ -128,9 +107,9 @@ describe("Cabinet photos page — authenticated", () => {
   it("renders the photo grid with both badge kinds", async () => {
     mockPhotos({
       cards: [
-        photo(),
-        photo({ id: "ph-2", url: "/images/client-work-2.jpg" }),
-        photo({
+        myPhotoCardView(),
+        myPhotoCardView({ id: "ph-2", url: "/images/client-work-2.jpg" }),
+        myPhotoCardView({
           id: "ph-priv",
           url: "/images/cabinet-draft.jpg",
           isPublic: false,
@@ -192,7 +171,7 @@ describe("Cabinet photos page — empty state and pagination", () => {
   });
 
   it("renders pagination when the list spills past one page and switches pages", async () => {
-    mockPhotos({ cards: [photo()], total: 45, page: 1, pageCount: 3 });
+    mockPhotos({ cards: [myPhotoCardView()], total: 45, page: 1, pageCount: 3 });
 
     render(<CabinetPhotosPage />);
 

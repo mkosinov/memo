@@ -10,7 +10,6 @@ GH #263 T4 (D5): у оплаты нет своей колонки мастера
 
 from __future__ import annotations
 
-from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +25,7 @@ from src.schemas.common import PaginatedResponse
 from src.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from src.services.decorators import transactional
 from src.services.generic import GenericService
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -179,13 +179,13 @@ class PaymentService(GenericService[PaymentCreate, PaymentUpdate, PaymentRespons
         """Create a payment with an explicit ``created_at`` default rule.
 
         Business rule: if the client does not supply ``created_at``, the
-        service sets it to ``datetime.utcnow()`` (matching the ORM column
+        service sets it to ``utc_now()`` (matching the ORM column
         default on ``AbstractModel``).  After this decision, ``created_at``
         is always present on *data*, so the generic create path handles
         persistence without any special-casing.
         """
         if data.created_at is None:
-            data = data.model_copy(update={"created_at": datetime.utcnow()})
+            data = data.model_copy(update={"created_at": utc_now()})
         return await super().create(db_session, data)
 
     # ── GH #171 Task 2 — scenario building block (no transaction) ───────

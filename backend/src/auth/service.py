@@ -91,6 +91,7 @@ from src.domain.phone_digits import to_national_digits
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import UserRole
 from src.models.user import User
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -177,7 +178,7 @@ def ip_failure_gate(client_ip: str) -> HTTPException | None:
     prune, then a tripped IP is rejected BEFORE any work — even for a
     valid token. Returns the 429 to raise, or None when the gate passes.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _prune_counters(now)
     return _counter_exception(f"ip:{client_ip}", now)
 
@@ -191,7 +192,7 @@ def register_ip_failure(client_ip: str) -> HTTPException | None:
     gate (the counter rejection then wins over the route's own 422),
     else None.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     key = f"ip:{client_ip}"
     _bump_counter(key, now)
     return _counter_exception(key, now)
@@ -254,7 +255,7 @@ def otp_send_gate(phone: str, client_ip: str) -> HTTPException | None:
     repeat send to a seen phone is not a new number). Returns the 429
     to raise, or None when the send is allowed.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _prune_counters(now)
     _prune_otp_phones(now)
     for key in (f"otp_send:phone:{phone}", f"otp:ip:{client_ip}"):
@@ -270,7 +271,7 @@ def register_otp_send(phone: str, client_ip: str) -> None:
     Called after the code row is written — a failed write must not
     consume the send budget.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _bump_counter(f"otp_send:phone:{phone}", now)
     _bump_counter(f"otp:ip:{client_ip}", now)
     entry = _OTP_PHONES_PER_IP.get(client_ip)
@@ -287,7 +288,7 @@ def otp_verify_gate(phone: str, client_ip: str) -> HTTPException | None:
     correct code is rejected once tripped, the login-lockout rule) and
     the shared 20/IP wire. Returns the 429 to raise, or None.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _prune_counters(now)
     _prune_otp_phones(now)
     for key in (f"otp_try:phone:{phone}", f"otp:ip:{client_ip}"):
@@ -306,7 +307,7 @@ def register_otp_verify_failure(phone: str, client_ip: str) -> HTTPException | N
     rejection then wins over the caller's unified verify failure
     (the ``register_ip_failure`` semantics).
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _bump_counter(f"otp_try:phone:{phone}", now)
     ip_key = f"otp:ip:{client_ip}"
     _bump_counter(ip_key, now)
@@ -344,7 +345,7 @@ def booking_spam_gate(account_id: str, visits: int) -> HTTPException | None:
     block (the next registration restarts them). Returns the 429 to
     raise, or None when the booking is allowed.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     _prune_counters(now)
     records = _FAILURE_COUNTERS.get(f"mybook:records:{account_id}")
     if records is not None:
@@ -364,7 +365,7 @@ def booking_spam_gate(account_id: str, visits: int) -> HTTPException | None:
 
 def register_booking(account_id: str, visits: int) -> None:
     """Count one SUCCESSFUL booking: +1 record, +N visits (§4.1 window)."""
-    now = datetime.utcnow()
+    now = utc_now()
     _bump_counter(f"mybook:records:{account_id}", now)
     for _ in range(visits):
         _bump_counter(f"mybook:visits:{account_id}", now)
@@ -425,7 +426,7 @@ class AuthService:
         phones, then — on failure — the in-memory counters. Returns
         ``(AuthedUser, token)``.
         """
-        now = datetime.utcnow()
+        now = utc_now()
         normalized = phone.strip()
         phone_key = f"phone:{normalized}"
         ip_key = f"ip:{client_ip}"
@@ -497,7 +498,7 @@ class AuthService:
             await db_session.commit()
             await db_session.refresh(user)
             raise (
-                self._ladder_check(user, datetime.utcnow())
+                self._ladder_check(user, utc_now())
                 or _counter_exception(phone_key, now)
                 or _counter_exception(ip_key, now)
                 or self._invalid_credentials()
@@ -627,7 +628,7 @@ class AuthService:
         if row is None:
             return None
 
-        now = datetime.utcnow()
+        now = utc_now()
         if row.idle_deadline <= now or row.absolute_deadline <= now:
             await db_session.execute(
                 sa_delete(Session).where(Session.token == token)

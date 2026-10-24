@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.util.utc import utc_now
 
 
 class AbstractModel(Base):
@@ -21,10 +22,10 @@ class AbstractModel(Base):
         default=lambda: str(uuid.uuid4()),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow,
+        DateTime, default=utc_now,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+        DateTime, default=utc_now, onupdate=utc_now,
     )
 
 

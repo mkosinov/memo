@@ -42,6 +42,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     задаче.
   - Status: `docs/status/2026-10-24-schedule-create-form-unified-280.md`
 
+- **GH #484 — Воркер отправки оповещений: часть 3 системы оповещений
+  (потребление очереди группой `worker`, реестр каналов + мок, статусы,
+  reclaim зависших)** — branch `484-notify-worker` (10 коммитов
+  `8f4205f4..88d874f9`, base `e6981c52`; 29 файлов, +3553/−398; спека
+  `docs/specs/2026-10-22-notify-worker-484-design.md` рев.2, план
+  `docs/plans/2026-10-23-notify-worker-484-plan.md` 8/8; семья #476 —
+  часть 3/5, части 1–2 = #482/#483 на main; по умолчанию поведение
+  прежнее — инвариант S10):
+  - **Каркас и каналы (T1–T2):** `NOTIFY_SEND_RETRIES` + общий
+    `process.py` (`run_loop`, сигналы) (`8f4205f4`); пакет
+    `notify/channels/` — протокол (async-шов), типизированные ошибки,
+    реестр с fail-fast-гейтом (`logger.error` + `SystemExit(2)` по
+    прецеденту `connect_or_exit`) и мок-канал (рекордер
+    `notify:mock:deliveries`) (`d6bd8e15`, гейт-рефактор `738603f4`).
+  - **Транспорт и доставка (T3–T5):** порт `WorkerQueue` + `FakeQueue`,
+    потребительская группа `worker` в `RedisQueue` (`9ddad53d`); ядро
+    доставки — валидатор payload (`task_id` = непустая UUID-строка по
+    шву `NotifyTask.id`) + перебор каналов по приоритету с ретраями,
+    статусы sent/failed/not_delivered (`285cc98d`); цикл воркера —
+    стартовые проверки, периодический reclaim зависших, ack после
+    публикации статусов (`eede6e04`).
+  - **Диспетчер и сценарии (T6–T7):** диспетчер подтверждает
+    бракованные статус-события (кривая форма, неизвестная задача/стадия)
+    (`57d4a492`); шов-фикс `4cabab6b` — `task_id` приведён к строковому
+    UUID и в слое брака (int-скетчи плана — артефакт); маркированные
+    S7 (фолбэк/не-доставлено, DB-строка → sent/failed) + S8 (возврат
+    зависших + ack-закрытие у консьюмера) (`fd04f08d`).
+  - **Контуры (T8):** воркер в dev/e2e/CI-контурах, Playwright S6 —
+    доставка через мок-канал (`notify-s6-mock-delivery.spec.ts`,
+    RED→GREEN доказан), dryrun-сюит пополнен; приоритет мок-канала —
+    осознанно до части 4 (реальные каналы) (`88d874f9`).
+  - **Tests:** backend полный без `REDIS_URL` **3724p/0f/58s**
+    (redis-marked — инвариант S10); маркированный контур против живого
+    Redis весь зелёный (воркер-очередь, S6, S7, S8, S1-relax,
+    reenqueue, гейты); notify e2e **S1 1/1, S6 1/1**; dryrun **ALL
+    PASS**; ruff+mypy+lint-бюджет зелёные; coverage **90.61%**
+    (`worker.py` ~90%); визуальный гейт N/A → exit 0; сценарии
+    S6–S10 ✅.
+   - Status: `docs/status/2026-10-24-notify-worker-484.md`
+
+- **GH #529 — Волна миграции `datetime.utcnow()` → единый помощник `utc_now()`
+  + страж DTZ003/DTZ005** — branch `529-utcnow-wave` (5 коммитов
+  `d6583f98..2f29dae2`, base `5637e68b`; 42 файла, +195/−127; спека
+  `docs/specs/2026-10-23-utcnow-migration-wave-design.md` рев.2 — Visual
+  Compliance: N/A, план
+  `docs/plans/2026-10-23-utcnow-migration-wave-plan.md` 5/5; backend-only —
+  UI, контракт API, миграции и значения времени не меняются):
+  - **Помощник (T1, `d6583f98`, trivial):** `backend/src/util/utc.py::utc_now()`
+    — единая точка наивного UTC-«сейчас» в src; чистый pure-unit тест
+    (`tzinfo is None` + допуск ≤2 с); перекрёстные докстринги
+    `utc_now()` ↔ `business_now()` (`src/notify/time.py`, #482 — бизнес-стена,
+    не тронут); aware-время и часовые пояса — отдельная задача #498.
+  - **Волна src (T2, `d6be088c`, standard):** 26 вызовов → `utc_now()`;
+    8 ORM-ссылок вне вызовов (6 строк: базовая модель, master, audit_log,
+    password_setup) → `default=utc_now`/`onupdate=utc_now`; проза
+    (докстринги/комментарии) в 4 местах; нормализация 7 aware-записей
+    `record.updated_at = datetime.now(UTC)` и порога чистки dispatcher на
+    помощника (хранимые значения и так наивные — SQLite срезает зону);
+    осознанные исключения спеки п. 4 не тронуты.
+  - **Волна tests (T3, `74d2e8f9`, standard):** 55 вызовов в 15 файлах →
+    `utc_now()`; 4 наивных локальных `now()` в `test_location_short_title.py`
+    на помощника; 3 прозы; ожидания фикстур/базлайнов не правились.
+  - **Девиация (mid-phase, `c04ebed6`):** «НЕ» → «не» в докстринге `utc_now()`
+    — кириллические Н/Е, конфузаблы RUF002 (факт 6 > бюджет 4 — CI был бы
+    красным); текст спеки п. 1 содержал «НЕ», семантика не изменилась.
+  - **Страж (T4, `2f29dae2`, trivial):** ruff `select` += `DTZ003`/`DTZ005`
+    + нулевые бюджеты в `lint_budget.py` (рахет #306) — новый `utcnow()`/
+    наивный `now()` в backend-коде красит CI.
+  - **Tests:** полный backend pytest **3632p/0f (44 skipped)**, exit 0;
+    warnings summary — записей класса `DeprecationWarning: ...utcnow()...`
+    **0** (было ~74 303); юнит-семейства auth/OTP/токенов **80/80** без правок
+    ожиданий; волна-tests файлы **280/0**; lint-budget зелёный; негативная
+    проба US-2 продемонстрирована (вставка `utcnow` → красный по DTZ003,
+    откат → зелёный); US-1 (чистая сводка) ✅ локально — CI подтвердит,
+    US-3 (e2e-шарды) — гейт PR CI (фикстуры/базлайны байт-не тронуты).
+  - Status: `docs/status/2026-10-24-utcnow-migration-wave-529.md`
+
 ## [Unreleased] — 2026-10-23
 
 ### Added
@@ -85,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ee70168d` + таргет-сьют канона сида **43/0**; web vitest **486/486**;
     web e2e **9/9** одиночным прогоном (С1–С5 + смоуки); визуальный гейт
     **exit 0 (5/5)**; admin нетронут (базлайн **3100/0**).
-  - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
+   - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
 
 ## [Unreleased] — 2026-10-22
 

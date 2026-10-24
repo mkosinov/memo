@@ -27,11 +27,11 @@ session-based branch), docs/domain-rules/auth.md («Клиентская
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
 
 import pytest
 
 from src.errors import ErrorCode
+from src.util.utc import utc_now
 from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
@@ -483,7 +483,7 @@ class TestAntiSpam:
 
     def test_21st_record_429(self, api_client, free_activity) -> None:
         owner = _owner(api_client)
-        self._store()[f"mybook:records:{owner['id']}"] = (20, datetime.utcnow())
+        self._store()[f"mybook:records:{owner['id']}"] = (20, utc_now())
 
         resp = api_client.post(MY_RECORDS_URL, json={
             "activity_id": free_activity["id"],
@@ -499,7 +499,7 @@ class TestAntiSpam:
         """A request that would push the account OVER 40 total visits is
         rejected whole (39 done + 2 new = 41 → 429), one visit still fits."""
         owner = _owner(api_client)
-        self._store()[f"mybook:visits:{owner['id']}"] = (39, datetime.utcnow())
+        self._store()[f"mybook:visits:{owner['id']}"] = (39, utc_now())
 
         payload = {
             "activity_id": free_activity["id"],
@@ -528,8 +528,8 @@ class TestAntiSpam:
     ) -> None:
         """Another account's tripped wires never block this one."""
         _owner(api_client)
-        self._store()["mybook:records:someone-else"] = (20, datetime.utcnow())
-        self._store()["mybook:visits:someone-else"] = (40, datetime.utcnow())
+        self._store()["mybook:records:someone-else"] = (20, utc_now())
+        self._store()["mybook:visits:someone-else"] = (40, utc_now())
 
         resp = api_client.post(MY_RECORDS_URL, json={
             "activity_id": free_activity["id"],

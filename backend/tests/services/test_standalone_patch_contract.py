@@ -556,7 +556,7 @@ def _as_datetime(value: Any) -> datetime:
     """Normalize datetime | ISO-string → NAIVE UTC datetime for comparison.
 
     The two sources disagree on tzinfo: DB-stored values come back naive
-    (AbstractModel default ``datetime.utcnow``) while VisitService.patch
+    (AbstractModel default ``utc_now()``) while VisitService.patch
     stamps ``datetime.now(UTC)`` (aware). Both are UTC — strip tzinfo so
     the ``>=`` guard compares like with like instead of raising TypeError.
     """

@@ -338,7 +338,7 @@ class TestGenericServicePatchContract:
     async def test_patch_updates_updated_at(
         self, service_cls, cfg, db_session, make_entity
     ):
-        """updated_at обновляется после patch (onupdate=datetime.utcnow)."""
+        """updated_at обновляется после patch (onupdate=utc_now())."""
         assert cfg is not None, (
             f"{service_cls.__name__} обнаружен через __subclasses__(), "
             f"но отсутствует в CONTRACT_CONFIG"

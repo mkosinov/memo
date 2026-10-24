@@ -26,6 +26,7 @@ from src.auth.session import (
 )
 from src.db.base import Base
 from src.models import User
+from src.util.utc import utc_now
 
 pytestmark = pytest.mark.unit
 
@@ -69,9 +70,9 @@ class TestNewSessionFactory:
         assert new_session("user-1").token != new_session("user-1").token
 
     def test_deadlines_computed(self) -> None:
-        before = datetime.utcnow()
+        before = utc_now()
         s = new_session("user-1")
-        after = datetime.utcnow()
+        after = utc_now()
         assert before <= s.created_at <= after
         assert s.last_extended_at == s.created_at
         assert s.idle_deadline == s.last_extended_at + IDLE_WINDOW

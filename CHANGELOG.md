@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-10-24
+
+### Added
+- **GH #280 — Единая форма создания занятия: унификация с формой
+  редактирования (общий `ActivityForm`, режимы edit/create)** — branch
+  `280-schedule-create-form` (5 коммитов `17667dc6..b393be2b`, base
+  `406fb0cd`; 25 файлов, +1259/−517; спека
+  `docs/specs/2026-10-23-schedule-create-form-unified-design.md` рев.2, план
+  `docs/plans/2026-10-23-schedule-create-form-unified-plan.md` 5/5;
+  frontend/admin-only — сервер, api-client и БД не меняются):
+  - **Фундамент (T1):** хелперы `snapMinutes`/`buildDateTimeLocal` →
+    `lib/datetime.ts`; опциональный `containerTestId` на обёртках
+    `Combobox`/`MasterPicker`; эталонные юнит+e2e зелёные без правки
+    ожиданий.
+  - **Общий `ActivityForm` (T2):** извлечение эталона из `SettingsTab`;
+    edit-режим незаметен пользователю; единственная видимая дельта — гейт
+    вместимости ≥ 1 (пустое/нулевое значение больше не отправляется) —
+    в обоих режимах.
+  - **Create-режим (T3):** `CreateActivityTab` — тонкая обёртка над тем же
+    `ActivityForm`; `CreateDefaults {date, startMinutes}` — создание на
+    выбранную календарную дату слота; `addActivity` — юнион
+    `{start} | {dayIndex, startMinutes}` (легаси-конвертация остаётся штампу
+    сетки и `updateActivity`); префиллы/гейты/тост с датой `formatDateRu`,
+    тестиды `create-*`; `docs/domain-rules/activities.md` +1 буллет юниона.
+  - **e2e (T4):** US-1..US-5 — 4 спеки переведены на канонный
+    комбобокс-паттерн (`selectOption` убран), US-2 межнедельный сценарий,
+    US-4 приватное тумблером; edit-сценарии не тронуты.
+  - **Базлайн (T5):** `modal-create-mode` перегнан CI-записью
+    `update-snapshots` (run 40060814412).
+  - **Tests:** admin vitest **3118/3118** (188 файлов); e2e 4 спеки **13/13**
+    (standalone-стек); Visual Compliance **8/8** машинных проверок (exit 0);
+    критерий незаметности — ожидания edit-тестов не правились ни в одной
+    задаче.
+  - Status: `docs/status/2026-10-24-schedule-create-form-unified-280.md`
+
 ## [Unreleased] — 2026-10-23
 
 ### Added

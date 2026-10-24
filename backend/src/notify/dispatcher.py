@@ -61,6 +61,7 @@ from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.scenarios import SCENARIOS
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -250,7 +251,7 @@ async def reenqueue_stale_tasks(
     terminal-``sent`` rule (§4.4), whereas the reverse order could
     silently lose a notification for a full re-enqueue window.
     """
-    threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+    threshold = utc_now() - timedelta(
         seconds=settings.NOTIFY_REENQUEUE_AFTER
     )
     async with session_factory() as session:

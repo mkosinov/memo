@@ -77,6 +77,14 @@ import {
   MyClientSchema,
   MyRecordCreateSchema,
   MyRecordResponseSchema,
+  MyVisitItemSchema,
+  MyRecordItemSchema,
+  MyRecordListResponseSchema,
+  MyPhotoItemSchema,
+  MyPhotoListResponseSchema,
+  MyPaymentRecordContextSchema,
+  MyPaymentItemSchema,
+  MyPaymentListResponseSchema,
   UserSettingsCreateSchema,
   UserSettingsResponseSchema,
   UserSettingsUpdateSchema,
@@ -2803,6 +2811,166 @@ describe('MyRecordResponseSchema (GH #499 §5 — 201 body)', () => {
   it('rejects a missing required top-level field', () => {
     const { id: _id, ...without } = validResponse;
     expect(() => MyRecordResponseSchema.parse(without)).toThrow();
+  });
+});
+
+// ─── Client cabinet read (GH #513 — the three /my lists) ────────────────────
+
+describe('MyRecordItemSchema (GH #513 — GET /my/records items)', () => {
+  const validVisit = { id: 'v-1', visitor_name: 'Мария', status: 'waiting', price: 1500 };
+  const validItem = {
+    id: 'r-1',
+    activity_date: '2026-10-25',
+    activity_start: '12:00:00',
+    activity_end: '13:30:00',
+    service_title: 'Рисунок песком',
+    comment: 'Позвоните за день',
+    visits: [validVisit, { id: 'v-2', visitor_name: null, status: 'visited', price: 0 }],
+  };
+
+  it('parses a record with its per-visitor rows', () => {
+    const parsed = MyRecordItemSchema.parse(validItem);
+    expect(parsed.id).toBe('r-1');
+    expect(parsed.service_title).toBe('Рисунок песком');
+    expect(parsed.visits).toHaveLength(2);
+    expect(parsed.visits[1].visitor_name).toBeNull(); // anonymous seat is legal per domain
+    expect(parsed.visits[1].price).toBe(0);
+  });
+
+  it('comment is nullable (client and staff both leave it)', () => {
+    expect(MyRecordItemSchema.parse({ ...validItem, comment: null }).comment).toBeNull();
+  });
+
+  it('visit status reuses the VisitStatus union (#480)', () => {
+    expect(MyVisitItemSchema.parse({ ...validVisit, status: 'cancelled' }).status).toBe('cancelled');
+    expect(() => MyVisitItemSchema.parse({ ...validVisit, status: 'confirmed' })).toThrow(); // dead Wave-5 value
+  });
+
+  it('rejects a visit missing the snapshot price (#357 — price never absent)', () => {
+    const { price: _price, ...without } = validVisit;
+    expect(() => MyVisitItemSchema.parse(without)).toThrow();
+  });
+
+  it('rejects a record missing activity_end (computed server-side, always present)', () => {
+    const { activity_end: _end, ...without } = validItem;
+    expect(() => MyRecordItemSchema.parse(without)).toThrow();
+  });
+});
+
+describe('MyPhotoItemSchema (GH #513 — GET /my/photos items)', () => {
+  const validItem = {
+    id: 'p-1',
+    filename: '2026/10/photo-1.jpg',
+    is_public: true,
+    tags: ['весна', 'песок'],
+    created_at: '2026-10-20T12:00:00Z',
+  };
+
+  it('parses a photo with resolved tag NAMES (string[])', () => {
+    const parsed = MyPhotoItemSchema.parse(validItem);
+    expect(parsed.tags).toEqual(['весна', 'песок']);
+    expect(parsed.is_public).toBe(true);
+  });
+
+  it('an untagged photo parses with tags: []', () => {
+    expect(MyPhotoItemSchema.parse({ ...validItem, tags: [] }).tags).toEqual([]);
+  });
+
+  it('is_public is required (the publish badge)', () => {
+    const { is_public: _pub, ...without } = validItem;
+    expect(() => MyPhotoItemSchema.parse(without)).toThrow();
+  });
+});
+
+describe('MyPaymentItemSchema (GH #513 — GET /my/payments items)', () => {
+  const validItem = {
+    id: 'pay-1',
+    amount: 4500,
+    method: 'card',
+    created_at: '2026-10-21T10:00:00Z',
+    record: { id: 'r-1', activity_date: '2026-10-25', service_title: 'Рисунок песком' },
+  };
+
+  it('parses a payment with the brief record context', () => {
+    const parsed = MyPaymentItemSchema.parse(validItem);
+    expect(parsed.amount).toBe(4500);
+    expect(parsed.record.id).toBe('r-1');
+    expect(parsed.record.activity_date).toBe('2026-10-25');
+    expect(parsed.record.service_title).toBe('Рисунок песком');
+  });
+
+  it('method is nullable (null → «Способ не указан»)', () => {
+    expect(MyPaymentItemSchema.parse({ ...validItem, method: null }).method).toBeNull();
+  });
+
+  it('unknown method → ZodError (PaymentMethod union reused)', () => {
+    expect(() => MyPaymentItemSchema.parse({ ...validItem, method: 'crypto' })).toThrow();
+  });
+
+  it('record is REQUIRED — the null branch does not exist (FK + cascade)', () => {
+    const { record: _record, ...without } = validItem;
+    expect(() => MyPaymentItemSchema.parse(without)).toThrow();
+    expect(() => MyPaymentItemSchema.parse({ ...validItem, record: null })).toThrow();
+  });
+
+  it('record context requires activity_date (exactly three fields, all required)', () => {
+    expect(() =>
+      MyPaymentRecordContextSchema.parse({ id: 'r-1', service_title: 'Рисунок песком' }),
+    ).toThrow();
+  });
+});
+
+describe('My lists ride the paginated envelope (GH #513)', () => {
+  const envelope = { total: 1, page: 1, per_page: 20 };
+
+  it('MyRecordListResponseSchema parses {items, total, page, per_page}', () => {
+    const parsed = MyRecordListResponseSchema.parse({
+      ...envelope,
+      items: [
+        {
+          id: 'r-1',
+          activity_date: '2026-10-25',
+          activity_start: '12:00:00',
+          activity_end: '13:30:00',
+          service_title: 'Рисунок песком',
+          comment: null,
+          visits: [],
+        },
+      ],
+    });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+    expect(parsed.per_page).toBe(20);
+  });
+
+  it('MyPhotoListResponseSchema parses the envelope', () => {
+    const parsed = MyPhotoListResponseSchema.parse({
+      ...envelope,
+      items: [{ id: 'p-1', filename: 'f.jpg', is_public: false, tags: [], created_at: '2026-10-20T12:00:00Z' }],
+    });
+    expect(parsed.items[0].is_public).toBe(false);
+  });
+
+  it('MyPaymentListResponseSchema parses the envelope', () => {
+    const parsed = MyPaymentListResponseSchema.parse({
+      ...envelope,
+      items: [
+        {
+          id: 'pay-1',
+          amount: 4500,
+          method: null,
+          created_at: '2026-10-21T10:00:00Z',
+          record: { id: 'r-1', activity_date: '2026-10-25', service_title: 'Рисунок песком' },
+        },
+      ],
+    });
+    expect(parsed.items[0].method).toBeNull();
+  });
+
+  it('a broken item fails the whole envelope (fail-closed validation)', () => {
+    expect(() =>
+      MyPaymentListResponseSchema.parse({ ...envelope, items: [{ id: 'pay-1', amount: 4500 }] }),
+    ).toThrow();
   });
 });
 

@@ -535,21 +535,7 @@ These smoke checks verify the /schedule page renders with expected UI text. Veri
 
 **Why only navigation smoke checks?** The script is a quick "is the page alive" check. Complex states require opening modals, clicking tabs, etc. — that's what visual-regression.spec.ts and the 10 E2E are for. Trying to put complex state checks in this section caused the script to fail parsing them as CSS selectors (see git history for the 2026-06-19 fix).
 
-**Current baseline snapshots (4):**
-- `modal-settings-chromium-linux.png`
-- `modal-new-booking-chromium-linux.png`
-- `records-default-chromium-linux.png`
-- `records-filtered-chromium-linux.png`
-
-**Frozen at v2 ship.** Expansion tracked separately.
-
-**Current baseline snapshots (4):**
-- `modal-settings-chromium-linux.png`
-- `modal-new-booking-chromium-linux.png`
-- `records-default-chromium-linux.png`
-- `records-filtered-chromium-linux.png`
-
-**Frozen at v2 ship.** Expansion tracked separately.
+**Current baseline snapshots** — updated 2026-10-23 (#496): single Playwright project `e2e` (native CI sharding, #415 / PR #494), filename suffix `-e2e-linux`; 71 files across 3 snapshot dirs (visual-regression 61, wave6-status 6, week-view 4). The original v2 list of 4 `*-chromium-linux.png` snapshots is obsolete — the legacy files were deleted with the migration.
 
 ---
 

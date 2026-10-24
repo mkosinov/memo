@@ -119,6 +119,8 @@ class TestPaymentsCrud:
         """POST /api/v1/payments without created_at uses server default (now)."""
         from datetime import datetime, timedelta
 
+        from src.util.utc import utc_now
+
         record_id = _create_record(api_client)
         payload = {
             "record_id": record_id,
@@ -126,9 +128,9 @@ class TestPaymentsCrud:
             "method": "card",
         }
 
-        before = datetime.utcnow()
+        before = utc_now()
         response = api_client.post("/api/v1/payments", json=payload)
-        after = datetime.utcnow()
+        after = utc_now()
 
         assert response.status_code == 201, f"Create failed: {response.text}"
         body = response.json()

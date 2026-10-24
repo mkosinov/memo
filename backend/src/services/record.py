@@ -24,7 +24,7 @@ visitors are handled by their owner services behind the scenarios.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
@@ -56,6 +56,7 @@ from src.schemas.record import (
     VisitResponse,
 )
 from src.services.generic import GenericService
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -566,7 +567,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
         record.client_id = client_id
         record.comment = comment
         record.custom_price = custom_price
-        record.updated_at = datetime.now(UTC)
+        record.updated_at = utc_now()
         await db_session.flush()
         return record
 
@@ -615,7 +616,7 @@ class RecordService(GenericService[RecordCreate, RecordUpdate, RecordResponse]):
             record.comment = cast("str | None", fields["comment"])
         if "custom_price" in fields:
             record.custom_price = cast("int | None", fields["custom_price"])
-        record.updated_at = datetime.now(UTC)
+        record.updated_at = utc_now()
         await db_session.flush()
         return record
 

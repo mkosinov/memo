@@ -30,7 +30,6 @@ marks live in the owner modules; their absence HERE is pinned by
 
 from __future__ import annotations
 
-from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +53,7 @@ from src.schemas.staff import (
 )
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -136,7 +136,7 @@ async def _account_blocks(
         .where(
             PasswordSetupToken.user_id.in_(list(staff_by_user)),
             PasswordSetupToken.used_at.is_(None),
-            PasswordSetupToken.expires_at > datetime.utcnow(),
+            PasswordSetupToken.expires_at > utc_now(),
         )
         # Defensive: the partial unique index guarantees ONE live token
         # per user; a deterministic order makes any violation loud

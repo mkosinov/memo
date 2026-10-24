@@ -19,7 +19,7 @@ pilot ``new_record`` mark).
 
 ``occurred_at`` is stamped at MARK time with naive UTC now — the
 repository timestamp convention (``AbstractModel.created_at`` and
-``AuditLog.created_at`` default to ``datetime.utcnow``).
+``AuditLog.created_at`` default to ``utc_now``).
 
 .. NOTE:: IMPORT DISCIPLINE (precedent: ``audit.py``)
     This module imports NO models — the staged row is a plain dict
@@ -32,8 +32,9 @@ from __future__ import annotations
 
 import contextvars
 import logging
-from datetime import datetime
 from typing import Any
+
+from src.util.utc import utc_now
 
 logger = logging.getLogger("memo.notify.journal")
 
@@ -88,7 +89,7 @@ def mark_domain_event(type: str, snapshot: dict[str, Any] | None) -> None:
     """Stage one domain-event row in the current transaction's accumulator.
 
     ``occurred_at`` is stamped NOW with naive UTC (the repository
-    timestamp convention — mirrors the ``datetime.utcnow`` model
+    timestamp convention — mirrors the ``utc_now`` model
     defaults); the ``snapshot`` is stored as passed (the scenario-side
     builder owns its §4.1 serialization contract). The row is a plain
     dict keyed by ``DomainEvent`` column names. No-op with a debug log
@@ -105,7 +106,7 @@ def mark_domain_event(type: str, snapshot: dict[str, Any] | None) -> None:
     rows.append(
         {
             "type": type,
-            "occurred_at": datetime.utcnow(),
+            "occurred_at": utc_now(),
             "snapshot": snapshot,
         }
     )

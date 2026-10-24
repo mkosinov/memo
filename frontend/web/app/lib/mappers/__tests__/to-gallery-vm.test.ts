@@ -71,4 +71,30 @@ describe('toGalleryPhotoView (GH #479: PhotoResponse → gallery view)', () => {
   it('rejects an empty filename', () => {
     expect(toGalleryPhotoView(photoResponse({ filename: '' }))).toBeNull();
   });
+
+  it('normalizes BEFORE the allowlist — whitespace-smuggled schemes are caught (GH #517)', () => {
+    // A leading space used to slip past the scheme check and render as a URL.
+    expect(toGalleryPhotoView(photoResponse({ filename: ' javascript:alert(1)' }))).toBeNull();
+    expect(toGalleryPhotoView(photoResponse({ filename: 'javascript:alert(1) \t' }))).toBeNull();
+  });
+
+  it('rejects a scheme glued from control characters (GH #517)', () => {
+    // "ja<NUL>vascript:" collapses into "javascript:" after control-char
+    // removal — the scheme check then rejects it.
+    expect(toGalleryPhotoView(photoResponse({ filename: 'ja\x00vascript:alert(1)' }))).toBeNull();
+    expect(toGalleryPhotoView(photoResponse({ filename: 'data\x1f:text/html;x' }))).toBeNull();
+  });
+
+  it('strips control characters inside a same-origin path (GH #517)', () => {
+    expect(toGalleryPhotoView(photoResponse({ filename: '/images/a\x00b.jpg' }))?.url).toBe('/images/ab.jpg');
+  });
+
+  it('returns null when the filename is only whitespace/control junk (GH #517)', () => {
+    expect(toGalleryPhotoView(photoResponse({ filename: ' \x00 \x1f ' }))).toBeNull();
+  });
+
+  it('trims outer whitespace on otherwise-legit values (GH #517)', () => {
+    expect(toGalleryPhotoView(photoResponse({ filename: '  /images/a.jpg  ' }))?.url).toBe('/images/a.jpg');
+    expect(toGalleryPhotoView(photoResponse({ filename: '\t https://cdn.example.com/a.jpg \t' }))?.url).toBe('https://cdn.example.com/a.jpg');
+  });
 });

@@ -14,6 +14,15 @@
 #   output-dir       Where to save screenshots (default: /tmp/visual-compliance)
 #   viewport         "mobile" (390x844) or "desktop" (default: mobile)
 #
+# Optional environment:
+#   VISUAL_STORAGE_STATE  Path to a Playwright storageState JSON. When set,
+#      the browser context is created with this storage state (cookies +
+#      localStorage) — required when the spec's checks target AUTHENTICATED
+#      views (the runner never drives a login form itself). Unset (default)
+#      = anonymous context, exactly the historical behavior. A set-but-
+#      missing, non-JSON, or wrong-shape (not { cookies: [...], origins: [...] })
+#      file is an infrastructure failure (exit 2).
+#
 # Exit codes (single canon of the gate's codes — callers follow this table):
 #   0  Green: all automatable checks passed (MANUAL_REVIEW items do not fail
 #      the gate), OR the spec's visual checks section is marked N/A
@@ -21,12 +30,16 @@
 #      Playwright, and report stages)
 #   1  Red: one or more automatable checks genuinely failed
 #   2  Infrastructure/usage failure: bad arguments, missing dependency,
-#      spec file not found, parser crash, or dev server unreachable
+#      spec file not found, parser crash, or dev server unreachable —
+#      including a set-but-invalid VISUAL_STORAGE_STATE (missing file,
+#      non-JSON, or wrong shape; see the env block above)
 #   3  Spec gap (return the card to design): the visual checks section is
 #      missing, empty, or contains no machine-usable hints — the spec
 #      section must be (re)designed in the design phase, not patched here
 #
-# Stage order: arguments → spec file exists → parse → branch
+# Stage order: arguments → VISUAL_STORAGE_STATE validation (when set:
+#      exists → JSON → storageState shape) → spec file exists → parse →
+#      branch
 #   (N/A → print verdict, exit 0 immediately) →
 #   (no section / empty / zero machine hints → exit 3) →
 #   (applicable with hints → deps → server pre-flight → Playwright → report)
@@ -61,6 +74,34 @@ DEV_URL="$1"
 SPEC_FILE="$2"
 OUTPUT_DIR="${3:-/tmp/visual-compliance}"
 VIEWPORT="${4:-mobile}"
+
+# --- Optional authenticated context (VISUAL_STORAGE_STATE) --------------------
+
+VISUAL_STORAGE_STATE="${VISUAL_STORAGE_STATE:-}"
+if [ -n "$VISUAL_STORAGE_STATE" ]; then
+    if [ ! -f "$VISUAL_STORAGE_STATE" ]; then
+        echo "ERROR: VISUAL_STORAGE_STATE is set but the file does not exist: $VISUAL_STORAGE_STATE" >&2
+        exit 2
+    fi
+    if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$VISUAL_STORAGE_STATE" 2>/dev/null; then
+        echo "ERROR: VISUAL_STORAGE_STATE is not valid JSON: $VISUAL_STORAGE_STATE" >&2
+        exit 2
+    fi
+    # Shape check (Playwright storageState contract): both `cookies` and
+    # `origins` must be arrays. A JSON-valid-but-wrong-shape file would
+    # otherwise throw inside browser.newContext — OUTSIDE the runner's
+    # try block — and surface as an unhandled rejection misclassified as
+    # "checks failed" (exit 1). Failing HERE keeps it an exit-2 infra error.
+    if ! node -e '
+        const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        if (!j || typeof j !== "object" || Array.isArray(j)) process.exit(1);
+        if (!Array.isArray(j.cookies) || !Array.isArray(j.origins)) process.exit(1);
+    ' "$VISUAL_STORAGE_STATE" 2>/dev/null; then
+        echo "ERROR: VISUAL_STORAGE_STATE is not a Playwright storageState (expected { cookies: [...], origins: [...] }): $VISUAL_STORAGE_STATE" >&2
+        exit 2
+    fi
+    echo "Using storageState for authenticated checks: $VISUAL_STORAGE_STATE"
+fi
 
 # Derive phase name from spec filename (e.g. "schedule-design.md" -> "schedule")
 PHASE_NAME=$(basename "$SPEC_FILE" .md | sed 's/-design//g' | sed 's/-spec//g')
@@ -215,6 +256,9 @@ const fs = require('fs');
     const checksFile = args[1];
     const phaseDir = args[2];
     const viewportType = args[3] || 'mobile';
+    // Optional authenticated context (header env contract): a Playwright
+    // storageState file path, or '' for the historical anonymous context.
+    const storageStatePath = args[4] || '';
 
     // Parser contract (GH #311): checks.json is an OBJECT
     // { "applicable": bool, "checks": [...] } — the runner consumes .checks.
@@ -265,11 +309,14 @@ const fs = require('fs');
 
     // Launch browser
     const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext(
-        viewportType === 'mobile'
-            ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)' }
-            : { viewport: { width: 1280, height: 720 } }
-    );
+    const contextOptions = viewportType === 'mobile'
+        ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)' }
+        : { viewport: { width: 1280, height: 720 } };
+    if (storageStatePath) {
+        console.log('Context storageState: ' + storageStatePath);
+        contextOptions.storageState = storageStatePath;
+    }
+    const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
 
     // Helper: screenshot a state
@@ -431,8 +478,9 @@ fi
 # @playwright/test is installed in /usr/local/lib/node_modules by the Dockerfile,
 # and Node's require() does not search global modules unless NODE_PATH is set.
 # set +e: the runner exits 1 when checks fail — capture it, still write the report.
+# The storageState path (when set) rides argv, never interpolated JS source.
 set +e
-NODE_PATH=/usr/local/lib/node_modules node "$PLAYWRIGHT_SCRIPT" "$DEV_URL" "$CHECKS_FILE" "$PHASE_DIR" "$VIEWPORT"
+NODE_PATH=/usr/local/lib/node_modules node "$PLAYWRIGHT_SCRIPT" "$DEV_URL" "$CHECKS_FILE" "$PHASE_DIR" "$VIEWPORT" "$VISUAL_STORAGE_STATE"
 EXIT_CODE=$?
 set -e
 

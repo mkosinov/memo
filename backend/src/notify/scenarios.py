@@ -40,6 +40,7 @@ from src.models.record import Record
 from src.notify.models import DomainEvent, NotifyTask
 from src.notify.render import render_event
 from src.notify.time import business_now
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,7 +111,7 @@ async def _skip(
             skip_reason=reason,
         )
     )
-    event.processed_at = datetime.utcnow()
+    event.processed_at = utc_now()
     await session.commit()
 
 
@@ -147,7 +148,7 @@ async def handle_new_record(
     record_id = (snapshot.get("event") or {}).get("record_id")
     record = await session.get(Record, record_id) if record_id else None
     if record is None:
-        event.processed_at = datetime.utcnow()
+        event.processed_at = utc_now()
         await session.commit()
         return
 
@@ -203,7 +204,7 @@ async def handle_new_record(
         channels=channels,
     )
     session.add(task)
-    event.processed_at = datetime.utcnow()
+    event.processed_at = utc_now()
     await session.commit()
 
     # Enqueue AFTER the commit (§3.4): an enqueue failure leaves the

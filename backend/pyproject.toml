@@ -58,6 +58,8 @@ select = [
     "N",    # pep8-naming
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
+    "DTZ003",  # flake8-datetimez: datetime.utcnow() banned (GH #529, DTZ=0 guard)
+    "DTZ005",  # flake8-datetimez: datetime.now() without tz banned (GH #529, DTZ=0 guard)
     "SIM",  # flake8-simplify
     "TCH",  # flake8-type-checking
     "RUF",  # ruff-specific rules

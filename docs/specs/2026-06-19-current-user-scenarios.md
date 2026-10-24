@@ -210,7 +210,7 @@ States that must be screenshot-stable. Verified by `visual-compliance-check.sh` 
 - [ ] `/schedule` with 5+ activities (grid stress) — **NOT YET BASELINED**
 - [ ] Экран входа (auth-гейт `/schedule` для гостя) — поле телефона на форме входа помечено data-testid="phone-input", url="/login"
 - [ ] `/schedule` with `ActivityDetailModal` open, full backdrop blur — **NOT YET BASELINED**
-- [ ] `ActivityDetailModal` — Settings tab, default state ✅ baseline (`modal-settings-chromium-linux.png`)
+- [ ] `ActivityDetailModal` — Settings tab, default state ✅ baseline (`modal-settings-e2e-linux.png`)
 - [ ] `ActivityDetailModal` — Records tab, 1 record — **NOT YET BASELINED**
 - [ ] `ActivityDetailModal` — Records tab, 5+ records (scrollable) — **NOT YET BASELINED**
 - [ ] `ActivityDetailModal` — Records tab, with cancelled record — **NOT YET BASELINED**

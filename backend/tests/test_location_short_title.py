@@ -37,33 +37,31 @@ class TestLocationSchemaShortTitle:
 
     def test_location_response_includes_short_title(self) -> None:
         """LocationResponse can be created with short_title."""
-        from datetime import datetime
-
         from src.schemas.location import LocationResponse
+        from src.util.utc import utc_now
 
         resp = LocationResponse(
             id="test-id",
             title="Test Studio",
             capacity=20,
             short_title="TS",
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=utc_now(),
+            updated_at=utc_now(),
             is_active=True,
         )
         assert resp.short_title == "TS"
 
     def test_location_response_short_title_optional(self) -> None:
         """LocationResponse allows short_title=None."""
-        from datetime import datetime
-
         from src.schemas.location import LocationResponse
+        from src.util.utc import utc_now
 
         resp = LocationResponse(
             id="test-id",
             title="Test Studio",
             capacity=20,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=utc_now(),
+            updated_at=utc_now(),
             is_active=True,
         )
         assert resp.short_title is None

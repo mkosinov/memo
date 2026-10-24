@@ -22,7 +22,6 @@ only — the session test DB is untouched → ``pure_unit``.
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -35,6 +34,7 @@ from sqlalchemy.orm import Session as ORMSession
 from alembic import command
 from src.db.base import Base
 from src.models import User
+from src.util.utc import utc_now
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -202,11 +202,11 @@ class TestModelBehaviorOnCreateAll:
             s.add(u)
             s.commit()
             s.add(PasswordSetupToken(
-                token="a" * 64, user_id=u.id, expires_at=datetime.utcnow(),
+                token="a" * 64, user_id=u.id, expires_at=utc_now(),
             ))
             s.commit()
             s.add(PasswordSetupToken(
-                token="b" * 64, user_id=u.id, expires_at=datetime.utcnow(),
+                token="b" * 64, user_id=u.id, expires_at=utc_now(),
             ))
             with pytest.raises(IntegrityError):
                 s.commit()
@@ -225,24 +225,24 @@ class TestModelBehaviorOnCreateAll:
             s.add(u)
             s.commit()
             first = PasswordSetupToken(
-                token="a" * 64, user_id=u.id, expires_at=datetime.utcnow(),
+                token="a" * 64, user_id=u.id, expires_at=utc_now(),
             )
             s.add(first)
             s.commit()
 
-            first.used_at = datetime.utcnow()
+            first.used_at = utc_now()
             s.commit()
 
             # A fresh live token for the same user is fine now…
             s.add(PasswordSetupToken(
-                token="b" * 64, user_id=u.id, expires_at=datetime.utcnow(),
+                token="b" * 64, user_id=u.id, expires_at=utc_now(),
             ))
             s.commit()
 
             # …and another USED row also does not clash with the live one.
             s.add(PasswordSetupToken(
                 token="c" * 64, user_id=u.id,
-                expires_at=datetime.utcnow(), used_at=datetime.utcnow(),
+                expires_at=utc_now(), used_at=utc_now(),
             ))
             s.commit()
         engine.dispose()
@@ -257,7 +257,7 @@ class TestModelBehaviorOnCreateAll:
             s.add(u)
             s.commit()
             s.add(PasswordSetupToken(
-                token="a" * 64, user_id=u.id, expires_at=datetime.utcnow(),
+                token="a" * 64, user_id=u.id, expires_at=utc_now(),
             ))
             s.commit()
             s.delete(u)

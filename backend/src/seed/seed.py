@@ -133,12 +133,13 @@ WEEK3_START = FUNC_WEEK_START                      # 2026-06-01 — reference fu
 # consistent screenshots regardless of when tests are run.
 WEEK_FIXED_START = datetime(2026, 6, 15)  # Monday, 2026-06-15 (original — for visual baselines)
 
-# Fixed rising created_at for the 7 seed photos (ph1–ph7 aliases):
-# consecutive days at noon starting at WEEK_FIXED_START — pins photos visual
-# baselines to the fixed week (sorted-by-created_at lists stop drifting
-# across UTC midnight). Keys are photo ALIASES, not DB ids. Naive datetimes:
-# the DB column is naive; explicit values so the AbstractModel default
-# (datetime.utcnow) no longer fires for seed photos.
+# Fixed rising created_at for the 9 seed photos (aliases ph1–ph7 +
+# ph_c1_private, ph_c2_private): consecutive days at noon starting at
+# WEEK_FIXED_START — pins photos visual baselines to the fixed week
+# (sorted-by-created_at lists stop drifting across UTC midnight). Keys
+# are photo ALIASES, not DB ids. Naive datetimes: the DB column is
+# naive; explicit values so the AbstractModel default (utc_now)
+# no longer fires for seed photos.
 PHOTO_FIXED_DATES: dict[str, datetime] = {
     "ph1": datetime(2026, 6, 15, 12, 0, 0),
     "ph2": datetime(2026, 6, 16, 12, 0, 0),
@@ -147,6 +148,10 @@ PHOTO_FIXED_DATES: dict[str, datetime] = {
     "ph5": datetime(2026, 6, 19, 12, 0, 0),
     "ph6": datetime(2026, 6, 20, 12, 0, 0),
     "ph7": datetime(2026, 6, 21, 12, 0, 0),
+    # #513 cabinet delta (both NON-public — the public gallery feed of 7
+    # is untouched): c1's private photo (С3) + c2's photo (С2 isolation).
+    "ph_c1_private": datetime(2026, 6, 22, 12, 0, 0),
+    "ph_c2_private": datetime(2026, 6, 23, 12, 0, 0),
 }
 
 _SERVICE_NAME_TO_ALIAS: dict[str, str] = {
@@ -724,7 +729,7 @@ async def _seed_activity_tags(session: AsyncSession, ids: _SeedIds) -> None:
 
 
 async def _seed_photos(session: AsyncSession, ids: _SeedIds) -> None:
-    """Seed 7 photos with mutually exclusive owners (GH #211).
+    """Seed 9 photos with mutually exclusive owners (GH #211).
 
     Layout (L1=«Альпика» alias alpika, T1=tag1 «новинка», T2=tag2 «хит»):
     - ph1, ph2 — client-owned by the SAME client (c1); filenames share the
@@ -735,6 +740,15 @@ async def _seed_photos(session: AsyncSession, ids: _SeedIds) -> None:
     - ph5 — owner-less tag-pair photo ([T1, T2]) → tags AND demo
     - ph6, ph7 — activity-owned guest photos (tag 'гость'); both activities
       are located at L1='alpika'; ph6 additionally carries T1 only
+    - ph_c1_private — c1's NON-public photo (#513 С3: the cabinet shows it
+      with «Не опубликовано», the guest gallery must not show it)
+    - ph_c2_private — c2's NON-public photo (#513 С2: second-client
+      isolation on the photos screen; c2 already carries record+payment)
+
+    Both #513 delta rows are non-public, so the public gallery feed
+    (``is_public=true``) stays exactly the 7 original photos. The
+    filenames deliberately avoid the "client" substring — the admin
+    q-search e2e pins ph1/ph2 by it.
     """
     # (alias, fields with FK aliases)
     photos: list[tuple[str, dict[str, object]]] = [
@@ -760,6 +774,14 @@ async def _seed_photos(session: AsyncSession, ids: _SeedIds) -> None:
         ("ph7", {"filename": "/images/guest-2.jpg",
                  "activity_id": ids.get("activities", "ev_4"),
                  "is_public": True, "created_at": PHOTO_FIXED_DATES["ph7"]}),
+        ("ph_c1_private", {"filename": "/images/cabinet-draft.jpg",
+                           "client_id": ids.get("clients", "c1"),
+                           "is_public": False,
+                           "created_at": PHOTO_FIXED_DATES["ph_c1_private"]}),
+        ("ph_c2_private", {"filename": "/images/maria-canvas.jpg",
+                           "client_id": ids.get("clients", "c2"),
+                           "is_public": False,
+                           "created_at": PHOTO_FIXED_DATES["ph_c2_private"]}),
     ]
     for alias, fields in photos:
         photo = Photo(id=_new_id(), **fields)

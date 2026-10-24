@@ -48,7 +48,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     PASS**; ruff+mypy+lint-бюджет зелёные; coverage **90.61%**
     (`worker.py` ~90%); визуальный гейт N/A → exit 0; сценарии
     S6–S10 ✅.
-  - Status: `docs/status/2026-10-24-notify-worker-484.md`
+   - Status: `docs/status/2026-10-24-notify-worker-484.md`
+
+- **GH #529 — Волна миграции `datetime.utcnow()` → единый помощник `utc_now()`
+  + страж DTZ003/DTZ005** — branch `529-utcnow-wave` (5 коммитов
+  `d6583f98..2f29dae2`, base `5637e68b`; 42 файла, +195/−127; спека
+  `docs/specs/2026-10-23-utcnow-migration-wave-design.md` рев.2 — Visual
+  Compliance: N/A, план
+  `docs/plans/2026-10-23-utcnow-migration-wave-plan.md` 5/5; backend-only —
+  UI, контракт API, миграции и значения времени не меняются):
+  - **Помощник (T1, `d6583f98`, trivial):** `backend/src/util/utc.py::utc_now()`
+    — единая точка наивного UTC-«сейчас» в src; чистый pure-unit тест
+    (`tzinfo is None` + допуск ≤2 с); перекрёстные докстринги
+    `utc_now()` ↔ `business_now()` (`src/notify/time.py`, #482 — бизнес-стена,
+    не тронут); aware-время и часовые пояса — отдельная задача #498.
+  - **Волна src (T2, `d6be088c`, standard):** 26 вызовов → `utc_now()`;
+    8 ORM-ссылок вне вызовов (6 строк: базовая модель, master, audit_log,
+    password_setup) → `default=utc_now`/`onupdate=utc_now`; проза
+    (докстринги/комментарии) в 4 местах; нормализация 7 aware-записей
+    `record.updated_at = datetime.now(UTC)` и порога чистки dispatcher на
+    помощника (хранимые значения и так наивные — SQLite срезает зону);
+    осознанные исключения спеки п. 4 не тронуты.
+  - **Волна tests (T3, `74d2e8f9`, standard):** 55 вызовов в 15 файлах →
+    `utc_now()`; 4 наивных локальных `now()` в `test_location_short_title.py`
+    на помощника; 3 прозы; ожидания фикстур/базлайнов не правились.
+  - **Девиация (mid-phase, `c04ebed6`):** «НЕ» → «не» в докстринге `utc_now()`
+    — кириллические Н/Е, конфузаблы RUF002 (факт 6 > бюджет 4 — CI был бы
+    красным); текст спеки п. 1 содержал «НЕ», семантика не изменилась.
+  - **Страж (T4, `2f29dae2`, trivial):** ruff `select` += `DTZ003`/`DTZ005`
+    + нулевые бюджеты в `lint_budget.py` (рахет #306) — новый `utcnow()`/
+    наивный `now()` в backend-коде красит CI.
+  - **Tests:** полный backend pytest **3632p/0f (44 skipped)**, exit 0;
+    warnings summary — записей класса `DeprecationWarning: ...utcnow()...`
+    **0** (было ~74 303); юнит-семейства auth/OTP/токенов **80/80** без правок
+    ожиданий; волна-tests файлы **280/0**; lint-budget зелёный; негативная
+    проба US-2 продемонстрирована (вставка `utcnow` → красный по DTZ003,
+    откат → зелёный); US-1 (чистая сводка) ✅ локально — CI подтвердит,
+    US-3 (e2e-шарды) — гейт PR CI (фикстуры/базлайны байт-не тронуты).
+  - Status: `docs/status/2026-10-24-utcnow-migration-wave-529.md`
+
+## [Unreleased] — 2026-10-23
+
+### Added
+- **GH #513 — Клиентский кабинет: чтение /my (записи/фото/платежи) + три
+  экрана** — branch `513-cabinet-read` (15 коммитов `c6fae56b..691ff5bf`,
+  base `ecbbe07f`; 83 файла, +6374/−159; спека
+  `docs/specs/2026-10-22-web-client-cabinet-read-design.md`, план
+  `docs/plans/2026-10-22-web-client-cabinet-read-plan.md` 10/10; срез
+  чтения после #499/#523; гостевая галерея, админка и публичные контракты
+  не меняются):
+  - **Backend (T1–T3):** `GET /api/v1/my/records` — per-endpoint схемы
+    `MyRecordItem`/`MyVisitItem` (дата/время занятия из начала+длительности,
+    услуга, посетители со статусом и ценой-снапшотом `custom_price` ?? 
+    `price`, без обращений к тарифам — инвариант #357), сортировка по началу
+    занятия убыв. + `id` возр. (`c6fae56b`; фиксы `1f87b41c` — allowlist
+    мастер-скоуп контракта, `3b5282eb`, `3f062aca`); `GET /api/v1/my/photos`
+    — все свои фото, включая непубличные, с `is_public` (`2badd7c2`);
+    `GET /api/v1/my/payments` — платежи с контекстом занятия (`ee70168d`);
+    все три — владелец из клиентской сессии `require_client_session`
+    (#499), кирпич `PaginationParams`; lint_budget ratchet.
+  - **api-client (T4):** `listMyRecords` / `listMyPhotos` /
+    `listMyPayments` — per-endpoint типы, статус-юнионы переиспользованы
+    (`3f8c1d39`).
+  - **Сид-дельта (T5):** непубличные фото c1 (`cabinet-draft.jpg`) и c2
+    (`maria-canvas.jpg`) — предпосылки сценариев С2/С3; канон-тесты сида
+    обновлены (`83ba745b`).
+  - **Web (T6–T9):** первый playwright-проект в `frontend/web` — стек на
+    портах из динамического окна, OTP-сессия-фикстура с восстановлением
+    кода из БД, `storageState` (`486ca51d`); `cabinet-nav` + экран «Мои
+    записи» (`my-record-card`, `my-visit-status`) — С1, С5 (`b240201c`);
+    «Мои фото» (`my-photo-card`, бейдж «Опубликовано»/«Не опубликовано»,
+    статический render-path + 3 JPEG) — С3 (`30560b0f`; рефактор общих
+    cabinet-фикстур `53a6e091`); «Мои платежи» (`my-payment-row`,
+    `ListPagination`) — С4 (`f3c42096`).
+  - **Харнес-шов + замыкание (T10):** e2e-изоляция С2
+    (`cabinet-isolation.spec.ts`) + opt-in `VISUAL_STORAGE_STATE` в
+    `scripts/visual-compliance-check.sh` для аутентифицированных визуальных
+    проверок с валидацией формы storageState (битый shape → exit 2), смоук
+    скрипта 8/8 (`8cfc9da1`, `691ff5bf`).
+  - **Tests:** backend полный pytest **3677p/0f (44 skipped)** на
+    `ee70168d` + таргет-сьют канона сида **43/0**; web vitest **486/486**;
+    web e2e **9/9** одиночным прогоном (С1–С5 + смоуки); визуальный гейт
+    **exit 0 (5/5)**; admin нетронут (базлайн **3100/0**).
+   - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
 
 ## [Unreleased] — 2026-10-22
 
@@ -99,6 +181,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     гейт N/A → exit 0; сценарии S1–S5 ✅; реальная зелень `notify-tests`
     доказывается на PR CI.
   - Status: `docs/status/2026-10-22-notify-infra-483.md`
+- **GH #464 — e2e: убрать 33-секундное ожидание устаревания из S3 + единая
+  константа окна отмены `UNDO_WINDOW_MS`** — branch `464-e2e-stale-prime`
+  (3 коммита `60b29f0d..798bc66d`, base `d1e18b2a`; 17 файлов, +81/−35;
+  спека `docs/specs/2026-10-22-e2e-stale-prime-464-design.md` рев.1, план
+  `docs/plans/2026-10-22-e2e-stale-prime-464-plan.md` 3/3 — оба на main;
+  продукт не меняется — окно отмены остаётся 5 000 мс):
+  - **Юнит-тест временной ветки (T1, `60b29f0d`, small):** новая пара к тесту
+    `isInvalidated` в `ScheduleDataContext.test.tsx` — кэш старше порога по
+    возрасту данных (`dataUpdatedAt`) → ensure-fresh `deleteActivityDeferred`,
+    `refetched=true`; фейковые таймеры до заполнения кэша, порог приложения
+    `staleTime: 30_000`, состаривание одним `setSystemTime(+31_000)`,
+    дискриминируемость проверена RED-пробой с откатом; сьют файла 45/45.
+  - **Константа `UNDO_WINDOW_MS = 5_000` (T2, `cbf7e317`, standard):**
+    `lib/constants.ts` — единый источник интервала: 13 литералов
+    `delayMs: 5000` в 12 файлах (хуки мутаций + `ScheduleDataContext`),
+    фолбэк undo-тоста `UIContext`, дефолт `advanceMs` e2e-хелпера
+    `withUndoWindow` (5 500 = константа + 500); литералы `__tests__/` и
+    `playwright.config.ts` не тронуты.
+  - **S3 без выдержки (T3, `798bc66d`, small):** `waitForTimeout(33_000)` и
+    недостижимый на свежем кэше ассерт баннера удалены (баннер покрыт
+    юнит-тестами диалога); остальные 7 сценариев файла не тронуты.
+  - **Tests:** admin vitest **3101/3101** (188 файлов), `tsc --noEmit` **0**,
+    e2e `activity-deferred-delete.spec.ts` **8/8**; S3 **45.3s → 3.7s**
+    (−41.6s; ~−33s ожидание, сверх — прогрев Next-роутов в замере «до»),
+    файл 2.7m → 1.4m; визуальный гейт N/A → exit 0; сценарии 1–4 спеки ✅.
+  - Status: `docs/status/2026-10-22-e2e-stale-prime-464.md`
 
 ## [Unreleased] — 2026-10-21
 

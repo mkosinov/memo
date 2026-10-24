@@ -6,7 +6,6 @@ functions. VisitService orchestrates but never calls another service.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +25,7 @@ from src.repositories.visit import VisitRepository, get_visit_repository
 from src.schemas.common import PaginatedResponse
 from src.schemas.visit import VisitCreate, VisitPatch, VisitResponse, VisitUpdate
 from src.services.decorators import transactional
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -249,7 +249,7 @@ class VisitService:
         _old = _visit_snapshot(visit)  # §4.2: before the first mutation
         for field, value in data.model_dump().items():
             setattr(visit, field, value)
-        visit.updated_at = datetime.now(UTC)
+        visit.updated_at = utc_now()
         await db_session.flush()
         # Cascade: status only (seats: no change — is_active not exposed in VisitUpdate)
         await recompute_record_status(db_session, visit.record_id)
@@ -305,7 +305,7 @@ class VisitService:
         _old = _visit_snapshot(visit)  # §4.2: before the first mutation
         for field, value in update_data.items():
             setattr(visit, field, value)
-        visit.updated_at = datetime.now(UTC)
+        visit.updated_at = utc_now()
         await db_session.flush()
         # Cascade: status only
         await recompute_record_status(db_session, visit.record_id)
@@ -368,7 +368,7 @@ class VisitService:
             return None
         _old_status = visit.status
         visit.status = status
-        visit.updated_at = datetime.now(UTC)
+        visit.updated_at = utc_now()
         # Use the domain function instead of inlined logic
         await recompute_record_status(db_session, visit.record_id)
         await db_session.flush()

@@ -122,6 +122,12 @@ import {
   type MyRecordCreate,
   MyRecordResponseSchema,
   type MyRecordResponse,
+  type MyRecordItem,
+  type MyPhotoItem,
+  type MyPaymentItem,
+  MyRecordListResponseSchema,
+  MyPhotoListResponseSchema,
+  MyPaymentListResponseSchema,
 } from './schemas';
 import { ApiError } from './client';
 
@@ -1349,6 +1355,48 @@ export async function createMyRecord(data: MyRecordCreate): Promise<MyRecordResp
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+// ─── Client cabinet read (GH #513 — the three «my» lists) ─────────────────
+// Own-scoped reads behind the client session cookie (memo_client_session —
+// the same transport, client.ts includes credentials). The query is the
+// bare pagination brick: page/per_page + the machine ?id= narrowing
+// (#232, repeated query keys, ANDs with the server-side owner filter).
+// No own content filters, no sort params (sorting is fixed server-side).
+
+export interface MyListParams {
+  page?: number;
+  per_page?: number;
+  /** Machine narrowing by id set (#232): serializes as ?id=X&id=Y. */
+  id?: string[];
+}
+
+function myListQuery(params?: MyListParams): string {
+  const search = new URLSearchParams();
+  if (params?.page) search.set('page', String(params.page));
+  if (params?.per_page) search.set('per_page', String(params.per_page));
+  params?.id?.forEach((v) => search.append('id', v));
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
+
+// Own records with visits (fixed sort: activity start DESC, id ASC).
+// 401 AUTH_UNAUTHORIZED without a client session; 422 on bad pagination.
+export async function listMyRecords(params?: MyListParams): Promise<PaginatedResponse<MyRecordItem>> {
+  return api(`/api/v1/my/records${myListQuery(params)}`, MyRecordListResponseSchema);
+}
+
+// All the client's photos regardless of publicity (fixed sort:
+// created_at DESC, id ASC); tags arrive resolved to names (string[]).
+export async function listMyPhotos(params?: MyListParams): Promise<PaginatedResponse<MyPhotoItem>> {
+  return api(`/api/v1/my/photos${myListQuery(params)}`, MyPhotoListResponseSchema);
+}
+
+// Payments of the client's records (ownership is THROUGH the record;
+// fixed sort: created_at DESC, id ASC); each item carries the always-
+// present record context {id, activity_date, service_title}.
+export async function listMyPayments(params?: MyListParams): Promise<PaginatedResponse<MyPaymentItem>> {
+  return api(`/api/v1/my/payments${myListQuery(params)}`, MyPaymentListResponseSchema);
 }
 
 // ─── User Settings ────────────────────────────────────────────────────

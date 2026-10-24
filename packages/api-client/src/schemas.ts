@@ -968,6 +968,79 @@ export const MyRecordResponseSchema = z.object({
 });
 export type MyRecordResponse = z.infer<typeof MyRecordResponseSchema>;
 
+// ─── Client cabinet read (GH #513 — mirrors backend src/schemas/my.py item
+// shapes). The three /my lists are OWN-scoped (the memo_client_session cookie
+// decides the owner — no client_id anywhere on the wire) and carry NO own
+// filters: the query is the bare pagination brick, see endpoints.ts.
+
+// GET /my/records items[] visit — per-endpoint shape, deliberately NOT
+// VisitResponse: no tariff_id/visitor_id/record_id/custom_price/timestamps
+// (the spec's «не входят» list). `visitor_name` is the linked Visitor's
+// name (null = anonymous seat, legal per domain); `price` is the
+// creation-time SNAPSHOT — never derived from the tariff on read (#357);
+// `status` reuses the VisitStatus union (#480 — there is no RecordStatus).
+export const MyVisitItemSchema = z.object({
+  id: z.string(),
+  visitor_name: z.string().nullable(),
+  status: VisitStatusSchema,
+  price: z.number(),
+});
+export type MyVisitItem = z.infer<typeof MyVisitItemSchema>;
+
+// GET /my/records items[] record. activity_date/start/end are computed
+// server-side from the activity (the model stores only start + duration;
+// end = start + duration, time-of-day after a midnight rollover, date
+// always the start's date) — all three always present. No service fields:
+// client_id/activity_id/seats/record status/custom_price stay out — the
+// client sees per-visit status/price only.
+export const MyRecordItemSchema = z.object({
+  id: z.string(),
+  activity_date: z.string(), // date
+  activity_start: z.string(), // time
+  activity_end: z.string(), // time
+  // FK-enforced join keeps the title always present — plain string.
+  service_title: z.string(),
+  comment: z.string().nullable(),
+  visits: z.array(MyVisitItemSchema),
+});
+export type MyRecordItem = z.infer<typeof MyRecordItemSchema>;
+
+// GET /my/photos items[] — per-endpoint shape, deliberately NOT
+// PhotoResponse: no client_id/client_name (the requester IS the client),
+// no service_id/activity_id/location_id owner slots, no updated_at.
+// `tags` are resolved server-side to tag NAMES (string[]) — tag objects
+// with ids stay in the admin contract. All the client's photos, regardless
+// of publicity (is_public is a display badge, not a filter here).
+export const MyPhotoItemSchema = z.object({
+  id: z.string(),
+  filename: z.string(), // same identifier the public gallery renders by
+  is_public: z.boolean(),
+  tags: z.array(z.string()),
+  created_at: z.string(), // datetime
+});
+export type MyPhotoItem = z.infer<typeof MyPhotoItemSchema>;
+
+// GET /my/payments items[] record context — ALWAYS present (record_id is a
+// mandatory FK and payments are deleted with the record, so no null
+// branch) and exactly these three fields: full record data stays out.
+export const MyPaymentRecordContextSchema = z.object({
+  id: z.string(),
+  activity_date: z.string(), // date
+  service_title: z.string(),
+});
+export type MyPaymentRecordContext = z.infer<typeof MyPaymentRecordContextSchema>;
+
+// `method` is nullable by model (null → «Способ не указан» on the screen);
+// the union itself is the shared PaymentMethod dictionary (#480).
+export const MyPaymentItemSchema = z.object({
+  id: z.string(),
+  amount: z.number(),
+  method: PaymentMethodSchema.nullable(),
+  created_at: z.string(), // datetime
+  record: MyPaymentRecordContextSchema,
+});
+export type MyPaymentItem = z.infer<typeof MyPaymentItemSchema>;
+
 // ─── Users vertical (#348 spec §5 — admin-side account operations) ─────────
 // Mirrors backend src/schemas/user.py. Errors: 404 USER_NOT_FOUND; the phone
 // edit answers domain codes PHONE_TAKEN / PHONE_INVALID; link issue refuses a
@@ -1108,6 +1181,12 @@ export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
 export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
 export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);
 export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
+
+// GH #513 — the three client-cabinet /my lists (same {items, total, page,
+// per_page} envelope; per-endpoint item shapes above).
+export const MyRecordListResponseSchema = paginatedSchema(MyRecordItemSchema);
+export const MyPhotoListResponseSchema = paginatedSchema(MyPhotoItemSchema);
+export const MyPaymentListResponseSchema = paginatedSchema(MyPaymentItemSchema);
 
 // ─── Bare-array /all dictionary responses (GH #205) ─────────────────────────
 

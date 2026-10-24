@@ -21,7 +21,7 @@ Domain rules: docs/domain-rules/auth.md «Клиентская аутентиф�
 
 import hashlib
 import hmac
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -30,6 +30,7 @@ from sqlalchemy import select, update
 from src.auth.otp import OTP_TTL, OtpCode
 from src.core.config import Settings, settings
 from src.errors import ErrorCode
+from src.util.utc import utc_now
 
 pytestmark = pytest.mark.integration
 
@@ -85,9 +86,9 @@ class TestOtpIssue:
     async def test_issue_writes_one_hashed_row_with_5min_ttl(
         self, db_session, otp_service,
     ) -> None:
-        before = datetime.utcnow()
+        before = utc_now()
         code = await otp_service.issue(db_session, PHONE, IP)
-        after = datetime.utcnow()
+        after = utc_now()
 
         assert len(code) == 6
         assert code.isdigit()
@@ -156,7 +157,7 @@ class TestOtpVerify:
         await db_session.execute(
             update(OtpCode)
             .where(OtpCode.phone == PHONE)
-            .values(expires_at=datetime.utcnow() - timedelta(seconds=1))
+            .values(expires_at=utc_now() - timedelta(seconds=1))
         )
 
         assert await otp_service.verify(db_session, PHONE, code, IP) is False
@@ -209,7 +210,7 @@ class TestOtpAttemptLimits:
         code = await otp_service.issue(db_session, PHONE, IP)
         # 19 events already on the shared IP window — one more verify
         # failure must trip the 20/IP wire (§4.1).
-        service_module._FAILURE_COUNTERS[f"otp:ip:{IP}"] = (19, datetime.utcnow())
+        service_module._FAILURE_COUNTERS[f"otp:ip:{IP}"] = (19, utc_now())
 
         with pytest.raises(HTTPException) as exc_info:
             await otp_service.verify(db_session, PHONE, _wrong_code(code), IP)
@@ -267,7 +268,7 @@ class TestOtpSendLimits:
         # A saturated counter whose window has expired must not block —
         # the next send restarts the window (fixed-window semantics).
         service_module._FAILURE_COUNTERS[f"otp_send:phone:{PHONE}"] = (
-            5, datetime.utcnow() - timedelta(minutes=16),
+            5, utc_now() - timedelta(minutes=16),
         )
 
         code = await otp_service.issue(db_session, PHONE, IP)

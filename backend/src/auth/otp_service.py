@@ -25,7 +25,6 @@ Domain rules: docs/domain-rules/auth.md «Клиентская аутентиф�
 from __future__ import annotations
 
 import hmac
-from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -39,6 +38,7 @@ from src.auth.service import (
     register_otp_send,
     register_otp_verify_failure,
 )
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,7 +90,7 @@ class OtpService:
         if gate is not None:
             raise gate
 
-        now = datetime.utcnow()
+        now = utc_now()
         row = (await db_session.execute(
             select(OtpCode).where(OtpCode.phone == phone)
         )).scalar_one_or_none()

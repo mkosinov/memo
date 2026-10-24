@@ -51,6 +51,7 @@ from src.auth.session import (
 from src.errors import ErrorCode
 from src.models.enums import UserRole
 from src.models.user import User
+from src.util.utc import utc_now
 
 pytestmark = pytest.mark.asyncio
 
@@ -98,7 +99,7 @@ def _session_row(
     idle_deadline: datetime | None = None,
     absolute_deadline: datetime | None = None,
 ) -> Session:
-    now = datetime.utcnow()
+    now = utc_now()
     return Session(
         token=secrets.token_urlsafe(32),
         user_id=user_id,
@@ -132,7 +133,7 @@ async def _simulate_lock_expiry(db_session, user: User) -> None:
     """
     from src.auth import service as service_module
 
-    user.locked_until = datetime.utcnow() - timedelta(minutes=1)
+    user.locked_until = utc_now() - timedelta(minutes=1)
     await db_session.commit()
     service_module._FAILURE_COUNTERS.clear()
 
@@ -282,7 +283,7 @@ class TestLoginRotationAndCleanup:
         self, db_session,
     ) -> None:
         user = await _make_user(db_session)
-        now = datetime.utcnow()
+        now = utc_now()
         expired_idle = _session_row(
             user.id, idle_deadline=now - timedelta(minutes=1),
             last_extended_at=now - IDLE_WINDOW - timedelta(minutes=1),
@@ -312,7 +313,7 @@ class TestResolve:
 
     async def test_expired_idle_returns_none_and_deletes_row(self, db_session) -> None:
         user = await _make_user(db_session)
-        now = datetime.utcnow()
+        now = utc_now()
         s = _session_row(user.id, idle_deadline=now - timedelta(seconds=1))
         db_session.add(s)
         await db_session.commit()
@@ -322,7 +323,7 @@ class TestResolve:
 
     async def test_expired_cap_returns_none_and_deletes_row(self, db_session) -> None:
         user = await _make_user(db_session)
-        now = datetime.utcnow()
+        now = utc_now()
         s = _session_row(user.id, absolute_deadline=now - timedelta(seconds=1))
         db_session.add(s)
         await db_session.commit()
@@ -356,7 +357,7 @@ class TestResolve:
 
     async def test_past_throttle_extends_idle_window(self, db_session) -> None:
         user = await _make_user(db_session)
-        now = datetime.utcnow()
+        now = utc_now()
         s = _session_row(
             user.id,
             last_extended_at=now - EXTENSION_THROTTLE - timedelta(minutes=10),
@@ -364,7 +365,7 @@ class TestResolve:
         )
         db_session.add(s)
         await db_session.commit()
-        before = datetime.utcnow()
+        before = utc_now()
 
         authed = await get_auth_service().resolve(db_session, s.token)
         assert authed is not None
@@ -376,7 +377,7 @@ class TestResolve:
 
     async def test_extension_capped_by_absolute_deadline(self, db_session) -> None:
         user = await _make_user(db_session)
-        now = datetime.utcnow()
+        now = utc_now()
         cap = now + timedelta(hours=2)  # closer than now + IDLE_WINDOW
         s = _session_row(
             user.id,
@@ -420,7 +421,7 @@ class TestLockoutLadder:
             with pytest.raises(HTTPException) as ei:
                 await svc.login(db_session, user.phone, "wrong-password", "203.0.113.14")
             assert ei.value.status_code == 401
-        before = datetime.utcnow()
+        before = utc_now()
         with pytest.raises(HTTPException) as ei:
             await svc.login(db_session, user.phone, "wrong-password", "203.0.113.14")
         _assert_locked_out(ei.value, retry_after=True)
@@ -456,7 +457,7 @@ class TestLockoutLadder:
             with pytest.raises(HTTPException) as ei:
                 await svc.login(db_session, user.phone, "wrong-password", "203.0.113.14")
             assert ei.value.status_code == 401
-        before = datetime.utcnow()
+        before = utc_now()
         with pytest.raises(HTTPException) as ei:
             await svc.login(db_session, user.phone, "wrong-password", "203.0.113.14")
         _assert_locked_out(ei.value, retry_after=True)
@@ -593,7 +594,7 @@ class TestInMemoryCounters:
         user = await _make_user(db_session, phone="+79990005551")
         ip = "203.0.113.18"
         service_module._FAILURE_COUNTERS[f"ip:{ip}"] = (
-            IP_FAILURE_THRESHOLD, datetime.utcnow(),
+            IP_FAILURE_THRESHOLD, utc_now(),
         )
         with pytest.raises(HTTPException) as ei:
             await get_auth_service().login(db_session, user.phone, PASSWORD, ip)
@@ -603,7 +604,7 @@ class TestInMemoryCounters:
         from src.auth import service as service_module
 
         ip = "203.0.113.17"
-        stale_start = datetime.utcnow() - FAILURE_WINDOW - timedelta(minutes=1)
+        stale_start = utc_now() - FAILURE_WINDOW - timedelta(minutes=1)
         service_module._FAILURE_COUNTERS[f"ip:{ip}"] = (IP_FAILURE_THRESHOLD, stale_start)
         service_module._FAILURE_COUNTERS["phone:+79990006666"] = (
             PHONE_FAILURE_THRESHOLD, stale_start,
@@ -620,8 +621,8 @@ class TestInMemoryCounters:
         accumulate forever (unbounded ip:/phone: keys otherwise leak)."""
         from src.auth import service as service_module
 
-        stale_start = datetime.utcnow() - FAILURE_WINDOW - timedelta(minutes=5)
-        fresh = datetime.utcnow()
+        stale_start = utc_now() - FAILURE_WINDOW - timedelta(minutes=5)
+        fresh = utc_now()
         service_module._FAILURE_COUNTERS.update({
             f"ip:198.51.100.{i}": (1, stale_start) for i in range(1, 11)
         })
@@ -654,7 +655,7 @@ class TestInMemoryCounters:
         assert f"phone:{user.phone}" not in service_module._FAILURE_COUNTERS
         count, started = service_module._FAILURE_COUNTERS[f"ip:{ip}"]
         assert count == 2
-        assert datetime.utcnow() - started < FAILURE_WINDOW
+        assert utc_now() - started < FAILURE_WINDOW
 
 
 # ─── singleton factory ──────────────────────────────────────────────────────────

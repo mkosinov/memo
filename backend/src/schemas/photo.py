@@ -1,9 +1,10 @@
 """Pydantic schemas for photos."""
 
+import re
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from src.schemas.common import SortOrder, SortParams
 from src.schemas.pagination import PaginationParams
@@ -13,6 +14,22 @@ PhotoSortBy = Literal["filename", "is_public", "created_at"]
 #: A photo is owned by at most ONE of these (GH #211 4-owner model;
 #: enforced by ``ck_photos_single_owner`` at the DB level).
 OWNER_FIELDS = ("client_id", "service_id", "activity_id", "location_id")
+
+_FILENAME_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_filename(value: str) -> str:
+    """``BeforeValidator`` for ``filename`` (GH #517): strip outer whitespace,
+    reject control characters (U+0000..U+001F, U+007F) → 422. Junk must not
+    be stored: the web gallery URL allowlist normalizes too, but the contract
+    should not ship such values in the first place."""
+    cleaned = value.strip()
+    if _FILENAME_CONTROL_CHARS.search(cleaned):
+        raise ValueError("filename must not contain control characters")
+    return cleaned
+
+
+FilenameStr = Annotated[str, BeforeValidator(_sanitize_filename)]
 
 
 def _reject_multiple_owners(values: dict[str, Any]) -> dict[str, Any]:
@@ -26,7 +43,7 @@ def _reject_multiple_owners(values: dict[str, Any]) -> dict[str, Any]:
 class PhotoCreate(BaseModel):
     """Request schema for creating a photo."""
 
-    filename: str
+    filename: FilenameStr
     client_id: str | None = None
     service_id: str | None = None
     activity_id: str | None = None
@@ -43,7 +60,7 @@ class PhotoUpdate(BaseModel):
     NOT NULL columns in the database.
     """
 
-    filename: str
+    filename: FilenameStr
     client_id: str | None = None
     service_id: str | None = None
     activity_id: str | None = None
@@ -64,7 +81,7 @@ class PhotoPatch(BaseModel):
     ``tag_ids``: if sent → hard-replace all tag links. If not sent → preserve existing.
     """
 
-    filename: str | None = None
+    filename: FilenameStr | None = None
     client_id: str | None = None
     service_id: str | None = None
     activity_id: str | None = None

@@ -25,6 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.auth.passwords import hash_password
+from src.util.utc import utc_now
 from tests.conftest import ADMIN_PHONE, insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
@@ -225,7 +226,7 @@ class TestIssuePasswordLink:
         assert set(body) == {"token", "expires_at"}, f"strict shape: {body}"
         assert isinstance(body["token"], str) and len(body["token"]) >= 32
         expires = datetime.fromisoformat(body["expires_at"])
-        now = datetime.utcnow()
+        now = utc_now()
         assert now + timedelta(hours=23) < expires < now + timedelta(hours=25)
         # DB truth: ONE live token row; the digest is stored, never the raw.
         rows = query_db(

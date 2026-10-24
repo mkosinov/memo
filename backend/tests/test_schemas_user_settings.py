@@ -1,7 +1,5 @@
 """Tests for UserSettings Pydantic schemas."""
 
-from datetime import datetime
-
 import pytest
 
 pytestmark = pytest.mark.pure_unit
@@ -13,8 +11,9 @@ class TestUserSettingsResponse:
     def test_response_all_fields(self):
         """UserSettingsResponse works with all fields provided."""
         from src.schemas.user_settings import UserSettingsResponse
+        from src.util.utc import utc_now
 
-        now = datetime.utcnow()
+        now = utc_now()
         schema = UserSettingsResponse(
             id="settings-uuid-123",
             user_id="user-uuid-456",
@@ -39,6 +38,7 @@ class TestUserSettingsResponse:
     def test_response_from_attributes(self):
         """UserSettingsResponse can be built from ORM via from_attributes."""
         from src.schemas.user_settings import UserSettingsResponse
+        from src.util.utc import utc_now
 
         class FakeUserSettings:
             id = "orm-id"
@@ -49,8 +49,8 @@ class TestUserSettingsResponse:
             column_order_locations = ["name", "address"]
             show_archived_masters = True
             show_archived_locations = False
-            created_at = datetime.utcnow()
-            updated_at = datetime.utcnow()
+            created_at = utc_now()
+            updated_at = utc_now()
 
         schema = UserSettingsResponse.model_validate(FakeUserSettings())
         assert schema.id == "orm-id"

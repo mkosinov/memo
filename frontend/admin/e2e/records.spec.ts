@@ -9,7 +9,7 @@ import {
 } from './fixtures/helpers';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
-import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY } from './fixtures/seed-week';
 import {
   createTestClient,
   createTestActivity,
@@ -447,10 +447,14 @@ test.describe('Records Page — Table and Filters', () => {
 
   test('12. Pagination — server total and page navigation', async ({ page, request }) => {
     // Seed 12 records (> default per_page=10) on reference-week activities.
-    // Seed records r1-r6 live in the fixed week 2026-06-15, so the default
-    // period's server total is driven by our 12 records alone. GH #422:
-    // each record gets a DISTINCT start (10:00, 10:05, …) — the shared
-    // factory-default timestamp made the date-sort ties undeterministic
+    // Audit #535 (exact settles): the default period is the page-clock week
+    // (GH #422 pin — SEED_WEEK_MONDAY..SEED_WEEK_SUNDAY, 2026-06-01..07),
+    // and the seed's r1-r6 live on the LATER fixed week 2026-06-15..21 —
+    // outside that window (verified against the seed DB) — so the period's
+    // server total is our 12 records ALONE and both pages are seed-DB
+    // derivable (queryDBRows below).
+    // GH #422: each record gets a DISTINCT start (10:00, 10:05, …) — the
+    // shared factory-default timestamp made the date-sort ties undeterministic
     // under server pagination (page 1/2 could overlap).
     const ts = Date.now();
     const seeded = [];
@@ -463,19 +467,44 @@ test.describe('Records Page — Table and Filters', () => {
       );
     }
 
+    // Frontend records-table default page size (useRecordsUrlState).
+    const PER_PAGE = 10;
+
     try {
       await waitForRecordsReady(page);
 
-      // "N всего" reflects the server total — at least our 12 records
-      const total = await readServerTotal(page);
-      expect(total).toBeGreaterThanOrEqual(12);
+      // #535: exact expectations derived from the seed DB by the endpoint's
+      // own predicate (records/view defaults): the period window on the
+      // activity date, the default sort date/asc — Activity.start ASC with
+      // the Record.id ASC PK tie-break (schemas/record.py + apply_sort) —
+      // then the per_page slices. No name literals; counts ride the arrays.
+      const expectedNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedTotal = expectedNames.length;
+      const expectedPageOneNames = expectedNames.slice(0, PER_PAGE);
+      const expectedPageTwoNames = expectedNames.slice(PER_PAGE);
+      // Pagination premise: 12 seeded records span more than one page.
+      expect(expectedTotal).toBeGreaterThan(PER_PAGE);
 
-      // Page 1: collect client names (unique per seeded record; also the
-      // date keys are distinct now — GH #422 — but names stay the anchor)
-      const pageOneNames = await page
-        .locator('tbody tr td:nth-child(2)')
-        .allTextContents();
-      expect(pageOneNames.length).toBe(10); // default per_page
+      // "N всего" reflects the server total — exactly the derived count
+      // (poll: the label renders a frame after the view response).
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBe(expectedTotal);
+
+      // Page 1: exact-name settle — the sequence pins rows AND count; the
+      // full first page keeps the default per_page=10 check in place.
+      expect(expectedPageOneNames).toHaveLength(PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
 
       // Navigate to page 2 — server request carries page=2
       const pageTwoWait = page.waitForResponse(
@@ -485,30 +514,16 @@ test.describe('Records Page — Table and Filters', () => {
       await page.getByRole('button', { name: '2', exact: true }).click();
       await pageTwoWait;
 
-      // Settle BEFORE reading: waitForResponse resolves at response RECEIPT,
-      // while React commits the page-2 rows a frame later — a raw read in
-      // that gap returns the STALE page-1 names → false overlap flake
-      // (#479 read-before-render family, same race as the sort poll in
-      // test 11; hit by the cold-compile leg of the PR #515 verification).
-      // Poll until the rendered names actually leave the page-1 signature,
-      // then read and assert — a genuine overlap never becomes disjoint and
-      // still fails the strictness below.
-      await expect
-        .poll(
-          async () =>
-            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('|'),
-          { timeout: 10_000 },
-        )
-        .not.toBe(pageOneNames.join('|'));
-
-      // Page 2 rows are disjoint from page 1 rows
-      const pageTwoNames = await page
-        .locator('tbody tr td:nth-child(2)')
-        .allTextContents();
-      expect(pageTwoNames.length).toBeGreaterThanOrEqual(2);
-      for (const name of pageTwoNames) {
-        expect(pageOneNames).not.toContain(name);
-      }
+      // Page 2: exact settle on the REMAINING names. The terminal state
+      // absorbs the #479 read-before-render race — the old negative poll
+      // («names left the page-1 signature») + raw re-reads is retired: a
+      // stale page-1 render never equals the remaining sequence, and a
+      // genuine overlap fails it too — tighter than the old disjointness
+      // loop, with no frozen snapshot in between.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageTwoNames,
+      );
     } finally {
       for (const s of seeded) {
         await cleanupRecord(request, s.recordId);

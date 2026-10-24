@@ -86,24 +86,29 @@
 #                        with each other or with shard tags) and the
 #                        manual 2-port run lease is written/removed as
 #                        for any tagged manual stack;
-#                      - NOTIFY_ENABLED=true is exported and REDIS_URL is
-#                        taken ONLY from an explicitly passed value (CI
-#                        service container). Without one, a local
-#                        EPHEMERAL redis-server child is spawned on
-#                        NOTIFY_E2E_REDIS_PORT (default 6380 — never the
-#                        dev/phase 6379) with --save "" --appendonly no.
-#                        Local-transport prerequisites (numeric port,
-#                        redis-server binary present, port free) are
-#                        validated BEFORE the run lease is written — a
-#                        rejected run leaves no lease and no wiped
-#                        storage; silently reusing a foreign answering
-#                        instance is forbidden (payloads carry PII).
-#                      - the notify DISPATCHER runs as a child process
-#                        (.venv/bin/python -m src.notify.dispatcher,
-#                        exec'd like dev.sh so TERM reaches it; the
-#                        worker skeleton is NOT part of the e2e stack);
+#                      - NOTIFY_ENABLED=true and
+#                        NOTIFY_CHANNEL_PRIORITY=mock are exported (until
+#                        part 4 the part-3 channel registry knows only
+#                        the mock — worker-484 spec §3.3/§3.8) and
+#                        REDIS_URL is taken ONLY from an explicitly
+#                        passed value (CI service container). Without
+#                        one, a local EPHEMERAL redis-server child is
+#                        spawned on NOTIFY_E2E_REDIS_PORT (default 6380 —
+#                        never the dev/phase 6379) with --save ""
+#                        --appendonly no. Local-transport prerequisites
+#                        (numeric port, redis-server binary present, port
+#                        free) are validated BEFORE the run lease is
+#                        written — a rejected run leaves no lease and no
+#                        wiped storage; silently reusing a foreign
+#                        answering instance is forbidden (payloads carry
+#                        PII).
+#                      - the notify DISPATCHER and WORKER run as child
+#                        processes (.venv/bin/python -m
+#                        src.notify.dispatcher / src.notify.worker,
+#                        exec'd like dev.sh so TERM reaches them —
+#                        worker-484 spec §3.8);
 #                      - the trap cleanup is extended to the new
-#                        children (dispatcher, redis).
+#                        children (dispatcher, worker, redis).
 #                    Unset/empty → byte-identical legacy shard behavior:
 #                    every enabled-mode branch is behind the flag (S2).
 #
@@ -138,6 +143,7 @@ set -euo pipefail
 # is skipped — zero behavior change (S2).
 REDIS_PID=""
 DISPATCHER_PID=""
+WORKER_PID=""
 NOTIFY_E2E_ENABLED="${NOTIFY_E2E_ENABLED:-}"
 case "$NOTIFY_E2E_ENABLED" in
   ""|1) ;;
@@ -388,8 +394,12 @@ rm -rf "$ABS_FILES_DIR"
 # (payloads carry PII). The local-transport prerequisites (binary present,
 # port free, numeric port) were validated in the enabled-mode preamble —
 # BEFORE the lease write — so this block only spawns.
+# NOTIFY_CHANNEL_PRIORITY=mock (#484 part 3, spec §3.3/§3.8): until part 4
+# the registry knows only the mock channel — without the export the
+# worker's loud registry check stops it on the default "telegram".
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   export NOTIFY_ENABLED=true
+  export NOTIFY_CHANNEL_PRIORITY=mock
   if [ -n "${REDIS_URL:-}" ]; then
     echo "[notify-e2e] REDIS_URL set explicitly — not starting a local redis-server"
   else
@@ -419,14 +429,17 @@ echo "[shard-$SHARD_ID] Backend PID: $BACKEND_PID"
 # Cleanup on exit
 cleanup() {
   echo "[shard-$SHARD_ID] Shutting down (backend PID: $BACKEND_PID)..."
-  # #483: notify children — `|| true` on every kill: a child may already
-  # be dead (a failed dispatcher) and, under set -e, its kill would abort
-  # cleanup BEFORE the remaining children get killed (dev.sh 9c78076f).
+  # #483/#484: notify children — `|| true` on every kill: a child may
+  # already be dead (a failed dispatcher) and, under set -e, its kill
+  # would abort cleanup BEFORE the remaining children get killed (dev.sh
+  # 9c78076f).
   [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
   [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && wait "$WORKER_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   remove_own_lease
 }
@@ -507,19 +520,24 @@ echo "[shard-$SHARD_ID] Database seeded."
 # file from a previous stack is removed by the generator itself.
 python3 "$ROOT_DIR/scripts/gen_seed_canon.py" "$ABS_DB_PATH" "$ABS_DB_PATH.canon.sql"
 
-# ── #483: notify dispatcher child (spec §3.5) ─────────────────────────────
-# Enabled mode ONLY (default mode never spawns it — S2). Same spawn form as
-# dev.sh: project venv python with `exec` inside the subshell so $! is the
-# REAL process and the TERM teardown reaches it (`uv run` does not forward
-# signals — it would orphan the dispatcher). The worker skeleton is NOT
-# part of the e2e stack (spec §3.5 names only the dispatcher). Inherits
-# DATABASE_URL / REDIS_URL / NOTIFY_ENABLED exports; ENV_FILE matches the
-# backend's own launch env below.
+# ── #483/#484: notify dispatcher + worker children (spec §3.5/§3.8) ────────
+# Enabled mode ONLY (default mode never spawns them — S2). Same spawn form
+# as dev.sh: project venv python with `exec` inside the subshell so $! is
+# the REAL process and the TERM teardown reaches it (`uv run` does not
+# forward signals — it would orphan the child). The worker (#484 part 3)
+# is the second consumer child: it inherits DATABASE_URL (unused — ADR
+# 009), REDIS_URL, NOTIFY_ENABLED and NOTIFY_CHANNEL_PRIORITY=mock (the
+# export of the transport block above). ENV_FILE matches the backend's
+# own launch env below.
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   echo "[notify-e2e] Starting notify dispatcher..."
   (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.notify.dispatcher) &
   DISPATCHER_PID=$!
   echo "[notify-e2e] Dispatcher PID: $DISPATCHER_PID"
+  echo "[notify-e2e] Starting notify worker..."
+  (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.notify.worker) &
+  WORKER_PID=$!
+  echo "[notify-e2e] Worker PID: $WORKER_PID"
 fi
 
 
@@ -542,17 +560,19 @@ STACK_FRONTEND_PORTS=("$SHARD_PORT")
 STACK_BACKEND_PORTS=("$BACKEND_PORT")
 _orig_cleanup() {
   echo "[shard-$SHARD_ID] Shutting down..."
-  # #483: notify children FIRST (the dispatcher stops enqueueing before
-  # its transport disappears), then the servers; every kill/wait guarded
-  # with `|| true` — set -e must never abort cleanup mid-way (dev.sh
-  # 9c78076f precedent).
+  # #483/#484: notify children FIRST (the dispatcher stops enqueueing and
+  # the worker stops consuming before their transport disappears), then
+  # the servers; every kill/wait guarded with `|| true` — set -e must
+  # never abort cleanup mid-way (dev.sh 9c78076f precedent).
   [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$FRONTEND_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$FRONTEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
   [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && wait "$WORKER_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   _sweep_masked STACK_FRONTEND_PORTS "next dev -p $SHARD_PORT" "next dev -p $SHARD_PORT" "next-server (v"
   _sweep_masked STACK_FRONTEND_PORTS "next-server" "next dev -p $SHARD_PORT" "next-server (v"

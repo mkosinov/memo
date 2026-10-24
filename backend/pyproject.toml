@@ -128,12 +128,13 @@ addopts = []
 
 # ── Coverage ───────────────────────────────────────────────────────
 [tool.coverage.run]
-# GH #483 §3.6 — the notify transport modules are measured by the
-# dedicated `notify-tests` CI contour (pytest -m redis), NOT by the
-# standard backend job: there their contour tests skip without Redis,
-# and counting near-unexecuted modules would drag the 80% gate down.
+# GH #483 §3.6 / #484 §3.8 — the notify transport adapter is measured by
+# the dedicated `notify-tests` CI contour (pytest -m redis), NOT by the
+# standard backend job: there its contour tests skip without Redis, and
+# counting the near-unexecuted adapter would drag the 80% gate down.
+# worker.py is BACK in the standard measurement (#484 §3.8): its unit
+# layer (S9 contract) runs without Redis.
 omit = [
     "src/seed/*",
     "src/notify/redis_queue.py",
-    "src/notify/worker.py",
 ]

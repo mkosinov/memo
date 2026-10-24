@@ -10,6 +10,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-24
 
 ### Added
+- **GH #484 — Воркер отправки оповещений: часть 3 системы оповещений
+  (потребление очереди группой `worker`, реестр каналов + мок, статусы,
+  reclaim зависших)** — branch `484-notify-worker` (10 коммитов
+  `8f4205f4..88d874f9`, base `e6981c52`; 29 файлов, +3553/−398; спека
+  `docs/specs/2026-10-22-notify-worker-484-design.md` рев.2, план
+  `docs/plans/2026-10-23-notify-worker-484-plan.md` 8/8; семья #476 —
+  часть 3/5, части 1–2 = #482/#483 на main; по умолчанию поведение
+  прежнее — инвариант S10):
+  - **Каркас и каналы (T1–T2):** `NOTIFY_SEND_RETRIES` + общий
+    `process.py` (`run_loop`, сигналы) (`8f4205f4`); пакет
+    `notify/channels/` — протокол (async-шов), типизированные ошибки,
+    реестр с fail-fast-гейтом (`logger.error` + `SystemExit(2)` по
+    прецеденту `connect_or_exit`) и мок-канал (рекордер
+    `notify:mock:deliveries`) (`d6bd8e15`, гейт-рефактор `738603f4`).
+  - **Транспорт и доставка (T3–T5):** порт `WorkerQueue` + `FakeQueue`,
+    потребительская группа `worker` в `RedisQueue` (`9ddad53d`); ядро
+    доставки — валидатор payload (`task_id` = непустая UUID-строка по
+    шву `NotifyTask.id`) + перебор каналов по приоритету с ретраями,
+    статусы sent/failed/not_delivered (`285cc98d`); цикл воркера —
+    стартовые проверки, периодический reclaim зависших, ack после
+    публикации статусов (`eede6e04`).
+  - **Диспетчер и сценарии (T6–T7):** диспетчер подтверждает
+    бракованные статус-события (кривая форма, неизвестная задача/стадия)
+    (`57d4a492`); шов-фикс `4cabab6b` — `task_id` приведён к строковому
+    UUID и в слое брака (int-скетчи плана — артефакт); маркированные
+    S7 (фолбэк/не-доставлено, DB-строка → sent/failed) + S8 (возврат
+    зависших + ack-закрытие у консьюмера) (`fd04f08d`).
+  - **Контуры (T8):** воркер в dev/e2e/CI-контурах, Playwright S6 —
+    доставка через мок-канал (`notify-s6-mock-delivery.spec.ts`,
+    RED→GREEN доказан), dryrun-сюит пополнен; приоритет мок-канала —
+    осознанно до части 4 (реальные каналы) (`88d874f9`).
+  - **Tests:** backend полный без `REDIS_URL` **3724p/0f/58s**
+    (redis-marked — инвариант S10); маркированный контур против живого
+    Redis весь зелёный (воркер-очередь, S6, S7, S8, S1-relax,
+    reenqueue, гейты); notify e2e **S1 1/1, S6 1/1**; dryrun **ALL
+    PASS**; ruff+mypy+lint-бюджет зелёные; coverage **90.61%**
+    (`worker.py` ~90%); визуальный гейт N/A → exit 0; сценарии
+    S6–S10 ✅.
+   - Status: `docs/status/2026-10-24-notify-worker-484.md`
+
 - **GH #529 — Волна миграции `datetime.utcnow()` → единый помощник `utc_now()`
   + страж DTZ003/DTZ005** — branch `529-utcnow-wave` (5 коммитов
   `d6583f98..2f29dae2`, base `5637e68b`; 42 файла, +195/−127; спека
@@ -90,7 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ee70168d` + таргет-сьют канона сида **43/0**; web vitest **486/486**;
     web e2e **9/9** одиночным прогоном (С1–С5 + смоуки); визуальный гейт
     **exit 0 (5/5)**; admin нетронут (базлайн **3100/0**).
-  - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
+   - Status: `docs/status/2026-10-23-web-client-cabinet-read-513.md`
 
 ## [Unreleased] — 2026-10-22
 

@@ -1,9 +1,13 @@
-"""Queue port of the notify subsystem (#482 spec §3.7; family #476 §4.2-§4.4).
+"""Queue ports of the notify subsystem (#482 spec §3.7; family #476
+§4.2-§4.4; worker half — #484 spec §3.1).
 
-``NotifyQueue`` is the seam between the notify logic and its transport:
-scenarios and the dispatcher depend on this protocol only — never on
-Redis directly. Payloads crossing the seam are plain JSON dicts of the
-family contracts (§4.2 tasks, §4.3 status events, §3.2 inbound); no ORM
+Two complementary protocol halves form the seam between the notify
+logic and its transport — consumers depend on the protocols only,
+never on Redis directly. ``NotifyQueue`` is the dispatcher-side half
+(scenarios, statuses/inbound consumption); ``WorkerQueue`` is the
+worker-side half (task consumption, status publication — #484 §3.1).
+Payloads crossing either seam are plain JSON dicts of the family
+contracts (§4.2 tasks, §4.3 status events, §3.2 inbound); no ORM
 objects.
 
 Reliable-delivery seam (family §4.4), mapped by every implementation:
@@ -102,6 +106,37 @@ class NotifyQueue(Protocol):
         ...
 
 
+@runtime_checkable
+class WorkerQueue(Protocol):
+    """Worker-side half of the queue seam (part 3 #484, spec §3.1).
+    publish_status is TYPED here (ADR 013 keeps it off the dispatcher
+    protocol); names follow the adapter (FakeQueue.push_status stays
+    as an alias for part-1/2 tests)."""
+
+    def claim_tasks(self) -> list[TaskPayload]:
+        """Reliable claim for ``notify:tasks`` delivery tasks (§4.4)."""
+        ...
+
+    def ack_task(self, item: TaskPayload) -> None:
+        """Mark a delivered task done (idempotent)."""
+        ...
+
+    def publish_status(self, event: StatusEvent) -> None:
+        """Publish a §4.3 worker stage event to ``notify:statuses``."""
+        ...
+
+    def ensure_worker_group(self) -> None:
+        """Worker-start duty (§3.1): create the ``worker`` group on
+        ``notify:tasks`` (``id=0 MKSTREAM`` — the accumulated backlog
+        stays deliverable; this is the point of part 3)."""
+        ...
+
+    def reclaim_hanging_tasks(self) -> None:
+        """Return claimed-but-unacked TASKS back into delivery (§4.4);
+        statuses/inbound reclaim is the dispatcher half's own duty."""
+        ...
+
+
 class FakeQueue:
     """In-process ``NotifyQueue`` on plain lists (part 1 tests, no Redis).
 
@@ -110,16 +145,18 @@ class FakeQueue:
     ``reclaim_hanging()`` puts the survivors back at the head of their
     queues — older than anything pushed meanwhile, so global order holds.
 
-    ``push_status`` / ``push_inbound`` emulate the worker side for tests;
-    they are deliberately NOT on the protocol (the dispatcher never
-    produces statuses or replies). ``tasks`` is the matching read seam
-    for what scenarios enqueued.
+    ``publish_status`` is the worker-protocol name (#484 §3.1); the
+    older ``push_status`` stays as a part-1/2 test alias, and
+    ``push_inbound`` emulates channel replies for tests (off-protocol
+    — replies come from external channels). ``tasks`` is the matching
+    read seam for what scenarios enqueued.
     """
 
     def __init__(self) -> None:
         self._tasks: list[TaskPayload] = []
         self._statuses: list[StatusEvent] = []
         self._inbound: list[InboundEvent] = []
+        self._servicing_tasks: list[TaskPayload] = []
         self._servicing_statuses: list[StatusEvent] = []
         self._servicing_inbound: list[InboundEvent] = []
 
@@ -133,13 +170,38 @@ class FakeQueue:
         """Snapshot of the tasks pushed so far (test seam)."""
         return list(self._tasks)
 
-    # ── worker side (test seams, not on the protocol) ────────────────────────
+    # ── worker side (test seams; publish_status IS on WorkerQueue) ──────────
 
     def push_status(self, event: StatusEvent) -> None:
         self._statuses.append(event)
 
+    #: Worker-protocol name (#484 §3.1) — same function object, the
+    #: part-1/2 ``push_status`` tests keep their spelling.
+    publish_status = push_status
+
     def push_inbound(self, event: InboundEvent) -> None:
         self._inbound.append(event)
+
+    # ── reliable list: notify:tasks (worker half, #484 §3.1) ────────────────
+
+    def claim_tasks(self) -> list[TaskPayload]:
+        claimed, self._tasks = self._tasks, []
+        self._servicing_tasks.extend(claimed)
+        return claimed
+
+    def ack_task(self, item: TaskPayload) -> None:
+        with contextlib.suppress(ValueError):
+            self._servicing_tasks.remove(item)
+
+    def reclaim_hanging_tasks(self) -> None:
+        """Return hanging TASKS to the head of the queue (§4.4) — tasks
+        only; the dispatcher half's ``reclaim_hanging`` owns statuses
+        and inbound (spec §3.1)."""
+        self._tasks = self._servicing_tasks + self._tasks
+        self._servicing_tasks = []
+
+    def ensure_worker_group(self) -> None:
+        """No-op: plain lists need no consumer groups (§3.1 seam)."""
 
     # ── reliable list: notify:statuses ───────────────────────────────────────
 

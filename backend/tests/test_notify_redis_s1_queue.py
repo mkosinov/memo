@@ -13,8 +13,10 @@ it. This check reads the REAL ``notify:tasks`` stream of that stack:
   rendered ``text``, frozen ``channels`` (``[{name, address}]``), ISO
   ``created_at``, ``resend_of: null``;
 - at least ONE payload is FULLY correct: the DB row behind ``task_id``
-  is ``queued`` and its frozen text/channels match the payload verbatim
-  (the enqueue uses the frozen task values, never re-resolved).
+  reached the queue (status in queued/sending/sent — #484 Task 8: the
+  stack's worker may already have delivered it) and its frozen
+  text/channels match the payload verbatim (the enqueue uses the frozen
+  task values, never re-resolved).
 
 Isolation profile (differs from the unit-contour modules on purpose):
 this check consumes the stack's PRODUCTION vocabulary (no key prefix —
@@ -63,6 +65,13 @@ pytestmark = [
 #: wait is LAG TOLERANCE, not a timer feature (the dispatcher's cadence
 #: is the elapsed-seconds semantics here).
 WAIT_SECONDS = 30
+
+#: Task-row statuses that prove the pipeline reached the queue (#484
+#: Task 8): the dispatcher CREATES the row as ``queued``; with the worker
+#: now part of the enabled stack, the row may legitimately have advanced
+#: to ``sending``/``sent`` by the time this check reads it. ``failed`` is
+#: a genuine delivery failure and fails the check.
+QUEUE_REACHED_STATUSES = {"queued", "sending", "sent"}
 
 #: Family §4.2 task payload — the exact key set of the contract.
 PAYLOAD_KEYS = {"task_id", "text", "channels", "created_at", "resend_of"}
@@ -146,16 +155,15 @@ def test_s1_stream_holds_valid_task_payload() -> None:
             row = _db_task_row(payload["task_id"])
             if row is None:
                 problems.append(f"task {payload['task_id']} not in the stack DB")
-            elif row["status"] != "queued":
+            elif row["status"] not in QUEUE_REACHED_STATUSES:
                 problems.append(
-                    f"task {payload['task_id']} status {row['status']!r} != 'queued'"
+                    f"task {payload['task_id']} status {row['status']!r} not in"
+                    f" {sorted(QUEUE_REACHED_STATUSES)}"
                 )
             elif row["text"] != payload["text"]:
                 problems.append(f"task {payload['task_id']} text != payload text")
             elif json.loads(row["channels"]) != payload["channels"]:
-                problems.append(
-                    f"task {payload['task_id']} channels != payload channels"
-                )
+                problems.append(f"task {payload['task_id']} channels != payload channels")
             else:
                 # One fully-correct, DB-correlated payload ends the wait.
                 assert row["id"] == payload["task_id"]

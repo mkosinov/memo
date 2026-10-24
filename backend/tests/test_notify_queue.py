@@ -18,7 +18,14 @@ from typing import Any
 
 import pytest
 
-from src.notify.queue import FakeQueue, InboundEvent, NotifyQueue, StatusEvent, TaskPayload
+from src.notify.queue import (
+    FakeQueue,
+    InboundEvent,
+    NotifyQueue,
+    StatusEvent,
+    TaskPayload,
+    WorkerQueue,
+)
 
 pytestmark = pytest.mark.pure_unit
 
@@ -190,3 +197,94 @@ class TestClaimedPayloadsAreJsonDicts:
         q.push_status(event)
         claimed = q.claim_statuses()
         assert type(claimed[0]) is dict
+
+
+class TestWorkerProtocolSeam:
+    """Part 3 (#484 spec §3.1): the worker half of the seam — FakeQueue
+    must satisfy ``WorkerQueue`` structurally."""
+
+    def test_fake_queue_satisfies_worker_queue_protocol(self) -> None:
+        assert isinstance(FakeQueue(), WorkerQueue)
+
+
+class TestClaimTasks:
+    def test_empty_queue_returns_empty_list(self) -> None:
+        q = FakeQueue()
+        assert q.claim_tasks() == []
+
+    def test_returns_items_in_fifo_order_and_empties_source(self) -> None:
+        q = FakeQueue()
+        first, second = _task(task_id=1), _task(task_id=2)
+        q.enqueue_task(first)
+        q.enqueue_task(second)
+        assert q.claim_tasks() == [first, second]
+        assert q.claim_tasks() == []
+
+
+class TestAckTask:
+    def test_acked_task_not_returned_by_reclaim(self) -> None:
+        q = FakeQueue()
+        q.enqueue_task(_task())
+        (claimed,) = q.claim_tasks()
+        q.ack_task(claimed)
+        q.reclaim_hanging_tasks()
+        assert q.claim_tasks() == []
+
+    def test_ack_of_unknown_or_duplicate_task_is_noop(self) -> None:
+        """At-least-once seam: a late/duplicate ack must not raise."""
+        q = FakeQueue()
+        q.ack_task(_task())  # never claimed
+        q.enqueue_task(_task(task_id=1))
+        (claimed,) = q.claim_tasks()
+        q.ack_task(claimed)
+        q.ack_task(claimed)  # duplicate ack
+
+
+class TestReclaimHangingTasks:
+    def test_returns_unacked_tasks_to_the_head_preserving_order(self) -> None:
+        """Hanging tasks are older than anything enqueued meanwhile —
+        they return ahead of it, global FIFO stays true; tasks ONLY
+        (statuses/inbound are the dispatcher half's prerogative, §3.1)."""
+        q = FakeQueue()
+        older, middle = _task(task_id=1), _task(task_id=2)
+        q.enqueue_task(older)
+        q.enqueue_task(middle)
+        q.claim_tasks()
+        q.ack_task(middle)
+        newer = _task(task_id=3)
+        q.enqueue_task(newer)
+        q.reclaim_hanging_tasks()
+        assert q.claim_tasks() == [older, newer]
+
+    def test_noop_when_nothing_hanging(self) -> None:
+        q = FakeQueue()
+        pending = _task()
+        q.enqueue_task(pending)
+        q.reclaim_hanging_tasks()
+        assert q.claim_tasks() == [pending]
+
+    def test_does_not_touch_dispatcher_halves(self) -> None:
+        """``reclaim_hanging_tasks`` is tasks-only: hanging statuses and
+        inbound stay in their servicing lists (the dispatcher's own
+        ``reclaim_hanging`` owns them, spec §3.1)."""
+        q = FakeQueue()
+        hanging_status, hanging_inbound = _status(), _inbound()
+        q.push_status(hanging_status)
+        q.push_inbound(hanging_inbound)
+        q.claim_statuses()
+        q.claim_inbound()
+        q.reclaim_hanging_tasks()
+        assert q.claim_statuses() == []
+        assert q.claim_inbound() == []
+        assert q.claim_tasks() == []
+
+
+class TestPublishStatus:
+    def test_publish_status_lands_in_status_claims(self) -> None:
+        """The worker-protocol name (spec §3.1): the worker publishes
+        §4.3 stage events through it; ``push_status`` stays as the
+        part-1/2 test alias."""
+        q = FakeQueue()
+        event = _status()
+        q.publish_status(event)
+        assert q.claim_statuses() == [event]

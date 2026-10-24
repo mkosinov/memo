@@ -27,8 +27,12 @@ and the TaskGroup winds down cleanly.
   not a setting) the task is ``failed``.
 - **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
   start, then claim → per event one append-only attempt row + the §4.3
-  derived task state in ONE commit → ack. Unapplied items stay unacked
-  and are reclaimed at the next process start (at-least-once, §4.4).
+  derived task state in ONE commit → ack. Brak leaves delivery by the
+  two-layer rule (#484 spec §3.5): shape pre-validation and a
+  ``ValueError`` from ``apply_status_event`` (unknown task/stage after a
+  valid form) are journalled (identifiers only) and ACKED; any other
+  error keeps the item unacked — the reliable-list reclaim at the next
+  process start redelivers it (at-least-once, §4.4).
 - **Cycle 3 — ``notify:inbound``**: routed by the handler registry
   (channel → handler). The pilot registry is EMPTY: log warning + ack.
 
@@ -40,10 +44,8 @@ standalone entries do (``seed``).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
-import signal
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -53,7 +55,9 @@ from sqlalchemy import select
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
 from src.db.database import DBManager
+from src.notify.channels.registry import parse_channel_priority
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
+from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.scenarios import SCENARIOS
@@ -86,33 +90,6 @@ InboundHandler = Callable[[InboundEvent], Awaitable[None]]
 INBOUND_HANDLERS: dict[str, InboundHandler] = {}
 
 
-# ── settings parsing (§3.8) ─────────────────────────────────────────────────
-
-
-def parse_channel_priority(raw: str) -> list[str]:
-    """Parse ``NOTIFY_CHANNEL_PRIORITY`` (CSV, case-insensitive).
-
-    An empty string (or an empty segment) or duplicate names are a LOUD
-    startup error: the setting must never produce an empty/duplicated
-    channel list in task payloads. Channel NAMES are not validated here
-    — an unregistered channel is the worker's loud startup error
-    (family §3.5, part 3).
-    """
-    names = [part.strip().lower() for part in raw.strip().split(",")]
-    if not any(names):
-        raise ValueError(
-            f"NOTIFY_CHANNEL_PRIORITY is empty — at least one channel is required (got {raw!r})"
-        )
-    if any(not name for name in names):
-        raise ValueError(f"NOTIFY_CHANNEL_PRIORITY has empty segments (got {raw!r})")
-    seen: set[str] = set()
-    for name in names:
-        if name in seen:
-            raise ValueError(f"NOTIFY_CHANNEL_PRIORITY duplicate channel {name!r} (got {raw!r})")
-        seen.add(name)
-    return names
-
-
 # ── small time helpers ──────────────────────────────────────────────────────
 
 
@@ -129,6 +106,32 @@ def _naive_utc(value: str) -> datetime:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed
+
+
+def _is_malformed_status(item: StatusEvent) -> bool:
+    """Shape pre-validation (spec §3.5): ``task_id`` a NON-EMPTY STRING
+    (a UUID String(36) — ``NotifyTask.id``, the only spelling the
+    dispatcher's own enqueue seam puts on tasks; the family §4.2 int
+    example is a sketch artifact — int/bool are malformed), ``stage``
+    in the §4.3 vocabulary, ``channel`` a non-empty string,
+    ``occurred_at`` parseable. Guards the reader against events that
+    would raise a non-ValueError inside ``apply_status_event`` and hang
+    on the stream unacked forever."""
+    try:
+        task_id = item.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            return True
+        if item.get("stage") not in ("sending", "sent", "failed"):
+            return True
+        channel = item.get("channel")
+        if not isinstance(channel, str) or not channel:
+            return True
+        _naive_utc(item["occurred_at"])
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # AttributeError: a corrupt entry that is not even a mapping —
+        # the reader must ack it away, not crash on it.
+        return True
+    return False
 
 
 # ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
@@ -344,16 +347,44 @@ async def statuses_once(
     session_factory: async_sessionmaker[AsyncSession], queue: NotifyQueue
 ) -> None:
     """Claim ``notify:statuses`` → apply each event in its own commit →
-    ack. An unapplied item is logged and left UNACKED: the reliable-list
-    reclaim at the next process start redelivers it (§4.4), and sibling
-    items of the same batch still proceed. The sync adapter is called
-    through ``asyncio.to_thread`` (§3.1) — a transport failure propagates
-    to the loop guard, the next tick retries.
+    ack. The two-layer brak rule (#484 spec §3.5): (1) shape
+    pre-validation, (2) ``ValueError`` from ``apply_status_event``
+    (unknown task/stage after a valid form) — both journalled
+    (identifiers only) and ACKED: redelivery cannot fix a handmade or
+    corrupted payload, and the task row commits before enqueue (#482),
+    so «unknown task» means a lost DB row, not a race worth waiting
+    out. Any OTHER error (DB down, integrity on commit) keeps the old
+    contract: logged, left UNACKED — the reliable-list reclaim at the
+    next process start redelivers it (§4.4), and sibling items of the
+    same batch still proceed. The sync adapter is called through
+    ``asyncio.to_thread`` (§3.1) — a transport failure propagates to
+    the loop guard, the next tick retries.
     """
     for item in await asyncio.to_thread(queue.claim_statuses):
+        if _is_malformed_status(item):
+            logger.error(
+                "notify dispatcher: malformed status event (spec §3.5 shape"
+                " brak) — acked away, identifiers %r",
+                {k: item.get(k) for k in ("task_id", "stage")}
+                if isinstance(item, dict)
+                else item,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
+            continue
         try:
             async with session_factory() as session:
                 await apply_status_event(session, item)
+        except ValueError as exc:
+            # Layer 2 (spec §3.5): a VALID form naming an unknown
+            # task/stage — handmade/broken payload or a lost DB row;
+            # redelivery cannot fix it, so the event leaves delivery.
+            logger.error(
+                "notify dispatcher: status event rejected (%s: %s) — acked"
+                " away (spec §3.5)",
+                type(exc).__name__,
+                exc,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
         except Exception:
             logger.exception(
                 "notify dispatcher: status event %r not applied — left unacked for reclaim",
@@ -383,28 +414,8 @@ async def inbound_once(queue: NotifyQueue) -> None:
         await asyncio.to_thread(queue.ack_inbound, item)
 
 
-# ── concurrency model: loops + stop (§3.8) ──────────────────────────────────
-
-
-async def run_loop(
-    name: str,
-    stop: asyncio.Event,
-    interval: float,
-    iteration: Callable[[], Awaitable[None]],
-) -> None:
-    """Run ``iteration`` until the stop-event, each iteration isolated in
-    its own ``try/except``: a crash is logged and the loop (and its
-    siblings in the TaskGroup) keep running — a silently dead cycle in a
-    live process would be an invisible stop of notifications (panel
-    finding, §3.8). Only ``Exception`` is caught; cancellation and
-    KeyboardInterrupt propagate so shutdown stays correct."""
-    while not stop.is_set():
-        try:
-            await iteration()
-        except Exception:
-            logger.exception("notify dispatcher: %s loop iteration failed", name)
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=interval)
+# ── concurrency model: loops + stop (§3.7 — run_loop/signals live in
+# src/notify/process.py; §3.8) ───────────────────────────────────────────────
 
 
 async def run_dispatcher(
@@ -436,19 +447,9 @@ async def run_dispatcher(
         await inbound_once(queue)
 
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(run_loop("polling", stop, interval, polling_iteration))
-        tg.create_task(run_loop("statuses", stop, interval, statuses_iteration))
-        tg.create_task(run_loop("inbound", stop, interval, inbound_iteration))
-
-
-def _install_signal_handlers(stop: asyncio.Event) -> None:
-    """SIGTERM/SIGINT → the stop-event (§3.8); the TaskGroup then winds
-    the loops down. ``add_signal_handler`` is main-thread Unix — silently
-    unsupported elsewhere (KeyboardInterrupt remains the fallback)."""
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, stop.set)
+        tg.create_task(run_loop("polling", stop, interval, polling_iteration, log=logger))
+        tg.create_task(run_loop("statuses", stop, interval, statuses_iteration, log=logger))
+        tg.create_task(run_loop("inbound", stop, interval, inbound_iteration, log=logger))
 
 
 # ── process entry ───────────────────────────────────────────────────────────
@@ -488,7 +489,7 @@ async def main(queue: NotifyQueue | None = None) -> None:
     database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./memo.db")
     manager = DBManager(database_url)
     stop = asyncio.Event()
-    _install_signal_handlers(stop)
+    install_signal_handlers(stop)
     try:
         await run_dispatcher(manager.async_session, queue, stop)
     finally:

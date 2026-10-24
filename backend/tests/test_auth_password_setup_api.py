@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,6 +39,7 @@ from fastapi.testclient import TestClient
 from src.auth import service as service_module
 from src.auth.service import IP_FAILURE_THRESHOLD
 from src.errors import ErrorCode
+from src.util.utc import utc_now
 from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
@@ -426,7 +426,7 @@ class TestPublicIpCounter:
         _seed_token(user["id"], "raw-gate-valid")
         service_module._FAILURE_COUNTERS["ip:testclient"] = (
             IP_FAILURE_THRESHOLD,
-            datetime.utcnow(),
+            utc_now(),
         )
 
         resp = anon.post(VALIDATE, json={"token": "raw-gate-valid"})
@@ -439,7 +439,7 @@ class TestPublicIpCounter:
         digest = _seed_token(user["id"], "raw-gate-setup")
         service_module._FAILURE_COUNTERS["ip:testclient"] = (
             IP_FAILURE_THRESHOLD,
-            datetime.utcnow(),
+            utc_now(),
         )
 
         resp = anon.post(SETUP, json={"token": "raw-gate-setup", "password": NEW_PASSWORD})
@@ -455,7 +455,7 @@ class TestPublicIpCounter:
         _seed_token(user["id"], "raw-counter-norest")
         service_module._FAILURE_COUNTERS["ip:testclient"] = (
             IP_FAILURE_THRESHOLD - 1,
-            datetime.utcnow(),
+            utc_now(),
         )
 
         ok = anon.post(VALIDATE, json={"token": "raw-counter-norest"})

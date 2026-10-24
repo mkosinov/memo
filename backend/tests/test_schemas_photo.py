@@ -14,8 +14,9 @@ class TestPhotoResponse:
         """PhotoResponse can be constructed with all required fields
         (4-owner model + denormalized client_name, GH #211)."""
         from src.schemas.photo import PhotoResponse
+        from src.util.utc import utc_now
 
-        now = datetime.utcnow()
+        now = utc_now()
         schema = PhotoResponse(
             id="123e4567-e89b-12d3-a456-426614174000",
             filename="photo_001.jpg",
@@ -38,8 +39,9 @@ class TestPhotoResponse:
     def test_photo_response_default_is_public(self):
         """PhotoResponse defaults is_public to False."""
         from src.schemas.photo import PhotoResponse
+        from src.util.utc import utc_now
 
-        now = datetime.utcnow()
+        now = utc_now()
         schema = PhotoResponse(
             id="abc",
             filename="pic.jpg",
@@ -52,8 +54,9 @@ class TestPhotoResponse:
         """PhotoResponse can be built from a Photo ORM instance via from_attributes."""
         from src.models.photo import Photo
         from src.schemas.photo import PhotoResponse
+        from src.util.utc import utc_now
 
-        now = datetime.utcnow()
+        now = utc_now()
         photo = Photo(
             id="test-uuid-1234",
             filename="orm_test.jpg",

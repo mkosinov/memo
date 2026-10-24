@@ -14,13 +14,14 @@ the FK to the staff card (association-object style, cf. ServiceMaterial).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 — ORM resolves Mapped[datetime] at runtime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
+from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from src.models.staff import Staff
@@ -42,10 +43,10 @@ class Master(Base):
     # Distribution (schedule) flag — independent from staff.is_active (D3).
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow,
+        DateTime, default=utc_now,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+        DateTime, default=utc_now, onupdate=utc_now,
     )
 
     staff: Mapped[Staff] = relationship(back_populates="master")

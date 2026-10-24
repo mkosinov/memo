@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -20,6 +19,7 @@ from src.schemas.user_settings import (
     UserSettingsUpdate,
 )
 from src.services.decorators import transactional
+from src.util.utc import utc_now
 
 
 def _to_response(model: UserSettings) -> UserSettingsResponse:
@@ -116,8 +116,8 @@ class UserSettingsService:
                 column_order_locations="[]",
                 show_archived_masters=True,
                 show_archived_locations=False,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=utc_now(),
+                updated_at=utc_now(),
             )
             .on_conflict_do_nothing(index_elements=["user_id"])
         )

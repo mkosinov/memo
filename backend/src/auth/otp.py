@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from src.core.config import settings
 from src.db.base import Base
+from src.util.utc import utc_now
 
 # Spec §4.1: 6-digit code, 5-minute lifetime.
 OTP_TTL = timedelta(minutes=5)
@@ -61,7 +62,7 @@ def hash_code(code: str) -> str:
 
 def new_otp_code(phone: str, code: str) -> OtpCode:
     """Build a fresh OtpCode row for ``phone`` (hash + deadlines computed)."""
-    now = datetime.utcnow()
+    now = utc_now()
     return OtpCode(
         phone=phone,
         code_hash=hash_code(code),

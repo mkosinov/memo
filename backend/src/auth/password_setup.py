@@ -28,6 +28,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.util.utc import utc_now
 
 
 def token_digest(raw_token: str) -> str:
@@ -57,7 +58,7 @@ class PasswordSetupToken(Base):
     # AuditLog precedent: timestamp default on the column. expires_at is
     # business input (24 h, a scenario parameter — Task 2), not a default.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow,
+        DateTime, default=utc_now,
     )
 
     __table_args__ = (

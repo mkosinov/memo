@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,6 +35,7 @@ import pytest
 from src.auth.passwords import PasswordPolicyError, verify_password
 from src.auth.session import new_session
 from src.events import audit
+from src.util.utc import utc_now
 from tests.conftest import insert_user, query_db, query_db_params
 
 if TYPE_CHECKING:
@@ -123,7 +124,7 @@ class TestIssuePasswordLink:
         from src.usecases.password_setup import issue_password_link
 
         user = insert_user("+79990008801", "x", role="master")
-        before = datetime.utcnow()
+        before = utc_now()
 
         link = await issue_password_link(
             db_session=db_session, user_id=user["id"]
@@ -135,7 +136,7 @@ class TestIssuePasswordLink:
         # Default TTL = 24 h (spec §4): expiry lands within (before+24h,
         # utcnow+24h+ε).
         assert before + timedelta(hours=24) <= link.expires_at
-        assert link.expires_at <= datetime.utcnow() + timedelta(hours=24, seconds=5)
+        assert link.expires_at <= utc_now() + timedelta(hours=24, seconds=5)
 
         rows = _token_rows()
         assert len(rows) == 1, f"expected exactly one token row, got {rows}"
@@ -152,7 +153,7 @@ class TestIssuePasswordLink:
         from src.usecases.password_setup import issue_password_link
 
         user = insert_user("+79990008802", "x", role="master")
-        before = datetime.utcnow()
+        before = utc_now()
 
         link = await issue_password_link(
             db_session=db_session, user_id=user["id"],
@@ -161,7 +162,7 @@ class TestIssuePasswordLink:
 
         assert link is not None
         assert before + timedelta(hours=2) <= link.expires_at
-        assert link.expires_at <= datetime.utcnow() + timedelta(hours=2, seconds=5)
+        assert link.expires_at <= utc_now() + timedelta(hours=2, seconds=5)
         # The stored row carries the same custom expiry.
         row = _token_rows()[0]
         assert row["expires_at"] is not None

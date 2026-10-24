@@ -24,6 +24,7 @@ from sqlalchemy import text
 
 from src.notify import journal
 from src.services.decorators import transactional
+from src.util.utc import utc_now
 
 pytestmark = pytest.mark.integration
 
@@ -159,14 +160,14 @@ class TestTransactionalInsert:
     async def test_owner_inserts_event_with_entity_in_one_commit(
         self, db_session, event_rows
     ) -> None:
-        before = datetime.utcnow()
+        before = utc_now()
         await _Writer().write_and_mark(
             db_session,
             "tag-journal-1",
             "journal-one",
             snapshot={"record_id": "tag-journal-1", "total_price": 3500},
         )
-        after = datetime.utcnow()
+        after = utc_now()
 
         rows = event_rows()
         assert len(rows) == 1
@@ -178,7 +179,7 @@ class TestTransactionalInsert:
         assert stored["record_id"] == "tag-journal-1"
         assert stored["total_price"] == 3500
         # occurred_at — naive UTC stamped at mark time (repository
-        # timestamp convention, mirrors the datetime.utcnow defaults).
+        # timestamp convention, mirrors the utc_now() defaults).
         occurred = datetime.fromisoformat(row["occurred_at"])
         assert occurred.tzinfo is None
         assert before <= occurred <= after

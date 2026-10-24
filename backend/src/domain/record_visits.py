@@ -8,8 +8,6 @@ its own consistency. Both VisitService and RecordService call these
 functions; neither knows about the other.
 """
 
-from datetime import UTC, datetime
-
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +22,7 @@ from src.errors import ErrorCode, ErrorDetail
 from src.models.activity import Activity
 from src.models.record import Record
 from src.models.visit import Visit
+from src.util.utc import utc_now
 
 
 async def recompute_record_seats(
@@ -47,7 +46,7 @@ async def recompute_record_seats(
     )
     visit_count = result.scalar() or 0
     record.seats = visit_count
-    record.updated_at = datetime.now(UTC)
+    record.updated_at = utc_now()
     await db_session.flush()
     return record
 
@@ -76,7 +75,7 @@ async def recompute_record_status(
         VisitItem(id=v.id, status=VisitStatus(v.status))
         for v in active_visits
     ]).value
-    record.updated_at = datetime.now(UTC)
+    record.updated_at = utc_now()
     await db_session.flush()
     return record
 

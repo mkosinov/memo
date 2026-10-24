@@ -138,7 +138,7 @@ WEEK_FIXED_START = datetime(2026, 6, 15)  # Monday, 2026-06-15 (original — for
 # WEEK_FIXED_START — pins photos visual baselines to the fixed week
 # (sorted-by-created_at lists stop drifting across UTC midnight). Keys
 # are photo ALIASES, not DB ids. Naive datetimes: the DB column is
-# naive; explicit values so the AbstractModel default (datetime.utcnow)
+# naive; explicit values so the AbstractModel default (utc_now)
 # no longer fires for seed photos.
 PHOTO_FIXED_DATES: dict[str, datetime] = {
     "ph1": datetime(2026, 6, 15, 12, 0, 0),

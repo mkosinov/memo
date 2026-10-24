@@ -1,12 +1,22 @@
 import { test, expect } from './fixtures/test';
-import { gotoScheduleDay } from './fixtures/helpers';
+import { gotoScheduleDay, closeModal } from './fixtures/helpers';
+import { pickComboboxOption } from './helpers/combobox';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
 /**
  * GH #258/#259 (spec §5 S3): the day view matches the week view — click an
- * empty slot → create-activity dialog «Новое занятие» → card appears. The
- * empty hint is unified: DayView renders the same `schedule-empty-hint`
- * banner (its no-filters text is «Нет занятий на этот день») instead of the
- * old column-header label.
+ * empty slot → create-activity dialog «Новое занятие» (GH #280: the shared
+ * ActivityForm with create-* comboboxes) → card appears. The empty hint is
+ * unified: DayView renders the same `schedule-empty-hint` banner (its
+ * no-filters text is «Нет занятий на этот день») instead of the old
+ * column-header label.
+ *
+ * GH #280 spec §5 on top:
+ *   US-5 — cancel: closing the form without «Создать» creates nothing —
+ *          the day stays empty (hint visible, no cards, no DB row).
+ *   US-4 — private: the «Приватное» switch (role="switch") creates a
+ *          private activity (DB is_private=1 + the card's edit form shows
+ *          the private state).
  *
  * Navigation deep-links to the far-future date 2099-01-05 where no seed
  * activity ever exists (#138: /schedule?view=day&date=… — the URL is the
@@ -55,6 +65,20 @@ async function navigateToEmptyDay(page: import('@playwright/test').Page) {
   await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
 }
 
+/** Click an empty slot → the create-activity dialog opens. */
+async function openCreateDialog(page: import('@playwright/test').Page) {
+  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
+  await expect(emptySlot).toBeVisible();
+  try {
+    await emptySlot.click({ timeout: 5_000 });
+  } catch {
+    await emptySlot.dispatchEvent('click');
+  }
+  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 test('S3: day view — hint, click-create via dialog, card appears', async ({ page }) => {
   // ARRANGE: empty day of 2099-01-05 in day view with grid + hint
   await navigateToEmptyDay(page);
@@ -65,20 +89,13 @@ test('S3: day view — hint, click-create via dialog, card appears', async ({ pa
     'Нет занятий на этот день',
   );
 
-  // ACT: click the first empty slot
-  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
-  await expect(emptySlot).toBeVisible();
-  await emptySlot.click();
-
-  // ASSERT: create-activity dialog opened with slot prefill
-  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-  await expect(dialog).toBeVisible();
+  // ACT: click the first empty slot → fill via comboboxes → submit
+  const dialog = await openCreateDialog(page);
 
   await test.step('fill create form and submit', async () => {
-    // First real option of each select (index 0 is the «—» placeholder)
-    await dialog.getByTestId('create-master').selectOption({ index: 1 });
-    await dialog.getByTestId('create-service').selectOption({ index: 1 });
-    await dialog.getByTestId('create-location').selectOption({ index: 1 });
+    await pickComboboxOption(page, 'create-master');
+    await pickComboboxOption(page, 'create-service');
+    await pickComboboxOption(page, 'create-location');
 
     await dialog.getByTestId('btn-create-activity').click();
     await expect(dialog).toBeHidden();
@@ -88,4 +105,72 @@ test('S3: day view — hint, click-create via dialog, card appears', async ({ pa
   await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible();
   // …and the empty-day hint is gone.
   await expect(page.getByTestId('schedule-empty-hint')).toHaveCount(0);
+});
+
+test('US-5: closing the form without «Создать» — no side effects', async ({ page }) => {
+  // ARRANGE: empty day — nothing can exist here
+  await navigateToEmptyDay(page);
+
+  // ACT: open the create dialog from a slot, dirty the form (service
+  // picked → duration/tariffs filled), then close WITHOUT «Создать»
+  // (backdrop click — the user's close gesture, #138).
+  const dialog = await openCreateDialog(page);
+  await pickComboboxOption(page, 'create-service');
+  await pickComboboxOption(page, 'create-master');
+  await closeModal(page);
+
+  // ASSERT: the dialog is gone…
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // …no success toast fired…
+  await expect(page.getByTestId('toast-info')).toHaveCount(0);
+  // …the slot stays empty (hint still up, no cards)…
+  await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
+  await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(0);
+  // …and nothing reached the DB on the empty day.
+  const rows = queryDBRows(
+    `SELECT id FROM activities WHERE substr(start,1,10)='${EMPTY_DAY}'`,
+  );
+  expect(rows).toHaveLength(0);
+});
+
+test('US-4: «Приватное» switch creates a private activity', async ({ page }) => {
+  // ARRANGE: empty day of the far future — the created activity is the
+  // only row on that date, identified without factories.
+  await navigateToEmptyDay(page);
+
+  // ACT: open the create dialog and flip the «Приватное» switch
+  // (role="switch", aria-checked — GH #280 spec §43) before submitting.
+  const dialog = await openCreateDialog(page);
+  const toggle = dialog.getByTestId('create-private');
+  await expect(toggle).toHaveAttribute('role', 'switch');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+  await pickComboboxOption(page, 'create-master');
+  await pickComboboxOption(page, 'create-service');
+  await pickComboboxOption(page, 'create-location');
+  await dialog.getByTestId('btn-create-activity').click();
+  await expect(dialog).toBeHidden();
+
+  // ASSERT: the card appeared…
+  const card = page.locator('[data-testid^="activity-"]').first();
+  await expect(card).toBeVisible();
+
+  // …DB says the created activity IS private (copy-last-week pattern)…
+  const row = queryDBRow(
+    `SELECT id, is_private FROM activities WHERE substr(start,1,10)='${EMPTY_DAY}'`,
+  );
+  expect(row).not.toBeNull();
+  expect(row!.is_private).toBe(1);
+
+  // …and the UI agrees: reopen the card → the edit form's private switch
+  // is on (activity-details-modal.spec.ts pattern).
+  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
+  const editDialog = page.locator('[data-testid="activity-details-modal"]');
+  await expect(editDialog).toBeVisible();
+  await expect(editDialog.getByTestId('toggle-private')).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
 });

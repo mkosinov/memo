@@ -503,7 +503,8 @@ describe('DayView', () => {
       expect(modal).toHaveAttribute('data-has-activity', 'false');
       expect(modal).toHaveAttribute(
         'data-defaults',
-        JSON.stringify({ dayIndex: 0, startMinutes: 600 }),
+        // GH #280: календарная дата выбранного дня (единственный день сетки)
+        JSON.stringify({ date: '2026-06-15', startMinutes: 600 }),
       );
     });
   });

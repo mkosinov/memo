@@ -870,6 +870,33 @@ describe('SettingsTab — service/location combobox flow', () => {
   });
 });
 
+// ─── SettingsTab — capacity gate (GH #280: вместимость ≥ 1) ─────────────────
+// Instant-patch convention (same as the «ЧЧ:ММ» duration): the field follows
+// raw input, but the capacity PATCH fires only for Number(value) >= 1 —
+// empty/zero input is silently not applied.
+
+describe('SettingsTab — capacity gate (вместимость ≥ 1, GH #280)', () => {
+  it('does not patch capacity when the input is emptied or set to 0', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-capacity');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('patches capacity for values >= 1', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-capacity');
+    fireEvent.change(input, { target: { value: '1' } });
+    expect(onUpdate).toHaveBeenCalledWith({ capacity: 1 });
+    fireEvent.change(input, { target: { value: '12' } });
+    expect(onUpdate).toHaveBeenCalledWith({ capacity: 12 });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+  });
+});
+
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {
@@ -1296,7 +1323,7 @@ describe('create mode', () => {
         onClose={vi.fn()}
         activity={null}
         mode="create"
-        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+        createDefaults={{ date: '2026-10-21', startMinutes: 540 }}
       />,
     );
 
@@ -1318,8 +1345,10 @@ describe('create mode', () => {
     expect(screen.queryByTestId('tab-add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('btn-delete-activity')).not.toBeInTheDocument();
 
-    // The create form is visible.
+    // The create form is visible (GH #280: combobox wrapper anchor + prefilled
+    // datetime from the slot).
     expect(screen.getByTestId('create-master')).toBeInTheDocument();
+    expect(screen.getByTestId('create-datetime')).toHaveValue('2026-10-21T09:00');
   });
 
   it('edit mode keeps tabs and delete footer (regression perimeter)', () => {
@@ -1347,16 +1376,24 @@ describe('create mode', () => {
         onClose={onClose}
         activity={null}
         mode="create"
-        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+        createDefaults={{ date: '2026-10-21', startMinutes: 540 }}
       />,
     );
 
     // Make the form valid and submit — saving becomes true and stays true
-    // (mutate is fire-and-forget; callbacks own the resolution).
-    fireEvent.change(screen.getByTestId('create-master'), { target: { value: 'm1' } });
-    fireEvent.change(screen.getByTestId('create-service'), { target: { value: 's1' } });
-    fireEvent.change(screen.getByTestId('create-location'), { target: { value: 'grand' } });
-    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '60' } });
+    // (mutate is fire-and-forget; callbacks own the resolution). Combobox
+    // picks (GH #280): клик по триггеру → клик по опции; вместимость — руками
+    // (у shared mockLocations нет defaultCapacity).
+    const pickIn = (containerTestId: string, optionValue: string) => {
+      fireEvent.click(
+        within(screen.getByTestId(containerTestId)).getByTestId('combobox-trigger'),
+      );
+      fireEvent.click(screen.getByTestId(`combobox-option-${optionValue}`));
+    };
+    pickIn('create-master', 'm1');
+    pickIn('create-service', 's1'); // длительность «02:30» заполнится сама
+    pickIn('create-location', 'alpika');
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('btn-create-activity'));
     expect(addActivity).toHaveBeenCalledTimes(1);
 

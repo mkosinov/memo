@@ -75,6 +75,34 @@ function resolveStaleTime(qc: QueryClient, key: readonly unknown[]): number {
   return typeof fallback === 'number' ? fallback : 0;
 }
 
+/**
+ * GH #280: source of the created activity's start time — an exclusive union.
+ * `start` — ready floating-local ISO from the create form's datetime field
+ * (goes to the payload as-is; the chosen date may be outside the open week);
+ * `dayIndex`+`startMinutes` — legacy week-relative conversion for the grid
+ * stamps (WeekView/DayView/dnd know only the open week's weekday + minutes).
+ * The `never` markers make the branches mutually exclusive in TS.
+ */
+export type AddActivityTimeSource =
+  | { start: string; dayIndex?: never; startMinutes?: never }
+  | { start?: never; dayIndex: number; startMinutes: number };
+
+/** addActivity input (GH #280): base fields + one of the two time sources. */
+export type AddActivityInput = {
+  masterId: string;
+  serviceId: string;
+  locationId: string;
+  durationMinutes: number;
+  capacity: number;
+  isPrivate?: boolean;
+  comment?: string;
+} & AddActivityTimeSource;
+
+export type AddActivityCallbacks = {
+  onSuccess?: () => void;
+  onError?: (err: unknown) => void;
+};
+
 interface ScheduleDataProviderProps {
   children: React.ReactNode;
   // inputs from the composition (spec §3: data context is NOT independent):
@@ -98,17 +126,7 @@ export interface ScheduleDataContextType {
   scheduleLocations: LocationResponse[];
   loading: boolean;
   error: Error | null;
-  addActivity: (activity: {
-    dayIndex: number;
-    masterId: string;
-    serviceId: string;
-    locationId: string;
-    startMinutes: number;
-    durationMinutes: number;
-    capacity: number;
-    isPrivate?: boolean;
-    comment?: string;
-  }, callbacks?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => void;
+  addActivity: (activity: AddActivityInput, callbacks?: AddActivityCallbacks) => void;
   updateActivity: (id: string, updates: {
     dayIndex?: number;
     startMinutes?: number;
@@ -314,18 +332,12 @@ export function ScheduleDataProvider({
   });
 
   // Actions
-  const addActivity = useCallback((activity: {
-    dayIndex: number;
-    masterId: string;
-    serviceId: string;
-    locationId: string;
-    startMinutes: number;
-    durationMinutes: number;
-    capacity: number;
-    isPrivate?: boolean;
-    comment?: string;
-  }, callbacks?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => {
-    const start = composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
+  const addActivity = useCallback((activity: AddActivityInput, callbacks?: AddActivityCallbacks) => {
+    // GH #280: `start` (create form) goes to the payload as-is; the legacy
+    // dayIndex+startMinutes (grid stamps) still converts via the open week.
+    const start = activity.start !== undefined
+      ? activity.start
+      : composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
 
     createActivityMutate({
       master_id: activity.masterId,

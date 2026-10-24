@@ -3,6 +3,23 @@
 // The ONLY place that parses/composes schedule-canonical datetime strings.
 // Future multi-TZ / Temporal support lands here (spec §11/§7).
 
+import { MONTHS_GENITIVE } from './utils';
+
+/** Lowercase weekday names — русская типографика тоста создания (GH #280). */
+const WEEKDAYS_RU = [
+  'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье',
+] as const;
+
+/**
+ * «среда, 21 октября» — день недели + число + месяц (родительный падеж), без
+ * года (GH #280: тост успеха создания называет выбранную календарную дату).
+ * Input — ключ даты 'YYYY-MM-DD'; парсинг локальный (полдень, без TZ-сдвигов).
+ */
+export function formatDateRu(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return `${WEEKDAYS_RU[(d.getDay() + 6) % 7]}, ${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]}`;
+}
+
 /**
  * Result of parsing a schedule-canonical datetime string.
  *
@@ -88,6 +105,22 @@ export function formatTime(startMinutes: number): string {
 export function hhmmToMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + m;
+}
+
+/** Snap minutes to the nearest grid slot (moved verbatim from SettingsTab, GH #280). */
+export function snapMinutes(minutes: number, gridFrequency: number): number {
+  return Math.round(minutes / gridFrequency) * gridFrequency;
+}
+
+/**
+ * Build a datetime-local string "YYYY-MM-DDTHH:MM" from a date key + integer
+ * minutes, snapped to grid (moved verbatim from SettingsTab, GH #280).
+ */
+export function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency: number): string {
+  if (!dateStr) return '';
+  const snapped = snapMinutes(startMinutes, gridFrequency);
+  // composeLocalISO yields "YYYY-MM-DDTHH:MM:00" — slice off the ":00" seconds for datetime-local.
+  return composeLocalISO(dateStr, snapped).slice(0, 16);
 }
 
 /** The Monday (local midnight) of the week containing `date`. Semantics identical to the legacy `utils.getMonday`. */

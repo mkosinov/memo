@@ -16,9 +16,10 @@ export interface ComboboxProps {
   clearLabel: string;         // required — pinned clear option's label
   className?: string;         // applied to the trigger
   ariaLabel?: string;         // accessible name for the trigger
+  containerTestId?: string;   // data-testid on the outer wrapper (pattern: select-service / select-location)
 }
 
-export function Combobox({ value, options, onChange, clearLabel, className = '', ariaLabel }: ComboboxProps) {
+export function Combobox({ value, options, onChange, clearLabel, className = '', ariaLabel, containerTestId }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -154,7 +155,7 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
   };
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative" ref={containerRef} data-testid={containerTestId}>
       <button
         ref={triggerRef}
         type="button"

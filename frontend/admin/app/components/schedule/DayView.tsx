@@ -85,11 +85,11 @@ export function DayView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
   const [modalMode, setModalMode] = useState<'edit' | 'quickAdd' | 'create'>('edit');
-  const [modalDayIndex, setModalDayIndex] = useState(0);
   const [modalStartMinutes, setModalStartMinutes] = useState(0);
 
-  const openCreateModal = useCallback((dayIndex: number, startMinutes: number) => {
-    setModalDayIndex(dayIndex);
+  // Day view renders a single day — the slot's calendar date IS selectedDay
+  // regardless of the weekday index the column reports (GH #280).
+  const openCreateModal = useCallback((_dayIndex: number, startMinutes: number) => {
     setModalStartMinutes(startMinutes);
     setModalActivity(null);
     setModalMode('create');
@@ -620,7 +620,7 @@ export function DayView() {
           onClose={closeModal}
           activity={modalActivity}
           mode={modalMode}
-          createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
+          createDefaults={{ date: selectedDayISO, startMinutes: modalStartMinutes }}
         />
       )}
 

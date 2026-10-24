@@ -7,7 +7,7 @@ import {
 } from './fixtures/helpers';
 import { createTestActivity, cleanup } from './fixtures/factories';
 import { clickFabRobust } from './fixtures/server-push';
-import { openCombobox } from './helpers/combobox';
+import { openCombobox, pickComboboxOption } from './helpers/combobox';
 
 /**
  * GH #261 — «Сохраняем…» loading toast in the common toast stack (spec §6).
@@ -15,10 +15,14 @@ import { openCombobox } from './helpers/combobox';
  * Five scenarios (S1–S5) covering the visibility lifecycle of the
  * `toast-loading` indicator during activity mutations on /schedule:
  *
- *   S1  create   → loading visible in flight, hidden after + «Создано: …»
+ *   S1  create   → loading visible in flight, hidden after + «Создано: …»;
+ *                  the «Создать» button is locked while the request flies
+ *                  (GH #280 spec §54 — single submit point, blocked during
+ *                  the save)
  *   S2  update   → loading visible in flight, hidden after
  *   S3  overlap  → exactly ONE loading toast across two concurrent creates
- *   S4  500      → loading disappears, error toast appears, nothing hangs
+ *   S4  500      → loading disappears, error toast appears, nothing hangs;
+ *                  the form STAYS OPEN with the draft (GH #280 spec §54)
  *   S5  delete   → «Сохраняем…» is NOT shown on the deferred delete (#286
  *                  пересмотр S5 #261): the dry-run click stays quiet, the
  *                  undo toast («удалено», with the #94 countdown ring)
@@ -27,11 +31,6 @@ import { openCombobox } from './helpers/combobox';
  *
  * The delay helper (`delayActivityMutations`) holds non-GET activity API
  * requests for ~1.5 s, making the in-flight window deterministic.
- *
- * RED note (TDD, Task 3 of plan 2026-09-14-saving-toast): at this point the
- * `useSavingToast` hook does not exist yet — the «Сохраняем…» toast is never
- * shown, so every scenario below MUST fail on a `toast-loading` assertion.
- * Task 4 (hook) turns them GREEN.
  */
 
 /** Open the create dialog by clicking an empty grid slot (GH #258/#259). */
@@ -50,14 +49,17 @@ async function openCreateDialog(page: import('@playwright/test').Page) {
   return dialog;
 }
 
-/** Fill and submit the create dialog (first real option for each dict). */
+/** Fill and submit the create dialog (first real combobox option each). */
 async function submitCreateDialog(
   page: import('@playwright/test').Page,
   dialog: import('@playwright/test').Locator,
 ) {
-  await dialog.getByTestId('create-master').selectOption({ index: 1 });
-  await dialog.getByTestId('create-service').selectOption({ index: 1 });
-  await dialog.getByTestId('create-location').selectOption({ index: 1 });
+  // GH #280: dictionary picks go through the create-* combobox containers
+  // (trigger + option click) — the native selectOption is gone with the
+  // old form. Duration/capacity autofill from the picked service/location.
+  await pickComboboxOption(page, 'create-master');
+  await pickComboboxOption(page, 'create-service');
+  await pickComboboxOption(page, 'create-location');
   await dialog.getByTestId('btn-create-activity').click();
 }
 
@@ -115,12 +117,18 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
     const dialog = await openCreateDialog(page);
     await submitCreateDialog(page, dialog);
 
-    // In flight: the loading toast is visible in the common stack.
+    // In flight: the loading toast is visible in the common stack…
     await expect(page.getByTestId('toast-loading')).toBeVisible();
+    // …and «Создать» is locked for the duration of the request (GH #280
+    // spec §54 — the modal stays open with saving=true).
+    await expect(dialog.getByTestId('btn-create-activity')).toBeDisabled();
+    await expect(dialog).toBeVisible();
 
-    // After the response: loading is gone, success toast appears.
+    // After the response: loading is gone, success toast appears, the
+    // dialog closes and the card lands in the grid.
     await expect(page.getByTestId('toast-loading')).toBeHidden();
     await expect(page.getByTestId('toast-info')).toContainText('Создано:');
+    await expect(dialog).toBeHidden();
     await expect(page.locator('[data-testid^="activity-"]')).toHaveCount(
       cardsBefore + 1,
     );
@@ -224,6 +232,10 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
     await expect(page.getByTestId('toast-loading')).toBeHidden();
     // An error toast explains the failure.
     await expect(page.getByTestId('toast-error')).toBeVisible();
+    // The form stays open with the draft and unlocks (GH #280 spec §54 —
+    // no silent loss of the entered values on an error).
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('btn-create-activity')).toBeEnabled();
     // Nothing lingers: no loading toast anywhere in the stack afterwards.
     await expect
       .poll(async () => page.getByTestId('toast-loading').count(), { timeout: 5_000 })

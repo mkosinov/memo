@@ -19,6 +19,7 @@ interface MasterPickerProps {
   onChange: (value: string) => void;
   className?: string;
   ariaLabel?: string;
+  containerTestId?: string;   // data-testid on the Combobox outer wrapper
 }
 
 function getMasterLabel(m: MasterBase): string {
@@ -28,7 +29,7 @@ function getMasterLabel(m: MasterBase): string {
   return m.name ?? '';
 }
 
-export function MasterPicker({ masters, value, onChange, className, ariaLabel }: MasterPickerProps) {
+export function MasterPicker({ masters, value, onChange, className, ariaLabel, containerTestId }: MasterPickerProps) {
   const options: ComboboxOption[] = (Array.isArray(masters) ? masters : []).map((m) => ({
     value: m.id,
     label: getMasterLabel(m),
@@ -44,6 +45,7 @@ export function MasterPicker({ masters, value, onChange, className, ariaLabel }:
       clearLabel="Не выбран"
       className={className}
       ariaLabel={ariaLabel}
+      containerTestId={containerTestId}
     />
   );
 }

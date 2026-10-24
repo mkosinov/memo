@@ -16,7 +16,7 @@ import { ActivityDeleteConfirmDialog } from './ActivityDeleteConfirmDialog';
 import { ScheduleColumnHeader } from './ScheduleColumnHeader';
 import { ActivityDetailsModal } from '../modal/ActivityDetailsModal';
 import { DAYS, TIME_COL_WIDTH, isSameDay } from '@/lib/utils';
-import { formatTime, getMonday, toISODate } from '@/lib/datetime';
+import { formatTime, getMonday, toISODate, dayIndexToDate } from '@/lib/datetime';
 
 export function WeekView() {
   const {
@@ -314,7 +314,7 @@ export function WeekView() {
             onClose={closeModal}
             activity={modalActivity}
             mode={modalMode}
-            createDefaults={{ dayIndex: modalDayIndex, startMinutes: modalStartMinutes }}
+            createDefaults={{ date: dayIndexToDate(monday, modalDayIndex), startMinutes: modalStartMinutes }}
           />
         )}
 

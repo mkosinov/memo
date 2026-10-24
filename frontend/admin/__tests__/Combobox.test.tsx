@@ -133,4 +133,18 @@ describe('Combobox', () => {
     fireEvent.click(screen.getByTestId('combobox-option-m3'));
     expect(onChange).toHaveBeenCalledWith('m3');
   });
+
+  it('9. containerTestId lands on the outer wrapper; inner testids unchanged', () => {
+    const { container } = renderCombobox({ containerTestId: 'select-service' });
+    const wrapper = screen.getByTestId('select-service');
+    expect(wrapper).toBe(container.firstElementChild);
+    expect(wrapper.querySelector('[data-testid="combobox-trigger"]')).toBe(
+      screen.getByTestId('combobox-trigger'),
+    );
+  });
+
+  it('10. wrapper carries no data-testid when containerTestId omitted', () => {
+    const { container } = renderCombobox();
+    expect(container.firstElementChild?.getAttribute('data-testid')).toBeNull();
+  });
 });

@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
-import { MasterPicker } from '@/app/components/shared/MasterPicker';
-import { Combobox, type ComboboxOption } from '@/app/components/shared/Combobox';
+import { ActivityForm } from './ActivityForm';
 import type { ScheduleAdminDTO } from '@memo/domain';
-import { formatTime, hhmmToMinutes, composeLocalISO } from '@/lib/datetime';
+import { formatTime, hhmmToMinutes, composeLocalISO, snapMinutes, buildDateTimeLocal } from '@/lib/datetime';
 
 /** Update payload accepted by ScheduleDataContext.updateActivity (GH #142 minutes contract). */
 type ActivityUpdates = Parameters<ReturnType<typeof useScheduleData>['updateActivity']>[1];
@@ -16,19 +15,11 @@ interface SettingsTabProps {
   onUpdate: (updates: ActivityUpdates) => void;
 }
 
-/** Snap minutes to the nearest grid slot. */
-function snapMinutes(minutes: number, gridFrequency: number): number {
-  return Math.round(minutes / gridFrequency) * gridFrequency;
-}
-
-/** Build a datetime-local string "YYYY-MM-DDTHH:MM" from a date key + integer minutes, snapped to grid. */
-function buildDateTimeLocal(dateStr: string, startMinutes: number, gridFrequency: number): string {
-  if (!dateStr) return '';
-  const snapped = snapMinutes(startMinutes, gridFrequency);
-  // composeLocalISO yields "YYYY-MM-DDTHH:MM:00" — slice off the ":00" seconds for datetime-local.
-  return composeLocalISO(dateStr, snapped).slice(0, 16);
-}
-
+/**
+ * Edit-mode wiring of the shared ActivityForm (GH #280): every change is an
+ * instant patch via onUpdate (values snap to the activity prop on external
+ * resync). All markup lives in ActivityForm.
+ */
 export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const { masters, services, locations } = useScheduleData();
   const { gridFrequency } = useGridSettings();
@@ -42,23 +33,6 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   const [startDateTime, setStartDateTime] = useState(() => {
     return buildDateTimeLocal(activity.date || '', activity.startMinutes, gridFrequency);
   });
-
-  const serviceOptions: ComboboxOption[] = services.map((s) => ({ value: s.id, label: s.name }));
-  const locationOptions: ComboboxOption[] = locations.map((l) => ({
-    value: l.id,
-    label: l.title,
-    searchText: l.shortTitle ? `${l.title} ${l.shortTitle}` : l.title,
-  }));
-
-  // Selected service for display (domain Service carries tariffs, GH #142)
-  const selectedService = services.find((s) => s.id === serviceId);
-
-  // Age display: if maxAge > 0 → "{minAge}–{maxAge}", else → "{minAge}+"
-  const ageDisplay = selectedService
-    ? Number(selectedService.maxAge) > 0
-      ? `${selectedService.minAge}–${selectedService.maxAge}`
-      : `${selectedService.minAge}+`
-    : null;
 
   // Auto-fill from service when service changes
   const handleServiceChange = useCallback(
@@ -106,6 +80,20 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     [onUpdate],
   );
 
+  // Handle capacity change (GH #280: вместимость ≥ 1) — instant-patch
+  // convention like the «ЧЧ:ММ» duration: the field follows the raw input,
+  // but empty/zero values are silently not applied (no patch fires).
+  const handleCapacityChange = useCallback(
+    (value: string) => {
+      const val = Number(value);
+      setCapacity(val);
+      if (val >= 1) {
+        onUpdate({ capacity: val });
+      }
+    },
+    [onUpdate],
+  );
+
   // Sync state from activity prop changes (e.g. after DnD)
   useEffect(() => {
     setServiceId(activity.serviceId);
@@ -126,161 +114,37 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- gridFrequency is display-snapping only; resync fires on activity changes alone (see above)
   }, [activity]);
 
-  const inputClass =
-    'w-full rounded-lg border px-3 py-2 text-sm bg-white';
-  const inputStyle = { borderColor: 'var(--line)' };
-
   return (
-    <div className="space-y-4 p-4" data-testid="settings-tab">
-      {/* Row 1: Date/Time + Duration + Private toggle */}
-      <div className="flex gap-3 items-start" data-testid="settings-row-datetime-duration">
-        <div className="flex-none">
-          <label className="text-xs font-medium text-ink-mid block mb-1">
-            Дата и время
-          </label>
-          <input
-            id="settings-datetime"
-            type="datetime-local"
-            className={inputClass}
-            style={inputStyle}
-            value={startDateTime}
-            onChange={(e) => handleDateTimeChange(e.target.value)}
-            data-testid="input-datetime"
-          />
-        </div>
-        <div className="w-20">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-duration">
-            Длительность
-          </label>
-          <input
-            id="settings-duration"
-            type="text"
-            placeholder="ЧЧ:ММ"
-            className={inputClass}
-            style={inputStyle}
-            value={durationStr}
-            onChange={(e) => handleDurationChange(e.target.value)}
-            data-testid="input-duration"
-          />
-        </div>
-        <div className="ml-auto flex flex-col items-end gap-1.5 pb-0.5">
-          <span className="text-xs text-ink-mid">Приватное</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isPrivate}
-            onClick={() => {
-              setIsPrivate(!isPrivate);
-              onUpdate({ isPrivate: !isPrivate });
-            }}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              isPrivate ? 'bg-brand' : 'bg-ink-faint'
-            }`}
-            data-testid="toggle-private"
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                isPrivate ? 'translate-x-4' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
-        </div>
-      </div>
-
-      {/* Row 2: Service + Age (read-only) + Capacity */}
-      <div className="flex gap-3" data-testid="settings-row-service-age-capacity">
-        <div className="flex-1" data-testid="select-service">
-          <label className="text-xs font-medium text-ink-mid block mb-1">
-            Услуга
-          </label>
-          <Combobox
-            clearLabel="Выберите"
-            value={serviceId}
-            options={serviceOptions}
-            onChange={(v) => handleServiceChange(v)}
-            className={inputClass}
-            ariaLabel="Услуга"
-          />
-        </div>
-        <div className="w-20">
-          <label className="text-xs font-medium text-ink-mid block mb-1">
-            Возраст
-          </label>
-          <div
-            className="w-full rounded-lg border px-3 py-2 text-sm bg-surface text-ink-light"
-            style={inputStyle}
-            data-testid="age-display"
-          >
-            {ageDisplay || '—'}
-          </div>
-        </div>
-        <div className="w-20">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-capacity">
-            Вместимость
-          </label>
-          <input
-            id="settings-capacity"
-            type="number"
-            min={1}
-            className={inputClass}
-            style={inputStyle}
-            value={capacity}
-            onChange={(e) => {
-              const val = Number(e.target.value);
-              setCapacity(val);
-              onUpdate({ capacity: val });
-            }}
-            data-testid="input-capacity"
-          />
-        </div>
-      </div>
-
-      {/* Tariffs */}
-      {selectedService?.tariffs && selectedService.tariffs.length > 0 && (
-        <div className="space-y-1">
-          <span className="text-xs font-medium text-ink-mid">Тарифы:</span>
-          {selectedService.tariffs.map((tariff) => (
-            <div key={tariff.id} className="flex items-center justify-between text-sm px-2 py-1 bg-surface rounded">
-              <span className="text-ink-mid">{tariff.title}</span>
-              <span className="font-medium text-ink">{tariff.price.toLocaleString('ru-RU')} ₽</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Row 3: Master + Location */}
-      <div className="flex gap-3" data-testid="settings-row-master-location">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-master">
-            Мастер
-          </label>
-          <MasterPicker
-            masters={masters}
-            value={masterId}
-            onChange={(value) => {
-              setMasterId(value);
-              onUpdate({ masterId: value });
-            }}
-            className={`${inputClass} appearance-none`}
-          />
-        </div>
-        <div className="flex-1" data-testid="select-location">
-          <label className="text-xs font-medium text-ink-mid block mb-1">
-            Локация
-          </label>
-          <Combobox
-            clearLabel="Выберите"
-            value={locationId}
-            options={locationOptions}
-            onChange={(v) => {
-              setLocationId(v);
-              onUpdate({ locationId: v });
-            }}
-            className={inputClass}
-            ariaLabel="Локация"
-          />
-        </div>
-      </div>
-    </div>
+    <ActivityForm
+      containerTestId="settings-tab"
+      services={services}
+      masters={masters}
+      locations={locations}
+      values={{
+        startDateTime,
+        durationStr,
+        isPrivate,
+        serviceId,
+        capacity,
+        masterId,
+        locationId,
+      }}
+      onDateTimeChange={handleDateTimeChange}
+      onDurationChange={handleDurationChange}
+      onPrivateToggle={() => {
+        setIsPrivate(!isPrivate);
+        onUpdate({ isPrivate: !isPrivate });
+      }}
+      onServiceChange={handleServiceChange}
+      onCapacityChange={handleCapacityChange}
+      onMasterChange={(value) => {
+        setMasterId(value);
+        onUpdate({ masterId: value });
+      }}
+      onLocationChange={(v) => {
+        setLocationId(v);
+        onUpdate({ locationId: v });
+      }}
+    />
   );
 }

@@ -39,13 +39,14 @@ redis_marks = [
     ),
 ]
 
+
 def redis_url() -> str:
     """The contour endpoint — set by the runner (dev shell / CI job)."""
     return os.environ["REDIS_URL"]
 
 
-#: Family §4.2 task payload sample.
-def make_task(task_id: int = 456) -> dict[str, Any]:
+#: Family §4.2 task payload sample (task_id — UUID string, #560 errata).
+def make_task(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> dict[str, Any]:
     return {
         "task_id": task_id,
         "text": "Готовый текст",
@@ -56,7 +57,10 @@ def make_task(task_id: int = 456) -> dict[str, Any]:
 
 
 #: Family §4.3 worker stage event sample.
-def make_status(task_id: int = 456, stage: str = "sending") -> dict[str, Any]:
+def make_status(
+    task_id: str = "123e4567-e89b-12d3-a456-426614174000",
+    stage: str = "sending",
+) -> dict[str, Any]:
     return {
         "task_id": task_id,
         "stage": stage,
@@ -68,7 +72,7 @@ def make_status(task_id: int = 456, stage: str = "sending") -> dict[str, Any]:
 
 
 #: Part-2 spec §3.2 inbound reply sample.
-def make_inbound(task_id: int = 456) -> dict[str, Any]:
+def make_inbound(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> dict[str, Any]:
     return {
         "channel": "telegram",
         "external_address": "+79990001122",

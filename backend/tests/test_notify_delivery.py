@@ -69,7 +69,7 @@ TEXT = "Готовый текст оповещения: мастер-класс 
 #: The live seam id: ``NotifyTask.id`` is a UUID String(36) (AbstractModel
 #: PK; scenarios/reenqueue enqueue ``task.id`` verbatim) — the canonical
 #: part-3 shape is a non-empty string, ints are brak (#484 follow-up;
-#: the family spec §4.2 example ``"task_id": 456`` is a sketch typo).
+#: the original §4.2 int example was corrected by the #560 spec errata).
 TASK_ID = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9c01"
 
 
@@ -225,8 +225,8 @@ class TestParseTaskPayload:
         [
             ("no task_id", _payload(task_id=None)),
             ("task_id empty string", _payload(task_id="")),
-            # The int spellings (incl. the §4.2 sketch example 456) are
-            # NOT what the seam carries — NotifyTask.id is String(36).
+            # The int spellings (the pre-errata §4.2 example showed one)
+            # are NOT what the seam carries — NotifyTask.id is String(36).
             ("task_id int", _payload(task_id=456)),
             ("task_id negative int", _payload(task_id=-1)),
             ("task_id bool", _payload(task_id=True)),

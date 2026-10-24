@@ -30,8 +30,8 @@ from src.notify.queue import (
 pytestmark = pytest.mark.pure_unit
 
 
-def _task(task_id: int = 456) -> TaskPayload:
-    """Family §4.2 task payload."""
+def _task(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> TaskPayload:
+    """Family §4.2 task payload (task_id — UUID string, #560 errata)."""
     return {
         "task_id": task_id,
         "text": "Готовый текст",
@@ -41,7 +41,10 @@ def _task(task_id: int = 456) -> TaskPayload:
     }
 
 
-def _status(task_id: int = 456, stage: str = "sending") -> StatusEvent:
+def _status(
+    task_id: str = "123e4567-e89b-12d3-a456-426614174000",
+    stage: str = "sending",
+) -> StatusEvent:
     """Family §4.3 worker stage event."""
     return {
         "task_id": task_id,
@@ -53,7 +56,7 @@ def _status(task_id: int = 456, stage: str = "sending") -> StatusEvent:
     }
 
 
-def _inbound(task_id: int = 456) -> InboundEvent:
+def _inbound(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> InboundEvent:
     """Inbound reply — the payload contract itself is fixed in part 2;
     for the fake it is opaque."""
     return {"channel": "telegram", "task_id": task_id, "text": "Ответ клиента"}

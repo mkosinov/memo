@@ -1323,7 +1323,7 @@ describe('create mode', () => {
         onClose={vi.fn()}
         activity={null}
         mode="create"
-        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+        createDefaults={{ date: '2026-10-21', startMinutes: 540 }}
       />,
     );
 
@@ -1345,8 +1345,10 @@ describe('create mode', () => {
     expect(screen.queryByTestId('tab-add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('btn-delete-activity')).not.toBeInTheDocument();
 
-    // The create form is visible.
+    // The create form is visible (GH #280: combobox wrapper anchor + prefilled
+    // datetime from the slot).
     expect(screen.getByTestId('create-master')).toBeInTheDocument();
+    expect(screen.getByTestId('create-datetime')).toHaveValue('2026-10-21T09:00');
   });
 
   it('edit mode keeps tabs and delete footer (regression perimeter)', () => {
@@ -1374,16 +1376,24 @@ describe('create mode', () => {
         onClose={onClose}
         activity={null}
         mode="create"
-        createDefaults={{ dayIndex: 2, startMinutes: 540 }}
+        createDefaults={{ date: '2026-10-21', startMinutes: 540 }}
       />,
     );
 
     // Make the form valid and submit — saving becomes true and stays true
-    // (mutate is fire-and-forget; callbacks own the resolution).
-    fireEvent.change(screen.getByTestId('create-master'), { target: { value: 'm1' } });
-    fireEvent.change(screen.getByTestId('create-service'), { target: { value: 's1' } });
-    fireEvent.change(screen.getByTestId('create-location'), { target: { value: 'grand' } });
-    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '60' } });
+    // (mutate is fire-and-forget; callbacks own the resolution). Combobox
+    // picks (GH #280): клик по триггеру → клик по опции; вместимость — руками
+    // (у shared mockLocations нет defaultCapacity).
+    const pickIn = (containerTestId: string, optionValue: string) => {
+      fireEvent.click(
+        within(screen.getByTestId(containerTestId)).getByTestId('combobox-trigger'),
+      );
+      fireEvent.click(screen.getByTestId(`combobox-option-${optionValue}`));
+    };
+    pickIn('create-master', 'm1');
+    pickIn('create-service', 's1'); // длительность «02:30» заполнится сама
+    pickIn('create-location', 'alpika');
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('btn-create-activity'));
     expect(addActivity).toHaveBeenCalledTimes(1);
 

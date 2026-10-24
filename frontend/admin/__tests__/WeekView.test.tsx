@@ -185,7 +185,8 @@ describe('WeekView', () => {
       expect(modal).toHaveAttribute('data-has-activity', 'false');
       expect(modal).toHaveAttribute(
         'data-defaults',
-        JSON.stringify({ dayIndex: 1, startMinutes: 540 }),
+        // GH #280: календарная дата колонки дня (currentWeek=2026-06-01, dayIndex 1)
+        JSON.stringify({ date: '2026-06-02', startMinutes: 540 }),
       );
     });
   });

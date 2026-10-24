@@ -36,6 +36,25 @@ interface ActivityFormProps {
   onLocationChange: (locationId: string) => void;
   /** data-testid on the root wrapper (Task-1 pattern: `settings-tab` today). */
   containerTestId?: string;
+  /**
+   * GH #280 create-mode anchors: a set field replaces the edit-mode anchor on
+   * that element (e.g. `create-datetime`); an unset field keeps the edit
+   * default, so edit-mode DOM is byte-identical. `tariffs` and the combobox
+   * containers have NO edit default — the attribute renders only when set.
+   */
+  testIds?: ActivityFormTestIds;
+}
+
+/** Optional per-element testid overrides (see {@link ActivityFormProps.testIds}). */
+export interface ActivityFormTestIds {
+  datetime?: string;           // default 'input-datetime'
+  duration?: string;           // default 'input-duration'
+  privateToggle?: string;      // default 'toggle-private'
+  capacity?: string;           // default 'input-capacity'
+  tariffs?: string;            // no default (edit renders no tariffs testid)
+  serviceContainer?: string;   // no default (Combobox containerTestId)
+  masterContainer?: string;    // no default (MasterPicker containerTestId)
+  locationContainer?: string;  // no default (Combobox containerTestId)
 }
 
 /**
@@ -57,6 +76,7 @@ export function ActivityForm({
   onMasterChange,
   onLocationChange,
   containerTestId,
+  testIds,
 }: ActivityFormProps) {
   const serviceOptions: ComboboxOption[] = services.map((s) => ({ value: s.id, label: s.name }));
   const locationOptions: ComboboxOption[] = locations.map((l) => ({
@@ -94,7 +114,7 @@ export function ActivityForm({
             style={inputStyle}
             value={values.startDateTime}
             onChange={(e) => onDateTimeChange(e.target.value)}
-            data-testid="input-datetime"
+            data-testid={testIds?.datetime ?? 'input-datetime'}
           />
         </div>
         <div className="w-20">
@@ -109,7 +129,7 @@ export function ActivityForm({
             style={inputStyle}
             value={values.durationStr}
             onChange={(e) => onDurationChange(e.target.value)}
-            data-testid="input-duration"
+            data-testid={testIds?.duration ?? 'input-duration'}
           />
         </div>
         <div className="ml-auto flex flex-col items-end gap-1.5 pb-0.5">
@@ -122,7 +142,7 @@ export function ActivityForm({
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
               values.isPrivate ? 'bg-brand' : 'bg-ink-faint'
             }`}
-            data-testid="toggle-private"
+            data-testid={testIds?.privateToggle ?? 'toggle-private'}
           >
             <span
               className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
@@ -146,6 +166,7 @@ export function ActivityForm({
             onChange={(v) => onServiceChange(v)}
             className={inputClass}
             ariaLabel="Услуга"
+            containerTestId={testIds?.serviceContainer}
           />
         </div>
         <div className="w-20">
@@ -172,14 +193,14 @@ export function ActivityForm({
             style={inputStyle}
             value={values.capacity}
             onChange={(e) => onCapacityChange(e.target.value)}
-            data-testid="input-capacity"
+            data-testid={testIds?.capacity ?? 'input-capacity'}
           />
         </div>
       </div>
 
       {/* Tariffs */}
       {selectedService?.tariffs && selectedService.tariffs.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1" data-testid={testIds?.tariffs}>
           <span className="text-xs font-medium text-ink-mid">Тарифы:</span>
           {selectedService.tariffs.map((tariff) => (
             <div key={tariff.id} className="flex items-center justify-between text-sm px-2 py-1 bg-surface rounded">
@@ -201,6 +222,7 @@ export function ActivityForm({
             value={values.masterId}
             onChange={(value) => onMasterChange(value)}
             className={`${inputClass} appearance-none`}
+            containerTestId={testIds?.masterContainer}
           />
         </div>
         <div className="flex-1" data-testid="select-location">
@@ -214,6 +236,7 @@ export function ActivityForm({
             onChange={(v) => onLocationChange(v)}
             className={inputClass}
             ariaLabel="Локация"
+            containerTestId={testIds?.locationContainer}
           />
         </div>
       </div>

@@ -3,6 +3,23 @@
 // The ONLY place that parses/composes schedule-canonical datetime strings.
 // Future multi-TZ / Temporal support lands here (spec §11/§7).
 
+import { MONTHS_GENITIVE } from './utils';
+
+/** Lowercase weekday names — русская типографика тоста создания (GH #280). */
+const WEEKDAYS_RU = [
+  'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье',
+] as const;
+
+/**
+ * «среда, 21 октября» — день недели + число + месяц (родительный падеж), без
+ * года (GH #280: тост успеха создания называет выбранную календарную дату).
+ * Input — ключ даты 'YYYY-MM-DD'; парсинг локальный (полдень, без TZ-сдвигов).
+ */
+export function formatDateRu(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return `${WEEKDAYS_RU[(d.getDay() + 6) % 7]}, ${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]}`;
+}
+
 /**
  * Result of parsing a schedule-canonical datetime string.
  *

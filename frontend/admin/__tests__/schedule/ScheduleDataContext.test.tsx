@@ -252,6 +252,23 @@ function DataConsumer() {
       >
         Add
       </button>
+      {/* GH #280: create-form branch — ready local-ISO start goes to the payload as-is. */}
+      <button
+        data-testid="add-activity-start"
+        onClick={() =>
+          addActivity({
+            masterId: 'm1',
+            serviceId: 's1',
+            locationId: 'alpika',
+            start: '2026-10-28T15:30:00',
+            durationMinutes: 75,
+            capacity: 4,
+            isPrivate: false,
+          })
+        }
+      >
+        AddWithStart
+      </button>
       <button
         data-testid="update-activity"
         onClick={() => updateActivity(activities[0]?.id ?? '', { occupied: 5 })}
@@ -600,6 +617,37 @@ describe('ScheduleDataProvider (data half of the old ScheduleContext)', () => {
         duration: 120,
         capacity: 8,
         is_private: false,
+      }),
+    );
+  });
+
+  it('carries a ready local-ISO start straight to the payload (GH #280 create form)', async () => {
+    vi.mocked(createActivity).mockResolvedValue({
+      id: 'new-id', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2026-10-28T15:30:00', duration: 75, capacity: 4,
+      is_private: false, comment: null, record_info: null, created_at: '',
+      updated_at: '', occupied: 0,
+    } as never);
+
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+
+    act(() => {
+      screen.getByTestId('add-activity-start').click();
+    });
+
+    await waitFor(() => {
+      expect(createActivity).toHaveBeenCalled();
+    });
+    // The create form's chosen calendar datetime — NOT recomputed from the
+    // open week (the activity may belong to another week entirely).
+    expect(createActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        start: '2026-10-28T15:30:00',
+        duration: 75,
+        capacity: 4,
       }),
     );
   });

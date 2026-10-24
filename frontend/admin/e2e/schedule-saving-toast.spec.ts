@@ -7,6 +7,7 @@ import {
 } from './fixtures/helpers';
 import { createTestActivity, cleanup } from './fixtures/factories';
 import { clickFabRobust } from './fixtures/server-push';
+import { openCreateDialog, clickWithFallback } from './helpers/clicks';
 import { openCombobox, pickComboboxOption } from './helpers/combobox';
 
 /**
@@ -32,22 +33,6 @@ import { openCombobox, pickComboboxOption } from './helpers/combobox';
  * The delay helper (`delayActivityMutations`) holds non-GET activity API
  * requests for ~1.5 s, making the in-flight window deterministic.
  */
-
-/** Open the create dialog by clicking an empty grid slot (GH #258/#259). */
-async function openCreateDialog(page: import('@playwright/test').Page) {
-  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
-  await expect(emptySlot).toBeVisible();
-  try {
-    await emptySlot.click({ timeout: 5_000 });
-  } catch {
-    // Slots live in DndContext (@dnd-kit) — the drag sensor may intercept
-    // the pointer; a dispatched click still runs the same handler.
-    await emptySlot.dispatchEvent('click');
-  }
-  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-  await expect(dialog).toBeVisible();
-  return dialog;
-}
 
 /** Fill and submit the create dialog (first real combobox option each). */
 async function submitCreateDialog(
@@ -281,9 +266,7 @@ test.describe('«Сохраняем…» toast during schedule mutations (GH #26
         { timeout: 20_000 },
       );
 
-      await card.click({ timeout: 5_000 }).catch(() =>
-        card.dispatchEvent('click'),
-      );
+      await clickWithFallback(card);
 
       // The dry-run is in flight for ~1.5s (delayActivityMutations) — the
       // exact window where the OLD flow showed «Сохраняем…». On the

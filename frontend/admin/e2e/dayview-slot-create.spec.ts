@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay, closeModal } from './fixtures/helpers';
+import { openCreateDialog, clickWithFallback } from './helpers/clicks';
 import { pickComboboxOption } from './helpers/combobox';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
@@ -63,20 +64,6 @@ async function deselectAllFilters(page: import('@playwright/test').Page) {
 async function navigateToEmptyDay(page: import('@playwright/test').Page) {
   await gotoScheduleDay(page, EMPTY_DAY);
   await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
-}
-
-/** Click an empty slot → the create-activity dialog opens. */
-async function openCreateDialog(page: import('@playwright/test').Page) {
-  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
-  await expect(emptySlot).toBeVisible();
-  try {
-    await emptySlot.click({ timeout: 5_000 });
-  } catch {
-    await emptySlot.dispatchEvent('click');
-  }
-  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-  await expect(dialog).toBeVisible();
-  return dialog;
 }
 
 test('S3: day view — hint, click-create via dialog, card appears', async ({ page }) => {
@@ -166,7 +153,7 @@ test('US-4: «Приватное» switch creates a private activity', async ({ 
 
   // …and the UI agrees: reopen the card → the edit form's private switch
   // is on (activity-details-modal.spec.ts pattern).
-  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
+  await clickWithFallback(card);
   const editDialog = page.locator('[data-testid="activity-details-modal"]');
   await expect(editDialog).toBeVisible();
   await expect(editDialog.getByTestId('toggle-private')).toHaveAttribute(

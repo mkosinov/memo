@@ -14,6 +14,7 @@ import {
   cleanup,
   cleanupRecord,
 } from './fixtures/factories';
+import { clickQuickAdd } from './helpers/clicks';
 
 /**
  * E2E tests for error message scenarios (spec §9).
@@ -84,12 +85,7 @@ test.describe('Scenario 1 — Activity at capacity', () => {
 
       // Open the modal via the card's quick-add (+) button — real user
       // interaction (#138; the activity object arrives through React props).
-      const quickAddBtn = activityCard.locator('[data-testid="btn-quick-add"]');
-      try {
-        await quickAddBtn.click({ timeout: 5_000 });
-      } catch {
-        await quickAddBtn.dispatchEvent('click');
-      }
+      await clickQuickAdd(activityCard);
 
       await page.waitForSelector('[data-testid="activity-details-modal"]', {
         state: 'visible',

@@ -5,6 +5,7 @@ import { queryDBRow } from './fixtures/db-query';
 import { createTestActivity, cleanup } from './fixtures/factories';
 import { waitForScheduleReady } from './fixtures/helpers';
 import { clickFabRobust } from './fixtures/server-push';
+import { clickCard } from './helpers/clicks';
 
 /**
  * GH #397 — beforeunload guard over the pending-actions pipeline
@@ -44,15 +45,6 @@ async function enableDeleteMode(page: Page) {
     await clickFabRobust(page);
   }
   await page.getByRole('button', { name: 'Режим удаления' }).click();
-}
-
-/** Click the activity card (real mouse first; the WeekView carousel may
- *  demote overlapping cards to pointer-events:none — dispatchEvent reaches
- *  the same React handler, #286 S5 pattern). */
-async function clickCard(page: Page, activityId: string) {
-  const card = page.locator(`[data-testid="activity-${activityId}"]`);
-  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
-  return card;
 }
 
 /** COMMIT-DELETE waiter: the deferred commit carries a JSON body

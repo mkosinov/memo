@@ -117,8 +117,9 @@ def parse_task_payload(raw: dict[str, Any]) -> TaskPayload:
     """Validate a ``notify:tasks`` payload (spec §3.1): ``task_id`` — a
     NON-EMPTY STRING (a UUID String(36): ``NotifyTask.id``, the
     AbstractModel PK — the shape scenarios and the re-enqueue cycle
-    actually put on the seam; the family §4.2 example ``"task_id": 456``
-    is a sketch artifact, ints/bools are brak), ``text`` — a string,
+    actually put on the seam; the original §4.2 int example was a
+    sketch artifact, corrected by the #560 spec errata; ints/bools
+    are brak), ``text`` — a string,
     ``channels`` — a non-empty list of ``{name, address}`` records with
     non-empty string values. ANY violation braks the whole task — the
     caller logs (identifiers and keys only, never the text) and acks

@@ -1,6 +1,7 @@
 import { SEED_WEEK_MONDAY, addDaysIso } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, gotoScheduleWeek } from './fixtures/helpers';
+import { clickEmptySlot } from './helpers/clicks';
 import { pickComboboxOption } from './helpers/combobox';
 import { queryDBRows } from './fixtures/db-query';
 
@@ -29,18 +30,6 @@ const TUESDAY = addDaysIso(SEED_WEEK_MONDAY, 1);
  */
 const OTHER_WEEK = addDaysIso(SEED_WEEK_MONDAY, 9); // 2026-06-10 (Wednesday)
 const OTHER_WEEK_DT = `${OTHER_WEEK}T14:00`;
-
-/** Empty-slot click (dnd-kit may intercept the pointer — fall back to DOM). */
-async function clickEmptySlot(
-  page: import('@playwright/test').Page,
-  slot: import('@playwright/test').Locator,
-) {
-  try {
-    await slot.click({ timeout: 5_000 });
-  } catch {
-    await slot.dispatchEvent('click');
-  }
-}
 
 /**
  * SQLite `start` storage is 'YYYY-MM-DD HH:MM:SS.ffffff' (space separator,

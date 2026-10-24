@@ -12,6 +12,7 @@ import {
 } from './fixtures/factories';
 import { waitForScheduleReady, withUndoWindow } from './fixtures/helpers';
 import { clickFabRobust } from './fixtures/server-push';
+import { clickCard, clickWithFallback } from './helpers/clicks';
 
 /**
  * GH #286 — deferred activity delete with undo (spec §6 S1–S6).
@@ -62,15 +63,6 @@ async function enableDeleteMode(page: Page) {
     await clickFabRobust(page);
   }
   await page.getByRole('button', { name: 'Режим удаления' }).click();
-}
-
-/** Click the activity card (real mouse first; the WeekView carousel may
- *  demote overlapping cards to pointer-events:none — dispatchEvent reaches
- *  the same React handler, S5 pattern). */
-async function clickCard(page: Page, activityId: string) {
-  const card = page.locator(`[data-testid="activity-${activityId}"]`);
-  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
-  return card;
 }
 
 /** Tracker of COMMITTING activity deletes (DELETE with a NON-EMPTY body).
@@ -508,7 +500,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       // Plain card click opens the details modal; its footer «Удалить
       // активность» initiates the same deferred flow and the modal closes
       // immediately (the pending action survives unmount, app-level provider).
-      await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
+      await clickWithFallback(card);
       await expect(page.locator('[data-testid="activity-details-modal"]')).toBeVisible({
         timeout: 10_000,
       });
@@ -541,7 +533,7 @@ test.describe('Deferred activity delete with undo (GH #286)', () => {
       const card = page.locator(`[data-testid="activity-${activity.id}"]`);
       await expect(card).toBeVisible({ timeout: 10_000 });
 
-      await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
+      await clickWithFallback(card);
       await expect(page.locator('[data-testid="activity-details-modal"]')).toBeVisible({
         timeout: 10_000,
       });

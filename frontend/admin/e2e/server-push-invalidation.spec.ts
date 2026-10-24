@@ -7,6 +7,7 @@ import {
   waitForTagsReady,
   waitForPhotosReady,
 } from './fixtures/helpers';
+import { clickCard } from './helpers/clicks';
 import {
   createTestClient,
   createTestActivity,
@@ -82,11 +83,7 @@ async function deleteActivityViaUI(
       r.request().postData() !== null,
     { timeout: 20_000 },
   );
-  // The WeekView carousel demotes overlapping cards to pointer-events:none
-  // (z>0), so a real-mouse click can be permanently hit-test-blocked;
-  // dispatchEvent reaches the same React handler (S5 pattern).
-  const card = pageB.locator(`[data-testid="activity-${activityId}"]`);
-  await card.click({ timeout: 5_000 }).catch(() => card.dispatchEvent('click'));
+  await clickCard(pageB, activityId);
 
   // needs-confirm: when the activity has dependencies the dry-run 409
   // opens the DeleteDialog — a PROPER visibility wait (the dialog renders

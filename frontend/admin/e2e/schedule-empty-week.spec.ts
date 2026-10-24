@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures/test';
 import { gotoScheduleWeek } from './fixtures/helpers';
-import { openCombobox } from './helpers/combobox';
-import { pickComboboxOption } from './helpers/combobox';
+import { openCombobox, pickComboboxOption } from './helpers/combobox';
+import { openCreateDialog } from './helpers/clicks';
 import { queryDBRow } from './fixtures/db-query';
 
 /**
@@ -75,14 +75,9 @@ test('S2: empty week — hint, click-create via dialog, card appears, hint disap
     'Нет занятий на эту неделю',
   );
 
-  // ACT: click the first empty slot
-  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
-  await expect(emptySlot).toBeVisible();
-  await emptySlot.click();
-
-  // ASSERT: create-activity dialog opened with slot prefill
-  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-  await expect(dialog).toBeVisible();
+  // ACT/ASSERT: click the first empty slot → the create-activity dialog
+  // opens with the slot prefill
+  const dialog = await openCreateDialog(page);
 
   await test.step('fill create form and submit', async () => {
     // Combobox picks (GH #280): trigger inside the create-* container +
@@ -106,12 +101,7 @@ test('US-3: service/location picks autofill duration/capacity; re-pick overwrite
 }) => {
   // ARRANGE: empty week — the dialog opens with a slot prefill
   await navigateToEmptyWeek(page);
-  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
-  await expect(emptySlot).toBeVisible();
-  await emptySlot.click();
-
-  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
-  await expect(dialog).toBeVisible();
+  const dialog = await openCreateDialog(page);
 
   /** Dictionary truth for the picked service: expected «ЧЧ:ММ» + age. */
   const serviceExpectations = (id: string) => {

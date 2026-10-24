@@ -870,6 +870,33 @@ describe('SettingsTab — service/location combobox flow', () => {
   });
 });
 
+// ─── SettingsTab — capacity gate (GH #280: вместимость ≥ 1) ─────────────────
+// Instant-patch convention (same as the «ЧЧ:ММ» duration): the field follows
+// raw input, but the capacity PATCH fires only for Number(value) >= 1 —
+// empty/zero input is silently not applied.
+
+describe('SettingsTab — capacity gate (вместимость ≥ 1, GH #280)', () => {
+  it('does not patch capacity when the input is emptied or set to 0', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-capacity');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('patches capacity for values >= 1', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-capacity');
+    fireEvent.change(input, { target: { value: '1' } });
+    expect(onUpdate).toHaveBeenCalledWith({ capacity: 1 });
+    fireEvent.change(input, { target: { value: '12' } });
+    expect(onUpdate).toHaveBeenCalledWith({ capacity: 12 });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+  });
+});
+
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {

@@ -1,6 +1,8 @@
 import { test, expect } from './fixtures/test';
 import { gotoScheduleWeek } from './fixtures/helpers';
 import { openCombobox } from './helpers/combobox';
+import { pickComboboxOption } from './helpers/combobox';
+import { queryDBRow } from './fixtures/db-query';
 
 /**
  * GH #258/#259 (spec §5): the empty week (2099-01-05, far future — no seed
@@ -10,6 +12,11 @@ import { openCombobox } from './helpers/combobox';
  *        card appears, hint disappears.
  *   S4 — stamp panel ready (master + service + location) → click an empty
  *        slot → card appears with NO dialog.
+ *
+ * GH #280 (spec §5 US-3): picking a service/location through the create
+ * form's comboboxes autofills duration/capacity (and shows age read-only +
+ * tariffs); re-picking OVERWRITES — and the autofilled values reach the
+ * created activity (DB check).
  *
  * State purity: the per-test seed reset (#252, auto fixture in
  * fixtures/test) restores canonical state before every test — activities
@@ -78,10 +85,11 @@ test('S2: empty week — hint, click-create via dialog, card appears, hint disap
   await expect(dialog).toBeVisible();
 
   await test.step('fill create form and submit', async () => {
-    // First real option of each select (index 0 is the «—» placeholder)
-    await dialog.getByTestId('create-master').selectOption({ index: 1 });
-    await dialog.getByTestId('create-service').selectOption({ index: 1 });
-    await dialog.getByTestId('create-location').selectOption({ index: 1 });
+    // Combobox picks (GH #280): trigger inside the create-* container +
+    // click on the option; index 0 of the list is the pinned clear option.
+    await pickComboboxOption(page, 'create-master');
+    await pickComboboxOption(page, 'create-service');
+    await pickComboboxOption(page, 'create-location');
 
     await dialog.getByTestId('btn-create-activity').click();
     await expect(dialog).toBeHidden();
@@ -91,6 +99,74 @@ test('S2: empty week — hint, click-create via dialog, card appears, hint disap
   await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible();
   // …and the empty-week hint is gone.
   await expect(page.getByTestId('schedule-empty-hint')).toHaveCount(0);
+});
+
+test('US-3: service/location picks autofill duration/capacity; re-pick overwrites', async ({
+  page,
+}) => {
+  // ARRANGE: empty week — the dialog opens with a slot prefill
+  await navigateToEmptyWeek(page);
+  const emptySlot = page.locator('[data-testid="empty-slot"]').first();
+  await expect(emptySlot).toBeVisible();
+  await emptySlot.click();
+
+  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
+  await expect(dialog).toBeVisible();
+
+  /** Dictionary truth for the picked service: expected «ЧЧ:ММ» + age. */
+  const serviceExpectations = (id: string) => {
+    const svc = queryDBRow(
+      `SELECT duration, min_age, max_age FROM services WHERE id='${id}'`,
+    )!;
+    const hh = String(Math.floor(svc.duration / 60)).padStart(2, '0');
+    const mm = String(svc.duration % 60).padStart(2, '0');
+    const age = svc.max_age > 0 ? `${svc.min_age}–${svc.max_age}` : `${svc.min_age}+`;
+    return { duration: `${hh}:${mm}`, durationMinutes: svc.duration, age };
+  };
+
+  // ACT/ASSERT: first service pick → duration + age read-only + tariffs.
+  const svc1 = await pickComboboxOption(page, 'create-service');
+  const exp1 = serviceExpectations(svc1.id);
+  await expect(dialog.getByTestId('create-duration')).toHaveValue(exp1.duration);
+  await expect(dialog.getByTestId('age-display')).toHaveText(exp1.age);
+  await expect(dialog.getByTestId('create-service-tariffs')).toBeVisible();
+
+  // Re-pick another service → duration/age/tariffs are OVERWRITTEN.
+  const svc2 = await pickComboboxOption(page, 'create-service', 1);
+  const exp2 = serviceExpectations(svc2.id);
+  await expect(dialog.getByTestId('create-duration')).toHaveValue(exp2.duration);
+  await expect(dialog.getByTestId('age-display')).toHaveText(exp2.age);
+
+  // Location pick → capacity from the dictionary (locations.capacity is
+  // the default); re-pick overwrites.
+  const loc1 = await pickComboboxOption(page, 'create-location');
+  const cap1 = queryDBRow(`SELECT capacity FROM locations WHERE id='${loc1.id}'`)!;
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+    String(cap1.capacity),
+  );
+  const loc2 = await pickComboboxOption(page, 'create-location', 1);
+  const cap2 = queryDBRow(`SELECT capacity FROM locations WHERE id='${loc2.id}'`)!;
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+    String(cap2.capacity),
+  );
+
+  // Submit with the AUTOFILLED values → the created activity carries them.
+  // (The slot prefill may be any day of the open 2099-01-04..10 week — no
+  // seed data ever lands in 2099, so that week window is unambiguous.)
+  await pickComboboxOption(page, 'create-master');
+  await dialog.getByTestId('btn-create-activity').click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible();
+
+  const created = queryDBRow(
+    `SELECT service_id, location_id, duration, capacity FROM activities
+     WHERE substr(start,1,10) BETWEEN '2099-01-04' AND '2099-01-10'`,
+  );
+  expect(created).not.toBeNull();
+  expect(created!.service_id).toBe(svc2.id);
+  expect(created!.location_id).toBe(loc2.id);
+  expect(created!.duration).toBe(exp2.durationMinutes);
+  expect(created!.capacity).toBe(cap2.capacity);
 });
 
 test('S4: empty week — ready stamp, click-create without dialog', async ({ page }) => {

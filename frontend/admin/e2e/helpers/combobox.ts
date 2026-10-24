@@ -55,3 +55,35 @@ export async function searchAndSelect(
   }
   await selectComboboxOption(page, optionValue);
 }
+
+/**
+ * Create-form combobox pick by container testid (GH #280): open the
+ * Combobox living inside `[data-testid="<container>"]` (the create-* wrappers
+ * around the shared Combobox/MasterPicker) and click the n-th REAL option
+ * (`index` 0-based; the pinned clear option «Не выбран» is skipped).
+ *
+ * Returns the picked `{ id, label }` — the id comes from the option's
+ * `combobox-option-<id>` testid, the label from its visible text — so specs
+ * verify the form's side effects against the dictionaries (DB/API) instead
+ * of hardcoding seed values.
+ */
+export async function pickComboboxOption(
+  page: Page,
+  container: string,
+  index = 0,
+): Promise<{ id: string; label: string }> {
+  const trigger = page.getByTestId(container).getByTestId('combobox-trigger');
+  await trigger.click();
+  const dropdown = page.locator('[data-testid="combobox-dropdown"]');
+  await expect(dropdown).toBeVisible();
+  const option = dropdown
+    .locator(
+      '[data-testid^="combobox-option-"]:not([data-testid="combobox-option-clear"])',
+    )
+    .nth(index);
+  const testid = (await option.getAttribute('data-testid')) ?? '';
+  const label = (await option.innerText()).trim();
+  await option.click();
+  await expect(dropdown).toBeHidden();
+  return { id: testid.replace(/^combobox-option-/, ''), label };
+}

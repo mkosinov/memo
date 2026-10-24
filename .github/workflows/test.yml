@@ -116,8 +116,14 @@ jobs:
         working-directory: frontend/admin
 
       # ── Unit layer: marked tests against the service container ────────
+      # #484 §3.3/§3.8: NOTIFY_CHANNEL_PRIORITY=mock — until part 4 the
+      # part-3 channel registry knows only the mock channel; the default
+      # "telegram" would trip the loud registry gate in any process that
+      # resolves the priority against the registry.
       - name: Run marked notify tests (real Redis)
         run: uv run pytest -m redis -v --tb=short --junitxml=test-results.xml
+        env:
+          NOTIFY_CHANNEL_PRIORITY: mock
 
       # Empty-green guard (spec §3.6): the job MUST fail when 0 marked
       # tests were collected or every one of them was skipped — a green
@@ -186,6 +192,11 @@ jobs:
 
       - name: Start notify e2e stack (enabled contour)
         if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+        # #484: NOTIFY_CHANNEL_PRIORITY=mock rides the job env into the
+        # stack's notify children (the shard script exports it as well —
+        # belt and braces for the enabled contours until part 4).
+        env:
+          NOTIFY_CHANNEL_PRIORITY: mock
         run: |
           NOTIFY_E2E_ENABLED=1 \
           SHARD_ID=notify \
@@ -220,6 +231,7 @@ jobs:
         working-directory: frontend/admin
         env:
           NOTIFY_E2E_ENABLED: "1"
+          NOTIFY_CHANNEL_PRIORITY: mock
           SHARD_PORT: "3006"
           BACKEND_URL: http://127.0.0.1:8005
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8005
@@ -232,6 +244,7 @@ jobs:
         if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
         run: uv run pytest tests/test_notify_redis_s1_queue.py -v --tb=short
         env:
+          NOTIFY_CHANNEL_PRIORITY: mock
           TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
 
       - name: Upload Playwright report (notify S1)

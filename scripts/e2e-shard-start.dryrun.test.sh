@@ -125,28 +125,32 @@
 #   Watch intervals are env-overridden (SHARD_STACK_WATCH_S=1) to keep
 #   the suite tight; stub children are real background processes.
 #
-# Feature #483 Task 8 (enabled notify e2e stack, spec §3.5):
+# Feature #483 Task 8 (enabled notify e2e stack, spec §3.5; #484 Task 8
+# adds the worker child + the mock priority export, spec §3.3/§3.8):
 #   NOTIFY_E2E_ENABLED=1 + SHARD_ID=notify switches the script from a
 #   numbered shard to THE enabled notify stack: own port pair (defaults
 #   backend 8005 / web 3006, outside the shard ranges, overridable via
 #   NOTIFY_E2E_BACKEND_PORT / NOTIFY_E2E_SHARD_PORT), an OWN derived
 #   SHARD_RUN_TAG + manual run lease (no collision with shards), the
 #   required URL vars pointed at the own pair, NOTIFY_ENABLED=true,
+#   NOTIFY_CHANNEL_PRIORITY=mock (part 3 registry knows only the mock),
 #   REDIS_URL ONLY from an explicitly passed value (else a local ephemeral
 #   redis-server child on NOTIFY_E2E_REDIS_PORT, default 6380 — never
-#   6379), and the dispatcher as a child process (.venv/bin/python with
-#   exec, dev.sh precedent — no worker skeleton in the e2e stack).
+#   6379), and the dispatcher AND the worker as child processes
+#   (.venv/bin/python with exec, dev.sh precedent).
 #   Trap cleanup is extended to the new children.
 #   → Case 17a: enabled defaults + EXPLICIT REDIS_URL — no redis child;
 #     derived ports/tag/URLs; lease `pid 001f45 3006 8005 0 0 epoch`
-#     written + removed; dispatcher spawned with NOTIFY_ENABLED=[true],
-#     ENV_FILE=[.env.test], the explicit REDIS_URL and the stack DB; DB
-#     wipe happened (TEST_DB_PATH contains test_memo → guard passes);
-#     dispatcher killed by the trap (DISPATCHER-TERMED).
+#     written + removed; dispatcher AND worker spawned with
+#     NOTIFY_ENABLED=[true], ENV_FILE=[.env.test], the explicit REDIS_URL
+#     and the stack DB; DB wipe happened (TEST_DB_PATH contains test_memo
+#     → guard passes); both notify children killed by the trap
+#     (DISPATCHER-TERMED / WORKER-TERMED).
 #   → Case 17b: local-redis mode + custom port pair — redis-server stub
 #     spawned with --save/--appendonly no on NOTIFY_E2E_REDIS_PORT, the
-#     dispatcher sees REDIS_URL pointed at it; tag derives from the
-#     CUSTOM port; BOTH children killed by the trap (TERMED lines).
+#     dispatcher and the worker see REDIS_URL pointed at it; tag derives
+#     from the CUSTOM port; ALL THREE children killed by the trap (TERMED
+#     lines).
 #   → Case 17c: guard negatives (direct calls): enabled×shard-id, notify
 #     id×default mode, garbage flag value, both shard-range port
 #     collisions, non-numeric NOTIFY_E2E_REDIS_PORT — each exit 1 with
@@ -158,11 +162,12 @@
 #     diagnostic, NO lease in the runs dir, the provided DB file
 #     byte-intact.
 #   → Case 17d (S2): default-mode control — REDIS_URL in the env is
-#     ignored, NO redis-server / dispatcher child is ever spawned; the
-#     legacy run (names, lease-less, wipe) is byte-identical.
+#     ignored, NO redis-server / dispatcher / worker child is ever
+#     spawned; the legacy run (names, lease-less, wipe) is byte-identical.
 #   Harness additions: a `redis-server` stub and a staged
-#   backend/.venv/bin/python stub (the dispatcher spawn is a PATH-FREE
-#   file call) journal their argv/env and model LIVE children with
+#   backend/.venv/bin/python stub (the notify spawns are PATH-FREE
+#   file calls; the stub labels the child by argv — DISPATCHER/WORKER)
+#   journal their argv/env and model LIVE children with
 #   TERM-journaling traps; the uv stub additionally journals the
 #   uvicorn call site's BACKEND_URL/NEXT_PUBLIC_API_URL/DATABASE_URL
 #   (additive — no existing assertion inspects its absence).
@@ -519,21 +524,27 @@ EOF
 
 chmod +x "$STUBS/pnpm" "$STUBS/rm" "$STUBS/curl" "$STUBS/lsof" "$STUBS/python3" "$STUBS/redis-server"
 
-# Dispatcher stub (#483 Case 17): the enabled stack spawns the dispatcher
-# via the FILE PATH backend/.venv/bin/python (dev.sh precedent: exec so
-# $! is the real process) — not PATH-resolved, so the stub must live at
-# the staged path. Journals the spawn env (NOTIFY_ENABLED / REDIS_URL /
-# ENV_FILE / DATABASE_URL — the contract Case 17a pins), then models a
-# LIVE child; TERM → journal line (the trap-kill assertion reads it).
+# Notify-child stub (#483 Case 17, #484 Task 8): the enabled stack spawns
+# the dispatcher AND the worker via the FILE PATH backend/.venv/bin/python
+# (dev.sh precedent: exec so $! is the real process) — not PATH-resolved,
+# so the stub must live at the staged path. Journals the spawn env
+# (NOTIFY_ENABLED / REDIS_URL / ENV_FILE / DATABASE_URL — the contract
+# Case 17a pins — plus NOTIFY_CHANNEL_PRIORITY, the #484 export), labeling
+# the child by its argv (WORKER vs DISPATCHER), then models a LIVE child;
+# TERM → journal line (the trap-kill assertion reads it).
 mkdir -p "$STAGE/backend/.venv/bin"
 cat > "$STAGE/backend/.venv/bin/python" <<'EOF'
 #!/bin/sh
-printf 'DISPATCHER-SPAWN argv=[%s] NOTIFY_ENABLED=[%s] REDIS_URL=[%s] ENV_FILE=[%s] DATABASE_URL=[%s]\n' \
-  "$*" "${NOTIFY_ENABLED:-unset}" "${REDIS_URL:-unset}" "${ENV_FILE:-unset}" \
-  "${DATABASE_URL:-unset}" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
+case "$*" in
+  *src.notify.worker*) _tag=WORKER ;;
+  *) _tag=DISPATCHER ;;
+esac
+printf '%s-SPAWN argv=[%s] NOTIFY_ENABLED=[%s] REDIS_URL=[%s] ENV_FILE=[%s] DATABASE_URL=[%s] NOTIFY_CHANNEL_PRIORITY=[%s]\n' \
+  "$_tag" "$*" "${NOTIFY_ENABLED:-unset}" "${REDIS_URL:-unset}" "${ENV_FILE:-unset}" \
+  "${DATABASE_URL:-unset}" "${NOTIFY_CHANNEL_PRIORITY:-unset}" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
 sleep 600 &
 _s=$!
-trap 'kill "$_s" 2>/dev/null; printf "DISPATCHER-TERMED\n" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"; exit 0' TERM INT
+trap 'kill "$_s" 2>/dev/null; printf "%s-TERMED\n" "$_tag" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"; exit 0' TERM INT
 wait "$_s"
 EOF
 chmod +x "$STAGE/backend/.venv/bin/python"
@@ -1921,6 +1932,25 @@ else
   echo "FAIL Case 17a (#483): dispatcher child survived the trap (no DISPATCHER-TERMED line)"
   FAIL=1
 fi
+# #484 Task 8: the worker is the SECOND notify child of the enabled stack.
+if grep -Fq "WORKER-SPAWN argv=[-m src.notify.worker] NOTIFY_ENABLED=[true] REDIS_URL=[redis://127.0.0.1:6399/0] ENV_FILE=[.env.test]" "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#484): worker spawned as the second child (NOTIFY_ENABLED=true, the explicit REDIS_URL, .env.test)"
+else
+  echo "FAIL Case 17a (#484): expected WORKER-SPAWN line (NOTIFY_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
+  FAIL=1
+fi
+if grep -Eq '^WORKER-SPAWN .*NOTIFY_CHANNEL_PRIORITY=\[mock\]' "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#484): worker spawn env carries NOTIFY_CHANNEL_PRIORITY=[mock] (the §3.3/§3.8 export)"
+else
+  echo "FAIL Case 17a (#484): worker spawn env missing NOTIFY_CHANNEL_PRIORITY=[mock]"
+  FAIL=1
+fi
+if grep -q '^WORKER-TERMED$' "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#484): extended trap killed the worker child"
+else
+  echo "FAIL Case 17a (#484): worker child survived the trap (no WORKER-TERMED line)"
+  FAIL=1
+fi
 if [ ! -e "$CASE17A_LEASE" ]; then
   echo "PASS Case 17a (#483): lease removed on script exit"
 else
@@ -1967,6 +1997,12 @@ else
   echo "FAIL Case 17b (#483): expected dispatcher REDIS_URL=[redis://localhost:6390/0]"
   FAIL=1
 fi
+if grep -Fq "WORKER-SPAWN argv=[-m src.notify.worker] NOTIFY_ENABLED=[true] REDIS_URL=[redis://localhost:6390/0]" "$CASE17_DIR/journal-b" 2>/dev/null; then
+  echo "PASS Case 17b (#484): worker REDIS_URL points at the spawned local redis"
+else
+  echo "FAIL Case 17b (#484): expected worker REDIS_URL=[redis://localhost:6390/0]"
+  FAIL=1
+fi
 if grep -Fq "NEXT_DIST_DIR=[.next-shard-notify_${CASE17B_TAG}] SHARD_PORT=[3106]" "$CASE17_DIR/journal-b" 2>/dev/null; then
   echo "PASS Case 17b (#483): custom web port 3106 honored; tag derives from the CUSTOM backend port (${CASE17B_TAG})"
 else
@@ -1980,10 +2016,11 @@ else
   FAIL=1
 fi
 if grep -q '^DISPATCHER-TERMED$' "$CASE17_DIR/journal-b" 2>/dev/null \
+   && grep -q '^WORKER-TERMED$' "$CASE17_DIR/journal-b" 2>/dev/null \
    && grep -q '^REDIS-SERVER-TERMED$' "$CASE17_DIR/journal-b" 2>/dev/null; then
-  echo "PASS Case 17b (#483): extended trap killed BOTH children (dispatcher + redis)"
+  echo "PASS Case 17b (#483/#484): extended trap killed ALL THREE children (dispatcher + worker + redis)"
 else
-  echo "FAIL Case 17b (#483): expected DISPATCHER-TERMED and REDIS-SERVER-TERMED lines (trap cleanup)"
+  echo "FAIL Case 17b (#483/#484): expected DISPATCHER-TERMED, WORKER-TERMED and REDIS-SERVER-TERMED lines (trap cleanup)"
   FAIL=1
 fi
 if [ ! -e "$CASE17B_LEASE" ]; then
@@ -2139,6 +2176,7 @@ echo "─────────────────"
 if [ "$LAST_RC" -eq 143 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE17_DIR/journal-d" 2>/dev/null \
    && ! grep -q '^REDIS-SERVER ' "$CASE17_DIR/journal-d" 2>/dev/null \
    && ! grep -q '^DISPATCHER-SPAWN ' "$CASE17_DIR/journal-d" 2>/dev/null \
+   && ! grep -q '^WORKER-SPAWN ' "$CASE17_DIR/journal-d" 2>/dev/null \
    && grep -Fq "BACKEND_URL=[http://127.0.0.1:8001] NEXT_PUBLIC_API_URL=[http://127.0.0.1:8001]" "$CASE17_DIR/journal-d" 2>/dev/null; then
   echo "PASS Case 17d (S2): default mode ignores REDIS_URL — no notify children, caller URLs untouched"
 else

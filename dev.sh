@@ -93,6 +93,11 @@ trap cleanup SIGINT SIGTERM
 # else's answering instance is forbidden (stream payloads carry PII).
 if $NOTIFY_MODE; then
     export NOTIFY_ENABLED=true
+    # Until part 4 the part-3 registry knows ONLY the mock channel (spec
+    # §3.3): without this export the worker's loud registry check stops it
+    # on the default priority "telegram". Contours drop the export when a
+    # real channel lands.
+    export NOTIFY_CHANNEL_PRIORITY=mock
     if [ -n "${REDIS_URL:-}" ]; then
         # Explicit REDIS_URL — a conscious choice of another instance:
         # no port check, no own redis-server.
@@ -143,7 +148,7 @@ if $NOTIFY_MODE; then
     echo -e "${BLUE}Starting notify dispatcher...${NC}"
     (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.dispatcher) &
     DISPATCHER_PID=$!
-    echo -e "${BLUE}Starting notify worker (skeleton)...${NC}"
+    echo -e "${BLUE}Starting notify worker...${NC}"
     (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.worker) &
     WORKER_PID=$!
 fi

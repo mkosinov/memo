@@ -28,7 +28,9 @@ void BACKEND; // GH #387 fence — both URL vars must be present and same-host
  * POINT: the queued task row must exist before cleanup deletes the
  * record — a deleted record would make the live-read scenario close the
  * event WITHOUT a task (§3.4) and the whole point of the run would
- * silently evaporate.
+ * silently evaporate. (#484 Task 8: the stack also runs the worker now —
+ * the row may already have advanced past 'queued' to 'sending'/'sent'
+ * when this sync point reads it.)
  *
  * Run against the enabled stack only (skipped everywhere else — standard
  * shards stay byte-identical, S2):
@@ -134,17 +136,21 @@ test.describe('Notify enabled stack — S1 (GH #483)', () => {
       expect(recordRow!.notify).toBe(1);
 
       // 5. SYNC POINT (queue-side, DB view) — the enabled dispatcher
-      //    consumed the journaled event and created the QUEUED task.
-      //    The stream/payload assertion itself lives in the marked
-      //    backend test (spec §3.6); this poll only proves the pipeline
-      //    reached the queue before cleanup runs.
+      //    consumed the journaled event and created the task (creation
+      //    status 'queued'). Since #484 Task 8 the stack also runs the
+      //    WORKER: by the time this read lands, the row may legitimately
+      //    have advanced to 'sending'/'sent' — each of the three proves
+      //    the pipeline reached the queue ('failed' does not and fails
+      //    the scenario). The stream/payload assertion itself lives in
+      //    the marked backend test (spec §3.6); this poll only proves
+      //    the pipeline reached the queue before cleanup runs.
       await expect.poll(async () => {
         taskRow = queryDBRow(
           `SELECT status FROM notify_tasks WHERE client_id='${clientRow!.id}' AND scenario='new_record'`,
         );
         return taskRow !== null;
       }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
-      expect(taskRow!.status).toBe('queued');
+      expect(['queued', 'sending', 'sent']).toContain(taskRow!.status);
     } finally {
       // 6. CLEANUP — safe only AFTER the task row exists (step 5): the
       //    dispatcher processes events with LIVE reads, and a deleted

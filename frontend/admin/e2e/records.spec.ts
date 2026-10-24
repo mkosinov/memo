@@ -1,8 +1,13 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { waitForRecordsReady, withUndoWindow, installReferenceWeekClock } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import {
+  waitForRecordsReady,
+  withUndoWindow,
+  installReferenceWeekClock,
+  expectRowsExact,
+} from './fixtures/helpers';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import {
@@ -1188,24 +1193,46 @@ test.describe('Records Page — Table and Filters', () => {
       toolbar.locator('[data-testid="records-filters-status-trigger"]'),
     ).toContainText('Посетил');
 
-    // The table is filtered: every row is Anna's, every badge «visited».
-    // Settle BEFORE enumerating: under CI load the table transiently renders
-    // a superset (RecordsContext keepPreviousData + the mirror/adoption
-    // query-key transition — the June window alone is 6 rows, window+status
-    // without q is 4) before the fully-filtered result commits; a rows.all()
-    // snapshot of that tail then loses its nth → «element(s) not found»
-    // (PR #515 flake; same race family as test 12's #479, fixed via #507).
-    // toHaveCount(2) waits out the transient WITHOUT loosening the contract:
-    // the seed pins exactly the two visited «Анна» rows (r1/r4).
-    const rows = page.locator('tbody tr');
-    await expect(rows).toHaveCount(2, { timeout: 20_000 });
-    for (const row of await rows.all()) {
-      await expect(row).toContainText('Анна');
-    }
+    // The table is filtered: exactly the seed's two «Анна» rows, every badge
+    // «visited». Expected names are DERIVED from the seed DB (per-test
+    // canonical reset — the #535 determinism premise) by the link's own
+    // predicate: the June window + a client-name «Анна» substring (no seed
+    // service title matches «Анна», see above) + status visited. No name
+    // literals; the row COUNT rides along (the seed pins exactly the two
+    // r1/r4 rows, so this evaluates to the same name twice).
+    const expectedAnnaNames: string[] = queryDBRows(
+      `SELECT c.name AS name
+       FROM records r
+       JOIN clients c ON r.client_id = c.id
+       JOIN activities a ON r.activity_id = a.id
+       WHERE r.status = 'visited'
+         AND c.name LIKE '%Анна%'
+         AND substr(a.start, 1, 10) BETWEEN '2026-06-01' AND '2026-06-30'
+       ORDER BY a.start ASC, r.id ASC`,
+    ).map((row) => String(row.name));
+
+    // #535: the exact-name settle via expectRowsExact replaces the
+    // toHaveCount(2) settle + rows.all()/badges.all() snapshots of the
+    // #479/#515 race family (under CI load the table transiently renders a
+    // superset — RecordsContext keepPreviousData + the mirror/adoption
+    // query-key transition: the June window alone is 6 rows, window+status
+    // without q is 4 — before the fully-filtered result commits; a snapshot
+    // of that tail then loses its nth → «element(s) not found», PR #515
+    // flake, same family as test 12's #479, fixed via #507). The exact
+    // sequence (names + count + order) is a TIGHTER contract than
+    // toHaveCount(2) + per-row contains, on the same 20s #515 budget.
+    const nameCells = page.locator('tbody tr td:nth-child(2)');
+    await expectRowsExact(nameCells, expectedAnnaNames, { timeout: 20_000 });
+
+    // Badges: locator auto-retry asserts (no frozen .all() enumeration) —
+    // exactly one «visited» badge per filtered row.
     const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-    await expect(badges.first()).toBeVisible();
-    for (const badge of await badges.all()) {
-      await expect(badge).toHaveAttribute('data-testid', 'status-badge-visited');
+    await expect(badges).toHaveCount(expectedAnnaNames.length);
+    for (let i = 0; i < expectedAnnaNames.length; i++) {
+      await expect(badges.nth(i)).toHaveAttribute(
+        'data-testid',
+        'status-badge-visited',
+      );
     }
 
     // The old URL survives the mount verbatim (a read never rewrites).

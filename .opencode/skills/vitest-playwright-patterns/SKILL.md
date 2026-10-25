@@ -379,6 +379,55 @@ seconds; control the clock:
   semantics (the unload-guard real-time exception, #417) — then mirror the
   app constant and name it in a comment.
 
+### Row reads — `expectRowsExact`, never snapshot-then-assert (canon since 2026-10-25, #535)
+
+Reading a table's rows is a positive wait on the TERMINAL row set (class 1
+above), not a race against the next React commit. Flake class #479/#535: a
+row detaches mid-read — the DOM was caught between commits, so asserts
+compare a stale/torn set or hit a detached node.
+
+Banned patterns:
+
+- **Snapshot-then-assert** — freeze the DOM at one instant
+  (`rows.all()`, `allTextContents()`), then assert against the frozen
+  array or per-index `nth()` outside any retry. Those reads never
+  re-run: whatever they caught — stale or torn — is what gets asserted.
+- **Negative settle as the ONLY expectation before a raw read** — wait
+  for a loader/spinner to vanish (`toBeHidden`, `toHaveCount(0)`), then
+  do a non-retrying read (`allTextContents()` + plain `expect`). "Old
+  state gone" does not imply "new state committed" — the read still
+  races the render. This is NOT the negative-waits canon (#337, class
+  2): negative waits as assertions stay legal; what is banned is using
+  one as the sole settle in front of a raw read.
+
+Correct forms:
+
+- Deterministic row set (`workers: 1` + per-test seed reset ⇒ table =
+  canonical seed + the test's own factories):
+  `await expectRowsExact(cells, expected)` — a positive settle that
+  polls `allTextContents()` until an ordered EXACT match (the sequence
+  match pins the row count too). `expected: []` is legal (asserts the
+  empty state). Default budget 10 s; `opts.timeout` may only RAISE it
+  for known-slow sites (the 20 s #515 budget of records test 25), never
+  shrink it to "fix" a flake. Derive `expected` from seed/factory
+  VARIABLES (factory responses, seed DB queries), never name literals.
+- Non-deterministic content (order, live data): repeat the assert in
+  locator form and let it auto-retry — `expect(cell).toHaveText(...)`,
+  `expect(rows).toHaveCount(n)` — never freeze an array first.
+
+```typescript
+// BEFORE (banned): frozen snapshot races the next commit (#479/#535)
+const rows = await page.locator('tbody tr').all();
+expect(rows.length).toBe(2);
+expect((await rows[0].locator('td').nth(1).textContent())?.trim()).toBe('Anna');
+
+// AFTER: one positive settle on the terminal state
+await expectRowsExact(page.locator('tbody tr td:nth-child(2)'), [
+  factoryA.name,
+  factoryB.name,
+]);
+```
+
 ---
 
 ## DB Verification Decision Table
@@ -436,6 +485,7 @@ DB_PATH resolves as: `process.env.TEST_DB_PATH || 'backend/test_memo.db'`
 | 7 | Mocking transitive dependencies in unit tests | Mock only direct `@/contexts/*` dependencies |
 | 8 | Using `renderWithProviders` when context mocks suffice | Use `renderWithProviders` only when testing real provider interactions |
 | 9 | Treating a local screenshot e2e pixel-diff as a regression | Local runs do not collect visual specs at all (#278): `playwright.config.ts` skips them outside CI, so a red "visual" local run only happens under the deliberate `E2E_VISUAL=1` opt-in (`pnpm run test:e2e:visual`) — and there diffs are expected font-stack drift (container Debian ≠ runner ubuntu), not regressions. CI is the authority (project `e2e`, `--shard` in `test.yml`); a narrow manual verdict on a branch: `gh workflow run visual-check.yml --ref <branch>`. Baselines are recorded in CI via `update-snapshots.yml` only. See `docs/tests_workflow.md` → "Known caveats" (#278 measurement: 46/71 local failures on a CI-green commit). |
+| 10 | Reading table rows from a frozen snapshot (`rows.all()` + asserts), or a raw read whose only settle is a "gone" wait | `expectRowsExact(cells, expected)` for deterministic tables; otherwise auto-retrying locator asserts (`toHaveText`/`toHaveCount`) — see **Waiting & Time Discipline** → row reads (#479/#535) |
 
 ---
 

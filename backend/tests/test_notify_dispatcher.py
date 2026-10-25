@@ -888,6 +888,43 @@ class TestChainReaction:
         await dispatcher.statuses_once(factory, queue)
         assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "not_delivered"
 
+    async def test_candidate_without_template_is_skipped_loudly_next_spawns(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """The skip branch of ``_chain_reaction``: a candidate channel
+        with NO template of any tier (channel/universal/default) is
+        skipped LOUDLY (a log line naming it) and the chain lands on
+        the NEXT candidate — a mid-chain template hole must not close
+        the chain while a deliverable channel remains."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock1,mock2")
+        # a template tier ONLY for mock2: mock1 has no channel tier, no
+        # universal row, no default (reset_db wiped the seed) — skipped
+        template = await _seed_channel_template(db_session, "mock2")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+
+        with capture_dispatcher_logs() as messages:
+            queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+            await dispatcher.statuses_once(factory, queue)
+
+        # the spawn went to the NEXT candidate — never the hole
+        rows = query_db(
+            "SELECT id, channel, template_id, template_body FROM notify_tasks"
+            " WHERE channel IN ('mock1', 'mock2')"
+        )
+        assert len(rows) == 1
+        assert rows[0]["channel"] == "mock2"
+        assert rows[0]["template_id"] == template.id
+        assert rows[0]["template_body"] == "MOCK2 TIER {{ client.name }}"
+        assert [p["task_id"] for p in queue.tasks] == [rows[0]["id"]]
+        # the skip was loud: the hole is named in the journal log
+        assert any(
+            "no template for channel 'mock1'" in m for m in messages
+        ), messages
+        # the chain stays open — the continuation is in flight
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] is None
+
     async def test_late_sent_after_close_flips_root_to_delivered(
         self, db_engine, db_session, monkeypatch
     ) -> None:

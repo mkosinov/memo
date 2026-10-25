@@ -24,6 +24,7 @@ before AND after every test. A dev contour on the default index
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -35,9 +36,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.notify import dispatcher
 from src.notify.models import DomainEvent, NotifyTask
-from src.notify.redis_queue import RedisQueue
+from src.notify.redis_queue import AUTOCLAIM_COUNT, RedisQueue
 from tests.conftest import query_db, query_db_params
-from tests.notify_redis_support import redis_marks, redis_url
+from tests.notify_redis_support import make_task, redis_marks, redis_url
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -249,3 +250,25 @@ class TestReenqueueWorkerPEL:
         await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
 
         assert [p["task_id"] for p in _stream_payloads(wipe_client)] == [task.id]
+
+    async def test_pel_over_one_page_returns_every_entry(
+        self, wipe_client, wipe_queue
+    ) -> None:
+        """The probe's pagination leg (#485 Task 6 review gap): a PEL
+        bigger than ONE ``XPENDING`` page (``AUTOCLAIM_COUNT``) is
+        drained WHOLE — the inclusive cursor walks every page, no entry
+        dropped. Pure adapter level: claims that never ack populate the
+        PEL (no DB rows — the probe reads the transport only)."""
+        total = AUTOCLAIM_COUNT + 1
+        ids = {str(uuid.uuid4()) for _ in range(total)}
+        wipe_queue.ensure_worker_group()
+        for task_id in ids:
+            wipe_queue.enqueue_task(make_task(task_id))
+
+        held: list[dict[str, Any]] = []
+        while batch := wipe_queue.claim_tasks():
+            held.extend(batch)  # claimed, never acked — the whole PEL
+        assert len(held) == total  # the PEL spans MORE than one page
+        assert len(ids) == total
+
+        assert wipe_queue.pending_worker_task_ids() == ids

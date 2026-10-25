@@ -25,6 +25,7 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 import { test, expect } from './fixtures/test';
+import type { Locator } from '@playwright/test';
 import { useMasterSession } from './fixtures/master-session';
 import { adminApiContext } from './fixtures/admin-context';
 import {
@@ -75,13 +76,21 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
 
     try {
       // ── Badge baseline: Не оплачено ────────────────────────────────────
-      const readBadge = async (): Promise<string> => {
+      // #535 (relational level): the badge is ONE cell of the filtered row
+      // — the isVisible-guarded one-shot textContent() reads become locator
+      // auto-retry asserts (toHaveText polls through re-renders; a raw read
+      // taken between the visibility check and the next React commit is the
+      // #479/#515 race family).
+      const badgeCell = async (): Promise<Locator> => {
         await waitForRecordsReady(page);
-        const row = page.locator('tbody tr').filter({ hasText: client.name }).first();
-        await expect(row).toBeVisible({ timeout: 15_000 });
-        return (await row.locator('td').nth(8).textContent()) ?? '';
+        return page
+          .locator('tbody tr')
+          .filter({ hasText: client.name })
+          .first()
+          .locator('td')
+          .nth(8);
       };
-      expect((await readBadge()).trim()).toBe('Не оплачено');
+      await expect(await badgeCell()).toHaveText('Не оплачено', { timeout: 15_000 });
 
       // ── 1. CREATE 1500 ₽ → Частично (1 500 ₽) ──────────────────────────
       await waitForScheduleReady(page, SEED_WEEK_MONDAY);
@@ -104,7 +113,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       await expect(amountInput).not.toBeVisible({ timeout: 5_000 });
 
       await page.locator('[data-testid="modal-close-btn"]').click();
-      expect((await readBadge()).trim()).toMatch(/Частично \(1[\s\u00A0]?500/);
+      await expect(await badgeCell()).toHaveText(/Частично \(1[\s\u00A0]?500/, { timeout: 15_000 });
 
       // ── 2. EDIT the saved row to 3500 ₽ → ✓ Оплачено ───────────────────
       await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
@@ -127,7 +136,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       await patchedWait;
 
       await page.locator('[data-testid="modal-close-btn"]').click();
-      expect((await readBadge()).trim()).toBe('✓ Оплачено');
+      await expect(await badgeCell()).toHaveText('✓ Оплачено', { timeout: 15_000 });
 
       // ── 3. DELETE the payment → Не оплачено again ──────────────────────
       await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
@@ -145,7 +154,7 @@ test.describe('GH #263 S3 — master payment CUD recalculates payment status', (
       await deleteWait; // deferred — fires ≤5 s later (unified-rows 16b)
 
       await page.locator('[data-testid="modal-close-btn"]').click();
-      expect((await readBadge()).trim()).toBe('Не оплачено');
+      await expect(await badgeCell()).toHaveText('Не оплачено', { timeout: 15_000 });
     } finally {
       // Deferred DELETE may still be in flight — hard-delete via API too.
       await cleanupRecord(admin, record.id);

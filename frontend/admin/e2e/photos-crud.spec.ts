@@ -9,6 +9,7 @@ import {
   createTestService,
 } from './fixtures/factories';
 import {
+  expectRowsExact,
   selectClientFilterOption,
   waitForPhotosReady,
 } from './fixtures/helpers';
@@ -212,18 +213,28 @@ test.describe('Photos — Client filter', () => {
       const settled = nextPhotosList(page);
       await selectClientFilterOption(page, client.name, client.name);
       await settled;
-      await settle(page);
 
       // Exactly the client's 2 photos — seed photos (c1's) are excluded.
-      const rows = page.locator('table tbody tr');
-      await expect(rows).toHaveCount(2);
+      // #535 (exact level): the double settle (wire wait + fixed 400 ms)
+      // and the rows.all() snapshot loop become ONE positive settle on the
+      // terminal state — the «Клиент» column (3rd visible cell) as an exact
+      // sequence. Factory-derived: every photo in photoIds belongs to this
+      // client, so the expected texts are [client.name × photoIds.length];
+      // the sequence match implicitly pins the row count (the old
+      // toHaveCount(2) + per-row toHaveText pair rode the same contract).
+      await expectRowsExact(
+        page.locator('table tbody tr td:nth-child(3)'),
+        photoIds.map(() => client.name),
+      );
       await expect(page.getByText('/images/client-work-1.jpg')).toHaveCount(0);
       await expect(page.getByText('2 всего')).toBeVisible();
 
-      // «Клиент» column (3rd visible cell) renders the NAME, never the UUID.
-      for (const row of await rows.all()) {
-        await expect(row.locator('td').nth(2)).toHaveText(client.name);
-        await expect(row).not.toContainText(client.id);
+      // «Клиент» renders the NAME, never the UUID — the per-row negative
+      // survives as locator auto-retry asserts (#535: no frozen rows.all()
+      // snapshot; nth(i) re-resolves on every retry).
+      const rows = page.locator('table tbody tr');
+      for (let i = 0; i < photoIds.length; i++) {
+        await expect(rows.nth(i)).not.toContainText(client.id);
       }
     } finally {
       for (const id of photoIds) {

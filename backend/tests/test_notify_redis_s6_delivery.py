@@ -71,8 +71,11 @@ async def _stage_task(db_session) -> NotifyTask:
         event_id=event.id,
         scenario="new_record",
         status="queued",
-        text=_TEXT,
-        channels=[{"name": "mock", "address": _ADDRESS}],
+        channel="mock",
+        address=_ADDRESS,
+        payload={},
+        template_id="06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        template_body=_TEXT,
         reenqueues=0,
     )
     db_session.add(task)
@@ -81,12 +84,17 @@ async def _stage_task(db_session) -> NotifyTask:
 
 
 def _payload(task: NotifyTask) -> dict:
-    """The §4.2 payload with the REAL task row id — exactly what the
-    enabled dispatcher puts on the seam for a mock-priority channel."""
+    """The §4.2 rev.5 payload with the REAL task row id — exactly what
+    the enabled dispatcher puts on the seam for a mock channel task
+    (one channel, frozen render data + template)."""
     return {
         "task_id": task.id,
-        "text": _TEXT,
-        "channels": [{"name": "mock", "address": _ADDRESS}],
+        "channel": "mock",
+        "address": _ADDRESS,
+        "payload": {},
+        "template_id": task.template_id,
+        "template_body": _TEXT,
+        "root_task_id": task.id,
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "resend_of": None,
     }

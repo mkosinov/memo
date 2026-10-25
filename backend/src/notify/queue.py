@@ -35,16 +35,41 @@ Streams + consumer groups, ADR 013 — part 2, GH #483).
 import contextlib
 from typing import Any, Protocol, runtime_checkable
 
-# ── Contracts (family #476 §4.2/§4.3) — JSON dicts, no ORM objects ──────────
+# ── Contracts (family #476 §4.2/§4.3, rev.5) — JSON dicts, no ORM objects ────
 
-#: Task payload of ``notify:tasks`` (§4.2):
-#: ``{task_id, text, channels: [{name, address}], created_at, resend_of}``.
+#: Task payload of ``notify:tasks`` (§4.2 rev.5 — task = one channel,
+#: ADR 014): ``{task_id, channel, address, payload, template_id,
+#: template_body, root_task_id, created_at, resend_of}`` — the frozen
+#: task row verbatim; the worker assembles the text from
+#: ``payload`` + ``template_body``.
 TaskPayload = dict[str, Any]
 
-#: Worker stage event of ``notify:statuses`` (§4.3):
+#: Worker stage event of ``notify:statuses`` (§4.3 rev.5):
 #: ``{task_id, stage: sending|sent|failed, channel, outcome, error,
-#: occurred_at}``.
+#: sent_text, occurred_at}`` — ``sent_text`` carries the actually
+#: transmitted text (None when the attempt died before transmission).
 StatusEvent = dict[str, Any]
+
+
+def build_task_payload(task: Any, created_at: str) -> TaskPayload:
+    """Map a ``NotifyTask`` row (duck-typed) onto the §4.2 rev.5 payload.
+
+    The single construction point of the seam: the scenario (first
+    enqueue) and the dispatcher's re-enqueue cycle emit the SAME shape
+    from the SAME frozen columns — addresses never re-resolved (ADR
+    014). Pure dict out: no ORM object crosses the seam.
+    """
+    return {
+        "task_id": task.id,
+        "channel": task.channel,
+        "address": task.address,
+        "payload": task.payload,
+        "template_id": task.template_id,
+        "template_body": task.template_body,
+        "root_task_id": task.root_task_id,
+        "created_at": created_at,
+        "resend_of": task.resend_of,
+    }
 
 #: Channel reply of ``notify:inbound`` — the format is FIXED (family
 #: §4.3; part-2 spec §3.2, GH #483):

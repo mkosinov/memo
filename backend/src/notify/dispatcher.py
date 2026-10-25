@@ -58,7 +58,7 @@ from src.db.database import DBManager
 from src.notify.channels.registry import parse_channel_priority
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
 from src.notify.process import install_signal_handlers, run_loop
-from src.notify.queue import InboundEvent
+from src.notify.queue import InboundEvent, build_task_payload
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.scenarios import SCENARIOS
 from src.util.utc import utc_now
@@ -114,9 +114,10 @@ def _is_malformed_status(item: StatusEvent) -> bool:
     dispatcher's own enqueue seam puts on tasks; the family §4.2 int
     example is a sketch artifact — int/bool are malformed), ``stage``
     in the §4.3 vocabulary, ``channel`` a non-empty string,
-    ``occurred_at`` parseable. Guards the reader against events that
-    would raise a non-ValueError inside ``apply_status_event`` and hang
-    on the stream unacked forever."""
+    ``occurred_at`` parseable, ``sent_text`` (rev.5) — a string or
+    NULL. Guards the reader against events that would raise a
+    non-ValueError inside ``apply_status_event`` and hang on the
+    stream unacked forever."""
     try:
         task_id = item.get("task_id")
         if not isinstance(task_id, str) or not task_id:
@@ -125,6 +126,9 @@ def _is_malformed_status(item: StatusEvent) -> bool:
             return True
         channel = item.get("channel")
         if not isinstance(channel, str) or not channel:
+            return True
+        sent_text = item.get("sent_text")
+        if sent_text is not None and not isinstance(sent_text, str):
             return True
         _naive_utc(item["occurred_at"])
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -237,12 +241,13 @@ async def reenqueue_stale_tasks(
 ) -> None:
     """Re-enqueue ``queued`` tasks older than ``NOTIFY_REENQUEUE_AFTER``.
 
-    The payload is the SAVED task payload in full — text and channels
-    from the row, addresses never re-resolved (§3.4 panel finding). The
-    ORM ``onupdate`` refresh of ``updated_at`` is the re-enqueue stamp:
-    without it the age predicate would fire every polling tick instead
-    of once per window. Past ``REENQUEUE_CAP`` the task becomes ``failed``
-    (the error text has no column on the task row — it is logged; part 5
+    The payload is the SAVED task row verbatim (§4.2 rev.5) — channel,
+    address, render data and the frozen template; addresses never
+    re-resolved (§3.4 panel finding). The ORM ``onupdate`` refresh of
+    ``updated_at`` is the re-enqueue stamp: without it the age
+    predicate would fire every polling tick instead of once per
+    window. Past ``REENQUEUE_CAP`` the task becomes ``failed`` (the
+    error text has no column on the task row — it is logged; part 5
     screens read the attempt journal for failure detail).
 
     Deliberate inversion: the enqueue lands BEFORE the stamp is committed
@@ -278,16 +283,13 @@ async def reenqueue_stale_tasks(
                 )
             else:
                 try:
-                    # sync adapter off the event loop (spec §3.1)
+                    # sync adapter off the event loop (spec §3.1); the
+                    # payload is the SAVED task row verbatim (§4.2
+                    # rev.5 — channel, address, render data and the
+                    # frozen template; addresses never re-resolved).
                     await asyncio.to_thread(
                         queue.enqueue_task,
-                        {
-                            "task_id": task.id,
-                            "text": task.text,
-                            "channels": task.channels,
-                            "created_at": _utc_now_iso_z(),
-                            "resend_of": None,
-                        },
+                        build_task_payload(task, _utc_now_iso_z()),
                     )
                 except NotifyTransportError as exc:
                     # GH #483 (spec §3.1): a failed enqueue counts toward
@@ -335,6 +337,9 @@ async def apply_status_event(session: AsyncSession, item: StatusEvent) -> None:
             stage=stage,
             outcome=item.get("outcome"),
             error=item.get("error"),
+            # rev.5 (§4.3): the actually transmitted text of the
+            # attempt — NULL on failures before any transmission.
+            sent_text=item.get("sent_text"),
             occurred_at=_naive_utc(item["occurred_at"]),
         )
     )

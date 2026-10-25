@@ -45,18 +45,24 @@ def redis_url() -> str:
     return os.environ["REDIS_URL"]
 
 
-#: Family §4.2 task payload sample (task_id — UUID string, #560 errata).
+#: Family §4.2 rev.5 task payload sample (task_id — UUID string, #560
+#: errata; task = one channel with frozen render data + template —
+#: ADR 014; the literal template keeps the assembled text == the body).
 def make_task(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> dict[str, Any]:
     return {
         "task_id": task_id,
-        "text": "Готовый текст",
-        "channels": [{"name": "telegram", "address": "+79990001122"}],
+        "channel": "mock",
+        "address": "+79990001122",
+        "payload": {},
+        "template_id": "06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        "template_body": "Готовый текст",
+        "root_task_id": task_id,
         "created_at": "2026-10-20T10:00:00",
         "resend_of": None,
     }
 
 
-#: Family §4.3 worker stage event sample.
+#: Family §4.3 rev.5 worker stage event sample.
 def make_status(
     task_id: str = "123e4567-e89b-12d3-a456-426614174000",
     stage: str = "sending",
@@ -67,6 +73,7 @@ def make_status(
         "channel": "telegram",
         "outcome": None,
         "error": None,
+        "sent_text": None,
         "occurred_at": "2026-10-20T10:00:05",
     }
 

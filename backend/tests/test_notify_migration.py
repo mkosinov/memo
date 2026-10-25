@@ -24,6 +24,7 @@ import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 
 import src.models  # noqa: F401 — registers all models incl. src.notify
 from alembic import command
@@ -203,6 +204,157 @@ class TestRoundtrip:
             "SELECT COUNT(*) FROM notify_templates WHERE event_type='new_record' AND is_default=1",
         )
         assert seeded == 1
+
+
+class TestPerChannelMigration:
+    """#485 Task 1 — per-channel task reshape (ADR 014, spec §4): the
+    ``d94b1f7c2a6e`` migration reshapes ``notify_tasks`` (drops
+    ``text``/``channels``, adds the per-channel columns +
+    ``UNIQUE(root_task_id, channel)``), adds ``notify_templates.channel``
+    with the COALESCE expression index and
+    ``notify_task_attempts.sent_text``."""
+
+    def test_notify_tasks_columns_reshaped(self, upgraded_url: str) -> None:
+        columns = _columns(upgraded_url, "notify_tasks")
+        # dropped (ADR 014 — dark system, no data compat)
+        assert "text" not in columns, "notify_tasks.text must be dropped"
+        assert "channels" not in columns, "notify_tasks.channels must be dropped"
+        # the per-channel shape
+        for name in (
+            "channel",
+            "address",
+            "payload",
+            "template_id",
+            "template_body",
+            "root_task_id",
+            "parent_task_id",
+            "delivery_outcome",
+            "resend_of",
+        ):
+            assert name in columns, f"notify_tasks.{name} missing"
+        # kept columns (skip-landing, §13)
+        for name in ("client_id", "skip_reason", "reenqueues", "status"):
+            assert name in columns, f"notify_tasks.{name} must survive the reshape"
+
+    def test_spawn_idempotency_unique_constraint(self, upgraded_url: str) -> None:
+        """UNIQUE(root_task_id, channel) present as the unique index
+        (family §8.3 — idempotent chain spawn; an index, not a table
+        constraint, so SQLite batch migrations can drop it cleanly)."""
+        sql = _scalar(
+            upgraded_url,
+            "SELECT sql FROM sqlite_master WHERE type='index'"
+            " AND name='uq_notify_tasks_root_channel'",
+        )
+        assert sql is not None, "unique index uq_notify_tasks_root_channel missing"
+        assert "root_task_id" in sql and "channel" in sql
+        assert "CREATE UNIQUE INDEX" in sql.upper()
+
+    def test_spawn_idempotency_enforced_on_migrated_db(
+        self, upgraded_url: str
+    ) -> None:
+        """Live check on the migrated DB: a duplicate (root, channel)
+        pair is rejected (the constraint is not just declared)."""
+        engine = create_engine(upgraded_url)
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO domain_events (id, type, occurred_at, snapshot,"
+                        " attempts, created_at, updated_at)"
+                        " VALUES ('evt-spawn', 'new_record', '2026-01-01 00:00:00',"
+                        " '{}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+            with engine.begin() as conn:
+                for row_id in ("t-1", "t-2"):
+                    conn.execute(
+                        text(
+                            "INSERT INTO notify_tasks (id, event_id, scenario,"
+                            " status, channel, root_task_id, created_at, updated_at)"
+                            " VALUES (:id, 'evt-spawn', 'new_record',"
+                            " 'queued', 'telegram', 'root-1',"
+                            " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                        ),
+                        {"id": row_id},
+                    )
+            raise AssertionError("duplicate (root, channel) insert was accepted")
+        except IntegrityError:
+            pass  # the constraint fired — exactly the DoD
+        finally:
+            engine.dispose()
+
+    def test_templates_channel_with_coalesce_index(self, upgraded_url: str) -> None:
+        columns = _columns(upgraded_url, "notify_templates")
+        assert "channel" in columns, "notify_templates.channel missing"
+
+        sql = _scalar(
+            upgraded_url,
+            "SELECT sql FROM sqlite_master WHERE type='index'"
+            " AND name='uq_notify_templates_event_channel'",
+        )
+        assert sql is not None, "unique COALESCE index on notify_templates missing"
+        assert "event_type" in sql
+        assert "COALESCE" in sql, (
+            f"index is not the COALESCE expression index (universal rows"
+            f" would escape uniqueness): {sql}"
+        )
+
+    def test_attempts_sent_text(self, upgraded_url: str) -> None:
+        columns = _columns(upgraded_url, "notify_task_attempts")
+        assert "sent_text" in columns, "notify_task_attempts.sent_text missing"
+
+    def test_skipped_row_lands_on_migrated_db(self, upgraded_url: str) -> None:
+        """Skip-landing (§13): a ``skipped`` task with a reason inserts
+        cleanly on the migrated schema — no channel payload required."""
+        engine = create_engine(upgraded_url)
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO domain_events (id, type, occurred_at, snapshot,"
+                        " attempts, created_at, updated_at)"
+                        " VALUES ('evt-2', 'new_record', '2026-01-01 00:00:00',"
+                        " '{}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO notify_tasks (id, event_id, scenario, status,"
+                        " skip_reason, created_at, updated_at)"
+                        " VALUES ('t-skip', 'evt-2', 'new_record', 'skipped',"
+                        " 'no_recipient', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                reason = conn.execute(
+                    text("SELECT skip_reason FROM notify_tasks WHERE id='t-skip'")
+                ).scalar()
+            assert reason == "no_recipient"
+        finally:
+            engine.dispose()
+
+    def test_per_channel_roundtrip(self, tmp_path: Path) -> None:
+        """The new migration upgrades/downgrades cleanly: downgrade to
+        its parent drops the reshape, upgrade rebuilds it."""
+        db_file = tmp_path / "per_channel_roundtrip.db"
+        url = f"sqlite:///{db_file}"
+        cfg = _alembic_config(url)
+
+        command.upgrade(cfg, "head")
+        columns = _columns(url, "notify_tasks")
+        assert "channel" in columns and "text" not in columns
+
+        command.downgrade(cfg, "d3b5f7a9c1e3")
+        columns = _columns(url, "notify_tasks")
+        assert "channel" not in columns
+        assert "text" in columns and "channels" in columns, (
+            "downgrade must restore the pre-#485 shape"
+        )
+        assert "channel" not in _columns(url, "notify_templates")
+        assert "sent_text" not in _columns(url, "notify_task_attempts")
+
+        command.upgrade(cfg, "head")
+        assert "channel" in _columns(url, "notify_tasks")
+        assert "sent_text" in _columns(url, "notify_task_attempts")
 
 
 class TestOrmParity:

@@ -1,139 +1,87 @@
-r"""Notify text rendering — sandboxed Jinja2, templates from the DB (#482 §3.5).
+r"""Notify templates: dispatcher-side lookup + render entry (sandboxed
+Jinja2, templates from the DB — #482 §3.5; rev.5/ADR 014, #485 part 4).
 
-Rendering runs ONCE at task creation (spec §3.4): the finished text is
-frozen into ``notify_tasks`` and never re-rendered.
+Two seams of the template subsystem live in the notify family:
 
-Decisions pinned by the spec:
+- HERE (:func:`find_template`) — the §3.7 rev.5 LOOKUP rule with DB
+  access: exact ``(event_type, channel)`` → ``(event_type, NULL)``
+  (universal) → ``is_default``. The scenario freezes the found row
+  (``template_id`` + ``template_body``) into the channel task (ADR
+  014): admin edits affect future tasks only.
+- :mod:`src.notify.assembly` — the WORKER-side, database-free text
+  assembly from the frozen body + payload (rev.5: assembly moved from
+  task creation to the worker). That module deliberately imports no
+  models — the worker process has no DB (ADR 009).
 
-- ``SandboxedEnvironment`` — template authors cannot escape into Python
-  (dunder access raises ``SecurityError``); ``undefined=StrictUndefined``
-  — a missing snapshot key is a RENDER ERROR, not a silent blank;
-  ``autoescape=False`` — the output is NEUTRAL markup (Markdown common
-  denominator); channel-specific conversion belongs to part 3.
-- Markup control chars (``*``, ``_``, `` ` ``, ``[``, ``]`` and the
-  backslash itself) are neutralized in snapshot STRING VALUES before
-  substitution — never in the template's own markup: the author writes
-  markup, data stays data. The backslash is in the set so a
-  client-supplied ``\[`` cannot re-activate what escaping neutralized
-  (``\\[`` would render as a literal ``\`` + ACTIVE link start).
-  Client names arrive from a public form; unescaped they could break the
-  message layout or inject links on behalf of the studio (panel finding).
-- Template lookup: row with matching ``event_type`` first, then the
-  ``is_default`` row; complete absence → ``RenderError`` (the general
-  render-error path → 3 attempts → ``processing_error``, Task 9).
+:func:`render_event` — the part-1 render-once entry kept for the
+part-5 admin preview render (spec §3.7: a trial render on sample
+variables when saving a template); complete template absence →
+``RenderError`` (the general render-error path → 3 attempts →
+``processing_error``, Task 9).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-import jinja2
-from jinja2 import StrictUndefined
-from jinja2.sandbox import SandboxedEnvironment
 from sqlalchemy import select
 
+from src.notify.assembly import (  # noqa: F401 — re-exported facade
+    RenderError,
+    assemble_text,
+    fmt_dt,
+    money,
+)
 from src.notify.models import NotifyTemplate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
-class RenderError(Exception):
-    """Render failed — no template found, or template/sandbox failure.
+async def find_template(
+    session: AsyncSession,
+    event_type: str,
+    channel: str | None,
+) -> NotifyTemplate | None:
+    """§3.7 lookup (rev.5, #485 Task 1): the template row to freeze into
+    a channel task — exact ``(event_type, channel)`` → ``(event_type,
+    NULL)`` (universal) → ``is_default`` (channel-agnostic: defaults
+    are universal only, spec §4.2). None when no tier matches — the
+    scenario raises its ``RenderError`` (the 3-attempts /
+    ``processing_error`` path of part 1 owns it).
 
-    The single error type of the render boundary: the dispatcher (Task 9)
-    routes it into the «render error → 3 attempts → processing_error»
-    policy instead of inspecting Jinja internals.
+    ``channel=None`` asks for the universal task spelling: tier 1
+    collapses into tier 2 (one lookup, same row set).
+
+    ``created_at, id`` ordering keeps each tier's choice deterministic
+    should a future CRUD (part 5) ever leave duplicate rows.
     """
-
-
-# Neutral-markup control chars neutralized in snapshot string values
-# (spec §3.5). Deterministic scheme: backslash prefix — readable, and a
-# plain-text channel just shows the bare character. The backslash IS in
-# the set: str.translate replaces single chars, so ``\[`` becomes
-# ``\\\[`` — both chars prefixed, no active escape/link sequence left.
-_MARKUP_CONTROL_CHARS = "*_`\\[]"
-_ESCAPE_TABLE = str.maketrans({char: "\\" + char for char in _MARKUP_CONTROL_CHARS})
-
-
-def _neutralize_markup(value: Any) -> Any:
-    """Walk the snapshot and escape markup control chars in STRING VALUES.
-
-    Returns a NEW structure — the caller's snapshot dict (already stored
-    in ``domain_events.snapshot``) is never mutated. Keys are left alone:
-    they are the fixed §4.1 contract, not user data.
-    """
-    if isinstance(value, str):
-        return value.translate(_ESCAPE_TABLE)
-    if isinstance(value, dict):
-        return {key: _neutralize_markup(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_neutralize_markup(item) for item in value]
-    return value
-
-
-def fmt_dt(value: str | datetime) -> str:
-    """``fmt_dt`` filter — stored naive local time → ``%d.%m.%Y %H:%M``.
-
-    Renders the stored value AS IS (spec §3.2: the same interpretation
-    as the past/future predicate — no timezone conversion). Accepts the
-    ISO string the snapshot carries, or a ``datetime`` for convenience.
-    """
-    dt = value if isinstance(value, datetime) else datetime.fromisoformat(value)
-    return dt.strftime("%d.%m.%Y %H:%M")
-
-
-def money(value: int | float) -> str:
-    """``money`` filter — ``1000`` → ``1 000 ₽``.
-
-    Thousands split by a NON-BREAKING space so channels never rewrap a
-    number; a regular space separates the currency sign (spec §3.5).
-    """
-    return f"{value:,}".replace(",", "\u00a0") + " ₽"
-
-
-def _build_environment() -> SandboxedEnvironment:
-    env = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
-    env.filters["fmt_dt"] = fmt_dt
-    env.filters["money"] = money
-    return env
-
-
-# Module-level singleton: environments are stateless for from_string(),
-# and the filter registration happens exactly once.
-_ENV = _build_environment()
-
-
-async def _template_body(session: AsyncSession, event_type: str) -> str:
-    """§3.5 lookup: typed row first, then the default; neither → error.
-
-    ``created_at, id`` ordering keeps the choice deterministic should a
-    future CRUD (part 5) ever leave duplicate rows.
-    """
-    typed = await session.execute(
-        select(NotifyTemplate.body)
-        .where(NotifyTemplate.event_type == event_type)
-        .order_by(NotifyTemplate.created_at, NotifyTemplate.id)
-        .limit(1)
+    tiers: list[list[Any]] = []
+    if channel is not None:
+        tiers.append(
+            [
+                NotifyTemplate.event_type == event_type,
+                NotifyTemplate.channel == channel,
+            ]
+        )
+    tiers.append(
+        [
+            NotifyTemplate.event_type == event_type,
+            NotifyTemplate.channel.is_(None),
+        ]
     )
-    body = typed.scalar_one_or_none()
-
-    if body is None:
-        default = await session.execute(
-            select(NotifyTemplate.body)
-            .where(NotifyTemplate.is_default.is_(True))
+    tiers.append([NotifyTemplate.is_default.is_(True)])
+    for where in tiers:
+        row = await session.execute(
+            select(NotifyTemplate)
+            .where(*where)
             .order_by(NotifyTemplate.created_at, NotifyTemplate.id)
             .limit(1)
         )
-        body = default.scalar_one_or_none()
-
-    if body is None:
-        raise RenderError(
-            f"no notify template for event_type={event_type!r} "
-            "and no default template (spec §3.5)"
-        )
-    return body
+        template = row.scalar_one_or_none()
+        if template is not None:
+            return template
+    return None
 
 
 async def render_event(
@@ -141,22 +89,15 @@ async def render_event(
     event_type: str,
     snapshot: dict[str, Any],
 ) -> str:
-    """Render the §4.1 ``snapshot`` into the final neutral-markup text.
+    """Render the §4.1 ``snapshot`` through the looked-up template —
+    the part-1 render entry (kept for the part-5 admin preview render).
 
-    Called by the scenario handler with the scenario's own session after
-    the predicate gates pass; the result is stored frozen in
-    ``notify_tasks.text``. Any failure raises ``RenderError``.
+    Any failure raises ``RenderError``.
     """
-    body = await _template_body(session, event_type)
-    data = _neutralize_markup(snapshot)
-    try:
-        return _ENV.from_string(body).render(**data)
-    except (jinja2.TemplateError, ValueError, TypeError) as exc:
-        # UndefinedError (missing key), SecurityError (sandbox),
-        # TemplateSyntaxError (broken authored body), plus ValueError /
-        # TypeError — a filter blowing up on a bad snapshot VALUE (e.g.
-        # fmt_dt on a non-ISO string, money on None). One boundary type:
-        # Task 9's attempts policy routes RenderError and nothing else.
+    template = await find_template(session, event_type, channel=None)
+    if template is None:
         raise RenderError(
-            f"notify template render failed for event_type={event_type!r}: {exc}"
-        ) from exc
+            f"no notify template for event_type={event_type!r} "
+            "and no default template (spec §3.5)"
+        )
+    return assemble_text(template.body, snapshot)

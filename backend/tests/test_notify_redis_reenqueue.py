@@ -98,8 +98,11 @@ async def _stage_queued_task(db_session) -> NotifyTask:
         event_id=event.id,
         scenario="new_record",
         status="queued",
-        text="готовый текст",
-        channels=[{"name": "telegram", "address": "+7OLD"}],
+        channel="telegram",
+        address="+7OLD",
+        payload={"client": {"name": "Анна"}},
+        template_id="06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        template_body="{{ client.name }}",
         reenqueues=0,
     )
     db_session.add(task)
@@ -118,13 +121,18 @@ def _age_task(task_id: str, age_seconds: int = _AGE_SECONDS) -> None:
 
 
 def _dispatcher_payload(task: NotifyTask) -> dict[str, Any]:
-    """The §4.2 shape the dispatcher's enqueue point hands the adapter."""
+    """The §4.2 rev.5 shape the dispatcher's enqueue point hands the
+    adapter (one channel, frozen render data + template)."""
     return {
         "task_id": task.id,
-        "text": task.text,
-        "channels": task.channels,
+        "channel": task.channel,
+        "address": task.address,
+        "payload": task.payload,
+        "template_id": task.template_id,
+        "template_body": task.template_body,
+        "root_task_id": task.root_task_id,
         "created_at": "2026-10-21T10:00:00Z",
-        "resend_of": None,
+        "resend_of": task.resend_of,
     }
 
 
@@ -162,8 +170,9 @@ class TestRedisWipeSurvival:
         assert len(payloads) >= 1  # ≥ 1, NOT an exact count — duplicates accepted (§4.4)
         for payload in payloads:
             assert payload["task_id"] == stale.id  # «не раньше»: fresh never crosses
-            assert payload["text"] == "готовый текст"
-            assert payload["channels"] == [{"name": "telegram", "address": "+7OLD"}]
+            assert payload["channel"] == "telegram"
+            assert payload["address"] == "+7OLD"
+            assert payload["template_body"] == "{{ client.name }}"
             assert payload["resend_of"] is None
             assert payload["created_at"]
         row = query_db(f"SELECT status, reenqueues FROM notify_tasks WHERE id = '{stale.id}'")

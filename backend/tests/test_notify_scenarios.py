@@ -12,9 +12,9 @@ Covered (spec §5, US-2/US-3):
 - four skip reasons, one per predicate branch, FIXED order
   ``notify_off → no_recipient → no_consent → past_event`` (first branch
   wins on multi-fail);
-- success → task ``queued`` with rendered text (service/tariffs/total/
-  location/time) and FROZEN channels, payload §4.2 in FakeQueue,
-  ``processed_at`` set;
+- success → task ``queued`` of the FIRST priority channel with the
+  FROZEN render payload + channel template + address (rev.5, ADR 014),
+  payload §4.2 in FakeQueue, ``processed_at`` set;
 - idempotency (§4.4): reprocessing an event creates no duplicate task;
 - RenderError PROPAGATES (not caught into a skip) — the 3-attempts
   policy of Task 9 owns it.
@@ -193,7 +193,9 @@ class TestSkipReasons:
         assert task.scenario == "new_record"
         assert task.event_id == event.id
         assert task.client_id == client["id"]
-        assert task.text is None and task.channels is None
+        # a skipped task carries no channel payload (rev.5)
+        assert task.channel is None and task.address is None
+        assert task.payload is None and task.template_body is None
         assert (await _fetch_event(db_session, event.id)).processed_at is not None
         assert queue.tasks == []
 
@@ -423,27 +425,46 @@ class TestSuccessPath:
         assert task.client_id == client["id"]
         assert task.reenqueues == 0
 
-        # US-3 rendered text: service, tariffs, total, location, time
-        assert "Гончарный мастер-класс" in task.text
-        assert "Взрослый" in task.text and "Детский" in task.text
-        assert "3\u00a0500 ₽" in task.text and "2\u00a0500 ₽" in task.text
-        assert "6\u00a0000 ₽" in task.text  # Итого
-        assert "Студия «Горы»" in task.text
-        assert "ул. Ленина, 1" in task.text
-        assert _FUTURE.strftime("%d.%m.%Y %H:%M") in task.text
-
-        # channels FROZEN in the task column (§4.4: never re-resolved)
-        assert task.channels == [{"name": "telegram", "address": "+79990001122"}]
+        # rev.5 (ADR 014): the task of the FIRST priority channel with
+        # the FROZEN render payload, template and address — the worker
+        # assembles the text; nothing is rendered here
+        assert task.channel == "telegram"
+        assert task.address == "+79990001122"
+        assert task.root_task_id == task.id
+        assert task.parent_task_id is None
+        assert task.payload is not None
+        # payload = the §4.1 snapshot verbatim (all top-level keys)
+        for key in (
+            "event", "client", "activity", "service",
+            "tariffs", "total_price", "location", "master",
+        ):
+            assert key in task.payload, f"payload lost the {key!r} snapshot key"
+        assert task.payload["service"]["title"] == "Гончарный мастер-класс"
+        assert task.template_body == _load_default_body()
+        assert task.template_id is not None
 
         assert (await _fetch_event(db_session, event.id)).processed_at is not None
 
-        # payload §4.2 in FakeQueue — exact shape, frozen values
+        # payload §4.2 rev.5 in FakeQueue — exact shape, frozen values
         assert len(queue.tasks) == 1
         payload = queue.tasks[0]
-        assert set(payload) == {"task_id", "text", "channels", "created_at", "resend_of"}
+        assert set(payload) == {
+            "task_id",
+            "channel",
+            "address",
+            "payload",
+            "template_id",
+            "template_body",
+            "root_task_id",
+            "created_at",
+            "resend_of",
+        }
         assert payload["task_id"] == task.id
-        assert payload["text"] == task.text
-        assert payload["channels"] == task.channels
+        assert payload["channel"] == task.channel
+        assert payload["address"] == task.address
+        assert payload["payload"] == task.payload
+        assert payload["template_body"] == task.template_body
+        assert payload["root_task_id"] == task.id
         assert payload["resend_of"] is None
         assert _UTC_ISO_Z.match(payload["created_at"]), payload["created_at"]
 

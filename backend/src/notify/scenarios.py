@@ -11,7 +11,7 @@ Handler contract (§3.4): ``async (event, session, queue) -> None``.
   record by ``event.record_id`` (existence only — records have no
   soft-delete flag), client by ``client.id`` (existence, ``is_active``,
   ``phone``, ``notify_enabled``). The snapshot stays the ONLY data source
-  for the render — text is frozen.
+  for the render — the payload is frozen verbatim (rev.5, ADR 014).
 - Predicate order is FIXED and cheapest-first (§3.4): ``notify_off`` →
   ``no_recipient`` → ``no_consent`` → ``past_event``. On multiple
   failures the FIRST branch wins.
@@ -24,6 +24,13 @@ Handler contract (§3.4): ``async (event, session, queue) -> None``.
   a decision branch. Only the five clean branches (deleted record, four
   skips/success) produce ``processed_at``; Task 9's attempts policy
   (1→2→3 → ``processing_error``) owns render failures.
+
+Rev.5 (#485, ADR 014): on success the handler creates the task of the
+FIRST priority channel — freezing the render payload (the §4.1
+snapshot), the channel's template (:func:`find_template` — §3.7 lookup)
+and the address (the live client phone). Text is NOT rendered here: the
+worker assembles it per channel. The dispatcher's chain spawner (part 4
+Task 5) continues the chain from this root task.
 """
 
 from __future__ import annotations
@@ -38,7 +45,9 @@ from src.core.config import settings
 from src.models.client import Client
 from src.models.record import Record
 from src.notify.models import DomainEvent, NotifyTask
-from src.notify.render import render_event
+from src.notify.channels.registry import parse_channel_priority
+from src.notify.queue import build_task_payload
+from src.notify.render import RenderError, find_template
 from src.notify.time import business_now
 from src.util.utc import utc_now
 
@@ -64,18 +73,13 @@ def _utc_now_iso_z() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _frozen_channels(phone: str) -> list[dict[str, str]]:
-    """``[{name, address}]`` from ``NOTIFY_CHANNEL_PRIORITY`` (§4.2).
-
-    Order = priority; address = the LIVE client phone the predicate just
-    validated. The list is FROZEN into the task at creation and never
-    re-resolved (§3.4 panel finding — re-resolution against frozen text
-    is a delivery-to-the-wrong-number vector). Empty/duplicate names in
-    the setting are the DISPATCHER START's loud error (§3.8, Task 9);
-    here empties are only dropped defensively.
-    """
-    names = [name.strip().lower() for name in settings.NOTIFY_CHANNEL_PRIORITY.split(",")]
-    return [{"name": name, "address": phone} for name in names if name]
+def _first_priority_channel() -> str:
+    """The channel of the FIRST task (rev.5): head of
+    ``NOTIFY_CHANNEL_PRIORITY``. The dispatcher start already validates
+    the setting loudly; here the canonical parser raises the same
+    ``ValueError`` on a corrupt setting — a scenario error for the
+    attempts policy, never a silent fallback."""
+    return parse_channel_priority(settings.NOTIFY_CHANNEL_PRIORITY)[0]
 
 
 async def _client_id_for_task(
@@ -190,18 +194,31 @@ async def handle_new_record(
         await _skip(event, session, "past_event")
         return
 
-    # Success: render once (RenderError PROPAGATES — Task 9's attempts
-    # policy owns it), freeze text + channels into the task, mark the
-    # event processed — ONE transaction (§4.4 idempotency).
-    text = await render_event(session, SCENARIO_NEW_RECORD, snapshot)
-    channels = _frozen_channels(client.phone)
+    # Success (rev.5, ADR 014): create the task of the FIRST priority
+    # channel — freeze the render payload (the snapshot verbatim), the
+    # channel's template (§3.7 lookup: (event_type, channel) →
+    # (event_type, NULL) → default) and the address (the live phone the
+    # predicate just validated — never re-resolved). ``root_task_id``
+    # defaults to the row's own id (chain root). RenderError (no
+    # template) PROPAGATES — Task 9's attempts policy owns it; task +
+    # ``processed_at`` in ONE transaction (§4.4 idempotency).
+    channel_name = _first_priority_channel()
+    template = await find_template(session, SCENARIO_NEW_RECORD, channel_name)
+    if template is None:
+        raise RenderError(
+            f"no notify template for event_type={SCENARIO_NEW_RECORD!r}"
+            f" channel={channel_name!r} and no default (spec §3.7)"
+        )
     task = NotifyTask(
         event_id=event.id,
         scenario=SCENARIO_NEW_RECORD,
         client_id=client.id,
         status="queued",
-        text=text,
-        channels=channels,
+        channel=channel_name,
+        address=client.phone,
+        payload=snapshot,
+        template_id=template.id,
+        template_body=template.body,
     )
     session.add(task)
     event.processed_at = utc_now()
@@ -209,17 +226,9 @@ async def handle_new_record(
 
     # Enqueue AFTER the commit (§3.4): an enqueue failure leaves the
     # queued task without a queue message — the re-enqueue loop (Task 9)
-    # picks it up; duplicates are accepted (§4.4). Payload §4.2 — the
-    # frozen task values verbatim, never re-resolved.
-    queue.enqueue_task(
-        {
-            "task_id": task.id,
-            "text": text,
-            "channels": channels,
-            "created_at": _utc_now_iso_z(),
-            "resend_of": None,
-        }
-    )
+    # picks it up; duplicates are accepted (§4.4). Payload §4.2 rev.5 —
+    # the frozen task values verbatim, never re-resolved.
+    queue.enqueue_task(build_task_payload(task, _utc_now_iso_z()))
 
 
 SCENARIOS[SCENARIO_NEW_RECORD] = handle_new_record

@@ -75,16 +75,32 @@ def _entry(name: str, address: str) -> dict[str, str]:
 
 def _task(
     task_id: str = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9c01",
-    entries: list[dict[str, str]] | None = None,
+    channel: str = "mock",
+    address: str = "+79990001122",
+    *,
+    brak: bool = False,
 ) -> TaskPayload:
-    """A family §4.2 payload; ``task_id`` — the live seam spelling: a
-    UUID String(36) (``NotifyTask.id``, AbstractModel PK — ints are
-    brak, #484 follow-up). ``entries=None`` → one deliverable mock
-    record, ``entries=[]`` → a brak task (empty channel list)."""
+    """A family §4.2 rev.5 payload (ONE channel, frozen render data +
+    template — the literal template keeps the assembled text == TEXT);
+    ``task_id`` — the live seam spelling: a UUID String(36)
+    (``NotifyTask.id``, AbstractModel PK — ints are brak, #484
+    follow-up). ``brak=True`` → a payload violating the shape (the
+    brak-path probe)."""
+    if brak:
+        return {
+            "task_id": task_id,
+            "channel": "",
+            "created_at": "2026-10-23T10:00:00Z",
+            "resend_of": None,
+        }
     return {
         "task_id": task_id,
-        "text": TEXT,
-        "channels": entries if entries is not None else [_entry("mock", "+79990001122")],
+        "channel": channel,
+        "address": address,
+        "payload": {},
+        "template_id": "06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        "template_body": TEXT,
+        "root_task_id": task_id,
         "created_at": "2026-10-23T10:00:00Z",
         "resend_of": None,
     }
@@ -97,6 +113,7 @@ def _status_item() -> dict:
         "channel": "telegram",
         "outcome": None,
         "error": None,
+        "sent_text": None,
         "occurred_at": "2026-10-20T10:00:05Z",
     }
 
@@ -388,7 +405,7 @@ class TestDeliveryOnce:
         channels, recorder = _mock_channels()
         good_id = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9101"
         brak_id = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9789"
-        good, brak = _task(task_id=good_id), _task(task_id=brak_id, entries=[])
+        good, brak = _task(task_id=good_id), _task(task_id=brak_id, brak=True)
         queue.enqueue_task(brak)
         queue.enqueue_task(good)
 
@@ -407,7 +424,7 @@ class TestDeliveryOnce:
             ("sent", "delivered"),
         ]
         brak_lines = [m for m in messages if "brak" in m]
-        assert brak_lines and brak_id in brak_lines[0] and "'channels'" in brak_lines[0]
+        assert brak_lines and brak_id in brak_lines[0] and "'channel'" in brak_lines[0]
         assert all(TEXT not in m for m in messages)  # no body leak
 
     async def test_publish_outage_aborts_iteration_task_keeps_ticket(self) -> None:
@@ -486,14 +503,14 @@ class TestProcessLoop:
         t4 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9404"
         t5 = "7f9c24e1-6f4a-4c0e-9a2b-3d1e5f7a9505"
         for task in (
-            _task(t1, [_entry("mock", "+70000000001")]),
-            _task(
-                t2,
-                [_entry("mock", "fail-transport:+70000000002"), _entry("mock", "+70000000003")],
-            ),
-            _task(t3, [_entry("mock", "fail-app:+70000000004")]),
-            _task(t4, entries=[]),  # brak
-            _task(t5, [_entry("ghost", "+70000000005")]),  # not a priority instance
+            _task(t1),  # deliverable
+            # transport budget exhausted → the channel task terminally
+            # fails (rev.5: the NEXT channel is the dispatcher's chain,
+            # not another payload record)
+            _task(t2, address="fail-transport:+70000000002"),
+            _task(t3, address="fail-app:+70000000004"),  # app error → terminal
+            _task(t4, brak=True),  # brak
+            _task(t5, "ghost", "+70000000005"),  # not a priority instance
         ):
             queue.enqueue_task(task)
         captured = _capture_stop(monkeypatch)
@@ -501,15 +518,14 @@ class TestProcessLoop:
         process = asyncio.create_task(worker.main(queue=queue, channels=channels))
         try:
             await _until(
-                lambda: len(recorder.deliveries) == 2,
-                what="both deliveries recorded",
+                lambda: len(recorder.deliveries) == 1,
+                what="the deliverable recorded",
             )
         finally:
             await _join_worker(process, captured.get("stop"))
 
         assert [(d["address"], d["text"]) for d in recorder.deliveries] == [
-            ("+70000000001", TEXT),
-            ("+70000000003", TEXT),
+            ("+79990001122", TEXT),
         ]
         by_task: dict[str, list[tuple[str, object, str]]] = {}
         for event in queue.claim_statuses():
@@ -520,11 +536,13 @@ class TestProcessLoop:
             ("sending", "attempt", "mock"),
             ("sent", "delivered", "mock"),
         ]
+        # rev.5: one channel per task — the transport budget (1 retry in
+        # this contour) burning out terminally fails the channel task;
+        # the dispatcher chain spawns the next channel (part 4 Task 5)
         assert by_task[t2] == [
             ("sending", "attempt", "mock"),
             ("failed", "transport_error", "mock"),
-            ("sending", "attempt", "mock"),
-            ("sent", "delivered", "mock"),
+            ("failed", "not_delivered", "mock"),
         ]
         assert by_task[t3] == [
             ("sending", "attempt", "mock"),

@@ -686,8 +686,12 @@ async def test_notify_templates_stays_in_canon(canon_stack: CanonStack) -> None:
     _exec(
         db,
         (
-            "INSERT INTO notify_templates (id, event_type, title, body, is_default,"
-            " created_at, updated_at) VALUES (?, 'new_record', ?, ?, 0, ?, ?)",
+            # rev.5 (#485): a channel-specific row — a second UNIVERSAL
+            # new_record row would violate the COALESCE uniqueness index
+            # and no longer prove anything about the canon.
+            "INSERT INTO notify_templates (id, event_type, channel, title, body,"
+            " is_default, created_at, updated_at)"
+            " VALUES (?, 'new_record', 'telegram', ?, ?, 0, ?, ?)",
             ("tpl-polluted", "Загрязнённый шаблон", "x", TS, TS),
         ),
     )

@@ -1,30 +1,38 @@
-"""GH #484 Task 4 (part 3 of the notify family #476; spec §3.1/§3.2/
-§3.4/§3.5) — the delivery core: ``parse_task_payload`` +
-``deliver_task``.
+"""GH #484 Task 4 + #485 Task 1 (part 3/4 of the notify family #476;
+spec §3.1/§3.2/§3.4/§3.5; §4.2/§4.3 rev.5) — the delivery core:
+``parse_task_payload`` + ``deliver_task``.
 
-Covered (the S9 core matrix, unit — no Redis, no DB, no real clock:
+Rev.5 (ADR 014): the task is ONE channel — the core assembles the text
+from the frozen ``template_body`` + ``payload`` and delivers to the
+task's single channel. Channel FALLBACK (next channel of the chain) is
+dispatcher logic (part 4 Task 5) — here a failed channel task ends
+``failed/not_delivered``.
 
-- validator: every family §4.2 violation raises ``InvalidTaskPayload``
-  (a ``ValueError``); ``created_at``/``resend_of`` are
-  delivery-irrelevant and deliberately NOT checked;
+Covered (the S9 core matrix, unit — no Redis, no DB, no real clock):
+
+- validator: every family §4.2 rev.5 violation raises
+  ``InvalidTaskPayload`` (a ``ValueError``); ``template_id``/
+  ``root_task_id``/``created_at``/``resend_of`` are delivery-irrelevant
+  and deliberately NOT checked;
 - first-attempt success: ``sending``/``attempt`` → ``sent``/
-  ``delivered``, the remaining channel records are never tried, no
-  final event;
-- fallback: a channel exhausting its transport budget (every attempt
-  ``failed``/``transport_error``) hands over to the next record which
-  delivers — the full event chain, still no final event;
-- every record failing: ONE final ``failed``/``not_delivered`` carrying
-  the LAST record's channel name;
-- ``ChannelAppError``: exactly ONE attempt (never retried), next
-  record;
+  ``delivered``; ``sent_text`` (§4.3 rev.5) rides the sending/sent
+  stages with the ASSEMBLED text;
+- assembly failure (spec §5.4): ONE ``failed/app_error``
+  («не удалось собрать текст уведомления: …»), no transport retries,
+  ``send`` never called;
+- a channel exhausting its transport budget: per-attempt
+  ``failed``/``transport_error`` events, then ONE final ``failed``/
+  ``not_delivered``;
+- ``ChannelAppError``: exactly ONE attempt (never retried), then the
+  final;
 - pauses: ``retry_after`` above the cap is capped to 30 s with a
   journal line; a small ``retry_after`` passes through; the default
   pause is 1 s; after the LAST failed attempt there is NO pause (the
   budget is checked before sleeping);
 - unavailable channel: ``failed``/``unavailable`` with NO ``sending``
-  event and no burned attempt;
+  event and no burned attempt, then the final;
 - a name missing from the channel instances: ``failed``/
-  ``unknown_channel``, next record;
+  ``unknown_channel``, then the final;
 - an unclassified ``send`` exception (a channel bug): ``failed``/
   ``app_error`` with the exception CLASS in ``error``, a traceback in
   the journal, the task itself does not crash, no retry;
@@ -44,6 +52,7 @@ from typing import Any
 
 import pytest
 
+from src.notify.assembly import RenderError
 from src.notify.channels.base import (
     Channel,
     ChannelAppError,
@@ -53,6 +62,7 @@ from src.notify.channels.mock import InMemoryRecorder, MockChannel
 from src.notify.queue import FakeQueue, StatusEvent, TaskPayload
 from src.notify.redis_queue import NotifyTransportError
 from src.notify.worker import (
+    ASSEMBLY_ERROR_MESSAGE,
     RETRY_AFTER_CAP_SECONDS,
     TRANSPORT_RETRY_PAUSE_SECONDS,
     InvalidTaskPayload,
@@ -62,8 +72,9 @@ from src.notify.worker import (
 
 pytestmark = pytest.mark.unit
 
-#: A ready (already rendered) notification text — §4.2 fixes it in the
-#: payload; the core hands it over verbatim and never journals it.
+#: A literal frozen template (no variables) — the assembled text equals
+#: its body; the delivery tests stay focused on delivery, assembly has
+#: its own test below.
 TEXT = "Готовый текст оповещения: мастер-класс в субботу"
 
 #: The live seam id: ``NotifyTask.id`` is a UUID String(36) (AbstractModel
@@ -160,15 +171,17 @@ def capture_worker_logs() -> Iterator[list[logging.LogRecord]]:
 # ── payload/task builders ───────────────────────────────────────────────────
 
 
-def _entry(name: str, address: str) -> dict[str, str]:
-    return {"name": name, "address": address}
-
-
 def _payload(**overrides: Any) -> dict[str, Any]:
+    """A §4.2 rev.5 task payload — ONE channel, frozen render data +
+    template; the literal template keeps the assembled text == TEXT."""
     payload: dict[str, Any] = {
         "task_id": TASK_ID,
-        "text": TEXT,
-        "channels": [_entry("mock", "+79990001122")],
+        "channel": "mock",
+        "address": "+79990001122",
+        "payload": {},
+        "template_id": "06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        "template_body": TEXT,
+        "root_task_id": TASK_ID,
         "created_at": "2026-10-23T10:00:00Z",
         "resend_of": None,
     }
@@ -176,8 +189,8 @@ def _payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def _task(entries: list[dict[str, Any]]) -> TaskPayload:
-    return _payload(channels=entries)
+def _task(channel: str = "mock", **overrides: Any) -> TaskPayload:
+    return _payload(channel=channel, **overrides)
 
 
 async def _run(
@@ -230,22 +243,17 @@ class TestParseTaskPayload:
             ("task_id int", _payload(task_id=456)),
             ("task_id negative int", _payload(task_id=-1)),
             ("task_id bool", _payload(task_id=True)),
-            ("no text", _payload(text=None)),
-            ("text not a string", _payload(text=123)),
-            ("no channels", _payload(channels=None)),
-            ("channels not a list", _payload(channels="mock")),
-            ("channels empty list", _payload(channels=[])),
-            ("entry not a dict", _payload(channels=["mock"])),
-            ("entry without name", _payload(channels=[{"address": "a"}])),
-            ("entry name empty", _payload(channels=[_entry("", "a")])),
-            ("entry name not a string", _payload(channels=[{"name": 7, "address": "a"}])),
-            ("entry without address", _payload(channels=[{"name": "mock"}])),
-            ("entry address empty", _payload(channels=[_entry("mock", "")])),
-            ("entry address not a string", _payload(channels=[{"name": "m", "address": 5}])),
-            (
-                "second entry broken",
-                _payload(channels=[_entry("mock", "a"), {"name": ""}]),
-            ),
+            ("no channel", _payload(channel=None)),
+            ("channel empty string", _payload(channel="")),
+            ("channel not a string", _payload(channel=7)),
+            ("no address", _payload(address=None)),
+            ("address empty string", _payload(address="")),
+            ("address not a string", _payload(address=5)),
+            ("no payload", _payload(payload=None)),
+            ("payload not a dict", _payload(payload="data")),
+            ("payload is a list", _payload(payload=[1, 2])),
+            ("no template_body", _payload(template_body=None)),
+            ("template_body not a string", _payload(template_body=42)),
         ],
     )
     def test_violation_braks_the_whole_task(self, case: str, payload: dict[str, Any]) -> None:
@@ -257,11 +265,17 @@ class TestParseTaskPayload:
 
         assert parse_task_payload(payload) is payload
 
-    def test_created_at_and_resend_of_are_not_checked(self) -> None:
-        """Plan §Task-4: delivery-irrelevant keys keep any shape — the
-        validator never braks a task over them."""
+    def test_delivery_irrelevant_keys_are_not_checked(self) -> None:
+        """Plan §Task-4: ``template_id``/``root_task_id``/
+        ``created_at``/``resend_of`` keep any shape — the validator
+        never braks a task over them."""
 
-        payload = _payload(created_at=None, resend_of=[{"weird": True}])
+        payload = _payload(
+            template_id=None,
+            root_task_id=17,
+            created_at=None,
+            resend_of=[{"weird": True}],
+        )
 
         assert parse_task_payload(payload) is payload
 
@@ -275,15 +289,14 @@ class TestPauseConstants:
         assert RETRY_AFTER_CAP_SECONDS == 30.0
 
 
-# ── deliver_task — the §3.4 algorithm ───────────────────────────────────────
+# ── deliver_task — the §3.4 algorithm (one channel, rev.5) ──────────────────
 
 
 class TestFirstAttemptSuccess:
-    async def test_sending_then_sent_and_rest_of_channels_not_tried(self) -> None:
+    async def test_sending_then_sent_with_the_assembled_text(self) -> None:
         recorder = InMemoryRecorder()
-        backup = StubChannel("backup")
-        channels: dict[str, Channel] = {"mock": MockChannel(recorder), "backup": backup}
-        task = _task([_entry("mock", "+79990001122"), _entry("backup", "b@x.io")])
+        channels: dict[str, Channel] = {"mock": MockChannel(recorder)}
+        task = _task()
 
         events, spy = await _run(task, channels)
 
@@ -291,13 +304,30 @@ class TestFirstAttemptSuccess:
             ("sending", "attempt", "mock"),
             ("sent", "delivered", "mock"),
         ]
-        assert backup.send_calls == 0
         assert spy.pauses == []
+        # §4.3 rev.5: the actually transmitted text rides sending/sent
+        assert events[0]["sent_text"] == TEXT
+        assert events[1]["sent_text"] == TEXT
         assert recorder.deliveries == [{"address": "+79990001122", "text": TEXT}]
+
+    async def test_text_assembled_from_frozen_template_and_payload(self) -> None:
+        """Rev.5: the worker assembles — ``{{ … }}`` from the frozen
+        body with the frozen render data (strict undefineds)."""
+        recorder = InMemoryRecorder()
+        channels: dict[str, Channel] = {"mock": MockChannel(recorder)}
+        task = _task(
+            template_body="Запись: {{ service.title }} — {{ total_price | money }}",
+            payload={"service": {"title": "Гончарный мастер-класс"}, "total_price": 2500},
+        )
+
+        events, _ = await _run(task, channels)
+
+        assert events[1]["sent_text"] == "Запись: Гончарный мастер-класс — 2\u00a0500 ₽"
+        assert recorder.deliveries[0]["text"] == events[1]["sent_text"]
 
     async def test_event_shape_is_the_section_4_3_contract(self) -> None:
         channels: dict[str, Channel] = {"mock": MockChannel(InMemoryRecorder())}
-        task = _task([_entry("mock", "+79990001122")])
+        task = _task()
 
         events, _ = await _run(task, channels)
 
@@ -307,6 +337,7 @@ class TestFirstAttemptSuccess:
             "channel",
             "outcome",
             "error",
+            "sent_text",
             "occurred_at",
         }
         assert events[0]["task_id"] == TASK_ID
@@ -315,14 +346,42 @@ class TestFirstAttemptSuccess:
         datetime.fromisoformat(events[0]["occurred_at"])
 
 
-class TestTransportFallback:
-    async def test_budget_exhausted_then_second_channel_delivers(self) -> None:
-        """flaky burns the whole budget (3 × transport_error), the next
-        record delivers: full chain, NO final event."""
+class TestAssemblyFailure:
+    async def test_broken_template_is_one_app_error_without_retries(self) -> None:
+        """Spec §5.4: a deterministic assembly failure — ONE
+        ``failed/app_error`` with the fixed russian phrase, ``send``
+        never called, no transport retries."""
+        stub = StubChannel("mock")
+        channels: dict[str, Channel] = {"mock": stub}
+        task = _task(template_body="{{ service.title }}", payload={})
+
+        events, spy = await _run(task, channels)
+
+        assert stub.send_calls == 0
+        assert _trail(events) == [("failed", "app_error", "mock")]
+        assert events[0]["error"] is not None
+        assert events[0]["error"].startswith(ASSEMBLY_ERROR_MESSAGE)
+        # a deterministic error never buys a pause
+        assert spy.pauses == []
+
+    async def test_assembly_failure_sent_text_is_none(self) -> None:
+        """§4.3 rev.5: no transmission happened — ``sent_text`` NULL."""
+        channels: dict[str, Channel] = {"mock": StubChannel("mock")}
+        task = _task(template_body="{{ missing_key }}")
+
+        events, _ = await _run(task, channels)
+
+        assert events[0]["sent_text"] is None
+
+
+class TestTransportBudget:
+    async def test_budget_exhausted_then_final_not_delivered(self) -> None:
+        """flaky burns the whole budget (3 × transport_error), then ONE
+        final ``failed/not_delivered`` (rev.5: no next channel here —
+        the dispatcher chain owns the fallback)."""
         flaky = StubChannel("flaky", outcome="transport")
-        recorder = InMemoryRecorder()
-        channels: dict[str, Channel] = {"flaky": flaky, "mock": MockChannel(recorder)}
-        task = _task([_entry("flaky", "f@x.io"), _entry("mock", "+79990001122")])
+        channels: dict[str, Channel] = {"flaky": flaky}
+        task = _task(channel="flaky")
 
         events, spy = await _run(task, channels, retries=3)
 
@@ -333,60 +392,20 @@ class TestTransportFallback:
             ("failed", "transport_error", "flaky"),
             ("sending", "attempt", "flaky"),
             ("failed", "transport_error", "flaky"),
-            ("sending", "attempt", "mock"),
-            ("sent", "delivered", "mock"),
+            ("failed", "not_delivered", "flaky"),
         ]
         assert flaky.send_calls == 3
-        # pauses BETWEEN attempts only — none after the last failure,
-        # none for the successful channel
+        # pauses BETWEEN attempts only — none after the last failure
         assert spy.pauses == [TRANSPORT_RETRY_PAUSE_SECONDS, TRANSPORT_RETRY_PAUSE_SECONDS]
-        assert recorder.deliveries == [{"address": "+79990001122", "text": TEXT}]
-
-
-class TestFinalNotDelivered:
-    async def test_all_records_fail__one_final_with_last_name(self) -> None:
-        flaky = StubChannel("flaky", outcome="transport")
-        broken = StubChannel("broken", outcome="app")
-        channels: dict[str, Channel] = {"flaky": flaky, "broken": broken}
-        task = _task([_entry("flaky", "f@x.io"), _entry("broken", "b@x.io")])
-
-        events, spy = await _run(task, channels)
-
-        assert _trail(events) == [
-            ("sending", "attempt", "flaky"),
-            ("failed", "transport_error", "flaky"),
-            ("sending", "attempt", "flaky"),
-            ("failed", "transport_error", "flaky"),
-            ("sending", "attempt", "flaky"),
-            ("failed", "transport_error", "flaky"),
-            ("sending", "attempt", "broken"),
-            ("failed", "app_error", "broken"),
-            ("failed", "not_delivered", "broken"),
-        ]
-        # the final carries the LAST record's name and arrives exactly once
-        finals = [e for e in events if e["outcome"] == "not_delivered"]
-        assert len(finals) == 1
-        assert finals[0]["channel"] == "broken"
-        assert spy.pauses == [TRANSPORT_RETRY_PAUSE_SECONDS] * 2
-
-    async def test_final_after_unknown_last_record_carries_its_name(self) -> None:
-        channels: dict[str, Channel] = {}
-        task = _task([_entry("ghost", "g@x.io")])
-
-        events, _ = await _run(task, channels)
-
-        assert _trail(events) == [
-            ("failed", "unknown_channel", "ghost"),
-            ("failed", "not_delivered", "ghost"),
-        ]
+        # transmission stages carry the text; failures never do
+        assert [e["sent_text"] for e in events] == [TEXT, None, TEXT, None, TEXT, None, None]
 
 
 class TestAppErrorIsTerminal:
-    async def test_app_error_not_retried_and_moves_to_next_record(self) -> None:
+    async def test_app_error_not_retried_then_final(self) -> None:
         bad = StubChannel("bad", outcome="app")
-        recorder = InMemoryRecorder()
-        channels: dict[str, Channel] = {"bad": bad, "mock": MockChannel(recorder)}
-        task = _task([_entry("bad", "fail-app:111"), _entry("mock", "+79990001122")])
+        channels: dict[str, Channel] = {"bad": bad}
+        task = _task(channel="bad")
 
         events, spy = await _run(task, channels)
 
@@ -394,14 +413,13 @@ class TestAppErrorIsTerminal:
         assert _trail(events) == [
             ("sending", "attempt", "bad"),
             ("failed", "app_error", "bad"),
-            ("sending", "attempt", "mock"),
-            ("sent", "delivered", "mock"),
+            ("failed", "not_delivered", "bad"),
         ]
         assert spy.pauses == []  # an app error never buys a pause
 
     async def test_app_error_message_lands_in_the_error_field(self) -> None:
         channels: dict[str, Channel] = {"bad": StubChannel("bad", outcome="app")}
-        task = _task([_entry("bad", "fail-app:111")])
+        task = _task(channel="bad")
 
         events, _ = await _run(task, channels)
 
@@ -414,7 +432,7 @@ class TestPauseDiscipline:
         channels: dict[str, Channel] = {
             "rate": StubChannel("rate", outcome="transport", retry_after=300.0)
         }
-        task = _task([_entry("rate", "r@x.io")])
+        task = _task(channel="rate")
 
         with capture_worker_logs() as records:
             _events, spy = await _run(task, channels)
@@ -426,7 +444,7 @@ class TestPauseDiscipline:
         channels: dict[str, Channel] = {
             "rate": StubChannel("rate", outcome="transport", retry_after=2.5)
         }
-        task = _task([_entry("rate", "r@x.io")])
+        task = _task(channel="rate")
 
         with capture_worker_logs() as records:
             _events, spy = await _run(task, channels)
@@ -435,12 +453,12 @@ class TestPauseDiscipline:
         assert not any("capped" in r.getMessage() for r in records)
 
     async def test_no_pause_after_the_last_failed_attempt(self) -> None:
-        """The budget is checked BEFORE sleeping — the last failure of
-        the last record must not buy a pause (§3.4)."""
+        """The budget is checked BEFORE sleeping — the last failure must
+        not buy a pause (§3.4)."""
         channels: dict[str, Channel] = {
             "solo": StubChannel("solo", outcome="transport", retry_after=300.0)
         }
-        task = _task([_entry("solo", "s@x.io")])
+        task = _task(channel="solo")
 
         events, spy = await _run(task, channels, retries=2)
 
@@ -452,32 +470,29 @@ class TestPauseDiscipline:
 class TestUnavailableChannel:
     async def test_unavailable_fails_without_sending_and_without_attempt(self) -> None:
         down = StubChannel("down", available=False)
-        recorder = InMemoryRecorder()
-        channels: dict[str, Channel] = {"down": down, "mock": MockChannel(recorder)}
-        task = _task([_entry("down", "d@x.io"), _entry("mock", "+79990001122")])
+        channels: dict[str, Channel] = {"down": down}
+        task = _task(channel="down")
 
         events, _ = await _run(task, channels)
 
         assert down.send_calls == 0  # no attempt is burned
         assert _trail(events) == [
             ("failed", "unavailable", "down"),  # NO sending before it
-            ("sending", "attempt", "mock"),
-            ("sent", "delivered", "mock"),
+            ("failed", "not_delivered", "down"),
         ]
+        assert all(e["sent_text"] is None for e in events)
 
 
 class TestUnknownChannel:
-    async def test_name_outside_instances_fails_and_continues(self) -> None:
-        recorder = InMemoryRecorder()
-        channels: dict[str, Channel] = {"mock": MockChannel(recorder)}
-        task = _task([_entry("ghost", "g@x.io"), _entry("mock", "+79990001122")])
+    async def test_name_outside_instances_fails_then_final(self) -> None:
+        channels: dict[str, Channel] = {}  # the task's channel is absent
+        task = _task(channel="ghost")
 
         events, _ = await _run(task, channels)
 
         assert _trail(events) == [
             ("failed", "unknown_channel", "ghost"),
-            ("sending", "attempt", "mock"),
-            ("sent", "delivered", "mock"),
+            ("failed", "not_delivered", "ghost"),
         ]
 
 
@@ -485,7 +500,7 @@ class TestUnclassifiedSendException:
     async def test_channel_bug_closes_channel_as_app_error_with_traceback(self) -> None:
         buggy = StubChannel("buggy", outcome="bug")
         channels: dict[str, Channel] = {"buggy": buggy}
-        task = _task([_entry("buggy", "b@x.io")])
+        task = _task(channel="buggy")
 
         with capture_worker_logs() as records:
             events, spy = await _run(task, channels)
@@ -518,7 +533,7 @@ class TestPublishTransportFailure:
             raise NotifyTransportError("statuses stream is down")
 
         channels: dict[str, Channel] = {"mock": MockChannel(InMemoryRecorder())}
-        task = _task([_entry("mock", "+79990001122")])
+        task = _task()
 
         with pytest.raises(NotifyTransportError):
             await _run(task, channels, publish=broken_publish)

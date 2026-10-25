@@ -157,8 +157,11 @@ async def _stage_queued_task(
         event_id=event.id,
         scenario="new_record",
         status=status,
-        text="готовый текст",
-        channels=[{"name": "telegram", "address": "+7OLD"}],
+        channel="telegram",
+        address="+7OLD",
+        payload={"client": {"name": "Анна"}},
+        template_id=str(uuid.uuid4()),
+        template_body="{{ client.name }}",
         reenqueues=reenqueues,
     )
     db_session.add(task)
@@ -179,6 +182,7 @@ def _status_item(task_id: str, stage: str, *, channel: str = "telegram") -> dict
         "channel": channel,
         "outcome": None,
         "error": "boom" if stage == "failed" else None,
+        "sent_text": None,
         "occurred_at": _iso_z(datetime.now(UTC)),
     }
 
@@ -798,9 +802,14 @@ class TestReenqueue:
         assert len(queue.tasks) == 1
         payload = queue.tasks[0]
         assert payload["task_id"] == task.id
-        assert payload["text"] == "готовый текст"
-        # saved payload IN FULL — channels verbatim, no re-resolution
-        assert payload["channels"] == [{"name": "telegram", "address": "+7OLD"}]
+        assert payload["channel"] == "telegram"
+        assert payload["address"] == "+7OLD"
+        # saved payload IN FULL — the frozen render data + template
+        # verbatim, no re-resolution (§4.2 rev.5)
+        assert payload["payload"] == {"client": {"name": "Анна"}}
+        assert payload["template_id"] == task.template_id
+        assert payload["template_body"] == "{{ client.name }}"
+        assert payload["root_task_id"] == task.id
         assert payload["resend_of"] is None
         assert payload["created_at"]
         row = _task_row(task.id, "status", "reenqueues", "updated_at")
@@ -900,8 +909,10 @@ class TestEnqueueTransportFailure:
                     event_id=event.id,
                     scenario="new_record",
                     status="queued",
-                    text="готовый текст",
-                    channels=[{"name": "telegram", "address": "+7OLD"}],
+                    channel="telegram",
+                    address="+7OLD",
+                    payload={"client": {"name": "Анна"}},
+                    template_body="{{ client.name }}",
                 )
             )
             event.processed_at = datetime.now(UTC).replace(tzinfo=None)

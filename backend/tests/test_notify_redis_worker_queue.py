@@ -80,8 +80,8 @@ class TestTaskRoundtrip:
 
         (claimed,) = q.claim_tasks()
         assert claimed["task_id"] == payload["task_id"]
-        assert claimed["text"] == payload["text"]
-        assert claimed["channels"] == payload["channels"]
+        assert claimed["channel"] == payload["channel"]
+        assert claimed["template_body"] == payload["template_body"]
         assert claimed["resend_of"] is None
         assert isinstance(claimed["_qid"], str)  # transport envelope
 

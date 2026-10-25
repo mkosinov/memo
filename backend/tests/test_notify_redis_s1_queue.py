@@ -73,8 +73,19 @@ WAIT_SECONDS = 30
 #: a genuine delivery failure and fails the check.
 QUEUE_REACHED_STATUSES = {"queued", "sending", "sent"}
 
-#: Family §4.2 task payload — the exact key set of the contract.
-PAYLOAD_KEYS = {"task_id", "text", "channels", "created_at", "resend_of"}
+#: Family §4.2 rev.5 task payload — the exact key set of the contract
+#: (one channel, frozen render data + template — ADR 014).
+PAYLOAD_KEYS = {
+    "task_id",
+    "channel",
+    "address",
+    "payload",
+    "template_id",
+    "template_body",
+    "root_task_id",
+    "created_at",
+    "resend_of",
+}
 
 
 def _stream_payloads(client: Redis) -> list[dict[str, Any]]:
@@ -94,21 +105,14 @@ def _payload_problem(payload: Any) -> str | None:
     task_id = payload["task_id"]
     if not isinstance(task_id, str) or len(task_id) != 36:
         return f"task_id is not a UUID string: {task_id!r}"
-    if not isinstance(payload["text"], str) or not payload["text"].strip():
-        return "text is empty or not a string"
-    channels = payload["channels"]
-    if not isinstance(channels, list) or not channels:
-        return "channels is empty or not a list"
-    for channel in channels:
-        if (
-            not isinstance(channel, dict)
-            or set(channel) != {"name", "address"}
-            or not isinstance(channel["name"], str)
-            or not channel["name"].strip()
-            or not isinstance(channel["address"], str)
-            or not channel["address"].strip()
-        ):
-            return f"bad channel entry (want [{{name, address}}]): {channel!r}"
+    if not isinstance(payload["channel"], str) or not payload["channel"].strip():
+        return "channel is empty or not a string"
+    if not isinstance(payload["address"], str) or not payload["address"].strip():
+        return "address is empty or not a string"
+    if not isinstance(payload["payload"], dict):
+        return "payload (render data) is not an object"
+    if not isinstance(payload["template_body"], str) or not payload["template_body"].strip():
+        return "template_body is empty or not a string"
     if not isinstance(payload["created_at"], str) or not payload["created_at"]:
         return "created_at is empty or not a string"
     if payload["resend_of"] is not None:
@@ -160,10 +164,14 @@ def test_s1_stream_holds_valid_task_payload() -> None:
                     f"task {payload['task_id']} status {row['status']!r} not in"
                     f" {sorted(QUEUE_REACHED_STATUSES)}"
                 )
-            elif row["text"] != payload["text"]:
-                problems.append(f"task {payload['task_id']} text != payload text")
-            elif json.loads(row["channels"]) != payload["channels"]:
-                problems.append(f"task {payload['task_id']} channels != payload channels")
+            elif row["channel"] != payload["channel"]:
+                problems.append(f"task {payload['task_id']} channel != payload channel")
+            elif row["address"] != payload["address"]:
+                problems.append(f"task {payload['task_id']} address != payload address")
+            elif row["template_body"] != payload["template_body"]:
+                problems.append(
+                    f"task {payload['task_id']} template_body != payload template_body"
+                )
             else:
                 # One fully-correct, DB-correlated payload ends the wait.
                 assert row["id"] == payload["task_id"]

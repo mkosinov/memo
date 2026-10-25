@@ -83,14 +83,19 @@ class Channel(Protocol):
     014): ``name`` — the registry key and the payload channel record
     value; ``escape_mode`` — the DECLARED escape mode the worker keys
     the text assembly by (``none`` — plain text, ``html`` — payload
-    values HTML-escaped at substitution); ``is_available`` — the cheap
-    "setting filled AND transport answers" probe (no attempt is burned
-    on an unavailable channel); ``send`` — deliver the text ASSEMBLED
-    BY THE WORKER (no channel-side markup conversion — the neutral
-    markup is retired); returning without an exception = delivered."""
+    values HTML-escaped at substitution); ``limits`` — the DECLARED
+    limit settings of the channel (spec §4.4/§6.3: ceiling, send pause,
+    service-message address) read by the limits mechanism
+    (``channels/limits.py`` — #485 Task 3), never enforced by the
+    channel itself; ``is_available`` — the cheap "setting filled AND
+    transport answers" probe (no attempt is burned on an unavailable
+    channel); ``send`` — deliver the text ASSEMBLED BY THE WORKER (no
+    channel-side markup conversion — the neutral markup is retired);
+    returning without an exception = delivered."""
 
     name: str
     escape_mode: EscapeMode
+    limits: ChannelLimits
 
     async def is_available(self) -> bool: ...
 

@@ -20,6 +20,8 @@ Covered (S9, unit — no Redis, no DB):
   the registry.
 """
 
+from datetime import date
+
 import pytest
 
 from src.notify import dispatcher
@@ -27,8 +29,10 @@ from src.notify.channels.base import (
     Channel,
     ChannelAppError,
     ChannelError,
+    ChannelLimits,
     ChannelTransportError,
 )
+from src.notify.channels.limits import ChannelLimiter, LimitedChannel
 from src.notify.channels.registry import (
     CHANNELS,
     NOT_REGISTERED_MESSAGE,
@@ -46,6 +50,9 @@ class _StubChannel:
 
     name = "stub"
     escape_mode = "none"
+    # The §4.4 limits declaration every registry channel carries (the
+    # Task-3 mechanism reads it; values are irrelevant here).
+    limits = ChannelLimits(daily_cap=25, send_pause_seconds=0.0)
 
     async def is_available(self) -> bool:
         return True
@@ -132,6 +139,32 @@ class TestEscapeModeDeclaration:
         assert isinstance(_WithMode(), Channel)
 
 
+# ── §4.4/§6.3: the limits declaration of the channel protocol ────────────────
+
+
+class TestLimitsDeclaration:
+    """#485 Task 3 (spec §4.4/§6.3): a registry channel DECLARES its
+    limit settings — ``limits: ChannelLimits`` (daily ceiling, send
+    pause, service-message address); the limits MECHANISM (registry
+    machinery) reads the declaration."""
+
+    def test_protocol_declares_the_limits_attribute(self) -> None:
+        assert "limits" in Channel.__protocol_attrs__
+
+    def test_channel_without_limits_does_not_satisfy_the_protocol(self) -> None:
+        class _NoLimits:
+            name = "nolimits"
+            escape_mode = "none"
+
+            async def is_available(self) -> bool:
+                return True
+
+            async def send(self, address: str, text: str) -> None:
+                return None
+
+        assert not isinstance(_NoLimits(), Channel)
+
+
 # ── §3.3: the loud startup gate ──────────────────────────────────────────────
 
 
@@ -172,6 +205,27 @@ class TestValidatePriorityChannels:
 # ── §3.3: instance building ──────────────────────────────────────────────────
 
 
+class _NoopStore:
+    """A cap-store stub — the wrapping tests exercise WIRING, not the
+    mechanism (that is test_notify_channel_limits's matrix)."""
+
+    def window_count(self, channel: str, today: date) -> int:
+        return 0
+
+    def register_send(self, channel: str, today: date) -> None:
+        return None
+
+    def window_notified(self, channel: str, today: date) -> bool:
+        return False
+
+    def mark_window_notified(self, channel: str, today: date) -> None:
+        return None
+
+
+async def _no_sleep(seconds: float) -> None:
+    return None
+
+
 class TestBuildInstances:
     def test_builds_only_the_prioritized_channels(self, monkeypatch) -> None:
         monkeypatch.setitem(CHANNELS, "stub", _StubChannel)
@@ -188,3 +242,24 @@ class TestBuildInstances:
         instances = build_instances(["stub"])
 
         assert isinstance(instances["stub"], Channel)
+
+    def test_limiter_wraps_every_built_instance(self, monkeypatch) -> None:
+        """#485 Task 3 (spec §4.4/§6.3): with a limiter, the registry
+        wires every built channel through the send-limits mechanism —
+        the worker's production path (instances injected by tests are
+        used as-is, wrapping there is the contour's own choice)."""
+        monkeypatch.setitem(CHANNELS, "stub", _StubChannel)
+        limiter = ChannelLimiter(_NoopStore(), sleep=_no_sleep)
+
+        instances = build_instances(["stub"], limiter=limiter)
+
+        assert isinstance(instances["stub"], LimitedChannel)
+        assert isinstance(instances["stub"], Channel)
+        assert instances["stub"].name == "stub"
+
+    def test_no_limiter_keeps_raw_instances(self, monkeypatch) -> None:
+        monkeypatch.setitem(CHANNELS, "stub", _StubChannel)
+
+        instances = build_instances(["stub"])
+
+        assert not isinstance(instances["stub"], LimitedChannel)

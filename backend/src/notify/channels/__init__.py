@@ -2,6 +2,10 @@
 §3.2/§3.3; ADR 011 — registry-based channel extensions).
 
 - ``base`` — the async channel protocol and the failure taxonomy;
+- ``limits`` — the common send-limits mechanism (#485 Task 3, spec
+  §4.4/§6.3): the Redis cap-window store, the ``ChannelLimiter``
+  governor (cap gate + admin service message + async pause), and the
+  ``LimitedChannel`` registry wrapper;
 - ``registry`` — the declarative ``CHANNELS`` registry and the
   channel-priority helpers (``parse_channel_priority`` lives here — the
   canonical home of the channel-name vocabulary);

@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 from src.core.config import settings
 from src.notify.assembly import RenderError, assemble_text
 from src.notify.channels.base import ChannelAppError, ChannelTransportError
+from src.notify.channels.limits import ChannelLimiter, RedisCapStore
 from src.notify.channels.registry import (
     build_instances,
     parse_channel_priority,
@@ -420,11 +421,13 @@ async def main(
     unregistered name is a loud ``SystemExit(2)`` before the group is
     created), select the transport adapter (``connect_or_exit`` carries
     ``reclaim_min_idle_ms = NOTIFY_REENQUEUE_AFTER x 1000``), resolve
-    the channel instances (injected — the test seam — or built from the
-    priority), create the ``worker`` group and reclaim the hanging
-    tasks, install the signal handlers, then run the delivery loop
-    until SIGTERM/KeyboardInterrupt. An explicitly injected queue skips
-    adapter selection entirely.
+    the channel instances (injected — the test seam — or built from
+    the priority THROUGH the send-limits mechanism: a ``ChannelLimiter``
+    over the ``RedisCapStore`` wraps every registry-built channel,
+    #485 Task 3 spec §4.4/§6.3), create the ``worker`` group and
+    reclaim the hanging tasks, install the signal handlers, then run
+    the delivery loop until SIGTERM/KeyboardInterrupt. An explicitly
+    injected queue skips adapter selection entirely.
     """
     if not settings.NOTIFY_ENABLED:
         logger.info("notify worker: NOTIFY_ENABLED=false — exiting (the queue stays untouched)")
@@ -439,9 +442,18 @@ async def main(
             reclaim_min_idle_ms=settings.NOTIFY_REENQUEUE_AFTER * 1000,
         )
 
-    channels = channels or build_instances(names)
-
     stop = asyncio.Event()
+    if channels is None:
+        # Registry-built channels go through the send-limits mechanism
+        # (#485 Task 3, spec §4.4/§6.3): the cap store rides the same
+        # Redis the transport gate just validated; injected channels
+        # (the test seam) are used as-is — a contour wraps its own.
+        limiter = ChannelLimiter(
+            RedisCapStore(settings.REDIS_URL.get_secret_value()),
+            sleep=functools.partial(_sleep_through, stop),
+        )
+        channels = build_instances(names, limiter=limiter)
+
     await asyncio.to_thread(queue.ensure_worker_group)
     await asyncio.to_thread(queue.reclaim_hanging_tasks)
     install_signal_handlers(stop)

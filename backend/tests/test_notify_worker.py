@@ -42,6 +42,7 @@ from pydantic import SecretStr
 
 from src.core.config import settings
 from src.notify import worker
+from src.notify.channels.limits import ChannelLimiter
 from src.notify.channels.mock import InMemoryRecorder, MockChannel
 from src.notify.channels.registry import NOT_REGISTERED_MESSAGE
 from src.notify.queue import FakeQueue, StatusEvent, TaskPayload
@@ -343,13 +344,28 @@ class TestStartupWiring:
         assert ran["log"] is worker.logger
 
     async def test_channels_built_from_priority_when_not_injected(self, monkeypatch) -> None:
+        """Registry-built channels go through the limits mechanism
+        (#485 Task 3, spec §4.4/§6.3): ``main`` builds a
+        ``ChannelLimiter`` over the ``RedisCapStore`` and hands it to
+        ``build_instances`` — every built instance is limited."""
         _enable(monkeypatch)
         built: dict[str, list[str]] = {}
+        wiring: dict[str, object] = {}
         channels, _ = _mock_channels()
 
-        def fake_build(names: list[str]) -> dict[str, MockChannel]:
+        def fake_build(
+            names: list[str], *, limiter: ChannelLimiter | None = None
+        ) -> dict[str, MockChannel]:
             built["names"] = names
+            wiring["limiter"] = limiter
             return channels
+
+        class _NoopStore:
+            def __init__(self, url: str) -> None:
+                wiring["store_url"] = url
+
+        monkeypatch.setattr(worker, "RedisCapStore", _NoopStore)
+        monkeypatch.setattr(worker, "build_instances", fake_build)
 
         async def fake_run_loop(
             name: str,
@@ -360,19 +376,30 @@ class TestStartupWiring:
         ) -> None:
             return None
 
-        monkeypatch.setattr(worker, "build_instances", fake_build)
         monkeypatch.setattr(worker, "run_loop", fake_run_loop)
         _capture_stop(monkeypatch)
 
         await worker.main(queue=RecordingQueue(), channels=None)
 
         assert built["names"] == ["mock"]
+        assert wiring["store_url"] == settings.REDIS_URL.get_secret_value()
+        assert isinstance(wiring["limiter"], ChannelLimiter)
 
     async def test_injected_channels_skip_building(self, monkeypatch) -> None:
+        """Injected channels (the test seam — Task 5) are used AS-IS:
+        neither ``build_instances`` nor the limits wiring runs — no cap
+        store is even constructed (#485 Task 3: injected channels are
+        either raw unit stubs or PRE-wrapped by the contour itself)."""
         _enable(monkeypatch)
 
-        def forbidden_build(names: list[str]) -> dict[str, MockChannel]:
+        def forbidden_build(
+            names: list[str], *, limiter: ChannelLimiter | None = None
+        ) -> dict[str, MockChannel]:
             raise AssertionError("injected channels must be used as-is")
+
+        class _ForbiddenStore:
+            def __init__(self, url: str) -> None:
+                raise AssertionError("injected channels must not build a cap store")
 
         async def fake_run_loop(
             name: str,
@@ -384,6 +411,7 @@ class TestStartupWiring:
             return None
 
         monkeypatch.setattr(worker, "build_instances", forbidden_build)
+        monkeypatch.setattr(worker, "RedisCapStore", _ForbiddenStore)
         monkeypatch.setattr(worker, "run_loop", fake_run_loop)
         _capture_stop(monkeypatch)
         channels, _ = _mock_channels()

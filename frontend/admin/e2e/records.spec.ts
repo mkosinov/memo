@@ -187,11 +187,39 @@ test.describe('Records Page — Table and Filters', () => {
       await page.locator('[data-testid="records-filters-status-option-waiting"]').click();
       await filterResponse;
 
-      // Post-state: every visible status badge is "waiting"
+      // Post-state (#535, exact level): the filtered rows are seed+factory
+      // derivable — the reference-week window (page clock, GH #422) holds
+      // only this test's factory record (the seed's r1–r6 live on the fixed
+      // week 2026-06-15..21, verified in test 12's audit), status waiting.
+      // Default sort date/asc → a.start ASC, r.id ASC (apply_sort PK
+      // tie-break). The exact sequence pins names AND row count; the
+      // per_page slice keeps it page-1-correct should the window ever grow
+      // past one page.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedWaitingNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedPageOneNames = expectedWaitingNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
     } finally {
       await cleanupRecord(request, recordId);
@@ -228,10 +256,22 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await openCombobox(page, page.getByLabel('Фильтр по локации'));
       await page.locator('[data-testid^="combobox-option-"]').nth(1).click();
-      await dictFilterWait;
-
-      const filteredCount = await page.locator('tbody tr').count();
-      const filteredTotal = await readServerTotal(page);
+      // #535 (relational level): the one-shot label/row readings raced the
+      // re-render after the filter commit (read-before-render, #479 family).
+      // The awaited response body IS the settled server truth for the
+      // filtered state — settle the UI readings against it via polls, keep
+      // the >= RELATION below semantic (this test's level is relational,
+      // not exact arrays).
+      const dictResponse = await dictFilterWait;
+      const filteredBody = await dictResponse.json();
+      const filteredTotal = Number(filteredBody.total);
+      const filteredCount = filteredBody.items.length as number;
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBe(filteredTotal);
+      await expect
+        .poll(() => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBe(filteredCount);
 
       // Click reset. NOTE: after reset the query key returns to the initial
       // unfiltered page-1 entry, which is still fresh (global staleTime 30s),
@@ -254,11 +294,16 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(page.getByLabel('Фильтр по мастеру')).toHaveText(/Все мастера/);
       await expect(page.locator('[data-testid="records-filters-status-trigger"]')).toContainText('Все статусы');
 
-      // Row count and server total grew or stayed equal after reset
-      const resetCount = await page.locator('tbody tr').count();
-      expect(resetCount).toBeGreaterThanOrEqual(filteredCount);
-      const resetTotal = await readServerTotal(page);
-      expect(resetTotal).toBeGreaterThanOrEqual(filteredTotal);
+      // Row count and server total grew or stayed equal after reset — the
+      // >= relation stays SEMANTIC (relational level), now in retrying
+      // form: the reset is a cache hit (no request fires), so the label
+      // and rows settle via a client-side re-render after the click.
+      await expect
+        .poll(() => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(filteredCount);
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(filteredTotal);
     } finally {
       await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -394,13 +439,31 @@ test.describe('Records Page — Table and Filters', () => {
       const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
       await expect(clientHeader).toBeVisible();
 
-      const getName = async (index: number) =>
-        page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
-
-      // Wait for at least 3 rows (our seeded records)
-      await expect
-        .poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 })
-        .toBeGreaterThanOrEqual(3);
+      // Expected client-sorted names — DERIVED from the seed DB + this
+      // test's own factories (#535, exact level): the 2020–2030 window
+      // holds everything (the seed's fixed week + the reference-week
+      // factories). sort_by=client → Client.name under the shared sort
+      // resolver; the PK tie-break r.id is ASC in BOTH directions
+      // (apply_sort appends tie_break.asc() unconditionally), and desc
+      // wraps the key NULLS LAST — moot here, the inner join never yields
+      // NULL names. Default page size keeps the array page-1-correct.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedAscNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY c.name ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedDescNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY c.name DESC, r.id ASC`,
+      ).map((row) => String(row.name));
 
       // First click on a NEW sort field → server request with sort_order=asc
       const ascWait = page.waitForResponse(
@@ -410,9 +473,14 @@ test.describe('Records Page — Table and Filters', () => {
       await clientHeader.click();
       await ascWait;
 
-      const rowCount = await page.locator('tbody tr').count();
-      const afterFirstAsc = await getName(0);
-      const afterLastAsc = await getName(rowCount - 1);
+      // Asc settle: the exact client-asc sequence absorbs the one-shot
+      // getName reads of the #479 read-before-render family — a pre-commit
+      // frame still shows the date-sorted (or keepPreviousData) rows and
+      // never equals this array.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedAscNames.slice(0, PER_PAGE),
+      );
 
       // Second click on the SAME field → toggles to sort_order=desc
       const descWait = page.waitForResponse(
@@ -422,16 +490,14 @@ test.describe('Records Page — Table and Filters', () => {
       await clientHeader.click();
       await descWait;
 
-      // Ascending and descending have different first elements (unless all
-      // same). expect.poll: waitForResponse resolves at response RECEIPT,
-      // while React commits the desc rows a frame later — a one-shot read
-      // raced that commit (read-before-render flake, ~33%; snapshot
-      // sort-fail-ctx-iter4). Mirrors the row-count poll above.
-      if (afterFirstAsc !== afterLastAsc) {
-        await expect
-          .poll(() => getName(0), { timeout: 3_000 })
-          .not.toBe(afterFirstAsc);
-      }
+      // Desc settle — the terminal desc state absorbs the old asc→desc
+      // transition poll (a negative «first name left its asc value» wait):
+      // a stale asc render never equals the desc sequence, and a genuine
+      // asc/desc disagreement fails it too — tighter than the old check.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedDescNames.slice(0, PER_PAGE),
+      );
 
       // Sort indicator shows descending after the second click
       await expect(clientHeader).toContainText('↓');
@@ -807,11 +873,38 @@ test.describe('Records Page — Table and Filters', () => {
       expect(masterResponse.url()).toContain('status=waiting');
       expect(masterResponse.url()).toContain(`master_id=${activity.master_id}`);
 
-      // Post-state: our seeded record matches both filters; all badges waiting
+      // Post-state (#535, exact level): the compound-filtered rows are
+      // seed+factory derivable — reference-week window (page clock, GH
+      // #422) + status waiting + this master. The reference week holds no
+      // seed records (the seed's r1–r6 live on the fixed week, see test
+      // 12's audit), so the predicate yields our seeded record — but the
+      // array is DERIVED by the endpoint's own predicate, not a literal.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedCompoundNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND a.master_id = '${activity.master_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedPageOneNames = expectedCompoundNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
     } finally {
       await cleanupRecord(request, seeded.recordId);
@@ -834,15 +927,15 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
-      // Find a cell in the "Сумма" column that contains a price
+      // The "Сумма" cell with our visit price — #535 (relational level):
+      // the isVisible-guarded one-shot textContent read becomes locator
+      // auto-retry asserts on the cell. The seeded 3500-₽ visit guarantees
+      // presence — a missing cell now FAILS instead of silently passing
+      // behind the old conditional.
       const priceCell = page.locator('tbody td').filter({ hasText: /₽/ }).first();
-
-      if (await priceCell.isVisible()) {
-        const text = await priceCell.textContent();
-        expect(text).toContain('₽');
-        // Price should be a formatted number
-        expect(text).toMatch(/[\d\s]+₽/);
-      }
+      await expect(priceCell).toBeVisible();
+      // Price is a formatted number with the ruble sign («3 500 ₽»)
+      await expect(priceCell).toHaveText(/[\d\s]+₽/);
     } finally {
       await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -1157,13 +1250,38 @@ test.describe('Records Page — Table and Filters', () => {
       await statusWait;
 
       // Table updated: our seeded row (now inside the widened period) is
-      // visible and every visible status badge is "waiting".
+      // visible, and the exact filtered rows are seed+factory derivable
+      // (#535, exact level): the 2020–2030 window holds the seed's fixed
+      // week (r1–r6, incl. its two waiting records) + this test's
+      // reference-week factory record, status waiting, default sort
+      // date/asc → a.start ASC, r.id ASC (apply_sort PK tie-break).
       const row = page.locator('tbody tr').filter({ hasText: clientName });
       await expect(row).toBeVisible();
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedWaitingNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((rec) => String(rec.name));
+      const expectedPageOneNames = expectedWaitingNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
 
       // The address carries the applied filters (#349 URL contract: period

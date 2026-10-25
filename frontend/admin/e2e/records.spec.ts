@@ -748,19 +748,39 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await filterResponse;
 
-      // Post-state: our seeded record's row shows the selected location
-      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
-      await expect(ourRow.first().locator('td').nth(5)).toHaveText(locationName);
-
-      // Every other visible row shows the same location — or "—" when the row
-      // belongs to a parallel worker's record whose activity is not in the
-      // frontend's (stale, date-scoped) activities map yet. A row showing a
-      // DIFFERENT location name is a genuine filter violation and fails.
-      const rows = page.locator('tbody tr');
-      for (const row of await rows.all()) {
-        const text = (await row.locator('td').nth(5).textContent())?.trim();
-        expect([locationName, '—']).toContain(text);
-      }
+      // Post-state (#535 task 4 — exact level, audit outcome «—» is
+      // impossible): «—» has no source in this view, transitionally or
+      // permanently. There are no parallel workers anymore (workers: 1 +
+      // per-test seedReset — the old "parallel worker's record" comment
+      // was a pre-reset era premise), and since #139 the cells read
+      // denormalized RecordView fields (row.location_name) delivered by
+      // the SAME GET /records/view response — the frontend activities
+      // map of the pre-#139 era ("stale, date-scoped map") no longer
+      // exists, so no second fetch exists for a dash to disappear from.
+      // Backend-side the name resolves via a scalar subquery with NO
+      // is_active filter (RecordViewResponse: archived entities resolve,
+      // only FK-dangling rows yield null), and the location_id filter
+      // predicate itself guarantees every matched activity points at
+      // this existing location — null is unreachable. Empirically
+      // confirmed 2026-10-25 (audit probe: 3s @150ms column sampling +
+      // full payload trace in this exact flow): zero «—», zero null
+      // location_name. Hence the exact conversion: the column is
+      // uniformly the selected location, count derived by the endpoint's
+      // own predicate (reference-week window, GH #422; the seed's r1–r6
+      // live outside it — test 12's audit).
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedLocationCells: string[] = queryDBRows(
+        `SELECT (SELECT l.title FROM locations l WHERE l.id = a.location_id) AS title
+         FROM records r
+         JOIN activities a ON r.activity_id = a.id
+         WHERE a.location_id = '${activity.location_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.title));
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(6)'),
+        expectedLocationCells.slice(0, PER_PAGE),
+      );
     } finally {
       await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
@@ -801,21 +821,35 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await filterResponse;
 
-      // Post-state: our seeded record's row shows the selected service
-      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
-      await expect(ourRow.first().locator('td').nth(3)).toContainText(serviceTitle);
-
-      // Every other visible row shows the same service — or "—" when the row
-      // belongs to a parallel worker's record whose activity is not in the
-      // frontend's (stale, date-scoped) activities map yet. A row showing a
-      // DIFFERENT service title is a genuine filter violation and fails.
-      const rows = page.locator('tbody tr');
-      for (const row of await rows.all()) {
-        const text = (await row.locator('td').nth(3).textContent())?.trim() ?? '';
-        if (text !== '—') {
-          expect(text).toContain(serviceTitle);
-        }
-      }
+      // Post-state (#535 task 4 — exact level, audit outcome «—» is
+      // impossible): same audit as test 16 — no parallel workers
+      // (workers: 1 + per-test seedReset), and since #139 the cells read
+      // denormalized RecordView fields (row.service_title) from the SAME
+      // GET /records/view response — no frontend activities map, no
+      // second fetch, hence no transitional «—». Backend resolves the
+      // title via a scalar subquery with NO is_active filter (archived
+      // services resolve; only FK-dangling rows yield null), and the
+      // service_id filter predicate guarantees every matched activity
+      // points at this existing service — null is unreachable.
+      // Empirically confirmed 2026-10-25 (audit probe: 3s @150ms column
+      // sampling + full payload trace in this exact flow): zero «—»,
+      // zero null service_title. Exact conversion: the column is
+      // uniformly the selected service, count derived by the endpoint's
+      // own predicate (reference-week window, GH #422; the seed's r1–r6
+      // live outside it — test 12's audit).
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedServiceCells: string[] = queryDBRows(
+        `SELECT (SELECT s.title FROM services s WHERE s.id = a.service_id) AS title
+         FROM records r
+         JOIN activities a ON r.activity_id = a.id
+         WHERE a.service_id = '${activity.service_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.title));
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(4)'),
+        expectedServiceCells.slice(0, PER_PAGE),
+      );
     } finally {
       await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);

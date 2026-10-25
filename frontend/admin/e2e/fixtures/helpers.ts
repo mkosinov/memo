@@ -915,3 +915,54 @@ export function expectDeepLinkChip(page: Page, text: string) {
 export function expectClientSearchEmpty(page: Page) {
   return expect(clientSearchInput(page)).toHaveValue('');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #535 — exact table-row reading primitive. Replaces the flaky
+// «snapshot-then-assert» pattern (rows.all()/allTextContents() frozen at one
+// instant, then per-element asserts racing the next React commit — the
+// #479/#515 flake family) with a positive settle on the terminal state.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Collapse each whitespace run to one plain space and trim. JS `\s` already
+ * covers NBSP (U+00A0) and the typographic spaces (U+2000–U+200A, U+202F
+ * narrow NBSP, U+FEFF), so prices like «1 500 ₽» compare equal whatever
+ * space glyph the renderer used.
+ */
+function normalizeCellText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * #535: poll the texts of a table column's cells until they EXACTLY match
+ * `expected` — order-significant, and the sequence match implicitly pins
+ * the row count. A positive settle: waits for the terminal state, never for
+ * «left the old state». This IS the assertion — `expect.poll` semantics,
+ * auto-retry built in.
+ *
+ * @param cells locator resolving to ONE column's cells across all rows,
+ *   e.g. `page.locator('tbody tr td:nth-child(2)')`
+ * @param expected the exact expected cell texts IN ROW ORDER; `[]` is legal
+ *   (asserts the empty state). Both sides are normalized
+ *   ({@link normalizeCellText}).
+ * @param opts.timeout poll budget, default 10_000 ms (the suite-wide expect
+ *   budget); overrides must only RAISE it for known-slow sites (e.g. the
+ *   20s #515 budget of records test 25), never shrink it to «fix» flakes.
+ *
+ * Applicability premise (#535 spec): the table must be deterministic —
+ * `workers: 1` + the per-test seed reset leave it = canonical seed + the
+ * test's own factories. Derive `expected` from seed/factory VARIABLES
+ * (factory responses, seed DB queries), never from name literals.
+ */
+export async function expectRowsExact(
+  cells: Locator,
+  expected: string[],
+  opts?: { timeout?: number },
+): Promise<void> {
+  const expectedNorm = expected.map(normalizeCellText);
+  await expect
+    .poll(async () => (await cells.allTextContents()).map(normalizeCellText), {
+      timeout: opts?.timeout ?? 10_000,
+    })
+    .toEqual(expectedNorm);
+}

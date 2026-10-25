@@ -45,6 +45,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     контур `pytest -m redis` **55p/0f/1 env-skip**; notify e2e
     **5/5** (S6 + §12-1/2/3/5); lint-бюджет зелёный.
   - Status: `docs/status/2026-10-25-notify-telegram-channel-485.md`
+- **GH #535 — Системное лечение e2e-класса flake «row-detach»
+  (snapshot-then-assert)** — branch `535-e2e-row-detach-class` (7 коммитов
+  `d363737c..9a2438e8`, base `9ce6d564`; 8 файлов, +714/−159; спека
+  `docs/specs/2026-10-25-e2e-row-detach-class-design.md` рев.2, план
+  `docs/plans/2026-10-25-e2e-row-detach-class-plan.md` 8/8; test-infra —
+  продуктовый код не тронут (0 строк)):
+  - **Примитив (T1–T2):** единый хелпер чтения строк `expectRowsExact`
+    (snapshot-then-assert) в `e2e/fixtures/helpers.ts`; records-тесты 25
+    и 12 переведены на точные сеттлы (полл производного тотала +
+    `expectRowsExact` по страницам) (`d363737c`, `4a9b602d`).
+  - **Конверсия records (T3–T4):** тесты 6/11/18/24 — точные сеттлы, 7/19 —
+    retrying-реляционная форма (`595fdd7f`, two-stage review); аудит
+    тестов 16/17 — «—» не имеет источника (денормализованные
+    same-response поля), конверсия на точный сеттл (`35200406`).
+  - **Другие спеки (T5):** photos-crud + master-role-payments —
+    `expectRowsExact` (`80dd80bf`).
+  - **Dayview state machine (T6):** `e2e/lib/dnd-announcements.ts` (чтение
+    live-region анонсов @dnd-kit) + машина состояний драга в
+    `dayview-column-reorder.spec.ts` — guard вместо темпоральных ожиданий,
+    self-healing порядок колонок сохранён; юнит `dnd-announcements.test.ts`
+    (`15393ba0`, two-stage review).
+  - **Канон (T7):** правило «никаких чтений строк вне `expectRowsExact`» +
+    паттерн snapshot-then-assert в скилле
+    `.opencode/skills/vitest-playwright-patterns/SKILL.md` (`9a2438e8`).
+  - **Approved deviation:** буквальный критерий «moved over Y» спеки
+    §Часть 3/state 2 несовместим с settle-фазой на @dnd-kit 6.3.1
+    (moved-over-Y и translate3d одним коммитом); принят расширенный
+    предикат «drag покинул X» (moved-over-Y≠X OR no-longer-over),
+    задокументирован в комментариях хелпера и lib.
+  - **Tests:** стабильность `--repeat-each=10`: records **310/0/0**,
+    dayview **30/0/0** (self-healing порядок ×10), photos-crud **220/0/0**,
+    master-role-payments **90/0/1** (fail = ENV_NOISE, подтверждён
+    повторным прогоном 10/10 за 4.3m); unit dnd-announcements **10/10**;
+    `tsc --noEmit` чист; базлайны: records 31/31, photos+payments 23/23,
+    dayview 3/3; parity review ✅.
+   - Status: `docs/status/2026-10-25-e2e-row-detach-class-535.md`
 
 ## [Unreleased] — 2026-10-24
 

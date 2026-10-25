@@ -1,10 +1,15 @@
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import type { APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { waitForRecordsReady, withUndoWindow, installReferenceWeekClock } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import {
+  waitForRecordsReady,
+  withUndoWindow,
+  installReferenceWeekClock,
+  expectRowsExact,
+} from './fixtures/helpers';
+import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { closeCombobox, openCombobox, searchAndSelect } from './helpers/combobox';
-import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
+import { SEED_WEEK_MONDAY, SEED_WEEK_SUNDAY } from './fixtures/seed-week';
 import {
   createTestClient,
   createTestActivity,
@@ -182,11 +187,39 @@ test.describe('Records Page — Table and Filters', () => {
       await page.locator('[data-testid="records-filters-status-option-waiting"]').click();
       await filterResponse;
 
-      // Post-state: every visible status badge is "waiting"
+      // Post-state (#535, exact level): the filtered rows are seed+factory
+      // derivable — the reference-week window (page clock, GH #422) holds
+      // only this test's factory record (the seed's r1–r6 live on the fixed
+      // week 2026-06-15..21, verified in test 12's audit), status waiting.
+      // Default sort date/asc → a.start ASC, r.id ASC (apply_sort PK
+      // tie-break). The exact sequence pins names AND row count; the
+      // per_page slice keeps it page-1-correct should the window ever grow
+      // past one page.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedWaitingNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedPageOneNames = expectedWaitingNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
     } finally {
       await cleanupRecord(request, recordId);
@@ -223,10 +256,22 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await openCombobox(page, page.getByLabel('Фильтр по локации'));
       await page.locator('[data-testid^="combobox-option-"]').nth(1).click();
-      await dictFilterWait;
-
-      const filteredCount = await page.locator('tbody tr').count();
-      const filteredTotal = await readServerTotal(page);
+      // #535 (relational level): the one-shot label/row readings raced the
+      // re-render after the filter commit (read-before-render, #479 family).
+      // The awaited response body IS the settled server truth for the
+      // filtered state — settle the UI readings against it via polls, keep
+      // the >= RELATION below semantic (this test's level is relational,
+      // not exact arrays).
+      const dictResponse = await dictFilterWait;
+      const filteredBody = await dictResponse.json();
+      const filteredTotal = Number(filteredBody.total);
+      const filteredCount = filteredBody.items.length as number;
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBe(filteredTotal);
+      await expect
+        .poll(() => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBe(filteredCount);
 
       // Click reset. NOTE: after reset the query key returns to the initial
       // unfiltered page-1 entry, which is still fresh (global staleTime 30s),
@@ -249,11 +294,16 @@ test.describe('Records Page — Table and Filters', () => {
       await expect(page.getByLabel('Фильтр по мастеру')).toHaveText(/Все мастера/);
       await expect(page.locator('[data-testid="records-filters-status-trigger"]')).toContainText('Все статусы');
 
-      // Row count and server total grew or stayed equal after reset
-      const resetCount = await page.locator('tbody tr').count();
-      expect(resetCount).toBeGreaterThanOrEqual(filteredCount);
-      const resetTotal = await readServerTotal(page);
-      expect(resetTotal).toBeGreaterThanOrEqual(filteredTotal);
+      // Row count and server total grew or stayed equal after reset — the
+      // >= relation stays SEMANTIC (relational level), now in retrying
+      // form: the reset is a cache hit (no request fires), so the label
+      // and rows settle via a client-side re-render after the click.
+      await expect
+        .poll(() => page.locator('tbody tr').count(), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(filteredCount);
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(filteredTotal);
     } finally {
       await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -389,13 +439,31 @@ test.describe('Records Page — Table and Filters', () => {
       const clientHeader = page.locator('table thead th').filter({ hasText: 'Клиент' });
       await expect(clientHeader).toBeVisible();
 
-      const getName = async (index: number) =>
-        page.locator('tbody tr').nth(index).locator('td').nth(1).textContent();
-
-      // Wait for at least 3 rows (our seeded records)
-      await expect
-        .poll(async () => page.locator('tbody tr').count(), { timeout: 10_000 })
-        .toBeGreaterThanOrEqual(3);
+      // Expected client-sorted names — DERIVED from the seed DB + this
+      // test's own factories (#535, exact level): the 2020–2030 window
+      // holds everything (the seed's fixed week + the reference-week
+      // factories). sort_by=client → Client.name under the shared sort
+      // resolver; the PK tie-break r.id is ASC in BOTH directions
+      // (apply_sort appends tie_break.asc() unconditionally), and desc
+      // wraps the key NULLS LAST — moot here, the inner join never yields
+      // NULL names. Default page size keeps the array page-1-correct.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedAscNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY c.name ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedDescNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY c.name DESC, r.id ASC`,
+      ).map((row) => String(row.name));
 
       // First click on a NEW sort field → server request with sort_order=asc
       const ascWait = page.waitForResponse(
@@ -405,9 +473,14 @@ test.describe('Records Page — Table and Filters', () => {
       await clientHeader.click();
       await ascWait;
 
-      const rowCount = await page.locator('tbody tr').count();
-      const afterFirstAsc = await getName(0);
-      const afterLastAsc = await getName(rowCount - 1);
+      // Asc settle: the exact client-asc sequence absorbs the one-shot
+      // getName reads of the #479 read-before-render family — a pre-commit
+      // frame still shows the date-sorted (or keepPreviousData) rows and
+      // never equals this array.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedAscNames.slice(0, PER_PAGE),
+      );
 
       // Second click on the SAME field → toggles to sort_order=desc
       const descWait = page.waitForResponse(
@@ -417,16 +490,14 @@ test.describe('Records Page — Table and Filters', () => {
       await clientHeader.click();
       await descWait;
 
-      // Ascending and descending have different first elements (unless all
-      // same). expect.poll: waitForResponse resolves at response RECEIPT,
-      // while React commits the desc rows a frame later — a one-shot read
-      // raced that commit (read-before-render flake, ~33%; snapshot
-      // sort-fail-ctx-iter4). Mirrors the row-count poll above.
-      if (afterFirstAsc !== afterLastAsc) {
-        await expect
-          .poll(() => getName(0), { timeout: 3_000 })
-          .not.toBe(afterFirstAsc);
-      }
+      // Desc settle — the terminal desc state absorbs the old asc→desc
+      // transition poll (a negative «first name left its asc value» wait):
+      // a stale asc render never equals the desc sequence, and a genuine
+      // asc/desc disagreement fails it too — tighter than the old check.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedDescNames.slice(0, PER_PAGE),
+      );
 
       // Sort indicator shows descending after the second click
       await expect(clientHeader).toContainText('↓');
@@ -442,10 +513,14 @@ test.describe('Records Page — Table and Filters', () => {
 
   test('12. Pagination — server total and page navigation', async ({ page, request }) => {
     // Seed 12 records (> default per_page=10) on reference-week activities.
-    // Seed records r1-r6 live in the fixed week 2026-06-15, so the default
-    // period's server total is driven by our 12 records alone. GH #422:
-    // each record gets a DISTINCT start (10:00, 10:05, …) — the shared
-    // factory-default timestamp made the date-sort ties undeterministic
+    // Audit #535 (exact settles): the default period is the page-clock week
+    // (GH #422 pin — SEED_WEEK_MONDAY..SEED_WEEK_SUNDAY, 2026-06-01..07),
+    // and the seed's r1-r6 live on the LATER fixed week 2026-06-15..21 —
+    // outside that window (verified against the seed DB) — so the period's
+    // server total is our 12 records ALONE and both pages are seed-DB
+    // derivable (queryDBRows below).
+    // GH #422: each record gets a DISTINCT start (10:00, 10:05, …) — the
+    // shared factory-default timestamp made the date-sort ties undeterministic
     // under server pagination (page 1/2 could overlap).
     const ts = Date.now();
     const seeded = [];
@@ -458,19 +533,44 @@ test.describe('Records Page — Table and Filters', () => {
       );
     }
 
+    // Frontend records-table default page size (useRecordsUrlState).
+    const PER_PAGE = 10;
+
     try {
       await waitForRecordsReady(page);
 
-      // "N всего" reflects the server total — at least our 12 records
-      const total = await readServerTotal(page);
-      expect(total).toBeGreaterThanOrEqual(12);
+      // #535: exact expectations derived from the seed DB by the endpoint's
+      // own predicate (records/view defaults): the period window on the
+      // activity date, the default sort date/asc — Activity.start ASC with
+      // the Record.id ASC PK tie-break (schemas/record.py + apply_sort) —
+      // then the per_page slices. No name literals; counts ride the arrays.
+      const expectedNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedTotal = expectedNames.length;
+      const expectedPageOneNames = expectedNames.slice(0, PER_PAGE);
+      const expectedPageTwoNames = expectedNames.slice(PER_PAGE);
+      // Pagination premise: 12 seeded records span more than one page.
+      expect(expectedTotal).toBeGreaterThan(PER_PAGE);
 
-      // Page 1: collect client names (unique per seeded record; also the
-      // date keys are distinct now — GH #422 — but names stay the anchor)
-      const pageOneNames = await page
-        .locator('tbody tr td:nth-child(2)')
-        .allTextContents();
-      expect(pageOneNames.length).toBe(10); // default per_page
+      // "N всего" reflects the server total — exactly the derived count
+      // (poll: the label renders a frame after the view response).
+      await expect
+        .poll(() => readServerTotal(page), { timeout: 10_000 })
+        .toBe(expectedTotal);
+
+      // Page 1: exact-name settle — the sequence pins rows AND count; the
+      // full first page keeps the default per_page=10 check in place.
+      expect(expectedPageOneNames).toHaveLength(PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
 
       // Navigate to page 2 — server request carries page=2
       const pageTwoWait = page.waitForResponse(
@@ -480,30 +580,16 @@ test.describe('Records Page — Table and Filters', () => {
       await page.getByRole('button', { name: '2', exact: true }).click();
       await pageTwoWait;
 
-      // Settle BEFORE reading: waitForResponse resolves at response RECEIPT,
-      // while React commits the page-2 rows a frame later — a raw read in
-      // that gap returns the STALE page-1 names → false overlap flake
-      // (#479 read-before-render family, same race as the sort poll in
-      // test 11; hit by the cold-compile leg of the PR #515 verification).
-      // Poll until the rendered names actually leave the page-1 signature,
-      // then read and assert — a genuine overlap never becomes disjoint and
-      // still fails the strictness below.
-      await expect
-        .poll(
-          async () =>
-            (await page.locator('tbody tr td:nth-child(2)').allTextContents()).join('|'),
-          { timeout: 10_000 },
-        )
-        .not.toBe(pageOneNames.join('|'));
-
-      // Page 2 rows are disjoint from page 1 rows
-      const pageTwoNames = await page
-        .locator('tbody tr td:nth-child(2)')
-        .allTextContents();
-      expect(pageTwoNames.length).toBeGreaterThanOrEqual(2);
-      for (const name of pageTwoNames) {
-        expect(pageOneNames).not.toContain(name);
-      }
+      // Page 2: exact settle on the REMAINING names. The terminal state
+      // absorbs the #479 read-before-render race — the old negative poll
+      // («names left the page-1 signature») + raw re-reads is retired: a
+      // stale page-1 render never equals the remaining sequence, and a
+      // genuine overlap fails it too — tighter than the old disjointness
+      // loop, with no frozen snapshot in between.
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageTwoNames,
+      );
     } finally {
       for (const s of seeded) {
         await cleanupRecord(request, s.recordId);
@@ -662,19 +748,39 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await filterResponse;
 
-      // Post-state: our seeded record's row shows the selected location
-      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
-      await expect(ourRow.first().locator('td').nth(5)).toHaveText(locationName);
-
-      // Every other visible row shows the same location — or "—" when the row
-      // belongs to a parallel worker's record whose activity is not in the
-      // frontend's (stale, date-scoped) activities map yet. A row showing a
-      // DIFFERENT location name is a genuine filter violation and fails.
-      const rows = page.locator('tbody tr');
-      for (const row of await rows.all()) {
-        const text = (await row.locator('td').nth(5).textContent())?.trim();
-        expect([locationName, '—']).toContain(text);
-      }
+      // Post-state (#535 task 4 — exact level, audit outcome «—» is
+      // impossible): «—» has no source in this view, transitionally or
+      // permanently. There are no parallel workers anymore (workers: 1 +
+      // per-test seedReset — the old "parallel worker's record" comment
+      // was a pre-reset era premise), and since #139 the cells read
+      // denormalized RecordView fields (row.location_name) delivered by
+      // the SAME GET /records/view response — the frontend activities
+      // map of the pre-#139 era ("stale, date-scoped map") no longer
+      // exists, so no second fetch exists for a dash to disappear from.
+      // Backend-side the name resolves via a scalar subquery with NO
+      // is_active filter (RecordViewResponse: archived entities resolve,
+      // only FK-dangling rows yield null), and the location_id filter
+      // predicate itself guarantees every matched activity points at
+      // this existing location — null is unreachable. Empirically
+      // confirmed 2026-10-25 (audit probe: 3s @150ms column sampling +
+      // full payload trace in this exact flow): zero «—», zero null
+      // location_name. Hence the exact conversion: the column is
+      // uniformly the selected location, count derived by the endpoint's
+      // own predicate (reference-week window, GH #422; the seed's r1–r6
+      // live outside it — test 12's audit).
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedLocationCells: string[] = queryDBRows(
+        `SELECT (SELECT l.title FROM locations l WHERE l.id = a.location_id) AS title
+         FROM records r
+         JOIN activities a ON r.activity_id = a.id
+         WHERE a.location_id = '${activity.location_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.title));
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(6)'),
+        expectedLocationCells.slice(0, PER_PAGE),
+      );
     } finally {
       await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
@@ -715,21 +821,35 @@ test.describe('Records Page — Table and Filters', () => {
       );
       await filterResponse;
 
-      // Post-state: our seeded record's row shows the selected service
-      const ourRow = page.locator('tbody tr').filter({ hasText: clientName });
-      await expect(ourRow.first().locator('td').nth(3)).toContainText(serviceTitle);
-
-      // Every other visible row shows the same service — or "—" when the row
-      // belongs to a parallel worker's record whose activity is not in the
-      // frontend's (stale, date-scoped) activities map yet. A row showing a
-      // DIFFERENT service title is a genuine filter violation and fails.
-      const rows = page.locator('tbody tr');
-      for (const row of await rows.all()) {
-        const text = (await row.locator('td').nth(3).textContent())?.trim() ?? '';
-        if (text !== '—') {
-          expect(text).toContain(serviceTitle);
-        }
-      }
+      // Post-state (#535 task 4 — exact level, audit outcome «—» is
+      // impossible): same audit as test 16 — no parallel workers
+      // (workers: 1 + per-test seedReset), and since #139 the cells read
+      // denormalized RecordView fields (row.service_title) from the SAME
+      // GET /records/view response — no frontend activities map, no
+      // second fetch, hence no transitional «—». Backend resolves the
+      // title via a scalar subquery with NO is_active filter (archived
+      // services resolve; only FK-dangling rows yield null), and the
+      // service_id filter predicate guarantees every matched activity
+      // points at this existing service — null is unreachable.
+      // Empirically confirmed 2026-10-25 (audit probe: 3s @150ms column
+      // sampling + full payload trace in this exact flow): zero «—»,
+      // zero null service_title. Exact conversion: the column is
+      // uniformly the selected service, count derived by the endpoint's
+      // own predicate (reference-week window, GH #422; the seed's r1–r6
+      // live outside it — test 12's audit).
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedServiceCells: string[] = queryDBRows(
+        `SELECT (SELECT s.title FROM services s WHERE s.id = a.service_id) AS title
+         FROM records r
+         JOIN activities a ON r.activity_id = a.id
+         WHERE a.service_id = '${activity.service_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.title));
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(4)'),
+        expectedServiceCells.slice(0, PER_PAGE),
+      );
     } finally {
       await cleanupRecord(request, seeded.recordId);
       await cleanup(request, `/api/v1/clients/${seeded.clientId}`);
@@ -787,11 +907,38 @@ test.describe('Records Page — Table and Filters', () => {
       expect(masterResponse.url()).toContain('status=waiting');
       expect(masterResponse.url()).toContain(`master_id=${activity.master_id}`);
 
-      // Post-state: our seeded record matches both filters; all badges waiting
+      // Post-state (#535, exact level): the compound-filtered rows are
+      // seed+factory derivable — reference-week window (page clock, GH
+      // #422) + status waiting + this master. The reference week holds no
+      // seed records (the seed's r1–r6 live on the fixed week, see test
+      // 12's audit), so the predicate yields our seeded record — but the
+      // array is DERIVED by the endpoint's own predicate, not a literal.
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedCompoundNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND a.master_id = '${activity.master_id}'
+           AND substr(a.start, 1, 10) BETWEEN '${SEED_WEEK_MONDAY}' AND '${SEED_WEEK_SUNDAY}'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((row) => String(row.name));
+      const expectedPageOneNames = expectedCompoundNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
     } finally {
       await cleanupRecord(request, seeded.recordId);
@@ -814,15 +961,15 @@ test.describe('Records Page — Table and Filters', () => {
     try {
       await waitForRecordsReady(page);
 
-      // Find a cell in the "Сумма" column that contains a price
+      // The "Сумма" cell with our visit price — #535 (relational level):
+      // the isVisible-guarded one-shot textContent read becomes locator
+      // auto-retry asserts on the cell. The seeded 3500-₽ visit guarantees
+      // presence — a missing cell now FAILS instead of silently passing
+      // behind the old conditional.
       const priceCell = page.locator('tbody td').filter({ hasText: /₽/ }).first();
-
-      if (await priceCell.isVisible()) {
-        const text = await priceCell.textContent();
-        expect(text).toContain('₽');
-        // Price should be a formatted number
-        expect(text).toMatch(/[\d\s]+₽/);
-      }
+      await expect(priceCell).toBeVisible();
+      // Price is a formatted number with the ruble sign («3 500 ₽»)
+      await expect(priceCell).toHaveText(/[\d\s]+₽/);
     } finally {
       await cleanupRecord(request, recordId);
       await cleanup(request, `/api/v1/clients/${clientId}`);
@@ -1137,13 +1284,38 @@ test.describe('Records Page — Table and Filters', () => {
       await statusWait;
 
       // Table updated: our seeded row (now inside the widened period) is
-      // visible and every visible status badge is "waiting".
+      // visible, and the exact filtered rows are seed+factory derivable
+      // (#535, exact level): the 2020–2030 window holds the seed's fixed
+      // week (r1–r6, incl. its two waiting records) + this test's
+      // reference-week factory record, status waiting, default sort
+      // date/asc → a.start ASC, r.id ASC (apply_sort PK tie-break).
       const row = page.locator('tbody tr').filter({ hasText: clientName });
       await expect(row).toBeVisible();
+      const PER_PAGE = 10; // frontend records-table default (useRecordsUrlState)
+      const expectedWaitingNames: string[] = queryDBRows(
+        `SELECT c.name AS name
+         FROM records r
+         JOIN clients c ON r.client_id = c.id
+         JOIN activities a ON r.activity_id = a.id
+         WHERE r.status = 'waiting'
+           AND substr(a.start, 1, 10) BETWEEN '2020-01-01' AND '2030-12-31'
+         ORDER BY a.start ASC, r.id ASC`,
+      ).map((rec) => String(rec.name));
+      const expectedPageOneNames = expectedWaitingNames.slice(0, PER_PAGE);
+      await expectRowsExact(
+        page.locator('tbody tr td:nth-child(2)'),
+        expectedPageOneNames,
+      );
+
+      // Badges: locator auto-retry asserts (no frozen .all() snapshot) —
+      // exactly one «waiting» badge per filtered row.
       const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-      await expect(badges.first()).toBeVisible();
-      for (const badge of await badges.all()) {
-        await expect(badge).toHaveAttribute('data-testid', 'status-badge-waiting');
+      await expect(badges).toHaveCount(expectedPageOneNames.length);
+      for (let i = 0; i < expectedPageOneNames.length; i++) {
+        await expect(badges.nth(i)).toHaveAttribute(
+          'data-testid',
+          'status-badge-waiting',
+        );
       }
 
       // The address carries the applied filters (#349 URL contract: period
@@ -1188,24 +1360,46 @@ test.describe('Records Page — Table and Filters', () => {
       toolbar.locator('[data-testid="records-filters-status-trigger"]'),
     ).toContainText('Посетил');
 
-    // The table is filtered: every row is Anna's, every badge «visited».
-    // Settle BEFORE enumerating: under CI load the table transiently renders
-    // a superset (RecordsContext keepPreviousData + the mirror/adoption
-    // query-key transition — the June window alone is 6 rows, window+status
-    // without q is 4) before the fully-filtered result commits; a rows.all()
-    // snapshot of that tail then loses its nth → «element(s) not found»
-    // (PR #515 flake; same race family as test 12's #479, fixed via #507).
-    // toHaveCount(2) waits out the transient WITHOUT loosening the contract:
-    // the seed pins exactly the two visited «Анна» rows (r1/r4).
-    const rows = page.locator('tbody tr');
-    await expect(rows).toHaveCount(2, { timeout: 20_000 });
-    for (const row of await rows.all()) {
-      await expect(row).toContainText('Анна');
-    }
+    // The table is filtered: exactly the seed's two «Анна» rows, every badge
+    // «visited». Expected names are DERIVED from the seed DB (per-test
+    // canonical reset — the #535 determinism premise) by the link's own
+    // predicate: the June window + a client-name «Анна» substring (no seed
+    // service title matches «Анна», see above) + status visited. No name
+    // literals; the row COUNT rides along (the seed pins exactly the two
+    // r1/r4 rows, so this evaluates to the same name twice).
+    const expectedAnnaNames: string[] = queryDBRows(
+      `SELECT c.name AS name
+       FROM records r
+       JOIN clients c ON r.client_id = c.id
+       JOIN activities a ON r.activity_id = a.id
+       WHERE r.status = 'visited'
+         AND c.name LIKE '%Анна%'
+         AND substr(a.start, 1, 10) BETWEEN '2026-06-01' AND '2026-06-30'
+       ORDER BY a.start ASC, r.id ASC`,
+    ).map((row) => String(row.name));
+
+    // #535: the exact-name settle via expectRowsExact replaces the
+    // toHaveCount(2) settle + rows.all()/badges.all() snapshots of the
+    // #479/#515 race family (under CI load the table transiently renders a
+    // superset — RecordsContext keepPreviousData + the mirror/adoption
+    // query-key transition: the June window alone is 6 rows, window+status
+    // without q is 4 — before the fully-filtered result commits; a snapshot
+    // of that tail then loses its nth → «element(s) not found», PR #515
+    // flake, same family as test 12's #479, fixed via #507). The exact
+    // sequence (names + count + order) is a TIGHTER contract than
+    // toHaveCount(2) + per-row contains, on the same 20s #515 budget.
+    const nameCells = page.locator('tbody tr td:nth-child(2)');
+    await expectRowsExact(nameCells, expectedAnnaNames, { timeout: 20_000 });
+
+    // Badges: locator auto-retry asserts (no frozen .all() enumeration) —
+    // exactly one «visited» badge per filtered row.
     const badges = page.locator('tbody tr [data-testid^="status-badge-"]');
-    await expect(badges.first()).toBeVisible();
-    for (const badge of await badges.all()) {
-      await expect(badge).toHaveAttribute('data-testid', 'status-badge-visited');
+    await expect(badges).toHaveCount(expectedAnnaNames.length);
+    for (let i = 0; i < expectedAnnaNames.length; i++) {
+      await expect(badges.nth(i)).toHaveAttribute(
+        'data-testid',
+        'status-badge-visited',
+      );
     }
 
     // The old URL survives the mount verbatim (a read never rewrites).

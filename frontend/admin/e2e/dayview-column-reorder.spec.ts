@@ -2,6 +2,11 @@ import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import { gotoScheduleDay } from './fixtures/helpers';
 import { seedId } from './fixtures/seed-ids';
+import {
+  DND_LIVE_REGION_SELECTOR,
+  activeIdFromAnnouncement,
+  hasLeftSelf,
+} from './lib/dnd-announcements';
 
 /**
  * E2E: DayView column reorder with the KEYBOARD (GH #138 US-6).
@@ -88,17 +93,102 @@ async function getColumnHeaders(page: import('@playwright/test').Page): Promise<
 
 /**
  * Move the focused, currently-grabbed column one slot LEFT and settle before
- * dropping. Empirically (probe-verified on this grid): the first ArrowLeft
- * commits over → the left sibling and WIPES the pickup transform (dnd-kit
- * re-measures; the settle translate lands only on the next press), so press
- * twice, then wait until the dragged rect rests displaced toward the sibling
- * — dropping inside the re-measure window resolves over=null and the reorder
- * is a no-op. Every press is gated on its own DOM observable (#479/#138
- * poll-guard pattern, GH #499): under CI load a fixed nap between the two
- * presses can desynchronize the choreography and turn the drop into a no-op.
+ * dropping. State machine per spec #535 §Часть 3 (US-4): behave like a live
+ * human — «нажал, не подвинулось — нажал ещё раз» (pressed, didn't move —
+ * pressed again).
+ *
+ * PROBE ARTIFACT (шаг 0, dev grid 2026-10-25; installed @dnd-kit core
+ * 6.3.1 + accessibility 3.1.1, 4/4 drags identical — see
+ * e2e/lib/dnd-announcements.ts for the announcement strings):
+ *   Space        → announcement "moved over droppable area X" (self-over;
+ *                  "Picked up …" is superseded within the pickup commit),
+ *                  transform translate3d(0px, …)
+ *   ArrowLeft #1 → announcement "is no longer over a droppable area.",
+ *                  transform '' (the pickup transform wiped)
+ *   ArrowLeft #2 → announcement "moved over droppable area Y" (Y≠X — the
+ *                  left sibling) AND translate3d(-164px, …) in the SAME
+ *                  commit; a further press is a no-op
+ * Because the over-commit to the sibling and the settle translate land in
+ * one commit, the settle polls below (kept verbatim from :103–109) can only
+ * pass on the press that leaves the drag OFF the sibling — so the move
+ * phase's success predicate is «the drag has left X» (moved over Y≠X OR no
+ * longer over), and its retry condition is the spec's own «the last
+ * announcement still names X, or nothing new has arrived» (a swallowed
+ * press leaves the self-over/pickup text in place).
+ *
+ * Machine: pickup (unchanged, done by the caller: Space + aria-pressed
+ * guard) → move phase: ArrowLeft (≤3 attempts), poll (≤2 s) the dnd-kit
+ * announcements node until the drag has left X → settle phase UNCHANGED
+ * (poll transform '', then the single settle ArrowLeft — always one press,
+ * NOT counted in the ≤3 limit — then poll translate3d(-) → drop (Space).
+ * Attempt exhaustion fails the test with the announcements node text for
+ * recurrence diagnostics (spec state 5). Every observable is gated on its
+ * own DOM state (#479/#138 poll-guard pattern, GH #499): under CI load a
+ * fixed nap between presses can desynchronize the choreography and turn
+ * the drop into a no-op.
  */
+const MAX_MOVE_ATTEMPTS = 3;
+
 async function settleMoveLeftThenDrop(page: import('@playwright/test').Page, header: ReturnType<typeof page.locator>) {
-  await page.keyboard.press('ArrowLeft'); // over → the left sibling…
+  // Locate the dnd-kit announcements node among the several live regions the
+  // page may carry (several #DndLiveRegion-N nodes can sit in the DOM; the
+  // first in DOM order may be an empty stale one — unified-rows.spec.ts:570)
+  // and fix the dragged column id X from its current (pickup) announcement.
+  let ann: ReturnType<typeof page.locator> | null = null;
+  let activeId = '';
+  try {
+    await expect
+      .poll(
+        async () => {
+          const regions = page.locator(DND_LIVE_REGION_SELECTOR);
+          for (let i = 0; i < await regions.count(); i++) {
+            const region = regions.nth(i);
+            const id = activeIdFromAnnouncement((await region.textContent()) ?? '');
+            if (id) {
+              ann = region;
+              activeId = id;
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: 5_000 },
+      )
+      .toBe(true);
+  } catch {
+    const dump = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[aria-live], [role="status"]')).map(
+        (el) => `<${el.tagName.toLowerCase()} id="${el.id}" aria-live="${el.getAttribute('aria-live')}">${(el.textContent || '').trim()}</${el.tagName.toLowerCase()}>`,
+      ),
+    );
+    throw new Error(
+      `dnd-kit announcements node never spoke after pickup: no ${DND_LIVE_REGION_SELECTOR} node carries a "Draggable item …" announcement. Live regions on the page: ${dump.join(' | ')}`,
+    );
+  }
+  if (!ann) throw new Error('unreachable: announcements poll passed without a node');
+  // Explicit type: TS's closure-blind flow analysis narrows `ann` to `never`
+  // here (assignments inside the poll callback above are not tracked).
+  const announcer: import('@playwright/test').Locator = ann;
+
+  // Move phase: press ArrowLeft until the announcements confirm the drag has
+  // left its own slot (≤3 attempts, ≤2 s poll each). A swallowed press leaves
+  // the announcement naming X (pickup self-over) — press again like a human.
+  for (let attempt = 1; attempt <= MAX_MOVE_ATTEMPTS; attempt++) {
+    await page.keyboard.press('ArrowLeft'); // move attempt
+    try {
+      await expect
+        .poll(async () => hasLeftSelf((await announcer.textContent()) ?? '', activeId), { timeout: 2_000 })
+        .toBe(true);
+      break; // the drag has left X — the over-commit sequence has begun
+    } catch {
+      if (attempt === MAX_MOVE_ATTEMPTS) {
+        throw new Error(
+          `dayview keyboard drag «пустышка» held after ${MAX_MOVE_ATTEMPTS} ArrowLeft presses; the dnd-kit announcements node says: "${(await announcer.textContent()) ?? ''}"`,
+        );
+      }
+    }
+  }
+
   // …committed once the pickup transform (translate3d(0px, …)) is wiped.
   await expect
     .poll(() => header.evaluate((el) => el.style.transform), { timeout: 5_000 })

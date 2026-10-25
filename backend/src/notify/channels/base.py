@@ -99,7 +99,17 @@ class Channel(Protocol):
     transport answers" probe (no attempt is burned on an unavailable
     channel); ``send`` — deliver the text ASSEMBLED BY THE WORKER (no
     channel-side markup conversion — the neutral markup is retired);
-    returning without an exception = delivered."""
+    returning without an exception = delivered.
+
+    ``send`` carries the frozen template ORIGIN (``template_channel``,
+    #485 Task 4, spec §6.2/§5.3): the frozen template row's channel
+    value — ``None`` = a UNIVERSAL template (plain text — the channel
+    sends WITHOUT its transport parse mode), a channel name = a
+    template written in that channel's format (the channel may apply
+    its parse mode, e.g. Telegram HTML). The default ``None`` keeps
+    every origin-agnostic send (the §6.3 admin service message, the
+    mock) plain — markup belongs to the channel template alone.
+    """
 
     name: str
     escape_mode: EscapeMode
@@ -107,4 +117,6 @@ class Channel(Protocol):
 
     async def is_available(self) -> bool: ...
 
-    async def send(self, address: str, text: str) -> None: ...
+    async def send(
+        self, address: str, text: str, *, template_channel: str | None = None
+    ) -> None: ...

@@ -11,13 +11,19 @@
   canonical home of the channel-name vocabulary);
 - ``mock`` — the observability mock channel + delivery recorders; the
   module registers itself at the bottom and is NOT registered under
-  ``ENV=production``.
+  ``ENV=production``;
+- ``telegram`` — the REAL Telegram channel (#485 part 4, Telethon over
+  MTProto); registers itself at the bottom with NO ENV gate — the
+  production registry.
 
 Real channels (part 4) register the same way: a module + one bottom-of-
 module registration line + settings, the core never changes.
 """
 
-from src.notify.channels import mock  # noqa: F401 — the registration import
+from src.notify.channels import (
+    mock,  # noqa: F401 — the registration import
+    telegram,  # noqa: F401 — the registration import
+)
 
 # The registry populates at IMPORT time (ADR 011: a channel module
 # registers itself at its bottom) — THIS package import is the hook

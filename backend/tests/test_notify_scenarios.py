@@ -442,6 +442,10 @@ class TestSuccessPath:
         assert task.payload["service"]["title"] == "Гончарный мастер-класс"
         assert task.template_body == _load_default_body()
         assert task.template_id is not None
+        # the frozen template's ORIGIN (#485 Task 4, spec §6.2): the
+        # default template is UNIVERSAL (channel NULL) — the origin
+        # rides the row/payload to the worker's parse-mode decision
+        assert task.template_channel is None
 
         assert (await _fetch_event(db_session, event.id)).processed_at is not None
 
@@ -455,6 +459,7 @@ class TestSuccessPath:
             "payload",
             "template_id",
             "template_body",
+            "template_channel",
             "root_task_id",
             "created_at",
             "resend_of",
@@ -464,9 +469,75 @@ class TestSuccessPath:
         assert payload["address"] == task.address
         assert payload["payload"] == task.payload
         assert payload["template_body"] == task.template_body
+        assert payload["template_channel"] == task.template_channel
         assert payload["root_task_id"] == task.id
         assert payload["resend_of"] is None
         assert _UTC_ISO_Z.match(payload["created_at"]), payload["created_at"]
+
+    async def test_channel_template_freezes_its_origin(
+        self,
+        db_session,
+        create_master,
+        create_service,
+        create_location,
+        create_client,
+        create_activity,
+        create_record,
+    ) -> None:
+        """#485 Task 4 (spec §3.7/§6.2): a CHANNEL template wins the
+        lookup over the universal one, and its origin (``"telegram"``)
+        is frozen into the task — the worker sends it with the channel's
+        parse mode (HTML), not as plain text."""
+        from src.notify.models import NotifyTemplate
+
+        # both tiers seeded: a telegram-channel template AND the default
+        # universal row — the lookup must pick the channel tier.
+        db_session.add(
+            NotifyTemplate(
+                event_type="new_record",
+                channel="telegram",
+                title="Канальный шаблон",
+                body="Канальный текст: {{ client.name }}",
+                is_default=False,
+            )
+        )
+        await _seed_default_template(db_session)
+
+        master = create_master(first_name="Мария", last_name="Иванова")
+        service = create_service(title="Гончарный мастер-класс")
+        location = create_location(title="Студия «Горы»", address="ул. Ленина, 1")
+        activity = create_activity(
+            master_id=master["id"],
+            service_id=service["id"],
+            location_id=location["id"],
+            start=_FUTURE,
+        )
+        client = create_client(name="Анна", phone="+79990001122")
+        record = create_record(
+            activity_id=activity["id"],
+            client_id=client["id"],
+            notify=True,
+            visits=[{"name": "Анна", "price": 3500, "status": "waiting"}],
+        )
+        db_session.expire_all()
+        rec = await db_session.get(Record, record["id"])
+        snapshot = await build_new_record_snapshot(db_session, rec)
+        event = DomainEvent(
+            type="new_record", occurred_at=datetime.now(UTC).replace(tzinfo=None), snapshot=snapshot
+        )
+        db_session.add(event)
+        await db_session.commit()
+
+        queue = FakeQueue()
+        await handle_new_record(event, db_session, queue)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        task = tasks[0]
+        assert task.template_body == "Канальный текст: {{ client.name }}"
+        assert task.template_channel == "telegram"
+        payload = queue.tasks[0]
+        assert payload["template_channel"] == "telegram"
 
 
 class TestIdempotency:

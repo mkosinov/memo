@@ -357,6 +357,39 @@ class TestPerChannelMigration:
         assert "sent_text" in _columns(url, "notify_task_attempts")
 
 
+class TestTemplateOriginMigration:
+    """#485 Task 4 — the template ORIGIN freeze (spec §6.2 parse-mode
+    rule): ``notify_tasks.template_channel`` — the frozen template row's
+    ``channel`` value (NULL = universal). The worker is DB-free (ADR
+    009), so the origin rides the task row + payload to the send seam
+    (a channel template → the channel's parse mode, a universal → none).
+    """
+
+    def test_template_channel_column_added(self, upgraded_url: str) -> None:
+        columns = _columns(upgraded_url, "notify_tasks")
+        assert "template_channel" in columns, "notify_tasks.template_channel missing"
+        # nullable — dark-system rows and universal templates keep NULL
+        assert columns["template_channel"]["nullable"], (
+            "template_channel must be nullable (NULL = universal template)"
+        )
+
+    def test_template_origin_roundtrip(self, tmp_path: Path) -> None:
+        """Downgrade to the Task-3 head drops the origin column;
+        upgrade rebuilds it."""
+        db_file = tmp_path / "template_origin_roundtrip.db"
+        url = f"sqlite:///{db_file}"
+        cfg = _alembic_config(url)
+
+        command.upgrade(cfg, "head")
+        assert "template_channel" in _columns(url, "notify_tasks")
+
+        command.downgrade(cfg, "d94b1f7c2a6e")
+        assert "template_channel" not in _columns(url, "notify_tasks")
+
+        command.upgrade(cfg, "head")
+        assert "template_channel" in _columns(url, "notify_tasks")
+
+
 class TestOrmParity:
     def test_metadata_matches_migrated_schema(self, upgraded_url: str) -> None:
         """Every Base.metadata table exists after upgrade head with exactly

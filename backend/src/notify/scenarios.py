@@ -219,6 +219,7 @@ async def handle_new_record(
         payload=snapshot,
         template_id=template.id,
         template_body=template.body,
+        template_channel=template.channel,
     )
     session.add(task)
     event.processed_at = utc_now()

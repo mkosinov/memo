@@ -127,13 +127,19 @@ class StubChannel:
         self.escape_mode: EscapeMode = escape_mode
         self.send_calls = 0
         self.texts: list[str] = []
+        #: the frozen template ORIGIN per send (#485 Task 4, spec §6.2)
+        #: — ``"unset"`` until a send proves the worker passed it.
+        self.origins: list[str | None] = []
 
     async def is_available(self) -> bool:
         return self._available
 
-    async def send(self, address: str, text: str) -> None:
+    async def send(
+        self, address: str, text: str, *, template_channel: str | None = None
+    ) -> None:
         self.send_calls += 1
         self.texts.append(text)
+        self.origins.append(template_channel)
         if self._outcome == "transport":
             raise ChannelTransportError(
                 f"stub {self.name}: transport failure", retry_after=self._retry_after
@@ -453,6 +459,53 @@ class TestEscapeModeWiring:
             ("failed", "unavailable", "down"),
             ("failed", "not_delivered", "down"),
         ]
+
+
+class TestTemplateOriginThreading:
+    """#485 Task 4 (spec §6.2): the worker threads the frozen template
+    ORIGIN (``payload['template_channel']``) into every ``send`` call —
+    the channel keys its transport parse mode by it (channel template →
+    markup, universal → plain). A payload WITHOUT the key (a legacy
+    in-flight task) sends with ``None`` — the plain/origin-unset
+    spelling, never a crash."""
+
+    async def test_channel_template_origin_rides_the_send(self) -> None:
+        tg = StubChannel("telegram")
+        task = _task(channel="telegram", template_channel="telegram")
+
+        await _run(task, {"telegram": tg})
+
+        assert tg.origins == ["telegram"]
+
+    async def test_universal_template_origin_is_none(self) -> None:
+        tg = StubChannel("telegram")
+        task = _task(channel="telegram", template_channel=None)
+
+        await _run(task, {"telegram": tg})
+
+        assert tg.origins == [None]
+
+    async def test_payload_without_the_key_sends_none(self) -> None:
+        """The origin is delivery-metadata (like ``template_id``): a
+        payload missing it is NOT brak — the send gets ``None``."""
+        tg = StubChannel("telegram")
+        raw = _task(channel="telegram")
+        raw.pop("template_channel", None)
+
+        await _run(raw, {"telegram": tg})
+
+        assert tg.origins == [None]
+
+    async def test_transport_retry_resends_the_same_origin(self) -> None:
+        """Retries send the SAME assembled text (§5.2) — and the same
+        origin: one task, one parse-mode decision."""
+        tg = StubChannel("telegram", outcome="transport")
+        task = _task(channel="telegram", template_channel="telegram")
+
+        await _run(task, {"telegram": tg})
+
+        assert tg.send_calls == 3
+        assert tg.origins == ["telegram"] * 3
 
 
 class TestAssemblyOncePerTask:

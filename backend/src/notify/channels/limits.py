@@ -267,10 +267,19 @@ class ChannelLimiter:
         :meth:`governed_send`."""
         return LimitedChannel(channel, self)
 
-    async def governed_send(self, channel: Channel, address: str, text: str) -> None:
+    async def governed_send(
+        self,
+        channel: Channel,
+        address: str,
+        text: str,
+        *,
+        template_channel: str | None = None,
+    ) -> None:
         """One governed send: cap gate → pause → send → INCR (see the
-        class docstring). Store failures propagate as the store raised
-        them (``ChannelTransportError`` from ``RedisCapStore``) — the
+        class docstring). The frozen template ORIGIN passes through
+        VERBATIM (spec §6.2) — the wrapper never interprets it. Store
+        failures propagate as the store raised them
+        (``ChannelTransportError`` from ``RedisCapStore``) — the
         delivery core retries transport failures per its budget."""
         name = channel.name
         limits = channel.limits
@@ -283,7 +292,7 @@ class ChannelLimiter:
 
         await self._hold_pause(name, limits.send_pause_seconds)
         try:
-            await channel.send(address, text)
+            await channel.send(address, text, template_channel=template_channel)
         finally:
             # The transport WAS engaged — the pause clock advances on
             # failures too (a failing send still hit the messenger).
@@ -363,5 +372,9 @@ class LimitedChannel:
     async def is_available(self) -> bool:
         return await self._inner.is_available()
 
-    async def send(self, address: str, text: str) -> None:
-        await self._limiter.governed_send(self._inner, address, text)
+    async def send(
+        self, address: str, text: str, *, template_channel: str | None = None
+    ) -> None:
+        await self._limiter.governed_send(
+            self._inner, address, text, template_channel=template_channel
+        )

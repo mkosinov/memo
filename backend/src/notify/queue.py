@@ -39,9 +39,12 @@ from typing import Any, Protocol, runtime_checkable
 
 #: Task payload of ``notify:tasks`` (§4.2 rev.5 — task = one channel,
 #: ADR 014): ``{task_id, channel, address, payload, template_id,
-#: template_body, root_task_id, created_at, resend_of}`` — the frozen
-#: task row verbatim; the worker assembles the text from
-#: ``payload`` + ``template_body``.
+#: template_body, template_channel, root_task_id, created_at,
+#: resend_of}`` — the frozen task row verbatim; the worker assembles
+#: the text from ``payload`` + ``template_body`` and threads
+#: ``template_channel`` (the frozen template's ORIGIN: NULL = universal,
+#: a channel name = a channel template) to the send seam — the channel
+#: keys its transport parse mode by it (#485 Task 4, spec §6.2).
 TaskPayload = dict[str, Any]
 
 #: Worker stage event of ``notify:statuses`` (§4.3 rev.5):
@@ -66,6 +69,7 @@ def build_task_payload(task: Any, created_at: str) -> TaskPayload:
         "payload": task.payload,
         "template_id": task.template_id,
         "template_body": task.template_body,
+        "template_channel": task.template_channel,
         "root_task_id": task.root_task_id,
         "created_at": created_at,
         "resend_of": task.resend_of,

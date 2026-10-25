@@ -141,8 +141,10 @@ def parse_task_payload(raw: dict[str, Any]) -> TaskPayload:
     — the caller logs (identifiers and keys only, never the payload
     data) and acks the item away. Delivery-irrelevant ``template_id``/
     ``root_task_id``/``created_at``/``resend_of`` are deliberately not
-    checked. Returns the same dict untouched: the seam stays plain JSON
-    (§4.2), no new schema objects (ADR 009).
+    checked; ``template_channel`` (the frozen template's ORIGIN, #485
+    Task 4) is metadata too — a missing value means the universal
+    spelling and never braks. Returns the same dict untouched: the seam
+    stays plain JSON (§4.2), no new schema objects (ADR 009).
     """
     task_id = raw.get("task_id")
     if not isinstance(task_id, str) or not task_id:
@@ -289,7 +291,14 @@ async def deliver_task(
             _status_event(task_id, "sending", name, "attempt", sent_text=text)
         )
         try:
-            await channel.send(task["address"], text)
+            # The frozen template ORIGIN rides every send (spec §6.2 —
+            # the channel keys its transport parse mode by it; §5.2 —
+            # retries send the same text, hence the same origin). A
+            # payload without the key (legacy in-flight) sends ``None``
+            # — the plain/universal spelling, never a crash.
+            await channel.send(
+                task["address"], text, template_channel=task.get("template_channel")
+            )
         except ChannelAppError as exc:
             await publish(
                 _status_event(task_id, "failed", name, "app_error", error=str(exc))

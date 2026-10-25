@@ -187,7 +187,12 @@ class MockChannel:
     async def is_available(self) -> bool:
         return True
 
-    async def send(self, address: str, text: str) -> None:
+    async def send(
+        self, address: str, text: str, *, template_channel: str | None = None
+    ) -> None:
+        # ``template_channel`` (the frozen template origin, #485 Task 4)
+        # is deliberately IGNORED: the mock is a plain-text channel —
+        # no markup, no parse mode, whatever the template's origin.
         if address.startswith("fail-transport:"):
             raise ChannelTransportError(f"mock: scripted transport failure for {address}")
         if address.startswith("fail-app:"):

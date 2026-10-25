@@ -131,6 +131,14 @@ class NotifyTask(AbstractModel):
     # text) + the body as of task creation.
     template_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     template_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The frozen template's ORIGIN (#485 Task 4, spec §6.2): the template
+    # row's ``channel`` value at freeze time — NULL = universal (plain
+    # text, no channel markup), a channel name = a template written in
+    # that channel's format. The worker is DB-free (ADR 009), so the
+    # origin rides the row and the §4.2 payload to the send seam: the
+    # channel picks its transport parse mode by it (channel template →
+    # the channel's markup, universal → no parse mode, §5.3).
+    template_channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Chain root (first task: own id). FK-like reference — no hard FK;
     # the dispatcher (chain spawner, part 4 Task 5) owns chain integrity.
     root_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

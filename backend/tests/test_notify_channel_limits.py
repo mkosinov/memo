@@ -205,12 +205,18 @@ class RecordingChannel:
         self._fail = fail
         self._fail_addresses = fail_addresses or set()
         self.sends: list[tuple[str, str]] = []
+        #: the frozen template ORIGIN per send (#485 Task 4, spec §6.2)
+        #: — the wrapper must forward it verbatim.
+        self.origins: list[str | None] = []
 
     async def is_available(self) -> bool:
         return True
 
-    async def send(self, address: str, text: str) -> None:
+    async def send(
+        self, address: str, text: str, *, template_channel: str | None = None
+    ) -> None:
         self.sends.append((address, text))
+        self.origins.append(template_channel)
         if self._fail == "transport":
             raise ChannelTransportError("stub: transport failure")
         if self._fail == "app":
@@ -568,6 +574,20 @@ class TestLimitedChannel:
 
         assert chan.sends == [("+79990001122", "текст")]
         assert store.registered == [("mock", FROZEN_TODAY)]
+
+    async def test_wrapped_send_forwards_the_template_origin(self) -> None:
+        """#485 Task 4 (spec §6.2): the wrapper is on the worker's send
+        path — the frozen template origin passes through the limiter to
+        the inner channel VERBATIM (default ``None`` — the §6.3 admin
+        service message sends plain)."""
+        store = FakeCapStore(count=0)
+        chan = RecordingChannel(limits=ChannelLimits(daily_cap=25, send_pause_seconds=0.0))
+        wrapped = _limiter(store).wrap(chan)
+
+        await wrapped.send("+79990001122", "текст", template_channel="telegram")
+        await wrapped.send("+79990001122", "текст")
+
+        assert chan.origins == ["telegram", None]
 
 
 # ── the delivery core through a limited channel (the DoD end-shape) ──────────

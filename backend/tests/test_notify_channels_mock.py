@@ -1,10 +1,11 @@
-"""GH #484 Task 2 (part 3 of the notify family #476; spec §3.6) — the
-mock channel and its recorders.
+"""GH #484 Task 2 (part 3 of the notify family #476; spec §3.6; rev.5
+of #485 — spec §5.3/§6.1) — the mock channel and its recorders.
 
 Covered (S9, unit — no Redis, no DB):
 
-- identity conversion: ``send`` writes the neutral text UNCHANGED (the
-  channel owns markup conversion, part 3 ships the identity one);
+- plain-text channel: ``escape_mode == "none"``, ``send`` records the
+  ASSEMBLED text verbatim (rev.5: channels do not convert markup —
+  ADR 014);
 - scripted outcomes by ADDRESS PREFIX (the payload contract is never
   extended): ``fail-transport:`` → ``ChannelTransportError`` with
   ``retry_after is None``; ``fail-app:`` → ``ChannelAppError``;
@@ -37,9 +38,9 @@ from src.notify.channels.mock import (
 
 pytestmark = pytest.mark.unit
 
-#: Neutral-markdown text with every construct a channel may need to
-#: convert — the mock must deliver it verbatim.
-_NEUTRAL_TEXT = "**Привет**, _мир_! [ссылка](https://example.com) — `код`"
+#: A text with every markup construct a template may produce — the mock
+#: must deliver it verbatim (plain-text channel, no conversion).
+_ASSEMBLED_TEXT = "**Привет**, _мир_! [ссылка](https://example.com) — `код`"
 
 
 class TestMockChannelOutcomes:
@@ -49,16 +50,23 @@ class TestMockChannelOutcomes:
     def test_channel_name_is_mock(self) -> None:
         assert MockChannel(InMemoryRecorder()).name == "mock"
 
+    def test_mock_declares_the_plain_text_escape_mode(self) -> None:
+        """Spec §5.3: «мок — простой текст» — the mock declares
+        ``none``; the worker sends it the assembled text as-is."""
+        assert MockChannel(InMemoryRecorder()).escape_mode == "none"
+
     def test_satisfies_the_channel_protocol(self) -> None:
         assert isinstance(MockChannel(InMemoryRecorder()), Channel)
 
-    async def test_send_is_the_identity_conversion(self) -> None:
+    async def test_send_records_the_assembled_text_verbatim(self) -> None:
+        """Rev.5 seam: the text arrives assembled — the mock records it
+        UNCHANGED (plain-text channel, no channel-side conversion)."""
         recorder = InMemoryRecorder()
         channel = MockChannel(recorder)
 
-        await channel.send("+79990001122", _NEUTRAL_TEXT)
+        await channel.send("+79990001122", _ASSEMBLED_TEXT)
 
-        assert recorder.deliveries == [{"address": "+79990001122", "text": _NEUTRAL_TEXT}]
+        assert recorder.deliveries == [{"address": "+79990001122", "text": _ASSEMBLED_TEXT}]
 
     async def test_successes_accumulate_in_the_recorder(self) -> None:
         recorder = InMemoryRecorder()
@@ -78,7 +86,7 @@ class TestMockChannelOutcomes:
         channel = MockChannel(InMemoryRecorder())
 
         with pytest.raises(ChannelTransportError) as exc_info:
-            await channel.send("fail-transport:+79990001122", _NEUTRAL_TEXT)
+            await channel.send("fail-transport:+79990001122", _ASSEMBLED_TEXT)
 
         assert exc_info.value.retry_after is None
         assert "fail-transport:+79990001122" in str(exc_info.value)
@@ -87,7 +95,7 @@ class TestMockChannelOutcomes:
         channel = MockChannel(InMemoryRecorder())
 
         with pytest.raises(ChannelAppError) as exc_info:
-            await channel.send("fail-app:+79990001122", _NEUTRAL_TEXT)
+            await channel.send("fail-app:+79990001122", _ASSEMBLED_TEXT)
 
         assert "fail-app:+79990001122" in str(exc_info.value)
 

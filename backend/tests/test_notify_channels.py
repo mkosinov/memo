@@ -45,11 +45,12 @@ class _StubChannel:
     """A minimal registry-test channel (the factory IS the class)."""
 
     name = "stub"
+    escape_mode = "none"
 
     async def is_available(self) -> bool:
         return True
 
-    async def send(self, address: str, text_neutral: str) -> None:
+    async def send(self, address: str, text: str) -> None:
         return None
 
 
@@ -98,6 +99,37 @@ class TestParseChannelPriority:
         the registry function (its module tests hit it through the old
         attribute path and keep passing unchanged)."""
         assert dispatcher.parse_channel_priority is parse_channel_priority
+
+
+# ── §6.1: the escape-mode declaration of the channel protocol ───────────────
+
+
+class TestEscapeModeDeclaration:
+    """Rev.5 (spec §6.1, ADR 014): a channel DECLARES its escape mode
+    (``none | html``) — the worker keys the assembly environment by it
+    and hands ``send`` the ASSEMBLED text; the «channel converts
+    neutral markup» clause of the old contract is retired."""
+
+    def test_protocol_declares_the_escape_mode_attribute(self) -> None:
+        assert "escape_mode" in Channel.__protocol_attrs__
+
+    def test_channel_without_escape_mode_does_not_satisfy_the_protocol(self) -> None:
+        class _NoMode:
+            name = "nomode"
+
+            async def is_available(self) -> bool:
+                return True
+
+            async def send(self, address: str, text: str) -> None:
+                return None
+
+        assert not isinstance(_NoMode(), Channel)
+
+    def test_channel_with_escape_mode_satisfies_the_protocol(self) -> None:
+        class _WithMode(_StubChannel):
+            escape_mode = "html"
+
+        assert isinstance(_WithMode(), Channel)
 
 
 # ── §3.3: the loud startup gate ──────────────────────────────────────────────

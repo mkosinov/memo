@@ -14,6 +14,13 @@ Covered (the S9 core matrix, unit — no Redis, no DB, no real clock):
   ``InvalidTaskPayload`` (a ``ValueError``); ``template_id``/
   ``root_task_id``/``created_at``/``resend_of`` are delivery-irrelevant
   and deliberately NOT checked;
+- escape-mode wiring (#485 Task 2, spec §5.3): the assembly
+  environment is keyed by the TASK'S CHANNEL — an ``html`` channel
+  gets HTML-escaped values even from a universal (plain) template, a
+  ``none`` channel gets them verbatim; unknown/unavailable channels
+  never assemble;
+- assembly ONCE per task (spec §5.2): transport retries resend the
+  SAME text — the §13 unit «сборка один раз на задачу»;
 - first-attempt success: ``sending``/``attempt`` → ``sent``/
   ``delivered``; ``sent_text`` (§4.3 rev.5) rides the sending/sent
   stages with the ASSEMBLED text;
@@ -48,10 +55,11 @@ import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
+from src.notify.assembly import EscapeMode
 from src.notify.channels.base import (
     Channel,
     ChannelAppError,
@@ -100,7 +108,8 @@ class SleepSpy:
 class StubChannel:
     """Scripted channel for the core matrix: ``outcome`` one of
     ``deliver`` | ``transport`` | ``app`` | ``bug``; counts ``send``
-    calls so tests assert the exact attempt count per channel."""
+    calls and records the received texts so tests assert the exact
+    attempt count and the assembled text per channel."""
 
     def __init__(
         self,
@@ -109,18 +118,22 @@ class StubChannel:
         outcome: str = "deliver",
         retry_after: float | None = None,
         available: bool = True,
+        escape_mode: EscapeMode = "none",
     ) -> None:
         self.name = name
         self._outcome = outcome
         self._retry_after = retry_after
         self._available = available
+        self.escape_mode: EscapeMode = escape_mode
         self.send_calls = 0
+        self.texts: list[str] = []
 
     async def is_available(self) -> bool:
         return self._available
 
-    async def send(self, address: str, text_neutral: str) -> None:
+    async def send(self, address: str, text: str) -> None:
         self.send_calls += 1
+        self.texts.append(text)
         if self._outcome == "transport":
             raise ChannelTransportError(
                 f"stub {self.name}: transport failure", retry_after=self._retry_after
@@ -371,6 +384,106 @@ class TestAssemblyFailure:
         events, _ = await _run(task, channels)
 
         assert events[0]["sent_text"] is None
+
+
+class TestEscapeModeWiring:
+    """Spec §5.3 via the worker seam: the assembly escape mode is keyed
+    by the TASK'S CHANNEL (its declared ``escape_mode``), never by the
+    template's origin; assembly happens only for a channel that would
+    actually attempt (resolved AND available)."""
+
+    _BODY = "{{ client.name }}, вы записаны на «{{ service.title }}»"
+    _PAYLOAD: ClassVar[dict[str, dict[str, str]]] = {
+        "client": {"name": "Анна"},
+        "service": {"title": "Керамика <начальный> & гончарное дело"},
+    }
+    _HTML_TEXT = "Анна, вы записаны на «Керамика &lt;начальный&gt; &amp; гончарное дело»"
+    _PLAIN_TEXT = "Анна, вы записаны на «Керамика <начальный> & гончарное дело»"
+
+    async def test_html_channel_gets_values_escaped_from_a_plain_template(self) -> None:
+        """The §13 cross case at the worker seam: a UNIVERSAL (plain)
+        template on an html-mode channel task — the worker assembles
+        with HTML escaping; the channel receives the escaped text and
+        ``sent_text`` carries it."""
+        tg = StubChannel("telegram", escape_mode="html")
+        task = _task(channel="telegram", template_body=self._BODY, payload=self._PAYLOAD)
+
+        events, _ = await _run(task, {"telegram": tg})
+
+        assert _trail(events) == [
+            ("sending", "attempt", "telegram"),
+            ("sent", "delivered", "telegram"),
+        ]
+        assert tg.texts == [self._HTML_TEXT]
+        assert events[0]["sent_text"] == self._HTML_TEXT
+        assert events[1]["sent_text"] == self._HTML_TEXT
+
+    async def test_none_channel_gets_values_verbatim(self) -> None:
+        recorder = InMemoryRecorder()
+        task = _task(template_body=self._BODY, payload=self._PAYLOAD)
+
+        events, _ = await _run(task, {"mock": MockChannel(recorder)})
+
+        assert events[1]["sent_text"] == self._PLAIN_TEXT
+        assert recorder.deliveries[0]["text"] == self._PLAIN_TEXT
+
+    async def test_unknown_channel_is_not_assembled(self) -> None:
+        """Assembly needs the channel's declared escape mode — an
+        unknown channel name fails as ``unknown_channel`` regardless of
+        the template's shape (the config error outranks the data
+        error)."""
+        task = _task(channel="ghost", template_body="{{ broken", payload={})
+
+        events, _ = await _run(task, {})
+
+        assert _trail(events) == [
+            ("failed", "unknown_channel", "ghost"),
+            ("failed", "not_delivered", "ghost"),
+        ]
+
+    async def test_unavailable_channel_is_not_assembled(self) -> None:
+        """No attempt is burned on an unavailable channel (§3.5) — and
+        no assembly either: nothing would transmit the text."""
+        down = StubChannel("down", available=False)
+        task = _task(channel="down", template_body="{{ broken", payload={})
+
+        events, _ = await _run(task, {"down": down})
+
+        assert _trail(events) == [
+            ("failed", "unavailable", "down"),
+            ("failed", "not_delivered", "down"),
+        ]
+
+
+class TestAssemblyOncePerTask:
+    async def test_transport_retries_do_not_reassemble(self, monkeypatch) -> None:
+        """Spec §5.2: the text is assembled ONCE per task — transport
+        retries send the SAME text (protection from divergence between
+        attempts, e.g. a deploy mid-task). The §13 unit: «сборка один
+        раз на задачу (ретраи — тот же текст)»."""
+        import src.notify.worker as worker_module
+
+        calls: list[str] = []
+        real = worker_module.assemble_text
+
+        def counting(body: str, data: dict, *, escape_mode: str = "none") -> str:  # type: ignore[assignment]
+            calls.append(escape_mode)
+            return real(body, data, escape_mode=escape_mode)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(worker_module, "assemble_text", counting)
+
+        flaky = StubChannel("flaky", outcome="transport")
+        task = _task(
+            channel="flaky",
+            template_body="Запись: {{ service.title }}",
+            payload={"service": {"title": "Гончарный мастер-класс"}},
+        )
+
+        _events, _ = await _run(task, {"flaky": flaky}, retries=3)
+
+        assert flaky.send_calls == 3  # the whole budget burned
+        assert calls == ["none"]  # ...but assembled exactly ONCE
+        assert flaky.texts == ["Запись: Гончарный мастер-класс"] * 3  # the SAME text
 
 
 class TestTransportBudget:

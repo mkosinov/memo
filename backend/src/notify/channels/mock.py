@@ -1,14 +1,16 @@
 """The mock channel and the delivery recorders (GH #484 part 3, spec
-§3.6; family #476 US-4/US-5 enablers).
+§3.6; family #476 US-4/US-5 enablers; rev.5 of #485 — spec §5.3/§6.1).
 
 The mock is the observability channel of the notify contours: deliveries
-land in a recorder artifact instead of a messenger, the conversion is
-IDENTITY (the neutral text goes out verbatim — the channel-owns-
-conversion seam with its simplest implementation). Outcomes are scripted
-by the ADDRESS PREFIX — the payload contract is never extended:
-``fail-transport:`` → ``ChannelTransportError`` (a falling/healing
-channel for the fallback scenarios), ``fail-app:`` → ``ChannelAppError``
-(the unresolvable-address analogue), anything else delivers.
+land in a recorder artifact instead of a messenger. It is a PLAIN-TEXT
+channel (spec §5.3: «мок — простой текст»): ``escape_mode = "none"``,
+the text assembled by the worker goes out VERBATIM — under the rev.5
+seam channels do not convert markup at all (ADR 014). Outcomes are
+scripted by the ADDRESS PREFIX — the payload contract is never
+extended: ``fail-transport:`` → ``ChannelTransportError`` (a
+falling/healing channel for the fallback scenarios), ``fail-app:`` →
+``ChannelAppError`` (the unresolvable-address analogue), anything else
+delivers.
 
 Recorders:
 
@@ -32,7 +34,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from redis import Redis
 from redis.backoff import NoBackoff
@@ -44,6 +46,9 @@ from src.core.config import settings
 from src.notify.channels.base import ChannelAppError, ChannelTransportError
 from src.notify.channels.registry import CHANNELS
 from src.notify.redis_queue import MAX_POOL_CONNECTIONS, SOCKET_TIMEOUT_SECONDS
+
+if TYPE_CHECKING:
+    from src.notify.assembly import EscapeMode
 
 #: Bounded-artifact list of the Redis recorder (spec §3.6).
 MOCK_DELIVERIES_LIST = "notify:mock:deliveries"
@@ -127,11 +132,13 @@ class RedisListRecorder:
 
 
 class MockChannel:
-    """Identity-conversion mock channel (spec §3.6): outcomes are
+    """Plain-text mock channel (spec §3.6/§5.3): ``escape_mode =
+    "none"`` — the assembled text goes out VERBATIM; outcomes are
     scripted by the ADDRESS PREFIX — fail-transport:, fail-app:,
     anything else delivers to the recorder."""
 
     name = "mock"
+    escape_mode: EscapeMode = "none"
 
     def __init__(self, recorder: Recorder) -> None:
         self._recorder = recorder
@@ -139,12 +146,12 @@ class MockChannel:
     async def is_available(self) -> bool:
         return True
 
-    async def send(self, address: str, text_neutral: str) -> None:
+    async def send(self, address: str, text: str) -> None:
         if address.startswith("fail-transport:"):
             raise ChannelTransportError(f"mock: scripted transport failure for {address}")
         if address.startswith("fail-app:"):
             raise ChannelAppError(f"mock: scripted app failure for {address}")
-        self._recorder.record(address, text_neutral)
+        self._recorder.record(address, text)
 
 
 def is_mock_allowed() -> bool:

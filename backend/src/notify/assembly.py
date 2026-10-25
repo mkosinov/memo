@@ -8,16 +8,19 @@ FROZEN ``template_body`` + ``payload`` that ride the task payload
 (§4.2). The dispatcher-side half — template LOOKUP from
 ``notify_templates`` — stays in :mod:`src.notify.render`.
 
-Decisions pinned by the spec:
+Decisions pinned by the spec (§5.2/§5.3):
 
 - ``SandboxedEnvironment`` — template authors cannot escape into Python
   (dunder access raises ``SecurityError``); ``undefined=StrictUndefined``
-  — a missing payload key is an ASSEMBLY ERROR, not a silent blank;
-  ``autoescape=False`` — escaping is keyed by the task's channel at
-  substitution time (rev.5), never a blanket HTML mode. Per-channel
-  escape variants (HTML values for telegram etc., spec §5.3) arrive
-  with part 4 Task 2 — this module is the Task-1 mechanical bridge on
-  the part-1 environment.
+  — a missing payload key is an ASSEMBLY ERROR, not a silent blank. Both
+  hold in EVERY environment variant.
+- The environment VARIANT is keyed by the TASK'S CHANNEL escape mode
+  (``EscapeMode``), never by the template's origin (§5.3: a telegram
+  task escapes values in HTML even from a UNIVERSAL template):
+  ``html`` — ``autoescape=True``, payload VALUES are HTML-escaped at
+  substitution while the channel template's own markup stays active
+  (markup belongs to the template, data stays data); ``none`` — plain
+  text, ``autoescape=False`` (the mock, the universal preview).
 - Markup control chars (``*``, ``_``, `` ` ``, ``[``, ``]`` and the
   backslash itself) are neutralized in payload STRING VALUES before
   substitution — never in the template's own markup: the author writes
@@ -26,17 +29,24 @@ Decisions pinned by the spec:
   (``\\[`` would render as a literal ``\`` + ACTIVE link start).
   Client names arrive from a public form; unescaped they could break
   the message layout or inject links on behalf of the studio (panel
-  finding).
+  finding). Preserved in BOTH variants (§5.2: «нейтрализация
+  контрольных символов — сохраняются»).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import jinja2
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
+
+#: The escape mode a CHANNEL declares (spec §6.1) and the worker keys
+#: the assembly environment by: ``html`` — payload values are
+#: HTML-escaped at substitution (telegram); ``none`` — plain text (the
+#: mock, universal templates sent without a channel parse mode, §5.3).
+EscapeMode = Literal["none", "html"]
 
 
 class RenderError(Exception):
@@ -95,32 +105,52 @@ def money(value: int | float) -> str:
     return f"{value:,}".replace(",", "\u00a0") + " ₽"
 
 
-def _build_environment() -> SandboxedEnvironment:
-    env = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
+def _build_environment(*, autoescape: bool) -> SandboxedEnvironment:
+    """One sandbox environment variant: the SAME strict undefineds and
+    filters everywhere; ``autoescape`` is the ONLY axis (spec §5.2 — a
+    per-FORMAT variant, not a new sandbox)."""
+    env = SandboxedEnvironment(undefined=StrictUndefined, autoescape=autoescape)
     env.filters["fmt_dt"] = fmt_dt
     env.filters["money"] = money
     return env
 
 
-# Module-level singleton: environments are stateless for from_string(),
-# and the filter registration happens exactly once.
-_ENV = _build_environment()
+# Module-level singletons: environments are stateless for from_string(),
+# and the filter registration happens exactly once per variant.
+_ENV_PLAIN = _build_environment(autoescape=False)
+_ENV_HTML = _build_environment(autoescape=True)
 
 
-def assemble_text(template_body: str, payload: dict[str, Any]) -> str:
+def assemble_text(
+    template_body: str,
+    payload: dict[str, Any],
+    *,
+    escape_mode: EscapeMode = "none",
+) -> str:
     """Assemble the task text from the FROZEN template body + render
     payload (rev.5, ADR 014) — the worker-side seam.
 
-    Task-1 mechanical bridge: the existing sandbox environment (strict
-    undefineds, markup neutralization of payload values) assembles the
-    text; the per-channel escape variants of spec §5.3 (HTML values for
-    telegram etc.) arrive with part 4 Task 2. Any failure raises
-    ``RenderError`` — the worker closes the channel attempt as an
-    application error (no transport retries, deterministic failure).
+    The environment variant is keyed by the TASK'S CHANNEL escape mode
+    (spec §5.3), regardless of the template's origin: ``html`` — every
+    payload value is HTML-escaped at substitution while the template's
+    own markup stays active; ``none`` (the default) — plain text.
+    Strict undefineds and control-char neutralization hold in both.
+    Any failure raises ``RenderError`` — the worker closes the channel
+    attempt as an application error (no transport retries,
+    deterministic failure).
     """
+    if escape_mode == "html":
+        env = _ENV_HTML
+    elif escape_mode == "none":
+        env = _ENV_PLAIN
+    else:
+        # A mode outside the §6.1 vocabulary is a CHANNEL programming
+        # error — loud and immediate, never a silent plain-text
+        # fallback (the Literal type makes it near-impossible to spell).
+        raise ValueError(f"escape_mode must be 'none' or 'html', got {escape_mode!r}")
     data = _neutralize_markup(payload)
     try:
-        return _ENV.from_string(template_body).render(**data)
+        return env.from_string(template_body).render(**data)
     except (jinja2.TemplateError, ValueError, TypeError) as exc:
         # UndefinedError (missing key), SecurityError (sandbox),
         # TemplateSyntaxError (broken authored body), plus ValueError /

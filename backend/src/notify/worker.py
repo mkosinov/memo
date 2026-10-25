@@ -4,9 +4,9 @@ the notify WORKER process: the delivery loop consuming ``notify:tasks``.
 Standalone entry ``python -m src.notify.worker`` — the second process
 entry of the family. The worker has NO database (ADR 009): the frozen
 render data and the channel template arrive in the payload (rev.5,
-ADR 014), the worker ASSEMBLES the text per task (Task-1 mechanical
-bridge on the part-1 sandbox; per-channel escape variants — part 4
-Task 2) and sends it to the task's ONE channel; only §4.3 status
+ADR 014), the worker ASSEMBLES the text per task — once, in the
+environment variant keyed by the task's channel escape mode (spec
+§5.2/§5.3) — and sends it to the task's ONE channel; only §4.3 status
 events go up (carrying the actually transmitted ``sent_text``).
 
 Startup (spec §3.1/§3.3, strictly in order):
@@ -183,24 +183,29 @@ async def deliver_task(
     """The §3.4 delivery algorithm of one VALID task (brak payloads
     never get here — the delivery loop validates first).
 
-    Rev.5 (ADR 014): the task is ONE channel. The worker assembles the
-    text from the frozen ``payload`` + ``template_body`` (Task-1
-    mechanical bridge on the part-1 sandbox — per-channel escape
-    variants arrive with part 4 Task 2):
-
-    - assembly failure → ``RenderError`` → ONE ``failed/app_error``
-      («не удалось собрать текст уведомления: …», spec §5.4) and RETURN
-      — a deterministic error, no transport retries; the dispatcher
-      chain (part 4 Task 5) owns the next channel;
-
-    then the single channel of the task:
+    Rev.5 (ADR 014): the task is ONE channel, and the worker owns the
+    text assembly (spec §5.2/§5.3):
 
     - the name missing from the priority instances → ``failed/
-      unknown_channel``;
+      unknown_channel`` (no assembly — the escape mode is the channel's
+      to declare);
     - ``is_available()`` false → ``failed/unavailable`` — no attempt
-      is burned (spec §3.5);
-    - up to ``retries`` attempts: ``sending/attempt`` → ``send``;
-      success → ``sent/delivered`` and RETURN;
+      is burned (spec §3.5), no assembly either (nothing would
+      transmit the text);
+    - the text is assembled ONCE from the frozen ``payload`` +
+      ``template_body``, the environment variant keyed by the channel's
+      declared ``escape_mode`` — regardless of the template's origin
+      (§5.3: a telegram task HTML-escapes values even from a universal
+      template); assembly failure → ``RenderError`` → ONE ``failed/
+      app_error`` («не удалось собрать текст уведомления: …», spec
+      §5.4) and RETURN — a deterministic error, no transport retries;
+      the dispatcher chain (part 4 Task 5) owns the next channel;
+
+    then up to ``retries`` attempts of the single channel (every
+    attempt sends the SAME assembled text, §5.2):
+
+    - ``sending/attempt`` → ``send``; success → ``sent/delivered`` and
+      RETURN;
     - ``ChannelAppError`` and ANY unclassified exception (a channel
       bug, §3.2: loud trace, the exception class in ``error``) close
       the channel as ``failed/app_error`` — never retried;
@@ -229,8 +234,41 @@ async def deliver_task(
     task_id = task["task_id"]
     name = task["channel"]
 
+    channel = channels.get(name)
+    if channel is None:
+        await publish(_status_event(task_id, "failed", name, "unknown_channel"))
+        await publish(_status_event(task_id, "failed", name, "not_delivered"))
+        return
+
     try:
-        text = assemble_text(task["template_body"], task["payload"])
+        available = await channel.is_available()
+    except Exception as exc:
+        # A channel bug in the probe — same rule as in send (§3.2):
+        # loud trace, the exception class in ``error``, the channel
+        # closes as an app error.
+        logger.exception(
+            "notify worker: is_available of channel %r raised — closing as app_error (task %s)",
+            name,
+            task_id,
+        )
+        await publish(
+            _status_event(task_id, "failed", name, "app_error", error=type(exc).__name__)
+        )
+        await publish(_status_event(task_id, "failed", name, "not_delivered"))
+        return
+
+    if not available:
+        await publish(_status_event(task_id, "failed", name, "unavailable"))
+        await publish(_status_event(task_id, "failed", name, "not_delivered"))
+        return
+
+    # ONCE per task (spec §5.2): the environment variant is keyed by
+    # the TASK'S channel escape mode (§5.3 — regardless of the
+    # template's origin); the retries below send this same ``text``.
+    try:
+        text = assemble_text(
+            task["template_body"], task["payload"], escape_mode=channel.escape_mode
+        )
     except RenderError as exc:
         # Spec §5.4: deterministic assembly failure — one app_error,
         # no transport retries (retrying a bug is pointless).
@@ -245,91 +283,69 @@ async def deliver_task(
         )
         return
 
-    channel = channels.get(name)
-    if channel is None:
-        await publish(_status_event(task_id, "failed", name, "unknown_channel"))
-    else:
+    for attempt in range(1, retries + 1):
+        await publish(
+            _status_event(task_id, "sending", name, "attempt", sent_text=text)
+        )
         try:
-            available = await channel.is_available()
+            await channel.send(task["address"], text)
+        except ChannelAppError as exc:
+            await publish(
+                _status_event(task_id, "failed", name, "app_error", error=str(exc))
+            )
+            break
+        except ChannelTransportError as exc:
+            await publish(
+                _status_event(
+                    task_id,
+                    "failed",
+                    name,
+                    "transport_error",
+                    error=str(exc),
+                )
+            )
+            if attempt >= retries:
+                break  # budget spent — the channel task is done, no pause
+            requested = exc.retry_after or TRANSPORT_RETRY_PAUSE_SECONDS
+            pause = min(requested, RETRY_AFTER_CAP_SECONDS)
+            if (
+                exc.retry_after is not None
+                and exc.retry_after > RETRY_AFTER_CAP_SECONDS
+            ):
+                logger.warning(
+                    "notify worker: retry_after %.1fs capped to %.1fs (task %s, channel %s)",
+                    exc.retry_after,
+                    RETRY_AFTER_CAP_SECONDS,
+                    task_id,
+                    name,
+                )
+            await sleep(pause)
+            continue
         except Exception as exc:
-            # A channel bug in the probe — same rule as in send (§3.2):
-            # loud trace, the exception class in ``error``, the channel
-            # closes as an app error.
+            # Unclassified = a channel bug, not a ChannelError
+            # (§3.2): retrying a bug is pointless, losing the
+            # observability is not — loud trace, app_error.
             logger.exception(
-                "notify worker: is_available of channel %r raised — closing as app_error (task %s)",
+                "notify worker: unclassified exception from channel %r"
+                " send — closing as app_error (task %s)",
                 name,
                 task_id,
             )
             await publish(
-                _status_event(task_id, "failed", name, "app_error", error=type(exc).__name__)
+                _status_event(
+                    task_id,
+                    "failed",
+                    name,
+                    "app_error",
+                    error=type(exc).__name__,
+                )
             )
+            break
         else:
-            if not available:
-                await publish(_status_event(task_id, "failed", name, "unavailable"))
-            else:
-                for attempt in range(1, retries + 1):
-                    await publish(
-                        _status_event(task_id, "sending", name, "attempt", sent_text=text)
-                    )
-                    try:
-                        await channel.send(task["address"], text)
-                    except ChannelAppError as exc:
-                        await publish(
-                            _status_event(task_id, "failed", name, "app_error", error=str(exc))
-                        )
-                        break
-                    except ChannelTransportError as exc:
-                        await publish(
-                            _status_event(
-                                task_id,
-                                "failed",
-                                name,
-                                "transport_error",
-                                error=str(exc),
-                            )
-                        )
-                        if attempt >= retries:
-                            break  # budget spent — the channel task is done, no pause
-                        requested = exc.retry_after or TRANSPORT_RETRY_PAUSE_SECONDS
-                        pause = min(requested, RETRY_AFTER_CAP_SECONDS)
-                        if (
-                            exc.retry_after is not None
-                            and exc.retry_after > RETRY_AFTER_CAP_SECONDS
-                        ):
-                            logger.warning(
-                                "notify worker: retry_after %.1fs capped to %.1fs (task %s, channel %s)",
-                                exc.retry_after,
-                                RETRY_AFTER_CAP_SECONDS,
-                                task_id,
-                                name,
-                            )
-                        await sleep(pause)
-                        continue
-                    except Exception as exc:
-                        # Unclassified = a channel bug, not a ChannelError
-                        # (§3.2): retrying a bug is pointless, losing the
-                        # observability is not — loud trace, app_error.
-                        logger.exception(
-                            "notify worker: unclassified exception from channel %r"
-                            " send — closing as app_error (task %s)",
-                            name,
-                            task_id,
-                        )
-                        await publish(
-                            _status_event(
-                                task_id,
-                                "failed",
-                                name,
-                                "app_error",
-                                error=type(exc).__name__,
-                            )
-                        )
-                        break
-                    else:
-                        await publish(
-                            _status_event(task_id, "sent", name, "delivered", sent_text=text)
-                        )
-                        return
+            await publish(
+                _status_event(task_id, "sent", name, "delivered", sent_text=text)
+            )
+            return
     # The channel task is terminally done without a delivery (rev.5:
     # ONE final event — the dispatcher chain owns the next channel).
     await publish(_status_event(task_id, "failed", name, "not_delivered"))

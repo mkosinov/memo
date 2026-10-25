@@ -1,5 +1,5 @@
 """The channel protocol and its failure taxonomy (GH #484 part 3, spec
-§3.2; family #476 §3.5; ADR 011).
+§3.2; family #476 §3.5; ADR 011; rev.5 of #485 — spec §6.1, ADR 014).
 
 A channel is the ASYNC seam between the worker and a messenger
 transport: the worker process is asyncio-native and the pilot channel of
@@ -7,11 +7,14 @@ part 4 (Telethon/MTProto) is async-native — a sync seam would force an
 async→sync bridge, rejected for the transport by ADR 013 for the same
 reason.
 
-Markup conversion is CHANNEL ownership: the worker hands the neutral
-text (the Markdown denominator) over verbatim, the channel converts
-inside ``send`` — every messenger has its own control syntax. Part 3
-ships the identity conversion of the mock; Markdown→Telegram HTML is
-part 4; there is deliberately no shared converter (YAGNI — one channel).
+Text assembly is WORKER ownership (ADR 014): the channel DECLARES its
+escape mode (``EscapeMode`` — ``none | html``) and the worker assembles
+the task text keyed by it BEFORE the send; ``send`` receives the
+ASSEMBLED text and hands it to the transport verbatim. The old «the
+channel converts the neutral markup» clause is retired with the neutral
+markup itself — a channel's template is written directly in the
+channel's format, values are escaped at substitution per channel format
+(spec §5.3): markup belongs to the template, data stays data.
 
 Failure taxonomy (spec §3.2): the worker counts retries, the channel
 classifies the failure — it is the only one that knows the transport.
@@ -22,7 +25,10 @@ error: loud trace + the channel closes without retries (spec §3.2).
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from src.notify.assembly import EscapeMode
 
 
 class ChannelError(Exception):
@@ -45,14 +51,19 @@ class ChannelTransportError(ChannelError):
 
 @runtime_checkable
 class Channel(Protocol):
-    """The delivery seam (family §3.5, ADR 011): ``name`` — the registry
-    key and the payload channel record value; ``is_available`` — the
-    cheap "setting filled AND transport answers" probe (no attempt is
-    burned on an unavailable channel); ``send`` — convert the neutral
-    markup and deliver; returning without an exception = delivered."""
+    """The delivery seam (family §3.5, ADR 011; rev.5 — spec §6.1, ADR
+    014): ``name`` — the registry key and the payload channel record
+    value; ``escape_mode`` — the DECLARED escape mode the worker keys
+    the text assembly by (``none`` — plain text, ``html`` — payload
+    values HTML-escaped at substitution); ``is_available`` — the cheap
+    "setting filled AND transport answers" probe (no attempt is burned
+    on an unavailable channel); ``send`` — deliver the text ASSEMBLED
+    BY THE WORKER (no channel-side markup conversion — the neutral
+    markup is retired); returning without an exception = delivered."""
 
     name: str
+    escape_mode: EscapeMode
 
     async def is_available(self) -> bool: ...
 
-    async def send(self, address: str, text_neutral: str) -> None: ...
+    async def send(self, address: str, text: str) -> None: ...

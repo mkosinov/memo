@@ -199,3 +199,53 @@ class TestRedisWipeSurvival:
         await dispatcher.reenqueue_stale_tasks(factory, wipe_queue)  # the next tick
 
         assert _stream_payloads(wipe_client) == first
+
+
+class TestReenqueueWorkerPEL:
+    """#485 Task 5 (family §3.3 rev.5): the predicate leg «не в PEL группы
+    worker» — over the REAL adapter. A task the worker claimed and holds
+    (channel pause, retry sleep) is NOT re-enqueued however stale its
+    ``updated_at`` is; once the worker acks, the next sweep picks it up
+    (no stamp was written while held)."""
+
+    async def test_held_task_skipped_released_task_reenqueued(
+        self, db_engine, db_session, wipe_client, wipe_queue
+    ) -> None:
+        task = await _stage_queued_task(db_session)
+        wipe_queue.ensure_worker_group()
+        wipe_queue.enqueue_task(_dispatcher_payload(task))
+
+        claimed = wipe_queue.claim_tasks()  # the PEL of the worker group
+        assert [p["task_id"] for p in claimed] == [task.id]
+        _age_task(task.id)
+
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        # held: exactly the ORIGINAL entry — no duplicate, no counter
+        assert len(_stream_payloads(wipe_client)) == 1
+        row = query_db(f"SELECT reenqueues FROM notify_tasks WHERE id = '{task.id}'")
+        assert row[0]["reenqueues"] == 0
+
+        wipe_queue.ack_task(claimed[0])  # the worker is done — ticket released
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        assert len(_stream_payloads(wipe_client)) == 2  # the re-enqueue landed
+        row = query_db(f"SELECT reenqueues FROM notify_tasks WHERE id = '{task.id}'")
+        assert row[0]["reenqueues"] == 1
+
+    async def test_missing_worker_group_probes_empty_and_proceeds(
+        self, db_engine, db_session, wipe_client, wipe_queue
+    ) -> None:
+        """NOGROUP (a wiped transport, the worker group never created):
+        the probe reads an EMPTY PEL — nothing was ever claimed — and
+        the sweep proceeds (wipe survival, §4.4)."""
+        task = await _stage_queued_task(db_session)
+        wipe_queue.enqueue_task(_dispatcher_payload(task))
+        wipe_client.flushdb()  # streams AND groups gone
+        _age_task(task.id)
+
+        assert wipe_queue.pending_worker_task_ids() == set()
+
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        assert [p["task_id"] for p in _stream_payloads(wipe_client)] == [task.id]

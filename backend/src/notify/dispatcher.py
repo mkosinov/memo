@@ -20,19 +20,34 @@ and the TaskGroup winds down cleanly.
   bookkeeping: ``attempts`` 1→2→3, ``processing_error`` (last error
   text) at 3 - never written during attempts 1-2; a dead event is no
   longer picked. The same iteration sweeps the re-enqueue predicate:
-  ``queued`` tasks with ``updated_at`` older than ``NOTIFY_REENQUEUE_AFTER``
-  are re-enqueued with the SAVED payload in full (no address
+  ``queued`` tasks with ``updated_at`` older than
+  ``NOTIFY_REENQUEUE_AFTER`` that the worker does not HOLD (family
+  §3.3 rev.5 — ``pending_worker_task_ids``: the PEL of the ``worker``
+  group; a channel-send pause or retry sleep is not a hang) are
+  re-enqueued with the SAVED payload in full (no address
   re-resolution); the ``updated_at`` refresh is the re-enqueue stamp that
   keeps the sweep from firing every tick; past the cap (module constant,
   not a setting) the task is ``failed``.
 - **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
   start, then claim → per event one append-only attempt row + the §4.3
-  derived task state in ONE commit → ack. Brak leaves delivery by the
-  two-layer rule (#484 spec §3.5): shape pre-validation and a
-  ``ValueError`` from ``apply_status_event`` (unknown task/stage after a
-  valid form) are journalled (identifiers only) and ACKED; any other
-  error keeps the item unacked — the reliable-list reclaim at the next
-  process start redelivers it (at-least-once, §4.4).
+  derived task state + the rev.5 CHAIN rules in ONE commit → the
+  spawned continuation (if any) is enqueued → ack. Chain (part-4 spec
+  §8, #485 Task 5): the first ``sent`` of any chain task writes
+  ``delivery_outcome = delivered`` on the root (terminal, never
+  flipped); a terminal failure (``not_delivered`` final or the
+  no-final ``app_error`` of an assembly error) spawns the next priority
+  channel — FRESH template freeze, payload/address/ids inherited from
+  the root (ADR 014) — or, at channel exhaustion with nothing in
+  flight, closes the chain ``not_delivered`` on the root (the reason
+  lives in the attempt journal). Spawn idempotency: the used-channel
+  filter over the chain rows is the ``UNIQUE(root_task_id, channel)``
+  pre-check — at-least-once report redelivery never duplicates a task.
+  Brak leaves delivery by the two-layer rule (#484 spec §3.5): shape
+  pre-validation and a ``ValueError`` from ``apply_status_event``
+  (unknown task/stage after a valid form) are journalled (identifiers
+  only) and ACKED; any other error keeps the item unacked — the
+  reliable-list reclaim at the next process start redelivers it
+  (at-least-once, §4.4).
 - **Cycle 3 — ``notify:inbound``**: routed by the handler registry
   (channel → handler). The pilot registry is EMPTY: log warning + ack.
 
@@ -58,8 +73,9 @@ from src.db.database import DBManager
 from src.notify.channels.registry import parse_channel_priority
 from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
 from src.notify.process import install_signal_handlers, run_loop
-from src.notify.queue import InboundEvent, build_task_payload
+from src.notify.queue import InboundEvent, TaskPayload, build_task_payload
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
+from src.notify.render import find_template
 from src.notify.scenarios import SCENARIOS
 from src.util.utc import utc_now
 
@@ -82,6 +98,21 @@ MAX_EVENT_ATTEMPTS = 3
 REENQUEUE_CAP = 10
 #: Failure text of a cap-exhausted task (spec §3.8 verbatim).
 REENQUEUE_FAILED_MESSAGE = "не доставлено: очередь не подтверждает приём"
+
+#: Failure volume of a §4. report that ends the CHANNEL task (spec §8.2:
+#: «транспортные ретраи исчерпаны, либо app_error»). ``not_delivered``
+#: is the worker's ONE final event; ``app_error`` is included because
+#: the ASSEMBLY failure (§5.4) publishes it WITHOUT any final follow-up
+#: — and the chain must continue there too (domain rule: «цепочка идёт
+#: к следующему каналу»). Harmless on the send-path duplicate (app_error
+#: followed by not_delivered): the spawn is idempotent (the used-channel
+#: filter is the UNIQUE(root, channel) pre-check) and the close is
+#: guarded by the in-flight check.
+TERMINAL_FAILURE_OUTCOMES = frozenset({"not_delivered", "app_error"})
+
+#: In-flight task statuses of a chain (§4.3): a live task means the
+#: chain is NOT exhausted, whatever the other rows say.
+_IN_FLIGHT_STATUSES = frozenset({"queued", "sending"})
 
 #: Inbound handler registry (channel → handler). Pilot: EMPTY — replies
 #: arrive with part 4; the empty-registry behavior (warn + ack) is the
@@ -239,7 +270,11 @@ async def process_pending_batch(
 async def reenqueue_stale_tasks(
     session_factory: async_sessionmaker[AsyncSession], queue: NotifyQueue
 ) -> None:
-    """Re-enqueue ``queued`` tasks older than ``NOTIFY_REENQUEUE_AFTER``.
+    """Re-enqueue ``queued`` tasks older than ``NOTIFY_REENQUEUE_AFTER``
+    that the worker does not HOLD (family §3.3 rev.5: not in the PEL of
+    the ``worker`` group — a task being worked on, e.g. a channel-send
+    pause or a transport-retry sleep, is not hanging; re-enqueueing it
+    would duplicate the delivery).
 
     The payload is the SAVED task row verbatim (§4.2 rev.5) — channel,
     address, render data and the frozen template; addresses never
@@ -256,6 +291,18 @@ async def reenqueue_stale_tasks(
     terminal-``sent`` rule (§4.4), whereas the reverse order could
     silently lose a notification for a full re-enqueue window.
     """
+    try:
+        held_ids = await asyncio.to_thread(queue.pending_worker_task_ids)
+    except NotifyTransportError as exc:
+        # The probe precedes every enqueue decision: a blind sweep over
+        # a dead probe would duplicate every task the worker holds.
+        # Nothing burns — the next tick retries the whole sweep.
+        logger.error(
+            "notify dispatcher: re-enqueue sweep aborted — worker PEL probe"
+            " failed (%s); the next tick retries",
+            exc,
+        )
+        return
     threshold = utc_now() - timedelta(
         seconds=settings.NOTIFY_REENQUEUE_AFTER
     )
@@ -281,6 +328,15 @@ async def reenqueue_stale_tasks(
                     REENQUEUE_FAILED_MESSAGE,
                     REENQUEUE_CAP,
                 )
+            elif task.id in held_ids:
+                # §3.3 rev.5: the worker holds the ticket (PEL) — not a
+                # hang; no stamp either, so the sweep re-checks after
+                # the worker is done with it.
+                logger.debug(
+                    "notify task %s: held by the worker (PEL) — re-enqueue skipped",
+                    task.id,
+                )
+                continue
             else:
                 try:
                     # sync adapter off the event loop (spec §3.1); the
@@ -312,7 +368,93 @@ async def reenqueue_stale_tasks(
 # ── cycle 2: notify:statuses (§3.8; family §4.3/§4.4) ───────────────────────
 
 
-async def apply_status_event(session: AsyncSession, item: StatusEvent) -> None:
+async def _chain_root(session: AsyncSession, task: NotifyTask) -> NotifyTask:
+    """The chain root of ``task`` — the row ``delivery_outcome`` lives
+    on. Falls back to ``task`` itself for a dangling chain reference
+    (the root row is gone): the outcome then lands on the surviving
+    task, never on a missing one."""
+    if task.root_task_id == task.id:
+        return task
+    root = await session.get(NotifyTask, task.root_task_id)
+    return task if root is None else root
+
+
+async def _chain_reaction(session: AsyncSession, task: NotifyTask) -> NotifyTask | None:
+    """The §8.2 chain rules on a TERMINAL failure of a channel task.
+
+    - Candidates: priority entries AFTER ``task.channel`` (all unused
+      ones when the channel left the priority list), minus the channels
+      the chain already used — the DB rows ARE the UNIQUE(root,
+      channel) pre-check, so an at-least-once duplicate report re-runs
+      this idempotently and never duplicates a task.
+    - First candidate with a template (§3.7 lookup, FRESH freeze for
+      the new channel) → a queued continuation inheriting the ROOT's
+      ``payload``/``address``/ids (never re-resolved, ADR 014) with
+      ``parent_task_id`` = the failed task; returned for the caller to
+      enqueue AFTER the commit (§3.4).
+    - No candidate AND nothing in flight (queued/sending chain tasks)
+      → the chain is exhausted: ``delivery_outcome = not_delivered`` on
+      the root. The REASON deliberately lives in the append-only attempt
+      journal (the failed events themselves) — no reason column on the
+      task (part-5 screens read attempts). ``delivered`` is never
+      overwritten; an in-flight sibling keeps the chain open — its own
+      terminal event closes it.
+    """
+    root = await _chain_root(session, task)
+    priority = parse_channel_priority(settings.NOTIFY_CHANNEL_PRIORITY)
+    chain = (
+        await session.execute(
+            select(NotifyTask.channel, NotifyTask.status).where(
+                NotifyTask.root_task_id == root.id
+            )
+        )
+    ).all()
+    used = {channel for channel, _status in chain if channel is not None}
+    in_flight = any(status in _IN_FLIGHT_STATUSES for _channel, status in chain)
+    if task.channel in priority:
+        candidates = priority[priority.index(task.channel) + 1 :]
+    else:
+        candidates = list(priority)
+    for name in candidates:
+        if name in used:
+            continue
+        template = await find_template(session, root.scenario, name)
+        if template is None:
+            # Near-dead branch (seed invariant: a default exists) — skip
+            # the channel LOUDLY and try the next one; exhaustion below
+            # closes the chain if nothing deliverable remains.
+            logger.error(
+                "notify dispatcher: chain of task %s: no template for channel %r"
+                " — channel skipped",
+                task.id,
+                name,
+            )
+            continue
+        continuation = NotifyTask(
+            event_id=root.event_id,
+            scenario=root.scenario,
+            client_id=root.client_id,
+            status="queued",
+            channel=name,
+            address=root.address,
+            payload=root.payload,
+            template_id=template.id,
+            template_body=template.body,
+            template_channel=template.channel,
+            root_task_id=root.id,
+            parent_task_id=task.id,
+            resend_of=root.resend_of,
+        )
+        session.add(continuation)
+        return continuation
+    if not in_flight and root.delivery_outcome is None:
+        root.delivery_outcome = "not_delivered"
+    return None
+
+
+async def apply_status_event(
+    session: AsyncSession, item: StatusEvent
+) -> TaskPayload | None:
     """One §4.3 stage event → append-only attempt row + derived task
     state, ONE commit (the caller acks only after it succeeds).
 
@@ -322,6 +464,18 @@ async def apply_status_event(session: AsyncSession, item: StatusEvent) -> None:
     never overridden (a late ``failed`` after a success, e.g. a
     re-enqueue duplicate, must not flip a delivered task). Idempotent
     re-apply only appends the attempt row (§4.4 — duplicates accepted).
+
+    Chain (rev.5, ADR 014 — the task is ONE channel):
+
+    - the first ``sent`` of any chain task → ``delivery_outcome =
+      delivered`` on the root (any success wins, even over a closed
+      ``not_delivered`` — a late duplicate that actually delivered);
+      ``delivered`` is never overwritten;
+    - a TERMINAL failure (``TERMINAL_FAILURE_OUTCOMES``) of a task
+      whose status is not the terminal ``sent`` → :func:`_chain_reaction`:
+      the next priority channel task (returned as its §4.2 payload for
+      the caller to enqueue after the commit) or the ``not_delivered``
+      close on the root at channel exhaustion.
     """
     task_id = item["task_id"]
     task = await session.get(NotifyTask, task_id)
@@ -343,9 +497,27 @@ async def apply_status_event(session: AsyncSession, item: StatusEvent) -> None:
             occurred_at=_naive_utc(item["occurred_at"]),
         )
     )
+    spawned: NotifyTask | None = None
     if task.status != "sent":
         task.status = stage
+    if stage == "sent":
+        # The chain outcome rides the ROOT (spec §8.2); «delivered» is
+        # terminal — written once, never flipped back.
+        root = await _chain_root(session, task)
+        root.delivery_outcome = "delivered"
+    elif (
+        stage == "failed"
+        and item.get("outcome") in TERMINAL_FAILURE_OUTCOMES
+        and task.status != "sent"
+    ):
+        spawned = await _chain_reaction(session, task)
     await session.commit()
+    if spawned is None:
+        return None
+    # §3.4 order: the row is committed, the queue message follows — an
+    # enqueue failure leaves the queued continuation to the re-enqueue
+    # cycle (duplicates accepted, §4.4).
+    return build_task_payload(spawned, _utc_now_iso_z())
 
 
 async def statuses_once(
@@ -378,7 +550,7 @@ async def statuses_once(
             continue
         try:
             async with session_factory() as session:
-                await apply_status_event(session, item)
+                spawned = await apply_status_event(session, item)
         except ValueError as exc:
             # Layer 2 (spec §3.5): a VALID form naming an unknown
             # task/stage — handmade/broken payload or a lost DB row;
@@ -396,6 +568,15 @@ async def statuses_once(
                 item,
             )
         else:
+            if spawned is not None:
+                # The chain continuation (§8.2): the row is committed,
+                # the queue message goes out BEFORE the ack — a transport
+                # failure leaves the event unacked (redelivery re-runs
+                # the reaction idempotently: the attempt row is an
+                # accepted duplicate, the spawn is suppressed by the
+                # used-channel filter) and the queued row waits for the
+                # re-enqueue cycle as the last resort.
+                await asyncio.to_thread(queue.enqueue_task, spawned)
             await asyncio.to_thread(queue.ack_status, item)
 
 

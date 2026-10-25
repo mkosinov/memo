@@ -117,9 +117,13 @@ class NotifyTransportError(Exception):
     """
 
 
-def _as_str(value: str | bytes) -> str:
-    """Normalize a Redis reply string across client decoding modes."""
-    return value.decode() if isinstance(value, bytes) else value
+def _as_str(value: str | bytes | int) -> str:
+    """Normalize a Redis reply value across client decoding modes —
+    ``message_id`` of an XPENDING reply is typed ``bytes | str | int``
+    (legacy integer ids), the cursor/entry ids are ``bytes | str``."""
+    if isinstance(value, bytes):
+        return value.decode()
+    return str(value)
 
 
 def _is_missing_group(message: str) -> bool:
@@ -302,6 +306,66 @@ class RedisQueue:
         group back into delivery (§4.4) — tasks only; the statuses and
         inbound streams are the dispatcher half's own reclaim."""
         self._reclaim_stream(TASKS_STREAM, WORKER_GROUP)
+
+    def pending_worker_task_ids(self) -> set[str]:
+        """Task ids in the PEL of the ``worker`` group on
+        ``notify:tasks`` — the dispatcher's re-enqueue predicate probe
+        (family §3.3 rev.5).
+
+        ``XPENDING`` (paged, inclusive cursor — the PEL carries message
+        ids, not payloads) + ``XRANGE`` per entry to read the task_id.
+        A missing group/key (NOGROUP — e.g. a wiped transport before
+        the worker ever ran) is an EMPTY set: nothing was ever claimed,
+        and the re-enqueue sweep MUST proceed for wipe survival (§4.4).
+        Every other failure is the typed transport error.
+        """
+        stream = self._stream(TASKS_STREAM)
+        ids: set[str] = set()
+        seen_entries: set[str] = set()
+        with self._transport("pending worker tasks"):
+            try:
+                cursor = "-"
+                while True:
+                    entries = self._client.xpending_range(
+                        stream,
+                        WORKER_GROUP,
+                        min=cursor,
+                        max="+",
+                        count=AUTOCLAIM_COUNT,
+                    )
+                    if not entries:
+                        break
+                    fresh = [
+                        _as_str(entry["message_id"])
+                        for entry in entries
+                        if _as_str(entry["message_id"]) not in seen_entries
+                    ]
+                    if not fresh:
+                        break
+                    seen_entries.update(fresh)
+                    for message_id in fresh:
+                        rows = cast(
+                            "list[tuple[str, dict[str, str]]]",
+                            self._client.xrange(
+                                stream, min=message_id, max=message_id, count=1
+                            ),
+                        )
+                        for _entry_id, fields in rows:
+                            try:
+                                ids.add(json.loads(fields[PAYLOAD_FIELD])["task_id"])
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                # A brak payload inside the PEL — the
+                                # worker's own brak rule acks it away;
+                                # the probe must not die on it.
+                                continue
+                    if len(entries) < AUTOCLAIM_COUNT:
+                        break
+                    cursor = fresh[-1]
+            except ResponseError as exc:
+                if _is_missing_group(str(exc)):
+                    return set()
+                raise
+        return ids
 
     # ── consumer start / graceful stop ───────────────────────────────────
 

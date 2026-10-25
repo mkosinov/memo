@@ -33,6 +33,7 @@ Covered (spec §5, US-5–US-8):
 """
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -50,8 +51,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
 from src.notify import dispatcher
-from src.notify.models import DomainEvent, NotifyTask
-from src.notify.queue import FakeQueue
+from src.notify.models import DomainEvent, NotifyTask, NotifyTemplate
+from src.notify.queue import FakeQueue, build_task_payload
 from src.notify.redis_queue import TRANSPORT_NOT_CONFIGURED_MESSAGE, NotifyTransportError
 from src.notify.render import RenderError
 from src.notify.scenarios import SCENARIOS
@@ -175,16 +176,60 @@ async def _stage_queued_task(
     return task
 
 
-def _status_item(task_id: str, stage: str, *, channel: str = "telegram") -> dict:
+def _status_item(
+    task_id: str,
+    stage: str,
+    *,
+    channel: str = "telegram",
+    outcome: str | None = None,
+    sent_text: str | None = None,
+) -> dict:
     return {
         "task_id": task_id,
         "stage": stage,
         "channel": channel,
-        "outcome": None,
+        "outcome": outcome,
         "error": "boom" if stage == "failed" else None,
-        "sent_text": None,
+        "sent_text": sent_text,
         "occurred_at": _iso_z(datetime.now(UTC)),
     }
+
+
+async def _stage_chain_task(
+    db_session,
+    *,
+    channel: str = "telegram",
+    status: str = "queued",
+    root_task_id: str | None = None,
+    parent_task_id: str | None = None,
+    address: str = "+79990001122",
+) -> NotifyTask:
+    """A chain task row with explicit chain knobs (#485 Task 5): the
+    first task of a chain passes ``root_task_id=None`` (the ORM default
+    fills it with the row's own id); a continuation names its root and
+    parent explicitly."""
+    event = DomainEvent(
+        type="new_record",
+        occurred_at=datetime.now(UTC).replace(tzinfo=None),
+        snapshot={},
+    )
+    db_session.add(event)
+    await db_session.flush()
+    task = NotifyTask(
+        event_id=event.id,
+        scenario="new_record",
+        status=status,
+        channel=channel,
+        address=address,
+        payload={"client": {"name": "Анна"}},
+        template_id=str(uuid.uuid4()),
+        template_body="{{ client.name }}",
+        root_task_id=root_task_id,
+        parent_task_id=parent_task_id,
+    )
+    db_session.add(task)
+    await db_session.commit()
+    return task
 
 
 def _task_row(task_id: str, *cols: str) -> dict:
@@ -630,6 +675,293 @@ class TestStatusesCycle:
         assert queue.reclaimed is True
 
 
+# ── channel chain — #485 Task 5 (part-4 spec §8; family §4.3 US-5) ───────────
+
+
+async def _seed_channel_template(db_session, channel: str) -> NotifyTemplate:
+    """A channel-tier ``new_record`` template — the autouse ``reset_db``
+    truncate wipes the migration-seeded default, and a spawn test needs
+    a findable tier for the NEXT channel."""
+    template = NotifyTemplate(
+        event_type="new_record",
+        channel=channel,
+        title=f"шаблон {channel}",
+        body=f"{channel.upper()} TIER {{{{ client.name }}}}",
+    )
+    db_session.add(template)
+    await db_session.commit()
+    return template
+
+
+class TestChainReaction:
+    """The dispatcher's chain rules (part-4 spec §8.2): a TERMINAL
+    failure of a channel task spawns the next priority channel (fresh
+    template freeze, inherited payload/address — never re-resolved);
+    channel exhaustion closes the chain ``not_delivered`` ON THE ROOT;
+    the first ``sent`` of ANY chain task is ``delivered``. Spawn is
+    idempotent (UNIQUE(root, channel) — at-least-once report redelivery
+    never duplicates a task)."""
+
+    async def test_terminal_failure_spawns_next_channel_task(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """падение канала 1 → задача канала 2: inherits the root's
+        payload/address/ids, freezes the NEXT channel's template tier
+        FRESH, and the §4.2 payload of the spawn reaches the queue."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        template = NotifyTemplate(
+            event_type="new_record",
+            channel="mock",
+            title="мок-канал",
+            body="MOCK TIER {{ client.name }}",
+        )
+        db_session.add(template)
+        await db_session.commit()
+        root = await _stage_chain_task(db_session, channel="telegram")
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        rows = query_db(
+            "SELECT id, status, root_task_id, parent_task_id, address, payload,"
+            " template_id, template_body, event_id, scenario, client_id,"
+            " delivery_outcome FROM notify_tasks WHERE channel = 'mock'"
+        )
+        assert len(rows) == 1
+        spawned = rows[0]
+        assert spawned["status"] == "queued"
+        assert spawned["root_task_id"] == root.id
+        assert spawned["parent_task_id"] == root.id
+        # inheritance from the ROOT (spec §8.2): payload/address frozen,
+        # never re-resolved
+        assert spawned["address"] == "+79990001122"
+        assert json.loads(spawned["payload"]) == {"client": {"name": "Анна"}}
+        assert spawned["event_id"] == root.event_id
+        assert spawned["scenario"] == "new_record"
+        assert spawned["client_id"] is None
+        # FRESH freeze for the new channel: the mock channel tier, not
+        # the root's frozen template
+        assert spawned["template_id"] == template.id
+        assert spawned["template_body"] == "MOCK TIER {{ client.name }}"
+        # the chain is in flight — no outcome on the root yet
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] is None
+        # the spawn reached the queue after the commit (§4.2 payload)
+        assert [p["task_id"] for p in queue.tasks] == [spawned["id"]]
+        assert queue.tasks[0]["channel"] == "mock"
+        assert queue.tasks[0]["root_task_id"] == root.id
+
+    async def test_sent_of_any_chain_task_marks_root_delivered(
+        self, db_engine, db_session
+    ) -> None:
+        root = await _stage_chain_task(db_session, channel="telegram")
+        cont = await _stage_chain_task(
+            db_session,
+            channel="mock",
+            root_task_id=root.id,
+            parent_task_id=root.id,
+        )
+        queue = FakeQueue()
+
+        queue.push_status(
+            _status_item(cont.id, "sent", channel="mock", sent_text="текст доставки")
+        )
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "delivered"
+        assert _task_row(cont.id, "status")["status"] == "sent"
+
+    async def test_channel_exhaustion_closes_chain_on_root(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """Исчерпание каналов: single-channel priority — the terminal
+        failure closes the chain ``not_delivered`` ON THE ROOT (the
+        reason lives in the attempt journal); nothing is spawned."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "not_delivered"
+        assert query_db("SELECT id FROM notify_tasks WHERE channel != 'telegram'") == []
+        assert queue.tasks == []
+        # the failure itself is in the append-only journal (part 5 reads
+        # attempts for the reason — no reason column on the task)
+        rows = query_db(
+            f"SELECT outcome FROM notify_task_attempts WHERE task_id = '{root.id}'"
+        )
+        assert rows == [{"outcome": "not_delivered"}]
+
+    async def test_intermediate_transport_failure_neither_spawns_nor_closes(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """A retry in progress is NOT a terminal failure: the intermediate
+        ``failed/transport_error`` event spawns nothing and closes
+        nothing."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        task = await _stage_chain_task(db_session, channel="telegram")
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(task.id, "failed", outcome="transport_error"))
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert query_db("SELECT id FROM notify_tasks WHERE channel = 'mock'") == []
+        assert _task_row(task.id, "delivery_outcome")["delivery_outcome"] is None
+
+    async def test_assembly_app_error_spawns_without_final_event(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """The assembly-error report (§5.4) carries ONE ``failed/
+        app_error`` and NO final ``not_delivered`` — it must still
+        continue the chain (domain rule: «цепочка идёт к следующему
+        каналу»)."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        await _seed_channel_template(db_session, "mock")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        queue = FakeQueue()
+
+        queue.push_status(
+            _status_item(
+                root.id,
+                "failed",
+                outcome="app_error",
+                sent_text=None,
+            )
+        )
+        await dispatcher.statuses_once(_session_factory(db_engine), queue)
+
+        assert len(query_db("SELECT id FROM notify_tasks WHERE channel = 'mock'")) == 1
+        assert len(queue.tasks) == 1
+
+    async def test_duplicate_report_redelivery_does_not_duplicate_spawn(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """DoD: повторная доставка отчёта не дублирует задачу — the
+        at-least-once duplicate of the terminal report re-runs the
+        reaction idempotently: ONE continuation task, ONE queue payload,
+        the root outcome stable."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        await _seed_channel_template(db_session, "mock")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+        item = _status_item(root.id, "failed", outcome="not_delivered")
+
+        queue.push_status(item)
+        await dispatcher.statuses_once(factory, queue)
+        queue.push_status(item)  # at-least-once duplicate (§4.4)
+        await dispatcher.statuses_once(factory, queue)
+
+        assert len(query_db("SELECT id FROM notify_tasks WHERE channel = 'mock'")) == 1
+        assert len(queue.tasks) == 1
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] is None
+
+    async def test_send_app_error_then_final_no_close_while_next_in_flight(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """The send-failure sequence is ``failed/app_error`` FOLLOWED BY
+        ``failed/not_delivered`` — both arrive after the spawn. The
+        second event must NOT close the chain while the continuation is
+        still in flight; the continuation's own terminal failure closes
+        it."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        await _seed_channel_template(db_session, "mock")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(root.id, "failed", outcome="app_error"))
+        await dispatcher.statuses_once(factory, queue)
+        rows = query_db("SELECT id FROM notify_tasks WHERE channel = 'mock'")
+        assert len(rows) == 1
+        cont_id = rows[0]["id"]
+
+        # the final of channel 1: the chain has a live task — no close
+        queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(factory, queue)
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] is None
+
+        # the continuation exhausts the chain — outcome on the root
+        queue.push_status(_status_item(cont_id, "failed", channel="mock", outcome="not_delivered"))
+        await dispatcher.statuses_once(factory, queue)
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "not_delivered"
+
+    async def test_late_sent_after_close_flips_root_to_delivered(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """«Успех любой задачи — цепочка успешна»: a late ``sent`` (the
+        accepted rare duplicate that actually delivered) re-opens the
+        closed chain to ``delivered`` — truth wins, ``delivered`` is the
+        terminal root outcome."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(factory, queue)
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "not_delivered"
+
+        queue.push_status(_status_item(root.id, "sent"))
+        await dispatcher.statuses_once(factory, queue)
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "delivered"
+
+    async def test_sent_task_late_failure_never_spawns_never_flips(
+        self, db_engine, db_session, monkeypatch
+    ) -> None:
+        """``sent`` is TERMINAL on the task: a late terminal failure of
+        an already-sent task (a re-enqueue duplicate) neither continues
+        the chain nor flips the root outcome."""
+        monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram,mock")
+        root = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+
+        queue.push_status(_status_item(root.id, "sent"))
+        await dispatcher.statuses_once(factory, queue)
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "delivered"
+
+        queue.push_status(_status_item(root.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(factory, queue)
+
+        assert query_db("SELECT id FROM notify_tasks WHERE channel = 'mock'") == []
+        assert _task_row(root.id, "delivery_outcome")["delivery_outcome"] == "delivered"
+
+
+class TestStatusesSentText:
+    """DoD «отчёты пишут ``sent_text``»: the §4.3 rev.5 report carries
+    the actually transmitted text — the dispatcher lands it on the
+    append-only attempt rows (failures before transmission keep NULL)."""
+
+    async def test_attempt_rows_carry_the_reported_sent_text(
+        self, db_engine, db_session
+    ) -> None:
+        task = await _stage_chain_task(db_session, channel="telegram")
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+
+        queue.push_status(
+            _status_item(task.id, "sending", sent_text="Готовый текст попытки")
+        )
+        queue.push_status(
+            _status_item(task.id, "sent", sent_text="Готовый текст попытки")
+        )
+        queue.push_status(_status_item(task.id, "failed", outcome="not_delivered"))
+        await dispatcher.statuses_once(factory, queue)
+
+        rows = query_db(
+            f"SELECT stage, sent_text FROM notify_task_attempts WHERE task_id = '{task.id}'"
+            " ORDER BY occurred_at, rowid"
+        )
+        assert rows == [
+            {"stage": "sending", "sent_text": "Готовый текст попытки"},
+            {"stage": "sent", "sent_text": "Готовый текст попытки"},
+            {"stage": "failed", "sent_text": None},
+        ]
+
+
 # ── statuses brak rule — #484 Task 6 (spec §3.5, two layers) ─────────────────
 
 
@@ -884,6 +1216,68 @@ class TestReenqueue:
         await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), queue)
 
         assert queue.tasks == []
+
+
+# ── re-enqueue × worker PEL — #485 Task 5 (family §3.3 rev.5) ────────────────
+
+
+class TestReenqueueWorkerPEL:
+    """The re-enqueue predicate's third leg: «не в PEL группы worker».
+    A task the worker HOLDS (claimed, unacked — e.g. sleeping out a
+    channel pause or a transport retry) is NOT hanging: the sweep must
+    not duplicate it. Once the worker acks, the age predicate fires
+    again on a later sweep."""
+
+    async def test_task_held_by_worker_is_not_reenqueued(
+        self, db_engine, db_session
+    ) -> None:
+        task = await _stage_queued_task(db_session, age_seconds=300)
+        factory = _session_factory(db_engine)
+        queue = FakeQueue()
+        queue.enqueue_task(build_task_payload(task, _iso_z(datetime.now(UTC))))
+
+        claimed = queue.claim_tasks()  # the worker's PEL holds the task
+        assert [p["task_id"] for p in claimed] == [task.id]
+
+        await dispatcher.reenqueue_stale_tasks(factory, queue)
+
+        assert queue.tasks == []
+        row = _task_row(task.id, "reenqueues", "updated_at")
+        assert row["reenqueues"] == 0
+        # no re-enqueue stamp either: the task stays eligible, the
+        # updated_at is still inside the stale window
+        assert datetime.fromisoformat(row["updated_at"]) < datetime.now(UTC).replace(
+            tzinfo=None
+        ) - timedelta(seconds=settings.NOTIFY_REENQUEUE_AFTER)
+
+        # the worker is done — the next sweep re-enqueues normally
+        queue.ack_task(claimed[0])
+        await dispatcher.reenqueue_stale_tasks(factory, queue)
+        assert len(queue.tasks) == 1
+        assert _task_row(task.id, "reenqueues")["reenqueues"] == 1
+
+    async def test_pel_probe_failure_aborts_sweep_without_burning(
+        self, db_engine, db_session
+    ) -> None:
+        """A dead transport at the PROBE point aborts the whole sweep:
+        nothing is enqueued, no counters move — the next tick retries.
+        (A blind sweep would duplicate every task the worker holds.)"""
+        task = await _stage_queued_task(db_session, age_seconds=300)
+
+        class _ProbeBrokenQueue(FakeQueue):
+            def pending_worker_task_ids(self) -> set[str]:
+                raise NotifyTransportError(
+                    "notify queue transport failed during pending worker tasks:"
+                    " ConnectionError: mock-dead-redis"
+                )
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.reenqueue_stale_tasks(
+                _session_factory(db_engine), _ProbeBrokenQueue()
+            )
+
+        assert _task_row(task.id, "reenqueues")["reenqueues"] == 0
+        assert any("PEL" in m or "pending" in m for m in messages)
 
 
 # ── enqueue-point transport failure — GH #483 Task 4 (spec §3.1) ────────────

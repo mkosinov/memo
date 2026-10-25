@@ -120,6 +120,14 @@ class NotifyQueue(Protocol):
         and inbound) back into delivery."""
         ...
 
+    def pending_worker_task_ids(self) -> set[str]:
+        """Task ids currently claimed-but-unacked by the ``worker``
+        group on ``notify:tasks`` — the PEL probe of the dispatcher's
+        re-enqueue predicate (family §3.3 rev.5: a task the worker
+        HOLDS — a channel pause, a retry sleep — is not hanging). A
+        transport failure raises :class:`NotifyTransportError`."""
+        ...
+
     def ensure_consumer_groups(self) -> None:
         """Consumer-start duty (§3.1): create this consumer's groups on
         the up-streams (``XGROUP CREATE ... MKSTREAM``; only BUSYGROUP
@@ -228,6 +236,13 @@ class FakeQueue:
         and inbound (spec §3.1)."""
         self._tasks = self._servicing_tasks + self._tasks
         self._servicing_tasks = []
+
+    def pending_worker_task_ids(self) -> set[str]:
+        """The in-memory PEL analogue: task ids claimed by
+        ``claim_tasks`` and not yet acked (family §3.3 rev.5)."""
+        return {
+            item["task_id"] for item in self._servicing_tasks if isinstance(item, dict)
+        }
 
     def ensure_worker_group(self) -> None:
         """No-op: plain lists need no consumer groups (§3.1 seam)."""

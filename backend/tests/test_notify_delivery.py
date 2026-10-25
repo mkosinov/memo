@@ -487,7 +487,8 @@ class TestTemplateOriginThreading:
 
     async def test_payload_without_the_key_sends_none(self) -> None:
         """The origin is delivery-metadata (like ``template_id``): a
-        payload missing it is NOT brak — the send gets ``None``."""
+        payload missing it does NOT break the task — the send gets
+        ``None``."""
         tg = StubChannel("telegram")
         raw = _task(channel="telegram")
         raw.pop("template_channel", None)

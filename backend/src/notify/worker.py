@@ -143,7 +143,7 @@ def parse_task_payload(raw: dict[str, Any]) -> TaskPayload:
     ``root_task_id``/``created_at``/``resend_of`` are deliberately not
     checked; ``template_channel`` (the frozen template's ORIGIN, #485
     Task 4) is metadata too — a missing value means the universal
-    spelling and never braks. Returns the same dict untouched: the seam
+    spelling and never breaks. Returns the same dict untouched: the seam
     stays plain JSON (§4.2), no new schema objects (ADR 009).
     """
     task_id = raw.get("task_id")

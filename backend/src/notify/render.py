@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
-from src.notify.assembly import (  # noqa: F401 — re-exported facade
+from src.notify.assembly import (
     RenderError,
     assemble_text,
     fmt_dt,
@@ -36,6 +36,18 @@ from src.notify.models import NotifyTemplate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+#: Re-exported facade of the assembly half (``__all__`` makes the
+#: re-export EXPLICIT — mypy strict has no implicit re-export; tests
+#: and the scenario import these names from HERE, not from assembly).
+__all__ = [
+    "RenderError",
+    "assemble_text",
+    "find_template",
+    "fmt_dt",
+    "money",
+    "render_event",
+]
 
 
 async def find_template(

@@ -52,7 +52,6 @@ from typing import Any
 
 import pytest
 
-from src.notify.assembly import RenderError
 from src.notify.channels.base import (
     Channel,
     ChannelAppError,

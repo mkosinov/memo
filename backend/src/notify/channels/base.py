@@ -69,12 +69,20 @@ class ChannelLimits:
       of the channel in the worker process (Telegram: 30 s);
     - ``admin_address`` — where the one-per-window service message
       goes via the SAME channel; ``None`` — no service message (the
-      reason stays in the journal).
+      reason stays in the journal);
+    - ``display_name`` — the channel's HUMAN name for the §6.3
+      service-message sentence («Суточный лимит Telegram исчерпан, …»
+      — spec §6.3 fixes the sentence with the display name, never the
+      raw registry key); ``None`` — the mechanism falls back to the
+      capitalized key (``telegram`` → ``Telegram``), so every channel
+      gets a human name by default (Telegram of part 4 Task 4
+      declares «Telegram» explicitly).
     """
 
     daily_cap: int
     send_pause_seconds: float
     admin_address: str | None = None
+    display_name: str | None = None
 
 
 @runtime_checkable

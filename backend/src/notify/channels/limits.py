@@ -98,12 +98,16 @@ def cap_notified_key(channel: str, today: date) -> str:
     return CAP_NOTIFIED_KEY_TEMPLATE.format(channel=channel, yyyymmdd=_yyyymmdd(today))
 
 
-def admin_cap_message(channel: str) -> str:
-    """The §6.3 service-message text — channel-generic (``telegram``
-    yields the spec's exact sentence): «Суточный лимит <канал>
-    исчерпан, уведомления не доставляются до конца окна»."""
+def admin_cap_message(channel: str, limits: ChannelLimits) -> str:
+    """The §6.3 service-message text — the spec's exact sentence with
+    the channel's HUMAN display name: «Суточный лимит Telegram
+    исчерпан, уведомления не доставляются до конца окна». The display
+    name comes from the declaration (``limits.display_name``); undeclared
+    — the capitalized registry key (``telegram`` → ``Telegram``), so
+    every channel gets a human name by default."""
+    display = limits.display_name or channel.capitalize()
     return (
-        f"Суточный лимит {channel} исчерпан,"
+        f"Суточный лимит {display} исчерпан,"
         " уведомления не доставляются до конца окна"
     )
 
@@ -300,7 +304,7 @@ class ChannelLimiter:
             return
         await self._hold_pause(name, limits.send_pause_seconds)
         try:
-            await channel.send(limits.admin_address, admin_cap_message(name))
+            await channel.send(limits.admin_address, admin_cap_message(name, limits))
         except Exception as exc:
             # The notice must never mask the cap refusal: log loudly,
             # keep the flag DOWN — the next exhaustion retries (the

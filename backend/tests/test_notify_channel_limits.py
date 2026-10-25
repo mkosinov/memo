@@ -90,14 +90,34 @@ class TestCapWindowKeys:
 
 
 class TestAdminCapMessage:
-    def test_message_is_channel_generic_spec_sentence(self) -> None:
-        assert admin_cap_message("telegram") == (
-            "Суточный лимит telegram исчерпан, уведомления не доставляются"
-            " до конца окна"
+    def test_message_is_the_spec_sentence_with_the_display_name(self) -> None:
+        """§6.3 fixes the exact sentence with the channel's HUMAN
+        name («Суточный лимит Telegram исчерпан, …») — the display
+        name, never the raw registry key."""
+        limits = ChannelLimits(
+            daily_cap=200, send_pause_seconds=30.0, display_name="Telegram"
         )
 
-    def test_message_names_the_channel(self) -> None:
-        assert "mock" in admin_cap_message("mock")
+        assert admin_cap_message("telegram", limits) == (
+            "Суточный лимит Telegram исчерпан,"
+            " уведомления не доставляются до конца окна"
+        )
+
+    def test_undeclared_display_name_falls_back_to_the_capitalized_key(
+        self,
+    ) -> None:
+        limits = ChannelLimits(daily_cap=25, send_pause_seconds=0.0)
+
+        assert "Mock" in admin_cap_message("mock", limits)
+        assert "Telegram" in admin_cap_message("telegram", limits)
+
+    def test_message_names_the_declared_display_name_not_the_key(self) -> None:
+        limits = ChannelLimits(
+            daily_cap=25, send_pause_seconds=0.0, display_name="Мок-канал"
+        )
+
+        assert "Мок-канал" in admin_cap_message("mock", limits)
+        assert "mock" not in admin_cap_message("mock", limits)
 
 
 # ── test seams: the faked store, clock, and channel ──────────────────────────
@@ -317,7 +337,7 @@ class TestAdminServiceMessage:
             await limiter.governed_send(chan, "+79990001122", "текст")
 
         # via the SAME channel, to the admin address, the §6.3 sentence
-        assert chan.sends == [("+79995556677", admin_cap_message("mock"))]
+        assert chan.sends == [("+79995556677", admin_cap_message("mock", chan.limits))]
         # the flag is set AFTER the successful send, once
         assert store.marked == [("mock", FROZEN_TODAY)]
 
@@ -379,6 +399,28 @@ class TestAdminServiceMessage:
         with pytest.raises(ChannelAppError):
             await limiter.governed_send(chan, "+79990001122", "текст")
         assert len(chan.sends) == 2
+
+    async def test_service_message_carries_the_declared_display_name(
+        self,
+    ) -> None:
+        """§6.3's exact sentence names the channel's HUMAN display name
+        (spec: «Суточный лимит Telegram исчерпан, …») — a channel
+        declaring it gets it verbatim in the sent text."""
+        limits = ChannelLimits(
+            daily_cap=25,
+            send_pause_seconds=0.0,
+            admin_address="+79995556677",
+            display_name="Telegram",
+        )
+        store = FakeCapStore(count=25)
+        chan = RecordingChannel(name="mock", limits=limits)
+        limiter = _limiter(store)
+
+        with pytest.raises(ChannelAppError):
+            await limiter.governed_send(chan, "+79990001122", "текст")
+
+        assert chan.sends == [("+79995556677", admin_cap_message("mock", limits))]
+        assert chan.sends[0][1].startswith("Суточный лимит Telegram исчерпан,")
 
 
 # ── §6.3: the async pause between sequential sends ───────────────────────────
@@ -460,7 +502,7 @@ class TestSendPause:
             await limiter.governed_send(chan, "+79990001122", "два")  # exhausted
 
         assert sleep.pauses == [30.0]  # held before the ADMIN message
-        assert chan.sends[1] == ("+79995556677", admin_cap_message("mock"))
+        assert chan.sends[1] == ("+79995556677", admin_cap_message("mock", chan.limits))
 
     async def test_exhausted_window_with_flag_set_holds_no_pause(self) -> None:
         """Nothing transmits (flag already set) — no pause is held."""

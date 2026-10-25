@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process';
+
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
 import {
@@ -274,7 +276,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     }
   });
 
-  test("§12-2: unresolvable address → attempt with the cause; chain closes «не доставлено» (mock is the last channel)", async ({
+  test("§12-2: unresolvable address → attempt with the cause; the inherited marker exhausts the chain «не доставлено»", async ({
     request,
   }) => {
     // 1. SETUP — the marker phone IS the #484 unresolvable-address
@@ -299,15 +301,18 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       });
       expect(record.id).toBeTruthy();
 
-      // 3. VERIFY DB — the task fails terminally AND the chain closes
-      //    on the root: `mock` is the LAST priority channel (§8.2 — no
-      //    candidate → delivery_outcome = not_delivered).
+      // 3. VERIFY DB — the ROOT task (channel 1) fails terminally AND
+      //    the chain closes on the root (§8.2): the inherited marker
+      //    kills EVERY priority channel, and once the last one (mock2)
+      //    is exhausted with nothing in flight → delivery_outcome =
+      //    not_delivered («все каналы недоступны», family US-4/US-5).
       await expect
         .poll(
           async () => {
             taskRow = queryDBRow(
               `SELECT id, status, delivery_outcome, root_task_id FROM notify_tasks
-           WHERE client_id='${client.id}' AND scenario='new_record'`,
+           WHERE client_id='${client.id}' AND scenario='new_record'
+             AND channel='mock'`,
             );
             return (
               taskRow !== null &&
@@ -339,14 +344,152 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         ),
       ).toBe(true);
 
-      // …no continuation task was spawned (single-channel chain: the
-      // root task is the only one — UNIQUE(root_task_id, channel)).
+      // …the chain walked EVERY priority channel and each one died on
+      // the INHERITED marker (the address is never re-resolved, §8.2 —
+      // mock2's task fails with the SAME cause) — exactly two tasks,
+      // one per channel (UNIQUE(root_task_id, channel)).
       const chainRows = queryDBRows(
-        `SELECT id FROM notify_tasks WHERE root_task_id='${taskRow!.root_task_id}'`,
+        `SELECT channel, status FROM notify_tasks
+         WHERE root_task_id='${taskRow!.root_task_id}' ORDER BY created_at`,
       );
-      expect(chainRows.length).toBe(1);
+      expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
+      expect(chainRows.every((r) => r.status === "failed")).toBe(true);
+      const mock2Row = queryDBRow(
+        `SELECT id FROM notify_tasks
+         WHERE root_task_id='${taskRow!.root_task_id}' AND channel='mock2'`,
+      );
+      const mock2Attempts = queryDBRows(
+        `SELECT stage, outcome, error FROM notify_task_attempts
+         WHERE task_id='${mock2Row!.id}'`,
+      );
+      expect(
+        mock2Attempts.some(
+          (a) =>
+            a.stage === "failed" &&
+            a.outcome === "app_error" &&
+            String(a.error).startsWith("mock: scripted app failure"),
+        ),
+      ).toBe(true);
     } finally {
       // 4. CLEANUP — safe after the terminal state.
+      if (record?.id) await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  test("§12-3: channel 1 fails → the chain delivers via channel 2", async ({
+    request,
+  }) => {
+    // 1. SETUP — kill channel 1 through its OWN cap window (the
+    //    scenario-3 lever, mock2.py: the limits mechanism keys the
+    //    window by channel NAME, so exhausting `mock`'s window leaves
+    //    `mock2`'s untouched — the address markers CANNOT drive this
+    //    scenario because the chain INHERITS the root address and both
+    //    mocks share the marker semantics). The pre-send gate raises
+    //    ChannelAppError «суточный лимит исчерпан» (§4.4/§6.3) — a
+    //    terminal failure that spawns the next priority channel (§8.2).
+    //    The stack priority is mock,mock2; the client phone is PLAIN —
+    //    channel 2 must deliver to the recorder.
+    const { start } = futureStart();
+    const activity = await createTestActivity(request, { start });
+    const uid = Date.now();
+    const clientName = `Notify 485 S3 Client ${uid}`;
+    const clientPhone = `+7996${String(uid).slice(-7)}`;
+    const client = await createTestClient(request, {
+      name: clientName,
+      phone: clientPhone,
+    });
+
+    // The §4.4 window key: notify:{channel}:cap:<ГГГГММДД> — the UTC
+    // date of the naive-UTC wall clock the limiter uses. Pre-set
+    // mock's counter to its declared cap (MOCK_DAILY_CAP = 25,
+    // backend/src/notify/channels/mock.py) with the store's 48 h TTL.
+    const yyyymmdd = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const redisPort = process.env.NOTIFY_E2E_REDIS_PORT || "6380";
+    const redis = (cmd: string): string =>
+      execSync(`redis-cli -p ${redisPort} ${cmd}`, { encoding: "utf-8" }).trim();
+    const mockCapKey = `notify:mock:cap:${yyyymmdd}`;
+    const mock2CapKey = `notify:mock2:cap:${yyyymmdd}`;
+    redis(`SET ${mockCapKey} 25 EX 172800`);
+
+    // `any` — the house pattern (see the S6 test above).
+    let rootTask: any = null;
+    let mock2Task: any = null;
+    let record: any = null;
+
+    try {
+      // 2. ACTION — authenticated create with the notify flag: the
+      //    scenario queues the FIRST-priority (mock) root task.
+      record = await createTestRecord(request, activity.id, client.id, {
+        notify: true,
+      });
+      expect(record.id).toBeTruthy();
+
+      // 3. VERIFY DB — the continuation task (channel 2) delivers:
+      //    spawned by the dispatcher after mock's terminal failure,
+      //    INHERITING the root's address (never re-resolved, §8.2)
+      //    with a FRESH template freeze, and landing `sent`.
+      await expect.poll(async () => {
+        mock2Task = queryDBRow(
+          `SELECT id, status, root_task_id, address, template_body
+           FROM notify_tasks
+           WHERE client_id='${client.id}' AND scenario='new_record'
+             AND channel='mock2'`,
+        );
+        return mock2Task !== null && mock2Task.status === "sent";
+      }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
+      expect(mock2Task!.address).toBe(clientPhone);
+      expect(mock2Task!.template_body).toBeTruthy();
+
+      // …the root task (channel 1) failed terminally with the
+      // human-readable cap cause, and the chain OUTCOME is written on
+      // the root: any channel's success delivers the chain (§8.2).
+      rootTask = queryDBRow(
+        `SELECT id, status, delivery_outcome FROM notify_tasks
+         WHERE client_id='${client.id}' AND scenario='new_record'
+           AND channel='mock'`,
+      );
+      expect(rootTask!.status).toBe("failed");
+      expect(rootTask!.delivery_outcome).toBe("delivered");
+
+      // …channel 1's attempt carries the cause (§6.3 — the refusal
+      // reason rides the app_error status)…
+      const mockAttempts = queryDBRows(
+        `SELECT stage, outcome, error FROM notify_task_attempts
+         WHERE task_id='${rootTask!.id}'`,
+      );
+      expect(
+        mockAttempts.some(
+          (a) =>
+            a.stage === "failed" &&
+            a.outcome === "app_error" &&
+            String(a.error).includes("суточный лимит исчерпан"),
+        ),
+      ).toBe(true);
+
+      // …and channel 2's attempt keeps the actually-delivered text.
+      const mock2Attempts = queryDBRows(
+        `SELECT stage, outcome, sent_text FROM notify_task_attempts
+         WHERE task_id='${mock2Task!.id}'`,
+      );
+      const sent = mock2Attempts.find(
+        (a) => a.stage === "sent" && a.outcome === "delivered",
+      );
+      expect(sent).toBeTruthy();
+      expect(String(sent!.sent_text)).toContain(clientName);
+
+      // …the chain is exactly two tasks — one per channel
+      // (UNIQUE(root_task_id, channel)).
+      const chainRows = queryDBRows(
+        `SELECT channel FROM notify_tasks WHERE root_task_id='${mock2Task!.root_task_id}' ORDER BY created_at`,
+      );
+      expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
+    } finally {
+      // 4. CLEANUP — restore BOTH cap windows first (mock's was
+      //    synthetic, mock2's got one real INCR; the per-test canon
+      //    reset covers sqlite only, Redis is stack-lifetime), then
+      //    the created rows (terminal-state rule above).
+      redis(`DEL ${mockCapKey} ${mock2CapKey}`);
       if (record?.id) await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/clients/${client.id}`);
     }

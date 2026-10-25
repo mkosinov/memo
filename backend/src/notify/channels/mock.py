@@ -12,6 +12,11 @@ falling/healing channel for the fallback scenarios), ``fail-app:`` →
 ``ChannelAppError`` (the unresolvable-address analogue), anything else
 delivers.
 
+The mock also declares its OWN limit settings (``MOCK_LIMITS`` — a
+small exhaustible ``daily_cap`` for the cap contour tests, spec §4.4:
+«мок-канал наследует механизм для контурных тестов потолка»); the
+limits MECHANISM itself is Task 3's registry machinery.
+
 Recorders:
 
 - ``InMemoryRecorder`` — the unit-test artifact (a list + a snapshot
@@ -43,7 +48,11 @@ from redis.exceptions import RedisError
 from redis.retry import Retry
 
 from src.core.config import settings
-from src.notify.channels.base import ChannelAppError, ChannelTransportError
+from src.notify.channels.base import (
+    ChannelAppError,
+    ChannelLimits,
+    ChannelTransportError,
+)
 from src.notify.channels.registry import CHANNELS
 from src.notify.redis_queue import MAX_POOL_CONNECTIONS, SOCKET_TIMEOUT_SECONDS
 
@@ -54,6 +63,31 @@ if TYPE_CHECKING:
 MOCK_DELIVERIES_LIST = "notify:mock:deliveries"
 #: ``LTRIM`` ceiling of the Redis recorder (spec §3.6: 1000 entries).
 MOCK_DELIVERIES_CAP = 1000
+
+# ── the mock's OWN limit settings (spec §4.4/§6.3, plan Task 2 step 4) ──────
+#
+# Declaration only — the Task-3 registry mechanism consumes the fields;
+# the mock inherits it «для контурных тестов потолка» (spec §4.4).
+
+#: A deliberately SMALL daily ceiling: a notify-tests contour run can
+#: exhaust the cap window without hundreds of deliveries (US-4 of the
+#: family; Task 6 contours may also inject their own ``ChannelLimits``).
+MOCK_DAILY_CAP = 25
+
+#: No pause between sequential mock sends — the observability channel
+#: must not slow the contours down (Telegram's 30 s is ITS own setting).
+MOCK_SEND_PAUSE_SECONDS = 0.0
+
+#: No service message by default — the admin-address seam is opt-in per
+#: contour via an injected ``ChannelLimits``.
+MOCK_ADMIN_ADDRESS: str | None = None
+
+#: The declared default limits of the mock (spec §4.4).
+MOCK_LIMITS = ChannelLimits(
+    daily_cap=MOCK_DAILY_CAP,
+    send_pause_seconds=MOCK_SEND_PAUSE_SECONDS,
+    admin_address=MOCK_ADMIN_ADDRESS,
+)
 
 
 def _utc_now_iso_z() -> str:
@@ -135,13 +169,20 @@ class MockChannel:
     """Plain-text mock channel (spec §3.6/§5.3): ``escape_mode =
     "none"`` — the assembled text goes out VERBATIM; outcomes are
     scripted by the ADDRESS PREFIX — fail-transport:, fail-app:,
-    anything else delivers to the recorder."""
+    anything else delivers to the recorder. Carries its OWN declarative
+    limit settings (``limits`` — spec §4.4/§6.3, a small exhaustible
+    cap for the Task-6 contour tests; the mechanism is Task 3's)."""
 
     name = "mock"
     escape_mode: EscapeMode = "none"
 
-    def __init__(self, recorder: Recorder) -> None:
+    def __init__(
+        self, recorder: Recorder, *, limits: ChannelLimits | None = None
+    ) -> None:
         self._recorder = recorder
+        #: The declared limits (spec §4.4) — ``MOCK_LIMITS`` unless the
+        #: contour injects its own window.
+        self.limits: ChannelLimits = MOCK_LIMITS if limits is None else limits
 
     async def is_available(self) -> bool:
         return True

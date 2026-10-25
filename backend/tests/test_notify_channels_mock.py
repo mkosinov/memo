@@ -27,9 +27,13 @@ from src.core.config import settings
 from src.notify.channels.base import (
     Channel,
     ChannelAppError,
+    ChannelLimits,
     ChannelTransportError,
 )
 from src.notify.channels.mock import (
+    MOCK_DAILY_CAP,
+    MOCK_LIMITS,
+    MOCK_SEND_PAUSE_SECONDS,
     InMemoryRecorder,
     MockChannel,
     RedisListRecorder,
@@ -109,6 +113,51 @@ class TestMockChannelOutcomes:
             await channel.send("fail-app:y", "текст")
 
         assert recorder.deliveries == []
+
+
+class TestMockLimitsDeclaration:
+    """Rev.5 (spec §4.4/§6.3, plan Task 2 step 4): the mock DECLARS its
+    own limit settings — the declarative seam Task 3's registry
+    mechanism reads and Task 6's cap contour tests exhaust. Declaration
+    only: no INCR/pause/admin-message logic here."""
+
+    def test_channel_limits_declares_the_spec_4_4_parameters(self) -> None:
+        """The shared declarative structure carries exactly the §4.4
+        triple — ceiling, pause, admin-message address."""
+        limits = ChannelLimits(
+            daily_cap=200, send_pause_seconds=30.0, admin_address="+79990000000"
+        )
+        assert limits.daily_cap == 200
+        assert limits.send_pause_seconds == 30.0
+        assert limits.admin_address == "+79990000000"
+
+    def test_channel_limits_is_frozen(self) -> None:
+        limits = ChannelLimits(daily_cap=1, send_pause_seconds=0.0)
+        with pytest.raises(Exception):  # noqa: B017 — dataclasses.FrozenInstanceError
+            limits.daily_cap = 5  # type: ignore[misc]
+
+    def test_mock_declares_a_small_default_cap_for_contour_tests(self) -> None:
+        """A SMALL default cap (spec §4.4: «мок-канал наследует механизм
+        для контурных тестов потолка») — a contour run can exhaust it
+        without hundreds of deliveries."""
+        limits = MockChannel(InMemoryRecorder()).limits
+        assert limits is MOCK_LIMITS
+        assert limits.daily_cap == MOCK_DAILY_CAP
+        assert 0 < limits.daily_cap <= 50  # small, per the review ask
+
+    def test_mock_pause_default_is_zero_and_admin_unset(self) -> None:
+        """Own mock settings: no pause (fast tests), no admin address
+        (the service message is opt-in per contour)."""
+        limits = MockChannel(InMemoryRecorder()).limits
+        assert limits.send_pause_seconds == MOCK_SEND_PAUSE_SECONDS == 0.0
+        assert limits.admin_address is None
+
+    def test_mock_limits_are_injectable_per_instance(self) -> None:
+        """Task 6 contours inject instances with their own window — the
+        constructor seam, not module mutation."""
+        custom = ChannelLimits(daily_cap=2, send_pause_seconds=0.0)
+        channel = MockChannel(InMemoryRecorder(), limits=custom)
+        assert channel.limits is custom
 
 
 class TestInMemoryRecorder:

@@ -25,6 +25,7 @@ error: loud trace + the channel closes without retries (spec §3.2).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -47,6 +48,33 @@ class ChannelTransportError(ChannelError):
     def __init__(self, message: str, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+
+
+@dataclass(frozen=True)
+class ChannelLimits:
+    """The DECLARATIVE limit settings of a channel (spec §4.4/§6.3, rev.5
+    of #485): «каналы в реестре декларируют свои параметры лимитов
+    (потолок, пауза, адрес служебных сообщений)».
+
+    Declaration only — the MECHANISM (Redis counter
+    ``notify:{channel}:cap:<ГГГГММДД>`` with the 48 h EXPIRE, the send
+    pause between sequential sends, the one-per-window admin message on
+    first exhaustion) is Task 3's registry machinery reading these
+    fields; nothing here counts, sleeps, or sends:
+
+    - ``daily_cap`` — the per-day send ceiling; an exhausted window
+      fails the attempt as an ``app_error`` («суточный лимит
+      исчерпан»);
+    - ``send_pause_seconds`` — the async hold between sequential sends
+      of the channel in the worker process (Telegram: 30 s);
+    - ``admin_address`` — where the one-per-window service message
+      goes via the SAME channel; ``None`` — no service message (the
+      reason stays in the journal).
+    """
+
+    daily_cap: int
+    send_pause_seconds: float
+    admin_address: str | None = None
 
 
 @runtime_checkable

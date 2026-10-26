@@ -16,7 +16,7 @@ jobs:
   # unit/api/integration/misc/pure_unit остаются локальными селекторами
   # (pytest -m …) — CI их не потребляет. Отказы: verbose-вывод + junit-артефакт.
   backend-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -60,7 +60,7 @@ jobs:
   # container never came up — exits 0 and would show a green job that
   # proves nothing; the guard step turns that into a job failure.
   notify-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -263,7 +263,7 @@ jobs:
   # без needs. Скрипт в PR-режиме делает git show <merge-base>:… —
   # checkout требует полную историю (fetch-depth: 0).
   backend-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -290,7 +290,7 @@ jobs:
   # 4 GB NODE_OPTIONS limit is in place. Fallback if OOM returns: split into
   # 2–3 shards INSIDE this same job (still one check in the PR).
   frontend-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend/admin
@@ -321,7 +321,7 @@ jobs:
   # scripts/run-workspace-tests.sh (also used by the local full suite), so a
   # new package with a test script joins this job automatically.
   workspace-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -343,7 +343,7 @@ jobs:
 
 
   frontend-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend/admin
@@ -368,7 +368,7 @@ jobs:
 
   skip-tracker:
     name: Skip-tracker (warning only)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Жёлтая проверка: никогда не роняет билд. Если что-то сломается
     # внутри скрипта — continue-on-error на всякий случай.
     continue-on-error: true
@@ -386,7 +386,7 @@ jobs:
   # (DB-wipe guard, SHARD_ID whitelist, NEXT_DIST_DIR export). Runs on
   # stubs — no browsers, no backend, no services.
   shard-script-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -406,7 +406,7 @@ jobs:
   # (e2e-shard-start.sh) on its port pair. Check names keep today's informative
   # style: e2e-tests (1, 3002, 8001) … e2e-tests (4, 3005, 8004).
   e2e-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

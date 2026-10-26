@@ -8,10 +8,14 @@ it. This check reads the REAL ``notify:tasks`` stream of that stack:
 
 - the stream holds **≥ 1** task (never an exact count — the re-enqueue
   cycle may legitimately add a duplicate, family §4.4);
-- every payload satisfies the family §4.2 contract: exactly the five
-  contract keys, ``task_id`` resolving into the stack's DB, non-empty
-  rendered ``text``, frozen ``channels`` (``[{name, address}]``), ISO
-  ``created_at``, ``resend_of: null``;
+- every payload satisfies the family §4.2 rev.5+errata contract: the
+  exact ten contract keys (``template_channel`` added by the errata of
+  PR #569 — the template's origin channel, frozen into the task because
+  the DB-less worker cannot resolve it from ``template_id``; ``null``
+  means a universal template), ``task_id`` resolving into the stack's
+  DB, non-empty frozen ``channel``/``address``, render ``payload``
+  object, non-empty ``template_body``, ISO ``created_at``,
+  ``resend_of: null``;
 - at least ONE payload is FULLY correct: the DB row behind ``task_id``
   reached the queue (status in queued/sending/sent — #484 Task 8: the
   stack's worker may already have delivered it) and its frozen
@@ -73,8 +77,11 @@ WAIT_SECONDS = 30
 #: a genuine delivery failure and fails the check.
 QUEUE_REACHED_STATUSES = {"queued", "sending", "sent"}
 
-#: Family §4.2 rev.5 task payload — the exact key set of the contract
-#: (one channel, frozen render data + template — ADR 014).
+#: Family §4.2 rev.5+errata task payload — the exact key set of the
+#: contract (one channel, frozen render data + template — ADR 014;
+#: ``template_channel`` — the template's origin channel, errata PR #569:
+#: frozen at enqueue time because the DB-less send worker cannot
+#: resolve it from ``template_id``; ``null`` = universal template).
 PAYLOAD_KEYS = {
     "task_id",
     "channel",
@@ -82,6 +89,7 @@ PAYLOAD_KEYS = {
     "payload",
     "template_id",
     "template_body",
+    "template_channel",
     "root_task_id",
     "created_at",
     "resend_of",
@@ -113,6 +121,16 @@ def _payload_problem(payload: Any) -> str | None:
         return "payload (render data) is not an object"
     if not isinstance(payload["template_body"], str) or not payload["template_body"].strip():
         return "template_body is empty or not a string"
+    # Errata PR #569 (rev.5 §4.2): template_channel is the template's
+    # origin channel frozen into the task — str, or None for a universal
+    # template. Deliberately NOT correlated with payload["channel"]: a
+    # telegram task carrying a universal template holds
+    # template_channel=None while channel="telegram".
+    template_channel = payload["template_channel"]
+    if template_channel is not None and (
+        not isinstance(template_channel, str) or not template_channel.strip()
+    ):
+        return f"template_channel is neither null nor a non-empty string: {template_channel!r}"
     if not isinstance(payload["created_at"], str) or not payload["created_at"]:
         return "created_at is empty or not a string"
     if payload["resend_of"] is not None:
@@ -135,7 +153,8 @@ def _db_task_row(task_id: str) -> dict[str, Any] | None:
     try:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT id, status, text, channels FROM notify_tasks WHERE id = ?",
+            "SELECT id, status, channel, address, template_body"
+            " FROM notify_tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         return dict(row) if row is not None else None

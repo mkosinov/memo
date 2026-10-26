@@ -48,7 +48,11 @@ if [ ! -d "$CLONE/.git" ]; then
   git clone --no-hardlinks -q "$MAIN_CLONE" "$CLONE"
 fi
 git -C "$MAIN_CLONE" fetch origin --prune -q || echo "WARN: main-clone fetch failed; using last fetched origin state"
-git -C "$CLONE" fetch origin -q
+# Fetch the main clone's REMOTE-TRACKING ref, never its local main: the local
+# branch may be stale or diverged (unpushed passenger commits — 2026-10-26,
+# #486 run: the panel silently reviewed a 3-week-old main). The panel always
+# reviews GitHub's origin/main.
+git -C "$CLONE" fetch -q "$MAIN_CLONE" refs/remotes/origin/main:refs/remotes/origin/main
 git -C "$CLONE" reset --hard -q origin/main
 git -C "$CLONE" clean -fdq
 # 1b. Strip sibling specs/plans from the review clone — the submitted inputs

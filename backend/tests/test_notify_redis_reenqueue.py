@@ -24,6 +24,7 @@ before AND after every test. A dev contour on the default index
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -35,9 +36,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.notify import dispatcher
 from src.notify.models import DomainEvent, NotifyTask
-from src.notify.redis_queue import RedisQueue
+from src.notify.redis_queue import AUTOCLAIM_COUNT, RedisQueue
 from tests.conftest import query_db, query_db_params
-from tests.notify_redis_support import redis_marks, redis_url
+from tests.notify_redis_support import make_task, redis_marks, redis_url
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -98,8 +99,11 @@ async def _stage_queued_task(db_session) -> NotifyTask:
         event_id=event.id,
         scenario="new_record",
         status="queued",
-        text="готовый текст",
-        channels=[{"name": "telegram", "address": "+7OLD"}],
+        channel="telegram",
+        address="+7OLD",
+        payload={"client": {"name": "Анна"}},
+        template_id="06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        template_body="{{ client.name }}",
         reenqueues=0,
     )
     db_session.add(task)
@@ -118,13 +122,18 @@ def _age_task(task_id: str, age_seconds: int = _AGE_SECONDS) -> None:
 
 
 def _dispatcher_payload(task: NotifyTask) -> dict[str, Any]:
-    """The §4.2 shape the dispatcher's enqueue point hands the adapter."""
+    """The §4.2 rev.5 shape the dispatcher's enqueue point hands the
+    adapter (one channel, frozen render data + template)."""
     return {
         "task_id": task.id,
-        "text": task.text,
-        "channels": task.channels,
+        "channel": task.channel,
+        "address": task.address,
+        "payload": task.payload,
+        "template_id": task.template_id,
+        "template_body": task.template_body,
+        "root_task_id": task.root_task_id,
         "created_at": "2026-10-21T10:00:00Z",
-        "resend_of": None,
+        "resend_of": task.resend_of,
     }
 
 
@@ -162,8 +171,9 @@ class TestRedisWipeSurvival:
         assert len(payloads) >= 1  # ≥ 1, NOT an exact count — duplicates accepted (§4.4)
         for payload in payloads:
             assert payload["task_id"] == stale.id  # «не раньше»: fresh never crosses
-            assert payload["text"] == "готовый текст"
-            assert payload["channels"] == [{"name": "telegram", "address": "+7OLD"}]
+            assert payload["channel"] == "telegram"
+            assert payload["address"] == "+7OLD"
+            assert payload["template_body"] == "{{ client.name }}"
             assert payload["resend_of"] is None
             assert payload["created_at"]
         row = query_db(f"SELECT status, reenqueues FROM notify_tasks WHERE id = '{stale.id}'")
@@ -190,3 +200,75 @@ class TestRedisWipeSurvival:
         await dispatcher.reenqueue_stale_tasks(factory, wipe_queue)  # the next tick
 
         assert _stream_payloads(wipe_client) == first
+
+
+class TestReenqueueWorkerPEL:
+    """#485 Task 5 (family §3.3 rev.5): the predicate leg «не в PEL группы
+    worker» — over the REAL adapter. A task the worker claimed and holds
+    (channel pause, retry sleep) is NOT re-enqueued however stale its
+    ``updated_at`` is; once the worker acks, the next sweep picks it up
+    (no stamp was written while held)."""
+
+    async def test_held_task_skipped_released_task_reenqueued(
+        self, db_engine, db_session, wipe_client, wipe_queue
+    ) -> None:
+        task = await _stage_queued_task(db_session)
+        wipe_queue.ensure_worker_group()
+        wipe_queue.enqueue_task(_dispatcher_payload(task))
+
+        claimed = wipe_queue.claim_tasks()  # the PEL of the worker group
+        assert [p["task_id"] for p in claimed] == [task.id]
+        _age_task(task.id)
+
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        # held: exactly the ORIGINAL entry — no duplicate, no counter
+        assert len(_stream_payloads(wipe_client)) == 1
+        row = query_db(f"SELECT reenqueues FROM notify_tasks WHERE id = '{task.id}'")
+        assert row[0]["reenqueues"] == 0
+
+        wipe_queue.ack_task(claimed[0])  # the worker is done — ticket released
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        assert len(_stream_payloads(wipe_client)) == 2  # the re-enqueue landed
+        row = query_db(f"SELECT reenqueues FROM notify_tasks WHERE id = '{task.id}'")
+        assert row[0]["reenqueues"] == 1
+
+    async def test_missing_worker_group_probes_empty_and_proceeds(
+        self, db_engine, db_session, wipe_client, wipe_queue
+    ) -> None:
+        """NOGROUP (a wiped transport, the worker group never created):
+        the probe reads an EMPTY PEL — nothing was ever claimed — and
+        the sweep proceeds (wipe survival, §4.4)."""
+        task = await _stage_queued_task(db_session)
+        wipe_queue.enqueue_task(_dispatcher_payload(task))
+        wipe_client.flushdb()  # streams AND groups gone
+        _age_task(task.id)
+
+        assert wipe_queue.pending_worker_task_ids() == set()
+
+        await dispatcher.reenqueue_stale_tasks(_session_factory(db_engine), wipe_queue)
+
+        assert [p["task_id"] for p in _stream_payloads(wipe_client)] == [task.id]
+
+    async def test_pel_over_one_page_returns_every_entry(
+        self, wipe_client, wipe_queue
+    ) -> None:
+        """The probe's pagination leg (#485 Task 6 review gap): a PEL
+        bigger than ONE ``XPENDING`` page (``AUTOCLAIM_COUNT``) is
+        drained WHOLE — the inclusive cursor walks every page, no entry
+        dropped. Pure adapter level: claims that never ack populate the
+        PEL (no DB rows — the probe reads the transport only)."""
+        total = AUTOCLAIM_COUNT + 1
+        ids = {str(uuid.uuid4()) for _ in range(total)}
+        wipe_queue.ensure_worker_group()
+        for task_id in ids:
+            wipe_queue.enqueue_task(make_task(task_id))
+
+        held: list[dict[str, Any]] = []
+        while batch := wipe_queue.claim_tasks():
+            held.extend(batch)  # claimed, never acked — the whole PEL
+        assert len(held) == total  # the PEL spans MORE than one page
+        assert len(ids) == total
+
+        assert wipe_queue.pending_worker_task_ids() == ids

@@ -58,13 +58,19 @@ _GOOD = "+79990001133"
 
 
 def _payload() -> dict:
-    """A well-formed §4.2 payload — a valid UUID string ``task_id`` (the
-    worker validator's seam): the transport scenario needs no DB row."""
+    """A well-formed §4.2 rev.5 payload (one channel, frozen render
+    data + template — the literal template keeps the assembled text ==
+    _TEXT) — a valid UUID string ``task_id`` (the worker validator's
+    seam): the transport scenario needs no DB row."""
     task_id = str(uuid.uuid4())
     return {
         "task_id": task_id,
-        "text": _TEXT,
-        "channels": [{"name": "mock", "address": _GOOD}],
+        "channel": "mock",
+        "address": _GOOD,
+        "payload": {},
+        "template_id": "06bd742e-56a7-4e4e-9f0e-3d5c0b6a1e11",
+        "template_body": _TEXT,
+        "root_task_id": task_id,
         "created_at": "2026-10-24T10:00:00Z",
         "resend_of": None,
     }

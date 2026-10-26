@@ -12,9 +12,9 @@ Covered (spec §5, US-2/US-3):
 - four skip reasons, one per predicate branch, FIXED order
   ``notify_off → no_recipient → no_consent → past_event`` (first branch
   wins on multi-fail);
-- success → task ``queued`` with rendered text (service/tariffs/total/
-  location/time) and FROZEN channels, payload §4.2 in FakeQueue,
-  ``processed_at`` set;
+- success → task ``queued`` of the FIRST priority channel with the
+  FROZEN render payload + channel template + address (rev.5, ADR 014),
+  payload §4.2 in FakeQueue, ``processed_at`` set;
 - idempotency (§4.4): reprocessing an event creates no duplicate task;
 - RenderError PROPAGATES (not caught into a skip) — the 3-attempts
   policy of Task 9 owns it.
@@ -193,7 +193,9 @@ class TestSkipReasons:
         assert task.scenario == "new_record"
         assert task.event_id == event.id
         assert task.client_id == client["id"]
-        assert task.text is None and task.channels is None
+        # a skipped task carries no channel payload (rev.5)
+        assert task.channel is None and task.address is None
+        assert task.payload is None and task.template_body is None
         assert (await _fetch_event(db_session, event.id)).processed_at is not None
         assert queue.tasks == []
 
@@ -423,29 +425,119 @@ class TestSuccessPath:
         assert task.client_id == client["id"]
         assert task.reenqueues == 0
 
-        # US-3 rendered text: service, tariffs, total, location, time
-        assert "Гончарный мастер-класс" in task.text
-        assert "Взрослый" in task.text and "Детский" in task.text
-        assert "3\u00a0500 ₽" in task.text and "2\u00a0500 ₽" in task.text
-        assert "6\u00a0000 ₽" in task.text  # Итого
-        assert "Студия «Горы»" in task.text
-        assert "ул. Ленина, 1" in task.text
-        assert _FUTURE.strftime("%d.%m.%Y %H:%M") in task.text
-
-        # channels FROZEN in the task column (§4.4: never re-resolved)
-        assert task.channels == [{"name": "telegram", "address": "+79990001122"}]
+        # rev.5 (ADR 014): the task of the FIRST priority channel with
+        # the FROZEN render payload, template and address — the worker
+        # assembles the text; nothing is rendered here
+        assert task.channel == "telegram"
+        assert task.address == "+79990001122"
+        assert task.root_task_id == task.id
+        assert task.parent_task_id is None
+        assert task.payload is not None
+        # payload = the §4.1 snapshot verbatim (all top-level keys)
+        for key in (
+            "event", "client", "activity", "service",
+            "tariffs", "total_price", "location", "master",
+        ):
+            assert key in task.payload, f"payload lost the {key!r} snapshot key"
+        assert task.payload["service"]["title"] == "Гончарный мастер-класс"
+        assert task.template_body == _load_default_body()
+        assert task.template_id is not None
+        # the frozen template's ORIGIN (#485 Task 4, spec §6.2): the
+        # default template is UNIVERSAL (channel NULL) — the origin
+        # rides the row/payload to the worker's parse-mode decision
+        assert task.template_channel is None
 
         assert (await _fetch_event(db_session, event.id)).processed_at is not None
 
-        # payload §4.2 in FakeQueue — exact shape, frozen values
+        # payload §4.2 rev.5 in FakeQueue — exact shape, frozen values
         assert len(queue.tasks) == 1
         payload = queue.tasks[0]
-        assert set(payload) == {"task_id", "text", "channels", "created_at", "resend_of"}
+        assert set(payload) == {
+            "task_id",
+            "channel",
+            "address",
+            "payload",
+            "template_id",
+            "template_body",
+            "template_channel",
+            "root_task_id",
+            "created_at",
+            "resend_of",
+        }
         assert payload["task_id"] == task.id
-        assert payload["text"] == task.text
-        assert payload["channels"] == task.channels
+        assert payload["channel"] == task.channel
+        assert payload["address"] == task.address
+        assert payload["payload"] == task.payload
+        assert payload["template_body"] == task.template_body
+        assert payload["template_channel"] == task.template_channel
+        assert payload["root_task_id"] == task.id
         assert payload["resend_of"] is None
         assert _UTC_ISO_Z.match(payload["created_at"]), payload["created_at"]
+
+    async def test_channel_template_freezes_its_origin(
+        self,
+        db_session,
+        create_master,
+        create_service,
+        create_location,
+        create_client,
+        create_activity,
+        create_record,
+    ) -> None:
+        """#485 Task 4 (spec §3.7/§6.2): a CHANNEL template wins the
+        lookup over the universal one, and its origin (``"telegram"``)
+        is frozen into the task — the worker sends it with the channel's
+        parse mode (HTML), not as plain text."""
+        from src.notify.models import NotifyTemplate
+
+        # both tiers seeded: a telegram-channel template AND the default
+        # universal row — the lookup must pick the channel tier.
+        db_session.add(
+            NotifyTemplate(
+                event_type="new_record",
+                channel="telegram",
+                title="Канальный шаблон",
+                body="Канальный текст: {{ client.name }}",
+                is_default=False,
+            )
+        )
+        await _seed_default_template(db_session)
+
+        master = create_master(first_name="Мария", last_name="Иванова")
+        service = create_service(title="Гончарный мастер-класс")
+        location = create_location(title="Студия «Горы»", address="ул. Ленина, 1")
+        activity = create_activity(
+            master_id=master["id"],
+            service_id=service["id"],
+            location_id=location["id"],
+            start=_FUTURE,
+        )
+        client = create_client(name="Анна", phone="+79990001122")
+        record = create_record(
+            activity_id=activity["id"],
+            client_id=client["id"],
+            notify=True,
+            visits=[{"name": "Анна", "price": 3500, "status": "waiting"}],
+        )
+        db_session.expire_all()
+        rec = await db_session.get(Record, record["id"])
+        snapshot = await build_new_record_snapshot(db_session, rec)
+        event = DomainEvent(
+            type="new_record", occurred_at=datetime.now(UTC).replace(tzinfo=None), snapshot=snapshot
+        )
+        db_session.add(event)
+        await db_session.commit()
+
+        queue = FakeQueue()
+        await handle_new_record(event, db_session, queue)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        task = tasks[0]
+        assert task.template_body == "Канальный текст: {{ client.name }}"
+        assert task.template_channel == "telegram"
+        payload = queue.tasks[0]
+        assert payload["template_channel"] == "telegram"
 
 
 class TestIdempotency:

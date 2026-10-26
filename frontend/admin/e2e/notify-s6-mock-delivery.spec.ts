@@ -1,13 +1,21 @@
+import { execSync } from 'node:child_process';
+
 import { resolveBackendUrl } from './lib/backend-url';
 import { test, expect } from './fixtures/test';
-import { createTestActivity, cleanup, cleanupRecord } from './fixtures/factories';
+import {
+  createTestActivity,
+  createTestClient,
+  createTestRecord,
+  cleanup,
+  cleanupRecord,
+} from './fixtures/factories';
 import {
   gotoScheduleWeek,
   clickActivityCard,
   clickModalTab,
   waitForRecordsReady,
 } from './fixtures/helpers';
-import { queryDBRow } from './fixtures/db-query';
+import { queryDB, queryDBRow, queryDBRows } from './fixtures/db-query';
 
 const BACKEND = resolveBackendUrl();
 void BACKEND; // GH #387 fence — both URL vars must be present and same-host
@@ -173,6 +181,457 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
       //    event mid-flight (§3.4).
       if (recordRow?.id) await cleanupRecord(request, recordRow.id);
       if (clientRow?.id) await cleanup(request, `/api/v1/clients/${clientRow.id}`);
+    }
+  });
+});
+
+/**
+ * GH #485 Task 6 — spec §12 User Scenarios 1, 2, 5 (§13: the E2E leg
+ * «продолжение специ notify-s6-mock-delivery», scenarios 1–3, 5; the
+ * spawn half of scenario 3 needs TWO mock channels in the priority —
+ * the contour covers it with injected channels, the enabled stack runs
+ * NOTIFY_CHANNEL_PRIORITY=mock).
+ *
+ * The scenario driver is the #484 seam: the notify ADDRESS (= the
+ * client phone, frozen verbatim) scripts the mock outcome — the
+ * `fail-app:` prefix is the unresolvable-address analogue (worker-484
+ * spec §3.6), a plain phone delivers to the recorder. Record creation
+ * goes through the authenticated API (`notify: true` needs a non-null
+ * actor, GH #482 §3.3 — the storageState `request` fixture carries the
+ * session), the pipeline then runs end-to-end: dispatcher → queue →
+ * worker (mock channel) → statuses → attempts/root outcome in the DB.
+ *
+ * Same run recipe as the S6 test above (both URL vars, same host —
+ * GH #387; no SHARD_ID so the standalone TEST_DB_PATH applies).
+ */
+test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
+  test.skip(
+    process.env.NOTIFY_E2E_ENABLED !== "1",
+    "targets the enabled notify stack WITH the worker child: run with NOTIFY_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #485 §12/§13)",
+  );
+
+  test("§12-1: delivered task keeps the actually-sent text in its attempt", async ({
+    request,
+  }) => {
+    // 1. SETUP — a future activity + a fresh named client (consent ON,
+    //    plain phone → the mock delivers to the recorder).
+    const { start } = futureStart();
+    const activity = await createTestActivity(request, { start });
+    const uid = Date.now();
+    const clientName = `Notify 485 S1 Client ${uid}`;
+    const client = await createTestClient(request, {
+      name: clientName,
+      phone: `+7999${String(uid).slice(-7)}`,
+    });
+
+    // `any` (house pattern, the S6 test above): rows are assigned inside
+    // expect.poll callbacks — control-flow analysis narrows `T | null` to
+    // `never` in the finally block and breaks the optional chains.
+    let taskRow: any = null;
+    let record: any = null;
+
+    try {
+      // 2. ACTION — authenticated create with the notify flag (GH #482
+      //    §3.3): the §3.4 predicate passes (future start, consent ON,
+      //    phone present) → the scenario freezes payload+template and
+      //    queues the first-priority (mock) channel task.
+      record = await createTestRecord(request, activity.id, client.id, {
+        notify: true,
+      });
+      expect(record.id).toBeTruthy();
+
+      // 3. VERIFY DB — the chain-completed task (sent + root outcome).
+      await expect
+        .poll(
+          async () => {
+            taskRow = queryDBRow(
+              `SELECT id, status, delivery_outcome FROM notify_tasks
+           WHERE client_id='${client.id}' AND scenario='new_record'`,
+            );
+            return taskRow !== null && taskRow.status === "sent";
+          },
+          { timeout: 30_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
+      expect(taskRow!.delivery_outcome).toBe("delivered");
+
+      // …and the append-only attempt journal stores the ACTUALLY-SENT
+      // text (§8.4): the sent/delivered row carries `sent_text` rendered
+      // by the worker from the FROZEN template — client name + the seed
+      // greeting are in the rendering by construction.
+      const attempts = queryDBRows(
+        `SELECT stage, outcome, sent_text FROM notify_task_attempts
+         WHERE task_id='${taskRow!.id}'`,
+      );
+      const sent = attempts.find(
+        (a) => a.stage === "sent" && a.outcome === "delivered",
+      );
+      expect(sent).toBeTruthy();
+      expect(String(sent!.sent_text)).toContain(clientName);
+      expect(String(sent!.sent_text)).toContain("Вы записаны");
+    } finally {
+      // 4. CLEANUP — safe after the terminal state (the S6 rule above).
+      if (record?.id) await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  test("§12-2: unresolvable address → attempt with the cause; the inherited marker exhausts the chain «не доставлено»", async ({
+    request,
+  }) => {
+    // 1. SETUP — the marker phone IS the #484 unresolvable-address
+    //    analogue: the address is the client phone frozen verbatim, and
+    //    the mock raises ChannelAppError on the `fail-app:` prefix.
+    const { start } = futureStart();
+    const activity = await createTestActivity(request, { start });
+    const uid = Date.now();
+    const markerPhone = `fail-app:+7999${String(uid).slice(-7)}`;
+    const client = await createTestClient(request, {
+      name: `Notify 485 S2 Client ${uid}`,
+      phone: markerPhone,
+    });
+
+    let taskRow: any = null;
+    let record: any = null;
+
+    try {
+      // 2. ACTION — authenticated create with the notify flag.
+      record = await createTestRecord(request, activity.id, client.id, {
+        notify: true,
+      });
+      expect(record.id).toBeTruthy();
+
+      // 3. VERIFY DB — the ROOT task (channel 1) fails terminally AND
+      //    the chain closes on the root (§8.2): the inherited marker
+      //    kills EVERY priority channel, and once the last one (mock2)
+      //    is exhausted with nothing in flight → delivery_outcome =
+      //    not_delivered («все каналы недоступны», family US-4/US-5).
+      await expect
+        .poll(
+          async () => {
+            taskRow = queryDBRow(
+              `SELECT id, status, delivery_outcome, root_task_id FROM notify_tasks
+           WHERE client_id='${client.id}' AND scenario='new_record'
+             AND channel='mock'`,
+            );
+            return (
+              taskRow !== null &&
+              taskRow.status === "failed" &&
+              taskRow.delivery_outcome === "not_delivered"
+            );
+          },
+          { timeout: 30_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
+
+      // …the attempt carries the CAUSE (§8.4 — human-readable error with
+      // the outcome category): the app_error row holds the scripted
+      // mock message; the final not_delivered row closes the channel.
+      const attempts = queryDBRows(
+        `SELECT stage, outcome, error FROM notify_task_attempts
+         WHERE task_id='${taskRow!.id}'`,
+      );
+      const failedWithCause = attempts.find(
+        (a) =>
+          a.stage === "failed" &&
+          a.outcome === "app_error" &&
+          String(a.error).startsWith("mock: scripted app failure"),
+      );
+      expect(failedWithCause).toBeTruthy();
+      expect(
+        attempts.some(
+          (a) => a.stage === "failed" && a.outcome === "not_delivered",
+        ),
+      ).toBe(true);
+
+      // …the chain walked EVERY priority channel and each one died on
+      // the INHERITED marker (the address is never re-resolved, §8.2 —
+      // mock2's task fails with the SAME cause) — exactly two tasks,
+      // one per channel (UNIQUE(root_task_id, channel)).
+      const chainRows = queryDBRows(
+        `SELECT channel, status FROM notify_tasks
+         WHERE root_task_id='${taskRow!.root_task_id}' ORDER BY created_at`,
+      );
+      expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
+      expect(chainRows.every((r) => r.status === "failed")).toBe(true);
+      const mock2Row = queryDBRow(
+        `SELECT id FROM notify_tasks
+         WHERE root_task_id='${taskRow!.root_task_id}' AND channel='mock2'`,
+      );
+      const mock2Attempts = queryDBRows(
+        `SELECT stage, outcome, error FROM notify_task_attempts
+         WHERE task_id='${mock2Row!.id}'`,
+      );
+      expect(
+        mock2Attempts.some(
+          (a) =>
+            a.stage === "failed" &&
+            a.outcome === "app_error" &&
+            String(a.error).startsWith("mock: scripted app failure"),
+        ),
+      ).toBe(true);
+    } finally {
+      // 4. CLEANUP — safe after the terminal state.
+      if (record?.id) await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  test("§12-3: channel 1 fails → the chain delivers via channel 2", async ({
+    request,
+  }) => {
+    // 1. SETUP — kill channel 1 through its OWN cap window (the
+    //    scenario-3 lever, mock2.py: the limits mechanism keys the
+    //    window by channel NAME, so exhausting `mock`'s window leaves
+    //    `mock2`'s untouched — the address markers CANNOT drive this
+    //    scenario because the chain INHERITS the root address and both
+    //    mocks share the marker semantics). The pre-send gate raises
+    //    ChannelAppError «суточный лимит исчерпан» (§4.4/§6.3) — a
+    //    terminal failure that spawns the next priority channel (§8.2).
+    //    The stack priority is mock,mock2; the client phone is PLAIN —
+    //    channel 2 must deliver to the recorder.
+    const { start } = futureStart();
+    const activity = await createTestActivity(request, { start });
+    const uid = Date.now();
+    const clientName = `Notify 485 S3 Client ${uid}`;
+    const clientPhone = `+7996${String(uid).slice(-7)}`;
+    const client = await createTestClient(request, {
+      name: clientName,
+      phone: clientPhone,
+    });
+
+    // The §4.4 window key: notify:{channel}:cap:<ГГГГММДД> — the UTC
+    // date of the naive-UTC wall clock the limiter uses. Pre-set
+    // mock's counter to its declared cap (MOCK_DAILY_CAP = 25,
+    // backend/src/notify/channels/mock.py) with the store's 48 h TTL.
+    const yyyymmdd = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const redisPort = process.env.NOTIFY_E2E_REDIS_PORT || "6380";
+    const redis = (cmd: string): string =>
+      execSync(`redis-cli -p ${redisPort} ${cmd}`, { encoding: "utf-8" }).trim();
+    const mockCapKey = `notify:mock:cap:${yyyymmdd}`;
+    const mock2CapKey = `notify:mock2:cap:${yyyymmdd}`;
+    redis(`SET ${mockCapKey} 25 EX 172800`);
+
+    // `any` — the house pattern (see the S6 test above).
+    let rootTask: any = null;
+    let mock2Task: any = null;
+    let record: any = null;
+
+    try {
+      // 2. ACTION — authenticated create with the notify flag: the
+      //    scenario queues the FIRST-priority (mock) root task.
+      record = await createTestRecord(request, activity.id, client.id, {
+        notify: true,
+      });
+      expect(record.id).toBeTruthy();
+
+      // 3. VERIFY DB — the continuation task (channel 2) delivers:
+      //    spawned by the dispatcher after mock's terminal failure,
+      //    INHERITING the root's address (never re-resolved, §8.2)
+      //    with a FRESH template freeze, and landing `sent`.
+      await expect.poll(async () => {
+        mock2Task = queryDBRow(
+          `SELECT id, status, root_task_id, address, template_body
+           FROM notify_tasks
+           WHERE client_id='${client.id}' AND scenario='new_record'
+             AND channel='mock2'`,
+        );
+        return mock2Task !== null && mock2Task.status === "sent";
+      }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
+      expect(mock2Task!.address).toBe(clientPhone);
+      expect(mock2Task!.template_body).toBeTruthy();
+
+      // …the root task (channel 1) failed terminally with the
+      // human-readable cap cause, and the chain OUTCOME is written on
+      // the root: any channel's success delivers the chain (§8.2).
+      rootTask = queryDBRow(
+        `SELECT id, status, delivery_outcome FROM notify_tasks
+         WHERE client_id='${client.id}' AND scenario='new_record'
+           AND channel='mock'`,
+      );
+      expect(rootTask!.status).toBe("failed");
+      expect(rootTask!.delivery_outcome).toBe("delivered");
+
+      // …channel 1's attempt carries the cause (§6.3 — the refusal
+      // reason rides the app_error status)…
+      const mockAttempts = queryDBRows(
+        `SELECT stage, outcome, error FROM notify_task_attempts
+         WHERE task_id='${rootTask!.id}'`,
+      );
+      expect(
+        mockAttempts.some(
+          (a) =>
+            a.stage === "failed" &&
+            a.outcome === "app_error" &&
+            String(a.error).includes("суточный лимит исчерпан"),
+        ),
+      ).toBe(true);
+
+      // …and channel 2's attempt keeps the actually-delivered text.
+      const mock2Attempts = queryDBRows(
+        `SELECT stage, outcome, sent_text FROM notify_task_attempts
+         WHERE task_id='${mock2Task!.id}'`,
+      );
+      const sent = mock2Attempts.find(
+        (a) => a.stage === "sent" && a.outcome === "delivered",
+      );
+      expect(sent).toBeTruthy();
+      expect(String(sent!.sent_text)).toContain(clientName);
+
+      // …the chain is exactly two tasks — one per channel
+      // (UNIQUE(root_task_id, channel)).
+      const chainRows = queryDBRows(
+        `SELECT channel FROM notify_tasks WHERE root_task_id='${mock2Task!.root_task_id}' ORDER BY created_at`,
+      );
+      expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
+    } finally {
+      // 4. CLEANUP — restore BOTH cap windows first (mock's was
+      //    synthetic, mock2's got one real INCR; the per-test canon
+      //    reset covers sqlite only, Redis is stack-lifetime), then
+      //    the created rows (terminal-state rule above).
+      redis(`DEL ${mockCapKey} ${mock2CapKey}`);
+      if (record?.id) await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  test("§12-5: admin edits the template via the DB — new tasks render the new text, the task frozen earlier keeps the old one", async ({
+    request,
+  }) => {
+    // 1. SETUP — the universal new_record template row the dispatcher
+    //    freezes for mock tasks (tier-2 lookup: event_type + channel IS
+    //    NULL, deterministic order — render.py find_template).
+    const template = queryDBRow(
+      `SELECT id, body FROM notify_templates
+       WHERE event_type='new_record' AND channel IS NULL
+       ORDER BY created_at, id LIMIT 1`,
+    );
+    expect(template).toBeTruthy();
+    const originalBody: string = template!.body;
+
+    const { start } = futureStart();
+    const activity = await createTestActivity(request, { start });
+    const uid = Date.now();
+    const marker = `485-S5-EDIT-${uid}`;
+    const editedBody = `${marker}: правка шаблона из теста — {{ client.name }}, ждём вас!`;
+
+    const clientA = await createTestClient(request, {
+      name: `Notify 485 S5 A ${uid}`,
+      phone: `+7998${String(uid).slice(-7)}`,
+    });
+    const clientB = await createTestClient(request, {
+      name: `Notify 485 S5 B ${uid}`,
+      phone: `+7997${String(uid).slice(-7)}`,
+    });
+
+    // `any` — the house pattern (see the S6 test above).
+    let taskA: any = null;
+    let taskB: any = null;
+    let recordA: any = null;
+    let recordB: any = null;
+
+    try {
+      // 2. TASK A — created BEFORE the edit: the dispatcher freezes the
+      //    ORIGINAL template into the task row (§3.2 — the freeze, not
+      //    a render). Waiting for the frozen row proves the freeze
+      //    happened before the edit regardless of delivery timing: the
+      //    worker renders from the frozen copy (ADR 014), so a task
+      //    still in flight at edit time is covered by the same column.
+      recordA = await createTestRecord(request, activity.id, clientA.id, {
+        notify: true,
+      });
+      expect(recordA.id).toBeTruthy();
+      await expect
+        .poll(
+          async () => {
+            taskA = queryDBRow(
+              `SELECT id, status, template_body FROM notify_tasks
+           WHERE client_id='${clientA.id}' AND scenario='new_record'`,
+            );
+            return taskA !== null && taskA.template_body === originalBody;
+          },
+          { timeout: 30_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
+
+      // 3. ACTION — the admin edit, applied straight to the stack DB
+      //    (the established test seam; the per-test canon reset also
+      //    restores the row — the finally restore is belt-and-braces).
+      queryDB(
+        `UPDATE notify_templates SET body='${editedBody}' WHERE id='${template!.id}'`,
+      );
+      expect(
+        queryDBRow(
+          `SELECT body FROM notify_templates WHERE id='${template!.id}'`,
+        )!.body,
+      ).toBe(editedBody);
+
+      // 4. TASK B — created AFTER the edit: the freeze picks up the NEW
+      //    body (the lookup runs dispatcher-side at task creation).
+      recordB = await createTestRecord(request, activity.id, clientB.id, {
+        notify: true,
+      });
+      expect(recordB.id).toBeTruthy();
+
+      // 5. VERIFY DB — both tasks deliver; A from the OLD freeze, B from
+      //    the NEW one — the actually-sent texts prove the split.
+      await expect
+        .poll(
+          async () => {
+            taskB = queryDBRow(
+              `SELECT id, status, template_body FROM notify_tasks
+           WHERE client_id='${clientB.id}' AND scenario='new_record'`,
+            );
+            return (
+              taskB !== null &&
+              taskB.status === "sent" &&
+              taskB.template_body === editedBody
+            );
+          },
+          { timeout: 30_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
+
+      await expect
+        .poll(
+          async () => {
+            taskA = queryDBRow(
+              `SELECT id, status, template_body FROM notify_tasks
+           WHERE client_id='${clientA.id}' AND scenario='new_record'`,
+            );
+            return taskA !== null && taskA.status === "sent";
+          },
+          { timeout: 30_000, intervals: [500, 1000, 2000] },
+        )
+        .toBe(true);
+      expect(taskA!.template_body).toBe(originalBody);
+
+      const sentText = (taskId: string): string => {
+        const rows = queryDBRows(
+          `SELECT stage, outcome, sent_text FROM notify_task_attempts
+           WHERE task_id='${taskId}'`,
+        );
+        const sent = rows.find(
+          (a) => a.stage === "sent" && a.outcome === "delivered",
+        );
+        expect(sent).toBeTruthy();
+        return String(sent!.sent_text);
+      };
+
+      expect(sentText(taskB!.id)).toContain(marker);
+      expect(sentText(taskA!.id)).not.toContain(marker);
+      expect(sentText(taskA!.id)).toContain(clientA.name);
+    } finally {
+      // 6. CLEANUP — restore the seed template FIRST (new tasks between
+      //    the finally start and the canon reset would render the edit),
+      //    then the created rows (terminal-state rule above).
+      queryDB(
+        `UPDATE notify_templates SET body='${originalBody}' WHERE id='${template!.id}'`,
+      );
+      if (recordB?.id) await cleanupRecord(request, recordB.id);
+      if (recordA?.id) await cleanupRecord(request, recordA.id);
+      await cleanup(request, `/api/v1/clients/${clientB.id}`);
+      await cleanup(request, `/api/v1/clients/${clientA.id}`);
     }
   });
 });

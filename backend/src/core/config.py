@@ -59,6 +59,27 @@ class Settings(BaseSettings):
     # spec §3.3). Empty = transport not configured. SecretStr: the URL
     # carries credentials and must never surface in repr/logs/errors.
     REDIS_URL: SecretStr = SecretStr("")
+    # ── The Telegram channel (#485 part 4, spec §7 — Telethon/MTProto) ───
+    # The settings triple (API_ID + API_HASH + SESSION) IS the channel's
+    # availability (spec §6.1): unset → the channel honestly reports
+    # «канал не настроен» (unavailable), the worker startup never fails.
+    # The hash/session are secrets — SecretStr like REDIS_URL; the
+    # session string especially is a durable currency: settings access
+    # IS account access (spec §14), rotation is manual via
+    # scripts/generate_telegram_session.py.
+    TELEGRAM_API_ID: int | None = None
+    TELEGRAM_API_HASH: SecretStr | None = None
+    TELEGRAM_SESSION: SecretStr | None = None
+    # Where the one-per-window cap-exhaustion service message goes
+    # (spec §6.3); unset → no service message, the reason stays in the
+    # attempt journal.
+    TELEGRAM_ADMIN_PHONE: str | None = None
+    # Seconds; the async pause between sequential sends of the channel
+    # (spec §6.3/§7).
+    TELEGRAM_SEND_PAUSE: int = 30
+    # The per-UTC-day send ceiling protecting the studio account
+    # (spec §6.3/§7).
+    TELEGRAM_DAILY_CAP: int = 200
     # Wall-clock zone of the business — the single time interpretation
     # for the future/past predicate and message text (spec §3.2).
     # Explicit zone, never the server TZ (panel finding).

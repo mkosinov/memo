@@ -20,8 +20,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from src.notify.channels.base import Channel
+
+if TYPE_CHECKING:
+    from src.notify.channels.limits import ChannelLimiter
 
 # The notify family logger convention (src/notify/journal.py):
 # "memo.notify.<module>", independent of import paths.
@@ -85,6 +89,15 @@ def validate_priority_channels(
             raise SystemExit(2)
 
 
-def build_instances(names: list[str]) -> dict[str, Channel]:
-    """Instantiate ONLY the prioritized channels."""
-    return {name: CHANNELS[name]() for name in names}
+def build_instances(
+    names: list[str], *, limiter: ChannelLimiter | None = None
+) -> dict[str, Channel]:
+    """Instantiate ONLY the prioritized channels. With ``limiter``
+    (#485 Task 3, spec §4.4/§6.3) every instance is wrapped by the
+    send-limits mechanism — the worker's production wiring; without it
+    the raw registry instances come back (tests inject instances
+    as-is and wrap them explicitly when a contour wants limits)."""
+    instances: dict[str, Channel] = {name: CHANNELS[name]() for name in names}
+    if limiter is not None:
+        return {name: limiter.wrap(channel) for name, channel in instances.items()}
+    return instances

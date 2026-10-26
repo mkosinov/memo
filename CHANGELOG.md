@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-10-25
 
 ### Added
+- **GH #485 — Канал Telegram через пользовательский аккаунт (MTProto/
+  Telethon) + перестройка задачи на канал: сборка текста в воркере,
+  лимиты, цепочка каналов: часть 4 системы оповещений** — branch
+  `485-notify-telegram-channel` (13 коммитов `459b82de..a848d8e4`, base
+  `1e0f354e`; 52 файла, +6923/−711; спека
+  `docs/specs/2026-10-25-notify-telegram-channel-485-design.md` рев.2 +
+  errata §4.1 `template_channel`, план
+  `docs/plans/2026-10-25-notify-telegram-channel-485-plan.md` 6/6;
+  семья #476 — часть 4/5, части 1–3 = #482/#483/#484 на main; ADR 014,
+  новая зависимость `telethon>=1.34`):
+  - **Модель (T1):** пер-канальная задача — `NotifyTask` с каналом,
+    замороженным шаблоном и данными рендера, шаблоны с каналом,
+    `sent_text` в попытке; миграции `d94b1f7c2a6e` + `a7c3e9f1b2d4`,
+    UNIQUE-шов, lookup, skip-landing (`459b82de`, `84145990`).
+  - **Сборка и протокол (T2):** текст собирается один раз в воркере
+    (песочница Jinja2) по escape-режиму канала, крестовый кейс;
+    мок-канал — декларативные настройки лимитов (`7fc0386e`,
+    `e618b10e`).
+  - **Лимиты (T3):** суточный потолок, окно паузы, служебное сообщение
+    с человеческим именем канала (`0e497697`, `794a23cf`).
+  - **Telegram-канал (T4):** `channels/telegram.py` на Telethon
+    (пользовательский аккаунт), parse-режим, нормализация адресатов,
+    генератор сессии `backend/scripts/generate_telegram_session.py`;
+    контракт-errata `template_channel` (`4bb48e5b`, `edfc794f`).
+  - **Диспетчер (T5):** цепочка каналов — спавн следующего канала при
+    терминальной неудаче (`UNIQUE(root_task_id, channel)` —
+    идемпотентность), итог на корневой задаче, PEL-предикат
+    пере-заливки (`ce50cddc`).
+  - **Тесты (T6):** юниты §6.4 построчно + контур лимитов/цепочки
+    `pytest -m redis`; второй мок-канал `mock2`, e2e §12-1/2/3/5
+    (`4be81545`, `466d5ce9`, `e603f003`, `a848d8e4`).
+  - **Tests:** backend полный без `REDIS_URL` **3949p/0f**; маркированный
+    контур `pytest -m redis` **55p/0f/1 env-skip**; notify e2e
+    **5/5** (S6 + §12-1/2/3/5); lint-бюджет зелёный.
+  - Status: `docs/status/2026-10-25-notify-telegram-channel-485.md`
 - **GH #535 — Системное лечение e2e-класса flake «row-detach»
   (snapshot-then-assert)** — branch `535-e2e-row-detach-class` (7 коммитов
   `d363737c..9a2438e8`, base `9ce6d564`; 8 файлов, +714/−159; спека

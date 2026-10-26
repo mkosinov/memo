@@ -66,8 +66,8 @@ class TestEnqueueTask:
         contour.queue().enqueue_task(payload)
         (read,) = _read_tasks(contour)
         assert read["task_id"] == payload["task_id"]
-        assert read["text"] == payload["text"]
-        assert read["channels"] == payload["channels"]
+        assert read["channel"] == payload["channel"]
+        assert read["template_body"] == payload["template_body"]
         assert read["created_at"] == payload["created_at"]
         assert read["resend_of"] is None
 

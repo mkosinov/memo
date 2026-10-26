@@ -87,9 +87,10 @@
 #                        manual 2-port run lease is written/removed as
 #                        for any tagged manual stack;
 #                      - NOTIFY_ENABLED=true and
-#                        NOTIFY_CHANNEL_PRIORITY=mock are exported (until
-#                        part 4 the part-3 channel registry knows only
-#                        the mock — worker-484 spec §3.3/§3.8) and
+#                        NOTIFY_CHANNEL_PRIORITY=mock,mock2 are
+#                        exported (#485 Task 6: TWO mock channels —
+#                        the §12 scenario-3 chain leg kills channel 1
+#                        and delivers via channel 2) and
 #                        REDIS_URL is taken ONLY from an explicitly
 #                        passed value (CI service container). Without
 #                        one, a local EPHEMERAL redis-server child is
@@ -394,12 +395,15 @@ rm -rf "$ABS_FILES_DIR"
 # (payloads carry PII). The local-transport prerequisites (binary present,
 # port free, numeric port) were validated in the enabled-mode preamble —
 # BEFORE the lease write — so this block only spawns.
-# NOTIFY_CHANNEL_PRIORITY=mock (#484 part 3, spec §3.3/§3.8): until part 4
-# the registry knows only the mock channel — without the export the
-# worker's loud registry check stops it on the default "telegram".
+# NOTIFY_CHANNEL_PRIORITY=mock,mock2 (#485 Task 6, spec §12 scenario 3):
+# TWO mock channels — the chain leg of the e2e scenarios needs channel 1
+# (mock) to fall and channel 2 (mock2) to deliver; mock2 is registered
+# statically in the registry (inert outside the priority). Without the
+# export the worker's loud registry check stops it on the default
+# "telegram".
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   export NOTIFY_ENABLED=true
-  export NOTIFY_CHANNEL_PRIORITY=mock
+  export NOTIFY_CHANNEL_PRIORITY=mock,mock2
   if [ -n "${REDIS_URL:-}" ]; then
     echo "[notify-e2e] REDIS_URL set explicitly — not starting a local redis-server"
   else
@@ -526,8 +530,8 @@ python3 "$ROOT_DIR/scripts/gen_seed_canon.py" "$ABS_DB_PATH" "$ABS_DB_PATH.canon
 # the REAL process and the TERM teardown reaches it (`uv run` does not
 # forward signals — it would orphan the child). The worker (#484 part 3)
 # is the second consumer child: it inherits DATABASE_URL (unused — ADR
-# 009), REDIS_URL, NOTIFY_ENABLED and NOTIFY_CHANNEL_PRIORITY=mock (the
-# export of the transport block above). ENV_FILE matches the backend's
+# 009), REDIS_URL, NOTIFY_ENABLED and NOTIFY_CHANNEL_PRIORITY=mock,mock2
+# (the export of the transport block above). ENV_FILE matches the backend's
 # own launch env below.
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   echo "[notify-e2e] Starting notify dispatcher..."

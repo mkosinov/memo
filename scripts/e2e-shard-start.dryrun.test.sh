@@ -133,7 +133,8 @@
 #   NOTIFY_E2E_BACKEND_PORT / NOTIFY_E2E_SHARD_PORT), an OWN derived
 #   SHARD_RUN_TAG + manual run lease (no collision with shards), the
 #   required URL vars pointed at the own pair, NOTIFY_ENABLED=true,
-#   NOTIFY_CHANNEL_PRIORITY=mock (part 3 registry knows only the mock),
+#   NOTIFY_CHANNEL_PRIORITY=mock,mock2 (#485 Task 6: TWO mock channels —
+#   the §12 scenario-3 chain leg needs the second priority slot),
 #   REDIS_URL ONLY from an explicitly passed value (else a local ephemeral
 #   redis-server child on NOTIFY_E2E_REDIS_PORT, default 6380 — never
 #   6379), and the dispatcher AND the worker as child processes
@@ -1939,10 +1940,10 @@ else
   echo "FAIL Case 17a (#484): expected WORKER-SPAWN line (NOTIFY_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
   FAIL=1
 fi
-if grep -Eq '^WORKER-SPAWN .*NOTIFY_CHANNEL_PRIORITY=\[mock\]' "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#484): worker spawn env carries NOTIFY_CHANNEL_PRIORITY=[mock] (the §3.3/§3.8 export)"
+if grep -Eq '^WORKER-SPAWN .*NOTIFY_CHANNEL_PRIORITY=\[mock,mock2\]' "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#485): worker spawn env carries NOTIFY_CHANNEL_PRIORITY=[mock,mock2] (two mock channels — §12 scenario 3's chain leg)"
 else
-  echo "FAIL Case 17a (#484): worker spawn env missing NOTIFY_CHANNEL_PRIORITY=[mock]"
+  echo "FAIL Case 17a (#485): worker spawn env missing NOTIFY_CHANNEL_PRIORITY=[mock,mock2]"
   FAIL=1
 fi
 if grep -q '^WORKER-TERMED$' "$CASE17_DIR/journal" 2>/dev/null; then

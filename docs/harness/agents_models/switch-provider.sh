@@ -7,7 +7,7 @@ set -euo pipefail
 #   ./switch-provider.sh <profile-name>
 #
 # Profile = имя JSON файла в той же директории (без .json).
-# Сейчас есть: opencode_go, cerebras
+# Сейчас есть: zai, opencode_free, opencode_go, cerebras, google-free-antigravity
 # Можно добавлять новые: cp cerebras.json myprovider.json && edit
 #
 # Что делает:
@@ -71,7 +71,10 @@ done <<< "$AGENTS_JSON"
 CHANGED=0
 NOT_FOUND=0
 
+for AGENTS_DIR in "${AGENTS_DIRS[@]}"; do
 for AGENT_FILE in "$AGENTS_DIR"/*.md; do
+  [ -e "$AGENT_FILE" ] || continue
+
   AGENT_NAME="$(basename "$AGENT_FILE" .md)"
 
   if [ -z "${AGENTS[$AGENT_NAME]:-}" ]; then
@@ -83,14 +86,17 @@ for AGENT_FILE in "$AGENTS_DIR"/*.md; do
 
   # Check if this agent file has a model: line
   if grep -q "^model: " "$AGENT_FILE"; then
-    # Replace the model line
-    sed -i "s|^model: .*|model: $NEW_MODEL|" "$AGENT_FILE"
+    # Replace ONLY the first model: line (the frontmatter one).
+    # Agent .md files may contain "model: ..." in doc examples further down —
+    # rewriting those would corrupt documentation (happened with infra.md).
+    sed -i "0,/^model: /s|^model: .*|model: $NEW_MODEL|" "$AGENT_FILE"
     echo "  ✅ $AGENT_NAME → $NEW_MODEL"
     CHANGED=$((CHANGED + 1))
   else
     echo "  ⚠️  $AGENT_NAME — нет поля model в файле"
     NOT_FOUND=$((NOT_FOUND + 1))
   fi
+done
 done
 
 echo ""
@@ -101,11 +107,14 @@ echo "  Skipped (no model field): $NOT_FOUND"
 if [ $CHANGED -gt 0 ]; then
   echo ""
   echo "📋 Changes made:"
+  for AGENTS_DIR in "${AGENTS_DIRS[@]}"; do
   for AGENT_FILE in "$AGENTS_DIR"/*.md; do
+    [ -e "$AGENT_FILE" ] || continue
     AGENT_NAME="$(basename "$AGENT_FILE" .md)"
     if [ -n "${AGENTS[$AGENT_NAME]:-}" ]; then
-      echo "  $AGENT_NAME → $(grep "^model:" "$AGENT_FILE" | sed 's/model: //')"
+      echo "  $AGENT_NAME → $(grep -m1 "^model:" "$AGENT_FILE" | sed 's/model: //')"
     fi
+  done
   done
 fi
 

@@ -18,7 +18,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-AGENTS_DIR="$PROJECT_DIR/.opencode/agents"
+# Both locations opencode reads agent definitions from:
+#   project agents  — <repo>/.opencode/agents
+#   global agents   — ~/.config/opencode/agents (explore, general, infra, researcher-agent, ...)
+AGENTS_DIRS=(
+  "$PROJECT_DIR/.opencode/agents"
+  "$HOME/.config/opencode/agents"
+)
 
 if [ $# -lt 1 ]; then
   echo "❌ Usage: $0 <profile-name>"

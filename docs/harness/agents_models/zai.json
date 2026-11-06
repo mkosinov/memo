@@ -1,0 +1,30 @@
+{
+  "name": "z.ai (paid subscription) — snapshot 2026-11-06",
+  "provider": "zai",
+  "updated": "2026-11-06",
+  "agents": {
+    "architect": "zai/glm-5.3",
+    "backend-coder": "zai/glm-5.3",
+    "code-compliance-reviewer": "zai/glm-5.3-flash",
+    "code-quality-reviewer": "zai/glm-5.3-flash",
+    "debugger": "zai/glm-5.3-flash",
+    "deployer": "zai/glm-5.3-flash",
+    "docser": "zai/glm-5.3-flash",
+    "frontend-coder": "zai/glm-5.3",
+    "manager": "zai/glm-5.3",
+    "plan-reviewer": "opencode/big-pickle",
+    "spec-panel-best-practices": "opencode/deepseek-v4.1-flash-free",
+    "spec-panel-completeness": "opencode/big-pickle",
+    "spec-panel-consistency": "opencode/ling-3.1-flash-free",
+    "spec-panel-feasibility": "opencode/nemotron-3-ultra-free",
+    "spec-panel-security": "opencode/minimax-m3.1-flash-free",
+    "spec-panel-simplicity": "opencode/mimo-v2.6-flash-free",
+    "spec-panel-test-design": "opencode/nemotron-3-ultra-free",
+    "tester": "zai/glm-5.3-flash",
+    "vision": "zai/glm-5.3-flash",
+    "explore": "zai/glm-5.3-flash",
+    "general": "zai/glm-5.3",
+    "infra": "zai/glm-5.3-flash",
+    "researcher-agent": "zai/glm-5.3-flash"
+  }
+}

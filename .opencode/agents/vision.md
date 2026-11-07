@@ -1,7 +1,7 @@
 ---
 description: Eyes for text-only agents — reads screenshots and images and answers concrete questions about what is visible. Dispatch with absolute image path(s) + a question when you cannot view an image yourself.
 mode: subagent
-model: zai/glm-5.3-flash
+model: opencode/nemotron-3.5-super-vl-free
 variant: max
 temperature: 0.1
 ---

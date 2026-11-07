@@ -1,7 +1,7 @@
 ---
 description: Bug localization and root cause analysis. Investigates issues in frontend (Next.js) and backend (FastAPI).
 mode: subagent
-model: zai/glm-5.3-flash
+model: opencode/deepseek-v4.1-flash-free
 temperature: 0.2
 permission:
   task:

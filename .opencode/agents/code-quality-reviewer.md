@@ -1,7 +1,7 @@
 ---
 description: Code quality reviewer. Verifies that implementation is well-built, clean, tested, and maintainable. Also runs the test suite.
 mode: subagent
-model: zai/glm-5.3-flash
+model: opencode/deepseek-v4.1-flash-free
 temperature: 0.1
 permission:
   task:

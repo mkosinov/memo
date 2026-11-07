@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — completeness perspective. Finds holes, unhandled edge cases, and missing scenarios in spec documents.
 mode: subagent
-model: opencode/big-pickle
+model: opencode/glm-5.3-flash-free
 temperature: 0.1
 permission:
   read: allow

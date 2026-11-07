@@ -1,7 +1,7 @@
 ---
 description: Test environment specialist. Prepares the dev/test environment (servers, ports, DB seed, health) and runs test suites. Reports compact pass/fail results only.
 mode: subagent
-model: zai/glm-5.3-flash
+model: opencode/glm-5.3-flash-free
 temperature: 0.2
 permission:
   skill:

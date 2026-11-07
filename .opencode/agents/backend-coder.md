@@ -1,7 +1,7 @@
 ---
 description: Backend developer — implements FastAPI API, SQLite database, business logic, and integrations.
 mode: subagent
-model: zai/glm-5.3
+model: opencode/deepseek-v4.1-flash-free
 variant: max
 temperature: 0.3
 permission:

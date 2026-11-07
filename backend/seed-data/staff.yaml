@@ -1,0 +1,96 @@
+# СОТРУДНИКИ и их блок «мастер» (участие в расписании), плюс должности.
+#
+# Правила:
+#   - Сотрудник ищется по паре first_name + last_name (повторный запуск
+#     обновляет запись, а не дублирует). ФИО пишите так, как должно быть
+#     видно в админке; полное совпадение имени и фамилии у двух людей
+#     невозможно — для тёзок добавьте инициал в фамилию.
+#   - positions — названия должностей. «Мастер» и «Администратор» уже есть
+#     в БД (системные) — их можно не объявлять в блоке positions.
+#     Остальные должности объявите в positions ниже; скрипт их создаст.
+#     Должность влияет только на зарплатный модуль, не на доступ.
+#   - master — блок расписания. Есть блок = человек стоит в расписании
+#     мастером. Нет блока = сотрудник без расписания (администратор, СММ…).
+#       specialty — обязательна; можно несколько через запятую:
+#                   specialty: "живопись, керамика"
+#       color     — цвет в расписании, ровно #RRGGBB
+#       is_active — участвует ли в распределении занятий (true/false)
+#   - avatar_url — путь к фото в репозитории фронта, можно "".
+#   - Если убрать блок master у уже залитого сотрудника, запись в расписании
+#     останется — архив/удаление мастера делается в админке.
+#
+# Проверка: cd backend && uv run python -m src.seed.reference --check
+#
+# Ниже — текущие данные студии из dev-сида: проверьте и поправьте под прод.
+
+positions:
+  - title: Мастер
+  - title: Администратор
+  - title: СММ
+
+staff:
+  - first_name: Ольга
+    last_name: Середа
+    sort_order: 0
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: живопись
+      color: "#5B8C7A"
+      is_active: true
+      tags: []
+
+  - first_name: Юлия
+    last_name: Большакова
+    sort_order: 1
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: керамика
+      color: "#6B7E9C"
+      is_active: true
+      tags: []
+
+  - first_name: Анастасия
+    last_name: П.
+    sort_order: 2
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: живопись
+      color: "#A07060"
+      is_active: true
+      tags: []
+
+  - first_name: Дарья
+    last_name: Тюльпина
+    sort_order: 3
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: керамика
+      color: "#7A6E9C"
+      is_active: true
+      tags: []
+
+  - first_name: Александра
+    last_name: В.
+    sort_order: 4
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: живопись
+      color: "#8A7840"
+      is_active: true
+      tags: []
+
+  - first_name: Ирина
+    last_name: Горох
+    sort_order: 5
+    avatar_url: ""
+    positions: [Мастер]
+    master:
+      specialty: керамика
+      color: "#9A5870"
+      is_active: true
+      tags: []

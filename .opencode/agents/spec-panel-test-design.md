@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — test-design perspective. Owns the verification quality of every test a spec defines — exercise completeness (data discriminates, assertions cover the result), non-duplication, failure localizability, AC testability; flags under-exercised, duplicated, and unlocalizable tests.
 mode: subagent
-model: opencode/nemotron-3-ultra-free
+model: opencode/glm-5.3-flash-free
 temperature: 0.1
 permission:
   read: allow

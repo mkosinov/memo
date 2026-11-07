@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — application security perspective. Finds authentication, authorization/role, and security-model breakage risks in spec documents; returns an explicit no-attack-surface verdict when a spec touches none.
 mode: subagent
-model: opencode/minimax-m3.1-flash-free
+model: opencode/deepseek-v4.1-flash-free
 temperature: 0.1
 permission:
   read: allow

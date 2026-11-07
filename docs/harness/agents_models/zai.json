@@ -1,8 +1,12 @@
 {
-  "name": "z.ai (paid subscription) — snapshot 2026-11-06",
+  "name": "z.ai (paid subscription) — snapshot 2026-11-06, stale ids fixed",
   "provider": "zai",
   "updated": "2026-11-06",
   "agents": {
+    "explore": "zai/glm-5.3-flash",
+    "general": "zai/glm-5.3",
+    "infra": "zai/glm-5.3-flash",
+    "researcher-agent": "zai/glm-5.3-flash",
     "architect": "zai/glm-5.3",
     "backend-coder": "zai/glm-5.3",
     "code-compliance-reviewer": "zai/glm-5.3-flash",
@@ -15,16 +19,12 @@
     "plan-reviewer": "opencode/big-pickle",
     "spec-panel-best-practices": "opencode/deepseek-v4.1-flash-free",
     "spec-panel-completeness": "opencode/big-pickle",
-    "spec-panel-consistency": "opencode/ling-3.1-flash-free",
-    "spec-panel-feasibility": "opencode/nemotron-3-ultra-free",
-    "spec-panel-security": "opencode/minimax-m3.1-flash-free",
+    "spec-panel-consistency": "opencode/glm-5.3-flash-free",
+    "spec-panel-feasibility": "opencode/glm-5.3-flash-free",
+    "spec-panel-security": "opencode/deepseek-v4.1-flash-free",
     "spec-panel-simplicity": "opencode/mimo-v2.6-flash-free",
-    "spec-panel-test-design": "opencode/nemotron-3-ultra-free",
+    "spec-panel-test-design": "opencode/glm-5.3-flash-free",
     "tester": "zai/glm-5.3-flash",
-    "vision": "zai/glm-5.3-flash",
-    "explore": "zai/glm-5.3-flash",
-    "general": "zai/glm-5.3",
-    "infra": "zai/glm-5.3-flash",
-    "researcher-agent": "zai/glm-5.3-flash"
+    "vision": "zai/glm-5.3-flash"
   }
 }

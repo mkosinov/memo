@@ -1,7 +1,7 @@
 ---
 description: Spec panel reviewer — feasibility perspective. Finds technical risks, hidden complexity, and unrealistic assumptions in spec documents.
 mode: subagent
-model: opencode/nemotron-3-ultra-free
+model: opencode/glm-5.3-flash-free
 temperature: 0.1
 permission:
   read: allow

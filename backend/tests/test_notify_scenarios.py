@@ -2,22 +2,24 @@
 
 The scenario registry maps event type codes to handlers; the pilot entry
 is ``new_record``. The handler receives the event (snapshot), a session
-and the queue port, does its own commit boundaries (task + ``processed_at``
-in ONE transaction; enqueue AFTER commit) and materializes its decision
-as a ``notify_tasks`` row.
+and the queue port, does its own commit boundaries (task row in ONE
+transaction; enqueue AFTER commit) and materializes its decision as a
+``notify_tasks`` row — the chain ROOT, whose existence is the
+deduplication key since #580 (``processed_at`` is gone with the column).
 
 Covered (spec §5, US-2/US-3):
 
-- deleted record → ``processed_at`` WITHOUT a task (nothing to send);
+- deleted record → nothing persisted at all (no task, no mark — the
+  event simply yields no notification);
 - four skip reasons, one per predicate branch, FIXED order
   ``notify_off → no_recipient → no_consent → past_event`` (first branch
   wins on multi-fail);
 - success → task ``queued`` of the FIRST priority channel with the
   FROZEN render payload + channel template + address (rev.5, ADR 014),
-  payload §4.2 in FakeQueue, ``processed_at`` set;
+  payload §4.2 in FakeQueue; the created task is the chain ROOT;
 - idempotency (§4.4): reprocessing an event creates no duplicate task;
-- RenderError PROPAGATES (not caught into a skip) — the 3-attempts
-  policy of Task 9 owns it.
+- RenderError PROPAGATES (not caught into a skip) — the subscriber's
+  attempts ledger owns it (#580 ``notify_event_attempts``, Task 6).
 """
 
 import importlib.util
@@ -162,13 +164,13 @@ class TestDeletedRecord:
         await handle_new_record(event, db_session, queue)
 
         assert await _tasks(db_session) == []  # nothing to send — NO task row
-        closed = await _fetch_event(db_session, event.id)
-        assert closed.processed_at is not None
+        # #580: no processed_at mark exists anymore — the closure of a
+        # deleted-record event is the ABSENCE of a task (nothing persisted)
         assert queue.tasks == []
 
 
 class TestSkipReasons:
-    """One test per predicate branch (US-2); skip → task row + processed_at
+    """One test per predicate branch (US-2); skip → skipped ROOT task row
     in one transaction, nothing enqueued."""
 
     async def test_notify_off(
@@ -196,7 +198,10 @@ class TestSkipReasons:
         # a skipped task carries no channel payload (rev.5)
         assert task.channel is None and task.address is None
         assert task.payload is None and task.template_body is None
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     @pytest.mark.parametrize(
@@ -240,7 +245,10 @@ class TestSkipReasons:
             assert task.client_id is None
         else:
             assert task.client_id == cid
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     async def test_no_consent(
@@ -262,7 +270,10 @@ class TestSkipReasons:
         assert len(tasks) == 1
         assert tasks[0].status == "skipped"
         assert tasks[0].skip_reason == "no_consent"
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     async def test_past_event(
@@ -281,7 +292,10 @@ class TestSkipReasons:
         assert len(tasks) == 1
         assert tasks[0].status == "skipped"
         assert tasks[0].skip_reason == "past_event"
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
 
@@ -348,7 +362,7 @@ class TestFixedReasonOrder:
 
 class TestSuccessPath:
     """US-3: future + flag + consent + phone → queued task, rendered text,
-    frozen channels, §4.2 payload in the queue, processed_at set."""
+    frozen channels, §4.2 payload in the queue, root task created."""
 
     async def test_success_creates_queued_task_and_enqueues(
         self,
@@ -447,7 +461,10 @@ class TestSuccessPath:
         # rides the row/payload to the worker's parse-mode decision
         assert task.template_channel is None
 
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
 
         # payload §4.2 rev.5 in FakeQueue — exact shape, frozen values
         assert len(queue.tasks) == 1
@@ -581,7 +598,7 @@ class TestIdempotency:
 
 class TestRenderErrorPropagates:
     """A render failure is NOT a skip branch — it propagates for the
-    Task 9 attempts policy; no task, no processed_at."""
+    attempts ledger (Task 6); no task, nothing persisted."""
 
     async def test_render_error_propagates(
         self, db_session, create_activity, create_record, create_client
@@ -598,5 +615,6 @@ class TestRenderErrorPropagates:
             await handle_new_record(event, db_session, queue)
 
         assert await _tasks(db_session) == []
-        assert (await _fetch_event(db_session, event.id)).processed_at is None
+        # #580: nothing persisted — the ledger writer is Task 6
+        assert await _fetch_event(db_session, event.id) is not None
         assert queue.tasks == []

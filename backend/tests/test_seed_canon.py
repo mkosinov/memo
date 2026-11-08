@@ -597,8 +597,8 @@ async def test_keeps_by_design_exceptions(canon_stack: CanonStack) -> None:
         ),
         (
             "INSERT INTO domain_events (id, created_at, updated_at, type,"
-            " occurred_at, snapshot, attempts)"
-            " VALUES ('dev-1', ?, ?, 'new_record', ?, '{}', 0)",
+            " occurred_at, snapshot)"
+            " VALUES ('dev-1', ?, ?, 'new_record', ?, '{}')",
             (TS, TS, TS),
         ),
         (

@@ -13,13 +13,7 @@ Standalone entry ``python -m src.notify.dispatcher``. Three loops of ONE
 spec §3.8 panel finding); SIGTERM/KeyboardInterrupt set the stop-event
 and the TaskGroup winds down cleanly.
 
-- **Cycle 1 — journal polling** (interval ``NOTIFY_POLL_INTERVAL``, batch
-  20, ``processed_at IS NULL AND processing_error IS NULL``, ``ORDER BY
-  occurred_at, id`` — cursor by row state, no "id > last"): applies the
-  scenario registry. Scenario/render errors are the DISPATCHER's
-  bookkeeping: ``attempts`` 1→2→3, ``processing_error`` (last error
-  text) at 3 - never written during attempts 1-2; a dead event is no
-  longer picked. The same iteration sweeps the re-enqueue predicate:
+- **Cycle 1 — re-enqueue sweep** (interval ``NOTIFY_POLL_INTERVAL``):
   ``queued`` tasks with ``updated_at`` older than
   ``NOTIFY_REENQUEUE_AFTER`` that the worker does not HOLD (family
   §3.3 rev.5 — ``pending_worker_task_ids``: the PEL of the ``worker``
@@ -27,7 +21,10 @@ and the TaskGroup winds down cleanly.
   re-enqueued with the SAVED payload in full (no address
   re-resolution); the ``updated_at`` refresh is the re-enqueue stamp that
   keeps the sweep from firing every tick; past the cap (module constant,
-  not a setting) the task is ``failed``.
+  not a setting) the task is ``failed``. (The journal-polling half of
+  the old cycle 1 is gone with the #580 switchover: the journal lost
+  its consumer-state columns — the dispatcher's event INPUT is the
+  ``notification`` consumer group from #580 Task 6.)
 - **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
   start, then claim → per event one append-only attempt row + the §4.3
   derived task state + the rev.5 CHAIN rules in ONE commit → the
@@ -71,12 +68,11 @@ import src.models  # noqa: F401 — registration first; breaks the models↔noti
 from src.core.config import settings
 from src.db.database import DBManager
 from src.notify.channels.registry import parse_channel_priority
-from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt
+from src.notify.models import NotifyTask, NotifyTaskAttempt
 from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent, TaskPayload, build_task_payload
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.render import find_template
-from src.notify.scenarios import SCENARIOS
 from src.util.utc import utc_now
 
 if TYPE_CHECKING:
@@ -90,10 +86,6 @@ logger = logging.getLogger("memo.notify.dispatcher")
 
 # ── module constants (spec §3.8 — deliberately NOT settings) ────────────────
 
-#: Journal polling batch size.
-POLL_BATCH_SIZE = 20
-#: Scenario/render attempts before an event is dead (``processing_error``).
-MAX_EVENT_ATTEMPTS = 3
 #: Re-enqueue ceiling; past it the task is ``failed``.
 REENQUEUE_CAP = 10
 #: Failure text of a cap-exhausted task (spec §3.8 verbatim).
@@ -169,102 +161,7 @@ def _is_malformed_status(item: StatusEvent) -> bool:
     return False
 
 
-# ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
-
-
-async def process_pending_batch(
-    session_factory: async_sessionmaker[AsyncSession], queue: NotifyQueue
-) -> None:
-    """Apply the scenario registry to one batch of pending events.
-
-    Handlers own their commit boundaries (task + ``processed_at`` in one
-    transaction, enqueue after commit — §3.4). A raising handler leaves
-    the attempts bookkeeping to the dispatcher: rollback, ``attempts``
-    +1, ``processing_error`` at the 3rd failure — EXCEPT the typed
-    transport failure (``NotifyTransportError``, GH #483 §3.1), which
-    burns no attempts: the queued task is left for the re-enqueue cycle.
-    No backoff — the next polling iteration is the retry cadence (§3.8).
-
-    The batch is selected as PLAIN ``(id, type)`` tuples and each event
-    re-loaded inside its own ``try``: a failing handler's ``rollback()``
-    expires every identity-mapped instance, and touching an attribute of
-    an expired instance is synchronous lazy IO — ``MissingGreenlet`` in
-    an async session, raised OUTSIDE the per-event ``try``. With ORM
-    instances in the routing one failing event would therefore skip the
-    whole rest of the batch every tick.
-    """
-    async with session_factory() as session:
-        batch = (
-            await session.execute(
-                select(DomainEvent.id, DomainEvent.type)
-                .where(
-                    DomainEvent.processed_at.is_(None),
-                    DomainEvent.processing_error.is_(None),
-                )
-                .order_by(DomainEvent.occurred_at.asc(), DomainEvent.id.asc())
-                .limit(POLL_BATCH_SIZE)
-            )
-        ).all()
-        for event_id, event_type in batch:
-            handler = SCENARIOS.get(event_type)
-            if handler is None:
-                logger.error(
-                    "notify dispatcher: no scenario handler for event type %r"
-                    " (event %s) — event stays pending",
-                    event_type,
-                    event_id,
-                )
-                continue
-            try:
-                # Fresh instance per event: a previous iteration's rollback
-                # may have expired the identity-mapped copy, and
-                # populate_existing guarantees the row values overwrite
-                # whatever stale state it holds.
-                event = (
-                    await session.execute(
-                        select(DomainEvent)
-                        .where(DomainEvent.id == event_id)
-                        .execution_options(populate_existing=True)
-                    )
-                ).scalar_one()
-                await handler(event, session, queue)
-            except NotifyTransportError as exc:
-                # GH #483 (spec §3.1): a TRANSPORT failure at the enqueue
-                # point is not a scenario failure — attempts must not burn
-                # (three dead Redis ticks must not kill the event). The
-                # handler owns its commit boundary (§3.4): the queued task
-                # is already committed and the re-enqueue cycle recovers
-                # it by NOTIFY_REENQUEUE_AFTER. Loud, identifiers only —
-                # no message bodies, no addresses.
-                await session.rollback()
-                logger.error(
-                    "notify dispatcher: event %s: transport failure at the enqueue"
-                    " point (%s) — attempts not burned, queued task left for the"
-                    " re-enqueue cycle",
-                    event_id,
-                    exc,
-                )
-            except Exception as exc:
-                await session.rollback()
-                fresh = (
-                    await session.execute(select(DomainEvent).where(DomainEvent.id == event_id))
-                ).scalar_one()
-                fresh.attempts += 1
-                if fresh.attempts >= MAX_EVENT_ATTEMPTS:
-                    fresh.processing_error = f"{type(exc).__name__}: {exc}"
-                else:
-                    # Attempts 1-2 degrade invisibly without this: the error
-                    # text only lands on the row at attempt 3.
-                    logger.warning(
-                        "notify dispatcher: scenario for event %s failed (attempt %d/%d): %s: %s",
-                        event_id,
-                        fresh.attempts,
-                        MAX_EVENT_ATTEMPTS,
-                        type(exc).__name__,
-                        exc,
-                        exc_info=exc,
-                    )
-                await session.commit()
+# ── cycle 1: re-enqueue sweep (§3.8) ─────────────────────────────────────────
 
 
 async def reenqueue_stale_tasks(
@@ -622,8 +519,7 @@ async def run_dispatcher(
     await asyncio.to_thread(queue.ensure_consumer_groups)
     await asyncio.to_thread(queue.reclaim_hanging)
 
-    async def polling_iteration() -> None:
-        await process_pending_batch(session_factory, queue)
+    async def reenqueue_iteration() -> None:
         await reenqueue_stale_tasks(session_factory, queue)
 
     async def statuses_iteration() -> None:
@@ -633,7 +529,7 @@ async def run_dispatcher(
         await inbound_once(queue)
 
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(run_loop("polling", stop, interval, polling_iteration, log=logger))
+        tg.create_task(run_loop("reenqueue", stop, interval, reenqueue_iteration, log=logger))
         tg.create_task(run_loop("statuses", stop, interval, statuses_iteration, log=logger))
         tg.create_task(run_loop("inbound", stop, interval, inbound_iteration, log=logger))
 

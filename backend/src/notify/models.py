@@ -137,6 +137,19 @@ class NotifyTask(AbstractModel):
             "channel",
             unique=True,
         ),
+        # Redelivery idempotency of chain ROOTS (#580 §3.5/§4.2): a
+        # re-issued event is caught by the EXISTENCE of its root task
+        # (roots and skipped tasks — parent NULL; continuations inherit
+        # the root's pair and are NOT covered). Partial — via
+        # sqlite_where, mirroring the migration that creates it
+        # (precedent c970adc6b3d6), so autogenerate sees no drift.
+        Index(
+            "uq_notify_tasks_event_scenario_root",
+            "event_id",
+            "scenario",
+            unique=True,
+            sqlite_where=sa.text("parent_task_id IS NULL"),
+        ),
     )
 
 
@@ -184,6 +197,40 @@ class NotifyTaskAttempt(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class NotifyEventAttempt(Base):
+    """Per-(event, scenario) attempts ledger of the notify subscriber
+    (#580 §3.5/§4.2) — the SCENARIO retry counter that replaces the
+    event's dropped ``attempts``/``processing_error`` columns: consumer
+    state lives with the consumer, never on the journal row.
+
+    One mutable counter row per (event_id, scenario) — the composite PK
+    IS the spec's ``UNIQUE(event_id, scenario)``. A scenario error
+    increments ``attempts`` and overwrites ``last_error``; at the
+    threshold (module constant ``MAX_SCENARIO_ATTEMPTS = 3``, #580
+    Task 6) the event is parked. Transport errors do NOT burn attempts.
+
+    The dispatcher's group-reading cycle (Task 6) owns the writes; the
+    table lands with the #580 switchover migration (Task 3).
+    """
+
+    __tablename__ = "notify_event_attempts"
+
+    event_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("domain_events.id"),
+        primary_key=True,
+    )
+    scenario: Mapped[str] = mapped_column(String(50), primary_key=True)
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=sa.text("0"),
+    )
+    # Last scenario error text (the parking reason of the counter).
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NotifyTemplate(AbstractModel):

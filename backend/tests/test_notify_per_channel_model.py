@@ -123,11 +123,40 @@ class TestChainIdentity:
             await db_session.flush()
 
     async def test_same_root_different_channels_allowed(self, db_session) -> None:
-        """The chain itself: one root, several channel tasks."""
+        """The chain itself: one root, several channel tasks. #580: only
+        the FIRST task is the root (parent NULL); every continuation
+        sets ``parent_task_id`` — the partial root index
+        ``uq_notify_tasks_event_scenario_root`` allows a chain of any
+        length under one (event_id, scenario)."""
         event_id = await _event_id(db_session)
         db_session.add(_task(event_id, root_task_id="root-1", channel="telegram"))
-        db_session.add(_task(event_id, root_task_id="root-1", channel="mock"))
+        db_session.add(
+            _task(
+                event_id,
+                root_task_id="root-1",
+                parent_task_id="root-1",
+                channel="mock",
+            )
+        )
         await db_session.flush()  # no IntegrityError
+
+    async def test_second_root_same_event_scenario_rejected(
+        self, db_session
+    ) -> None:
+        """#580 §3.5/§4.2: one ROOT per (event_id, scenario) — a re-issued
+        event must not duplicate the chain (redelivery idempotency by
+        root existence); continuations are not covered by the partial
+        index (see the test above)."""
+        event_id = await _event_id(db_session)
+        db_session.add(_task(event_id, root_task_id="root-1", channel="telegram"))
+        await db_session.flush()
+
+        db_session.add(
+            _task(event_id, root_task_id="root-2", channel="mock")
+        )  # a SECOND parent-NULL row — a duplicate root
+
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
 
     async def test_skipped_task_lands_with_reason(self, db_session) -> None:
         """DoD skip-landing: ``skipped`` + ``skip_reason`` survive the

@@ -128,7 +128,7 @@ def event_rows():
 
     def read() -> list[dict]:
         return query_db(
-            "SELECT type, occurred_at, snapshot, processed_at, attempts "
+            "SELECT type, occurred_at, snapshot, published_at "
             "FROM domain_events ORDER BY rowid"
         )
 
@@ -196,8 +196,7 @@ class TestTransactionalInsert:
         assert len(rows) == 1
         row = rows[0]
         assert row["type"] == "new_record"
-        assert row["processed_at"] is None  # pending — for the polling loop
-        assert row["attempts"] == 0
+        assert row["published_at"] is None  # unpublished — for the relay (#580)
         stored = json.loads(row["snapshot"])
         assert stored["record_id"] == "tag-journal-1"
         assert stored["total_price"] == 3500

@@ -1,16 +1,15 @@
 """GH #482 Task 9 (spec §3.8; family #476 §4.3/§4.4): dispatcher process.
 
-Three loops of one ``asyncio.TaskGroup`` over the queue port: journal
-polling (batch 20 + re-enqueue sweep), ``notify:statuses`` reading
-(§4.3 derived state), ``notify:inbound`` reading (empty pilot registry).
-Covered (spec §5, US-5–US-8):
+Three loops of one ``asyncio.TaskGroup`` over the queue port: the
+re-enqueue sweep, ``notify:statuses`` reading (§4.3 derived state),
+``notify:inbound`` reading (empty pilot registry). Covered (spec §5,
+US-5–US-8):
 
-- polling processes and marks a batch (order ``occurred_at, id``, batch
-  limit), the real scenario closes events for deleted records;
-- 3-attempts policy: ``attempts`` 1→2→3 → ``processing_error`` (last
-  error text), NOT written during attempts 1–2, dead event no longer
-  picked, failing handler does not skip the rest of the batch (rollback
-  expiry — routing survives, later events process in the same sweep);
+- #580 Task 3: the journal-polling cycle and the event 3-attempts
+  policy are GONE with the ``processed_at``/``attempts``/
+  ``processing_error`` columns (the switchover migration dropped them;
+  their tests are deleted with replacement — the group-input tests of
+  #580 Task 6, spec §5.2);
 - statuses: attempt rows appended, derived state per §4.3 (first
   ``sending`` → sending; first ``sent`` of ANY attempt → sent, terminal;
   final ``failed`` → failed), idempotent re-apply (duplicate redelivery
@@ -54,8 +53,6 @@ from src.notify import dispatcher
 from src.notify.models import DomainEvent, NotifyTask, NotifyTemplate
 from src.notify.queue import FakeQueue, build_task_payload
 from src.notify.redis_queue import TRANSPORT_NOT_CONFIGURED_MESSAGE, NotifyTransportError
-from src.notify.render import RenderError
-from src.notify.scenarios import SCENARIOS
 from tests.conftest import BACKEND_DIR, query_db, query_db_params
 from tests.notify_redis_support import capture_notify_logs
 
@@ -111,31 +108,6 @@ def _session_factory(db_engine):
 
 def _iso_z(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
-
-
-async def _stage_event(
-    db_session,
-    *,
-    type_: str = "new_record",
-    occurred_at: datetime | None = None,
-) -> DomainEvent:
-    """A pending journal event; the default snapshot points at a record
-    that does not exist — the real scenario then closes the event
-    WITHOUT a task (§3.4 deleted-record branch)."""
-    event = DomainEvent(
-        type=type_,
-        occurred_at=occurred_at or datetime.now(UTC).replace(tzinfo=None),
-        snapshot={
-            "event": {
-                "type": type_,
-                "occurred_at": _iso_z(datetime.now(UTC)),
-                "record_id": str(uuid.uuid4()),
-            }
-        },
-    )
-    db_session.add(event)
-    await db_session.commit()
-    return event
 
 
 async def _stage_queued_task(
@@ -285,15 +257,6 @@ class _TransportBrokenQueue(FakeQueue):
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_inbound()
-
-
-def _event_row(event_id: str) -> dict:
-    rows = query_db(
-        "SELECT processed_at, attempts, processing_error FROM domain_events"
-        f" WHERE id = '{event_id}'"
-    )
-    assert rows, f"event {event_id} not found"
-    return rows[0]
 
 
 # ── NOTIFY_CHANNEL_PRIORITY parsing (§3.8) ──────────────────────────────────
@@ -462,128 +425,6 @@ class TestMainExitCodePropagation:
         )
         assert proc.returncode == 2
         assert TRANSPORT_NOT_CONFIGURED_MESSAGE in proc.stdout + proc.stderr
-
-
-# ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
-
-
-class TestPollingBatch:
-    async def test_poll_processes_and_marks_batch(self, db_engine, db_session) -> None:
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        for i in range(3):
-            await _stage_event(db_session, occurred_at=base + timedelta(seconds=i))
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        rows = query_db("SELECT processed_at FROM domain_events")
-        assert len(rows) == 3
-        # nonexistent record → the scenario closes the event WITHOUT a task
-        assert all(r["processed_at"] is not None for r in rows)
-        assert query_db("SELECT id FROM notify_tasks") == []
-
-    async def test_poll_respects_batch_size_and_occurred_at_order(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(dispatcher, "POLL_BATCH_SIZE", 2)
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        staged = [
-            (await _stage_event(db_session, occurred_at=base + timedelta(seconds=i))).id
-            for i in range(5)
-        ]
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-        closed = {
-            r["id"] for r in query_db("SELECT id FROM domain_events WHERE processed_at IS NOT NULL")
-        }
-        assert closed == set(staged[:2])  # oldest first, batch of 2
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-        closed = {
-            r["id"] for r in query_db("SELECT id FROM domain_events WHERE processed_at IS NOT NULL")
-        }
-        assert closed == set(staged[:4])
-
-    async def test_unknown_event_type_logged_and_stays_pending(self, db_engine, db_session) -> None:
-        event = await _stage_event(db_session, type_="mystery")
-
-        with capture_dispatcher_logs() as messages:
-            await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        assert any("mystery" in m for m in messages)
-        row = _event_row(event.id)
-        assert row["processed_at"] is None
-        assert row["attempts"] == 0
-        assert row["processing_error"] is None
-
-
-class TestAttemptsPolicy:
-    async def test_attempts_1_2_3_then_processing_error(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        calls: list[str] = []
-
-        async def boom(event, session, queue) -> None:
-            calls.append(event.id)
-            raise RenderError("template exploded")
-
-        monkeypatch.setitem(SCENARIOS, "new_record", boom)
-        event = await _stage_event(db_session)
-        factory = _session_factory(db_engine)
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 1
-        assert row["processing_error"] is None  # NOT written on attempt 1
-        assert row["processed_at"] is None
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 2
-        assert row["processing_error"] is None  # NOT written on attempt 2
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 3
-        assert row["processed_at"] is None
-        assert row["processing_error"] is not None
-        assert "template exploded" in row["processing_error"]
-
-        # dead event: the polling predicate no longer takes it
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        assert len(calls) == 3
-
-    async def test_failing_event_rest_of_batch_processes_same_sweep(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        """Regression (review of 6710caba): a failing handler's rollback
-        expires every loaded event of the batch; the routing must survive
-        that, and the events AFTER the failing one must still process in
-        the SAME sweep instead of waiting out the next ticks."""
-        real_handler = SCENARIOS["new_record"]
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        first = await _stage_event(db_session, occurred_at=base)
-        await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
-        await _stage_event(db_session, occurred_at=base + timedelta(seconds=2))
-
-        async def flaky(event, session, queue) -> None:
-            if event.id == first.id:
-                raise RenderError("template exploded")
-            await real_handler(event, session, queue)
-
-        monkeypatch.setitem(SCENARIOS, "new_record", flaky)
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        row = _event_row(first.id)
-        assert row["attempts"] == 1
-        assert row["processed_at"] is None
-        assert row["processing_error"] is None  # attempt 1 — not written yet
-        # the two LATER events closed in the same sweep (nonexistent record
-        # → the scenario closes them without a task)
-        processed = query_db(
-            f"SELECT id FROM domain_events WHERE processed_at IS NOT NULL AND id != '{first.id}'"
-        )
-        assert len(processed) == 2
 
 
 # ── cycle 2: notify:statuses → attempts + derived state (§4.3) ──────────────
@@ -1320,77 +1161,6 @@ class TestReenqueueWorkerPEL:
 
 
 # ── enqueue-point transport failure — GH #483 Task 4 (spec §3.1) ────────────
-
-
-class TestEnqueueTransportFailure:
-    """A TYPED transport failure at the enqueue point is not a scenario
-    failure: the event's ``attempts`` must not burn (the re-enqueue cycle
-    owns recovery); scenario errors keep the 1→2→3 policy unchanged."""
-
-    async def test_transport_error_does_not_burn_attempts_scenarios_still_do(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        dead = await _stage_event(db_session, occurred_at=base)
-        boom = await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
-
-        async def transport_dead(event, session, queue) -> None:
-            # the §3.4 contract shape: task + processed_at committed,
-            # enqueue AFTER the commit — the failure leaves a queued task
-            session.add(
-                NotifyTask(
-                    event_id=event.id,
-                    scenario="new_record",
-                    status="queued",
-                    channel="telegram",
-                    address="+7OLD",
-                    payload={"client": {"name": "Анна"}},
-                    template_body="{{ client.name }}",
-                )
-            )
-            event.processed_at = datetime.now(UTC).replace(tzinfo=None)
-            await session.commit()
-            raise NotifyTransportError(
-                "streams transport failed during publish notify:tasks:"
-                " ConnectionError: mock-dead-redis"
-            )
-
-        async def scenario_boom(event, session, queue) -> None:
-            raise RenderError("template exploded")
-
-        async def selective(event, session, queue) -> None:
-            if event.id == dead.id:
-                await transport_dead(event, session, queue)
-            else:
-                await scenario_boom(event, session, queue)
-
-        monkeypatch.setitem(SCENARIOS, "new_record", selective)
-
-        with capture_dispatcher_logs() as messages:
-            await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        # transport failure: attempts did NOT move, no processing_error,
-        # the queued task waits for the re-enqueue cycle (§3.1)
-        dead_row = _event_row(dead.id)
-        assert dead_row["attempts"] == 0
-        assert dead_row["processing_error"] is None
-        assert dead_row["processed_at"] is not None  # closed by its own handler
-        task_rows = query_db(
-            f"SELECT status, reenqueues FROM notify_tasks WHERE event_id = '{dead.id}'"
-        )
-        assert task_rows[0]["status"] == "queued"
-        assert task_rows[0]["reenqueues"] == 0
-
-        # contrast, same sweep: a scenario error DID burn an attempt
-        boom_row = _event_row(boom.id)
-        assert boom_row["attempts"] == 1
-        assert boom_row["processing_error"] is None  # attempt 1 — not written yet
-
-        # loud + log hygiene: exception class in the journal, no message
-        # bodies, no addresses (§3.1)
-        assert any("transport" in m and "ConnectionError" in m for m in messages)
-        assert all("готовый текст" not in m for m in messages)
-        assert all("+7OLD" not in m for m in messages)
 
 
 class TestReenqueueTransportFailure:

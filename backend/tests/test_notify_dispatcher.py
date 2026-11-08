@@ -252,8 +252,10 @@ def _age_task(task_id: str, age_seconds: int = 300) -> None:
 class _TransportBrokenQueue(FakeQueue):
     """FakeQueue whose transport-facing calls raise the typed transport
     error — a deterministic dead-Redis stand-in (no server, no marks).
-    The message mirrors the adapter's real failure text (class + message,
-    no bodies)."""
+    The message mirrors the streams core's real failure text
+    (``streams transport failed during <operation>:`` class + message,
+    no bodies) with the core's own operation labels for the adapter's
+    call paths."""
 
     def __init__(self, *, fail_enqueue: bool = True, fail_claim: bool = True) -> None:
         super().__init__()
@@ -263,7 +265,7 @@ class _TransportBrokenQueue(FakeQueue):
     def enqueue_task(self, payload: dict) -> None:
         if self._fail_enqueue:
             raise NotifyTransportError(
-                "notify queue transport failed during enqueue_task:"
+                "streams transport failed during publish notify:tasks:"
                 " ConnectionError: mock-dead-redis"
             )
         super().enqueue_task(payload)
@@ -271,7 +273,7 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_statuses(self):
         if self._fail_claim:
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:statuses:"
+                "streams transport failed during claim notify:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_statuses()
@@ -279,7 +281,7 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_inbound(self):
         if self._fail_claim:
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:inbound:"
+                "streams transport failed during claim notify:inbound/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_inbound()
@@ -1304,7 +1306,7 @@ class TestReenqueueWorkerPEL:
         class _ProbeBrokenQueue(FakeQueue):
             def pending_worker_task_ids(self) -> set[str]:
                 raise NotifyTransportError(
-                    "notify queue transport failed during pending worker tasks:"
+                    "streams transport failed during pending notify:tasks/worker:"
                     " ConnectionError: mock-dead-redis"
                 )
 
@@ -1349,7 +1351,7 @@ class TestEnqueueTransportFailure:
             event.processed_at = datetime.now(UTC).replace(tzinfo=None)
             await session.commit()
             raise NotifyTransportError(
-                "notify queue transport failed during enqueue_task:"
+                "streams transport failed during publish notify:tasks:"
                 " ConnectionError: mock-dead-redis"
             )
 
@@ -1552,7 +1554,7 @@ class TestTransportFailureDoesNotKillCycles:
             if len(ticks) >= 3:
                 stop.set()
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:statuses:"
+                "streams transport failed during claim notify:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
 

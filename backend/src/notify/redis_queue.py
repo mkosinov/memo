@@ -59,10 +59,12 @@ from src.streams.transport import (
 from src.streams.transport import (
     DEFAULT_RECLAIM_MIN_IDLE_MS,
     ENVELOPE_KEY,
-    MAX_POOL_CONNECTIONS,
     PAYLOAD_FIELD,
     StreamTransport,
     StreamTransportError,
+)
+from src.streams.transport import (
+    MAX_POOL_CONNECTIONS as MAX_POOL_CONNECTIONS,  # re-export: channels/limits, channels/mock
 )
 from src.streams.transport import (
     SOCKET_TIMEOUT_SECONDS as SOCKET_TIMEOUT_SECONDS,  # re-export: channels/limits

@@ -41,7 +41,7 @@ E2E-якоря: изменения не имеют браузерного дел
 | `GET /api/v1/photos` (аноним) | 200, полный `PhotoResponse` со служебными полями | **401** (`AUTH_UNAUTHORIZED`) |
 | `GET /api/v1/photos/{id}` (аноним) | 200, полный `PhotoResponse` | **401** |
 | `GET /api/v1/photos` / `GET /photos/{id}` (staff) | полный `PhotoResponse`; мастер — скоуп #263 | без изменений (добавлен только guard `photos:read`) |
-| `GET /api/v1/photos/public` (аноним) | — маршрута нет | **новый**: 200, `PaginatedResponse[PhotoPublicResponse]`, `is_public=True` принудительно, параметры только `page`/`per_page` |
+| `GET /api/v1/photos/public` (аноним) | — маршрута нет | **новый**: 200, `PaginatedResponse[PhotoPublicResponse]` (теги — названия), `is_public=True` принудительно, параметры `page`/`per_page`/`id`, сортировка зафиксирована |
 | Веб-галерея (`useGallery`) | `getPhotos({is_public:true, per_page:12})` → `/photos` | `getPublicPhotos({per_page:12})` → `/photos/public` (для гостя визуально ничего не меняется) |
 | api-client | только полный `PhotoResponseSchema` | + `PhotoPublicResponseSchema`, `PhotoPublicListResponseSchema`, `getPublicPhotos`; полный контракт не тронут |
 | Комментарий `records.py:69-72` | «#493 owns that wiring» (устарел) | ссылка на #499 (см. §6.6) |
@@ -56,36 +56,48 @@ E2E-якоря: изменения не имеют браузерного дел
 
 ```python
 class PhotoPublicResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     filename: str
-    tags: list[PhotoTagResponse] = []
+    tags: list[str] = []  # названия тегов, резолвятся на сервере
 ```
 
-Минимум, который потребляет галерея (`to-gallery-vm` читает только `id`/`filename`/`tags`). `is_public` не включается (на маршруте константа true), `created_at`/`updated_at`/владельческие поля — не включаются. Docstring по образцу `MyPhotoItem`: почему схема отделена от `PhotoResponse`.
+Минимум, который потребляет галерея (`to-gallery-vm` читает только `id`/`filename`/`tags` → caption из названий). Форма тегов — по конвенции публичных поверхностей (`MyPhotoItem`, `schemas/my.py:197-199`; api-client `:1011-1012`): названия строками; объекты тегов с id остаются в админском контракте — публичные id тегов не отдаются. `is_public` не включается (на маршруте константа true), `created_at`/`updated_at`/владельческие поля — не включаются. `from_attributes=True` — для `model_validate` из ORM/Row. Docstring по образцу `MyPhotoItem`: почему схема отделена от `PhotoResponse`.
 
 ### 6.2 Публичный маршрут (`backend/src/api/v1/photos.py`)
 
 - `GET /api/v1/photos/public` → `PaginatedResponse[PhotoPublicResponse]`; аноним разрешён (без scope-зависимости).
-- Параметры: только `page`, `per_page` (та же валидация, что у общего списка). Фильтры владельцев/`q`/`tag_id`/`sort_by` не подключаются; `is_public=True` принудительно в билдере.
-- Реализация через переиспользование `list_photos_view` с форсированным фильтром и маппингом Row → `PhotoPublicResponse`.
+- Параметры: стандартный кирпич `PaginationParams` — `page`, `per_page`, `id` (Guard 1 #371 / domain rule 8: каждый пагинированный GET публикует `?id=`; пин `EXPECTED_PAGINATED_LISTS` 19 → 20, `test_list_id_uniform_guards.py:52`). `?id=` безопасен: AND-сочетается с принудительным `is_public=True`, обойти фильтр не может. Фильтры владельцев/`q`/`tag_id`/`sort_by`/`is_public` не подключаются; незнакомые параметры игнорируются (FastAPI default — явное решение, в конвенции репо «неизвестный фильтр → молчаливый результат, не 4xx»).
+- Сортировка зафиксирована: `created_at desc` + tiebreak `id asc` (дефолт общего списка), не настраивается — порядок галереи не дрейфует.
+- Реализация: переиспользование композита списка (`list_photos_view`, `services/photo.py:386-474`) с форсированным `is_public=True`. Уточнение: билдер сегодня жёстко маппит Row → `PhotoResponse` (включая scalar-subquery `client_name`); переиспользование — через параметр целевой схемы/маппинга на общем композите (или route-level `PhotoPublicResponse.model_validate`), точный шов — в плане. Прогон `client_name`-subquery на публичном маршруте безвреден (поле в ответ не попадает), но предпочтительно отключить для публичного вызова.
 - **Ограничение порядка объявления:** маршрут объявляется в роутере ДО `GET /photos/{photo_id}` (иначе path-param проглатывает `public`).
 
 ### 6.3 Закрытие старых GET (`backend/src/api/v1/photos.py`)
 
 - На `list_photos` и `get_photo` добавляется `_READ_GUARD = [Depends(require_permission("photos:read"))]` (паттерн `services.py:52`); `get_optional_scope` сохраняется — скоуп #263 для мастера работает как сегодня (guard срабатывает раньше и только отсекает анонима: 401).
 - Право `photos:read` в реестре существует и выдано мастеру (`permissions.py:51`), админу — `*` (`permissions.py:45`): регрессии ролей нет.
+- **Анонимный allowlist** (`backend/src/auth/public.py:49-50`) — точка принудительного исполнения публичной поверхности (default-deny walk `test_every_api_v1_route_is_guarded_or_allowlisted`, `test_auth_contract.py:139`): записи `("GET", "/api/v1/photos")` и `("GET", "/api/v1/photos/{id}")` удаляются (эндпоинты стали guarded — иначе `test_public_routes_allowlist_has_no_stale_entries`, `:153`), добавляется `("GET", "/api/v1/photos/public")`; docstring модуля (`public.py:12-15`, «галерея едет в общем списке») переписывается под новый механизм.
+- **Scope-контракт роутера:** `photos` — scope-wired роутер; для нового маршрута без scope-зависимости добавляется явная запись в `UNSCOPED_ALLOWED_WITHIN_WIRED_ROUTERS["photos"]` (`test_master_scope_contract.py:218-263,388`) с обоснованием «публичный маршрут по дизайну, данные только публичные». Явное решение: залогиненный мастер на `/photos/public` видит ВСЕ публичные фото (нескоупленно), в отличие от сегодняшнего скоупленного пути; утечки приватного нет — маршрут отдаёт только `is_public=true`.
 
 ### 6.4 api-client + веб-галерея
 
-- `packages/api-client/src/schemas.ts`: `PhotoPublicResponseSchema` (зеркало §6.1) + обёртка-конверт; `PhotoResponseSchema` не меняется.
-- `packages/api-client/src/endpoints.ts`: `getPublicPhotos(params)` → `/api/v1/photos/public`.
-- `frontend/web/app/hooks/useGallery.ts:21`: переход на `getPublicPhotos({ per_page: 12 })`; ключ react-query и маппер `to-gallery-vm` без изменений.
+- `packages/api-client/src/schemas.ts`: `PhotoPublicResponseSchema` (зеркало §6.1: теги — названия строками) + обёртка-конверт; `PhotoResponseSchema` не меняется.
+- `packages/api-client/src/endpoints.ts`: `getPublicPhotos(params)` → `/api/v1/photos/public`; попутно стирается устаревающий комментарий «use `getPhotos({ is_public: true })` for public galleries» (`endpoints.ts:365-366`).
+- `frontend/web/app/hooks/useGallery.ts:21`: переход на `getPublicPhotos({ per_page: 12 })`; ключ react-query без изменений.
+- Маппер `toGalleryPhotoView` (`frontend/web/app/lib/mappers/to-gallery-vm.ts:23`) сегодня типизирован `raw: PhotoResponse` — входной тип сужается до публичной схемы; тело меняется точечно: теги приходят названиями (строками), склейка caption — по строкам.
+- Витстест `useGallery.test.tsx` (мок `getPhotos`, ассерт вызова `:9-15,79-80`) переводится на `getPublicPhotos`.
 
 ### 6.5 Тесты (`backend/tests/`)
 
 - Новые: сценарии 1–3 из §3 (минимальный состав полей, игнор владельческих фильтров, 401 на обоих старых GET).
-- Миграция: анонимный кейс витрины в `test_master_scope_photos.py:377` (`anon_client.get("/api/v1/photos", params={"is_public": "true"})`) переводится на `GET /photos/public`.
-- Существующие админ/мастер-тесты — без правок, остаются зелёными (сценарии 4–5).
+- Миграции (пины старой публичной поверхности):
+  - `test_master_scope_photos.py:377` — анонимный кейс витрины (`anon_client.get("/api/v1/photos", params={"is_public": "true"})`) → на `GET /photos/public`.
+  - `test_auth_guards.py:86-94` — `_PUBLIC_GETS` пинит анонимный `GET /photos` → 200 («public surface intact»); кейс переезжает на `/photos/public` (+ docstring `:15`).
+  - `test_auth_permissions.py:221-246` — `test_equals_spec_allowlist_exactly` пинит точный состав `PUBLIC_ROUTES`; обновляется под новый набор (−2 старых фото-записи, + `/photos/public`).
+  - `test_list_id_uniform_guards.py:52` — пин `EXPECTED_PAGINATED_LISTS` 19 → 20.
+  - `test_master_scope_contract.py` — запись unscoped-исключения (§6.3).
+- Существующие админ/мастер API-тесты (`test_api_photos.py` — CRUD/фильтры/скоуп) — без правок, остаются зелёными (сценарии 4–5).
 
 ### 6.6 Устаревший комментарий (`backend/src/api/v1/records.py:69-72`)
 
@@ -93,7 +105,7 @@ class PhotoPublicResponse(BaseModel):
 
 ### 6.7 Domain rules (`docs/domain-rules/photos.md`)
 
-Обновить: таблицу API Endpoints (новая строка `GET /photos/public`; пометка «staff-only, anon → 401» на двух GET); раздел Master role («Публичная витрина» — новый механизм вместо общего списка с `?is_public=true`); краткое упоминание публичной вариантной схемы.
+Обновить: таблицу API Endpoints (новая строка `GET /photos/public`; пометка «staff-only, anon → 401» на двух GET); раздел Master role («Публичная витрина» — новый механизм вместо общего списка с `?is_public=true`); краткое упоминание публичной вариантной схемы; стелющие фразы — строка 40 («the web gallery sends `is_public=true` (#479)») и строка 63 таблицы («the public gallery rides it with `is_public=true`»). Плюс `docs/domain-rules/auth.md:27` (раздел Public Access — тот же механизм). Новая доменная заметка: публичные фото-файлы не должны нести PII в имени (filename — админский свободный текст; «Иванов.jpg» на публичном маршруте утечёт даже после чистки id) — правило для процесса загрузки, без новой валидации в этом объёме.
 
 ## 7. Visual Compliance Checks
 
@@ -102,6 +114,8 @@ class PhotoPublicResponse(BaseModel):
 ## 8. Риски и совместимость
 
 - **Разрыв анонимного доступа к старым GET** — единственный анонимный потребитель веб-галереи мигрирует в этом же изменении (перепись вызовов: `useGallery` — единственный в web, прямых fetch мимо api-client нет; single-GET не потребляется никем). Внешних потребителей нет (приложение не в проде).
+- **Лимиты на новом анонимном маршруте** — вне объёма (лимиты/анти-спам ушли в #499 по решению гейта); риск принимается явно: маршрут отдаёт только публичные данные с пином `per_page`, остаток OWASP API4:2023 фиксируется здесь как осознанное отклонение до задачи #499.
 - **Опечатка в правах** — `photos:read` уже в реестре, сиды не трогаются.
 - **Порядок маршрутов** — явное ограничение §6.2 снимает коллизию `{photo_id}` vs `public`.
+- **Allowlist как точка исполнения** — публичная поверхность репо объявляется в `PUBLIC_ROUTES` (default-deny walk); все изменения публичной поверхности в этой спеке идут через правку allowlist + его пин-тесты (§6.3, §6.5), а не только через guard'ы.
 - Обратимость: изменение чисто добавляет маршрут/схему и guard; откат — обратный коммит без миграций данных.

@@ -65,9 +65,7 @@ def require_type(code: str) -> None:
     event, not silence in the journal.
     """
     if code not in _REGISTRY:
-        raise ValueError(
-            f"unknown domain event type {code!r} — registered: {sorted(_REGISTRY)}"
-        )
+        raise ValueError(f"unknown domain event type {code!r} — registered: {sorted(_REGISTRY)}")
 
 
 def stream_key(code: str) -> str:

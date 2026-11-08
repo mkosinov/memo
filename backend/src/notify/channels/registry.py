@@ -27,7 +27,7 @@ from src.notify.channels.base import Channel
 if TYPE_CHECKING:
     from src.notify.channels.limits import ChannelLimiter
 
-# The notify family logger convention (src/notify/journal.py):
+# The notify family logger convention (src/domain_events/journal.py):
 # "memo.notify.<module>", independent of import paths.
 logger = logging.getLogger("memo.notify.registry")
 

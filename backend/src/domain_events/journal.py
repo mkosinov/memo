@@ -44,8 +44,8 @@ from src.util.utc import utc_now
 logger = logging.getLogger("memo.domain_events.journal")
 
 # None = no open accumulator in this context → mark_domain_event is a no-op.
-_pending: contextvars.ContextVar[list[dict[str, Any]] | None] = (
-    contextvars.ContextVar("domain_events_journal_pending", default=None)
+_pending: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "domain_events_journal_pending", default=None
 )
 
 
@@ -117,9 +117,7 @@ def mark_domain_event(type: str, snapshot: dict[str, Any] | None) -> None:
         )
     rows = _pending.get()
     if rows is None:
-        logger.debug(
-            "mark_domain_event(%s) outside a transaction — ignored", type
-        )
+        logger.debug("mark_domain_event(%s) outside a transaction — ignored", type)
         return
     rows.append(
         {

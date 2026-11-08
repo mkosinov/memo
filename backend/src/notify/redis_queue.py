@@ -1,18 +1,28 @@
 """Redis Streams transport of the notify queue (GH #483 spec §3.1; ADR 013).
 
-``RedisQueue`` implements the ``NotifyQueue`` port (``queue.py``) on top
-of Redis Streams + consumer groups through the SYNC ``redis-py`` client —
-no queue library. The dispatcher wraps every queue call in
-``asyncio.to_thread`` (part 2 wiring); the worker (part 3) calls the
-same sync surface from its own process.
+``RedisQueue`` implements the ``NotifyQueue`` port (``queue.py``) as the
+notify stream/group vocabulary on top of the GENERIC streams core
+``src/streams/transport.py`` (GH #580 spec §3.6) — delegation, not
+inheritance: the domain-events relay/subscribers (#580) reuse the same
+core without importing notify. All mechanics — pool construction
+(retries OFF, socket timeout), XADD with the approximate MAXLEN trim,
+``XREADGROUP >`` claims with the ``_qid`` envelope, ``XACK``,
+``XGROUP CREATE id=0 MKSTREAM``, the RAW ``XAUTOCLAIM`` PEL transfer,
+``ping``/``close`` — live in the core; this adapter keeps the notify
+API (verb methods over the three streams below) and the ONE
+notify-specific wrapper: a reclaim re-XADDs a verbatim copy of the
+claimed entry and acks the old id (the fresh-delivery semantics of a
+task/status queue).
+
+The dispatcher wraps every queue call in ``asyncio.to_thread``; the
+worker calls the same sync surface from its own process.
 
 Three streams (``MAXLEN ~ 10000`` on every write — the queue is
 transport only, real retention lives in the DB per ADR 008; Redis
 silently trims the oldest entries at the ceiling, and a write is never
 rejected):
 
-- ``notify:tasks`` (down)  — group ``worker`` (the worker half below,
-  part 3 #484);
+- ``notify:tasks`` (down)  — group ``worker`` (the worker half, #484);
 - ``notify:statuses``      — group ``dispatcher`` (this part);
 - ``notify:inbound``       — group ``dispatcher`` (this part).
 
@@ -30,34 +40,38 @@ worker per Redis instance — documented, no leader election in the
 pilot; dev/CI contours are isolated.
 
 **Failure volume** (spec §3.1): transport failures are never muted —
-every redis error surfaces as :class:`NotifyTransportError` (the
-dispatcher tells a transport outage from a scenario error by that
-class); the message carries the original exception class + message and
-record identifiers, never message bodies and never the URL value.
-The client is built with retries explicitly OFF (redis-py ≥ 6 retries
-silently by default — a quiet retry would hide the outage the
-dispatcher must see), an explicit pool ceiling, and a ``socket_timeout``
-larger than any read ``BLOCK`` parameter (the dispatcher reads
-non-blocking; the margin is the part-3 worker's BLOCK requirement).
+every redis error surfaces as :class:`NotifyTransportError` (the alias
+of the core's ``StreamTransportError`` — same class object, so the
+dispatcher's catch shape and the test corpus keep the notify name);
+the message carries the original exception class + message and record
+identifiers, never message bodies and never the URL value.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
-import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from redis import Redis
-from redis.backoff import NoBackoff
-from redis.connection import ConnectionPool
-from redis.exceptions import RedisError, ResponseError
-from redis.retry import Retry
+from src.streams.transport import (
+    AUTOCLAIM_COUNT as AUTOCLAIM_COUNT,  # re-export: tests/reenqueue contour
+)
+from src.streams.transport import (
+    DEFAULT_RECLAIM_MIN_IDLE_MS,
+    ENVELOPE_KEY,
+    MAX_POOL_CONNECTIONS,
+    PAYLOAD_FIELD,
+    StreamTransport,
+    StreamTransportError,
+)
+from src.streams.transport import (
+    SOCKET_TIMEOUT_SECONDS as SOCKET_TIMEOUT_SECONDS,  # re-export: channels/limits
+)
+from src.streams.transport import (
+    connect_or_exit as core_connect_or_exit,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from src.notify.queue import InboundEvent, StatusEvent, TaskPayload
 
 logger = logging.getLogger("memo.notify.redis_queue")
@@ -74,71 +88,22 @@ DISPATCHER_GROUP = "dispatcher"
 #: worker half's group (claim/ack/reclaim, part 3 #484 spec §3.1).
 WORKER_GROUP = "worker"
 
-# ── transport parameters ─────────────────────────────────────────────────────
-
-#: Approximate per-entry MAXLEN: Redis trims whole macro-nodes, so tiny
-#: streams may briefly exceed the cap — never assert exact XLEN at
-#: small scales.
-MAXLEN_APPROX = 10_000
-#: Non-blocking claim batch (``XREADGROUP COUNT``).
-CLAIM_BATCH = 100
-#: Explicit ``XAUTOCLAIM COUNT`` page.
-AUTOCLAIM_COUNT = 100
-#: Single ``payload`` JSON field per stream entry (spec §3.1).
-PAYLOAD_FIELD = "payload"
-#: Transport-reserved envelope key: the stream entry id, added to
-#: claimed items only — underscore = reserved for the transport.
-ENVELOPE_KEY = "_qid"
-#: Pool ceiling (spec §3.1: ≈10).
-MAX_POOL_CONNECTIONS = 10
-#: ``socket_timeout`` must exceed ANY read ``BLOCK`` parameter: the
-#: dispatcher claims non-blocking, the margin covers the part-3
-#: worker's blocking reads (spec §3.1).
-SOCKET_TIMEOUT_SECONDS = 30.0
-#: Default ``XAUTOCLAIM min-idle-time`` — never less than
-#: ``NOTIFY_REENQUEUE_AFTER`` (whose default is 120 s). The consuming
-#: process passes its setting explicitly at construction.
-DEFAULT_RECLAIM_MIN_IDLE_MS = 120_000
-
 #: Stable fail-fast message (spec §3.1). The URL value NEVER appears
 #: next to it — only the fact "not configured".
 TRANSPORT_NOT_CONFIGURED_MESSAGE = "notify: transport not configured"
 
-
-class NotifyTransportError(Exception):
-    """A transport (Redis) failure of the queue adapter.
-
-    Raised for every redis-py error surfacing through adapter methods —
-    the dispatcher distinguishes a transport outage from a scenario
-    error by this class (consumed by Task 4). The adapter never swallows
-    it: the failure stays loud. The text carries the original exception
-    class and message (logging hygiene, spec §3.1 — no message bodies,
-    channel addresses masked); the Redis URL value never appears in it.
-    """
-
-
-def _as_str(value: str | bytes | int) -> str:
-    """Normalize a Redis reply value across client decoding modes —
-    ``message_id`` of an XPENDING reply is typed ``bytes | str | int``
-    (legacy integer ids), the cursor/entry ids are ``bytes | str``."""
-    if isinstance(value, bytes):
-        return value.decode()
-    return str(value)
-
-
-def _is_missing_group(message: str) -> bool:
-    """True for both Redis phrasings of "no such consumer group": the
-    ``NOGROUP`` error (group absent on an existing key) and the XGROUP
-    "key to exist" error (the whole key absent — a producer-only
-    lifecycle, or a flushed instance). Both mean the consumer has
-    nothing to deregister from — a graceful no-op for shutdown."""
-    return message.startswith("NOGROUP") or message.startswith(
-        "The XGROUP subcommand requires the key to exist"
-    )
+#: The typed transport failure of the notify queue — since the #580
+#: core extraction an ALIAS of the generic
+#: :class:`src.streams.transport.StreamTransportError` (same class
+#: object: ``except NotifyTransportError`` catches core-raised errors
+#: and vice versa; the dispatcher/worker catch shape and the test
+#: corpus keep the notify name).
+NotifyTransportError = StreamTransportError
 
 
 class RedisQueue:
-    """``NotifyQueue`` over Redis Streams + consumer groups (sync client).
+    """``NotifyQueue`` over Redis Streams + consumer groups — the notify
+    vocabulary delegating to the generic streams core.
 
     Consumer names are unique per live process (``<group>-<pid>`` —
     override with ``consumer_name``); hanging-entry recovery works at
@@ -162,53 +127,19 @@ class RedisQueue:
         reclaim_min_idle_ms: int = DEFAULT_RECLAIM_MIN_IDLE_MS,
         consumer_name: str | None = None,
     ) -> None:
-        self._prefix = key_prefix
-        self._reclaim_min_idle_ms = reclaim_min_idle_ms
-        self._consumer_override = consumer_name
-        # Retries OFF explicitly (redis-py >= 6: ExponentialWithJitterBackoff
-        # x10 by default), explicit pool ceiling, socket_timeout above any
-        # BLOCK, decoded responses (payloads are JSON strings by contract).
-        self._pool = ConnectionPool.from_url(
+        self._core = StreamTransport(
             url,
+            key_prefix=key_prefix,
             max_connections=max_connections,
-            socket_timeout=SOCKET_TIMEOUT_SECONDS,
-            decode_responses=True,
-            retry=Retry(NoBackoff(), 0),
+            reclaim_min_idle_ms=reclaim_min_idle_ms,
+            consumer_name=consumer_name,
+            logger=logger,
         )
-        self._client: Redis = Redis(connection_pool=self._pool)
-
-    # ── naming ───────────────────────────────────────────────────────────
-
-    def _stream(self, name: str) -> str:
-        return f"{self._prefix}{name}"
-
-    def _consumer(self, group: str) -> str:
-        return self._consumer_override or f"{group}-{os.getpid()}"
-
-    # ── failure volume: typed, loud transport errors (spec §3.1) ─────────
-
-    @contextlib.contextmanager
-    def _transport(self, operation: str) -> Generator[None]:
-        """Normalize every redis error to ``NotifyTransportError`` and let
-        it PROPAGATE — muting is forbidden; the dispatcher's loop catches
-        the typed failure, logs it and survives to the next tick."""
-        try:
-            yield
-        except RedisError as exc:
-            raise NotifyTransportError(
-                f"notify queue transport failed during {operation}: {type(exc).__name__}: {exc}"
-            ) from exc
 
     # ── producer side (protocol) ─────────────────────────────────────────
 
     def enqueue_task(self, payload: TaskPayload) -> None:
-        with self._transport("enqueue_task"):
-            self._client.xadd(
-                self._stream(TASKS_STREAM),
-                {PAYLOAD_FIELD: json.dumps(payload, ensure_ascii=False)},
-                maxlen=MAXLEN_APPROX,
-                approximate=True,
-            )
+        self._core.publish(TASKS_STREAM, payload)
 
     # ── producer side (off-protocol; worker side from part 3) ────────────
 
@@ -216,81 +147,37 @@ class RedisQueue:
         """``XADD`` a §4.3 stage event to ``notify:statuses`` (mirrors
         ``FakeQueue.publish_status``; off the DISPATCHER protocol per
         ADR 013 — typed on ``WorkerQueue`` since part 3, #484 §3.1)."""
-        self._publish(STATUSES_STREAM, event)
+        self._core.publish(STATUSES_STREAM, event)
 
     def publish_inbound(self, event: InboundEvent) -> None:
         """``XADD`` a §3.2 inbound event to ``notify:inbound`` (mirrors
         ``FakeQueue.push_inbound``; deliberately NOT on the protocol)."""
-        self._publish(INBOUND_STREAM, event)
-
-    def _publish(self, stream: str, payload: dict[str, Any]) -> None:
-        with self._transport(f"publish {stream}"):
-            self._client.xadd(
-                self._stream(stream),
-                {PAYLOAD_FIELD: json.dumps(payload, ensure_ascii=False)},
-                maxlen=MAXLEN_APPROX,
-                approximate=True,
-            )
+        self._core.publish(INBOUND_STREAM, event)
 
     # ── reliable delivery: notify:statuses / notify:inbound ──────────────
 
     def claim_statuses(self) -> list[StatusEvent]:
-        return self._claim(STATUSES_STREAM, DISPATCHER_GROUP)
+        return self._core.claim(STATUSES_STREAM, DISPATCHER_GROUP)
 
     def claim_inbound(self) -> list[InboundEvent]:
-        return self._claim(INBOUND_STREAM, DISPATCHER_GROUP)
-
-    def _claim(self, stream: str, group: str) -> list[dict[str, Any]]:
-        """Non-blocking ``XREADGROUP >`` with the ``_qid`` envelope; the
-        group parameter picks the consuming half (dispatcher up-streams,
-        worker tasks — part 3 #484 §3.1).
-
-        Reading id ``0`` (draining one's own PEL) is the FORBIDDEN
-        anti-pattern (spec §3.1): inside the loop it keeps hanging
-        entries below the reclaim threshold forever — recovery happens
-        only through :meth:`reclaim_hanging` / :meth:`reclaim_hanging_tasks`."""
-        with self._transport(f"claim {stream}/{group}"):
-            reply = cast(
-                "list[tuple[str, list[tuple[str, dict[str, str]]]]]",
-                self._client.xreadgroup(
-                    groupname=group,
-                    consumername=self._consumer(group),
-                    streams={self._stream(stream): ">"},
-                    count=CLAIM_BATCH,
-                ),
-            )
-        return [
-            self._envelope(entry_id, fields)
-            for _name, entries in reply
-            for entry_id, fields in entries
-        ]
-
-    @staticmethod
-    def _envelope(entry_id: str, fields: dict[str, str]) -> dict[str, Any]:
-        return {**json.loads(fields[PAYLOAD_FIELD]), ENVELOPE_KEY: entry_id}
+        return self._core.claim(INBOUND_STREAM, DISPATCHER_GROUP)
 
     def ack_status(self, item: StatusEvent) -> None:
-        self._ack(STATUSES_STREAM, DISPATCHER_GROUP, item)
+        self._core.ack(STATUSES_STREAM, DISPATCHER_GROUP, item[ENVELOPE_KEY])
 
     def ack_inbound(self, item: InboundEvent) -> None:
-        self._ack(INBOUND_STREAM, DISPATCHER_GROUP, item)
-
-    def _ack(self, stream: str, group: str, item: dict[str, Any]) -> None:
-        """``XACK`` by ``_qid`` — a duplicate/late ack is a harmless no-op
-        (family §4.4, at-least-once tolerance)."""
-        with self._transport(f"ack {stream}/{group}"):
-            self._client.xack(self._stream(stream), group, item[ENVELOPE_KEY])
+        self._core.ack(INBOUND_STREAM, DISPATCHER_GROUP, item[ENVELOPE_KEY])
 
     # ── worker half: notify:tasks, group ``worker`` (part 3 #484 §3.1) ───
 
     def claim_tasks(self) -> list[TaskPayload]:
         """Non-blocking claim of the ``worker`` group (``XREADGROUP >``,
         ``CLAIM_BATCH``, ``_qid`` envelope)."""
-        return self._claim(TASKS_STREAM, WORKER_GROUP)
+        return self._core.claim(TASKS_STREAM, WORKER_GROUP)
 
     def ack_task(self, item: TaskPayload) -> None:
         """``XACK`` a delivered task (idempotent, family §4.4)."""
-        self._ack(TASKS_STREAM, WORKER_GROUP, item)
+        self._core.ack(TASKS_STREAM, WORKER_GROUP, item[ENVELOPE_KEY])
 
     def ensure_worker_group(self) -> None:
         """Worker-start duty (spec §3.1): the ``worker`` group on
@@ -299,7 +186,7 @@ class RedisQueue:
         piled up with no consumer — that is what part 3 consumes;
         «improving» to ``$`` is forbidden). ONLY the concrete BUSYGROUP
         error is suppressed; anything else propagates loudly."""
-        self._ensure_group(TASKS_STREAM, WORKER_GROUP)
+        self._core.ensure_group(TASKS_STREAM, WORKER_GROUP)
 
     def reclaim_hanging_tasks(self) -> None:
         """Return claimed-but-unacked TASK entries of the ``worker``
@@ -310,61 +197,22 @@ class RedisQueue:
     def pending_worker_task_ids(self) -> set[str]:
         """Task ids in the PEL of the ``worker`` group on
         ``notify:tasks`` — the dispatcher's re-enqueue predicate probe
-        (family §3.3 rev.5).
+        (family §3.3 rev.5). The PEL paging (XPENDING + XRANGE) lives in
+        the core; this side only maps payloads to task ids.
 
-        ``XPENDING`` (paged, inclusive cursor — the PEL carries message
-        ids, not payloads) + ``XRANGE`` per entry to read the task_id.
-        A missing group/key (NOGROUP — e.g. a wiped transport before
-        the worker ever ran) is an EMPTY set: nothing was ever claimed,
-        and the re-enqueue sweep MUST proceed for wipe survival (§4.4).
+        A missing group/key (NOGROUP — e.g. a wiped transport before the
+        worker ever ran) is an EMPTY set: nothing was ever claimed, and
+        the re-enqueue sweep MUST proceed for wipe survival (§4.4).
         Every other failure is the typed transport error.
         """
-        stream = self._stream(TASKS_STREAM)
         ids: set[str] = set()
-        seen_entries: set[str] = set()
-        with self._transport("pending worker tasks"):
+        for _entry_id, fields in self._core.pending_entries(TASKS_STREAM, WORKER_GROUP):
             try:
-                cursor = "-"
-                while True:
-                    entries = self._client.xpending_range(
-                        stream,
-                        WORKER_GROUP,
-                        min=cursor,
-                        max="+",
-                        count=AUTOCLAIM_COUNT,
-                    )
-                    if not entries:
-                        break
-                    fresh = [
-                        _as_str(entry["message_id"])
-                        for entry in entries
-                        if _as_str(entry["message_id"]) not in seen_entries
-                    ]
-                    if not fresh:
-                        break
-                    seen_entries.update(fresh)
-                    for message_id in fresh:
-                        rows = cast(
-                            "list[tuple[str, dict[str, str]]]",
-                            self._client.xrange(
-                                stream, min=message_id, max=message_id, count=1
-                            ),
-                        )
-                        for _entry_id, fields in rows:
-                            try:
-                                ids.add(json.loads(fields[PAYLOAD_FIELD])["task_id"])
-                            except (json.JSONDecodeError, KeyError, TypeError):
-                                # A brak payload inside the PEL — the
-                                # worker's own brak rule acks it away;
-                                # the probe must not die on it.
-                                continue
-                    if len(entries) < AUTOCLAIM_COUNT:
-                        break
-                    cursor = fresh[-1]
-            except ResponseError as exc:
-                if _is_missing_group(str(exc)):
-                    return set()
-                raise
+                ids.add(json.loads(fields[PAYLOAD_FIELD])["task_id"])
+            except (json.JSONDecodeError, KeyError, TypeError):
+                # A brak payload inside the PEL — the worker's own brak
+                # rule acks it away; the probe must not die on it.
+                continue
         return ids
 
     # ── consumer start / graceful stop ───────────────────────────────────
@@ -377,16 +225,7 @@ class RedisQueue:
         error is suppressed (group exists); swallowing ``ResponseError``
         whole is forbidden — anything else propagates loudly."""
         for stream in (STATUSES_STREAM, INBOUND_STREAM):
-            self._ensure_group(stream, DISPATCHER_GROUP)
-
-    def _ensure_group(self, stream: str, group: str) -> None:
-        with self._transport(f"ensure group {stream}/{group}"):
-            try:
-                self._client.xgroup_create(self._stream(stream), group, id="0", mkstream=True)
-            except ResponseError as exc:
-                if str(exc).startswith("BUSYGROUP"):
-                    return
-                raise
+            self._core.ensure_group(stream, DISPATCHER_GROUP)
 
     # ── process start: reclaim hanging entries (spec §3.1, §4.4) ─────────
 
@@ -398,52 +237,22 @@ class RedisQueue:
             self._reclaim_stream(stream, DISPATCHER_GROUP)
 
     def _reclaim_stream(self, stream: str, group: str) -> None:
-        """``XAUTOCLAIM`` loop over one group's PEL.
+        """The notify-specific reclaim wrapper over the core's RAW
+        ``XAUTOCLAIM`` (fresh-delivery semantics — kept HERE, out of the
+        generic core, #580 §3.6 rev.2):
 
-        - cursor-driven to exhaustion (``0-0``), explicit ``COUNT`` page,
-          ``min-idle-time`` = ``reclaim_min_idle_ms`` (in production
-          never below ``NOTIFY_REENQUEUE_AFTER``);
-        - a claimed entry is re-XADDed to the stream FIRST, THEN XACKed
-          out of the PEL: a crash in between leaves a harmless duplicate
+        - a claimed entry is re-XADDed to the stream FIRST as a VERBATIM
+          copy (the next claim sees a NEW entry id), THEN XACKed out of
+          the PEL: a crash in between leaves a harmless duplicate
           (family §4.4), the reverse order could lose an entry that had
           already left the PEL;
-        - entries deleted under the MAXLEN ceiling arrive in the reply's
-          THIRD element, leave the PEL in this same call and are
-          unrecoverable — logged terminally (entry id + stream, never a
-          message body, logging hygiene §3.1)."""
-        consumer = self._consumer(group)
-        full_name = self._stream(stream)
-        with self._transport(f"reclaim {stream}"):
-            cursor = "0-0"
-            while True:
-                claimed_cursor, entries, trimmed = self._client.xautoclaim(
-                    name=full_name,
-                    groupname=group,
-                    consumername=consumer,
-                    min_idle_time=self._reclaim_min_idle_ms,
-                    start_id=cursor,
-                    count=AUTOCLAIM_COUNT,
-                )
-                cursor = _as_str(claimed_cursor)
-                for trimmed_id in trimmed:
-                    logger.error(
-                        "notify queue: entry %s of stream %s/%s was trimmed"
-                        " under the MAXLEN ceiling while pending —"
-                        " unrecoverable, dropped from delivery",
-                        trimmed_id,
-                        full_name,
-                        group,
-                    )
-                for entry_id, fields in entries:
-                    self._client.xadd(
-                        full_name,
-                        {PAYLOAD_FIELD: fields[PAYLOAD_FIELD]},
-                        maxlen=MAXLEN_APPROX,
-                        approximate=True,
-                    )
-                    self._client.xack(full_name, group, entry_id)
-                if cursor == "0-0":
-                    return
+        - entries deleted under the MAXLEN ceiling are logged terminally
+          by the core's autoclaim (entry id + stream, never a message
+          body, logging hygiene §3.1)."""
+        for entries in self._core.autoclaim(stream, group):
+            for entry_id, fields in entries:
+                self._core.republish(stream, fields)
+                self._core.ack(stream, group, entry_id)
 
     # ── graceful stop (spec §3.1) ────────────────────────────────────────
 
@@ -457,48 +266,13 @@ class RedisQueue:
         registered for the next start's ``reclaim_hanging_tasks``. A
         flushed group (NOGROUP) is suppressed — the shutdown must stay
         graceful; other errors stay loud. Idempotent."""
-        self._delconsumer(TASKS_STREAM, WORKER_GROUP, keep_if_pending=True)
-        for stream in (STATUSES_STREAM, INBOUND_STREAM):
-            self._delconsumer(stream, DISPATCHER_GROUP)
-        self._client.close()
-        self._pool.disconnect()
-
-    def _delconsumer(self, stream: str, group: str, *, keep_if_pending: bool = False) -> None:
-        """Deregister this consumer from the group. With
-        ``keep_if_pending``, a non-empty consumer PEL cancels the
-        deregistration with a warning instead (spec §3.1: DELCONSUMER
-        would destroy the pending records — unrecoverable task loss).
-        A missing group/key (NOGROUP) stays a graceful no-op — the
-        XPENDING pre-check must not out-noise the shutdown it guards."""
-        with self._transport(f"delconsumer {stream}/{group}"):
-            consumer = self._consumer(group)
-            full_name = self._stream(stream)
-            try:
-                if keep_if_pending:
-                    pending = self._client.xpending_range(
-                        full_name,
-                        group,
-                        min="-",
-                        max="+",
-                        count=AUTOCLAIM_COUNT,
-                        consumername=consumer,
-                    )
-                    if pending:
-                        logger.warning(
-                            "notify queue: consumer %s of %s/%s kept on stop — "
-                            "%d pending entries preserved for reclaim "
-                            "(XGROUP DELCONSUMER would destroy them, #484 §3.1)",
-                            consumer,
-                            full_name,
-                            group,
-                            len(pending),
-                        )
-                        return
-                self._client.xgroup_delconsumer(full_name, group, consumer)
-            except ResponseError as exc:
-                if _is_missing_group(str(exc)):
-                    return
-                raise
+        self._core.close(
+            (
+                (TASKS_STREAM, WORKER_GROUP, True),
+                (STATUSES_STREAM, DISPATCHER_GROUP, False),
+                (INBOUND_STREAM, DISPATCHER_GROUP, False),
+            )
+        )
 
     # ── reachability probe + fail-fast startup gate (spec §3.1) ──────────
 
@@ -506,8 +280,7 @@ class RedisQueue:
         """Startup probe: raise ``NotifyTransportError`` unless Redis
         answers PING (the gate turns that into exit code 2 — loud,
         never silent loop rotation)."""
-        with self._transport("ping"):
-            self._client.ping()
+        self._core.ping()
 
     # ── context manager: scoped graceful stop ────────────────────────────
 
@@ -520,7 +293,10 @@ class RedisQueue:
 
 def connect_or_exit(url: str, **kwargs: Any) -> RedisQueue:
     """The fail-fast transport gate consumed by the process entries
-    (dispatcher — Task 4, worker — Task 5; spec §3.1):
+    (dispatcher — Task 4, worker — Task 5; spec §3.1); the gate
+    mechanics live in the streams core (``transport.connect_or_exit``,
+    #580 §3.6), this wrapper keeps the notify journal and message
+    contracts:
 
     - empty URL (transport not configured) → journal + ``SystemExit(2)``
       with the STABLE message ``notify: transport not configured``;
@@ -530,13 +306,11 @@ def connect_or_exit(url: str, **kwargs: Any) -> RedisQueue:
     The URL value NEVER appears in messages or the journal (spec §3.3:
     application secret) — only the fact "not configured / unavailable".
     """
-    if not url:
-        logger.error(TRANSPORT_NOT_CONFIGURED_MESSAGE)
-        raise SystemExit(2)
-    queue = RedisQueue(url, **kwargs)
-    try:
-        queue.ping()
-    except NotifyTransportError as exc:
-        logger.error("notify: transport unavailable: %s", exc)
-        raise SystemExit(2) from exc
-    return queue
+    return core_connect_or_exit(
+        url,
+        transport_factory=RedisQueue,
+        logger=logger,
+        not_configured_message=TRANSPORT_NOT_CONFIGURED_MESSAGE,
+        unavailable_prefix="notify: transport unavailable",
+        **kwargs,
+    )

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "project_id": "PVT_kwHOA-0Z984BXl3Z",
+  "project_number": 3,
+  "owner": "mkosinov",
+  "repo": "memo",
+  "fields": {
+    "Status": "PVTSSF_lAHOA-0Z984BXl3ZzhSxsrA",
+    "Priority": "PVTSSF_lAHOA-0Z984BXl3ZzhSxtWY",
+    "host": "PVTSSF_lAHOA-0Z984BXl3Zzhi30Hw",
+    "gate": "PVTSSF_lAHOA-0Z984BXl3Zzhi4X9E"
+  },
+  "host_budgets": {
+    "imac": 2,
+    "macbook": 1,
+    "hk": 1,
+    "gcp": 1
+  }
+}

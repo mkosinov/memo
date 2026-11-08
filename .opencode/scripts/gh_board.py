@@ -17,7 +17,10 @@ Usage (from repo root):
   python3 .zcode/scripts/gh_board.py merged N PR ["short title"] — append the "Recently merged" line (scratchpad v2)
   python3 .zcode/scripts/gh_board.py issue N                      — standard issue view: state, labels, body
 
-Project constants are hardcoded (IDs are stable for Project #3).
+Project identity (project/field node ids, owner, repo, per-host budgets)
+lives in docs/board/board_config.json (format v1), loaded and validated by
+load_config() before any board read or mutation — a missing or broken config
+fails loudly instead of falling back to hardcoded ids.
 Card ownership lives in the single-select field "host" (options: imac,
 macbook, hk, gcp — created manually 2026-09-20): claiming is a field write
 and the race tiebreak re-reads the field. This replaced the CLAIM-comment
@@ -88,12 +91,23 @@ MERGED_MAX = 5
 SESSION_DB = Path("/root/.local/share/opencode/opencode.db")  # container-side session store (liveness source for reconcile)
 SESSION_IDLE_LIMIT_S = 3600  # a run's sessions silent this long = stuck (the 2026-09-22 #319 dead-stream incident)
 
-# Configure per project. Get IDs via:
+# Project identity comes from docs/board/board_config.json (format v1).
+# Regenerate the ids via:
 #   gh api graphql -f query='query { user(login: "<owner>") { projectV2(number: <N>) { id fields(first: 30) { nodes { ... on ProjectV2SingleSelectField { name id options { id name } } } } } } }'
-PROJECT_ID = "PVT_kwHOA-0Z984BXl3Z"
-OWNER = "mkosinov"
-REPO = "memo"
-PROJECT_NUM = 3
+REPO_ROOT = Path(__file__).resolve().parents[2]  # identical for both twins (the parents[2] convention)
+BOARD_CONFIG_PATH = REPO_ROOT / "docs" / "board" / "board_config.json"
+REQUIRED_CONFIG_KEYS = ("version", "project_id", "project_number", "owner", "repo", "fields", "host_budgets")
+_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")  # GitHub login charset
+_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")  # GitHub repo name charset
+_PVT_RE = re.compile(r"^PVT_[A-Za-z0-9_-]+$")  # project node id
+_PVTSSF_RE = re.compile(r"^PVTSSF_[A-Za-z0-9_-]+$")  # single-select field node id
+
+PROJECT_ID: str | None = None
+OWNER: str | None = None
+REPO: str | None = None
+PROJECT_NUM: int | None = None
+HOST_BUDGETS: dict[str, int] = {}
+_CONFIG: dict | None = None
 
 # Statuses are read live from the board (the option list is user-managed in
 # the web UI — e.g. "Not planned" was added there 2026-09-09; never hardcode).
@@ -119,29 +133,93 @@ def gql(query: str) -> dict:
     return data["data"]
 
 
+def load_config(force: bool = False) -> dict:
+    """Load and validate docs/board/board_config.json (format v1 — the
+    single source of project identity) into the module globals. All checks
+    run BEFORE any network call: missing file, wrong version, garbage JSON,
+    a missing required key and malformed values (owner/repo charset,
+    PVT…/PVTSSF… node-id patterns) each exit cleanly with the reason.
+    Cached; force=True re-reads."""
+    global _CONFIG, PROJECT_ID, OWNER, REPO, PROJECT_NUM, HOST_BUDGETS
+    if _CONFIG is not None and not force:
+        return _CONFIG
+    path = BOARD_CONFIG_PATH
+    if not path.is_file():
+        sys.exit(f"board config not found: {path}\n"
+                 "restore the file (format v1 requires: version, project_id, project_number, "
+                 "owner, repo, fields, host_budgets)")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        sys.exit(f"board config {path}: invalid JSON: {e}")
+    if not isinstance(data, dict):
+        sys.exit(f"board config {path}: invalid JSON: expected an object")
+    for key in REQUIRED_CONFIG_KEYS:
+        if key not in data:
+            sys.exit(f"board config {path}: missing required key '{key}'")
+    if isinstance(data["version"], bool) or data["version"] != 1:
+        sys.exit(f"board config {path}: unsupported version {data['version']!r} — expected 1")
+    pn = data["project_number"]
+    if not isinstance(pn, int) or isinstance(pn, bool):
+        sys.exit(f"board config {path}: 'project_number' must be an integer, got {pn!r}")
+    owner, repo = data["owner"], data["repo"]
+    if not isinstance(owner, str) or not _OWNER_RE.fullmatch(owner):
+        sys.exit(f"board config {path}: invalid owner {owner!r} — must match the GitHub login charset "
+                 "(alphanumerics, single hyphens, no leading/trailing hyphen)")
+    if not isinstance(repo, str) or not _REPO_RE.fullmatch(repo):
+        sys.exit(f"board config {path}: invalid repo {repo!r} — must match the GitHub repo name charset "
+                 "(alphanumerics, hyphens, underscores, dots)")
+    pid = data["project_id"]
+    if not isinstance(pid, str) or not _PVT_RE.fullmatch(pid):
+        sys.exit(f"board config {path}: invalid project_id {pid!r} — expected a PVT_… node id")
+    fields = data["fields"]
+    if not isinstance(fields, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) and _PVTSSF_RE.fullmatch(v)
+            for k, v in fields.items()):
+        sys.exit(f"board config {path}: 'fields' must map field name → PVTSSF_… node id")
+    budgets = data["host_budgets"]
+    if not isinstance(budgets, dict) or not all(
+            isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+            for k, v in budgets.items()):
+        sys.exit(f"board config {path}: 'host_budgets' must map host name → integer budget")
+    _CONFIG = data
+    PROJECT_ID, OWNER, REPO, PROJECT_NUM, HOST_BUDGETS = pid, owner, repo, pn, budgets
+    return _CONFIG
+
+
+def _config_field_id(cfg: dict, name: str) -> str:
+    fid = cfg["fields"].get(name)
+    if not fid:
+        sys.exit(f"board config {BOARD_CONFIG_PATH}: fields missing '{name}' — "
+                 "add the field node id to the config")
+    return fid
+
+
 def load_status_field():
     global _status_field_id, _status_opts, _host_field_id, _host_field_opts, _gate_field_id, _gate_field_opts
     if _status_field_id:
         return
+    cfg = load_config()
     d = gql(f'query {{ node(id: "{PROJECT_ID}") {{ ... on ProjectV2 {{ fields(first: 30) {{ nodes {{ __typename ... on ProjectV2SingleSelectField {{ id name options {{ id name }} }} }} }} }} }} }}')
     for f in d["node"]["fields"]["nodes"]:
         if f["__typename"] != "ProjectV2SingleSelectField":
             continue
         if f["name"] == "Status":
-            _status_field_id = f["id"]
             _status_opts = {o["name"]: o["id"] for o in f["options"]}
         elif f["name"] == HOST_FIELD_NAME:
-            _host_field_id = f["id"]
             _host_field_opts = {o["name"]: o["id"] for o in f["options"]}
         elif f["name"] == GATE_FIELD_NAME:
-            _gate_field_id = f["id"]
             _gate_field_opts = {o["name"]: o["id"] for o in f["options"]}
-    if not _status_field_id:
+    if not _status_opts:
         sys.exit("Status field not found")
-    if not _host_field_id:
+    if not _host_field_opts:
         sys.exit(f"'{HOST_FIELD_NAME}' single-select field not found — create it on the project (options: imac, macbook, hk, gcp)")
-    if not _gate_field_id:
+    if not _gate_field_opts:
         sys.exit(f"'{GATE_FIELD_NAME}' single-select field not found — create it on the project (options: concept, spec, plan, blocked)")
+    # field ids come from the config; only the options are read live
+    _status_field_id = _config_field_id(cfg, "Status")
+    _host_field_id = _config_field_id(cfg, HOST_FIELD_NAME)
+    _gate_field_id = _config_field_id(cfg, GATE_FIELD_NAME)
 
 
 def items_with_fields() -> list[dict]:
@@ -207,8 +285,7 @@ def set_field(item_id: str, field_id: str, option_id: str | None):
 CLAIM_TTL_HOURS = 1  # auto-impl: freshness of claim/blocked log entries — a fresh entry means the card is in flight or resting
 NUDGE_BUDGET = 24  # orphan wake budget (2026-09-28, user decision after the #348 night: hourly wakes for a full day, not 3 per sliding 6h)
 NUDGE_BUDGET_H = 24  # the NUDGE-marker counting window for NUDGE_BUDGET
-HOST_BUDGETS = {"imac": 2, "macbook": 1}  # auto-impl: per-machine In IMPL slots (replaced the global MAX_TOTAL_INFLIGHT on 2026-09-20: parked cards on one machine must not starve another)
-DEFAULT_HOST_BUDGET = 1  # unknown hosts (hk, gcp — reserved) get one slot
+DEFAULT_HOST_BUDGET = 1  # unknown hosts (hk, gcp — reserved) get one slot; per-host budgets live in board_config.json (host_budgets)
 HOST_FIELD_NAME = "host"  # single-select ownership field; options imac/macbook/hk/gcp
 GATE_FIELD_NAME = "gate"  # single-select pending-ask field; options concept/spec/plan/blocked (replaced the gate:* issue labels 2026-09-20)
 PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}  # pick ordering: Critical first, unset last, ties by issue number
@@ -369,6 +446,7 @@ def cmd_pick_next_design():
     Candidates: OPEN issues with board status starting with "Backlog".
     Skipped: cards whose body declares `depends-on: #N` with N still OPEN.
     Order: priority (Critical > High > Medium > Low, unset last), then the lower (older) issue number. Priority never overrides status eligibility."""
+    load_config()
     all_items = items_with_fields()
     # инвариант мощности: дизайн занят — новых карточек не берём
     busy = [f"#{it['number']}" for it in all_items
@@ -413,6 +491,7 @@ def cmd_auto_log(number: int, entry: str):
     """Append "<now> <entry>" to the auto-impl log comment (create if missing).
     Read-merge-append: the body is re-fetched right before the patch, so a
     concurrent appender's lines are kept (last writer wins the merge)."""
+    load_config()
     line = f"- {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} {entry}"
     cid, body = _auto_impl_log(number)
     if cid is None:
@@ -436,6 +515,7 @@ def cmd_auto_state(number: int):
     """Last line of the auto-impl log ("<ts> <entry>") or nothing.
     Diagnostics for humans; since 2026-09-20 the claim tiebreak reads the
     host field (cmd_host), not this log."""
+    load_config()
     _, body = _auto_impl_log(number)
     if not body:
         return
@@ -981,6 +1061,7 @@ def cmd_orphans(host_arg: str | None = None):
 
 
 def cmd_show(arg: str):
+    load_config()
     if arg == "all":
         items = sorted(items_with_fields(), key=lambda it: it["number"])
         if not items:
@@ -1074,6 +1155,7 @@ def cmd_gate(number: int, value: str):
 def cmd_issue(number: int):
     """Standard `gh issue view` with fixed output — replaces ad-hoc `--json … -q …` compositions
     (audit 2026-09-09: 33 hand-rolled calls in 3 weeks). Body is capped at 120 lines."""
+    load_config()
     r = subprocess.run(
         ["gh", "issue", "view", str(number), "--repo", f"{OWNER}/{REPO}",
          "--json", "number,title,state,labels,body,url"],
@@ -1082,7 +1164,7 @@ def cmd_issue(number: int):
     if r.returncode != 0:
         sys.exit(f"gh issue view error: {r.stderr.strip()}")
     d = json.loads(r.stdout)
-    labels = ", ".join(l["name"] for l in d.get("labels") or [])
+    labels = ", ".join(label["name"] for label in d.get("labels") or [])
     print(f"#{d['number']} [{d['state']}] {d['title']}")
     if labels:
         print(f"  Labels: {labels}")

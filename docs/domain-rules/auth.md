@@ -24,6 +24,7 @@ Two staff roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `mas
 
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
+- Audience URL namespaces (`/public/*`, `/my`, `/my/{role}`) are codified in **ADR-015** (`docs/decisions/015-api-url-audience-namespaces.md`): bare `/api/v1/{entity}` paths are the staff CRM; `/api/v1/public/{entity}` is the anonymous showcase namespace. The prefix alone exposes nothing — every anonymous route is still a conscious `PUBLIC_ROUTES` entry, not a side effect of the prefix.
 - `GET` dictionaries: masters, locations, services, tags, activities, photos (the web gallery rides the photo list with `?is_public=true` — the separate `GET /api/v1/photos/web` showcase was removed in #479)
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)

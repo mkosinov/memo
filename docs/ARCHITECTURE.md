@@ -225,10 +225,20 @@ backend/
 │   │   ├── __init__.py
 │   │   └── config.py              # Settings (pydantic-settings, DATABASE_URL)
 │   │
-│   ├── db/
-│   │   ├── __init__.py
-│   │   ├── base.py                # DeclarativeBase
-│   │   └── database.py            # DatabaseSessionManager + get_db_session DI
-│   │
-│   └── domain/
-│       └── system/                # Healthcheck module
+ │   ├── db/
+ │   │   ├── __init__.py
+ │   │   ├── base.py                # DeclarativeBase
+ │   │   └── database.py            # DatabaseSessionManager + get_db_session DI
+ │   │
+ │   └── domain/
+ │       └── system/                # Healthcheck module
+
+### API URL Conventions
+
+URL prefixes name the **audience** of a route — codified in [ADR-015](decisions/015-api-url-audience-namespaces.md):
+
+- `/api/v1/{entity}` — staff CRM (admin app); staff session + permission matrix.
+- `/api/v1/public/{entity}` — anonymous showcase; minimal per-audience schema, and every anonymous route is a conscious `PUBLIC_ROUTES` allowlist entry (default-deny stands).
+- `/api/v1/my` — universal whoami for any authenticated session; `/api/v1/my/{role}` (`client`/`master`/`admin`) — role-specific self-surface.
+
+First implementation: #493 (`GET /api/v1/public/photos`); the dictionary and `/my` migration is a follow-up wave (see ADR-015, clause 4).

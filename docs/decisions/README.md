@@ -23,6 +23,8 @@ An ADR captures a significant architectural decision, its context, and consequen
 | 011 | Channels Are Registry-Based Extensions; Templates and Rules Live in the Core | Accepted | 2026-10-11 |
 | 012 | The Notification System Is Decomposed into Five Leaf Tasks under Container #476 | Accepted | 2026-10-11 |
 | 013 | Redis Streams + Consumer Groups as the Queue Transport (redis-py Directly) | Accepted | 2026-10-21 |
+| 014 | Per-channel delivery tasks; text assembly in the worker | Accepted | 2026-10-29 |
+| 015 | API URL conventions — audience namespaces (`/public/*`, `/my`, `/my/{role}`) | Accepted | 2026-11-08 |
 
 ## When to create an ADR?
 

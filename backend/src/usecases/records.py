@@ -244,12 +244,15 @@ async def create_record(
     # ── GH #482 (§3.1): mark the ``new_record`` domain event ────────
     # AFTER the seats/status recalculation (the snapshot must see the
     # derived state), BEFORE return — the @transactional wrapper inserts
-    # the journal row in the SAME commit (Task 4 wiring). Snapshot is
-    # built with this session, pre-commit, local reads only (§3.2).
+    # the journal row in the SAME commit. Snapshot is built with this
+    # session, pre-commit, local reads only (§3.2).
     # No actor gate here: domain events are DATA, not an action log.
-    # LAZY imports — cycle discipline (see _mark_record_audit above).
-    from src.notify.journal import mark_domain_event
-    from src.notify.snapshots import build_new_record_snapshot
+    # #580 Task 2: the journal + snapshot builder seams moved to the
+    # producer side (src/domain_events + neighbor module) — the producer
+    # no longer imports notify. LAZY imports — cycle discipline (see
+    # _mark_record_audit above).
+    from src.domain_events.journal import mark_domain_event
+    from src.usecases.record_snapshots import build_new_record_snapshot
 
     mark_domain_event(
         "new_record", await build_new_record_snapshot(db_session, record)

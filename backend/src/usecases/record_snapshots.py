@@ -1,8 +1,13 @@
 """GH #482 — ``new_record`` event snapshot builder (spec §3.2, family #476 §4.1).
 
+MOVED from ``src/notify/snapshots.py`` (#580 Task 2): snapshot assembly
+is a PRODUCER duty (family §4.1) — the producer module must not import
+the notify package.
+
 The builder runs BEFORE the scenario's commit, reading ONLY local rows
 in the same transaction (``session.get`` / one visits select): the
-snapshot must be self-sufficient — the renderer never re-reads the DB.
+snapshot must be self-sufficient — the consumer never re-reads the DB
+for the text.
 
 Contract (family §4.1, fixed here): every top-level key is ALWAYS
 present; values may be null (client not linked, tariff deleted, no map

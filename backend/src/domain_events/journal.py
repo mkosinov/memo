@@ -1,5 +1,9 @@
 """GH #482 — domain-event journal accumulator (spec §3.1; family #476).
 
+MOVED from ``src/notify/journal.py`` (#580 Task 2, spec §3.1) — the
+producer seam of the domain-events service. The surface is unchanged
+by the move.
+
 A mechanical copy of the audit accumulator pattern
 (``src/events/audit.py``): a request-scoped contextvar opened/closed
 with an ownership token. The ``@transactional`` wrapper is the ONLY
@@ -14,8 +18,8 @@ domain-event journal is DATA, not an action log. Rows are written
 ALWAYS (seeds and CLI included); the insertion is unconditional. There
 is also no auto-collection, no target entity and no seniority rule —
 scenarios mark their events explicitly via :func:`mark_domain_event`
-(snapshots are built by the scenario, spec §3.2; Task 6 wires the
-pilot ``new_record`` mark).
+(snapshots are built by the producer, family spec §4.1; the pilot
+``new_record`` mark lives in ``src/usecases/records.py``).
 
 ``occurred_at`` is stamped at MARK time with naive UTC now — the
 repository timestamp convention (``AbstractModel.created_at`` and
@@ -34,13 +38,14 @@ import contextvars
 import logging
 from typing import Any
 
+from src.domain_events.types import require_type
 from src.util.utc import utc_now
 
-logger = logging.getLogger("memo.notify.journal")
+logger = logging.getLogger("memo.domain_events.journal")
 
 # None = no open accumulator in this context → mark_domain_event is a no-op.
 _pending: contextvars.ContextVar[list[dict[str, Any]] | None] = (
-    contextvars.ContextVar("notify_journal_pending", default=None)
+    contextvars.ContextVar("domain_events_journal_pending", default=None)
 )
 
 
@@ -88,15 +93,28 @@ def draw_events() -> list[dict[str, Any]] | None:
 def mark_domain_event(type: str, snapshot: dict[str, Any] | None) -> None:
     """Stage one domain-event row in the current transaction's accumulator.
 
+    VALIDATION FIRST (#580 §3.2/§4.1) — before the accumulator check:
+    an unregistered type or a missing snapshot is a programming error,
+    and the price of a programming error is an immediate loud failure,
+    never silence in the journal. Inside ``@transactional`` the raise
+    happens IN the transaction → the wrapper skips the commit → the
+    domain change rolls back together with the event.
+
     ``occurred_at`` is stamped NOW with naive UTC (the repository
-    timestamp convention — mirrors the ``utc_now`` model
-    defaults); the ``snapshot`` is stored as passed (the scenario-side
-    builder owns its §4.1 serialization contract). The row is a plain
-    dict keyed by ``DomainEvent`` column names. No-op with a debug log
-    when no accumulator is open (outside ``@transactional``, or a task
-    spawned before the transaction opened) — same contract as
-    ``mark_audit`` / ``mark_changed``.
+    timestamp convention — mirrors the ``utc_now`` model defaults); the
+    ``snapshot`` is stored as passed (the producer-side builder owns its
+    §4.1 serialization contract). The row is a plain dict keyed by
+    ``DomainEvent`` column names. No-op with a debug log when no
+    accumulator is open (outside ``@transactional``, or a task spawned
+    before the transaction opened) — same contract as ``mark_audit`` /
+    ``mark_changed`` (valid marks only; invalid ones raise above).
     """
+    require_type(type)
+    if snapshot is None:
+        raise ValueError(
+            f"domain event {type!r} requires a snapshot — a NULL snapshot "
+            f"is never published to the stream (spec §4.1)"
+        )
     rows = _pending.get()
     if rows is None:
         logger.debug(

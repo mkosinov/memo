@@ -7,6 +7,9 @@
 from src.auth.otp import OtpCode  # bare registration import — re-exported via __all__ (#499 §4.1)
 from src.auth.password_setup import PasswordSetupToken  # noqa: F401 — bare registration import
 from src.auth.session import Session  # noqa: F401 — bare registration import
+from src.domain_events.models import (  # noqa: F401 — bare registration import (#580 §3.1)
+    DomainEvent,
+)
 from src.models.abstract import AbstractModel, AbstractModelSoftDelete
 from src.models.activity import Activity
 from src.models.audit_log import AuditLog
@@ -39,7 +42,6 @@ from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
 from src.notify.models import (  # noqa: F401 — bare registration import (#482)
-    DomainEvent,
     NotifyTask,
     NotifyTaskAttempt,
     NotifyTemplate,

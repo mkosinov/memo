@@ -35,7 +35,7 @@ from src.notify.models import DomainEvent, NotifyTask, NotifyTemplate
 from src.notify.queue import FakeQueue
 from src.notify.render import RenderError
 from src.notify.scenarios import SCENARIOS, handle_new_record
-from src.notify.snapshots import build_new_record_snapshot
+from src.usecases.record_snapshots import build_new_record_snapshot
 from tests.conftest import query_db_params
 
 pytestmark = pytest.mark.integration

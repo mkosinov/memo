@@ -1,18 +1,18 @@
 """Notify subsystem ORM models (#482, spec §3.1/§3.5/§3.6; family #476;
 per-channel reshape — #485 part 4, ADR 014).
 
-``DomainEvent`` / ``NotifyTask`` / ``NotifyTemplate`` follow the
-``AbstractModel`` conventions (String(36) UUID PK + naive-UTC
-``created_at``/``updated_at``).
+``DomainEvent`` moved to ``src/domain_events/models.py`` (#580 Task 2,
+spec §3.1) and is re-exported below until the dispatcher switches from
+journal polling to the consumer-group loop (#580 Task 6).
+
+``NotifyTask`` / ``NotifyTemplate`` follow the ``AbstractModel``
+conventions (String(36) UUID PK + naive-UTC ``created_at``/
+``updated_at``).
 
 ``NotifyTaskAttempt`` is append-only ("только добавляемые строки", §3.6) —
 like ``AuditLog`` it deliberately builds directly on ``Base``: own ``id`` +
 ``occurred_at`` only, no ``updated_at``, no relationships; rows are never
 updated or deleted.
-
-The partial index ``ix_domain_events_pending`` must be declared through
-``sqlite_where`` (spec §3.1) so alembic autogenerate sees no drift between
-this model and the migration that creates it.
 """
 
 import uuid
@@ -34,48 +34,10 @@ from sqlalchemy import event as sa_event
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from src.db.base import Base
+from src.domain_events.models import (
+    DomainEvent as DomainEvent,  # re-export: dispatcher + notify tests (#580 Task 2)
+)
 from src.models.abstract import AbstractModel
-
-
-class DomainEvent(AbstractModel):
-    """Journal of domain events — the third @transactional accumulator.
-
-    Written in the scenario's transaction (no actor required — it is data,
-    not an action log, §3.1). ``occurred_at`` is naive UTC (repository
-    timestamp convention); the snapshot format is family spec §4.1.
-    """
-
-    __tablename__ = "domain_events"
-
-    # Event code; pilot: new_record.
-    type: Mapped[str] = mapped_column(String(50))
-    occurred_at: Mapped[datetime] = mapped_column(DateTime)
-    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
-    # Set in the same transaction as the resulting notify task; NULL =
-    # pending (picked by the polling loop).
-    processed_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True,
-    )
-    attempts: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default=sa.text("0"),
-    )
-    # Last processing error; written after 3 failed attempts — from then on
-    # the polling loop skips the event.
-    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    __table_args__ = (
-        # Polling cursor index: both predicates of the pending query, so the
-        # index never carries rows the poll always discards (spec §3.1).
-        Index(
-            "ix_domain_events_pending",
-            "occurred_at",
-            sqlite_where=sa.text("processed_at IS NULL AND processing_error IS NULL"),
-        ),
-    )
 
 
 class NotifyTask(AbstractModel):

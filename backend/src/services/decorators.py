@@ -120,12 +120,12 @@ def _insert_event_rows(session: Any) -> None:
     LAZY imports — cycle precedent: same rule as the audit insert above;
     the model import lives here, not in the accumulator module.
     """
-    from src.notify import journal
+    from src.domain_events import journal
 
     events = journal.draw_events()
     if not events:
         return
-    from src.notify.models import DomainEvent
+    from src.domain_events.models import DomainEvent
 
     session.add_all(DomainEvent(**event) for event in events)
 
@@ -249,9 +249,10 @@ def transactional[**P, R](func: _AsyncFunc[P, R]) -> _AsyncFunc[P, R]:
         # neither insert nor reset (single-owner rule). KEY DIFFERENCE
         # from audit: no actor gate — the insertion is unconditional
         # (domain events are data, not an action log; seeds and CLI
-        # write them too). LAZY import — cycle precedent (see above +
-        # src/notify/journal.py).
-        from src.notify import journal as _journal
+        # write them too). #580 Task 2: the journal module moved from
+        # src/notify to src/domain_events (spec §3.1). LAZY import —
+        # cycle precedent (see above + src/domain_events/journal.py).
+        from src.domain_events import journal as _journal
 
         journal_token = _journal.open_journal()
         try:

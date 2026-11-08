@@ -1,6 +1,6 @@
 ---
 description: Spec panel reviewer — simplicity/YAGNI perspective. Finds overengineering, unrequested scope, and needless complexity in spec documents.
-mode: subagent
+mode: all
 model: opencode/mimo-v2.6-flash-free
 temperature: 0.1
 permission:

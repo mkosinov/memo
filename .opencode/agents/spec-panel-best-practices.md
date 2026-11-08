@@ -1,6 +1,6 @@
 ---
 description: Spec panel reviewer — best-practices perspective. Verifies spec decisions against current community/vendor best practices, using web research.
-mode: subagent
+mode: all
 model: opencode/deepseek-v4.1-flash-free
 temperature: 0.1
 permission:

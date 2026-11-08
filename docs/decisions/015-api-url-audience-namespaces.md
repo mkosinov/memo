@@ -6,7 +6,7 @@ Accepted
 
 **Date:** 2026-11-08
 
-Decided at Gate B of #493 (user decision, 2026-11-08). First implementation lands in #493 (`GET /api/v1/public/photos`); everything else is a staged migration owned by a follow-up wave issue (spec #493, §5 + appendix).
+Decided by the user in the #493 Gate B discussion (2026-11-08); this ADR is committed for approval together with spec #493 rev 3 — the /my placements in clause 3 are the architect's resolutions presented at the same gate. First implementation lands in #493 (`GET /api/v1/public/photos`); everything else is a staged migration owned by a follow-up wave issue (spec #493, §5 + appendix).
 
 ## Context
 
@@ -41,7 +41,7 @@ A `/public/*` route never returns the staff contract: each public route gets a m
 
 User's wording: «/my возвращал какие-то стандартные для всех данные, а /my/client и /my/master и /my/admin возвращал данные для меня как для клиента/мастера/админа».
 
-- `/my` — universal whoami, one standard schema for every session: `{id, role, name, phone}`. Requires the new combined guard (either cookie, strict role read from the resolved principal; no permission implication).
+- `/my` — universal whoami, one standard schema for every session: `{id, role, name, phone}`. Requires the new combined guard (either cookie, strict role read from the resolved principal; no permission implication). **Resolution order is the precedence**: probe `memo_session` first and resolve `memo_client_session` only if no valid staff session — the first valid cookie wins and no second resolution happens (`resolve_authed` journals the audit actor on every successful resolve, so a losing probe would journal the wrong actor). Response fields are sourced per the resolved role from the same rows the role branches use (staff: the user row / master snapshot; client: the client card). Role branches never use the combined guard.
 - `/my/client` — client self-surface. The flat cabinet paths migrate under the branch: `GET/POST /my/client/records`, `GET /my/client/photos`, `GET /my/client/payments` (today's flat `/my/records|photos|payments`), plus `GET /my/client` itself.
 - `/my/master`, `/my/admin` — staff self-surface. Admin and master share the profile shape, so **one staff-profile router (GET/PUT profile, POST portrait) is mounted under both branches** — same handlers, same schema, no fork. The rich payload of today's `/auth/me` (permissions list; master snapshot) lives here: permissions in both branches, the master snapshot only in `/my/master`.
 - `/my/settings` — today's `/user-settings` moves here (staff own-only semantics unchanged; `user_id`-addressed access stays removed).

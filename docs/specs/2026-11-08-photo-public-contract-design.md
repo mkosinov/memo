@@ -17,7 +17,7 @@
 
 **Разделение по маршрутам (route split):** публичная витрина получает собственный маршрут с минимальной публичной схемой; существующие GET-эндпоинты закрываются от анонима штатным read-guard'ом. Админский контракт не меняется вообще.
 
-Публичный маршрут селит в **новый неймспейс `/api/v1/public/*`** — первый житель конвенции аудиторий ADR-015 (решение Gate B от 2026-11-08, артефакт — §6.8): `GET /api/v1/public/photos`, выделенный роутер `public.py`. Плюс задача выводит сам ADR (фиксация конвенции URL) и черновик issue волны-follow-up (§5, §9).
+Публичный маршрут селит в **новый неймспейс `/api/v1/public/*`** — первый житель конвенции аудиторий ADR-015 (решение пользователя в обсуждении Gate B #493 от 2026-11-08; спека и ADR проходят гейт вместе — артефакт §6.8): `GET /api/v1/public/photos`, выделенный роутер `public.py`. Плюс задача выводит сам ADR (фиксация конвенции URL) и черновик issue волны-follow-up (§5, §9).
 
 Отброшенные подходы (по правилам фильтра Gate A):
 
@@ -81,7 +81,7 @@ class PhotoPublicResponse(BaseModel):
 - `GET /api/v1/public/photos` → `PaginatedResponse[PhotoPublicResponse]`; аноним разрешён (без scope-зависимости).
 - Параметры: стандартный кирпич `PaginationParams` — `page`, `per_page`, `id` (Guard 1 #371 / domain rule 8: каждый пагинированный GET публикует `?id=`; пин `EXPECTED_PAGINATED_LISTS` 19 → 20, `test_list_id_uniform_guards.py:52`). `?id=` безопасен: AND-сочетается с принудительным `is_public=True`, обойти фильтр не может. Фильтры владельцев/`q`/`tag_id`/`sort_by`/`is_public` не подключаются; незнакомые параметры игнорируются (FastAPI default — явное решение, в конвенции репо «неизвестный фильтр → молчаливый результат, не 4xx»).
 - Сортировка зафиксирована: `created_at desc` + tiebreak `id asc` (дефолт общего списка), не настраивается — порядок галереи не дрейфует.
-- Реализация: переиспользование композита списка (`list_photos_view`, `services/photo.py:386-474`) с форсированным `is_public=True`. Уточнение: билдер сегодня жёстко маппит Row → `PhotoResponse` (включая scalar-subquery `client_name`); переиспользование — через параметр целевой схемы/маппинга на общем композите (или route-level `PhotoPublicResponse.model_validate`), точный шов — в плане. Прогон `client_name`-subquery на публичном маршруте безвреден (поле в ответ не попадает), но предпочтительно отключить для публичного вызова.
+- Реализация: переиспользование композита списка (`list_photos_view`, `services/photo.py:386-474`) с форсированным `is_public=True`. Уточнение: билдер сегодня жёстко маппит Row → `PhotoResponse` (включая scalar-subquery `client_name`); переиспользование — через параметр целевой схемы/маппинга на общем композите, точный шов — в плане. Прямой route-level `PhotoPublicResponse.model_validate` из `PhotoResponse` НЕ годится: `.tags` там — объекты (`PhotoTagResponse`/ORM `Tag`), а публичной схеме нужны строки-названия; сборка публичного item'а — явная, по прецеденту `MyPhotoItem` (`services/my_reads.py:194-203`, извлечение `tag.title`). Прогон `client_name`-subquery на публичном маршруте безвреден (поле в ответ не попадает), но предпочтительно отключить для публичного вызова.
 - Коллизии path-param нет: маршрут живёт в собственном префиксе, `{photo_id}` из `photos.py` его не перекрывает (специальное ограничение порядка объявления из rev 2 снято).
 
 ### 6.3 Закрытие старых GET (`backend/src/api/v1/photos.py`)
@@ -89,7 +89,7 @@ class PhotoPublicResponse(BaseModel):
 - На `list_photos` и `get_photo` добавляется `_READ_GUARD = [Depends(require_permission("photos:read"))]` (паттерн `services.py:52`); `get_optional_scope` сохраняется — скоуп #263 для мастера работает как сегодня (guard срабатывает раньше и только отсекает анонима: 401).
 - Право `photos:read` в реестре существует и выдано мастеру (`permissions.py:51`), админу — `*` (`permissions.py:45`): регрессии ролей нет.
 - **Анонимный allowlist** (`backend/src/auth/public.py:49-50`) — точка принудительного исполнения публичной поверхности (default-deny walk `test_every_api_v1_route_is_guarded_or_allowlisted`, `test_auth_contract.py:139`): записи `("GET", "/api/v1/photos")` и `("GET", "/api/v1/photos/{id}")` удаляются (эндпоинты стали guarded — иначе `test_public_routes_allowlist_has_no_stale_entries`, `:153`), добавляется `("GET", "/api/v1/public/photos")`; docstring модуля (`public.py:12-15`, «галерея едет в общем списке») переписывается под новый механизм + ссылка на ADR-015 (префикс — конвенция, allowlist — принуждение).
-- **Scope-контракт:** новый роутер `public.py` не несёт scope-зависимости (как auth-роутер), поэтому исключение `UNSCOPED_ALLOWED_WITHIN_WIRED_ROUTERS["photos"]` из rev 2 НЕ нужно — маршрут больше не живёт в scope-wired роутере `photos`. Проверяется, что контракт-тест скоупа (`test_master_scope_contract.py`) корректно классифицирует новый роутер (не scope-wired → не требует записей); точный шов — в плане. Явное решение сохраняется: залогиненный мастер на `/public/photos` видит ВСЕ публичные фото (нескоупленно), в отличие от скоупленного `/photos`; утечки приватного нет — маршрут отдаёт только `is_public=true`.
+- **Scope-контракт:** scope-walk (`test_every_api_v1_route_is_scope_wired_or_allowlisted`, `test_master_scope_contract.py:388-424`) требует от КАЖДОГО маршрута `/api/v1` либо жить в scope-wired модуле, либо иметь явную запись в `ALLOWED_UNSCOPED` — именно так проходит auth-роутер (`:128-140`). Новый маршрут в НЕ-wired модуле `public` получает запись `ALLOWED_UNSCOPED[("GET", "/api/v1/public/photos")]` с обоснованием «публичный маршрут по дизайну, отдаёт только is_public=true» (карта `:111-213`). Запись `UNSCOPED_ALLOWED_WITHIN_WIRED_ROUTERS["photos"]` из rev 2 НЕ переносится — маршрут больше не живёт в scope-wired роутере `photos`. Явное решение сохраняется: залогиненный мастер на `/public/photos` видит ВСЕ публичные фото (нескоупленно), в отличие от скоупленного `/photos`; утечки приватного нет — маршрут отдаёт только `is_public=true`.
 
 ### 6.4 api-client + веб-галерея
 
@@ -103,11 +103,11 @@ class PhotoPublicResponse(BaseModel):
 
 - Новые: сценарии 1–3 из §3 (минимальный состав полей, игнор владельческих фильтров, 401 на обоих старых GET).
 - Миграции (пины старой публичной поверхности):
-  - `test_master_scope_photos.py:377` — анонимный кейс витрины (`anon_client.get("/api/v1/photos", params={"is_public": "true"})`) → на `GET /api/v1/public/photos`.
+  - `test_master_scope_photos.py:377` — анонимный кейс витрины (`anon_client.get("/api/v1/photos", params={"is_public": "true"})`) → на `GET /api/v1/public/photos`. Кейс переписывается целиком: параметр `is_public` уходит (на публичном маршруте не подключён), а ассерт `all(p["is_public"] ...)` (`:382`) ключуется на поле, которого в публичной схеме нет, — заменяется на проверку минимального состава полей (`id`/`filename`/`tags`) и отсутствия владельческих.
   - `test_auth_guards.py:86-94` — `_PUBLIC_GETS` пинит анонимный `GET /photos` → 200 («public surface intact»); кейс переезжает на `/api/v1/public/photos` (+ docstring `:15`).
   - `test_auth_permissions.py:221-246` — `test_equals_spec_allowlist_exactly` пинит точный состав `PUBLIC_ROUTES`; обновляется под новый набор (−2 старых фото-записи, + `/api/v1/public/photos`).
   - `test_list_id_uniform_guards.py:52` — пин `EXPECTED_PAGINATED_LISTS` 19 → 20.
-  - `test_master_scope_contract.py` — проверка классификации нового роутера `public.py` (не scope-wired; исключение НЕ вводится — §6.3).
+  - `test_master_scope_contract.py` — добавляется запись `ALLOWED_UNSCOPED[("GET", "/api/v1/public/photos")]` (маршрут в НЕ-wired модуле — как строки auth-роутера, §6.3); запись `UNSCOPED_ALLOWED_WITHIN_WIRED_ROUTERS["photos"]` из rev 2 не переносится.
 - Существующие админ/мастер API-тесты (`test_api_photos.py` — CRUD/фильтры/скоуп) — без правок, остаются зелёными (сценарии 4–5).
 
 ### 6.6 Устаревший комментарий (`backend/src/api/v1/records.py:69-72`)
@@ -116,7 +116,7 @@ class PhotoPublicResponse(BaseModel):
 
 ### 6.7 Domain rules (`docs/domain-rules/photos.md`)
 
-Обновить: таблицу API Endpoints (новая строка `GET /api/v1/public/photos`; пометка «staff-only, anon → 401» на двух GET); раздел Master role («Публичная витрина» — новый механизм вместо общего списка с `?is_public=true`); краткое упоминание публичной вариантной схемы; стелющие фразы — строка 40 («the web gallery sends `is_public=true` (#479)») и строка 63 таблицы («the public gallery rides it with `is_public=true`»). Плюс `docs/domain-rules/auth.md` Public Access (строка 27 — тот же механизм; строка-ссылка на ADR-015 в этом разделе уже добавлена DESIGN-фазой, IMPL её не трогает). Новая доменная заметка: публичные фото-файлы не должны нести PII в имени (filename — админский свободный текст; «Иванов.jpg» на публичном маршруте утечёт даже после чистки id) — правило для процесса загрузки, без новой валидации в этом объёме.
+Обновить: таблицу API Endpoints (новая строка `GET /api/v1/public/photos`; пометка «staff-only, anon → 401» на двух GET); раздел Master role («Публичная витрина» — новый механизм вместо общего списка с `?is_public=true`); краткое упоминание публичной вариантной схемы; стелющие фразы — строка 40 («the web gallery sends `is_public=true` (#479)») и строка 63 таблицы («the public gallery rides it with `is_public=true`»). Плюс `docs/domain-rules/auth.md` Public Access (строка 28 — тот же механизм, нумерация после вставки ADR-строки в DESIGN; строка-ссылка на ADR-015, теперь 27, уже добавлена DESIGN-фазой — IMPL её не трогает). Новая доменная заметка: публичные фото-файлы не должны нести PII в имени (filename — админский свободный текст; «Иванов.jpg» на публичном маршруте утечёт даже после чистки id) — правило для процесса загрузки, без новой валидации в этом объёме.
 
 ### 6.8 Артефакт ADR-015 (`docs/decisions/015-api-url-audience-namespaces.md`)
 
@@ -158,11 +158,12 @@ class PhotoPublicResponse(BaseModel):
 > **2. Веб-форма записи** (frontend/web `useSchedule.ts`): masters/services/locations/activities → новые `/public/*` варианты; api-client: `/public/*`-методы.
 >
 > **3. `/my`-реструктуризация** (ADR-015, clause 3):
-> - [ ] комбинированный guard (`memo_session` ИЛИ `memo_client_session`, роль строго из резолва)
-> - [ ] `GET /my` — универсальный whoami `{id, role, name, phone}`
+> - [ ] комбинированный guard (`memo_session` ИЛИ `memo_client_session`, роль строго из резолва; прецедент: staff-cookie резолвится первым, валидная первая cookie побеждает, второй резолв НЕ выполняется — audit-actor журналируется только победителем, ADR-015 clause 3)
+> - [ ] `GET /my` — универсальный whoami `{id, role, name, phone}` (источники полей — по роли, из тех же строк, что и ролевые ветки)
 > - [ ] кабинет клиента: `GET /my/client` + `GET|POST /my/client/records`, `GET /my/client/photos`, `GET /my/client/payments` (плоские пути → под ветку; обратной совместимости нет — не в проде)
 > - [ ] стафф-профиль: один роутер под `/my/master` и `/my/admin` (GET/PUT, portrait); permissions — в обеих ветках, master-snapshot — только в `/my/master`
 > - [ ] `/user-settings` → `/my/settings` (own-only семантика без изменений)
+> - [ ] админ-SPA + api-client: `getMe` (`endpoints.ts:1273-1275`) → `/my` + ролевая ветка; user-settings-методы (`endpoints.ts:1407-1426`, потребитель `frontend/admin/app/components/layout/Topbar.tsx`) → `/my/settings`
 > - [ ] `/auth/me` — депрекация, удаление после миграции админ-SPA
 >
-> Acceptance: default-deny walk зелёный; пин-тесты allowlist/пагинации обновлены; веб (галерея + форма записи) и клиентский кабинет работают на новых путях; ADR-015 clause 4 «волна» закрыта.
+> Acceptance: default-deny walk зелёный; пин-тесты allowlist/пагинации обновлены; веб (галерея + форма записи), клиентский кабинет И админ-SPA работают на новых путях; ADR-015 clause 4 «волна» закрыта.

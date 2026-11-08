@@ -225,13 +225,14 @@ backend/
 │   │   ├── __init__.py
 │   │   └── config.py              # Settings (pydantic-settings, DATABASE_URL)
 │   │
- │   ├── db/
- │   │   ├── __init__.py
- │   │   ├── base.py                # DeclarativeBase
- │   │   └── database.py            # DatabaseSessionManager + get_db_session DI
- │   │
- │   └── domain/
- │       └── system/                # Healthcheck module
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── base.py                # DeclarativeBase
+│   │   └── database.py            # DatabaseSessionManager + get_db_session DI
+│   │
+│   └── domain/
+│       └── system/                # Healthcheck module
+```
 
 ### API URL Conventions
 

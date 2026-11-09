@@ -265,7 +265,7 @@ async def list_public_photos(
 ```
 
 - [ ] **Маунт.** В `backend/src/main.py`: импорт `from src.api.v1.public import router as public_router` вставь в алфавитном порядке между position и records (ruff `I001`); маунт `app.include_router(public_router, prefix="/api/v1/public")` — рядом со строкой photos-маунта (:264).
-- [ ] **Линт/типы шва.** `cd backend && uv run ruff check src/` → ноль замечаний (TC/I001 на изменённых файлах); если в backend настроен mypy (см. pyproject/CI-workflow) — прогони его по `src/services/photo.py`, `src/api/v1/public.py`.
+- [ ] **Линт/типы шва.** Линт-гейт как в CI: `cd backend && uv run python scripts/lint_budget.py` (бюджетный скрипт; новые TC/I001-нарушения не должны поднимать счётчики — если поднял, перенеси импорт в TYPE_CHECKING/исправь порядок); mypy, если он в CI-workflow, — по изменённым файлам.
 - [ ] **Allowlist.** В `backend/src/auth/public.py`: в `PUBLIC_ROUTES` после блока activities добавь:
 
 ```python
@@ -431,7 +431,7 @@ export const PhotoPublicListResponseSchema = paginatedSchema(PhotoPublicResponse
 export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSchema>;
 ```
 
-Экспорты: в `endpoints.ts` добавь `PhotoPublicListResponseSchema` в существующий import из `'./schemas'`; в `src/index.ts` проверь grep'ом, как экспортируются соседи (`getPhotos`, `PhotoListResponseSchema` — явные строки или `export *`), и добавь оба новых имени по тому же паттерну.
+Экспорты: в `endpoints.ts` добавь в существующий import из `'./schemas'` ОБА имени — value `PhotoPublicListResponseSchema` и type `PhotoPublicListResponse` (паттерн соседей: `PhotoListResponseSchema,` + `type PhotoListResponse,` — строки ~:101-102); в `src/index.ts` проверь grep'ом, как экспортируются соседи (`getPhotos`, `PhotoListResponseSchema` — явные строки или `export *`), и добавь оба новых имени по тому же паттерну.
 
 - [ ] **RED (endpoints).** В `endpoints.test.ts` рядом с `describe('getPhotos')` (:338-349), по его образцу (`vi.mocked(api)` — мок уже настроен в файле):
 
@@ -591,7 +591,7 @@ function publicPhoto(overrides: Partial<PhotoPublicResponse> = {}): PhotoPublicR
 - [ ] `photos.md`, раздел Master role: «Публичная витрина» — новый механизм (мастер на `/public/photos` видит все публичные фото, нескоупленно; `/photos` — скоуп #263); краткое упоминание вариантной публичной схемы (`PhotoPublicResponse` — теги названиями, без владельческих полей).
 - [ ] `photos.md`, новая доменная заметка (раздел правил/заметок): публичные фото-файлы не должны нести PII в имени — `filename` это админский свободный текст («Иванов.jpg» утечёт на публичном маршруте даже после чистки id); правило процесса загрузки, без валидации в #493.
 - [ ] `auth.md`, Public Access (:28, словарная строка): убери `photos` из перечисления анонимных словарей; фото-витрина — `GET /api/v1/public/photos` (ADR-015; строка-ссылка на ADR уже есть строкой выше — не дублируй). Строку про `#479 removal` рядом с фото-упоминанием приведи в соответствие (бare GET закрыты #493).
-- [ ] **Полный прогон (форма — как в CI, `.github/workflows/test.yml`):** backend — `cd backend && uv run pytest -q` + линт/типы (`uv run ruff check src/`; mypy, если настроен в workflow) → зелёное; api-client — vitest + type-check/build-скрипт из package.json → зелёное; web — vitest + type-check (по workflow) → зелёное. Команды бери из workflow-файла, не изобретай свои.
+- [ ] **Полный прогон (форма — как в CI, `.github/workflows/test.yml`):** backend — `cd backend && uv run pytest -q` + `uv run python scripts/lint_budget.py` (mypy, если настроен в workflow) → зелёное; api-client — vitest + type-check/build-скрипт из package.json → зелёное; web — vitest + type-check (по workflow) → зелёное. Команды бери из workflow-файла, не изобретай свои.
 - [ ] `git add -A && git commit -m "docs(domain-rules): photos public showcase route, staff-only bare GETs (#493)"`
 
 **DoD:** все суиты зелёные; grep по `docs/domain-rules/` не находит «rides it with `is_public`» / «gallery sends `is_public`»; обе таблицы эндпоинтов содержат `/api/v1/public/photos`.

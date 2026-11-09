@@ -26,6 +26,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 - Photos are hard-deleted (row physically removed). Photo is a general resource — on owner deletion (Client/Service/Activity/Location), the photo's owner FK is set to NULL (photo survives, becomes owner-less); the photo is never deleted by cascade. Own deletion — единый флоу (спека #324): `photo_tags` — видимая зависимость (теги отвязываются, чистое фото ведёт себя как лист), `?dry_run=true` → 409-превью у тегированных, кольцо 5 с, коммит `{expected: {photo_tags}}`/`{expected:{}}`.
 - Group photos = N independent rows with distinct `client_id` (same filename); copies are created individually via the single-owner modal; no grouping/sync mechanism exists (#224 closed as not-planned).
 - Zero owners at rest is legal (parent deletion or direct creation with no owner).
+- **PII in filename (#493):** публичные фото-файлы не должны нести PII в имени. `filename` — админский свободный текст: «Иванов.jpg» утечёт на `/api/v1/public/photos` даже после чистки id из ответа (минимальная схема не спасает от самого имени файла). Правило процесса загрузки (указание админам), осознанно БЕЗ валидации в коде в объёме #493.
 
 ## Business Logic
 
@@ -37,7 +38,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
   - `client_id` / `activity_id` — direct equality
   - `location_id` — DIRECT equality only (activity-owned photos at that location do NOT match)
   - `service_id` — variant A: direct `service_id` OR via `activity.service_id` (LEFT OUTER JOIN)
-  - `is_public` — direct equality, applied only when sent (`None` = no filter); the retired `/photos/web` showcase successor — the web gallery sends `is_public=true` (#479)
+  - `is_public` — direct equality, applied only when sent (`None` = no filter); staff-list filter only — the public showcase no longer rides this list: it is a separate anonymous route `GET /api/v1/public/photos` (ADR-015, #493)
   - `tag_id` — repeatable (`?tag_id=a&tag_id=b`), AND semantics (photo must have ALL selected tags); duplicates deduped
   - All filters AND-combine with each other and with q; unknown filter ids → silent empty page (NOT 404)
   - `sort_by` whitelist: `filename | is_public | created_at` (422 on unknown); default `created_at desc` + `id asc` tiebreak
@@ -53,15 +54,16 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 
 ## Master role (#263)
 
-Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная витрина — общий список с `?is_public=true` (#479): анонимный гость без скоупа, скоуп сужает только вход мастера.
+Для роли `master` (спека `docs/specs/2026-09-10-master-role-design.md`): **«своё фото» = фото, привязанное к активности мастера** (`photo.activity_id → activity.master_id = master_key`). Фото клиентов/услуг/локаций и без владельца мастеру не видны (категория «фото своего клиента» отклонена — юзер 10.09). Полный CUD своих фото (filename строкой — загрузки файлов в v1 нет); список `/photos` — только свои; чужие get/мутации → 404. Публичная витрина — отдельный анонимный маршрут `GET /api/v1/public/photos` (ADR-015, #493): мастер видит на нём все публичные фото нескоупленно; скоуп #263 сужает только вход мастера на `/photos` и его point-операции. Витрина отдаёт вариантную публичную схему `PhotoPublicResponse` — теги названиями-строками, без владельческих полей.
 
 Mechanics (T5): the list builder folds in a correlated EXISTS (`EXISTS(activities WHERE activities.id = photo.activity_id AND master_id = master_key)`) — an admin (`master_key=None`) adds no predicate, a master without a masters row matches an empty set. Point ops (get/PUT/PATCH/DELETE) gate via one scope-aware query (photo → activity); foreign/owner-less → the same 404 as missing (404-fast-path). POST/PUT/PATCH validate the TARGET `activity_id` the same way (create with a foreign activity → 404; PUT/PATCH re-target to a foreign activity → 404, photo unchanged); PATCH sending `activity_id: null` detaches the photo (legal for one's own photo). The `service_id` filter's LEFT JOIN path is untouched and AND-combines with the scope.
 
 ## API Endpoints
 | Method | Path | Params | Description |
 |--------|------|--------|-------------|
-| GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `is_public` (#479; bool, only when sent), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total); the public gallery rides it with `is_public=true` |
-| GET | /api/v1/photos/{id} | — | Get |
+| GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `is_public` (bool, only when sent), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total). Staff-only (#493): anon → 401, guard `photos:read` |
+| GET | /api/v1/photos/{id} | — | Get. Staff-only (#493): anon → 401, guard `photos:read` |
+| GET | /api/v1/public/photos | `page`, `per_page` (capped by the shared list limit) | Анонимная витрина (ADR-015, #493): forced `is_public=true`, sort закреплён сервером (`created_at desc` + `id asc`), минимальная схема `PhotoPublicResponse` (теги — названия-строки, без владельческих полей); envelope `PaginatedResponse[PhotoPublicResponse]` |
 | POST | /api/v1/photos | — | Create |
 | PUT | /api/v1/photos/{id} | — | Full update (filename + is_public required) |
 | PATCH | /api/v1/photos/{id} | — | Partial update (tag_ids hard-replace when sent) |

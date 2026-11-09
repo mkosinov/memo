@@ -51,6 +51,12 @@ def register_type(code: str, description: str) -> None:
     _REGISTRY[code] = EventType(code=code, description=description)
 
 
+#: The stream-name prefix of every domain-event stream (§3.2/§4.1) —
+#: ``stream_key`` is the single formatter built on it; the subscriber's
+#: name validation (§3.4) reads the same constant.
+STREAM_KEY_PREFIX = "domain_events"
+
+
 def registered_codes() -> frozenset[str]:
     """The declared type codes (registry completeness probes, §3.2)."""
     return frozenset(_REGISTRY)
@@ -62,7 +68,8 @@ def require_type(code: str) -> None:
     Called at the producer mark (``journal.mark_domain_event``, §3.2):
     an unknown type is a programming error — the price is an immediate
     in-transaction failure that rolls the domain change back WITH the
-    event, not silence in the journal.
+    event, not silence in the journal. The subscriber's stream-name
+    validation (§3.4) reuses the same gate on the code side of the name.
     """
     if code not in _REGISTRY:
         raise ValueError(f"unknown domain event type {code!r} — registered: {sorted(_REGISTRY)}")
@@ -70,7 +77,7 @@ def require_type(code: str) -> None:
 
 def stream_key(code: str) -> str:
     """The Redis stream name of a type: ``domain_events:<code>`` (§3.2/§4.1)."""
-    return f"domain_events:{code}"
+    return f"{STREAM_KEY_PREFIX}:{code}"
 
 
 # ── Declarative registry (rev.2 — THE type set of the system) ────────────────

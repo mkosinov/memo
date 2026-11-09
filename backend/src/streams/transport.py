@@ -221,10 +221,16 @@ class StreamTransport:
 
     # ── consumer side: claim / ack ───────────────────────────────────────
 
-    def claim(self, stream: str, group: str) -> list[dict[str, Any]]:
+    def claim(self, stream: str, group: str, count: int = CLAIM_BATCH) -> list[dict[str, Any]]:
         """Non-blocking ``XREADGROUP >`` with the ``_qid`` envelope; the
         group parameter picks the consuming half (notify: dispatcher
-        up-streams / worker tasks).
+        up-streams / worker tasks), ``count`` is the per-stream
+        ``XREADGROUP COUNT`` ceiling — the cap is applied AT THE SERVER
+        (entries beyond it are NOT claimed; a caller batching smaller
+        than ``CLAIM_BATCH`` — e.g. a domain-events subscriber, #580
+        §3.4 — passes its batch here, never slices a full claim
+        client-side: the slice would orphan the tail in the consumer's
+        PEL).
 
         Reading id ``0`` (draining one's own PEL) is the FORBIDDEN
         anti-pattern (GH #483 spec §3.1): inside the loop it keeps
@@ -237,7 +243,7 @@ class StreamTransport:
                     groupname=group,
                     consumername=self._consumer(group),
                     streams={self._stream(stream): ">"},
-                    count=CLAIM_BATCH,
+                    count=count,
                 ),
             )
         return [
@@ -276,7 +282,9 @@ class StreamTransport:
 
     # ── process start / periodic recovery: RAW XAUTOCLAIM ────────────────
 
-    def autoclaim(self, stream: str, group: str) -> Iterator[list[tuple[str, dict[str, str]]]]:
+    def autoclaim(
+        self, stream: str, group: str, min_idle_ms: int | None = None
+    ) -> Iterator[list[tuple[str, dict[str, str]]]]:
         """RAW ``XAUTOCLAIM`` over one group's PEL — a PEL transfer to
         this consumer, page by page, WITHOUT re-adding anything to the
         stream and without acking: the CALLER decides what a redelivery
@@ -285,7 +293,11 @@ class StreamTransport:
         and acks after materializing — #580 §3.6).
 
         - cursor-driven to exhaustion (``0-0``), explicit ``COUNT`` page,
-          ``min-idle-time`` = the constructor's ``reclaim_min_idle_ms``;
+          ``min-idle-time`` = ``min_idle_ms`` when given, else the
+          constructor's ``reclaim_min_idle_ms`` (the per-call override is
+          the subscriber's periodic-cadence seam, #580 §3.4 — a shorter
+          sweep than the constructor default, without rebuilding the
+          pool);
         - each yielded page is the claimed entries as stored —
           ``(entry_id, fields)`` with the verbatim ``payload`` field;
         - entries deleted under the MAXLEN ceiling arrive in the reply's
@@ -298,6 +310,7 @@ class StreamTransport:
         """
         consumer = self._consumer(group)
         full_name = self._stream(stream)
+        idle_ms = self._reclaim_min_idle_ms if min_idle_ms is None else min_idle_ms
         with self._transport(f"reclaim {stream}"):
             cursor = "0-0"
             while True:
@@ -305,7 +318,7 @@ class StreamTransport:
                     name=full_name,
                     groupname=group,
                     consumername=consumer,
-                    min_idle_time=self._reclaim_min_idle_ms,
+                    min_idle_time=idle_ms,
                     start_id=cursor,
                     count=AUTOCLAIM_COUNT,
                 )

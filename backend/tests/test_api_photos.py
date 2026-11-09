@@ -22,11 +22,11 @@ FIXTURE_PHOTOS = (
 class TestPhotosWebRemoved:
     """GH #479 Изменение 4 — the public showcase route is gone.
 
-    The gallery now rides the common list with ``?is_public=true`` (see
-    the ``is_public_*`` filter-matrix cases in ``TestPhotosListContract``);
-    ``/web`` itself must 404 (the request falls through to
-    ``GET /photos/{photo_id}`` with ``photo_id="web"`` → the same 404 as
-    any missing photo).
+    Since #493 the gallery rides the anonymous route
+    ``GET /api/v1/public/photos`` (getPublicPhotos, ADR-015); the bare
+    photo GETs are staff-only (``photos:read``). ``/web`` itself must
+    404 (the request falls through to ``GET /photos/{photo_id}`` with
+    ``photo_id="web"`` → the same 404 as any missing photo).
     """
 
     def test_web_route_gone_404(self, api_client) -> None:

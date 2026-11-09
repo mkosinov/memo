@@ -12,8 +12,9 @@ Spec D6 (docs/specs/2026-09-10-master-role-design.md) + domain rules
   (чужое → 404, неразличимо с «не существует», 404-fast-path);
 * create с чужим activity_id → 404 (валидация цели);
 * PUT не может перепривязать фото на чужую активность;
-* публичная витрина — общий список с ``?is_public=true`` (#479),
-  анонимный доступ без скоупа;
+* публичная витрина — анонимный маршрут ``/api/v1/public/photos``
+  (ADR-015, #493), доступ без скоупа; bare GET ``/api/v1/photos`` —
+  staff-only (``photos:read``);
 * admin → без скоупа (regression-pinned).
 
 The master session comes from the ``make_master`` conftest factory;

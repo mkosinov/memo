@@ -8,6 +8,7 @@ process, #580 Task 4) and the public subscription API (``subscribe`` —
 :class:`src.domain_events.subscribe.Subscriber`, #580 Task 5) are live.
 
 Import direction (domain rules): this package never imports notify;
-notify imports it (transitional re-export of ``DomainEvent`` until the
-dispatcher switches to the group loop, Task 6).
+notify imports it — the subscriber API and the type registry are the
+consumer-side seam (the transitional ``DomainEvent`` re-export in notify
+died with the dispatcher's switchover to the group loop, Task 6).
 """

@@ -7,7 +7,21 @@ gates), every queue call from the async cycles goes through
 kept apart from scenario errors (attempts are not burned — the re-enqueue
 cycle owns recovery; spec §3.1).
 
-Standalone entry ``python -m src.notify.dispatcher``. Three loops of ONE
+#580 Task 6 (spec §3.5): the dispatcher's event INPUT is the consumer
+group ``notification`` on the stream ``domain_events:new_record`` —
+the journal-polling cycle is gone with the consumer-state columns.
+Delivery semantics (§3.5/§4.3): at-least-once; idempotency is the
+partial root index ``uq_notify_tasks_event_scenario_root``
+(IntegrityError → «already processed» → ack); a scenario failure
+increments the ``notify_event_attempts`` ledger — below
+``MAX_SCENARIO_ATTEMPTS`` the entry stays UNACKED (the periodic
+hanging-return cycle redelivers), at the threshold it is acked WITH
+parking (a re-delivered parked event re-parks — the ledger is at the
+threshold); a ``StreamTransportError`` at the enqueue point burns NO
+attempt and leaves the entry unacked (the committed task is picked up
+by the re-enqueue cycle).
+
+Standalone entry ``python -m src.notify.dispatcher``. Five loops of ONE
 ``asyncio.TaskGroup``, each iteration isolated in its own ``try/except``
 (one crash is logged and never kills the process or the sibling loops —
 spec §3.8 panel finding); SIGTERM/KeyboardInterrupt set the stop-event
@@ -47,6 +61,19 @@ and the TaskGroup winds down cleanly.
   (at-least-once, §4.4).
 - **Cycle 3 — ``notify:inbound``**: routed by the handler registry
   (channel → handler). The pilot registry is EMPTY: log warning + ack.
+- **Cycle 4 — the events group read** (interval ``NOTIFY_POLL_INTERVAL``):
+  claim a batch of the ``notification`` group on
+  ``domain_events:new_record`` → the scenario handler (registry, by
+  record type) → ack. A record whose type has no handler is brak: logged
+  (identifiers only) and acked away.
+- **Cycle 5 — the periodic hanging return** (interval
+  ``EVENTS_RECLAIM_INTERVAL``, the «четвёртый периодический цикл» of
+  §3.5 over the subscriber's §3.4 cadence): ``XAUTOCLAIM`` the group's
+  hanging entries (idle ≥ ``EVENTS_RECLAIM_MIN_IDLE_MS``) and run them
+  through the same processing path — an unacked failed attempt comes
+  back here until it parks. The process START runs the same return once
+  with ``min_idle_ms=0`` (a crashed predecessor's leftovers return
+  immediately), next to the queue's own ``reclaim_hanging``.
 
 The dispatcher inherits the repo engine pragmas (``busy_timeout``, WAL —
 ``src/db/database.py``) by building its own ``DBManager`` the way other
@@ -63,15 +90,21 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
 from src.db.database import DBManager
+from src.domain_events.models import DomainEvent
+from src.domain_events.subscribe import ClaimedEvent, Subscriber
+from src.domain_events.types import stream_key
 from src.notify.channels.registry import parse_channel_priority
-from src.notify.models import NotifyTask, NotifyTaskAttempt
+from src.notify.models import NotifyEventAttempt, NotifyTask, NotifyTaskAttempt
 from src.notify.queue import InboundEvent, TaskPayload, build_task_payload
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.render import find_template
+from src.notify.scenarios import SCENARIO_NEW_RECORD, SCENARIOS
+from src.streams.transport import CLAIM_BATCH, DEFAULT_RECLAIM_MIN_IDLE_MS
 from src.util.process import install_signal_handlers, run_loop
 from src.util.utc import utc_now
 
@@ -90,6 +123,24 @@ logger = logging.getLogger("memo.notify.dispatcher")
 REENQUEUE_CAP = 10
 #: Failure text of a cap-exhausted task (spec §3.8 verbatim).
 REENQUEUE_FAILED_MESSAGE = "не доставлено: очередь не подтверждает приём"
+
+#: The notify subscriber's consumer group (spec §3.5) — the group name
+#: IS the service (globally unique system-wide, the §3.4 contract).
+NOTIFICATION_GROUP = "notification"
+#: The one stream the pilot subscriber consumes (§3.5): the stream of
+#: the pilot event type, ``domain_events:new_record``.
+NEW_RECORD_STREAM = stream_key(SCENARIO_NEW_RECORD)
+#: Scenario-attempts ceiling before parking (§3.5) — a module constant,
+#: not a setting.
+MAX_SCENARIO_ATTEMPTS = 3
+#: Interval of the periodic hanging-return cycle (§3.5 «четвёртый цикл»)
+#: — a module constant, not a setting; fast enough that an entry idling
+#: past the threshold returns within a fraction of it.
+EVENTS_RECLAIM_INTERVAL = 30.0
+#: Idle threshold of the periodic return (~120 s, §6: the retry tempo of
+#: a failing scenario — minutes, not seconds); the transport core's
+#: default, stated here as the subscriber policy.
+EVENTS_RECLAIM_MIN_IDLE_MS = DEFAULT_RECLAIM_MIN_IDLE_MS
 
 #: Failure volume of a §4. report that ends the CHANNEL task (spec §8.2:
 #: «транспортные ретраи исчерпаны, либо app_error»). ``not_delivered``
@@ -497,6 +548,173 @@ async def inbound_once(queue: NotifyQueue) -> None:
         await asyncio.to_thread(queue.ack_inbound, item)
 
 
+# ── cycle 4/5: the events group input + hanging return (#580 §3.5) ─────────
+
+
+async def _bump_attempt_ledger(
+    session_factory: async_sessionmaker[AsyncSession],
+    event_id: str,
+    scenario: str,
+    exc: Exception,
+) -> bool:
+    """One failed scenario attempt → increment the
+    ``notify_event_attempts`` ledger (attempts + 1, ``last_error``
+    overwritten). Returns ``True`` iff the event is PARKED — the counter
+    reached ``MAX_SCENARIO_ATTEMPTS`` (§3.5): the caller acks WITH the
+    parking row as the materialized result, so the periodic return never
+    drags a parked event forever. A re-delivered parked event re-parks
+    naturally: its next failure increments past the threshold and acks
+    again."""
+    async with session_factory() as session:
+        row = await session.get(NotifyEventAttempt, (event_id, scenario))
+        if row is None:
+            # ``attempts=0`` explicit: the column default applies at
+            # INSERT, and the increment below reads the attribute BEFORE
+            # the flush (a constructed row would carry None here).
+            row = NotifyEventAttempt(event_id=event_id, scenario=scenario, attempts=0)
+            session.add(row)
+        row.attempts += 1
+        row.last_error = f"{type(exc).__name__}: {exc}"
+        # read BEFORE the commit: a session with expire_on_commit would
+        # refresh the attribute on access after it (an extra SELECT), and
+        # the log line below reads the value outside the session block.
+        attempts_after = row.attempts
+        await session.commit()
+        parked = attempts_after >= MAX_SCENARIO_ATTEMPTS
+    if parked:
+        logger.error(
+            "notify dispatcher: event %s scenario %r failed %d/%d times"
+            " (%s: %s) — PARKED, ledger row is the record",
+            event_id,
+            scenario,
+            attempts_after,
+            MAX_SCENARIO_ATTEMPTS,
+            type(exc).__name__,
+            exc,
+        )
+    return parked
+
+
+async def _process_claimed_events(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotifyQueue,
+    subscriber: Subscriber,
+    records: list[ClaimedEvent],
+) -> None:
+    """Run the claimed/reclaimed §4.1 records of the ``notification``
+    group through the scenario registry, one by one, each in its own
+    session and its own error volume (§3.5 — a sibling of the batch
+    always proceeds):
+
+    - no handler for the record type → brak: logged (identifiers only)
+      and ACKED (redelivery cannot fix a handmade payload);
+    - ``IntegrityError`` on the handler commit → the partial root index
+      caught a concurrent delivery: «already processed» → ACK, the
+      ledger is not a scenario failure and stays untouched;
+    - ``NotifyTransportError`` (the enqueue point inside the handler) →
+      NO increment, NO ack: the PEL return repeats the entry, the
+      COMMITTED task is picked up by the re-enqueue cycle (§3.5 — a
+      transport outage is not a scenario failure; #483 legacy);
+    - any OTHER handler failure → the attempts ledger increments; below
+      the threshold the entry stays UNACKED (the periodic return
+      redelivers), at it — acked with parking (§3.5/§5.2 scenario 4).
+
+    Ack strictly AFTER the result is materialized (§4.3).
+    """
+    for record in records:
+        handler = SCENARIOS.get(record.type)
+        if handler is None:
+            logger.error(
+                "notify dispatcher: domain event %s of unhandled type %r"
+                " — acked away (no scenario handler)",
+                record.event_id,
+                record.type,
+            )
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+            continue
+        # A transient stand-in for the journalled event: the snapshot is
+        # the record's own data (§4.1 — self-sufficient); the handler's
+        # live predicate reads go by the snapshot identifiers.
+        event = DomainEvent(
+            id=record.event_id,
+            type=record.type,
+            occurred_at=_naive_utc(record.occurred_at),
+            snapshot=record.snapshot,
+        )
+        try:
+            async with session_factory() as session:
+                await handler(event, session, queue)
+        except IntegrityError:
+            logger.info(
+                "notify dispatcher: event %s scenario %r already processed"
+                " (root index) — acked",
+                record.event_id,
+                record.type,
+            )
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+        except NotifyTransportError as exc:
+            logger.error(
+                "notify dispatcher: event %s scenario %r — transport failure"
+                " at the enqueue point (%s); no attempt burned, entry left"
+                " unacked for the PEL return",
+                record.event_id,
+                record.type,
+                exc,
+            )
+        except Exception as exc:
+            parked = await _bump_attempt_ledger(
+                session_factory, record.event_id, record.type, exc
+            )
+            if parked:
+                await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+            else:
+                logger.warning(
+                    "notify dispatcher: event %s scenario %r failed (%s: %s)"
+                    " — attempt recorded, entry left unacked for the"
+                    " periodic return",
+                    record.event_id,
+                    record.type,
+                    type(exc).__name__,
+                    exc,
+                )
+        else:
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+
+
+async def events_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotifyQueue,
+    subscriber: Subscriber,
+) -> None:
+    """Cycle 4 (§3.5): claim a batch of the ``notification`` group on
+    ``domain_events:new_record`` (non-blocking ``XREADGROUP >`` — the
+    entries land in this consumer's PEL) → scenario → ack. The sync
+    subscriber goes through ``asyncio.to_thread`` (§3.1); a transport
+    failure propagates to the loop guard, the next tick retries."""
+    records = await asyncio.to_thread(
+        subscriber.claim, [NEW_RECORD_STREAM], CLAIM_BATCH
+    )
+    await _process_claimed_events(session_factory, queue, subscriber, records)
+
+
+async def events_reclaim_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotifyQueue,
+    subscriber: Subscriber,
+    *,
+    min_idle_ms: int = EVENTS_RECLAIM_MIN_IDLE_MS,
+) -> None:
+    """Cycle 5 — the periodic hanging return (§3.5 «четвёртый цикл»,
+    §3.4): ``XAUTOCLAIM`` the group's claimed-but-unacked entries idle
+    ≥ ``min_idle_ms`` (the raw PEL transfer — nothing is re-XADDed) and
+    run them through the same processing path as :func:`events_once`.
+    The dispatcher START calls this once with ``min_idle_ms=0`` (a
+    crashed predecessor's leftovers return immediately); the loop runs
+    it at ``EVENTS_RECLAIM_INTERVAL`` with the policy threshold."""
+    records = await asyncio.to_thread(subscriber.reclaim, [NEW_RECORD_STREAM], min_idle_ms)
+    await _process_claimed_events(session_factory, queue, subscriber, records)
+
+
 # ── concurrency model: loops + stop (§3.7 — run_loop/signals moved to
 # src/util/process.py by #580 Task 4; §3.8) ──────────────────────────────────
 
@@ -505,19 +723,29 @@ async def run_dispatcher(
     session_factory: async_sessionmaker[AsyncSession],
     queue: NotifyQueue,
     stop: asyncio.Event,
+    subscriber: Subscriber,
 ) -> None:
-    """The three cycles of the dispatcher: ensure the consumer groups
-    and reclaim hanging queue items at process start (§3.1, §4.4), then
-    one ``asyncio.TaskGroup`` — a stop-event winds all loops down
-    correctly (§3.8). The sync adapter's start calls go through
-    ``asyncio.to_thread`` (§3.1); a failure there is a process-start
-    failure — loud, before any cycle begins."""
+    """The five cycles of the dispatcher: ensure the consumer groups and
+    reclaim hanging queue items at process start (§3.1, §4.4), ensure the
+    ``notification`` group on ``domain_events:new_record`` and return a
+    crashed predecessor's hanging entries IMMEDIATELY (§3.5/§3.4 — the
+    startup pass of cycle 5), then one ``asyncio.TaskGroup`` — a
+    stop-event winds all loops down correctly (§3.8). The sync adapters'
+    start calls go through ``asyncio.to_thread`` (§3.1); a failure there
+    is a process-start failure — loud, before any cycle begins. The
+    subscriber consumer is closed on the way down (keep_if_pending —
+    unacked entries survive for the next start's return)."""
     interval = settings.NOTIFY_POLL_INTERVAL
     # Consumer-start duty (§3.1): the groups MUST exist before the
     # XAUTOCLAIM of ``reclaim_hanging`` — on a fresh Redis they don't,
     # and the start would die with NOGROUP before any cycle begins.
     await asyncio.to_thread(queue.ensure_consumer_groups)
     await asyncio.to_thread(queue.reclaim_hanging)
+    # Subscriber-start duty (§3.5/§3.4): the notification group on the
+    # event stream, then the IMMEDIATE hanging return — a previous
+    # process's PEL entries are processed before the first claim tick.
+    await asyncio.to_thread(subscriber.ensure, [NEW_RECORD_STREAM])
+    await events_reclaim_once(session_factory, queue, subscriber, min_idle_ms=0)
 
     async def reenqueue_iteration() -> None:
         await reenqueue_stale_tasks(session_factory, queue)
@@ -528,55 +756,90 @@ async def run_dispatcher(
     async def inbound_iteration() -> None:
         await inbound_once(queue)
 
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(
-            run_loop(
-                "reenqueue",
-                stop,
-                interval,
-                reenqueue_iteration,
-                log=logger,
-                log_prefix="notify dispatcher",
+    async def events_iteration() -> None:
+        await events_once(session_factory, queue, subscriber)
+
+    async def events_reclaim_iteration() -> None:
+        await events_reclaim_once(session_factory, queue, subscriber)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(
+                run_loop(
+                    "reenqueue",
+                    stop,
+                    interval,
+                    reenqueue_iteration,
+                    log=logger,
+                    log_prefix="notify dispatcher",
+                )
             )
-        )
-        tg.create_task(
-            run_loop(
-                "statuses",
-                stop,
-                interval,
-                statuses_iteration,
-                log=logger,
-                log_prefix="notify dispatcher",
+            tg.create_task(
+                run_loop(
+                    "statuses",
+                    stop,
+                    interval,
+                    statuses_iteration,
+                    log=logger,
+                    log_prefix="notify dispatcher",
+                )
             )
-        )
-        tg.create_task(
-            run_loop(
-                "inbound",
-                stop,
-                interval,
-                inbound_iteration,
-                log=logger,
-                log_prefix="notify dispatcher",
+            tg.create_task(
+                run_loop(
+                    "inbound",
+                    stop,
+                    interval,
+                    inbound_iteration,
+                    log=logger,
+                    log_prefix="notify dispatcher",
+                )
             )
-        )
+            tg.create_task(
+                run_loop(
+                    "events",
+                    stop,
+                    interval,
+                    events_iteration,
+                    log=logger,
+                    log_prefix="notify dispatcher",
+                )
+            )
+            tg.create_task(
+                run_loop(
+                    "events-reclaim",
+                    stop,
+                    EVENTS_RECLAIM_INTERVAL,
+                    events_reclaim_iteration,
+                    log=logger,
+                    log_prefix="notify dispatcher",
+                )
+            )
+    finally:
+        # keep_if_pending (§3.4): a consumer holding unacked entries is
+        # NOT deregistered — they survive for the next start's return.
+        await asyncio.to_thread(subscriber.close)
 
 
 # ── process entry ───────────────────────────────────────────────────────────
 
 
-async def main(queue: NotifyQueue | None = None) -> None:
+async def main(
+    queue: NotifyQueue | None = None, subscriber: Subscriber | None = None
+) -> None:
     """``python -m src.notify.dispatcher``. Disabled (``NOTIFY_ENABLED=false``,
     the default): log and return 0 — events keep accumulating in the
     journal (family §3.3). Enabled: validate the channel priority loudly,
-    select the transport adapter, then run the three cycles until
+    select the transport adapters, then run the five cycles until
     SIGTERM/KeyboardInterrupt.
 
-    Adapter selection (GH #483 spec §3.1): no injected queue →
-    ``connect_or_exit(REDIS_URL)`` — the fail-fast gate builds the
+    Adapter selection (GH #483 spec §3.1; #580 Task 6): no injected queue
+    → ``connect_or_exit(REDIS_URL)`` — the fail-fast gate builds the
     ``RedisQueue`` and refuses the process LOUDLY (``SystemExit(2)``,
     stable message, the URL value never disclosed) when the transport
-    is not configured or unreachable. An explicitly injected queue
-    (the part-1 test seam) skips selection entirely.
+    is not configured or unreachable. No injected subscriber → the
+    ``Subscriber`` of the ``notification`` group over the SAME URL, with
+    its own fail-fast PING (the Task-5 seam — exit 2, same contract).
+    Explicitly injected adapters (the test seams) skip selection.
     """
     if not settings.NOTIFY_ENABLED:
         logger.info(
@@ -592,6 +855,17 @@ async def main(queue: NotifyQueue | None = None) -> None:
         # no configured/working transport must not rotate silently — the
         # gate exits code 2 before any cycle starts.
         queue = connect_or_exit(settings.REDIS_URL.get_secret_value())
+    if subscriber is None:
+        subscriber = Subscriber(
+            settings.REDIS_URL.get_secret_value(), group=NOTIFICATION_GROUP
+        )
+        try:
+            # Same fail-fast contract as the queue gate (§3.6): a
+            # half-alive subscriber must not rotate silently either.
+            await asyncio.to_thread(subscriber.ping)
+        except NotifyTransportError as exc:
+            logger.error("notify dispatcher: subscriber transport unavailable: %s", exc)
+            raise SystemExit(2) from exc
 
     # Standalone-entry engine (the ``seed`` pattern): inherits the repo
     # connection pragmas — busy_timeout + WAL (src/db/database.py).
@@ -600,7 +874,7 @@ async def main(queue: NotifyQueue | None = None) -> None:
     stop = asyncio.Event()
     install_signal_handlers(stop)
     try:
-        await run_dispatcher(manager.async_session, queue, stop)
+        await run_dispatcher(manager.async_session, queue, stop, subscriber)
     finally:
         await manager.engine.dispose()
 

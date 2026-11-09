@@ -28,7 +28,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
-from src.notify.models import DomainEvent, NotifyTask, NotifyTaskAttempt, NotifyTemplate
+from src.domain_events.models import DomainEvent
+from src.notify.models import NotifyTask, NotifyTaskAttempt, NotifyTemplate
 from src.notify.render import find_template
 
 pytestmark = pytest.mark.integration

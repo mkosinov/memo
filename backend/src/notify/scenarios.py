@@ -45,10 +45,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from sqlalchemy import select
 
 from src.core.config import settings
+from src.domain_events.models import DomainEvent
 from src.models.client import Client
 from src.models.record import Record
 from src.notify.channels.registry import parse_channel_priority
-from src.notify.models import DomainEvent, NotifyTask
+from src.notify.models import NotifyTask
 from src.notify.queue import build_task_payload
 from src.notify.render import RenderError, find_template
 from src.notify.time import business_now

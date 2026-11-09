@@ -1,9 +1,10 @@
 """Notify subsystem ORM models (#482, spec §3.1/§3.5/§3.6; family #476;
 per-channel reshape — #485 part 4, ADR 014).
 
-``DomainEvent`` moved to ``src/domain_events/models.py`` (#580 Task 2,
-spec §3.1) and is re-exported below until the dispatcher switches from
-journal polling to the consumer-group loop (#580 Task 6).
+``DomainEvent`` lives in ``src/domain_events/models.py`` (#580 Task 2);
+its transitional re-export here died with the dispatcher's switchover
+to the consumer-group loop (#580 Task 6) — importers read the
+domain-events module directly.
 
 ``NotifyTask`` / ``NotifyTemplate`` follow the ``AbstractModel``
 conventions (String(36) UUID PK + naive-UTC ``created_at``/
@@ -34,9 +35,6 @@ from sqlalchemy import event as sa_event
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from src.db.base import Base
-from src.domain_events.models import (
-    DomainEvent as DomainEvent,  # re-export: dispatcher + notify tests (#580 Task 2)
-)
 from src.models.abstract import AbstractModel
 
 

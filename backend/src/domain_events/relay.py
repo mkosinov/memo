@@ -41,8 +41,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from sqlalchemy import func, select
 
 # ``import src.models`` FIRST — registration breaks the models↔notify
-# import cycle (``src/models/__init__`` pulls notify models which re-export
-# ``DomainEvent`` from this package; the re-export dies with #580 Task 6).
+# import cycle (``src/models/__init__`` pulls notify models; the old
+# ``DomainEvent`` re-export there died with #580 Task 6).
 import src.models  # noqa: F401
 from src.core.config import settings
 from src.db.database import DBManager

@@ -514,6 +514,21 @@ class TestPhotosPublicRoute:
         assert [p["id"] for p in probed.json()["items"]] == baseline_ids
 
 
+class TestPhotosBareGetClosed:
+    """#493 сценарий 3: bare GET закрыты от анонима (staff-only, photos:read)."""
+
+    def test_anonymous_list_gets_401(self, anon_client) -> None:
+        resp = anon_client.get("/api/v1/photos")
+        assert resp.status_code == 401, resp.text
+
+    def test_anonymous_single_get_gets_401(
+        self, anon_client, photos_fixture
+    ) -> None:
+        photo_id = photos_fixture["p_client"]["id"]
+        resp = anon_client.get(f"/api/v1/photos/{photo_id}")
+        assert resp.status_code == 401, resp.text
+
+
 class TestPhotosOwnerValidation:
     """Merged-set owner validation in the service (#211 Task 3, spec §6.2)."""
 

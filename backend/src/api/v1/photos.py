@@ -37,6 +37,10 @@ from src.services.photo import (
 
 router = APIRouter(tags=["photos"])
 
+# GH #493 (spec §6.3): bare photo GETs are staff-only (photos:read) —
+# the anonymous showcase lives at GET /api/v1/public/photos (ADR-015).
+_READ_GUARD = [Depends(require_permission("photos:read"))]
+
 
 @lru_cache
 def _get_photo_service() -> PhotoService:
@@ -108,15 +112,17 @@ async def _activity_scoped_or_404(
         )
 
 
-@router.get("", response_model=PaginatedResponse[PhotoResponse])
+@router.get("", response_model=PaginatedResponse[PhotoResponse],
+            dependencies=_READ_GUARD)
 async def list_photos(
     session: SessionDep,
     params: Annotated[PhotoListParams, Query()],
     # GH #263 T5: scoped master sees only photos attached to HIS activities
     # (EXISTS photo → activity.master_id); conjunctive with the params.
     # Admin → master_key=None → no filter (unchanged behaviour). The list
-    # is a PUBLIC route (the web gallery rides the same table) —
-    # get_optional_scope keeps anonymous requests at 200 (T2 pattern).
+    # is STAFF-ONLY since #493 (photos:read guard above) — the anonymous
+    # showcase lives at /api/v1/public/photos (ADR-015);
+    # get_optional_scope keeps the master narrowing as today.
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> PaginatedResponse[PhotoResponse]:
     """Return a paginated page of photos (admin view, GH #211).
@@ -136,14 +142,16 @@ async def list_photos(
     )
 
 
-@router.get("/{photo_id}", response_model=PhotoResponse)
+@router.get("/{photo_id}", response_model=PhotoResponse,
+            dependencies=_READ_GUARD)
 async def get_photo(
     photo_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    # GH #263 T5: чужое фото (нет своей активности) → 404. Public route —
-    # get_optional_scope: anonymous stays 200 (T2 pattern), a logged-in
-    # master is narrowed to his own rows.
+    # GH #263 T5: чужое фото (нет своей активности) → 404. Staff-only
+    # since #493 (photos:read guard above) — the anonymous showcase
+    # lives at /api/v1/public/photos (ADR-015); get_optional_scope
+    # narrows a logged-in master to his own rows.
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> PhotoResponse:
     """Return a single photo by ID."""

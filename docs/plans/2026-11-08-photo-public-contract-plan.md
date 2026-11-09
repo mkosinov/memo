@@ -29,6 +29,7 @@
 - `backend/src/auth/public.py` — `PUBLIC_ROUTES` + entry; docstring bullet (~:11-15)
 - `backend/tests/test_master_scope_contract.py` — `ALLOWED_UNSCOPED` entry (~:111)
 - `backend/tests/test_list_id_uniform_guards.py` — pin 19 → 20 (~:52)
+- `backend/tests/test_auth_permissions.py` — точный allowlist-пин: + `("GET", "/api/v1/public/photos")` (~:210-246)
 - `backend/tests/test_api_photos.py` — `anon_client` fixture + `TestPhotosPublicRoute`
 
 ### Task Description
@@ -54,19 +55,55 @@ class TestPhotosPublicRoute:
     """#493 сценарии 1–2: публичная витрина ``/api/v1/public/photos``."""
 
     def test_minimal_schema_public_only(
-        self, anon_client, photos_fixture
+        self, api_client, anon_client, photos_fixture
     ) -> None:
         public = photos_fixture["p_client"]    # создан с is_public=True
         private = photos_fixture["p_client2"]  # дефолт: private
+        # непустая выдача тегов: публикуем фото с тегами (tag id — из ответа p_tags)
+        tag_ids = [t["id"] for t in photos_fixture["p_tags"]["tags"]]
+        tagged = api_client.post(
+            PHOTOS_URL,
+            json={
+                "filename": "p_public_tagged.jpg",
+                "is_public": True,
+                "tag_ids": tag_ids,
+            },
+        )
+        assert tagged.status_code == 201, tagged.text
 
         resp = anon_client.get("/api/v1/public/photos")
         assert resp.status_code == 200, resp.text
         ids = [p["id"] for p in resp.json()["items"]]
         assert public["id"] in ids
         assert private["id"] not in ids
+        assert tagged.json()["id"] in ids
         for item in resp.json()["items"]:
             assert set(item.keys()) == {"id", "filename", "tags"}
             assert all(isinstance(t, str) for t in item["tags"])
+        tagged_item = next(
+            p for p in resp.json()["items"] if p["id"] == tagged.json()["id"]
+        )
+        assert tagged_item["tags"]  # непусто: теги-строки реально проходят
+
+    def test_id_filter_ands_with_forced_is_public(
+        self, anon_client, photos_fixture
+    ) -> None:
+        """Guard 1 #371: ``?id=`` опубликован и AND-ится с форсом is_public —
+        приватный id через фильтр не достаётся."""
+        public = photos_fixture["p_client"]
+        private = photos_fixture["p_client2"]
+
+        picked = anon_client.get(
+            "/api/v1/public/photos", params={"id": public["id"]}
+        )
+        assert picked.status_code == 200, picked.text
+        assert [p["id"] for p in picked.json()["items"]] == [public["id"]]
+
+        bypass = anon_client.get(
+            "/api/v1/public/photos", params={"id": private["id"]}
+        )
+        assert bypass.status_code == 200, bypass.text
+        assert bypass.json()["items"] == []
 
     def test_owner_filters_not_wired_unknown_params_ignored(
         self, anon_client, photos_fixture
@@ -109,7 +146,7 @@ class PhotoPublicResponse(BaseModel):
     tags: list[str] = []
 ```
 
-- [ ] **Сервисный шов.** В `backend/src/services/photo.py` — импорты вверху файла: `from collections.abc import Callable`, `from typing import TypeVar, overload`, `from src.schemas.pagination import PaginationParams`, `PhotoPublicResponse` в существующий импорт из `src.schemas.photo`. Над `list_photos_view` (:386):
+- [ ] **Сервисный шов.** В `backend/src/services/photo.py`: в backend включены ruff TC-правила (flake8-type-checking), поэтому импорты, используемые ТОЛЬКО в аннотациях, кладём в `TYPE_CHECKING`-блок: `from collections.abc import Callable` и `from src.schemas.pagination import PaginationParams` → TYPE_CHECKING; runtime-импорты: `from typing import TypeVar, overload` и `PhotoPublicResponse` (конструируется) — `PhotoPublicResponse` добавь в существующий import из `src.schemas.photo`. Над `list_photos_view` (:386):
 
 ```python
 ResponseT = TypeVar("ResponseT")
@@ -185,6 +222,8 @@ async def list_public_photos_view(
     )
 ```
 
+Осознанное решение (спека §6.2 допускает оба варианта — выбираем меньший диф): `client_name`-subquery остаётся в общем stmt, его результат отбрасывается маппером; отключение потребовало бы разрезания композита — не делаем.
+
 - [ ] **Роутер.** Новый файл `backend/src/api/v1/public.py`:
 
 ```python
@@ -225,7 +264,8 @@ async def list_public_photos(
     )
 ```
 
-- [ ] **Маунт.** В `backend/src/main.py`: импорт рядом с `from src.api.v1.photos import router as photos_router` (:27) → `from src.api.v1.public import router as public_router`; маунт рядом с `app.include_router(photos_router, prefix="/api/v1/photos")` (:264) → `app.include_router(public_router, prefix="/api/v1/public")`.
+- [ ] **Маунт.** В `backend/src/main.py`: импорт `from src.api.v1.public import router as public_router` вставь в алфавитном порядке между position и records (ruff `I001`); маунт `app.include_router(public_router, prefix="/api/v1/public")` — рядом со строкой photos-маунта (:264).
+- [ ] **Линт/типы шва.** `cd backend && uv run ruff check src/` → ноль замечаний (TC/I001 на изменённых файлах); если в backend настроен mypy (см. pyproject/CI-workflow) — прогони его по `src/services/photo.py`, `src/api/v1/public.py`.
 - [ ] **Allowlist.** В `backend/src/auth/public.py`: в `PUBLIC_ROUTES` после блока activities добавь:
 
 ```python
@@ -295,6 +335,7 @@ _READ_GUARD = [Depends(require_permission("photos:read"))]
 ```
 
 В декоратор `list_photos` (`@router.get("", ...)`, ~:111) и `get_photo` (`@router.get("/{photo_id}", ...)`) добавь аргумент `dependencies=_READ_GUARD`, сохранив все прочие аргументы декораторов. Тела функций и scope-зависимости (`get_optional_scope`/`get_scope`) не трогай: guard срабатывает раньше и отсекает только анонима.
+- [ ] **Docstring-чистка photos.py.** Перепиши docstring/комментарии `list_photos` и `get_photo` (:111-139), упоминающие анонимную галерею / публичный список с `?is_public=true`, под staff-only семантику (витрина — `/api/v1/public/photos`, ADR-015). Это последний носитель старой формулировки после правки `public.py`.
 - [ ] **Allowlist −2.** В `backend/src/auth/public.py` удали записи `("GET", "/api/v1/photos")`, `("GET", "/api/v1/photos/{id}")` и следующий за ними комментарий `# GH #479 (Изменение 4): ... photos/web ...` (строки ~:49-52). В docstring (:11-15) перепиши словарную строку-буллет: фото уходит из перечисления словарей, вместо неё — `photos` НЕ анонимно: `bare photo GETs are staff-only (photos:read); the showcase lives at GET /api/v1/public/photos (ADR-015)`. Строку-буллет про public-неймспейс из Task 1 сведи с этой формулировкой (одна строка, без «until»).
 - [ ] **Точный пин.** `backend/tests/test_auth_permissions.py`: из frozenset-литерала удали `("GET", "/api/v1/photos"),` и `("GET", "/api/v1/photos/{id}"),` (запись `/api/v1/public/photos` добавлена в Task 1 — итог: −2 +1).
 - [ ] **`_PUBLIC_GETS`.** `backend/tests/test_auth_guards.py` (~:86-94): замени элемент `"/api/v1/photos"` на `"/api/v1/public/photos"`; docstring модуля (:15) и `TestPublicSurface`, если упоминают фото-список, — переформулируй под витрину `/public/photos`.
@@ -357,12 +398,13 @@ describe('PhotoPublicResponseSchema (#493: ADR-015 audience schema)', () => {
     expect(parsed.tags).toEqual(['масло', 'акварель']);
   });
 
-  it('defaults tags to [] and rejects owner fields', () => {
+  it('defaults tags to [] and strips owner keys (zod non-strict)', () => {
     const parsed = PhotoPublicResponseSchema.parse({ id: 'p2', filename: 'f.jpg' });
     expect(parsed.tags).toEqual([]);
-    expect(() =>
-      PhotoPublicResponseSchema.parse({ id: 'p2', filename: 'f.jpg', client_id: null } as never),
-    ).not.toThrow(); // zod non-strict: extra keys stripped, owner data never typed
+    const withOwner = PhotoPublicResponseSchema.parse({
+      id: 'p2', filename: 'f.jpg', client_id: null,
+    } as never) as Record<string, unknown>;
+    expect(withOwner).not.toHaveProperty('client_id'); // extra keys stripped, owner data never typed
   });
 });
 ```
@@ -389,7 +431,7 @@ export const PhotoPublicListResponseSchema = paginatedSchema(PhotoPublicResponse
 export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSchema>;
 ```
 
-Проверь, что `src/index.ts` реэкспортит оба (паттерн `export *`/явные строки — как для соседей; при явных строках допиши).
+Экспорты: в `endpoints.ts` добавь `PhotoPublicListResponseSchema` в существующий import из `'./schemas'`; в `src/index.ts` проверь grep'ом, как экспортируются соседи (`getPhotos`, `PhotoListResponseSchema` — явные строки или `export *`), и добавь оба новых имени по тому же паттерну.
 
 - [ ] **RED (endpoints).** В `endpoints.test.ts` рядом с `describe('getPhotos')` (:338-349), по его образцу (`vi.mocked(api)` — мок уже настроен в файле):
 
@@ -440,7 +482,7 @@ export async function getPublicPhotos(params?: PhotoPublicListParams): Promise<P
 }
 ```
 
-- [ ] `pnpm --filter @memo/api-client test` → зелёное; `pnpm --filter @memo/api-client build` (если есть script build / tsc) → без ошибок типов.
+- [ ] `pnpm --filter @memo/api-client test` → зелёное; type-check: запусти скрипт type-check/build из `packages/api-client/package.json` (имя смотри там — обычно `build`/`typecheck`) → ноль ошибок типов.
 - [ ] `git add -A && git commit -m "feat(api-client): getPublicPhotos + PhotoPublicResponseSchema (#493)"`
 
 **DoD:** новые describe зелёные (RED→GREEN); `PhotoResponseSchema` и `getPhotos` не изменены.
@@ -549,7 +591,7 @@ function publicPhoto(overrides: Partial<PhotoPublicResponse> = {}): PhotoPublicR
 - [ ] `photos.md`, раздел Master role: «Публичная витрина» — новый механизм (мастер на `/public/photos` видит все публичные фото, нескоупленно; `/photos` — скоуп #263); краткое упоминание вариантной публичной схемы (`PhotoPublicResponse` — теги названиями, без владельческих полей).
 - [ ] `photos.md`, новая доменная заметка (раздел правил/заметок): публичные фото-файлы не должны нести PII в имени — `filename` это админский свободный текст («Иванов.jpg» утечёт на публичном маршруте даже после чистки id); правило процесса загрузки, без валидации в #493.
 - [ ] `auth.md`, Public Access (:28, словарная строка): убери `photos` из перечисления анонимных словарей; фото-витрина — `GET /api/v1/public/photos` (ADR-015; строка-ссылка на ADR уже есть строкой выше — не дублируй). Строку про `#479 removal` рядом с фото-упоминанием приведи в соответствие (бare GET закрыты #493).
-- [ ] **Полный прогон:** `cd backend && uv run pytest -q` → зелёное; `pnpm --filter @memo/api-client test && pnpm --filter @memo/web test` → зелёное.
+- [ ] **Полный прогон (форма — как в CI, `.github/workflows/test.yml`):** backend — `cd backend && uv run pytest -q` + линт/типы (`uv run ruff check src/`; mypy, если настроен в workflow) → зелёное; api-client — vitest + type-check/build-скрипт из package.json → зелёное; web — vitest + type-check (по workflow) → зелёное. Команды бери из workflow-файла, не изобретай свои.
 - [ ] `git add -A && git commit -m "docs(domain-rules): photos public showcase route, staff-only bare GETs (#493)"`
 
 **DoD:** все суиты зелёные; grep по `docs/domain-rules/` не находит «rides it with `is_public`» / «gallery sends `is_public`»; обе таблицы эндпоинтов содержат `/api/v1/public/photos`.

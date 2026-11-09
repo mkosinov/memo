@@ -1430,7 +1430,7 @@ class TestScenarioAttemptsLedger:
         assert _group_pending(contour) == 1
 
 
-# ── re-enqueue (§3.8, inside the polling cycle) ─────────────────────────────
+# ── re-enqueue (§3.8, inside the dispatcher loop) ───────────────────────────
 
 
 class TestReenqueue:

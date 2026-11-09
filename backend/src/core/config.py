@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # spec §3.3). Empty = transport not configured. SecretStr: the URL
     # carries credentials and must never surface in repr/logs/errors.
     REDIS_URL: SecretStr = SecretStr("")
+    # ── The domain-events relay (#580, spec §4.4) ─────────────────────────
+    # Gate of the relay process ``python -m src.domain_events.relay`` —
+    # a deliberate mirror of ``NOTIFY_ENABLED``: off by default, the
+    # contour opts in (dev.sh --notify exports it).
+    DOMAIN_EVENTS_ENABLED: bool = False
+    # Seconds; the relay tick (spec §3.3) — the depth of the unpublished
+    # tail is drained in POLL_BATCH_SIZE batches every interval.
+    DOMAIN_EVENTS_POLL_INTERVAL: float = 1.0
     # ── The Telegram channel (#485 part 4, spec §7 — Telethon/MTProto) ───
     # The settings triple (API_ID + API_HASH + SESSION) IS the channel's
     # availability (spec §6.1): unset → the channel honestly reports
@@ -89,9 +97,14 @@ class Settings(BaseSettings):
     def _force_notify_off_in_testing(self) -> "Settings":
         """The testing profile never runs the enabled notify subsystem
         (family #476 §3.3, US-7): a standard pytest pass must not require
-        Redis. An accidental NOTIFY_ENABLED=true is forced off."""
-        if self.ENV == "testing" and self.NOTIFY_ENABLED:
-            self.NOTIFY_ENABLED = False
+        Redis. An accidental ``NOTIFY_ENABLED=true`` is forced off — and
+        so is ``DOMAIN_EVENTS_ENABLED`` (the #580 relay mirror of the
+        same gate)."""
+        if self.ENV == "testing":
+            if self.NOTIFY_ENABLED:
+                self.NOTIFY_ENABLED = False
+            if self.DOMAIN_EVENTS_ENABLED:
+                self.DOMAIN_EVENTS_ENABLED = False
         return self
 
     @model_validator(mode="after")

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
+from src.domain_events.models import DomainEvent
 from src.notify import dispatcher, worker
 from src.notify.channels.base import ChannelLimits
 from src.notify.channels.limits import (
@@ -40,7 +41,7 @@ from src.notify.channels.limits import (
     cap_notified_key,
 )
 from src.notify.channels.mock import InMemoryRecorder, MockChannel
-from src.notify.models import DomainEvent, NotifyTask
+from src.notify.models import NotifyTask
 from src.util.utc import utc_now
 from tests.conftest import query_db
 from tests.notify_redis_support import contour_fixture, redis_marks, redis_url

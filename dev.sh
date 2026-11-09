@@ -53,6 +53,7 @@ done
 REDIS_PID=""
 DISPATCHER_PID=""
 WORKER_PID=""
+RELAY_PID=""
 
 # ── Kill dev processes (--restart) ────────────────────────────────
 if $RESTART; then
@@ -81,6 +82,7 @@ cleanup() {
     # the remaining children get killed (orphaned redis/worker).
     [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
     [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+    [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null || true
     [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
     wait 2>/dev/null
     echo -e "${GREEN}Done.${NC}"
@@ -93,6 +95,9 @@ trap cleanup SIGINT SIGTERM
 # else's answering instance is forbidden (stream payloads carry PII).
 if $NOTIFY_MODE; then
     export NOTIFY_ENABLED=true
+    # The domain-events relay (#580 §4.5) rides the same contour: its
+    # own gate mirrors NOTIFY_ENABLED — export it or the child exits 0.
+    export DOMAIN_EVENTS_ENABLED=true
     # Until part 4 the part-3 registry knows ONLY the mock channel (spec
     # §3.3): without this export the worker's loud registry check stops it
     # on the default priority "telegram". Contours drop the export when a
@@ -140,10 +145,10 @@ if _ensure_port_free 8000; then
     BACKEND_PID=$!
 fi
 
-# ── Start notify dispatcher + worker (--notify) ───────────────────
+# ── Start notify dispatcher + worker + events relay (--notify) ─────
 # Spawned via the project venv python with `exec` so $! is the real
 # process: `uv run` does not forward SIGTERM to its child, which would
-# orphan the dispatcher/worker on stack shutdown.
+# orphan the dispatcher/worker/relay on stack shutdown.
 if $NOTIFY_MODE; then
     echo -e "${BLUE}Starting notify dispatcher...${NC}"
     (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.dispatcher) &
@@ -151,6 +156,9 @@ if $NOTIFY_MODE; then
     echo -e "${BLUE}Starting notify worker...${NC}"
     (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.worker) &
     WORKER_PID=$!
+    echo -e "${BLUE}Starting domain events relay...${NC}"
+    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.domain_events.relay) &
+    RELAY_PID=$!
 fi
 
 # ── Start frontend/web ─────────────────────────────────────────────
@@ -177,7 +185,7 @@ if [ -n "$ADMIN_PID" ]; then
     echo -e "${GREEN}  Admin:     http://localhost:3001${NC}"
 fi
 if $NOTIFY_MODE; then
-    echo -e "${GREEN}  Notify:    dispatcher + worker${NC}"
+    echo -e "${GREEN}  Notify:    dispatcher + worker + events relay${NC}"
 fi
 echo -e "${GREEN}  API docs:  http://localhost:8000/docs${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

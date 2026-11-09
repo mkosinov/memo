@@ -34,8 +34,9 @@ from redis import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+from src.domain_events.models import DomainEvent
 from src.notify import dispatcher
-from src.notify.models import DomainEvent, NotifyTask
+from src.notify.models import NotifyTask
 from src.notify.redis_queue import AUTOCLAIM_COUNT, RedisQueue
 from tests.conftest import query_db, query_db_params
 from tests.notify_redis_support import make_task, redis_marks, redis_url

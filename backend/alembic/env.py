@@ -13,11 +13,15 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Import ALL models so they register with Base.metadata
+import src.models  # noqa: F401 — registration first; breaks the models↔notify/domain_events import cycle (dispatcher precedent)
 from src.auth.password_setup import (
     PasswordSetupToken,  # noqa: F401 — password_setup_tokens (#348)
 )
 from src.auth.session import Session  # noqa: F401 — sessions table (GH #247)
 from src.db.base import Base
+from src.domain_events.models import (  # noqa: F401 — domain_events journal table (#580 §3.1)
+    DomainEvent,
+)
 from src.models import (  # noqa: F401
     Activity,
     Client,
@@ -37,7 +41,6 @@ from src.models import (  # noqa: F401
     Visitor,
 )
 from src.notify.models import (  # noqa: F401 — notify subsystem tables (#482)
-    DomainEvent,
     NotifyTask,
     NotifyTaskAttempt,
     NotifyTemplate,

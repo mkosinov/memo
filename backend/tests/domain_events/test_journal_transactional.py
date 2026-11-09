@@ -1,5 +1,11 @@
 """GH #482 Task 4 — domain-event journal accumulator + @transactional splice.
 
+MOVED to ``tests/domain_events/`` (#580 Task 2, spec §3.1): the journal
+module now lives in ``src/domain_events/journal.py``. Asserts are
+unchanged by the move; only the import seam and the synthetic
+``inner_event`` fixture (the mark now validates types against the
+registry, §3.2) differ from the original notify-location test.
+
 Integration tests against the real test DB, mirroring the audit
 accumulator's transactional suite (``test_audit_log_transactional.py``):
 
@@ -22,11 +28,28 @@ from datetime import datetime
 import pytest
 from sqlalchemy import text
 
-from src.notify import journal
+from src.domain_events import journal
 from src.services.decorators import transactional
 from src.util.utc import utc_now
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _test_double_event_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register the suite's synthetic ``inner_event`` type.
+
+    The mark validates types against the registry (#580 §3.2); the
+    suite's test doubles stage a second type to pin multi-type ordering.
+    Real types are declared declaratively in ``types.py`` — the double
+    type is registered here via the public verb on an ISOLATED copy of
+    the registry (``monkeypatch`` restores the real dict afterwards).
+    """
+    from src.domain_events import types
+
+    monkeypatch.setattr(types, "_REGISTRY", dict(types._REGISTRY))
+    types.register_type("inner_event", "test double — nested mark order")
+
 
 # ─── Test doubles: decorated writers that mark domain events ──────────────────
 
@@ -105,7 +128,7 @@ def event_rows():
 
     def read() -> list[dict]:
         return query_db(
-            "SELECT type, occurred_at, snapshot, processed_at, attempts "
+            "SELECT type, occurred_at, snapshot, published_at "
             "FROM domain_events ORDER BY rowid"
         )
 
@@ -173,8 +196,7 @@ class TestTransactionalInsert:
         assert len(rows) == 1
         row = rows[0]
         assert row["type"] == "new_record"
-        assert row["processed_at"] is None  # pending — for the polling loop
-        assert row["attempts"] == 0
+        assert row["published_at"] is None  # unpublished — for the relay (#580)
         stored = json.loads(row["snapshot"])
         assert stored["record_id"] == "tag-journal-1"
         assert stored["total_price"] == 3500

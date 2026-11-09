@@ -57,8 +57,8 @@ from src.notify.channels.registry import (
     parse_channel_priority,
     validate_priority_channels,
 )
-from src.notify.process import install_signal_handlers, run_loop
 from src.notify.redis_queue import connect_or_exit
+from src.util.process import install_signal_handlers, run_loop
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from src.notify.channels.base import Channel
     from src.notify.queue import StatusEvent, TaskPayload, WorkerQueue
 
-# The notify family logger convention (src/notify/journal.py):
+# The notify family logger convention (src/domain_events/journal.py):
 # "memo.notify.<module>", independent of import paths.
 logger = logging.getLogger("memo.notify.worker")
 
@@ -471,7 +471,17 @@ async def main(
     async def iteration() -> None:
         await delivery_once(queue, channels, stop)
 
-    await run_loop("delivery", stop, settings.NOTIFY_POLL_INTERVAL, iteration, log=logger)
+    # the historical failure line keeps its «notify dispatcher» family
+    # attribution (#580 Task 4 moved run_loop to src/util/process.py with
+    # a parameterized prefix — behavior identical for notify).
+    await run_loop(
+        "delivery",
+        stop,
+        settings.NOTIFY_POLL_INTERVAL,
+        iteration,
+        log=logger,
+        log_prefix="notify dispatcher",
+    )
 
 
 if __name__ == "__main__":

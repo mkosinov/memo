@@ -15,15 +15,18 @@ Handler contract (§3.4): ``async (event, session, queue) -> None``.
 - Predicate order is FIXED and cheapest-first (§3.4): ``notify_off`` →
   ``no_recipient`` → ``no_consent`` → ``past_event``. On multiple
   failures the FIRST branch wins.
-- Decision is materialized as a ``notify_tasks`` row; ``processed_at``
-  is set IN THE SAME TRANSACTION as the task (§4.4: reprocessing an
-  event creates no duplicate). Enqueue happens AFTER the commit: an
-  enqueue failure leaves the ``queued`` task for the re-enqueue loop
-  (Task 9, §3.8); a duplicate delivery is accepted (§4.4).
+- Decision is materialized as a ``notify_tasks`` row — the root of the
+  chain, whose existence IS the deduplication key after the #580
+  switchover (partial unique index ``uq_notify_tasks_event_scenario_root``
+  on roots, §4.2; the event's ``processed_at`` mark is gone with the
+  column). Enqueue happens AFTER the commit: an enqueue failure leaves
+  the ``queued`` task for the re-enqueue loop (Task 9, §3.8); a
+  duplicate delivery is accepted (§4.4).
 - ``RenderError`` from :mod:`src.notify.render` PROPAGATES — it is not
   a decision branch. Only the five clean branches (deleted record, four
-  skips/success) produce ``processed_at``; Task 9's attempts policy
-  (1→2→3 → ``processing_error``) owns render failures.
+  skips/success) produce a task (or nothing, for the deleted record);
+  the attempts ledger of the subscriber (#580 ``notify_event_attempts``,
+  Task 6) owns render failures.
 
 Rev.5 (#485, ADR 014): on success the handler creates the task of the
 FIRST priority channel — freezing the render payload (the §4.1
@@ -42,14 +45,14 @@ from typing import TYPE_CHECKING, Any, Literal
 from sqlalchemy import select
 
 from src.core.config import settings
+from src.domain_events.models import DomainEvent
 from src.models.client import Client
 from src.models.record import Record
 from src.notify.channels.registry import parse_channel_priority
-from src.notify.models import DomainEvent, NotifyTask
+from src.notify.models import NotifyTask
 from src.notify.queue import build_task_payload
 from src.notify.render import RenderError, find_template
 from src.notify.time import business_now
-from src.util.utc import utc_now
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,8 +107,10 @@ async def _skip(
     session: AsyncSession,
     reason: SkipReason,
 ) -> None:
-    """Decision «skipped»: task row with the reason + ``processed_at``,
-    ONE transaction, nothing enqueued (§3.4)."""
+    """Decision «skipped»: a SKIPPED ROOT task row with the reason, ONE
+    transaction, nothing enqueued (§3.4). The root row is the
+    deduplication key after #580 (roots carry the partial unique index);
+    the deleted ``processed_at`` mark used to close the event here."""
     session.add(
         NotifyTask(
             event_id=event.id,
@@ -115,7 +120,6 @@ async def _skip(
             skip_reason=reason,
         )
     )
-    event.processed_at = utc_now()
     await session.commit()
 
 
@@ -126,17 +130,16 @@ async def handle_new_record(
 ) -> None:
     """``new_record`` scenario — the §3.4 decision flowchart, verbatim.
 
-    Owns its commit boundaries: task + ``processed_at`` in one
-    transaction, ``enqueue_task`` after the commit.
+    Owns its commit boundaries: the task row in one transaction,
+    ``enqueue_task`` after the commit.
     """
     snapshot: dict[str, Any] = event.snapshot
 
-    # Idempotency (§4.4): (event, scenario) is unique. A closed event or
-    # an already-existing task makes reprocessing a no-op — the guard
-    # covers both a fresh fetch (processed_at set) and a stale in-memory
-    # event object (task row exists).
-    if event.processed_at is not None:
-        return
+    # Idempotency (§4.4): (event, scenario) is unique — enforced by the
+    # partial root index since #580 (§4.2). An already-existing task
+    # makes reprocessing a no-op; the guard covers both a fresh fetch
+    # and a stale in-memory event object (the old ``processed_at``
+    # check is gone with the column).
     existing = await session.execute(
         select(NotifyTask.id).where(
             NotifyTask.event_id == event.id,
@@ -148,12 +151,12 @@ async def handle_new_record(
 
     # Live read #1 — record by event.record_id (existence only). A record
     # deleted before processing closes the event WITHOUT a task: there is
-    # nothing to notify about (§3.4).
+    # nothing to notify about (§3.4). Nothing is persisted — after #580
+    # the closure is the absence of a task; re-issuing such an event is
+    # naturally idempotent.
     record_id = (snapshot.get("event") or {}).get("record_id")
     record = await session.get(Record, record_id) if record_id else None
     if record is None:
-        event.processed_at = utc_now()
-        await session.commit()
         return
 
     # 1) notify_off — the record's own flag, LIVE (cheapest first; only
@@ -200,8 +203,8 @@ async def handle_new_record(
     # (event_type, NULL) → default) and the address (the live phone the
     # predicate just validated — never re-resolved). ``root_task_id``
     # defaults to the row's own id (chain root). RenderError (no
-    # template) PROPAGATES — Task 9's attempts policy owns it; task +
-    # ``processed_at`` in ONE transaction (§4.4 idempotency).
+    # template) PROPAGATES — the subscriber's attempts ledger owns it
+    # (#580 Task 6); the task row in ONE transaction (§4.4 idempotency).
     channel_name = _first_priority_channel()
     template = await find_template(session, SCENARIO_NEW_RECORD, channel_name)
     if template is None:
@@ -222,7 +225,6 @@ async def handle_new_record(
         template_channel=template.channel,
     )
     session.add(task)
-    event.processed_at = utc_now()
     await session.commit()
 
     # Enqueue AFTER the commit (§3.4): an enqueue failure leaves the

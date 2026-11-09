@@ -6,9 +6,11 @@ clean temporary SQLite file — the DoD of plan task 1:
 * four notify tables created (domain_events, notify_tasks,
   notify_task_attempts, notify_templates) + columns ``clients.notify_enabled``
   / ``records.notify`` with the spec'd server defaults (true / false);
-* the partial index ``ix_domain_events_pending`` exists in ``sqlite_master``
-  with BOTH polling predicates — spec §3.1: declaration must go through
-  ``sqlite_where`` so autogenerate sees no drift;
+* the partial index ``ix_domain_events_unpublished`` exists in
+  ``sqlite_master`` with the relay-cursor predicate ``published_at IS
+  NULL`` (#580 §4.2 replaced the two pending-polling predicates — the
+  declaration goes through ``sqlite_where`` so autogenerate sees no
+  drift);
 * the seed default ``new_record`` template is present with ``is_default``;
 * the migration round-trips (downgrade drops the notify schema, upgrade
   rebuilds it);
@@ -131,21 +133,30 @@ class TestUpgradeHead:
         assert record_dflts["notify"] in ("0", "false")
 
     def test_partial_index_has_both_predicates(self, upgraded_url: str) -> None:
-        """§3.1: ix_domain_events_pending ON (occurred_at) WHERE
-        processed_at IS NULL AND processing_error IS NULL — sqlite_master
-        must carry both predicates."""
+        """#580 §4.2 rewrite: the two pending-polling predicates are
+        REPLACED by the relay cursor — ``ix_domain_events_unpublished ON
+        (occurred_at) WHERE published_at IS NULL``; the old
+        ``ix_domain_events_pending`` (both old predicates) is gone with
+        the columns it references."""
         sql = _scalar(
             upgraded_url,
-            "SELECT sql FROM sqlite_master WHERE type='index' AND name='ix_domain_events_pending'",
+            "SELECT sql FROM sqlite_master WHERE type='index'"
+            " AND name='ix_domain_events_unpublished'",
         )
-        assert sql is not None, "partial index ix_domain_events_pending missing"
+        assert sql is not None, "partial index ix_domain_events_unpublished missing"
         assert "ON domain_events" in sql
         assert "occurred_at" in sql
-        assert "processed_at IS NULL" in sql, (
-            f"partial index lost the processed_at predicate: {sql}"
+        assert "published_at IS NULL" in sql, (
+            f"partial index lost the published_at predicate: {sql}"
         )
-        assert "processing_error IS NULL" in sql, (
-            f"partial index lost the processing_error predicate: {sql}"
+        old = _scalar(
+            upgraded_url,
+            "SELECT sql FROM sqlite_master WHERE type='index'"
+            " AND name='ix_domain_events_pending'",
+        )
+        assert old is None, (
+            "old processed_at/processing_error pending index survived the"
+            " #580 switchover"
         )
 
     def test_seed_default_new_record_template(self, upgraded_url: str) -> None:
@@ -260,9 +271,9 @@ class TestPerChannelMigration:
                 conn.execute(
                     text(
                         "INSERT INTO domain_events (id, type, occurred_at, snapshot,"
-                        " attempts, created_at, updated_at)"
+                        " created_at, updated_at)"
                         " VALUES ('evt-spawn', 'new_record', '2026-01-01 00:00:00',"
-                        " '{}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                        " '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                     )
                 )
             with engine.begin() as conn:
@@ -312,9 +323,9 @@ class TestPerChannelMigration:
                 conn.execute(
                     text(
                         "INSERT INTO domain_events (id, type, occurred_at, snapshot,"
-                        " attempts, created_at, updated_at)"
+                        " created_at, updated_at)"
                         " VALUES ('evt-2', 'new_record', '2026-01-01 00:00:00',"
-                        " '{}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                        " '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                     )
                 )
                 conn.execute(

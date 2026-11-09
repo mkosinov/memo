@@ -1,16 +1,23 @@
 """GH #482 Task 9 (spec §3.8; family #476 §4.3/§4.4): dispatcher process.
 
-Three loops of one ``asyncio.TaskGroup`` over the queue port: journal
-polling (batch 20 + re-enqueue sweep), ``notify:statuses`` reading
-(§4.3 derived state), ``notify:inbound`` reading (empty pilot registry).
-Covered (spec §5, US-5–US-8):
+Three loops of one ``asyncio.TaskGroup`` over the queue port: the
+re-enqueue sweep, ``notify:statuses`` reading (§4.3 derived state),
+``notify:inbound`` reading (empty pilot registry). Covered (spec §5,
+US-5–US-8):
 
-- polling processes and marks a batch (order ``occurred_at, id``, batch
-  limit), the real scenario closes events for deleted records;
-- 3-attempts policy: ``attempts`` 1→2→3 → ``processing_error`` (last
-  error text), NOT written during attempts 1–2, dead event no longer
-  picked, failing handler does not skip the rest of the batch (rollback
-  expiry — routing survives, later events process in the same sweep);
+- #580 Task 3: the journal-polling cycle and the event 3-attempts
+  policy are GONE with the ``processed_at``/``attempts``/
+  ``processing_error`` columns (the switchover migration dropped them;
+  their tests are deleted with replacement — the group-input tests of
+  #580 Task 6, spec §5.2);
+- #580 Task 6: the dispatcher's INPUT is the ``notification`` consumer
+  group on ``domain_events:new_record`` — claim batch → scenario → ack;
+  a FOURTH periodic cycle returns hanging entries (attempts grow via
+  the RETURN cycle, 3 failures park with an ack; an enqueue-point
+  transport failure burns no attempt and leaves the entry unacked);
+  startup: group ensure + immediate hanging return; consumer closed
+  with keep_if_pending on stop. Redis-marked classes run against a real
+  Redis (contour workspace), the rest against ``FakeSubscriber``;
 - statuses: attempt rows appended, derived state per §4.3 (first
   ``sending`` → sending; first ``sent`` of ANY attempt → sent, terminal;
   final ``failed`` → failed), idempotent re-apply (duplicate redelivery
@@ -46,20 +53,30 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import SecretStr
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
 from src.core.config import settings
+from src.domain_events.models import DomainEvent
+from src.domain_events.subscribe import ClaimedEvent, Subscriber
 from src.notify import dispatcher
-from src.notify.models import DomainEvent, NotifyTask, NotifyTemplate
+from src.notify.models import NotifyTask, NotifyTemplate
 from src.notify.queue import FakeQueue, build_task_payload
 from src.notify.redis_queue import TRANSPORT_NOT_CONFIGURED_MESSAGE, NotifyTransportError
-from src.notify.render import RenderError
-from src.notify.scenarios import SCENARIOS
+from src.streams.transport import StreamTransport
 from tests.conftest import BACKEND_DIR, query_db, query_db_params
-from tests.notify_redis_support import capture_notify_logs
+from tests.notify_redis_support import (
+    RedisContour,
+    capture_notify_logs,
+    contour_fixture,
+    redis_marks,
+    redis_url,
+)
 
 pytestmark = pytest.mark.integration
+
+contour = contour_fixture()  # per-test Redis workspace (redis-marked classes)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -111,31 +128,6 @@ def _session_factory(db_engine):
 
 def _iso_z(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
-
-
-async def _stage_event(
-    db_session,
-    *,
-    type_: str = "new_record",
-    occurred_at: datetime | None = None,
-) -> DomainEvent:
-    """A pending journal event; the default snapshot points at a record
-    that does not exist — the real scenario then closes the event
-    WITHOUT a task (§3.4 deleted-record branch)."""
-    event = DomainEvent(
-        type=type_,
-        occurred_at=occurred_at or datetime.now(UTC).replace(tzinfo=None),
-        snapshot={
-            "event": {
-                "type": type_,
-                "occurred_at": _iso_z(datetime.now(UTC)),
-                "record_id": str(uuid.uuid4()),
-            }
-        },
-    )
-    db_session.add(event)
-    await db_session.commit()
-    return event
 
 
 async def _stage_queued_task(
@@ -252,8 +244,10 @@ def _age_task(task_id: str, age_seconds: int = 300) -> None:
 class _TransportBrokenQueue(FakeQueue):
     """FakeQueue whose transport-facing calls raise the typed transport
     error — a deterministic dead-Redis stand-in (no server, no marks).
-    The message mirrors the adapter's real failure text (class + message,
-    no bodies)."""
+    The message mirrors the streams core's real failure text
+    (``streams transport failed during <operation>:`` class + message,
+    no bodies) with the core's own operation labels for the adapter's
+    call paths."""
 
     def __init__(self, *, fail_enqueue: bool = True, fail_claim: bool = True) -> None:
         super().__init__()
@@ -263,7 +257,7 @@ class _TransportBrokenQueue(FakeQueue):
     def enqueue_task(self, payload: dict) -> None:
         if self._fail_enqueue:
             raise NotifyTransportError(
-                "notify queue transport failed during enqueue_task:"
+                "streams transport failed during publish notify:tasks:"
                 " ConnectionError: mock-dead-redis"
             )
         super().enqueue_task(payload)
@@ -271,7 +265,7 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_statuses(self):
         if self._fail_claim:
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:statuses:"
+                "streams transport failed during claim notify:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_statuses()
@@ -279,19 +273,103 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_inbound(self):
         if self._fail_claim:
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:inbound:"
+                "streams transport failed during claim notify:inbound/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_inbound()
 
 
-def _event_row(event_id: str) -> dict:
-    rows = query_db(
-        "SELECT processed_at, attempts, processing_error FROM domain_events"
-        f" WHERE id = '{event_id}'"
+class FakeSubscriber:
+    """In-memory ``Subscriber`` double — the dispatcher's group seam
+    without Redis (deterministic; the redis-marked classes exercise the
+    real one). Mirrors the ``src/domain_events/subscribe.py`` surface the
+    dispatcher calls: ensure/claim/ack/reclaim/close/ping."""
+
+    def __init__(self, records: list[ClaimedEvent] | None = None) -> None:
+        self.pending: list[ClaimedEvent] = list(records or [])
+        self.acked: list[str] = []
+        self.ensured: list[list[str]] = []
+        self.reclaim_calls: list[int] = []
+        self.closed = False
+
+    def ensure(self, streams: list[str]) -> None:
+        self.ensured.append(list(streams))
+
+    def claim(self, streams: list[str], count: int) -> list[ClaimedEvent]:
+        taken, self.pending = self.pending[:count], self.pending[count:]
+        return taken
+
+    def ack(self, stream: str, qid: str) -> None:
+        self.acked.append(qid)
+
+    def reclaim(self, streams: list[str], min_idle_ms: int) -> list[ClaimedEvent]:
+        self.reclaim_calls.append(min_idle_ms)
+        taken, self.pending = self.pending, []
+        return taken
+
+    def close(self) -> None:
+        self.closed = True
+
+    def ping(self) -> None:
+        return None
+
+
+# ── group-input helpers (#580 Task 6, spec §3.5/§5.2) ───────────────────────
+
+
+def _stream_record(
+    event_id: str,
+    snapshot: dict,
+    *,
+    type: str = "new_record",
+    occurred_at: str | None = None,
+) -> dict:
+    """One §4.1 stream record — the relay's ``stream_record`` shape."""
+    return {
+        "event_id": event_id,
+        "type": type,
+        "occurred_at": occurred_at
+        or datetime.now(UTC).replace(tzinfo=None).isoformat(),
+        "snapshot": snapshot,
+    }
+
+
+def _publish(contour: RedisContour, record: dict) -> None:
+    """XADD ``record`` to the contour's ``new_record`` stream — the
+    relay-side stand-in (a raw producer transport, no group)."""
+    StreamTransport(redis_url(), key_prefix=contour.prefix).publish(
+        dispatcher.NEW_RECORD_STREAM, record
     )
-    assert rows, f"event {event_id} not found"
-    return rows[0]
+
+
+def _group_pending(contour: RedisContour) -> int:
+    """The PEL size of the ``notification`` group on the contour's
+    stream — the unacked-entry count."""
+    return contour.client.xpending(
+        f"{contour.prefix}{dispatcher.NEW_RECORD_STREAM}",
+        dispatcher.NOTIFICATION_GROUP,
+    )["pending"]
+
+
+async def _stage_event_row(db_session, snapshot: dict) -> DomainEvent:
+    """A journal ``new_record`` row carrying ``snapshot`` (committed) —
+    the stream record's event_id must exist for the task/ledger FKs."""
+    event = DomainEvent(
+        type="new_record",
+        occurred_at=datetime.now(UTC).replace(tzinfo=None),
+        snapshot=snapshot,
+    )
+    db_session.add(event)
+    await db_session.commit()
+    return event
+
+
+def _ledger(event_id: str) -> list[dict]:
+    """The attempts-ledger row(s) of one event (empty = no row)."""
+    return query_db(
+        "SELECT attempts, last_error FROM notify_event_attempts"
+        f" WHERE event_id = '{event_id}'"
+    )
 
 
 # ── NOTIFY_CHANNEL_PRIORITY parsing (§3.8) ──────────────────────────────────
@@ -393,7 +471,9 @@ class TestMainTransportGates:
         self, monkeypatch
     ) -> None:
         """Non-empty ``REDIS_URL`` → ``connect_or_exit(<unwrapped url>)``;
-        the queue it returns is what the cycles run."""
+        the queue it returns is what the cycles run. The subscriber is
+        built over the SAME unwrapped URL (group ``notification``) with
+        its own fail-fast ping (#580 Task 6)."""
         monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
         monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
         monkeypatch.setattr(settings, "REDIS_URL", SecretStr("redis://localhost:6379/0"))
@@ -405,41 +485,63 @@ class TestMainTransportGates:
             seen["url"] = url
             return built
 
+        class _StubSubscriber:
+            def __init__(self, url: str, group: str) -> None:
+                seen["sub_url"] = url
+                seen["sub_group"] = group
+
+            def ping(self) -> None:
+                return None
+
         async def fake_run(
-            session_factory: object, queue: FakeQueue, stop: asyncio.Event
+            session_factory: object,
+            queue: FakeQueue,
+            stop: asyncio.Event,
+            subscriber: object,
         ) -> None:
             ran["queue"] = queue
+            ran["subscriber"] = subscriber
 
         monkeypatch.setattr(dispatcher, "connect_or_exit", fake_connect)
+        monkeypatch.setattr(dispatcher, "Subscriber", _StubSubscriber)
         monkeypatch.setattr(dispatcher, "run_dispatcher", fake_run)
 
         await dispatcher.main()
 
         assert seen["url"] == "redis://localhost:6379/0"
+        assert seen["sub_url"] == "redis://localhost:6379/0"
+        assert seen["sub_group"] == dispatcher.NOTIFICATION_GROUP
         assert ran["queue"] is built
+        assert isinstance(ran["subscriber"], _StubSubscriber)
 
     async def test_injected_queue_skips_adapter_selection(self, monkeypatch) -> None:
-        """Part-1 test seam (unchanged): an explicitly injected queue is
-        used as is — the gates never run for it."""
+        """Part-1 test seam (unchanged): an explicitly injected queue —
+        and subscriber — is used as is; the gates never run for it."""
         monkeypatch.setattr(settings, "NOTIFY_ENABLED", True)
         monkeypatch.setattr(settings, "NOTIFY_CHANNEL_PRIORITY", "telegram")
         injected = FakeQueue()
+        injected_sub = FakeSubscriber()
         ran: dict[str, object] = {}
 
         def forbidden_connect(url: str, **kwargs: object) -> FakeQueue:
             raise AssertionError("adapter selection must not run for an injected queue")
 
         async def fake_run(
-            session_factory: object, queue: FakeQueue, stop: asyncio.Event
+            session_factory: object,
+            queue: FakeQueue,
+            stop: asyncio.Event,
+            subscriber: object,
         ) -> None:
             ran["queue"] = queue
+            ran["subscriber"] = subscriber
 
         monkeypatch.setattr(dispatcher, "connect_or_exit", forbidden_connect)
         monkeypatch.setattr(dispatcher, "run_dispatcher", fake_run)
 
-        await dispatcher.main(injected)
+        await dispatcher.main(injected, injected_sub)
 
         assert ran["queue"] is injected
+        assert ran["subscriber"] is injected_sub
 
 
 class TestMainExitCodePropagation:
@@ -460,128 +562,6 @@ class TestMainExitCodePropagation:
         )
         assert proc.returncode == 2
         assert TRANSPORT_NOT_CONFIGURED_MESSAGE in proc.stdout + proc.stderr
-
-
-# ── cycle 1: journal polling (§3.8) ─────────────────────────────────────────
-
-
-class TestPollingBatch:
-    async def test_poll_processes_and_marks_batch(self, db_engine, db_session) -> None:
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        for i in range(3):
-            await _stage_event(db_session, occurred_at=base + timedelta(seconds=i))
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        rows = query_db("SELECT processed_at FROM domain_events")
-        assert len(rows) == 3
-        # nonexistent record → the scenario closes the event WITHOUT a task
-        assert all(r["processed_at"] is not None for r in rows)
-        assert query_db("SELECT id FROM notify_tasks") == []
-
-    async def test_poll_respects_batch_size_and_occurred_at_order(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(dispatcher, "POLL_BATCH_SIZE", 2)
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        staged = [
-            (await _stage_event(db_session, occurred_at=base + timedelta(seconds=i))).id
-            for i in range(5)
-        ]
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-        closed = {
-            r["id"] for r in query_db("SELECT id FROM domain_events WHERE processed_at IS NOT NULL")
-        }
-        assert closed == set(staged[:2])  # oldest first, batch of 2
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-        closed = {
-            r["id"] for r in query_db("SELECT id FROM domain_events WHERE processed_at IS NOT NULL")
-        }
-        assert closed == set(staged[:4])
-
-    async def test_unknown_event_type_logged_and_stays_pending(self, db_engine, db_session) -> None:
-        event = await _stage_event(db_session, type_="mystery")
-
-        with capture_dispatcher_logs() as messages:
-            await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        assert any("mystery" in m for m in messages)
-        row = _event_row(event.id)
-        assert row["processed_at"] is None
-        assert row["attempts"] == 0
-        assert row["processing_error"] is None
-
-
-class TestAttemptsPolicy:
-    async def test_attempts_1_2_3_then_processing_error(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        calls: list[str] = []
-
-        async def boom(event, session, queue) -> None:
-            calls.append(event.id)
-            raise RenderError("template exploded")
-
-        monkeypatch.setitem(SCENARIOS, "new_record", boom)
-        event = await _stage_event(db_session)
-        factory = _session_factory(db_engine)
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 1
-        assert row["processing_error"] is None  # NOT written on attempt 1
-        assert row["processed_at"] is None
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 2
-        assert row["processing_error"] is None  # NOT written on attempt 2
-
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        row = _event_row(event.id)
-        assert row["attempts"] == 3
-        assert row["processed_at"] is None
-        assert row["processing_error"] is not None
-        assert "template exploded" in row["processing_error"]
-
-        # dead event: the polling predicate no longer takes it
-        await dispatcher.process_pending_batch(factory, FakeQueue())
-        assert len(calls) == 3
-
-    async def test_failing_event_rest_of_batch_processes_same_sweep(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        """Regression (review of 6710caba): a failing handler's rollback
-        expires every loaded event of the batch; the routing must survive
-        that, and the events AFTER the failing one must still process in
-        the SAME sweep instead of waiting out the next ticks."""
-        real_handler = SCENARIOS["new_record"]
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        first = await _stage_event(db_session, occurred_at=base)
-        await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
-        await _stage_event(db_session, occurred_at=base + timedelta(seconds=2))
-
-        async def flaky(event, session, queue) -> None:
-            if event.id == first.id:
-                raise RenderError("template exploded")
-            await real_handler(event, session, queue)
-
-        monkeypatch.setitem(SCENARIOS, "new_record", flaky)
-
-        await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        row = _event_row(first.id)
-        assert row["attempts"] == 1
-        assert row["processed_at"] is None
-        assert row["processing_error"] is None  # attempt 1 — not written yet
-        # the two LATER events closed in the same sweep (nonexistent record
-        # → the scenario closes them without a task)
-        processed = query_db(
-            f"SELECT id FROM domain_events WHERE processed_at IS NOT NULL AND id != '{first.id}'"
-        )
-        assert len(processed) == 2
 
 
 # ── cycle 2: notify:statuses → attempts + derived state (§4.3) ──────────────
@@ -667,12 +647,57 @@ class TestStatusesCycle:
                 super().reclaim_hanging()
 
         queue = SpyQueue()
+        subscriber = FakeSubscriber()
         stop = asyncio.Event()
         stop.set()  # loops exit immediately; only the start path runs
 
-        await dispatcher.run_dispatcher(_session_factory(db_engine), queue, stop)
+        await dispatcher.run_dispatcher(
+            _session_factory(db_engine), queue, stop, subscriber
+        )
 
         assert queue.reclaimed is True
+        # the subscriber start duty (§3.5): group ensured, hanging entries
+        # of a crashed predecessor returned IMMEDIATELY (idle 0), consumer
+        # closed on the graceful stop
+        assert subscriber.ensured == [[dispatcher.NEW_RECORD_STREAM]]
+        assert subscriber.reclaim_calls == [0]
+        assert subscriber.closed is True
+
+    async def test_run_dispatcher_startup_reclaim_processes_hanging_entry(
+        self, db_engine, db_session, create_activity, create_record
+    ) -> None:
+        """A crashed predecessor's hanging entry (its PEL) returns through
+        the STARTUP path and is processed: the scenario decision
+        materializes and the entry is acked — nothing waits out the
+        periodic-cadence threshold at process start (§3.4/§3.5)."""
+        activity = create_activity()
+        record = create_record(
+            activity_id=activity["id"],
+            notify=False,
+            visits=[{"name": "Гость", "price": 3500, "status": "waiting"}],
+        )
+        snapshot = {"event": {"record_id": record["id"]}}
+        event = await _stage_event_row(db_session, snapshot)
+        hanging = ClaimedEvent(
+            qid="1-1",
+            event_id=event.id,
+            type="new_record",
+            occurred_at=datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            snapshot=snapshot,
+        )
+        subscriber = FakeSubscriber([hanging])
+        stop = asyncio.Event()
+        stop.set()
+
+        await dispatcher.run_dispatcher(
+            _session_factory(db_engine), FakeQueue(), stop, subscriber
+        )
+
+        assert subscriber.acked == ["1-1"]
+        assert query_db(
+            "SELECT status, skip_reason FROM notify_tasks"
+            f" WHERE event_id = '{event.id}'"
+        ) == [{"status": "skipped", "skip_reason": "notify_off"}]
 
 
 # ── channel chain — #485 Task 5 (part-4 spec §8; family §4.3 US-5) ───────────
@@ -1156,7 +1181,256 @@ class TestInboundCycle:
         assert queue.claim_inbound() == []
 
 
-# ── re-enqueue (§3.8, inside the polling cycle) ─────────────────────────────
+# ── the events group cycle: domain_events:new_record (#580 Task 6, §3.5) ────
+
+
+class TestEventsCycle:
+    """The dispatcher's group input (spec §5.2 scenario 2): claim a batch
+    of the ``notification`` group → scenario → ack. Real Redis (contour
+    workspace): the claim/ack/PEL semantics are the object under test."""
+
+    pytestmark = redis_marks
+
+    async def test_claim_runs_scenario_and_acks_deleted_record(
+        self, db_engine, db_session, contour
+    ) -> None:
+        """A snapshot whose record is gone (the deleted-record branch —
+        here: no record id at all) yields NO task and the entry is ACKED:
+        the closure is the absence of a task, redelivery is idempotent."""
+        event = await _stage_event_row(db_session, {})
+        _publish(contour, _stream_record(event.id, {}))
+        subscriber = Subscriber(
+            redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+        )
+        subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+
+        queue = FakeQueue()
+        await dispatcher.events_once(_session_factory(db_engine), queue, subscriber)
+
+        assert query_db("SELECT id FROM notify_tasks") == []
+        assert queue.tasks == []
+        # acked: no new deliveries AND an empty PEL
+        assert subscriber.claim([dispatcher.NEW_RECORD_STREAM], 10) == []
+        assert _group_pending(contour) == 0
+
+    async def test_duplicate_delivery_one_task_both_acked(
+        self, db_engine, db_session, create_activity, create_record, contour
+    ) -> None:
+        """At-least-once (§4.3): the relay may re-XADD an event it failed
+        to mark — both entries arrive, ONE decision materializes (the
+        partial root index is the dedup key), BOTH are acked."""
+        activity = create_activity()
+        record = create_record(
+            activity_id=activity["id"],
+            notify=False,
+            visits=[{"name": "Гость", "price": 3500, "status": "waiting"}],
+        )
+        snapshot = {"event": {"record_id": record["id"]}}
+        event = await _stage_event_row(db_session, snapshot)
+        _publish(contour, _stream_record(event.id, snapshot))
+        _publish(contour, _stream_record(event.id, snapshot))  # the duplicate
+
+        subscriber = Subscriber(
+            redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+        )
+        subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+        queue = FakeQueue()
+        await dispatcher.events_once(_session_factory(db_engine), queue, subscriber)
+
+        assert query_db(
+            "SELECT status, skip_reason, root_task_id, parent_task_id FROM"
+            f" notify_tasks WHERE event_id = '{event.id}'"
+        ) == [
+            {
+                "status": "skipped",
+                "skip_reason": "notify_off",
+                "root_task_id": query_db(
+                    f"SELECT id FROM notify_tasks WHERE event_id = '{event.id}'"
+                )[0]["id"],
+                "parent_task_id": None,
+            }
+        ]
+        assert queue.tasks == []  # a skip enqueues nothing
+        # both stream entries left delivery — nothing hangs
+        assert _group_pending(contour) == 0
+        assert subscriber.claim([dispatcher.NEW_RECORD_STREAM], 10) == []
+
+    async def test_record_of_unhandled_type_is_acked_away(
+        self, db_engine, contour
+    ) -> None:
+        """A handmade record whose ``type`` has no scenario handler (a
+        corrupt payload — the registry gate keeps such types out of the
+        stream) is logged (identifiers only) and acked away: redelivery
+        cannot fix it, and it must not hang in the PEL forever."""
+        _publish(contour, _stream_record(str(uuid.uuid4()), {}, type="alien_type"))
+        subscriber = Subscriber(
+            redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+        )
+        subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.events_once(
+                _session_factory(db_engine), FakeQueue(), subscriber
+            )
+
+        assert _group_pending(contour) == 0
+        assert subscriber.claim([dispatcher.NEW_RECORD_STREAM], 10) == []
+        assert any("alien_type" in m for m in messages), messages
+
+    async def test_integrity_error_is_acked_as_already_processed(
+        self, db_engine, db_session, create_activity, create_record, contour, monkeypatch
+    ) -> None:
+        """The idempotency seam of the partial root index (§3.5): a commit
+        that hits ``uq_notify_tasks_event_scenario_root`` (a concurrent
+        delivery won the race past the pre-check) means «already
+        processed» — the entry is ACKED, the attempts ledger is NOT
+        touched (this is not a scenario failure)."""
+        activity = create_activity()
+        record = create_record(
+            activity_id=activity["id"],
+            notify=False,
+            visits=[{"name": "Гость", "price": 3500, "status": "waiting"}],
+        )
+        snapshot = {"event": {"record_id": record["id"]}}
+        event = await _stage_event_row(db_session, snapshot)
+        _publish(contour, _stream_record(event.id, snapshot))
+
+        async def racer(event, session, queue):
+            raise IntegrityError(
+                "INSERT INTO notify_tasks",
+                {},
+                Exception("UNIQUE constraint failed: uq_notify_tasks_event_scenario_root"),
+            )
+
+        monkeypatch.setitem(dispatcher.SCENARIOS, "new_record", racer)
+
+        subscriber = Subscriber(
+            redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+        )
+        subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+        with capture_dispatcher_logs() as messages:
+            await dispatcher.events_once(
+                _session_factory(db_engine), FakeQueue(), subscriber
+            )
+
+        assert _group_pending(contour) == 0  # acked — already processed
+        assert _ledger(event.id) == []  # the ledger stays untouched
+        assert query_db("SELECT id FROM notify_tasks") == []
+        assert any("already processed" in m for m in messages), messages
+
+
+class TestScenarioAttemptsLedger:
+    """Spec §5.2 scenario 4 — the DoD test ``test_notify_scenario_attempts_ledger``.
+
+    A failing scenario grows the ``notify_event_attempts`` ledger via the
+    RETURN CYCLE (not a manual invocation); the entry stays unacked until
+    the 3rd failure parks it (ack); after parking the PEL is EMPTY for
+    the event — a ``min_idle_ms=0`` return finds nothing. A re-delivered
+    parked event re-parks immediately (the ledger is at the threshold —
+    no second retry cycle). The TRANSPORT branch of the same test: an
+    enqueue-point ``StreamTransportError`` burns no attempt and leaves
+    the entry unacked (the committed task is picked up by the re-enqueue
+    cycle)."""
+
+    pytestmark = redis_marks
+
+    async def test_notify_scenario_attempts_ledger(
+        self,
+        db_engine,
+        db_session,
+        create_activity,
+        create_record,
+        create_client,
+        contour,
+    ) -> None:
+        factory = _session_factory(db_engine)
+        subscriber = Subscriber(
+            redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+        )
+        subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+
+        # A scenario that ALWAYS fails: every predicate passes but no
+        # template of any tier exists → RenderError (§3.4: it propagates,
+        # the ledger owns it).
+        client = create_client(phone="+79990001122")
+        activity = create_activity()
+        record = create_record(
+            activity_id=activity["id"],
+            client_id=client["id"],
+            notify=True,
+            visits=[{"name": "Анна", "price": 3500, "status": "waiting"}],
+        )
+        # the snapshot's activity.start is NAIVE (the storage convention —
+        # an aware ISO string would break the handler's naive comparison)
+        future = (
+            datetime.now(UTC).replace(tzinfo=None) + timedelta(days=1)
+        ).isoformat()
+        snapshot = {
+            "event": {"record_id": record["id"]},
+            "client": {"id": client["id"]},
+            "activity": {"start": future},
+        }
+        event = await _stage_event_row(db_session, snapshot)
+        _publish(contour, _stream_record(event.id, snapshot))
+
+        # 1st failure — the CLAIM cycle: one increment, NO ack
+        await dispatcher.events_once(factory, FakeQueue(), subscriber)
+        ledger = _ledger(event.id)
+        assert len(ledger) == 1
+        assert ledger[0]["attempts"] == 1
+        assert "RenderError" in ledger[0]["last_error"]
+        assert _group_pending(contour) == 1  # hanging — not acked
+
+        # 2nd failure — the RETURN cycle (idle 0: no 120 s wait in the test)
+        await dispatcher.events_reclaim_once(factory, FakeQueue(), subscriber, min_idle_ms=0)
+        assert _ledger(event.id)[0]["attempts"] == 2
+        assert _group_pending(contour) == 1
+
+        # 3rd failure — the threshold: parking WITH the ack
+        await dispatcher.events_reclaim_once(factory, FakeQueue(), subscriber, min_idle_ms=0)
+        assert _ledger(event.id)[0]["attempts"] == 3
+        assert _group_pending(contour) == 0
+        # DoD: PEL empty for the event — a min_idle_ms=0 return finds nothing
+        assert subscriber.reclaim([dispatcher.NEW_RECORD_STREAM], 0) == []
+        # nothing ever materialized — the parking row is the only trace
+        assert query_db(f"SELECT id FROM notify_tasks WHERE event_id = '{event.id}'") == []
+
+        # a re-delivered PARKED event re-parks without a retry cycle: the
+        # ledger is already at the threshold → one increment + immediate ack
+        _publish(contour, _stream_record(event.id, snapshot))
+        await dispatcher.events_once(factory, FakeQueue(), subscriber)
+        assert _ledger(event.id)[0]["attempts"] == 4
+        assert _group_pending(contour) == 0
+
+        # ── the transport branch (same test, §5.2): attempts NOT burned ──
+        db_session.add(
+            NotifyTemplate(
+                event_type="new_record",
+                title="шаблон",
+                body="Текст {{ client.name }}",
+                is_default=True,
+            )
+        )
+        await db_session.commit()
+        event2 = await _stage_event_row(db_session, snapshot)
+        _publish(contour, _stream_record(event2.id, snapshot))
+
+        broken = _TransportBrokenQueue()  # enqueue_task → NotifyTransportError
+        await dispatcher.events_once(factory, broken, subscriber)
+
+        # the task COMMITTED before the failed enqueue (§3.4 order) — the
+        # re-enqueue cycle owns its delivery
+        assert query_db(
+            f"SELECT status FROM notify_tasks WHERE event_id = '{event2.id}'"
+        ) == [{"status": "queued"}]
+        # the ledger was NOT touched — a transport outage is not a
+        # scenario failure (§3.5)
+        assert _ledger(event2.id) == []
+        # the entry stays UNACKED — the PEL return repeats it
+        assert _group_pending(contour) == 1
+
+
+# ── re-enqueue (§3.8, inside the dispatcher loop) ───────────────────────────
 
 
 class TestReenqueue:
@@ -1304,7 +1578,7 @@ class TestReenqueueWorkerPEL:
         class _ProbeBrokenQueue(FakeQueue):
             def pending_worker_task_ids(self) -> set[str]:
                 raise NotifyTransportError(
-                    "notify queue transport failed during pending worker tasks:"
+                    "streams transport failed during pending notify:tasks/worker:"
                     " ConnectionError: mock-dead-redis"
                 )
 
@@ -1318,77 +1592,6 @@ class TestReenqueueWorkerPEL:
 
 
 # ── enqueue-point transport failure — GH #483 Task 4 (spec §3.1) ────────────
-
-
-class TestEnqueueTransportFailure:
-    """A TYPED transport failure at the enqueue point is not a scenario
-    failure: the event's ``attempts`` must not burn (the re-enqueue cycle
-    owns recovery); scenario errors keep the 1→2→3 policy unchanged."""
-
-    async def test_transport_error_does_not_burn_attempts_scenarios_still_do(
-        self, db_engine, db_session, monkeypatch
-    ) -> None:
-        base = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
-        dead = await _stage_event(db_session, occurred_at=base)
-        boom = await _stage_event(db_session, occurred_at=base + timedelta(seconds=1))
-
-        async def transport_dead(event, session, queue) -> None:
-            # the §3.4 contract shape: task + processed_at committed,
-            # enqueue AFTER the commit — the failure leaves a queued task
-            session.add(
-                NotifyTask(
-                    event_id=event.id,
-                    scenario="new_record",
-                    status="queued",
-                    channel="telegram",
-                    address="+7OLD",
-                    payload={"client": {"name": "Анна"}},
-                    template_body="{{ client.name }}",
-                )
-            )
-            event.processed_at = datetime.now(UTC).replace(tzinfo=None)
-            await session.commit()
-            raise NotifyTransportError(
-                "notify queue transport failed during enqueue_task:"
-                " ConnectionError: mock-dead-redis"
-            )
-
-        async def scenario_boom(event, session, queue) -> None:
-            raise RenderError("template exploded")
-
-        async def selective(event, session, queue) -> None:
-            if event.id == dead.id:
-                await transport_dead(event, session, queue)
-            else:
-                await scenario_boom(event, session, queue)
-
-        monkeypatch.setitem(SCENARIOS, "new_record", selective)
-
-        with capture_dispatcher_logs() as messages:
-            await dispatcher.process_pending_batch(_session_factory(db_engine), FakeQueue())
-
-        # transport failure: attempts did NOT move, no processing_error,
-        # the queued task waits for the re-enqueue cycle (§3.1)
-        dead_row = _event_row(dead.id)
-        assert dead_row["attempts"] == 0
-        assert dead_row["processing_error"] is None
-        assert dead_row["processed_at"] is not None  # closed by its own handler
-        task_rows = query_db(
-            f"SELECT status, reenqueues FROM notify_tasks WHERE event_id = '{dead.id}'"
-        )
-        assert task_rows[0]["status"] == "queued"
-        assert task_rows[0]["reenqueues"] == 0
-
-        # contrast, same sweep: a scenario error DID burn an attempt
-        boom_row = _event_row(boom.id)
-        assert boom_row["attempts"] == 1
-        assert boom_row["processing_error"] is None  # attempt 1 — not written yet
-
-        # loud + log hygiene: exception class in the journal, no message
-        # bodies, no addresses (§3.1)
-        assert any("transport" in m and "ConnectionError" in m for m in messages)
-        assert all("готовый текст" not in m for m in messages)
-        assert all("+7OLD" not in m for m in messages)
 
 
 class TestReenqueueTransportFailure:
@@ -1498,7 +1701,32 @@ class TestQueueCallsOffEventLoop:
                 self._tick("reclaim_hanging")
                 super().reclaim_hanging()
 
+        class SpySubscriber(FakeSubscriber):
+            def _tick(self, op: str) -> None:
+                seen.append((op, threading.get_ident()))
+
+            def ensure(self, streams: list[str]) -> None:
+                self._tick("sub_ensure")
+                super().ensure(streams)
+
+            def claim(self, streams: list[str], count: int) -> list[ClaimedEvent]:
+                self._tick("sub_claim")
+                return super().claim(streams, count)
+
+            def ack(self, stream: str, qid: str) -> None:
+                self._tick("sub_ack")
+                super().ack(stream, qid)
+
+            def reclaim(self, streams: list[str], min_idle_ms: int) -> list[ClaimedEvent]:
+                self._tick("sub_reclaim")
+                return super().reclaim(streams, min_idle_ms)
+
+            def close(self) -> None:
+                self._tick("sub_close")
+                super().close()
+
         spy = SpyQueue()
+        subscriber = SpySubscriber()
         task = await _stage_queued_task(db_session)
         factory = _session_factory(db_engine)
 
@@ -1510,10 +1738,11 @@ class TestQueueCallsOffEventLoop:
         spy.push_inbound({"channel": "telegram", "text": "hi"})
         await dispatcher.statuses_once(factory, spy)
         await dispatcher.inbound_once(spy)
-        # process start
+        # the events group cycle (claim path) + process start
+        await dispatcher.events_once(factory, spy, subscriber)
         stop = asyncio.Event()
         stop.set()
-        await dispatcher.run_dispatcher(factory, spy, stop)
+        await dispatcher.run_dispatcher(factory, spy, stop, subscriber)
 
         assert {op for op, _ in seen} == {
             "enqueue_task",
@@ -1522,6 +1751,11 @@ class TestQueueCallsOffEventLoop:
             "claim_inbound",
             "ack_inbound",
             "reclaim_hanging",
+            # the subscriber seam of the events cycles (#580 Task 6)
+            "sub_ensure",
+            "sub_claim",
+            "sub_reclaim",
+            "sub_close",
         }
         assert all(tid != loop_thread for _, tid in seen)
 
@@ -1552,7 +1786,7 @@ class TestTransportFailureDoesNotKillCycles:
             if len(ticks) >= 3:
                 stop.set()
             raise NotifyTransportError(
-                "notify queue transport failed during claim notify:statuses:"
+                "streams transport failed during claim notify:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
 

@@ -2,22 +2,31 @@
 
 The scenario registry maps event type codes to handlers; the pilot entry
 is ``new_record``. The handler receives the event (snapshot), a session
-and the queue port, does its own commit boundaries (task + ``processed_at``
-in ONE transaction; enqueue AFTER commit) and materializes its decision
-as a ``notify_tasks`` row.
+and the queue port, does its own commit boundaries (task row in ONE
+transaction; enqueue AFTER commit) and materializes its decision as a
+``notify_tasks`` row — the chain ROOT, whose existence is the
+deduplication key since #580 (``processed_at`` is gone with the column).
 
 Covered (spec §5, US-2/US-3):
 
-- deleted record → ``processed_at`` WITHOUT a task (nothing to send);
+- deleted record → nothing persisted at all (no task, no mark — the
+  event simply yields no notification);
 - four skip reasons, one per predicate branch, FIXED order
   ``notify_off → no_recipient → no_consent → past_event`` (first branch
   wins on multi-fail);
 - success → task ``queued`` of the FIRST priority channel with the
   FROZEN render payload + channel template + address (rev.5, ADR 014),
-  payload §4.2 in FakeQueue, ``processed_at`` set;
+  payload §4.2 in FakeQueue; the created task is the chain ROOT;
 - idempotency (§4.4): reprocessing an event creates no duplicate task;
-- RenderError PROPAGATES (not caught into a skip) — the 3-attempts
-  policy of Task 9 owns it.
+- RenderError PROPAGATES (not caught into a skip) — the subscriber's
+  attempts ledger owns it (#580 ``notify_event_attempts``, Task 6).
+
+#580 Task 6 (spec §5.2 scenario 2): ``TestGroupEntry`` re-runs the SAME
+decisions through the dispatcher's GROUP entry — claim of the
+``notification`` group on ``domain_events:new_record`` → scenario → ack
+(real Redis, contour workspace) — success, every skip reason and the
+deleted-record closure, each entry acked after its decision
+materializes.
 """
 
 import importlib.util
@@ -28,17 +37,27 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+from src.core.config import settings
+from src.domain_events.models import DomainEvent
+from src.domain_events.subscribe import Subscriber
 from src.models.record import Record
-from src.notify.models import DomainEvent, NotifyTask, NotifyTemplate
+from src.notify import dispatcher
+from src.notify.channels.registry import parse_channel_priority
+from src.notify.models import NotifyTask, NotifyTemplate
 from src.notify.queue import FakeQueue
 from src.notify.render import RenderError
 from src.notify.scenarios import SCENARIOS, handle_new_record
-from src.notify.snapshots import build_new_record_snapshot
+from src.streams.transport import StreamTransport
+from src.usecases.record_snapshots import build_new_record_snapshot
 from tests.conftest import query_db_params
+from tests.notify_redis_support import contour_fixture, redis_marks, redis_url
 
 pytestmark = pytest.mark.integration
+
+contour = contour_fixture()  # per-test Redis workspace (group-entry tests)
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _MIGRATION_FILE = (
@@ -162,13 +181,13 @@ class TestDeletedRecord:
         await handle_new_record(event, db_session, queue)
 
         assert await _tasks(db_session) == []  # nothing to send — NO task row
-        closed = await _fetch_event(db_session, event.id)
-        assert closed.processed_at is not None
+        # #580: no processed_at mark exists anymore — the closure of a
+        # deleted-record event is the ABSENCE of a task (nothing persisted)
         assert queue.tasks == []
 
 
 class TestSkipReasons:
-    """One test per predicate branch (US-2); skip → task row + processed_at
+    """One test per predicate branch (US-2); skip → skipped ROOT task row
     in one transaction, nothing enqueued."""
 
     async def test_notify_off(
@@ -196,7 +215,10 @@ class TestSkipReasons:
         # a skipped task carries no channel payload (rev.5)
         assert task.channel is None and task.address is None
         assert task.payload is None and task.template_body is None
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     @pytest.mark.parametrize(
@@ -240,7 +262,10 @@ class TestSkipReasons:
             assert task.client_id is None
         else:
             assert task.client_id == cid
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     async def test_no_consent(
@@ -262,7 +287,10 @@ class TestSkipReasons:
         assert len(tasks) == 1
         assert tasks[0].status == "skipped"
         assert tasks[0].skip_reason == "no_consent"
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
     async def test_past_event(
@@ -281,7 +309,10 @@ class TestSkipReasons:
         assert len(tasks) == 1
         assert tasks[0].status == "skipped"
         assert tasks[0].skip_reason == "past_event"
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
         assert queue.tasks == []
 
 
@@ -348,7 +379,7 @@ class TestFixedReasonOrder:
 
 class TestSuccessPath:
     """US-3: future + flag + consent + phone → queued task, rendered text,
-    frozen channels, §4.2 payload in the queue, processed_at set."""
+    frozen channels, §4.2 payload in the queue, root task created."""
 
     async def test_success_creates_queued_task_and_enqueues(
         self,
@@ -447,7 +478,10 @@ class TestSuccessPath:
         # rides the row/payload to the worker's parse-mode decision
         assert task.template_channel is None
 
-        assert (await _fetch_event(db_session, event.id)).processed_at is not None
+        # #580: closure is the ROOT task row (the dedup key of the
+        # partial root index) — processed_at is gone with the column
+        assert tasks[0].root_task_id == tasks[0].id
+        assert tasks[0].parent_task_id is None
 
         # payload §4.2 rev.5 in FakeQueue — exact shape, frozen values
         assert len(queue.tasks) == 1
@@ -581,7 +615,7 @@ class TestIdempotency:
 
 class TestRenderErrorPropagates:
     """A render failure is NOT a skip branch — it propagates for the
-    Task 9 attempts policy; no task, no processed_at."""
+    attempts ledger (Task 6); no task, nothing persisted."""
 
     async def test_render_error_propagates(
         self, db_session, create_activity, create_record, create_client
@@ -598,5 +632,185 @@ class TestRenderErrorPropagates:
             await handle_new_record(event, db_session, queue)
 
         assert await _tasks(db_session) == []
-        assert (await _fetch_event(db_session, event.id)).processed_at is None
+        # #580: nothing persisted — the ledger writer is Task 6
+        assert await _fetch_event(db_session, event.id) is not None
         assert queue.tasks == []
+
+
+# ── group entry — #580 Task 6 (spec §5.2 scenario 2) ────────────────────────
+
+
+def _session_factory(db_engine) -> async_sessionmaker:
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+def _publish_record(contour, event: DomainEvent) -> None:
+    """XADD the §4.1 record of ``event`` into the contour's stream — the
+    relay-side stand-in (a raw producer transport, no group)."""
+    StreamTransport(redis_url(), key_prefix=contour.prefix).publish(
+        dispatcher.NEW_RECORD_STREAM,
+        {
+            "event_id": event.id,
+            "type": event.type,
+            "occurred_at": event.occurred_at.isoformat(),
+            "snapshot": event.snapshot,
+        },
+    )
+
+
+async def _through_group(db_engine, contour, event: DomainEvent) -> tuple[FakeQueue, Subscriber]:
+    """Run ONE claim iteration of the dispatcher's events cycle over
+    ``event``: publish its record → ``events_once`` (claim batch →
+    scenario → ack, §5.2 scenario 2). Returns the task queue (payload
+    captures) and the subscriber (drain assertions)."""
+    subscriber = Subscriber(
+        redis_url(), group=dispatcher.NOTIFICATION_GROUP, key_prefix=contour.prefix
+    )
+    subscriber.ensure([dispatcher.NEW_RECORD_STREAM])
+    _publish_record(contour, event)
+    queue = FakeQueue()
+    await dispatcher.events_once(_session_factory(db_engine), queue, subscriber)
+    return queue, subscriber
+
+
+def _drained(subscriber: Subscriber) -> bool:
+    """The group is drained: no new deliveries AND an empty PEL (a
+    ``min_idle_ms=0`` return finds nothing) — the entry was ACKED."""
+    return subscriber.claim([dispatcher.NEW_RECORD_STREAM], 10) == [] and (
+        subscriber.reclaim([dispatcher.NEW_RECORD_STREAM], 0) == []
+    )
+
+
+class TestGroupEntry:
+    """#580 Task 6 (spec §5.2 scenario 2): the SAME §3.4 decisions with
+    the dispatcher's input switched from journal polling to the consumer
+    group ``notification`` on ``domain_events:new_record`` — success and
+    every skip reason through the group entry, each acknowledged after
+    its decision materializes. Real Redis (contour workspace)."""
+
+    pytestmark = redis_marks
+
+    async def test_success_creates_queued_task_and_enqueues(
+        self, db_engine, db_session, create_activity, create_record, create_client, contour
+    ) -> None:
+        await _seed_default_template(db_session)
+        client = create_client(phone="+79990001122")
+        event, _ = await _stage_event(
+            db_session, create_activity, create_record,
+            start=_FUTURE, client=client,
+        )
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        task = tasks[0]
+        assert task.status == "queued"
+        assert task.skip_reason is None
+        # the FIRST priority channel (the contour may override the
+        # setting — the decision, not the channel name, is the object)
+        assert task.channel == parse_channel_priority(
+            settings.NOTIFY_CHANNEL_PRIORITY
+        )[0]
+        assert task.address == "+79990001122"
+        assert task.root_task_id == task.id
+        assert task.parent_task_id is None
+        # the §4.2 payload crossed the task queue AFTER the commit
+        assert [p["task_id"] for p in queue.tasks] == [task.id]
+        assert queue.tasks[0]["channel"] == task.channel
+        # acked after materialization — the group is drained
+        assert _drained(subscriber)
+
+    async def test_notify_off(
+        self, db_engine, db_session, create_activity, create_record, create_client, contour
+    ) -> None:
+        client = create_client(phone="+79990001122")
+        event, _ = await _stage_event(
+            db_session, create_activity, create_record,
+            start=_FUTURE, notify=False, client=client,
+        )
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        assert tasks[0].status == "skipped"
+        assert tasks[0].skip_reason == "notify_off"
+        assert tasks[0].root_task_id == tasks[0].id
+        assert queue.tasks == []
+        assert _drained(subscriber)
+
+    async def test_no_recipient(
+        self, db_engine, db_session, create_activity, create_record, create_client, contour
+    ) -> None:
+        client = create_client(phone="+79990001122")
+        event, _ = await _stage_event(
+            db_session, create_activity, create_record,
+            start=_FUTURE, client=client,
+        )
+        query_db_params(
+            "UPDATE clients SET is_active = 0 WHERE id = :c", {"c": client["id"]}
+        )
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        assert tasks[0].status == "skipped"
+        assert tasks[0].skip_reason == "no_recipient"
+        assert queue.tasks == []
+        assert _drained(subscriber)
+
+    async def test_no_consent(
+        self, db_engine, db_session, create_activity, create_record, create_client, contour
+    ) -> None:
+        client = create_client(phone="+79990001122")
+        event, _ = await _stage_event(
+            db_session, create_activity, create_record,
+            start=_FUTURE, client=client,
+        )
+        query_db_params(
+            "UPDATE clients SET notify_enabled = 0 WHERE id = :c", {"c": client["id"]}
+        )
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        assert tasks[0].status == "skipped"
+        assert tasks[0].skip_reason == "no_consent"
+        assert queue.tasks == []
+        assert _drained(subscriber)
+
+    async def test_past_event(
+        self, db_engine, db_session, create_activity, create_record, create_client, contour
+    ) -> None:
+        client = create_client(phone="+79990001122")
+        event, _ = await _stage_event(
+            db_session, create_activity, create_record,
+            start=_PAST, client=client,
+        )
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        tasks = await _tasks(db_session)
+        assert len(tasks) == 1
+        assert tasks[0].status == "skipped"
+        assert tasks[0].skip_reason == "past_event"
+        assert queue.tasks == []
+        assert _drained(subscriber)
+
+    async def test_deleted_record_closes_without_task(
+        self, db_engine, db_session, create_activity, create_record, contour
+    ) -> None:
+        event, record = await _stage_event(
+            db_session, create_activity, create_record, start=_FUTURE
+        )
+        query_db_params("DELETE FROM visits WHERE record_id = :rid", {"rid": record["id"]})
+        query_db_params("DELETE FROM records WHERE id = :rid", {"rid": record["id"]})
+
+        queue, subscriber = await _through_group(db_engine, contour, event)
+
+        assert await _tasks(db_session) == []  # no task — the closure is the absence
+        assert queue.tasks == []
+        assert _drained(subscriber)  # acked: redelivery stays idempotent

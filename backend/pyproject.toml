@@ -151,7 +151,11 @@ addopts = []
 # counting the near-unexecuted adapter would drag the 80% gate down.
 # worker.py is BACK in the standard measurement (#484 §3.8): its unit
 # layer (S9 contract) runs without Redis.
+# GH #580 §3.6 — the extracted streams core follows the same rule: it is
+# exercised by the redis contour (tests/test_streams_transport.py + the
+# delegating RedisQueue corpus), not by the no-Redis standard job.
 omit = [
     "src/seed/*",
     "src/notify/redis_queue.py",
+    "src/streams/transport.py",
 ]

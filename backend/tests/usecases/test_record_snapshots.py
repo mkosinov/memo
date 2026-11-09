@@ -1,5 +1,10 @@
 """#482 Task 5 (spec §3.2, family #476 §4.1): the ``new_record`` snapshot.
 
+MOVED to ``tests/usecases/`` (#580 Task 2): the builder is a PRODUCER
+duty (family §4.1) and now lives at ``src/usecases/record_snapshots.py``
+— the producer no longer imports notify. Asserts are unchanged by the
+move.
+
 The snapshot builder runs BEFORE the scenario's commit (local reads in
 the same transaction) and is the single owner of the §4.1 JSON shape:
 every top-level key ALWAYS present, values may be null. Covered:
@@ -20,8 +25,8 @@ from sqlalchemy import select
 
 from src.models.record import Record
 from src.models.visit import Visit
-from src.notify.snapshots import build_new_record_snapshot
 from src.services.record import _total_price_sq, record_total_price
+from src.usecases.record_snapshots import build_new_record_snapshot
 from tests.conftest import query_db_params
 
 # Family #476 §4.1 — the exact top-level key set (always ALL present).

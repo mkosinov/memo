@@ -30,6 +30,7 @@ import json
 from datetime import UTC, datetime
 
 import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+from src.domain_events.models import DomainEvent
 from src.notify import worker
 from src.notify.channels.mock import (
     MOCK_DELIVERIES_CAP,
@@ -37,7 +38,7 @@ from src.notify.channels.mock import (
     MockChannel,
     RedisListRecorder,
 )
-from src.notify.models import DomainEvent, NotifyTask
+from src.notify.models import NotifyTask
 from src.notify.redis_queue import TASKS_STREAM, WORKER_GROUP
 from tests.notify_redis_support import (
     RedisContour,

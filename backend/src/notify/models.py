@@ -1,18 +1,19 @@
 """Notify subsystem ORM models (#482, spec §3.1/§3.5/§3.6; family #476;
 per-channel reshape — #485 part 4, ADR 014).
 
-``DomainEvent`` / ``NotifyTask`` / ``NotifyTemplate`` follow the
-``AbstractModel`` conventions (String(36) UUID PK + naive-UTC
-``created_at``/``updated_at``).
+``DomainEvent`` lives in ``src/domain_events/models.py`` (#580 Task 2);
+its transitional re-export here died with the dispatcher's switchover
+to the consumer-group loop (#580 Task 6) — importers read the
+domain-events module directly.
+
+``NotifyTask`` / ``NotifyTemplate`` follow the ``AbstractModel``
+conventions (String(36) UUID PK + naive-UTC ``created_at``/
+``updated_at``).
 
 ``NotifyTaskAttempt`` is append-only ("только добавляемые строки", §3.6) —
 like ``AuditLog`` it deliberately builds directly on ``Base``: own ``id`` +
 ``occurred_at`` only, no ``updated_at``, no relationships; rows are never
 updated or deleted.
-
-The partial index ``ix_domain_events_pending`` must be declared through
-``sqlite_where`` (spec §3.1) so alembic autogenerate sees no drift between
-this model and the migration that creates it.
 """
 
 import uuid
@@ -35,47 +36,6 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from src.db.base import Base
 from src.models.abstract import AbstractModel
-
-
-class DomainEvent(AbstractModel):
-    """Journal of domain events — the third @transactional accumulator.
-
-    Written in the scenario's transaction (no actor required — it is data,
-    not an action log, §3.1). ``occurred_at`` is naive UTC (repository
-    timestamp convention); the snapshot format is family spec §4.1.
-    """
-
-    __tablename__ = "domain_events"
-
-    # Event code; pilot: new_record.
-    type: Mapped[str] = mapped_column(String(50))
-    occurred_at: Mapped[datetime] = mapped_column(DateTime)
-    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
-    # Set in the same transaction as the resulting notify task; NULL =
-    # pending (picked by the polling loop).
-    processed_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True,
-    )
-    attempts: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default=sa.text("0"),
-    )
-    # Last processing error; written after 3 failed attempts — from then on
-    # the polling loop skips the event.
-    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    __table_args__ = (
-        # Polling cursor index: both predicates of the pending query, so the
-        # index never carries rows the poll always discards (spec §3.1).
-        Index(
-            "ix_domain_events_pending",
-            "occurred_at",
-            sqlite_where=sa.text("processed_at IS NULL AND processing_error IS NULL"),
-        ),
-    )
 
 
 class NotifyTask(AbstractModel):
@@ -175,6 +135,19 @@ class NotifyTask(AbstractModel):
             "channel",
             unique=True,
         ),
+        # Redelivery idempotency of chain ROOTS (#580 §3.5/§4.2): a
+        # re-issued event is caught by the EXISTENCE of its root task
+        # (roots and skipped tasks — parent NULL; continuations inherit
+        # the root's pair and are NOT covered). Partial — via
+        # sqlite_where, mirroring the migration that creates it
+        # (precedent c970adc6b3d6), so autogenerate sees no drift.
+        Index(
+            "uq_notify_tasks_event_scenario_root",
+            "event_id",
+            "scenario",
+            unique=True,
+            sqlite_where=sa.text("parent_task_id IS NULL"),
+        ),
     )
 
 
@@ -222,6 +195,40 @@ class NotifyTaskAttempt(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class NotifyEventAttempt(Base):
+    """Per-(event, scenario) attempts ledger of the notify subscriber
+    (#580 §3.5/§4.2) — the SCENARIO retry counter that replaces the
+    event's dropped ``attempts``/``processing_error`` columns: consumer
+    state lives with the consumer, never on the journal row.
+
+    One mutable counter row per (event_id, scenario) — the composite PK
+    IS the spec's ``UNIQUE(event_id, scenario)``. A scenario error
+    increments ``attempts`` and overwrites ``last_error``; at the
+    threshold (module constant ``MAX_SCENARIO_ATTEMPTS = 3``, #580
+    Task 6) the event is parked. Transport errors do NOT burn attempts.
+
+    The dispatcher's group-reading cycle (Task 6) owns the writes; the
+    table lands with the #580 switchover migration (Task 3).
+    """
+
+    __tablename__ = "notify_event_attempts"
+
+    event_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("domain_events.id"),
+        primary_key=True,
+    )
+    scenario: Mapped[str] = mapped_column(String(50), primary_key=True)
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=sa.text("0"),
+    )
+    # Last scenario error text (the parking reason of the counter).
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NotifyTemplate(AbstractModel):

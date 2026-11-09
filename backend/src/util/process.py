@@ -1,14 +1,20 @@
-"""Shared process mechanics of the notify family: the isolated run loop
-and the signal handlers (part 3 #484, spec §3.7; source — the part-1
-dispatcher, moved here verbatim so the delivery worker reuses them).
+"""Shared process mechanics of the long-running backend daemons: the
+isolated run loop and the signal handlers.
+
+MOVED from ``src/notify/process.py`` (#580 Task 4, spec §3.3/§3.6) into
+the neutral util home so the domain-events relay reuses them without
+importing notify; notify (dispatcher/worker) switched to this module by
+import, passing its historical ``log_prefix="notify dispatcher"`` —
+behavior identical to the old hardcoded failure line.
 
 - :func:`run_loop` — ``iteration`` until the stop-event, each iteration
   isolated in its own ``try/except`` (one crash is logged, never kills
   the process or the sibling loops). The caller passes its OWN family
-  logger (``memo.notify.dispatcher`` / ``memo.notify.worker``) so the
-  loop-failure lines keep their process attribution.
+  logger AND log prefix (``notify dispatcher`` / ``domain events
+  relay``) so the loop-failure lines keep their process attribution.
 - :func:`install_signal_handlers` — SIGTERM/SIGINT → the stop-event;
-  previously a verbatim duplicate in ``dispatcher.py`` and ``worker.py``.
+  moved verbatim (previously a duplicate in ``dispatcher.py`` /
+  ``worker.py``, extracted by GH #484 part 3).
 """
 
 from __future__ import annotations
@@ -22,9 +28,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-# The notify family logger convention (src/notify/journal.py):
-# "memo.notify.<module>", independent of import paths.
-logger = logging.getLogger("memo.notify.process")
+#: Default logger/prefix of this module; daemons pass their own family
+#: logger and prefix (the notify convention: "memo.notify.<module>").
+logger = logging.getLogger("memo.util.process")
+
+#: Neutral default of the loop-failure prefix; the notify family passes
+#: its historical "notify dispatcher" so its log contract is unchanged.
+DEFAULT_LOG_PREFIX = "process"
 
 
 async def run_loop(
@@ -33,18 +43,23 @@ async def run_loop(
     interval: float,
     iteration: Callable[[], Awaitable[None]],
     log: logging.Logger = logger,
+    log_prefix: str = DEFAULT_LOG_PREFIX,
 ) -> None:
     """Run ``iteration`` until the stop-event, each iteration isolated in
     its own ``try/except``: a crash is logged and the loop (and its
     siblings in the TaskGroup) keep running — a silently dead cycle in a
     live process would be an invisible stop of notifications (panel
     finding, §3.8). Only ``Exception`` is caught; cancellation and
-    KeyboardInterrupt propagate so shutdown stays correct."""
+    KeyboardInterrupt propagate so shutdown stays correct.
+
+    ``log_prefix`` parameterizes the failure line (#580 §3.6): the old
+    notify home had «notify dispatcher» hardcoded; every daemon now
+    states its own attribution."""
     while not stop.is_set():
         try:
             await iteration()
         except Exception:
-            log.exception("notify dispatcher: %s loop iteration failed", name)
+            log.exception("%s: %s loop iteration failed", log_prefix, name)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=interval)
 

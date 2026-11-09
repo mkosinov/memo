@@ -1,5 +1,10 @@
 """GH #482 Task 6 — scenario-side flag gate + ``new_record`` domain event.
 
+ADAPTED for #580 Task 2: the journal/seam imports now point at
+``src/domain_events`` (spec §3.1); the mark validates its type against
+the registry and requires a snapshot (§3.2/§4.1) — the negative
+branches pin the rollback-together guarantee of a failed validation.
+
 ``create_record`` (spec §3.1/§3.3):
 
 * the ``notify`` flag is saved into ``records.notify`` ONLY when an
@@ -20,8 +25,8 @@ from uuid import uuid4 as _uuid4
 import pytest
 from sqlalchemy import text
 
+from src.domain_events import journal
 from src.models.activity import Activity
-from src.notify import journal
 from src.schemas.record import RecordCreate, VisitItem
 
 pytestmark = pytest.mark.integration
@@ -166,3 +171,87 @@ class TestNewRecordDomainEvent:
             {"aid": activity_id},
         )
         assert left.scalar_one() == 0
+
+
+class TestMarkValidationRollsBackWithRecord:
+    """#580 §3.2/§4.1 — mark validation failures abort the transaction.
+
+    An unregistered type or a mark without a snapshot is a programming
+    error: ``ValueError`` INSIDE the transaction → the wrapper skips the
+    commit → the domain row and the event roll back together (the old
+    dispatcher-side «unknown type logged and stays pending» semantics
+    are gone — the price of the mistake is an immediate failure, not
+    silence in the journal).
+    """
+
+    async def _assert_rolled_back_together(
+        self, db_session, activity_id: str
+    ) -> None:
+        assert _domain_event_rows() == []
+        left = await db_session.execute(
+            text("SELECT COUNT(*) FROM records WHERE activity_id = :aid"),
+            {"aid": activity_id},
+        )
+        assert left.scalar_one() == 0
+        assert journal.pending_events() is None  # accumulator discarded
+
+    async def test_unregistered_type_value_error_rolls_back_all(
+        self, db_session, create_activity, monkeypatch
+    ) -> None:
+        from src.usecases.records import create_record
+
+        activity = await _orm_activity(db_session, create_activity)
+        activity_id = activity.id  # rollback expires ORM objects
+
+        real_mark = journal.mark_domain_event
+
+        def mark_with_unregistered_type(event_type, snapshot):
+            # a hypothetical producer bug: staging a type nobody declared
+            real_mark("totally_unregistered_type", {"record_id": "x"})
+
+        monkeypatch.setattr(
+            journal, "mark_domain_event", mark_with_unregistered_type
+        )
+
+        with pytest.raises(ValueError, match="totally_unregistered_type"):
+            await create_record(
+                db_session=db_session,
+                data=RecordCreate(
+                    activity_id=activity_id,
+                    phone="+79995551115",
+                    visits=[VisitItem(name="Гость", price=1000)],
+                ),
+            )
+        await db_session.rollback()  # what the caller does on error
+
+        await self._assert_rolled_back_together(db_session, activity_id)
+
+    async def test_mark_without_snapshot_value_error_rolls_back_all(
+        self, db_session, create_activity, monkeypatch
+    ) -> None:
+        from src.usecases.records import create_record
+
+        activity = await _orm_activity(db_session, create_activity)
+        activity_id = activity.id  # rollback expires ORM objects
+
+        real_mark = journal.mark_domain_event
+
+        def mark_without_snapshot(event_type, snapshot):
+            # a hypothetical producer bug: dropping the snapshot (§4.1 —
+            # a NULL snapshot is never published to the stream)
+            real_mark(event_type, None)
+
+        monkeypatch.setattr(journal, "mark_domain_event", mark_without_snapshot)
+
+        with pytest.raises(ValueError, match="snapshot"):
+            await create_record(
+                db_session=db_session,
+                data=RecordCreate(
+                    activity_id=activity_id,
+                    phone="+79995551116",
+                    visits=[VisitItem(name="Гость", price=1000)],
+                ),
+            )
+        await db_session.rollback()  # what the caller does on error
+
+        await self._assert_rolled_back_together(db_session, activity_id)

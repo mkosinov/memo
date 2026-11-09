@@ -343,7 +343,7 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         # the client event grid stays byte-identical; the service-level
         # handler decision belongs to the dispatcher part).
         FKDependency(
-            entity="notify_tasks",
+            entity="notification_tasks",
             relation="Оповещение",
             nullable=True,
             action="nullify",

@@ -54,7 +54,7 @@ class NotifyTask(AbstractModel):
     ``status='skipped'`` + ``skip_reason``.
     """
 
-    __tablename__ = "notify_tasks"
+    __tablename__ = "notification_tasks"
 
     event_id: Mapped[str] = mapped_column(
         String(36),
@@ -130,7 +130,7 @@ class NotifyTask(AbstractModel):
         # A unique INDEX (not a table constraint): drops cleanly under
         # SQLite batch migrations (constraints don't).
         Index(
-            "uq_notify_tasks_root_channel",
+            "uq_notification_tasks_root_channel",
             "root_task_id",
             "channel",
             unique=True,
@@ -142,7 +142,7 @@ class NotifyTask(AbstractModel):
         # sqlite_where, mirroring the migration that creates it
         # (precedent c970adc6b3d6), so autogenerate sees no drift.
         Index(
-            "uq_notify_tasks_event_scenario_root",
+            "uq_notification_tasks_event_scenario_root",
             "event_id",
             "scenario",
             unique=True,
@@ -176,7 +176,7 @@ class NotifyTaskAttempt(Base):
     failed before any transmission (assembly, limits, resolve).
     """
 
-    __tablename__ = "notify_task_attempts"
+    __tablename__ = "notification_task_attempts"
 
     id: Mapped[str] = mapped_column(
         String(36),
@@ -185,7 +185,7 @@ class NotifyTaskAttempt(Base):
     )
     task_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("notify_tasks.id"),
+        ForeignKey("notification_tasks.id"),
         nullable=False,
     )
     channel: Mapped[str] = mapped_column(String(50))
@@ -213,7 +213,7 @@ class NotifyEventAttempt(Base):
     table lands with the #580 switchover migration (Task 3).
     """
 
-    __tablename__ = "notify_event_attempts"
+    __tablename__ = "notification_event_attempts"
 
     event_id: Mapped[str] = mapped_column(
         String(36),
@@ -244,7 +244,7 @@ class NotifyTemplate(AbstractModel):
     ``new_record`` row is seeded by the migration and never deleted.
     """
 
-    __tablename__ = "notify_templates"
+    __tablename__ = "notification_templates"
 
     event_type: Mapped[str] = mapped_column(String(50))
     channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -259,7 +259,7 @@ class NotifyTemplate(AbstractModel):
 
     __table_args__ = (
         Index(
-            "uq_notify_templates_event_channel",
+            "uq_notification_templates_event_channel",
             "event_type",
             sa.text("COALESCE(channel, '')"),
             unique=True,

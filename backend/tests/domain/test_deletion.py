@@ -344,7 +344,8 @@ class TestFKMatrixService:
 class TestFKMatrixClient:
     def test_has_exactly_six_deps(self) -> None:
         assert {dep.entity for dep in FK_MATRIX[Client]} == {
-            "records", "visitors", "client_tags", "photos", "notify_tasks",
+            "records", "visitors", "client_tags", "photos",
+            "notification_tasks",
             # GH #499: users.client_id — the client-account link (the
             # users.staff_id mirror).
             "users",
@@ -377,10 +378,11 @@ class TestFKMatrixClient:
         assert dep.allowed_actions == ["nullify"]
         assert dep.nullable is True
 
-    def test_notify_tasks_nullify_auto(self) -> None:
+    def test_notification_tasks_nullify_auto(self) -> None:
         """GH #482: the task history survives the client hard delete —
-        ``notify_tasks.client_id`` is ON DELETE SET NULL (spec §3.6)."""
-        dep = _deps_map(Client)["notify_tasks"]
+        ``notification_tasks.client_id`` is ON DELETE SET NULL (spec
+        §3.6; table renamed with the subsystem, #581)."""
+        dep = _deps_map(Client)["notification_tasks"]
         assert dep.action == "nullify"
         assert dep.auto is True
         assert dep.allowed_actions == ["nullify"]

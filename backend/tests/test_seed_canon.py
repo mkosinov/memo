@@ -36,17 +36,18 @@ pytestmark = pytest.mark.misc
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN_SEED_CANON = REPO_ROOT / "scripts" / "gen_seed_canon.py"
 
-# Every canon-exception table (audit_logs, sessions, the notify journal
-# chain) plus notify_templates (a deterministic seed table that stays IN
-# the canon) must exist in the built schema — by construction of the real
-# models, which is exactly what this fixture asserts.
+# Every canon-exception table (audit_logs, sessions, the notification
+# journal chain) plus notification_templates (a deterministic seed table
+# that stays IN the canon) must exist in the built schema — by
+# construction of the real models, which is exactly what this fixture
+# asserts. (#581: the tables carry their renamed notification_* names.)
 EXPECTED_TABLES = {
     "audit_logs",
     "sessions",
     "domain_events",
-    "notify_tasks",
-    "notify_task_attempts",
-    "notify_templates",
+    "notification_tasks",
+    "notification_task_attempts",
+    "notification_templates",
 }
 
 # Pollution timestamp: fixed so polluted rows are identical across runs.
@@ -181,7 +182,7 @@ def pollute(stack: CanonStack) -> dict[str, Any]:
         cur.execute("DELETE FROM records WHERE id = ?", (r1_id,))
         # — insert non-seed rows: fixed ids …
         cur.execute(
-            "INSERT INTO clients (id, name, phone, notify_enabled, is_active, created_at, updated_at) "
+            "INSERT INTO clients (id, name, phone, notification_enabled, is_active, created_at, updated_at) "
             "VALUES ('polluted-client', 'Polluted Client', '+70000000001', 1, 1, ?, ?)",
             (ts, ts),
         )
@@ -217,7 +218,7 @@ def pollute(stack: CanonStack) -> dict[str, Any]:
         )
         # — … and fresh UUIDs (what a real runtime insert would produce)
         cur.execute(
-            "INSERT INTO clients (id, name, phone, notify_enabled, is_active, created_at, updated_at) "
+            "INSERT INTO clients (id, name, phone, notification_enabled, is_active, created_at, updated_at) "
             "VALUES (?, 'UUID Client', '+70000000002', 1, 1, ?, ?)",
             (uuid_ids["clients"], ts, ts),
         )
@@ -323,7 +324,7 @@ async def canon_stack(tmp_path: Path) -> CanonStack:
     _exec(
         db,
         (
-            "INSERT INTO notify_templates (id, event_type, title, body,"
+            "INSERT INTO notification_templates (id, event_type, title, body,"
             " is_default, created_at, updated_at)"
             " VALUES (?, 'new_record', ?, ?, 1, ?, ?)",
             (
@@ -602,13 +603,13 @@ async def test_keeps_by_design_exceptions(canon_stack: CanonStack) -> None:
             (TS, TS, TS),
         ),
         (
-            "INSERT INTO notify_tasks (id, created_at, updated_at, event_id,"
+            "INSERT INTO notification_tasks (id, created_at, updated_at, event_id,"
             " scenario, status, reenqueues)"
             " VALUES ('ntk-1', ?, ?, 'dev-1', 'new_record', 'queued', 0)",
             (TS, TS),
         ),
         (
-            "INSERT INTO notify_task_attempts (id, task_id, channel, stage,"
+            "INSERT INTO notification_task_attempts (id, task_id, channel, stage,"
             " occurred_at)"
             " VALUES ('nat-1', 'ntk-1', 'telegram', 'sending', ?)",
             (TS,),
@@ -618,9 +619,11 @@ async def test_keeps_by_design_exceptions(canon_stack: CanonStack) -> None:
         "audit_logs": "SELECT COUNT(*) FROM audit_logs WHERE id = 'aud-1'",
         "sessions": "SELECT COUNT(*) FROM sessions WHERE token = 'tok-1'",
         "domain_events": "SELECT COUNT(*) FROM domain_events WHERE id = 'dev-1'",
-        "notify_tasks": "SELECT COUNT(*) FROM notify_tasks WHERE id = 'ntk-1'",
-        "notify_task_attempts": (
-            "SELECT COUNT(*) FROM notify_task_attempts WHERE id = 'nat-1'"
+        "notification_tasks": (
+            "SELECT COUNT(*) FROM notification_tasks WHERE id = 'ntk-1'"
+        ),
+        "notification_task_attempts": (
+            "SELECT COUNT(*) FROM notification_task_attempts WHERE id = 'nat-1'"
         ),
     }
     for sql in survivors.values():  # the pollution landed
@@ -674,13 +677,13 @@ async def test_is_idempotent(canon_stack: CanonStack) -> None:
 
 
 async def test_notify_templates_stays_in_canon(canon_stack: CanonStack) -> None:
-    """notify_templates stays IN the canon (#482)"""
+    """notification_templates stays IN the canon (#482; #581 name)"""
     db = canon_stack.db
     # The default new_record row — seeded by the alembic data migration
     # (fixed uuid BY DESIGN so it enters the deterministic canon, #482 §5).
     default_id = "27715c0f-1d0f-4895-a555-1cb54f00bc7e"
     assert count(
-        db, f"SELECT COUNT(*) FROM notify_templates WHERE id = '{default_id}'"
+        db, f"SELECT COUNT(*) FROM notification_templates WHERE id = '{default_id}'"
     ) == 1, "canon-time default template row missing from the fixture DB"
 
     _exec(
@@ -689,13 +692,13 @@ async def test_notify_templates_stays_in_canon(canon_stack: CanonStack) -> None:
             # rev.5 (#485): a channel-specific row — a second UNIVERSAL
             # new_record row would violate the COALESCE uniqueness index
             # and no longer prove anything about the canon.
-            "INSERT INTO notify_templates (id, event_type, channel, title, body,"
-            " is_default, created_at, updated_at)"
+            "INSERT INTO notification_templates (id, event_type, channel, title,"
+            " body, is_default, created_at, updated_at)"
             " VALUES (?, 'new_record', 'telegram', ?, ?, 0, ?, ?)",
             ("tpl-polluted", "Загрязнённый шаблон", "x", TS, TS),
         ),
     )
-    assert count(db, "SELECT COUNT(*) FROM notify_templates WHERE id = 'tpl-polluted'") == 1
+    assert count(db, "SELECT COUNT(*) FROM notification_templates WHERE id = 'tpl-polluted'") == 1
 
     canon_stack.apply()
 
@@ -703,8 +706,8 @@ async def test_notify_templates_stays_in_canon(canon_stack: CanonStack) -> None:
     # the polluted non-seed template is wiped — i.e. the table is NOT excluded
     assert count(
         db,
-        f"SELECT COUNT(*) FROM notify_templates "
+        f"SELECT COUNT(*) FROM notification_templates "
         f"WHERE id = '{default_id}' AND event_type = 'new_record' AND is_default = 1",
     ) == 1
-    assert count(db, "SELECT COUNT(*) FROM notify_templates WHERE id = 'tpl-polluted'") == 0
-    assert count(db, "SELECT COUNT(*) FROM notify_templates") == 1
+    assert count(db, "SELECT COUNT(*) FROM notification_templates WHERE id = 'tpl-polluted'") == 0
+    assert count(db, "SELECT COUNT(*) FROM notification_templates") == 1

@@ -23,8 +23,9 @@ class Client(AbstractModelSoftDelete):
     channel: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # GH #482: notification consent — ON by default (family spec rev. 3);
     # the dispatcher reads it LIVE at processing time, it never enters the
-    # event snapshot (spec §3.4).
-    notify_enabled: Mapped[bool] = mapped_column(
+    # event snapshot (spec §3.4). GH #581: renamed with the subsystem
+    # (notify_enabled → notification_enabled).
+    notification_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=sa.true(),
     )
 

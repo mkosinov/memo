@@ -32,6 +32,7 @@ import {
   ActivityResponseSchema,
   type ActivityResponse,
   PhotoResponseSchema,
+  PhotoPublicResponseSchema,
   PhotoListResponseSchema,
   PhotoCreateSchema,
   PhotoUpdateSchema,
@@ -1461,6 +1462,26 @@ describe('PhotoResponseSchema', () => {
   it('rejects missing required field', () => {
     const { id, ...without } = validPhoto;
     expect(() => PhotoResponseSchema.parse(without)).toThrow();
+  });
+});
+
+describe('PhotoPublicResponseSchema (#493: ADR-015 audience schema)', () => {
+  it('accepts the minimal public shape with string tags', () => {
+    const parsed = PhotoPublicResponseSchema.parse({
+      id: 'p1',
+      filename: '/images/gallery/p1.jpg',
+      tags: ['масло', 'акварель'],
+    });
+    expect(parsed.tags).toEqual(['масло', 'акварель']);
+  });
+
+  it('defaults tags to [] and strips owner keys (zod non-strict)', () => {
+    const parsed = PhotoPublicResponseSchema.parse({ id: 'p2', filename: 'f.jpg' });
+    expect(parsed.tags).toEqual([]);
+    const withOwner = PhotoPublicResponseSchema.parse({
+      id: 'p2', filename: 'f.jpg', client_id: null,
+    } as never) as Record<string, unknown>;
+    expect(withOwner).not.toHaveProperty('client_id'); // extra keys stripped, owner data never typed
   });
 });
 

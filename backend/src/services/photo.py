@@ -10,7 +10,7 @@ remains the owner of create / update / patch / delete / point gets.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, delete, exists, or_, select, update
@@ -29,6 +29,7 @@ from src.schemas.photo import (
     OWNER_FIELDS,
     PhotoCreate,
     PhotoListParams,
+    PhotoPublicResponse,
     PhotoResponse,
     PhotoUpdate,
 )
@@ -36,7 +37,11 @@ from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
+
+    from src.schemas.pagination import PaginationParams
 
 # Sort whitelist (GH #211 §6.8): filename | is_public | created_at.
 # FK columns and the denormalized client_name are NOT sortable.
@@ -383,11 +388,38 @@ def get_photo_service() -> PhotoService:
     return PhotoService(get_base_repository(), Photo, PhotoResponse)
 
 
+# Seam typing (GH #493): the overloads carry the typed surface; the
+# implementation follows the typeshed ``Any`` convention — a
+# ``list[PhotoResponse | ResponseT]`` impl return cannot satisfy
+# overload 2 (``list`` is invariant). PEP 695 type params keep the
+# ruff UP047 count at its base (2, pre-existing elsewhere).
+@overload
+async def list_photos_view(
+    db_session: AsyncSession,
+    params: PhotoListParams,
+    master_key: str | None = ...,
+    *,
+    item_mapper: None = ...,
+) -> tuple[list[PhotoResponse], int]: ...
+
+
+@overload
+async def list_photos_view[ResponseT](
+    db_session: AsyncSession,
+    params: PhotoListParams,
+    master_key: str | None = ...,
+    *,
+    item_mapper: Callable[[Photo], ResponseT],
+) -> tuple[list[ResponseT], int]: ...
+
+
 async def list_photos_view(
     db_session: AsyncSession,
     params: PhotoListParams,
     master_key: str | None = None,
-) -> tuple[list[PhotoResponse], int]:
+    *,
+    item_mapper: Callable[[Photo], Any] | None = None,
+) -> tuple[list[Any], int]:
     """Paginated photo list composite riding the repo row core (GH #213
     §5.2; Corridor 3 free function — GH #217 Task 3, ADR 007 / canon
     rule 8; behavior-for-behavior move of the former ``PhotoService.list``
@@ -469,7 +501,43 @@ async def list_photos_view(
 
     items = []
     for photo, name in rows:
-        resp = PhotoResponse.model_validate(photo)
-        resp.client_name = name
-        items.append(resp)
+        if item_mapper is None:
+            resp = PhotoResponse.model_validate(photo)
+            resp.client_name = name
+            items.append(resp)
+        else:
+            items.append(item_mapper(photo))
     return items, total
+
+
+async def list_public_photos_view(
+    db_session: AsyncSession,
+    params: PaginationParams,
+) -> tuple[list[PhotoPublicResponse], int]:
+    """``/api/v1/public/photos`` showcase composite (ADR-015).
+
+    Forced ``is_public=True``, pinned default sort (``created_at desc`` +
+    ``id asc`` — the shared list defaults), minimal per-audience schema.
+    Owner filters are unreachable: only the PaginationParams brick is
+    wired through. The admin ``client_name`` subquery still runs (shared
+    stmt) but its result is dropped by the explicit item mapper
+    (``MyPhotoItem`` pattern — ``tag.title`` strings).
+    """
+
+    list_params = PhotoListParams(
+        page=params.page,
+        per_page=params.per_page,
+        id=params.id,
+        is_public=True,
+    )
+
+    def _public_item(photo: Photo) -> PhotoPublicResponse:
+        return PhotoPublicResponse(
+            id=photo.id,
+            filename=photo.filename,
+            tags=sorted(tag.title for tag in photo.tags),
+        )
+
+    return await list_photos_view(
+        db_session, list_params, item_mapper=_public_item
+    )

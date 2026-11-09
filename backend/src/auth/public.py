@@ -9,10 +9,10 @@ use entity-specific names (``{master_id}``, ``{photo_id}``, …), so the
 contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
-- ``GET`` dictionaries: masters, locations, services, tags, activities,
-  photos (public site; the web gallery rides the same list with
-  ``?is_public=true`` — GH #479 Изменение 4 retired the separate
-  ``GET /api/v1/photos/web`` showcase);
+- ``GET`` dictionaries: masters, locations, services, tags, activities;
+- ``GET /api/v1/public/photos`` — ``photos`` is NOT anonymous: bare
+  photo GETs are staff-only (``photos:read``); the showcase lives at
+  ``GET /api/v1/public/photos`` (ADR-015 audience namespace);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout / me) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -46,10 +46,13 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v1/tags/{id}"),
     ("GET", "/api/v1/activities"),
     ("GET", "/api/v1/activities/{id}"),
-    ("GET", "/api/v1/photos"),
-    ("GET", "/api/v1/photos/{id}"),
-    # GH #479 (Изменение 4): ("GET", "/api/v1/photos/web") was removed —
-    # the gallery rides the public list above with ?is_public=true.
+    # ADR-015: anonymous showcase namespace. The prefix exposes nothing —
+    # entries here ARE the exposure (default-deny walk).
+    ("GET", "/api/v1/public/photos"),
+    # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
+    # "/api/v1/photos/{id}") were removed from here — both routes carry
+    # the photos:read guard now; the anonymous showcase is the
+    # /public/photos entry above (ADR-015).
     # GH #479 (Изменение 5): ("POST", "/api/v1/records") was removed —
     # the full contract now carries the records:write guard; guest
     # booking is a separate contract (#499).

@@ -99,7 +99,9 @@ import {
   VisitorListResponseSchema,
   ClientListResponseSchema,
   PhotoListResponseSchema,
+  PhotoPublicListResponseSchema,
   type PhotoListResponse,
+  type PhotoPublicListResponse,
   type PaginatedResponse,
   AuthMeSchema,
   AuditLogListResponseSchema,
@@ -362,8 +364,6 @@ export async function getLocations(params?: ListParams): Promise<PaginatedRespon
 }
 
 // ─── Photos (GH #211: paginated list with filters/sort) ─────────────────────
-// GH #479: getWebPhotos (GET /api/v1/photos/web showcase) removed — the route
-// no longer exists; use getPhotos({ is_public: true }) for public galleries.
 
 export interface PhotoListParams {
   page?: number;
@@ -390,6 +390,25 @@ export async function getPhotos(params?: PhotoListParams): Promise<PhotoListResp
   }
   const qs = search.toString();
   return api(`/api/v1/photos${qs ? `?${qs}` : ''}`, PhotoListResponseSchema);
+}
+
+export interface PhotoPublicListParams {
+  page?: number;
+  per_page?: number;
+  id?: string[];
+}
+
+/** #493 / ADR-015: anonymous gallery list — minimal schema,
+ * `is_public` is forced server-side and not a parameter. */
+export async function getPublicPhotos(params?: PhotoPublicListParams): Promise<PhotoPublicListResponse> {
+  const search = new URLSearchParams();
+  if (params) {
+    if (params.id) params.id.forEach((i) => search.append('id', i));
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.per_page !== undefined) search.set('per_page', String(params.per_page));
+  }
+  const qs = search.toString();
+  return api(`/api/v1/public/photos${qs ? `?${qs}` : ''}`, PhotoPublicListResponseSchema);
 }
 
 // ─── Photos CRUD ────────────────────────────────────────────────────────

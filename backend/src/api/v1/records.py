@@ -68,8 +68,9 @@ _WRITE_GUARD = [
 _READ_GUARD = [Depends(require_permission("records:read"))]
 # GH #479 (Изменение 5): the full POST contract is staff-only —
 # records:write, like every other records mutation. The CSRF secondary
-# line (verify_fetch_metadata) is NOT layered here yet — #493 owns that
-# wiring; the permission guard alone seals the anonymous surface.
+# line (verify_fetch_metadata) is NOT layered here yet — #499 owns that
+# wiring (client accounts branch; Gate B #499, 2026-10-21); the permission
+# guard alone seals the anonymous surface.
 _CREATE_GUARD = [Depends(require_permission("records:write"))]
 
 

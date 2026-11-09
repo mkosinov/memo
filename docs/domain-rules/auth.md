@@ -25,7 +25,7 @@ Two staff roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `mas
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
 - Audience URL namespaces (`/public/*`, `/my`, `/my/{role}`) are codified in **ADR-015** (`docs/decisions/015-api-url-audience-namespaces.md`): bare `/api/v1/{entity}` paths are the staff CRM; `/api/v1/public/{entity}` is the anonymous showcase namespace. The prefix alone exposes nothing — every anonymous route is still a conscious `PUBLIC_ROUTES` entry, not a side effect of the prefix.
-- `GET` dictionaries: masters, locations, services, tags, activities, photos (the web gallery rides the photo list with `?is_public=true` — the separate `GET /api/v1/photos/web` showcase was removed in #479)
+- `GET` dictionaries: masters, locations, services, tags, activities — фото-словаря в этом перечне больше нет: bare фото-GET (`/api/v1/photos`, `/api/v1/photos/{id}`) закрыты #493 (staff-only, `photos:read`, anon → 401); анонимная фото-витрина — отдельный маршрут `GET /api/v1/public/photos` (ADR-015)
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
 - `POST /api/v1/auth/otp/request` + `POST /api/v1/auth/otp/verify` — клиентский OTP-вход (#499, спека; добавляются в `PUBLIC_ROUTES` явно — allowlist точный, не маска)
@@ -111,6 +111,7 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | POST | /api/v1/users/{id}/password-link | admin | выдать одноразовую ссылку установки пароля (#348) |
 | POST | /api/v1/auth/otp/request | public | клиентский OTP: всегда 202 на валидный номер (#499, спека) |
 | POST | /api/v1/auth/otp/verify | public | код → клиентская сессия `memo_client_session` (#499, спека) |
+| GET | /api/v1/public/photos | public | анонимная фото-витрина: forced `is_public=true`, минимальная схема `PhotoPublicResponse` (ADR-015, #493) |
 | GET | /api/v1/my/client | клиентская сессия | `{phone, name}` — кто вошёл (#499, спека) |
 | POST | /api/v1/my/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |
 

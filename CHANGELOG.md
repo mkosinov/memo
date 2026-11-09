@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-08
+
+### Added
+- **GH #580 — DomainEventsService: выноска сервиса доменных событий из
+  notify (журнал, ретранслятор, стримы по типам)** — branch
+  `580-domain-events` (11 коммитов `8f5588e0..69b1c938`, base
+  `261ef64f` = origin/main; 53 файла, +5256/−912; спека
+  `docs/specs/2026-11-08-domain-events-service-580-design.md` рев.2,
+  план `docs/plans/2026-11-08-domain-events-service-580-plan.md` 8/8):
+  - **Транспорт (T1):** общее ядро Redis-стримов вынесено в
+    `src/streams/transport.py` — общий шов для notify-очереди и новых
+    подписчиков; ре-экспорт `MAX_POOL_CONNECTIONS` (`8f5588e0`,
+    `b2426ba3`).
+  - **Модуль (T2):** `src/domain_events` — модель, транзакционный
+    журнал, реестр типов; шов продюсера переключён
+    (`decorators`/`record_snapshots`/`records`), `domain_events` без
+    зависимости от notify (`8440cbd2`, `dc740d97`).
+  - **Миграция (T3):** `e8a2c4d6b0f3` — `published_at`, бэкфилл
+    ИЛИ-множеств, гроссбух попыток `notify_event_attempts`, частичный
+    индекс корней (`c4c49e6d`).
+  - **Ретранслятор (T4):** `relay.py` — цикл журнал→стрим, общий
+    `run_loop` в `src/util/process` (`c4140b5a`).
+  - **API подписки (T5):** `subscribe.py` — `Subscriber`
+    (ensure/claim/ack/reclaim/close) над общим ядром стримов
+    (`c06eb591`).
+  - **Notification — подписчик (T6):** группа `notification` на
+    `domain_events:new_record` вместо поллинга журнала, гроссбух
+    попыток, цикл возврата зависших (`1a852445`).
+  - **Восстановление (T7):** `--republish-since` — dry-run счёт строк,
+    окна ≤ MAXLEN с пометкой между окнами, граница
+    `occurred_at >= точки` (`96690207`).
+  - **Границы (T8):** тест импорт-направлений по каноническому шову §8,
+    резолвер относительных импортов ленты границ (`85f4bb1e`,
+    `69b1c938`).
+  - Поведение пользователей не изменилось; гарантия at-least-once с
+    дедупликацией на подписчике; domain rules обновлены веткой
+    (`domain-events.md` — полный жизненный цикл, `notify.md` — порядок
+    переключения).
+  - **Tests:** backend полный **3987p/0f/92s** (exit 0); Redis-контур
+    (зеркало CI `notify-tests`) **76p/0f/1 env-skip**; mypy `src` **0**;
+    lint-бюджет зелёный (ruff 111/111); visual gate N/A → exit 0.
+  - Status: `docs/status/2026-11-08-domain-events-service-580.md`
+
 ## [Unreleased] — 2026-10-25
 
 ### Added

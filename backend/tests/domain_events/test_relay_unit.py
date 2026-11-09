@@ -243,3 +243,155 @@ class TestRelayTailDepthLog:
             await relay.relay_once(_session_factory(db_engine), FakePublisher())
 
         assert any("tail depth 5" in m for m in messages), messages
+
+
+# ── Task 7 (§3.3/§4.5): --republish-since — the recovery engine ──────────────
+
+#: The fixed recovery point of the boundary scenario (naive UTC — the
+#: journal storage convention); events are staged at ABSOLUTE instants
+#: around it: the boundary is positional, not relative to «now».
+_RECOVERY_POINT = datetime(2026, 11, 9, 12, 0, 0)
+
+
+async def _stage_at(db_session, stamps: list[datetime]) -> list[DomainEvent]:
+    """Recovery data: events at explicit ``occurred_at`` instants."""
+    events: list[DomainEvent] = []
+    for ts in stamps:
+        event = DomainEvent(type="new_record", occurred_at=ts, snapshot={"at": ts.isoformat()})
+        events.append(event)
+        db_session.add(event)
+    await db_session.commit()
+    return events
+
+
+def _stamps() -> dict[str, str]:
+    """``id → published_at`` of the journal (ISO strings — lexicographic
+    comparison is exact for the fixed-width SQLite DATETIME format)."""
+    return {
+        row["id"]: row["published_at"]
+        for row in query_db("SELECT id, published_at FROM domain_events")
+    }
+
+
+class CrashAfterThirdPublish(FakePublisher):
+    """XADD #3 REALLY lands, then the transport dies INSIDE the second
+    window (``window=2``): the crash-between-XADD-and-mark state
+    mid-recovery."""
+
+    def publish(self, stream: str, payload: dict[str, Any]) -> None:
+        super().publish(stream, payload)
+        if len(self.published) == 3:
+            raise StreamTransportError(
+                "streams transport failed during publish"
+                " domain_events:new_record: ConnectionError: crash-mid-recovery"
+            )
+
+
+class TestRepublishSince:
+    async def test_boundary_is_inclusive_and_count_is_logged(
+        self, db_engine, db_session
+    ) -> None:
+        """``occurred_at >= point`` — the row AT the point is re-emitted,
+        the OLDER row is not (neither re-emitted nor re-stamped); the
+        run logs the dry-run count of matching rows first."""
+        old, at_point, after = await _stage_at(
+            db_session,
+            [
+                _RECOVERY_POINT - timedelta(seconds=1),
+                _RECOVERY_POINT,
+                _RECOVERY_POINT + timedelta(seconds=1),
+            ],
+        )
+        factory = _session_factory(db_engine)
+        await relay.relay_once(factory, FakePublisher())  # normal life: all marked
+        before = _stamps()
+
+        publisher = FakePublisher()
+        with capture_relay_logs() as messages:
+            total = await relay.republish_since(factory, publisher, _RECOVERY_POINT, window=10)
+
+        assert total == 2
+        # arrival strictly (occurred_at, id): AT the point first — the
+        # older row never leaves
+        assert [payload["event_id"] for _s, payload in publisher.published] == [
+            at_point.id,
+            after.id,
+        ]
+        assert any("dry-run count: 2 row(s) match" in m for m in messages), messages
+        after_stamps = _stamps()
+        assert after_stamps[old.id] == before[old.id]  # untouched
+        assert after_stamps[at_point.id] > before[at_point.id]  # re-stamped
+        assert after_stamps[after.id] > before[after.id]
+
+    async def test_marks_land_between_windows(
+        self, db_engine, db_session
+    ) -> None:
+        """Windows commit their marks SEPARATELY (§3.3 rev.2): a
+        transport crash inside window 2 leaves window 1 committed — the
+        completed window is durable; the resume re-emits from the top
+        (at-least-once — the duplicates of §4.3) and converges."""
+        events = await _stage_at(
+            db_session,
+            [_RECOVERY_POINT + timedelta(seconds=i) for i in range(1, 6)],
+        )
+        ids = [event.id for event in events]
+        factory = _session_factory(db_engine)
+        await relay.relay_once(factory, FakePublisher())
+        before = _stamps()
+
+        crash = CrashAfterThirdPublish()
+        with pytest.raises(StreamTransportError):
+            await relay.republish_since(factory, crash, _RECOVERY_POINT, window=2)
+
+        mid = _stamps()
+        # window 1 (rows 1–2) is committed BEFORE window 2 starts
+        assert mid[ids[0]] > before[ids[0]]
+        assert mid[ids[1]] > before[ids[1]]
+        # window 2 is left UNMARKED — XADD #3 landed, its mark discarded
+        assert mid[ids[2]] == before[ids[2]]
+        assert mid[ids[3]] == before[ids[3]]
+        assert mid[ids[4]] == before[ids[4]]
+
+        healthy = FakePublisher()
+        await relay.republish_since(factory, healthy, _RECOVERY_POINT, window=2)
+        # the resume covers every matching row (window 1 rides again —
+        # the accepted duplicate)
+        assert {payload["event_id"] for _s, payload in healthy.published} == set(ids)
+        final = _stamps()
+        assert all(final[event_id] > before[event_id] for event_id in ids)
+
+    async def test_point_after_everything_republishes_nothing(self, db_engine) -> None:
+        """No rows at/after the point: count 0, nothing re-emitted."""
+        factory = _session_factory(db_engine)
+        publisher = FakePublisher()
+
+        with capture_relay_logs() as messages:
+            total = await relay.republish_since(
+                factory, publisher, _RECOVERY_POINT + timedelta(days=1)
+            )
+
+        assert total == 0
+        assert publisher.published == []
+        assert any("dry-run count: 0 row(s) match" in m for m in messages), messages
+
+
+class TestRepublishCli:
+    """The ``--republish-since`` CLI seam of ``python -m
+    src.domain_events.relay`` (argv always injected — the default reads
+    ``sys.argv``, which under pytest is pytest's own)."""
+
+    def test_parse_args_exposes_the_flag(self) -> None:
+        args = relay.parse_args(["--republish-since", "2026-11-09T12:00:00"])
+        assert args.republish_since == "2026-11-09T12:00:00"
+        assert relay.parse_args([]).republish_since is None
+
+    def test_parse_since_normalizes_to_naive_utc(self) -> None:
+        """The journal's storage convention is naive UTC: ``Z`` and
+        explicit offsets are converted, naive input passes verbatim."""
+        assert relay.parse_since("2026-11-09T12:00:00") == datetime(2026, 11, 9, 12)
+        assert relay.parse_since("2026-11-09T12:00:00Z") == datetime(2026, 11, 9, 12)
+        assert relay.parse_since("2026-11-09T15:00:00+03:00") == datetime(2026, 11, 9, 12)
+
+    def test_parse_since_rejects_garbage_loudly(self) -> None:
+        with pytest.raises(ValueError, match="not an ISO datetime"):
+            relay.parse_since("not-a-timestamp")

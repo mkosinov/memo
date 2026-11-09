@@ -13,6 +13,8 @@ Exactly this list, no more, no less:
   photos (public site; the web gallery rides the same list with
   ``?is_public=true`` — GH #479 Изменение 4 retired the separate
   ``GET /api/v1/photos/web`` showcase);
+- ``GET /api/v1/public/photos`` — the photo showcase (ADR-015 audience
+  namespace; bare photo GETs stay until GH #493 closes them);
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout / me) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -46,6 +48,9 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v1/tags/{id}"),
     ("GET", "/api/v1/activities"),
     ("GET", "/api/v1/activities/{id}"),
+    # ADR-015: anonymous showcase namespace. The prefix exposes nothing —
+    # entries here ARE the exposure (default-deny walk).
+    ("GET", "/api/v1/public/photos"),
     ("GET", "/api/v1/photos"),
     ("GET", "/api/v1/photos/{id}"),
     # GH #479 (Изменение 4): ("GET", "/api/v1/photos/web") was removed —

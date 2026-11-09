@@ -231,6 +231,7 @@ class TestPublicRoutes:
             ("GET", "/api/v1/tags/{id}"),
             ("GET", "/api/v1/activities"),
             ("GET", "/api/v1/activities/{id}"),
+            ("GET", "/api/v1/public/photos"),
             ("GET", "/api/v1/photos"),
             ("GET", "/api/v1/photos/{id}"),
             # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed

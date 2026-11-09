@@ -144,3 +144,20 @@ class PhotoResponse(BaseModel):
     client_name: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class PhotoPublicResponse(BaseModel):
+    """Public gallery photo — deliberately NOT PhotoResponse (ADR-015).
+
+    Audience schema for the anonymous showcase ``GET /api/v1/public/photos``:
+    only what the web gallery consumes. Tags resolve to plain title strings
+    server-side (the ``MyPhotoItem`` convention, ``schemas/my.py``).
+    Owner/service fields, timestamps and ``is_public`` never leave through
+    this schema — ``is_public`` is a forced constant on the route.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    filename: str
+    tags: list[str] = []

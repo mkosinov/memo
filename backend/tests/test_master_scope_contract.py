@@ -121,6 +121,8 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/tags"): "dictionary read (public + tags:read)",
     ("GET", "/api/v1/tags/{id}"): "dictionary read (public + tags:read)",
     ("GET", "/api/v1/tags/all"): "dictionary read (tags:read)",
+    # ── ADR-015 public showcase: anonymous by design ──
+    ("GET", "/api/v1/public/photos"): "public showcase (ADR-015): forced is_public=True, minimal schema, unscoped by design",
     # ── System / transport ──
     ("GET", "/api/v1/health"): "system probe, anonymous",
     ("GET", "/api/v1/events"): "SSE transport, require_session — not entity data",

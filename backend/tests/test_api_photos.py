@@ -1,6 +1,7 @@
 """Tests for the Photos API endpoints (is_public list filter + admin CRUD + list contract)."""
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tests.conftest import query_db, query_db_params
 from tests.delete_family_full_contract import (
@@ -422,6 +423,95 @@ class TestPhotosListContract:
         body = response.json()
         names = [i["filename"] for i in body["items"]]
         assert names == ["p_card_two.jpg", "p_card_one.jpg"]
+
+
+@pytest.fixture
+def anon_client(app):
+    """A FRESH TestClient with an empty cookie jar (anonymous view).
+
+    Not the shared ``api_client`` with a cleared jar: showcase tests
+    need BOTH views in one test — an authenticated client to seed rows
+    (POST /photos writes) and an anonymous one to probe the public
+    route.
+    """
+
+    client = TestClient(app)
+    yield client
+    client.close()
+
+
+class TestPhotosPublicRoute:
+    """#493 сценарии 1–2: публичная витрина ``/api/v1/public/photos``."""
+
+    def test_minimal_schema_public_only(
+        self, api_client, anon_client, photos_fixture
+    ) -> None:
+        public = photos_fixture["p_client"]    # создан с is_public=True
+        private = photos_fixture["p_client2"]  # дефолт: private
+        # непустая выдача тегов: публикуем фото с тегами (tag id — из ответа p_tags)
+        tag_ids = [t["id"] for t in photos_fixture["p_tags"]["tags"]]
+        tagged = api_client.post(
+            PHOTOS_URL,
+            json={
+                "filename": "p_public_tagged.jpg",
+                "is_public": True,
+                "tag_ids": tag_ids,
+            },
+        )
+        assert tagged.status_code == 201, tagged.text
+
+        resp = anon_client.get("/api/v1/public/photos")
+        assert resp.status_code == 200, resp.text
+        ids = [p["id"] for p in resp.json()["items"]]
+        assert public["id"] in ids
+        assert private["id"] not in ids
+        assert tagged.json()["id"] in ids
+        for item in resp.json()["items"]:
+            assert set(item.keys()) == {"id", "filename", "tags"}
+            assert all(isinstance(t, str) for t in item["tags"])
+        tagged_item = next(
+            p for p in resp.json()["items"] if p["id"] == tagged.json()["id"]
+        )
+        assert tagged_item["tags"]  # непусто: теги-строки реально проходят
+
+    def test_id_filter_ands_with_forced_is_public(
+        self, anon_client, photos_fixture
+    ) -> None:
+        """Guard 1 #371: ``?id=`` опубликован и AND-ится с форсом is_public —
+        приватный id через фильтр не достаётся."""
+        public = photos_fixture["p_client"]
+        private = photos_fixture["p_client2"]
+
+        picked = anon_client.get(
+            "/api/v1/public/photos", params={"id": public["id"]}
+        )
+        assert picked.status_code == 200, picked.text
+        assert [p["id"] for p in picked.json()["items"]] == [public["id"]]
+
+        bypass = anon_client.get(
+            "/api/v1/public/photos", params={"id": private["id"]}
+        )
+        assert bypass.status_code == 200, bypass.text
+        assert bypass.json()["items"] == []
+
+    def test_owner_filters_not_wired_unknown_params_ignored(
+        self, anon_client, photos_fixture
+    ) -> None:
+        baseline = anon_client.get("/api/v1/public/photos")
+        assert baseline.status_code == 200, baseline.text
+        baseline_ids = [p["id"] for p in baseline.json()["items"]]
+
+        probed = anon_client.get(
+            "/api/v1/public/photos",
+            params={
+                "client_id": "00000000-0000-0000-0000-000000000000",
+                "is_public": "false",
+                "q": "zz-no-such-phrase",
+                "sort_by": "filename",
+            },
+        )
+        assert probed.status_code == 200, probed.text
+        assert [p["id"] for p in probed.json()["items"]] == baseline_ids
 
 
 class TestPhotosOwnerValidation:

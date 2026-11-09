@@ -3,7 +3,7 @@
 Spec §1: ``utc_now()`` is THE helper for instants (TTL, created/updated
 stamps, journal, audit) — a naive datetime equal to the UTC instant.
 Wall-clock schedule time is a different helper —
-``src/notify/time.py::business_now()`` (business zone, also naive).
+``src/notification/time.py::business_now()`` (business zone, also naive).
 Aware datetimes and zones are #498; until then all values are naive.
 """
 

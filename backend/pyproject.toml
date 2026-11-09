@@ -15,13 +15,13 @@ dependencies = [
     "pwdlib[argon2]>=0.3.1",
     # GH #262 Task 2 — multipart/form-data parsing for POST /my/portrait
     "python-multipart>=0.0.20",
-    # GH #482 — template rendering for notify messages (spec §3.5).
+    # GH #482 — template rendering for notification messages (spec §3.5).
     # Floor 3.1.6: CVE-2025-27516 (sandbox escape via |attr, fixed in 3.1.6).
     "jinja2>=3.1.6",
-    # GH #483 — Redis Streams transport for notify queue (spec §3.1, ADR 013).
+    # GH #483 — Redis Streams transport for the notification queue (spec §3.1, ADR 013).
     # Floor: version actually smoke-tested against Redis 7 (XADD/XREADGROUP/XACK/XAUTOCLAIM).
     "redis>=8.1.0",
-    # GH #485 — the Telegram channel of the notify worker (spec §6,
+    # GH #485 — the Telegram channel of the notification worker (spec §6,
     # MTProto user account; floor from the spec §6 requirement).
     "telethon>=1.34",
     # Prod reference-data loader (src/seed/reference.py) reads the YAML
@@ -137,16 +137,16 @@ markers = [
     "api: API endpoint tests (CRUD, status codes)",
     "integration: Complex flows, multi-step scenarios",
     "misc: Infrastructure, health, CORS, admin",
-    # GH #483 §3.6 — notify transport contour: real Redis, needs REDIS_URL;
+    # GH #483 §3.6 — notification transport contour: real Redis, needs REDIS_URL;
     # declarative skipif keeps the standard no-Redis run green (US-7/S2).
-    "redis: Notify transport integration tests against a real Redis (need REDIS_URL; skipped without it)",
+    "redis: Notification transport integration tests against a real Redis (need REDIS_URL; skipped without it)",
 ]
 addopts = []
 
 # ── Coverage ───────────────────────────────────────────────────────
 [tool.coverage.run]
-# GH #483 §3.6 / #484 §3.8 — the notify transport adapter is measured by
-# the dedicated `notify-tests` CI contour (pytest -m redis), NOT by the
+# GH #483 §3.6 / #484 §3.8 — the notification transport adapter is measured by
+# the dedicated `notification-tests` CI contour (pytest -m redis), NOT by the
 # standard backend job: there its contour tests skip without Redis, and
 # counting the near-unexecuted adapter would drag the 80% gate down.
 # worker.py is BACK in the standard measurement (#484 §3.8): its unit
@@ -156,6 +156,6 @@ addopts = []
 # delegating RedisQueue corpus), not by the no-Redis standard job.
 omit = [
     "src/seed/*",
-    "src/notify/redis_queue.py",
+    "src/notification/redis_queue.py",
     "src/streams/transport.py",
 ]

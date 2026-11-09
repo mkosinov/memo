@@ -13,10 +13,10 @@ between XADD and the batch mark — the restart republishes the unmarked
 row; the stream holds TWO entries of the event (the duplicate is REALLY
 delivered — the test does not pass vacuously, §5.3 rev.2) and the
 subscriber-side root-task uniqueness (the §4.2 partial unique index
-``uq_notify_tasks_event_scenario_root``) absorbs it: ONE root task.
+``uq_notification_tasks_event_scenario_root``) absorbs it: ONE root task.
 
 Marked ``redis`` with the declarative ``skipif`` guard over
-``REDIS_URL``; per-test key-prefix workspace (tests/notify_redis_support).
+``REDIS_URL``; per-test key-prefix workspace (tests/notification_redis_support).
 """
 
 from __future__ import annotations
@@ -29,13 +29,13 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+import src.models  # noqa: F401 — registration first; breaks the models↔notification import cycle
 from src.domain_events import relay
 from src.domain_events.models import DomainEvent
-from src.notify.models import NotifyTask
+from src.notification.models import NotificationTask
 from src.streams.transport import StreamTransport, StreamTransportError
 from tests.conftest import query_db
-from tests.notify_redis_support import (
+from tests.notification_redis_support import (
     RedisContour,
     contour_fixture,
     redis_marks,
@@ -178,10 +178,10 @@ class TestScenario3RelayRestart:
         )
 
         # the duplicate does NOT create a second root task: the §4.2
-        # partial unique index uq_notify_tasks_event_scenario_root (the
+        # partial unique index uq_notification_tasks_event_scenario_root (the
         # subscriber idempotency seam, wired into the group loop by
         # #580 Task 6) rejects the second root of the same event.
-        root = NotifyTask(
+        root = NotificationTask(
             event_id=event_id,
             scenario="new_record",
             status="skipped",
@@ -194,7 +194,7 @@ class TestScenario3RelayRestart:
         db_session.add(root)
         await db_session.commit()
 
-        duplicate = NotifyTask(
+        duplicate = NotificationTask(
             event_id=event_id,
             scenario="new_record",
             status="skipped",
@@ -210,7 +210,7 @@ class TestScenario3RelayRestart:
         await db_session.rollback()
 
         roots = query_db(
-            f"SELECT id FROM notify_tasks WHERE event_id = '{event_id}'"
+            f"SELECT id FROM notification_tasks WHERE event_id = '{event_id}'"
             f" AND parent_task_id IS NULL"
         )
         assert len(roots) == 1  # ONE root task despite the duplicate delivery

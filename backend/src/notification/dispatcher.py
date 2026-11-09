@@ -1,0 +1,895 @@
+"""GH #482 Task 9 — the dispatcher process (spec §3.8; family #476 §3.2/§4.3/§4.4).
+
+GH #483 part 2 wiring: the queue adapter is selected at start
+(``connect_or_exit`` — ``RedisQueue`` over ``REDIS_URL``, fail-fast code 2
+gates), every queue call from the async cycles goes through
+``asyncio.to_thread``, and a transport failure at the enqueue point is
+kept apart from scenario errors (attempts are not burned — the re-enqueue
+cycle owns recovery; spec §3.1).
+
+#580 Task 6 (spec §3.5): the dispatcher's event INPUT is the consumer
+group ``notification`` on the stream ``domain_events:new_record`` —
+the journal-polling cycle is gone with the consumer-state columns.
+Delivery semantics (§3.5/§4.3): at-least-once; idempotency is the
+partial root index ``uq_notification_tasks_event_scenario_root``
+(IntegrityError → «already processed» → ack); a scenario failure
+increments the ``notification_event_attempts`` ledger — below
+``MAX_SCENARIO_ATTEMPTS`` the entry stays UNACKED (the periodic
+hanging-return cycle redelivers), at the threshold it is acked WITH
+parking (a re-delivered parked event re-parks — the ledger is at the
+threshold); a ``StreamTransportError`` at the enqueue point burns NO
+attempt and leaves the entry unacked (the committed task is picked up
+by the re-enqueue cycle).
+
+Standalone entry ``python -m src.notification.dispatcher``. Five loops of ONE
+``asyncio.TaskGroup``, each iteration isolated in its own ``try/except``
+(one crash is logged and never kills the process or the sibling loops —
+spec §3.8 panel finding); SIGTERM/KeyboardInterrupt set the stop-event
+and the TaskGroup winds down cleanly.
+
+- **Cycle 1 — re-enqueue sweep** (interval ``NOTIFICATION_POLL_INTERVAL``):
+  ``queued`` tasks with ``updated_at`` older than
+  ``NOTIFICATION_REENQUEUE_AFTER`` that the worker does not HOLD (family
+  §3.3 rev.5 — ``pending_worker_task_ids``: the PEL of the ``worker``
+  group; a channel-send pause or retry sleep is not a hang) are
+  re-enqueued with the SAVED payload in full (no address
+  re-resolution); the ``updated_at`` refresh is the re-enqueue stamp that
+  keeps the sweep from firing every tick; past the cap (module constant,
+  not a setting) the task is ``failed``. (The journal-polling half of
+  the old cycle 1 is gone with the #580 switchover: the journal lost
+  its consumer-state columns — the dispatcher's event INPUT is the
+  ``notification`` consumer group from #580 Task 6.)
+- **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
+  start, then claim → per event one append-only attempt row + the §4.3
+  derived task state + the rev.5 CHAIN rules in ONE commit → the
+  spawned continuation (if any) is enqueued → ack. Chain (part-4 spec
+  §8, #485 Task 5): the first ``sent`` of any chain task writes
+  ``delivery_outcome = delivered`` on the root (terminal, never
+  flipped); a terminal failure (``not_delivered`` final or the
+  no-final ``app_error`` of an assembly error) spawns the next priority
+  channel — FRESH template freeze, payload/address/ids inherited from
+  the root (ADR 014) — or, at channel exhaustion with nothing in
+  flight, closes the chain ``not_delivered`` on the root (the reason
+  lives in the attempt journal). Spawn idempotency: the used-channel
+  filter over the chain rows is the ``UNIQUE(root_task_id, channel)``
+  pre-check — at-least-once report redelivery never duplicates a task.
+  Brak leaves delivery by the two-layer rule (#484 spec §3.5): shape
+  pre-validation and a ``ValueError`` from ``apply_status_event``
+  (unknown task/stage after a valid form) are journalled (identifiers
+  only) and ACKED; any other error keeps the item unacked — the
+  reliable-list reclaim at the next process start redelivers it
+  (at-least-once, §4.4).
+- **Cycle 3 — ``notify:inbound``**: routed by the handler registry
+  (channel → handler). The pilot registry is EMPTY: log warning + ack.
+- **Cycle 4 — the events group read** (interval ``NOTIFICATION_POLL_INTERVAL``):
+  claim a batch of the ``notification`` group on
+  ``domain_events:new_record`` → the scenario handler (registry, by
+  record type) → ack. A record whose type has no handler is brak: logged
+  (identifiers only) and acked away.
+- **Cycle 5 — the periodic hanging return** (interval
+  ``EVENTS_RECLAIM_INTERVAL``, the «четвёртый периодический цикл» of
+  §3.5 over the subscriber's §3.4 cadence): ``XAUTOCLAIM`` the group's
+  hanging entries (idle ≥ ``EVENTS_RECLAIM_MIN_IDLE_MS``) and run them
+  through the same processing path — an unacked failed attempt comes
+  back here until it parks. The process START runs the same return once
+  with ``min_idle_ms=0`` (a crashed predecessor's leftovers return
+  immediately), next to the queue's own ``reclaim_hanging``.
+
+The dispatcher inherits the repo engine pragmas (``busy_timeout``, WAL —
+``src/db/database.py``) by building its own ``DBManager`` the way other
+standalone entries do (``seed``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+import src.models  # noqa: F401 — registration first; breaks the models↔notification import cycle
+from src.core.config import settings
+from src.db.database import DBManager
+from src.domain_events.models import DomainEvent
+from src.domain_events.subscribe import ClaimedEvent, Subscriber
+from src.domain_events.types import stream_key
+from src.notification.channels.registry import parse_channel_priority
+from src.notification.models import (
+    NotificationEventAttempt,
+    NotificationTask,
+    NotificationTaskAttempt,
+)
+from src.notification.queue import InboundEvent, TaskPayload, build_task_payload
+from src.notification.redis_queue import NotificationTransportError, connect_or_exit
+from src.notification.render import find_template
+from src.notification.scenarios import SCENARIO_NEW_RECORD, SCENARIOS
+from src.streams.transport import CLAIM_BATCH, DEFAULT_RECLAIM_MIN_IDLE_MS
+from src.util.process import install_signal_handlers, run_loop
+from src.util.utc import utc_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from src.notification.queue import NotificationQueue, StatusEvent
+
+# The notification family logger convention (src/domain_events/journal.py):
+# "memo.notification.<module>", independent of import paths.
+logger = logging.getLogger("memo.notification.dispatcher")
+
+# ── module constants (spec §3.8 — deliberately NOT settings) ────────────────
+
+#: Re-enqueue ceiling; past it the task is ``failed``.
+REENQUEUE_CAP = 10
+#: Failure text of a cap-exhausted task (spec §3.8 verbatim).
+REENQUEUE_FAILED_MESSAGE = "не доставлено: очередь не подтверждает приём"
+
+#: The notification subscriber's consumer group (spec §3.5) — the group name
+#: IS the service (globally unique system-wide, the §3.4 contract).
+NOTIFICATION_GROUP = "notification"
+#: The one stream the pilot subscriber consumes (§3.5): the stream of
+#: the pilot event type, ``domain_events:new_record``.
+NEW_RECORD_STREAM = stream_key(SCENARIO_NEW_RECORD)
+#: Scenario-attempts ceiling before parking (§3.5) — a module constant,
+#: not a setting.
+MAX_SCENARIO_ATTEMPTS = 3
+#: Interval of the periodic hanging-return cycle (§3.5 «четвёртый цикл»)
+#: — a module constant, not a setting; fast enough that an entry idling
+#: past the threshold returns within a fraction of it.
+EVENTS_RECLAIM_INTERVAL = 30.0
+#: Idle threshold of the periodic return (~120 s, §6: the retry tempo of
+#: a failing scenario — minutes, not seconds); the transport core's
+#: default, stated here as the subscriber policy.
+EVENTS_RECLAIM_MIN_IDLE_MS = DEFAULT_RECLAIM_MIN_IDLE_MS
+
+#: Failure volume of a §4. report that ends the CHANNEL task (spec §8.2:
+#: «транспортные ретраи исчерпаны, либо app_error»). ``not_delivered``
+#: is the worker's ONE final event; ``app_error`` is included because
+#: the ASSEMBLY failure (§5.4) publishes it WITHOUT any final follow-up
+#: — and the chain must continue there too (domain rule: «цепочка идёт
+#: к следующему каналу»). Harmless on the send-path duplicate (app_error
+#: followed by not_delivered): the spawn is idempotent (the used-channel
+#: filter is the UNIQUE(root, channel) pre-check) and the close is
+#: guarded by the in-flight check.
+TERMINAL_FAILURE_OUTCOMES = frozenset({"not_delivered", "app_error"})
+
+#: In-flight task statuses of a chain (§4.3): a live task means the
+#: chain is NOT exhausted, whatever the other rows say.
+_IN_FLIGHT_STATUSES = frozenset({"queued", "sending"})
+
+#: Inbound handler registry (channel → handler). Pilot: EMPTY — replies
+#: arrive with part 4; the empty-registry behavior (warn + ack) is the
+#: contract fixed here.
+InboundHandler = Callable[[InboundEvent], Awaitable[None]]
+INBOUND_HANDLERS: dict[str, InboundHandler] = {}
+
+
+# ── small time helpers ──────────────────────────────────────────────────────
+
+
+def _utc_now_iso_z() -> str:
+    """UTC now → ISO 8601 with the ``Z`` suffix (payload ``created_at``,
+    §4.2 — same serialization as the scenario module)."""
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _naive_utc(value: str) -> datetime:
+    """ISO 8601 timestamp → naive UTC ``datetime`` (the repository storage
+    convention for ``occurred_at`` columns)."""
+    parsed = datetime.fromisoformat(value)  # py3.11+: trailing "Z" supported
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _is_malformed_status(item: StatusEvent) -> bool:
+    """Shape pre-validation (spec §3.5): ``task_id`` a NON-EMPTY STRING
+    (a UUID String(36) — ``NotificationTask.id``, the only spelling the
+    dispatcher's own enqueue seam puts on tasks; the family §4.2 int
+    example is a sketch artifact — int/bool are malformed), ``stage``
+    in the §4.3 vocabulary, ``channel`` a non-empty string,
+    ``occurred_at`` parseable, ``sent_text`` (rev.5) — a string or
+    NULL. Guards the reader against events that would raise a
+    non-ValueError inside ``apply_status_event`` and hang on the
+    stream unacked forever."""
+    try:
+        task_id = item.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            return True
+        if item.get("stage") not in ("sending", "sent", "failed"):
+            return True
+        channel = item.get("channel")
+        if not isinstance(channel, str) or not channel:
+            return True
+        sent_text = item.get("sent_text")
+        if sent_text is not None and not isinstance(sent_text, str):
+            return True
+        _naive_utc(item["occurred_at"])
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # AttributeError: a corrupt entry that is not even a mapping —
+        # the reader must ack it away, not crash on it.
+        return True
+    return False
+
+
+# ── cycle 1: re-enqueue sweep (§3.8) ─────────────────────────────────────────
+
+
+async def reenqueue_stale_tasks(
+    session_factory: async_sessionmaker[AsyncSession], queue: NotificationQueue
+) -> None:
+    """Re-enqueue ``queued`` tasks older than ``NOTIFICATION_REENQUEUE_AFTER``
+    that the worker does not HOLD (family §3.3 rev.5: not in the PEL of
+    the ``worker`` group — a task being worked on, e.g. a channel-send
+    pause or a transport-retry sleep, is not hanging; re-enqueueing it
+    would duplicate the delivery).
+
+    The payload is the SAVED task row verbatim (§4.2 rev.5) — channel,
+    address, render data and the frozen template; addresses never
+    re-resolved (§3.4 panel finding). The ORM ``onupdate`` refresh of
+    ``updated_at`` is the re-enqueue stamp: without it the age
+    predicate would fire every polling tick instead of once per
+    window. Past ``REENQUEUE_CAP`` the task becomes ``failed`` (the
+    error text has no column on the task row — it is logged; part 5
+    screens read the attempt journal for failure detail).
+
+    Deliberate inversion: the enqueue lands BEFORE the stamp is committed
+    — a crash in between leaves an unstamped task that the next sweep
+    re-enqueues again, an at-least-once duplicate absorbed by the
+    terminal-``sent`` rule (§4.4), whereas the reverse order could
+    silently lose a notification for a full re-enqueue window.
+    """
+    try:
+        held_ids = await asyncio.to_thread(queue.pending_worker_task_ids)
+    except NotificationTransportError as exc:
+        # The probe precedes every enqueue decision: a blind sweep over
+        # a dead probe would duplicate every task the worker holds.
+        # Nothing burns — the next tick retries the whole sweep.
+        logger.error(
+            "notification dispatcher: re-enqueue sweep aborted — worker PEL probe"
+            " failed (%s); the next tick retries",
+            exc,
+        )
+        return
+    threshold = utc_now() - timedelta(
+        seconds=settings.NOTIFICATION_REENQUEUE_AFTER
+    )
+    async with session_factory() as session:
+        tasks = (
+            (
+                await session.execute(
+                    select(NotificationTask).where(
+                        NotificationTask.status == "queued",
+                        NotificationTask.updated_at < threshold,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for task in tasks:
+            if task.reenqueues >= REENQUEUE_CAP:
+                task.status = "failed"
+                logger.error(
+                    "notification task %s: %s (re-enqueue cap %d reached)",
+                    task.id,
+                    REENQUEUE_FAILED_MESSAGE,
+                    REENQUEUE_CAP,
+                )
+            elif task.id in held_ids:
+                # §3.3 rev.5: the worker holds the ticket (PEL) — not a
+                # hang; no stamp either, so the sweep re-checks after
+                # the worker is done with it.
+                logger.debug(
+                    "notification task %s: held by the worker (PEL) — re-enqueue skipped",
+                    task.id,
+                )
+                continue
+            else:
+                try:
+                    # sync adapter off the event loop (spec §3.1); the
+                    # payload is the SAVED task row verbatim (§4.2
+                    # rev.5 — channel, address, render data and the
+                    # frozen template; addresses never re-resolved).
+                    await asyncio.to_thread(
+                        queue.enqueue_task,
+                        build_task_payload(task, _utc_now_iso_z()),
+                    )
+                except NotificationTransportError as exc:
+                    # GH #483 (spec §3.1): a failed enqueue counts toward
+                    # the SAME cap as a successful one — a dead transport
+                    # must churn finitely, not forever. The task stays
+                    # «queued» until the cap path terminates it; the log
+                    # carries the exception class + task id only.
+                    logger.error(
+                        "notification task %s: enqueue failed (%s) — re-enqueue"
+                        " %d/%d counted, task stays queued",
+                        task.id,
+                        exc,
+                        task.reenqueues + 1,
+                        REENQUEUE_CAP,
+                    )
+                task.reenqueues += 1
+            await session.commit()
+
+
+# ── cycle 2: notify:statuses (§3.8; family §4.3/§4.4) ───────────────────────
+
+
+async def _chain_root(session: AsyncSession, task: NotificationTask) -> NotificationTask:
+    """The chain root of ``task`` — the row ``delivery_outcome`` lives
+    on. Falls back to ``task`` itself for a dangling chain reference
+    (the root row is gone): the outcome then lands on the surviving
+    task, never on a missing one."""
+    if task.root_task_id == task.id:
+        return task
+    root = await session.get(NotificationTask, task.root_task_id)
+    return task if root is None else root
+
+
+async def _chain_reaction(session: AsyncSession, task: NotificationTask) -> NotificationTask | None:
+    """The §8.2 chain rules on a TERMINAL failure of a channel task.
+
+    - Candidates: priority entries AFTER ``task.channel`` (all unused
+      ones when the channel left the priority list), minus the channels
+      the chain already used — the DB rows ARE the UNIQUE(root,
+      channel) pre-check, so an at-least-once duplicate report re-runs
+      this idempotently and never duplicates a task.
+    - First candidate with a template (§3.7 lookup, FRESH freeze for
+      the new channel) → a queued continuation inheriting the ROOT's
+      ``payload``/``address``/ids (never re-resolved, ADR 014) with
+      ``parent_task_id`` = the failed task; returned for the caller to
+      enqueue AFTER the commit (§3.4).
+    - No candidate AND nothing in flight (queued/sending chain tasks)
+      → the chain is exhausted: ``delivery_outcome = not_delivered`` on
+      the root. The REASON deliberately lives in the append-only attempt
+      journal (the failed events themselves) — no reason column on the
+      task (part-5 screens read attempts). ``delivered`` is never
+      overwritten; an in-flight sibling keeps the chain open — its own
+      terminal event closes it.
+    """
+    root = await _chain_root(session, task)
+    priority = parse_channel_priority(settings.NOTIFICATION_CHANNEL_PRIORITY)
+    chain = (
+        await session.execute(
+            select(NotificationTask.channel, NotificationTask.status).where(
+                NotificationTask.root_task_id == root.id
+            )
+        )
+    ).all()
+    used = {channel for channel, _status in chain if channel is not None}
+    in_flight = any(status in _IN_FLIGHT_STATUSES for _channel, status in chain)
+    if task.channel in priority:
+        candidates = priority[priority.index(task.channel) + 1 :]
+    else:
+        candidates = list(priority)
+    for name in candidates:
+        if name in used:
+            continue
+        template = await find_template(session, root.scenario, name)
+        if template is None:
+            # Near-dead branch (seed invariant: a default exists) — skip
+            # the channel LOUDLY and try the next one; exhaustion below
+            # closes the chain if nothing deliverable remains.
+            logger.error(
+                "notification dispatcher: chain of task %s: no template for channel %r"
+                " — channel skipped",
+                task.id,
+                name,
+            )
+            continue
+        continuation = NotificationTask(
+            event_id=root.event_id,
+            scenario=root.scenario,
+            client_id=root.client_id,
+            status="queued",
+            channel=name,
+            address=root.address,
+            payload=root.payload,
+            template_id=template.id,
+            template_body=template.body,
+            template_channel=template.channel,
+            root_task_id=root.id,
+            parent_task_id=task.id,
+            resend_of=root.resend_of,
+        )
+        session.add(continuation)
+        return continuation
+    if not in_flight and root.delivery_outcome is None:
+        root.delivery_outcome = "not_delivered"
+    return None
+
+
+async def apply_status_event(
+    session: AsyncSession, item: StatusEvent
+) -> TaskPayload | None:
+    """One §4.3 stage event → append-only attempt row + derived task
+    state, ONE commit (the caller acks only after it succeeds).
+
+    Derived state: the stage vocabulary maps 1:1 onto task statuses
+    (``sending``/``sent``/``failed``); the single special rule is that
+    ``sent`` is TERMINAL — the first ``sent`` of any attempt wins and is
+    never overridden (a late ``failed`` after a success, e.g. a
+    re-enqueue duplicate, must not flip a delivered task). Idempotent
+    re-apply only appends the attempt row (§4.4 — duplicates accepted).
+
+    Chain (rev.5, ADR 014 — the task is ONE channel):
+
+    - the first ``sent`` of any chain task → ``delivery_outcome =
+      delivered`` on the root (any success wins, even over a closed
+      ``not_delivered`` — a late duplicate that actually delivered);
+      ``delivered`` is never overwritten;
+    - a TERMINAL failure (``TERMINAL_FAILURE_OUTCOMES``) of a task
+      whose status is not the terminal ``sent`` → :func:`_chain_reaction`:
+      the next priority channel task (returned as its §4.2 payload for
+      the caller to enqueue after the commit) or the ``not_delivered``
+      close on the root at channel exhaustion.
+    """
+    task_id = item["task_id"]
+    task = await session.get(NotificationTask, task_id)
+    if task is None:
+        raise ValueError(f"status for unknown notification task {task_id!r}")
+    stage = item["stage"]
+    if stage not in ("sending", "sent", "failed"):
+        raise ValueError(f"unknown status stage {stage!r}")
+    session.add(
+        NotificationTaskAttempt(
+            task_id=task_id,
+            channel=item["channel"],
+            stage=stage,
+            outcome=item.get("outcome"),
+            error=item.get("error"),
+            # rev.5 (§4.3): the actually transmitted text of the
+            # attempt — NULL on failures before any transmission.
+            sent_text=item.get("sent_text"),
+            occurred_at=_naive_utc(item["occurred_at"]),
+        )
+    )
+    spawned: NotificationTask | None = None
+    if task.status != "sent":
+        task.status = stage
+    if stage == "sent":
+        # The chain outcome rides the ROOT (spec §8.2); «delivered» is
+        # terminal — written once, never flipped back.
+        root = await _chain_root(session, task)
+        root.delivery_outcome = "delivered"
+    elif (
+        stage == "failed"
+        and item.get("outcome") in TERMINAL_FAILURE_OUTCOMES
+        and task.status != "sent"
+    ):
+        spawned = await _chain_reaction(session, task)
+    await session.commit()
+    if spawned is None:
+        return None
+    # §3.4 order: the row is committed, the queue message follows — an
+    # enqueue failure leaves the queued continuation to the re-enqueue
+    # cycle (duplicates accepted, §4.4).
+    return build_task_payload(spawned, _utc_now_iso_z())
+
+
+async def statuses_once(
+    session_factory: async_sessionmaker[AsyncSession], queue: NotificationQueue
+) -> None:
+    """Claim ``notify:statuses`` → apply each event in its own commit →
+    ack. The two-layer brak rule (#484 spec §3.5): (1) shape
+    pre-validation, (2) ``ValueError`` from ``apply_status_event``
+    (unknown task/stage after a valid form) — both journalled
+    (identifiers only) and ACKED: redelivery cannot fix a handmade or
+    corrupted payload, and the task row commits before enqueue (#482),
+    so «unknown task» means a lost DB row, not a race worth waiting
+    out. Any OTHER error (DB down, integrity on commit) keeps the old
+    contract: logged, left UNACKED — the reliable-list reclaim at the
+    next process start redelivers it (§4.4), and sibling items of the
+    same batch still proceed. The sync adapter is called through
+    ``asyncio.to_thread`` (§3.1) — a transport failure propagates to
+    the loop guard, the next tick retries.
+    """
+    for item in await asyncio.to_thread(queue.claim_statuses):
+        if _is_malformed_status(item):
+            logger.error(
+                "notification dispatcher: malformed status event (spec §3.5 shape"
+                " brak) — acked away, identifiers %r",
+                {k: item.get(k) for k in ("task_id", "stage")}
+                if isinstance(item, dict)
+                else item,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
+            continue
+        try:
+            async with session_factory() as session:
+                spawned = await apply_status_event(session, item)
+        except ValueError as exc:
+            # Layer 2 (spec §3.5): a VALID form naming an unknown
+            # task/stage — handmade/broken payload or a lost DB row;
+            # redelivery cannot fix it, so the event leaves delivery.
+            logger.error(
+                "notification dispatcher: status event rejected (%s: %s) — acked"
+                " away (spec §3.5)",
+                type(exc).__name__,
+                exc,
+            )
+            await asyncio.to_thread(queue.ack_status, item)
+        except Exception:
+            logger.exception(
+                "notification dispatcher: status event %r not applied — left unacked for reclaim",
+                item,
+            )
+        else:
+            if spawned is not None:
+                # The chain continuation (§8.2): the row is committed,
+                # the queue message goes out BEFORE the ack — a transport
+                # failure leaves the event unacked (redelivery re-runs
+                # the reaction idempotently: the attempt row is an
+                # accepted duplicate, the spawn is suppressed by the
+                # used-channel filter) and the queued row waits for the
+                # re-enqueue cycle as the last resort.
+                await asyncio.to_thread(queue.enqueue_task, spawned)
+            await asyncio.to_thread(queue.ack_status, item)
+
+
+# ── cycle 3: notify:inbound (§3.8) ──────────────────────────────────────────
+
+
+async def inbound_once(queue: NotificationQueue) -> None:
+    """Claim ``notify:inbound`` → route by the handler registry. The pilot
+    registry is empty, so every event is logged as a warning and acked —
+    producers do not exist yet; the routing form is the fixed contract.
+    Queue calls go through ``asyncio.to_thread`` (§3.1)."""
+    for item in await asyncio.to_thread(queue.claim_inbound):
+        handler = INBOUND_HANDLERS.get(str(item.get("channel", "")))
+        if handler is None:
+            logger.warning(
+                "notification dispatcher: inbound event on channel %r has no handler — acking",
+                item.get("channel"),
+            )
+        else:
+            await handler(item)
+        await asyncio.to_thread(queue.ack_inbound, item)
+
+
+# ── cycle 4/5: the events group input + hanging return (#580 §3.5) ─────────
+
+
+async def _bump_attempt_ledger(
+    session_factory: async_sessionmaker[AsyncSession],
+    event_id: str,
+    scenario: str,
+    exc: Exception,
+) -> bool:
+    """One failed scenario attempt → increment the
+    ``notification_event_attempts`` ledger (attempts + 1, ``last_error``
+    overwritten). Returns ``True`` iff the event is PARKED — the counter
+    reached ``MAX_SCENARIO_ATTEMPTS`` (§3.5): the caller acks WITH the
+    parking row as the materialized result, so the periodic return never
+    drags a parked event forever. A re-delivered parked event re-parks
+    naturally: its next failure increments past the threshold and acks
+    again."""
+    async with session_factory() as session:
+        row = await session.get(NotificationEventAttempt, (event_id, scenario))
+        if row is None:
+            # ``attempts=0`` explicit: the column default applies at
+            # INSERT, and the increment below reads the attribute BEFORE
+            # the flush (a constructed row would carry None here).
+            row = NotificationEventAttempt(event_id=event_id, scenario=scenario, attempts=0)
+            session.add(row)
+        row.attempts += 1
+        row.last_error = f"{type(exc).__name__}: {exc}"
+        # read BEFORE the commit: a session with expire_on_commit would
+        # refresh the attribute on access after it (an extra SELECT), and
+        # the log line below reads the value outside the session block.
+        attempts_after = row.attempts
+        await session.commit()
+        parked = attempts_after >= MAX_SCENARIO_ATTEMPTS
+    if parked:
+        logger.error(
+            "notification dispatcher: event %s scenario %r failed %d/%d times"
+            " (%s: %s) — PARKED, ledger row is the record",
+            event_id,
+            scenario,
+            attempts_after,
+            MAX_SCENARIO_ATTEMPTS,
+            type(exc).__name__,
+            exc,
+        )
+    return parked
+
+
+async def _process_claimed_events(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotificationQueue,
+    subscriber: Subscriber,
+    records: list[ClaimedEvent],
+) -> None:
+    """Run the claimed/reclaimed §4.1 records of the ``notification``
+    group through the scenario registry, one by one, each in its own
+    session and its own error volume (§3.5 — a sibling of the batch
+    always proceeds):
+
+    - no handler for the record type → brak: logged (identifiers only)
+      and ACKED (redelivery cannot fix a handmade payload);
+    - ``IntegrityError`` on the handler commit → the partial root index
+      caught a concurrent delivery: «already processed» → ACK, the
+      ledger is not a scenario failure and stays untouched;
+    - ``NotificationTransportError`` (the enqueue point inside the handler) →
+      NO increment, NO ack: the PEL return repeats the entry, the
+      COMMITTED task is picked up by the re-enqueue cycle (§3.5 — a
+      transport outage is not a scenario failure; #483 legacy);
+    - any OTHER handler failure → the attempts ledger increments; below
+      the threshold the entry stays UNACKED (the periodic return
+      redelivers), at it — acked with parking (§3.5/§5.2 scenario 4).
+
+    Ack strictly AFTER the result is materialized (§4.3).
+    """
+    for record in records:
+        handler = SCENARIOS.get(record.type)
+        if handler is None:
+            logger.error(
+                "notification dispatcher: domain event %s of unhandled type %r"
+                " — acked away (no scenario handler)",
+                record.event_id,
+                record.type,
+            )
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+            continue
+        # A transient stand-in for the journalled event: the snapshot is
+        # the record's own data (§4.1 — self-sufficient); the handler's
+        # live predicate reads go by the snapshot identifiers.
+        event = DomainEvent(
+            id=record.event_id,
+            type=record.type,
+            occurred_at=_naive_utc(record.occurred_at),
+            snapshot=record.snapshot,
+        )
+        try:
+            async with session_factory() as session:
+                await handler(event, session, queue)
+        except IntegrityError:
+            logger.info(
+                "notification dispatcher: event %s scenario %r already processed"
+                " (root index) — acked",
+                record.event_id,
+                record.type,
+            )
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+        except NotificationTransportError as exc:
+            logger.error(
+                "notification dispatcher: event %s scenario %r — transport failure"
+                " at the enqueue point (%s); no attempt burned, entry left"
+                " unacked for the PEL return",
+                record.event_id,
+                record.type,
+                exc,
+            )
+        except Exception as exc:
+            parked = await _bump_attempt_ledger(
+                session_factory, record.event_id, record.type, exc
+            )
+            if parked:
+                await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+            else:
+                logger.warning(
+                    "notification dispatcher: event %s scenario %r failed (%s: %s)"
+                    " — attempt recorded, entry left unacked for the"
+                    " periodic return",
+                    record.event_id,
+                    record.type,
+                    type(exc).__name__,
+                    exc,
+                )
+        else:
+            await asyncio.to_thread(subscriber.ack, NEW_RECORD_STREAM, record.qid)
+
+
+async def events_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotificationQueue,
+    subscriber: Subscriber,
+) -> None:
+    """Cycle 4 (§3.5): claim a batch of the ``notification`` group on
+    ``domain_events:new_record`` (non-blocking ``XREADGROUP >`` — the
+    entries land in this consumer's PEL) → scenario → ack. The sync
+    subscriber goes through ``asyncio.to_thread`` (§3.1); a transport
+    failure propagates to the loop guard, the next tick retries."""
+    records = await asyncio.to_thread(
+        subscriber.claim, [NEW_RECORD_STREAM], CLAIM_BATCH
+    )
+    await _process_claimed_events(session_factory, queue, subscriber, records)
+
+
+async def events_reclaim_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotificationQueue,
+    subscriber: Subscriber,
+    *,
+    min_idle_ms: int = EVENTS_RECLAIM_MIN_IDLE_MS,
+) -> None:
+    """Cycle 5 — the periodic hanging return (§3.5 «четвёртый цикл»,
+    §3.4): ``XAUTOCLAIM`` the group's claimed-but-unacked entries idle
+    ≥ ``min_idle_ms`` (the raw PEL transfer — nothing is re-XADDed) and
+    run them through the same processing path as :func:`events_once`.
+    The dispatcher START calls this once with ``min_idle_ms=0`` (a
+    crashed predecessor's leftovers return immediately); the loop runs
+    it at ``EVENTS_RECLAIM_INTERVAL`` with the policy threshold."""
+    records = await asyncio.to_thread(subscriber.reclaim, [NEW_RECORD_STREAM], min_idle_ms)
+    await _process_claimed_events(session_factory, queue, subscriber, records)
+
+
+# ── concurrency model: loops + stop (§3.7 — run_loop/signals moved to
+# src/util/process.py by #580 Task 4; §3.8) ──────────────────────────────────
+
+
+async def run_dispatcher(
+    session_factory: async_sessionmaker[AsyncSession],
+    queue: NotificationQueue,
+    stop: asyncio.Event,
+    subscriber: Subscriber,
+) -> None:
+    """The five cycles of the dispatcher: ensure the consumer groups and
+    reclaim hanging queue items at process start (§3.1, §4.4), ensure the
+    ``notification`` group on ``domain_events:new_record`` and return a
+    crashed predecessor's hanging entries IMMEDIATELY (§3.5/§3.4 — the
+    startup pass of cycle 5), then one ``asyncio.TaskGroup`` — a
+    stop-event winds all loops down correctly (§3.8). The sync adapters'
+    start calls go through ``asyncio.to_thread`` (§3.1); a failure there
+    is a process-start failure — loud, before any cycle begins. The
+    subscriber consumer is closed on the way down (keep_if_pending —
+    unacked entries survive for the next start's return)."""
+    interval = settings.NOTIFICATION_POLL_INTERVAL
+    # Consumer-start duty (§3.1): the groups MUST exist before the
+    # XAUTOCLAIM of ``reclaim_hanging`` — on a fresh Redis they don't,
+    # and the start would die with NOGROUP before any cycle begins.
+    await asyncio.to_thread(queue.ensure_consumer_groups)
+    await asyncio.to_thread(queue.reclaim_hanging)
+    # Subscriber-start duty (§3.5/§3.4): the notification group on the
+    # event stream, then the IMMEDIATE hanging return — a previous
+    # process's PEL entries are processed before the first claim tick.
+    await asyncio.to_thread(subscriber.ensure, [NEW_RECORD_STREAM])
+    await events_reclaim_once(session_factory, queue, subscriber, min_idle_ms=0)
+
+    async def reenqueue_iteration() -> None:
+        await reenqueue_stale_tasks(session_factory, queue)
+
+    async def statuses_iteration() -> None:
+        await statuses_once(session_factory, queue)
+
+    async def inbound_iteration() -> None:
+        await inbound_once(queue)
+
+    async def events_iteration() -> None:
+        await events_once(session_factory, queue, subscriber)
+
+    async def events_reclaim_iteration() -> None:
+        await events_reclaim_once(session_factory, queue, subscriber)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(
+                run_loop(
+                    "reenqueue",
+                    stop,
+                    interval,
+                    reenqueue_iteration,
+                    log=logger,
+                    log_prefix="notification dispatcher",
+                )
+            )
+            tg.create_task(
+                run_loop(
+                    "statuses",
+                    stop,
+                    interval,
+                    statuses_iteration,
+                    log=logger,
+                    log_prefix="notification dispatcher",
+                )
+            )
+            tg.create_task(
+                run_loop(
+                    "inbound",
+                    stop,
+                    interval,
+                    inbound_iteration,
+                    log=logger,
+                    log_prefix="notification dispatcher",
+                )
+            )
+            tg.create_task(
+                run_loop(
+                    "events",
+                    stop,
+                    interval,
+                    events_iteration,
+                    log=logger,
+                    log_prefix="notification dispatcher",
+                )
+            )
+            tg.create_task(
+                run_loop(
+                    "events-reclaim",
+                    stop,
+                    EVENTS_RECLAIM_INTERVAL,
+                    events_reclaim_iteration,
+                    log=logger,
+                    log_prefix="notification dispatcher",
+                )
+            )
+    finally:
+        # keep_if_pending (§3.4): a consumer holding unacked entries is
+        # NOT deregistered — they survive for the next start's return.
+        await asyncio.to_thread(subscriber.close)
+
+
+# ── process entry ───────────────────────────────────────────────────────────
+
+
+async def main(
+    queue: NotificationQueue | None = None, subscriber: Subscriber | None = None
+) -> None:
+    """``python -m src.notification.dispatcher``. Disabled (``NOTIFICATION_ENABLED=false``,
+    the default): log and return 0 — events keep accumulating in the
+    journal (family §3.3). Enabled: validate the channel priority loudly,
+    select the transport adapters, then run the five cycles until
+    SIGTERM/KeyboardInterrupt.
+
+    Adapter selection (GH #483 spec §3.1; #580 Task 6): no injected queue
+    → ``connect_or_exit(REDIS_URL)`` — the fail-fast gate builds the
+    ``RedisQueue`` and refuses the process LOUDLY (``SystemExit(2)``,
+    stable message, the URL value never disclosed) when the transport
+    is not configured or unreachable. No injected subscriber → the
+    ``Subscriber`` of the ``notification`` group over the SAME URL, with
+    its own fail-fast PING (the Task-5 seam — exit 2, same contract).
+    Explicitly injected adapters (the test seams) skip selection.
+    """
+    if not settings.NOTIFICATION_ENABLED:
+        logger.info(
+            "notification dispatcher: NOTIFICATION_ENABLED=false — exiting (domain events keep accumulating)"
+        )
+        return
+
+    channels = parse_channel_priority(settings.NOTIFICATION_CHANNEL_PRIORITY)
+    logger.info("notification dispatcher starting (channel priority: %s)", channels)
+
+    if queue is None:
+        # Part-1's FakeQueue fallback is gone: an enabled dispatcher with
+        # no configured/working transport must not rotate silently — the
+        # gate exits code 2 before any cycle starts.
+        queue = connect_or_exit(settings.REDIS_URL.get_secret_value())
+    if subscriber is None:
+        subscriber = Subscriber(
+            settings.REDIS_URL.get_secret_value(), group=NOTIFICATION_GROUP
+        )
+        try:
+            # Same fail-fast contract as the queue gate (§3.6): a
+            # half-alive subscriber must not rotate silently either.
+            await asyncio.to_thread(subscriber.ping)
+        except NotificationTransportError as exc:
+            logger.error("notification dispatcher: subscriber transport unavailable: %s", exc)
+            raise SystemExit(2) from exc
+
+    # Standalone-entry engine (the ``seed`` pattern): inherits the repo
+    # connection pragmas — busy_timeout + WAL (src/db/database.py).
+    database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./memo.db")
+    manager = DBManager(database_url)
+    stop = asyncio.Event()
+    install_signal_handlers(stop)
+    try:
+        await run_dispatcher(manager.async_session, queue, stop, subscriber)
+    finally:
+        await manager.engine.dispose()
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    # KeyboardInterrupt ONLY: the transport gate's SystemExit(2) (spec §3.1,
+    # S3) must propagate — the process exit code IS the fail-fast contract.
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("notification dispatcher: interrupted — stopped")

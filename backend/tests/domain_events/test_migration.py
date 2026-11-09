@@ -2,7 +2,7 @@
 
 Runs the real alembic chain against clean temporary SQLite files,
 staging PRE-migration data at the switchover migration's parent
-(``a7c3e9f1b2d4``) the way ``test_notify_migration`` stages post-shape
+(``a7c3e9f1b2d4``) the way ``test_notification_migration`` stages post-shape
 checks:
 
 * backfill — both DEAD sets are marked ``published_at`` at the migration
@@ -271,7 +271,7 @@ def test_domain_events_migration(tmp_path: Path) -> None:
 
 
 def test_domain_events_migration_roots_without_duplicates(tmp_path: Path) -> None:
-    """«Корни без дублей» (test_notify_migration style): on a CLEAN
+    """«Корни без дублей» (test_notification_migration style): on a CLEAN
     pre-switch DB the partial root index lands and is ENFORCED — a
     second root for the same (event_id, scenario) is rejected, a chain
     CONTINUATION with the same pair is not (it inherits the root's

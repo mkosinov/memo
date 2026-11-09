@@ -7,8 +7,8 @@ validates every mark. The relay (``relay`` — the journal→stream
 process, #580 Task 4) and the public subscription API (``subscribe`` —
 :class:`src.domain_events.subscribe.Subscriber`, #580 Task 5) are live.
 
-Import direction (domain rules): this package never imports notify;
-notify imports it — the subscriber API and the type registry are the
-consumer-side seam (the transitional ``DomainEvent`` re-export in notify
+Import direction (domain rules): this package never imports notification;
+notification imports it — the subscriber API and the type registry are the
+consumer-side seam (the transitional ``DomainEvent`` re-export in the subsystem
 died with the dispatcher's switchover to the group loop, Task 6).
 """

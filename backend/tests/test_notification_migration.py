@@ -20,7 +20,7 @@ parent ids) against clean temporary SQLite files:
   (``PRAGMA foreign_key_list``), the old table/index names leave
   ``sqlite_master``; the downgrade to the EXPLICIT parent id is the
   exact mirror (consent ``false`` survives the roundtrip);
-* ORM metadata (Base.metadata, incl. ``src/notify/models.py``) matches
+* ORM metadata (Base.metadata, incl. ``src/notification/models.py``) matches
   the migrated schema column-for-column — the no-drift contract.
 """
 
@@ -34,7 +34,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-import src.models  # noqa: F401 — registers all models incl. src.notify
+import src.models  # noqa: F401 — registers all models incl. src.notification
 from alembic import command
 from src.db.base import Base
 

@@ -281,7 +281,7 @@ async def canon_stack(tmp_path: Path) -> CanonStack:
       2. import the model modules BEFORE create_all (Base.metadata is
          empty without them; src.models is the aggregate import covering
          auth/session.py and notify/models.py too);
-      3. create_all + assert the exception tables and notify_templates
+      3. create_all + assert the exception tables and notification_templates
          exist in the built schema;
       4. real seed_data(), then an explicit COMMIT and engine dispose
          BEFORE the generator runs (uncommitted rows are invisible from
@@ -676,7 +676,7 @@ async def test_is_idempotent(canon_stack: CanonStack) -> None:
     assert after_second == after_first
 
 
-async def test_notify_templates_stays_in_canon(canon_stack: CanonStack) -> None:
+async def test_notification_templates_stays_in_canon(canon_stack: CanonStack) -> None:
     """notification_templates stays IN the canon (#482; #581 name)"""
     db = canon_stack.db
     # The default new_record row — seeded by the alembic data migration

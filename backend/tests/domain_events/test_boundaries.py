@@ -4,11 +4,11 @@ The canonical seam list is ONE (spec 2026-11-08-domain-events-service-580
 -design.md §8, rev.2 panel decision — «двойная бухгалтерия границ» risk:
 no second, divergent boundary definition). These tests pin it:
 
-- ``src/domain_events`` NEVER imports ``src.notify`` — the service module
-  is standalone; notify is its first consumer, not a dependency;
-- ``src/streams`` (the shared transport core, §3.6) imports NEITHER notify
+- ``src/domain_events`` NEVER imports ``src.notification`` — the service module
+  is standalone; notification is its first consumer, not a dependency;
+- ``src/streams`` (the shared transport core, §3.6) imports NEITHER notification
   NOR domain_events — it sits below both;
-- notify — the subscriber — imports from domain_events ONLY the subscriber
+- notification — the subscriber — imports from domain_events ONLY the subscriber
   seam: ``subscribe``, ``types`` (the registry) and ``models`` (the row
   shape is the scenario-handler payload contract — the dispatcher feeds
   handlers a transient ``DomainEvent`` stand-in built from the record);
@@ -37,7 +37,7 @@ from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 
-NOTIFY = "src.notify"
+NOTIFY = "src.notification"
 DOMAIN_EVENTS = "src.domain_events"
 
 # ── the canonical seam (spec §8): domain_events submodules per consumer ────
@@ -47,7 +47,7 @@ MODELS_REGISTRATION = frozenset({"models"})
 
 PRODUCER_PACKAGES = ("usecases", "services")
 # packages with their own allowlists; everything else under src/ is banned
-SEAL_PACKAGES = ("notify", "models", *PRODUCER_PACKAGES)
+SEAL_PACKAGES = ("notification", "models", *PRODUCER_PACKAGES)
 
 
 def _src_files() -> list[Path]:
@@ -55,8 +55,8 @@ def _src_files() -> list[Path]:
 
 
 def _package_of(py: Path) -> list[str]:
-    """Dotted package of the file (``src/notify/channels/x.py`` →
-    ``['src', 'notify', 'channels']``; ``src/notify/__init__.py`` → the
+    """Dotted package of the file (``src/notification/channels/x.py`` →
+    ``['src', 'notification', 'channels']``; ``src/notification/__init__.py`` → the
     package the init belongs to)."""
     rel = py.relative_to(SRC_DIR).with_suffix("")
     parts = ["src", *rel.parts]
@@ -135,8 +135,8 @@ class TestDomainEventsNeverImportsNotify:
                 continue
             offenders += _violations(py, NOTIFY, allowed=None)
         assert not offenders, (
-            "src/domain_events must not import src.notify (spec §8 — the "
-            "carve-out direction; notify is the consumer, not a "
+            "src/domain_events must not import src.notification (spec §8 — the "
+            "carve-out direction; notification is the consumer, not a "
             f"dependency): {offenders}"
         )
 
@@ -154,7 +154,7 @@ class TestStreamsImportsNeitherSide:
             offenders += _violations(py, DOMAIN_EVENTS, allowed=None)
         assert not offenders, (
             "src/streams is the shared transport core — it must not import "
-            "src.notify or src/domain_events (spec §3.6, domain rules "
+            "src.notification or src/domain_events (spec §3.6, domain rules "
             f"'src/streams'): {offenders}"
         )
 
@@ -166,10 +166,10 @@ class TestConsumerSeamAllowlists:
         offenders: list[str] = []
         for py in _src_files():
             rel = py.relative_to(SRC_DIR)
-            if rel.parts[0] == "notify":
+            if rel.parts[0] == "notification":
                 offenders += _violations(py, DOMAIN_EVENTS, NOTIFY_ALLOWED)
         assert not offenders, (
-            "notify (the subscriber) may import from src/domain_events "
+            "notification (the subscriber) may import from src/domain_events "
             f"only {sorted(NOTIFY_ALLOWED)} — subscribe + the registry, plus "
             "the row shape as the handler payload (spec §8): "
             f"{offenders}"
@@ -207,7 +207,7 @@ class TestConsumerSeamAllowlists:
                 continue
             offenders += _violations(py, DOMAIN_EVENTS, allowed=None)
         assert not offenders, (
-            "only the sealed consumers (notify, the producer, the model "
+            "only the sealed consumers (notification, the producer, the model "
             "registry) import src/domain_events; the relay is a standalone "
             "process, not an import target (spec §8): "
             f"{offenders}"

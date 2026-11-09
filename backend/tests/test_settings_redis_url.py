@@ -1,7 +1,7 @@
 """Settings.REDIS_URL (GH #483 spec §3.3).
 
 Empty by default (transport not configured). The production gate
-(ENV=production + NOTIFY_ENABLED=true) demands a ``rediss://`` URL with
+(ENV=production + NOTIFICATION_ENABLED=true) demands a ``rediss://`` URL with
 credentials — unencrypted and unauthenticated transports are rejected
 alike. The URL is an application secret: the field is SecretStr, so the
 value never shows up in ``repr()`` or in validation-error texts.
@@ -33,7 +33,7 @@ class TestProductionGate:
                 ENV="production",
                 SECRET_KEY="test-secret-key",
                 OTP_PEPPER="test-otp-pepper",
-                NOTIFY_ENABLED=True,
+                NOTIFICATION_ENABLED=True,
                 REDIS_URL="",
             )
 
@@ -44,7 +44,7 @@ class TestProductionGate:
                 ENV="production",
                 SECRET_KEY="test-secret-key",
                 OTP_PEPPER="test-otp-pepper",
-                NOTIFY_ENABLED=True,
+                NOTIFICATION_ENABLED=True,
                 REDIS_URL=f"redis://default:{_SECRET}@localhost:6379/0",
             )
 
@@ -55,7 +55,7 @@ class TestProductionGate:
                 ENV="production",
                 SECRET_KEY="test-secret-key",
                 OTP_PEPPER="test-otp-pepper",
-                NOTIFY_ENABLED=True,
+                NOTIFICATION_ENABLED=True,
                 REDIS_URL="rediss://localhost:6379/0",
             )
 
@@ -66,18 +66,18 @@ class TestProductionGate:
             ENV="production",
             SECRET_KEY="test-secret-key",
             OTP_PEPPER="test-otp-pepper",
-            NOTIFY_ENABLED=True,
+            NOTIFICATION_ENABLED=True,
             REDIS_URL=url,
         )
         assert s.REDIS_URL.get_secret_value() == url
 
-    def test_gate_applies_only_when_notify_enabled(self) -> None:
+    def test_gate_applies_only_when_notification_enabled(self) -> None:
         s = Settings(
             _env_file=None,
             ENV="production",
             SECRET_KEY="test-secret-key",
             OTP_PEPPER="test-otp-pepper",
-            NOTIFY_ENABLED=False,
+            NOTIFICATION_ENABLED=False,
             REDIS_URL="",
         )
         assert s.REDIS_URL.get_secret_value() == ""
@@ -100,7 +100,7 @@ class TestSecretNotDisclosed:
                 ENV="production",
                 SECRET_KEY="test-secret-key",
                 OTP_PEPPER="test-otp-pepper",
-                NOTIFY_ENABLED=True,
+                NOTIFICATION_ENABLED=True,
                 REDIS_URL=f"redis://default:{_SECRET}@localhost:6379/0",
             )
         assert _SECRET not in str(excinfo.value)

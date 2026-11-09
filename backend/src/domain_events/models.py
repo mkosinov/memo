@@ -11,7 +11,7 @@ consumer-state columns (``processed_at``/``attempts``/
 unpublished (the relay batch predicate), set in the same transaction as
 the stream XADD. Consumer state (attempts, parking) lives with the
 subscriber in its own tables (notification —
-``notify_event_attempts``); the journal is the archive, never the
+``notification_event_attempts``); the journal is the archive, never the
 consumer's bookkeeping.
 
 The partial index ``ix_domain_events_unpublished`` must be declared

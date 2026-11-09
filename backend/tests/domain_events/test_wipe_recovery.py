@@ -1,7 +1,7 @@
 """GH #580 Task 7 (spec §3.3/§4.5, §5 Scenario 5) — Redis WIPED: the
 recovery contour on a real transport.
 
-The scenario (modelled on ``test_notify_redis_s8_recovery`` — a
+The scenario (modelled on ``test_notification_redis_s8_recovery`` — a
 marked-integration crash story on the real Redis):
 
 - normal life first: the relay publishes the journal, the notification
@@ -23,7 +23,7 @@ marked-integration crash story on the real Redis):
   into the stream nor re-stamped in the journal;
 - the re-delivery is the accepted duplicate of §4.3: every re-claimed
   event already has its root — the §4.2 partial unique index
-  ``uq_notify_tasks_event_scenario_root`` rejects the second root
+  ``uq_notification_tasks_event_scenario_root`` rejects the second root
   (IntegrityError → «already processed» → ack, the Task-6 loop), so
   exactly ONE root per event survives the whole story.
 
@@ -45,15 +45,15 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+import src.models  # noqa: F401 — registration first; breaks the models↔notification import cycle
 from src.domain_events import relay
 from src.domain_events.models import DomainEvent
 from src.domain_events.subscribe import Subscriber
 from src.domain_events.types import stream_key
-from src.notify.models import NotifyTask
+from src.notification.models import NotificationTask
 from src.streams.transport import StreamTransport
 from tests.conftest import query_db
-from tests.notify_redis_support import (
+from tests.notification_redis_support import (
     RedisContour,
     contour_fixture,
     redis_marks,
@@ -71,7 +71,7 @@ contour = contour_fixture()  # per-test isolated workspace (§3.6)
 _STREAM = stream_key("new_record")
 #: The subscriber of the scenario — the dispatcher's group name
 #: (``NOTIFICATION_GROUP``, §3.5); spelled here so the domain_events
-#: test does not import the notify dispatcher module.
+#: test does not import the notification dispatcher module.
 _GROUP = "notification"
 
 #: The fixed recovery point (naive UTC — the journal storage
@@ -120,11 +120,11 @@ def _stream_entries(contour: RedisContour) -> list[dict]:
     ]
 
 
-def _root(event_id: str) -> NotifyTask:
+def _root(event_id: str) -> NotificationTask:
     """A §4.2 root task of one claimed event (the materialization the
     dispatcher performs before ack; ``status=skipped`` — the transport
     scenario needs no channel work)."""
-    return NotifyTask(
+    return NotificationTask(
         event_id=event_id,
         scenario="new_record",
         status="skipped",
@@ -138,7 +138,7 @@ def _root(event_id: str) -> NotifyTask:
 
 def _root_count() -> int:
     return int(
-        query_db("SELECT COUNT(*) AS n FROM notify_tasks WHERE parent_task_id IS NULL")[0]["n"]
+        query_db("SELECT COUNT(*) AS n FROM notification_tasks WHERE parent_task_id IS NULL")[0]["n"]
     )
 
 

@@ -3,14 +3,15 @@ isolated run loop and the signal handlers.
 
 MOVED from ``src/notify/process.py`` (#580 Task 4, spec §3.3/§3.6) into
 the neutral util home so the domain-events relay reuses them without
-importing notify; notify (dispatcher/worker) switched to this module by
-import, passing its historical ``log_prefix="notify dispatcher"`` —
-behavior identical to the old hardcoded failure line.
+importing the notification subsystem; its daemons (dispatcher/worker)
+switched to this module by import, passing their
+``log_prefix="notification dispatcher"`` — behavior identical to the
+old hardcoded failure line.
 
 - :func:`run_loop` — ``iteration`` until the stop-event, each iteration
   isolated in its own ``try/except`` (one crash is logged, never kills
   the process or the sibling loops). The caller passes its OWN family
-  logger AND log prefix (``notify dispatcher`` / ``domain events
+  logger AND log prefix (``notification dispatcher`` / ``domain events
   relay``) so the loop-failure lines keep their process attribution.
 - :func:`install_signal_handlers` — SIGTERM/SIGINT → the stop-event;
   moved verbatim (previously a duplicate in ``dispatcher.py`` /
@@ -29,11 +30,11 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 #: Default logger/prefix of this module; daemons pass their own family
-#: logger and prefix (the notify convention: "memo.notify.<module>").
+#: logger and prefix (the notification convention: "memo.notification.<module>").
 logger = logging.getLogger("memo.util.process")
 
-#: Neutral default of the loop-failure prefix; the notify family passes
-#: its historical "notify dispatcher" so its log contract is unchanged.
+#: Neutral default of the loop-failure prefix; the notification family
+#: passes "notification dispatcher" so its log contract stays stable.
 DEFAULT_LOG_PREFIX = "process"
 
 
@@ -53,7 +54,7 @@ async def run_loop(
     KeyboardInterrupt propagate so shutdown stays correct.
 
     ``log_prefix`` parameterizes the failure line (#580 §3.6): the old
-    notify home had «notify dispatcher» hardcoded; every daemon now
+    notify home had its prefix hardcoded; every daemon now
     states its own attribution."""
     while not stop.is_set():
         try:

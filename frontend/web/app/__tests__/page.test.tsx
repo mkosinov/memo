@@ -114,7 +114,8 @@ const mockLocations = [
   { id: "loc-2", title: "Парк Горького", address: "ул. Крымский Вал, 9" },
 ];
 
-/** View-model photos as mapped from PhotoResponse (GH #479):
+/** View-model photos as mapped from PhotoPublicResponse via getPublicPhotos
+ * (/api/v1/public/photos, ADR-015 — GH #493):
  * caption = tag titles joined with " · ". */
 const mockGalleryPhotos = [
   { url: "/images/gallery-1.jpg", caption: "масло · акварель" },

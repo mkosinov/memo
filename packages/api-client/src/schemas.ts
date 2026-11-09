@@ -250,6 +250,15 @@ export const PhotoResponseSchema = z.object({
 
 export type PhotoResponse = z.infer<typeof PhotoResponseSchema>;
 
+/** #493: public gallery photo — minimal audience schema (ADR-015);
+ * tags are plain title strings (server resolves), never tag objects. */
+export const PhotoPublicResponseSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  tags: z.array(z.string()).default([]),
+});
+export type PhotoPublicResponse = z.infer<typeof PhotoPublicResponseSchema>;
+
 // ─── PhotoCreate (request body) ──────────────────────────────────────────
 // GH #211: 4-owner model — at most ONE of client_id/service_id/activity_id/
 // location_id may be non-null (server 422s on ≥2; visitor_id is gone).
@@ -1181,6 +1190,9 @@ export const VisitorListResponseSchema = paginatedSchema(VisitorResponseSchema);
 export const ClientListResponseSchema = paginatedSchema(ClientWithStatsSchema);
 export const PhotoListResponseSchema = paginatedSchema(PhotoResponseSchema);
 export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
+
+export const PhotoPublicListResponseSchema = paginatedSchema(PhotoPublicResponseSchema);
+export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSchema>;
 
 // GH #513 — the three client-cabinet /my lists (same {items, total, page,
 // per_page} envelope; per-endpoint item shapes above).

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -403,6 +403,26 @@ describe('getPhotos', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await getPhotos({ is_public: undefined, per_page: 12 });
     expect(api).toHaveBeenCalledWith('/api/v1/photos?per_page=12', expect.anything());
+  });
+});
+
+describe('getPublicPhotos (#493: /api/v1/public/photos)', () => {
+  it('calls the public route with pagination params', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 12 });
+    await getPublicPhotos({ per_page: 12 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/photos?per_page=12',
+      PhotoPublicListResponseSchema,
+    );
+  });
+
+  it('sends repeatable id params and omits empties', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 2, per_page: 20 });
+    await getPublicPhotos({ id: ['a', 'b'], page: 2, per_page: 20 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/photos?id=a&id=b&page=2&per_page=20',
+      PhotoPublicListResponseSchema,
+    );
   });
 });
 

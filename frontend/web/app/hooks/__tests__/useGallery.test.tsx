@@ -3,46 +3,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { Mock } from 'vitest';
 import { useGallery } from '../useGallery';
-import type { PhotoResponse } from '@memo/api-client';
+import type { PhotoPublicResponse } from '@memo/api-client';
 
 // ─── Mock @memo/api-client ─────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => ({
-  getPhotos: vi.fn(),
+  getPublicPhotos: vi.fn(),
 }));
 
-import { getPhotos } from '@memo/api-client';
+import { getPublicPhotos } from '@memo/api-client';
 
-const mockedGetPhotos = getPhotos as Mock;
+const mockedGetPublicPhotos = getPublicPhotos as Mock;
 
-/** Contract row factory — full PhotoResponse shape (GH #479 gallery migration). */
-function photoResponse(overrides: Partial<PhotoResponse> = {}): PhotoResponse {
-  return {
-    id: 'p1',
-    filename: '/images/gallery/p1.jpg',
-    client_id: null,
-    service_id: null,
-    activity_id: null,
-    location_id: null,
-    is_public: true,
-    tags: [],
-    client_name: null,
-    created_at: '2026-10-19T10:00:00Z',
-    updated_at: '2026-10-19T10:00:00Z',
-    ...overrides,
-  };
-}
-
-const contractPhotos: PhotoResponse[] = [
-  photoResponse({
-    id: 'p1',
-    filename: '/images/gallery/p1.jpg',
-    tags: [
-      { id: 't1', title: 'масло' },
-      { id: 't2', title: 'акварель' },
-    ],
-  }),
-  photoResponse({ id: 'p2', filename: 'images/gallery/p2.jpg' }),
-  photoResponse({ id: 'p3', filename: 'https://cdn.example.com/p3.jpg', tags: [{ id: 't1', title: 'масло' }] }),
+const contractPhotos: PhotoPublicResponse[] = [
+  { id: 'p1', filename: '/images/gallery/p1.jpg', tags: ['масло', 'акварель'] },
+  { id: 'p2', filename: 'images/gallery/p2.jpg', tags: [] },
+  { id: 'p3', filename: 'https://cdn.example.com/p3.jpg', tags: ['масло'] },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -59,12 +34,17 @@ function createWrapper() {
   };
 }
 
-// GH #479: public gallery rides getPhotos({ is_public: true, per_page: 12 })
-// on the ['photos', 'public'] react-query cache.
+// GH #493: the gallery rides the public route getPublicPhotos({ per_page: 12 })
+// on the ['photos', 'public'] react-query cache (ADR-015).
 describe('useGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetPhotos.mockResolvedValue({ items: contractPhotos, total: contractPhotos.length });
+    mockedGetPublicPhotos.mockResolvedValue({
+      items: contractPhotos,
+      total: contractPhotos.length,
+      page: 1,
+      per_page: 12,
+    });
   });
 
   it('fetches public photos and maps the paged envelope to view models', async () => {
@@ -76,8 +56,8 @@ describe('useGallery', () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(mockedGetPhotos).toHaveBeenCalledTimes(1);
-    expect(mockedGetPhotos).toHaveBeenCalledWith({ is_public: true, per_page: 12 });
+    expect(mockedGetPublicPhotos).toHaveBeenCalledTimes(1);
+    expect(mockedGetPublicPhotos).toHaveBeenCalledWith({ per_page: 12 });
     expect(result.current.photos).toStrictEqual([
       { id: 'p1', url: '/images/gallery/p1.jpg', caption: 'масло · акварель' },
       { id: 'p2', url: 'images/gallery/p2.jpg', caption: '' },
@@ -87,13 +67,15 @@ describe('useGallery', () => {
   });
 
   it('drops photos whose filename fails the url allowlist', async () => {
-    mockedGetPhotos.mockResolvedValue({
+    mockedGetPublicPhotos.mockResolvedValue({
       items: [
-        photoResponse({ id: 'ok', filename: '/images/ok.jpg' }),
-        photoResponse({ id: 'evil', filename: 'javascript:alert(1)' }),
-        photoResponse({ id: 'evil2', filename: '//evil.example.com/x.jpg' }),
+        { id: 'ok', filename: '/images/ok.jpg', tags: [] },
+        { id: 'evil', filename: 'javascript:alert(1)', tags: [] },
+        { id: 'evil2', filename: '//evil.example.com/x.jpg', tags: [] },
       ],
       total: 3,
+      page: 1,
+      per_page: 12,
     });
 
     const { result } = renderHook(() => useGallery(), {
@@ -110,7 +92,7 @@ describe('useGallery', () => {
   });
 
   it('empty page → empty photos, no error (section hides)', async () => {
-    mockedGetPhotos.mockResolvedValue({ items: [], total: 0 });
+    mockedGetPublicPhotos.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 12 });
 
     const { result } = renderHook(() => useGallery(), {
       wrapper: createWrapper(),
@@ -125,7 +107,7 @@ describe('useGallery', () => {
   });
 
   it('surfaces a failed fetch as error with an empty list', async () => {
-    mockedGetPhotos.mockRejectedValue(new Error('backend down'));
+    mockedGetPublicPhotos.mockRejectedValue(new Error('backend down'));
 
     const { result } = renderHook(() => useGallery(), {
       wrapper: createWrapper(),

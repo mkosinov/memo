@@ -48,7 +48,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Tests:** backend полный **3987p/0f/92s** (exit 0); Redis-контур
     (зеркало CI `notify-tests`) **76p/0f/1 env-skip**; mypy `src` **0**;
     lint-бюджет зелёный (ruff 111/111); visual gate N/A → exit 0.
-  - Status: `docs/status/2026-11-08-domain-events-service-580.md`
+     - Status: `docs/status/2026-11-08-domain-events-service-580.md`
+- **GH #493 — Публичный фото-контракт: `GET /api/v1/public/photos`
+  (минимальная per-audience-схема `PhotoPublicResponse`, первый резидент
+  ADR-015) + закрытие голых `GET /photos`/`GET /photos/{id}` от анонима
+  (`photos:read`)** — branch `493-photo-public-contract` (7 коммитов
+  `b0110abf..b901a651`, base `f02b474a`; 25 файлов, +456/−161; спека
+  `docs/specs/2026-11-08-photo-public-contract-design.md` рев.3, план
+  `docs/plans/2026-11-08-photo-public-contract-plan.md` 6/6 — оба на main,
+  unchanged by IMPL; ADR-015
+  (`docs/decisions/015-api-url-audience-namespaces.md`) уже на main):
+  - **Публичная витрина (T1, `b0110abf`, standard):** `GET
+    /api/v1/public/photos` — пагинированный список только публичных фото
+    (`is_public=True` принудителен на сервере и не параметр,
+    зафиксированный сорт `created_at desc, id asc`, владельческие фильтры
+    не проводятся, неизвестные query-параметры игнорируются); минимальная
+    per-audience-схема `PhotoPublicResponse` (`id`/`filename`/теги —
+    строки-заголовки, никогда админ-контракт — прецедент `MyPhotoItem`);
+    свободная функция `list_public_photos_view`; явная запись в allowlist
+    `PUBLIC_ROUTES` (default-deny сохранён).
+  - **Голые GET закрыты (T2, `e036a88d`, standard):** `GET /photos` и
+    `GET /photos/{id}` под `require_permission("photos:read")` — аноним
+    → 401; фото-словарь убран из allowlist `PUBLIC_ROUTES`; скоуп-сужение
+    вошедшего мастера сохранено (`get_optional_scope`); сателлит
+    `8ae17758` — устаревшие public-posture докстринги тестов переведены
+    на `/api/v1/public/photos`.
+  - **api-client (T3, `59ba1a04`, standard):** `PhotoPublicResponseSchema`
+    / `PhotoPublicListResponseSchema` + `getPublicPhotos`
+    (`id[]`/`page`/`per_page`).
+  - **Web-галерея (T4, `a9561b44`, standard):** `useGallery` переведён на
+    `getPublicPhotos`, маппер `to-gallery-vm` (подписи из тегов), юниты
+    хука/маппера/страницы обновлены.
+  - **Чистка (T5, `05aef55d`, trivial):** устаревший wiring-комментарий в
+    `records.py` указывает на #499.
+  - **Domain rules + верификация (T6, `b901a651`, small):**
+    `docs/domain-rules/photos.md` (публичная витрина) и `auth.md`
+    (`photos` убран из анонимного перечисления).
+  - **Tests:** backend полный pytest **3954p/71s/0f** (exit 0),
+    lint-бюджет зелёный (mypy 0); api-client **571/571** + tsc чист +
+    build чист; web **493/493** + tsc чист; визуальный гейт **exit 0**
+    (секция §7 спеки = N/A); сценарии 1–5 спеки покрыты тестами (4–5 —
+    существующими admin/master-сьютами).
+   - Status: `docs/status/2026-11-08-photo-public-contract-493.md`
 
 ## [Unreleased] — 2026-10-25
 

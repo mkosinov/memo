@@ -12,8 +12,8 @@ Spec §3.7's access matrix exercised end-to-end through the real app:
   ``clients:write`` (spec §2.5: read-only payments + clients, no
   materials);
 * public surface intact (User Scenario 5): anonymous dictionary GETs →
-  200 (the gallery rides ``GET /api/v1/photos?is_public=true`` — GH #479
-  Изменение 4 retired the ``/photos/web`` showcase);
+  200; the photo showcase rides ``GET /api/v1/public/photos`` (ADR-015;
+  bare photo GETs are staff-only since GH #493 — ``photos:read``);
   ``POST /api/v1/records`` is CLOSED since GH #479 — anonymous → 401,
   the full contract is staff-only (``records:write``);
 * Sec-Fetch-Site (User Scenario 6): an authenticated mutation with
@@ -89,7 +89,9 @@ _PUBLIC_GETS = [
     "/api/v1/services",
     "/api/v1/tags",
     "/api/v1/activities",
-    "/api/v1/photos",
+    # GH #493: the anonymous photo showcase lives at /public/photos —
+    # bare ``GET /api/v1/photos`` is guarded now (photos:read).
+    "/api/v1/public/photos",
     "/api/v1/health",
 ]
 

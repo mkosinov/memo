@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GuestGallery } from "../sections/GuestGallery";
 
-/** View-model photos as mapped from PhotoResponse (GH #479):
- * url = allowlisted filename, caption = tag titles joined with " · ". */
+/** View-model photos as mapped from PhotoPublicResponse via getPublicPhotos
+ * (/api/v1/public/photos, ADR-015 — GH #493): url = allowlisted filename,
+ * caption = tag titles joined with " · ". */
 const SAMPLE_PHOTOS = [
   { url: "/images/gallery/p1.jpg", caption: "масло · акварель" },
   { url: "/images/gallery/p2.jpg", caption: "акрил" },

@@ -103,13 +103,15 @@
 #                        wiped storage; silently reusing a foreign
 #                        answering instance is forbidden (payloads carry
 #                        PII).
-#                      - the notify DISPATCHER and WORKER run as child
-#                        processes (.venv/bin/python -m
-#                        src.notify.dispatcher / src.notify.worker,
+#                      - the notify DISPATCHER and WORKER, plus the #580
+#                        domain-events RELAY (the journal→stream XADD leg
+#                        the S1 chain needs), run as child processes
+#                        (.venv/bin/python -m src.notify.dispatcher /
+#                        src.notify.worker / src.domain_events.relay,
 #                        exec'd like dev.sh so TERM reaches them —
 #                        worker-484 spec §3.8);
 #                      - the trap cleanup is extended to the new
-#                        children (dispatcher, worker, redis).
+#                        children (dispatcher, worker, relay, redis).
 #                    Unset/empty → byte-identical legacy shard behavior:
 #                    every enabled-mode branch is behind the flag (S2).
 #
@@ -145,6 +147,7 @@ set -euo pipefail
 REDIS_PID=""
 DISPATCHER_PID=""
 WORKER_PID=""
+RELAY_PID=""
 NOTIFY_E2E_ENABLED="${NOTIFY_E2E_ENABLED:-}"
 case "$NOTIFY_E2E_ENABLED" in
   ""|1) ;;
@@ -403,6 +406,8 @@ rm -rf "$ABS_FILES_DIR"
 # "telegram".
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   export NOTIFY_ENABLED=true
+  # The relay gate mirrors NOTIFY_ENABLED (#580 §4.5) — export it or the child exits 0.
+  export DOMAIN_EVENTS_ENABLED=true
   export NOTIFY_CHANNEL_PRIORITY=mock,mock2
   if [ -n "${REDIS_URL:-}" ]; then
     echo "[notify-e2e] REDIS_URL set explicitly — not starting a local redis-server"
@@ -439,11 +444,13 @@ cleanup() {
   # 9c78076f).
   [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
   [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+  [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
   [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
   [ -n "$WORKER_PID" ] && wait "$WORKER_PID" 2>/dev/null || true
+  [ -n "$RELAY_PID" ] && wait "$RELAY_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   remove_own_lease
 }
@@ -532,7 +539,10 @@ python3 "$ROOT_DIR/scripts/gen_seed_canon.py" "$ABS_DB_PATH" "$ABS_DB_PATH.canon
 # is the second consumer child: it inherits DATABASE_URL (unused — ADR
 # 009), REDIS_URL, NOTIFY_ENABLED and NOTIFY_CHANNEL_PRIORITY=mock,mock2
 # (the export of the transport block above). ENV_FILE matches the backend's
-# own launch env below.
+# own launch env below. The #580 domain-events relay is the third consumer
+# child (dev.sh parity): the journal→stream XADD leg — without it the S1
+# chain (journal mark → relay XADD → dispatcher group consumer → task row)
+# can never complete.
 if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   echo "[notify-e2e] Starting notify dispatcher..."
   (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.notify.dispatcher) &
@@ -542,6 +552,10 @@ if [ "$NOTIFY_E2E_ENABLED" = "1" ]; then
   (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.notify.worker) &
   WORKER_PID=$!
   echo "[notify-e2e] Worker PID: $WORKER_PID"
+  echo "[notify-e2e] Starting domain events relay..."
+  (cd "$BACKEND_DIR" && ENV_FILE=.env.test exec .venv/bin/python -m src.domain_events.relay) &
+  RELAY_PID=$!
+  echo "[notify-e2e] Relay PID: $RELAY_PID"
 fi
 
 
@@ -570,6 +584,7 @@ _orig_cleanup() {
   # never abort cleanup mid-way (dev.sh 9c78076f precedent).
   [ -n "$DISPATCHER_PID" ] && kill "$DISPATCHER_PID" 2>/dev/null || true
   [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+  [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && kill "$REDIS_PID" 2>/dev/null || true
   kill "$FRONTEND_PID" 2>/dev/null || true
   kill "$BACKEND_PID" 2>/dev/null || true
@@ -577,6 +592,7 @@ _orig_cleanup() {
   wait "$BACKEND_PID" 2>/dev/null || true
   [ -n "$DISPATCHER_PID" ] && wait "$DISPATCHER_PID" 2>/dev/null || true
   [ -n "$WORKER_PID" ] && wait "$WORKER_PID" 2>/dev/null || true
+  [ -n "$RELAY_PID" ] && wait "$RELAY_PID" 2>/dev/null || true
   [ -n "$REDIS_PID" ] && wait "$REDIS_PID" 2>/dev/null || true
   _sweep_masked STACK_FRONTEND_PORTS "next dev -p $SHARD_PORT" "next dev -p $SHARD_PORT" "next-server (v"
   _sweep_masked STACK_FRONTEND_PORTS "next-server" "next dev -p $SHARD_PORT" "next-server (v"

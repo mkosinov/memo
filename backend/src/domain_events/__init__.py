@@ -3,8 +3,9 @@
 The PRODUCER seam of the domain-events service: ``@transactional``
 inserts staged event rows into the same transaction as the domain
 change (``journal``), and the declarative type registry (``types``)
-validates every mark. The relay (``relay``) and the public subscription
-API (``subscribe``) arrive with later plan tasks (#580 Tasks 4-5).
+validates every mark. The relay (``relay`` — the journal→stream
+process, #580 Task 4) is live; the public subscription API
+(``subscribe``) arrives with #580 Task 5.
 
 Import direction (domain rules): this package never imports notify;
 notify imports it (transitional re-export of ``DomainEvent`` until the

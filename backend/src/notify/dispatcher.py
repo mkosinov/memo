@@ -69,10 +69,10 @@ from src.core.config import settings
 from src.db.database import DBManager
 from src.notify.channels.registry import parse_channel_priority
 from src.notify.models import NotifyTask, NotifyTaskAttempt
-from src.notify.process import install_signal_handlers, run_loop
 from src.notify.queue import InboundEvent, TaskPayload, build_task_payload
 from src.notify.redis_queue import NotifyTransportError, connect_or_exit
 from src.notify.render import find_template
+from src.util.process import install_signal_handlers, run_loop
 from src.util.utc import utc_now
 
 if TYPE_CHECKING:
@@ -497,8 +497,8 @@ async def inbound_once(queue: NotifyQueue) -> None:
         await asyncio.to_thread(queue.ack_inbound, item)
 
 
-# ── concurrency model: loops + stop (§3.7 — run_loop/signals live in
-# src/notify/process.py; §3.8) ───────────────────────────────────────────────
+# ── concurrency model: loops + stop (§3.7 — run_loop/signals moved to
+# src/util/process.py by #580 Task 4; §3.8) ──────────────────────────────────
 
 
 async def run_dispatcher(
@@ -529,9 +529,36 @@ async def run_dispatcher(
         await inbound_once(queue)
 
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(run_loop("reenqueue", stop, interval, reenqueue_iteration, log=logger))
-        tg.create_task(run_loop("statuses", stop, interval, statuses_iteration, log=logger))
-        tg.create_task(run_loop("inbound", stop, interval, inbound_iteration, log=logger))
+        tg.create_task(
+            run_loop(
+                "reenqueue",
+                stop,
+                interval,
+                reenqueue_iteration,
+                log=logger,
+                log_prefix="notify dispatcher",
+            )
+        )
+        tg.create_task(
+            run_loop(
+                "statuses",
+                stop,
+                interval,
+                statuses_iteration,
+                log=logger,
+                log_prefix="notify dispatcher",
+            )
+        )
+        tg.create_task(
+            run_loop(
+                "inbound",
+                stop,
+                interval,
+                inbound_iteration,
+                log=logger,
+                log_prefix="notify dispatcher",
+            )
+        )
 
 
 # ── process entry ───────────────────────────────────────────────────────────

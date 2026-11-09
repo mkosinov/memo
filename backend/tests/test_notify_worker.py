@@ -297,6 +297,7 @@ class TestStartupWiring:
             interval: float,
             iteration: Callable[[], object],
             log: object = None,
+            log_prefix: object = None,
         ) -> None:
             return None
 
@@ -325,6 +326,7 @@ class TestStartupWiring:
             interval: float,
             iteration: Callable[[], object],
             log: object = None,
+            log_prefix: object = None,
         ) -> None:
             queue.duty_calls.append(f"run_loop:{name}")
             ran.update(name=name, stop=stop, interval=interval, log=log)
@@ -373,6 +375,7 @@ class TestStartupWiring:
             interval: float,
             iteration: Callable[[], object],
             log: object = None,
+            log_prefix: object = None,
         ) -> None:
             return None
 
@@ -407,6 +410,7 @@ class TestStartupWiring:
             interval: float,
             iteration: Callable[[], object],
             log: object = None,
+            log_prefix: object = None,
         ) -> None:
             return None
 

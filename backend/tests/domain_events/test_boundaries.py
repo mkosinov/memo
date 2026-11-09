@@ -60,8 +60,7 @@ def _package_of(py: Path) -> list[str]:
     package the init belongs to)."""
     rel = py.relative_to(SRC_DIR).with_suffix("")
     parts = ["src", *rel.parts]
-    if parts[-1] != "__init__":
-        parts.pop()
+    parts.pop()  # module name — or `__init__`: either way, the containing package
     return parts
 
 
@@ -88,9 +87,9 @@ def _imported_targets(py: Path) -> list[tuple[str, int]]:
                 if drop > len(package):
                     continue  # relative import above src/ — not ours
                 prefix = ".".join(package[: len(package) - drop])
-            targets += [
-                (f"{prefix}.{alias.name}", node.lineno) for alias in node.names
-            ]
+                if node.module:  # `from ..pkg.mod import X` keeps pkg.mod in path
+                    prefix += f".{node.module}"
+            targets += [(f"{prefix}.{alias.name}", node.lineno) for alias in node.names]
     return targets
 
 
@@ -107,9 +106,7 @@ def _seam_submodule(target: str, package: str) -> str | None:
     return None
 
 
-def _violations(
-    py: Path, package: str, allowed: frozenset[str] | None
-) -> list[str]:
+def _violations(py: Path, package: str, allowed: frozenset[str] | None) -> list[str]:
     """Offending imports of ``package`` in ``py`` against ``allowed``.
 
     ``allowed=None`` — any touch of ``package`` is a violation.
@@ -196,9 +193,7 @@ class TestConsumerSeamAllowlists:
         for py in _src_files():
             rel = py.relative_to(SRC_DIR)
             if rel.parts[0] == "models":
-                offenders += _violations(
-                    py, DOMAIN_EVENTS, MODELS_REGISTRATION
-                )
+                offenders += _violations(py, DOMAIN_EVENTS, MODELS_REGISTRATION)
         assert not offenders, (
             "src/models touches src/domain_events for model registration "
             f"only ({sorted(MODELS_REGISTRATION)}): {offenders}"

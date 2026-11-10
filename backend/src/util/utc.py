@@ -6,7 +6,7 @@ def utc_now() -> datetime:
 
     Для мгновений (TTL, отметки создания/обновления, журнал, аудит).
     не для настенного времени расписания: там своё время —
-    src/notify/time.py::business_now() (бизнес-зона, тоже наивное).
+    src/notification/time.py::business_now() (бизнес-зона, тоже наивное).
     Осведомлённое время и пояса — #498; до него значения наивные.
     """
     return datetime.now(UTC).replace(tzinfo=None)

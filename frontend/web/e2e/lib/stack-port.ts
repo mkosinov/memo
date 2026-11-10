@@ -5,7 +5,7 @@
  * scripts/test-e2e.sh) from the dynamic 28000-32700 window
  * (dev-workflow port canon). The standalone fallback (3007) is chosen
  * OFF every reserved range: 3002-3005 (admin shards), 3006/8005 (the
- * enabled notify e2e pair), 3100/3101 (playground — NEVER touch), and
+ * enabled notification e2e pair), 3100/3101 (playground — NEVER touch), and
  * legacy 3000/8000 (#499 dev pair) — the admin standalone lesson
  * (default :3002 silently reused a live shard's server, GH #387).
  *

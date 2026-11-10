@@ -52,8 +52,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from sqlalchemy import and_, func, or_, select
 
-# ``import src.models`` FIRST — registration breaks the models↔notify
-# import cycle (``src/models/__init__`` pulls notify models; the old
+# ``import src.models`` FIRST — registration breaks the models↔notification
+# import cycle (``src/models/__init__`` pulls notification models; the old
 # ``DomainEvent`` re-export there died with #580 Task 6).
 import src.models  # noqa: F401
 from src.core.config import settings
@@ -77,7 +77,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("memo.domain_events.relay")
 
 #: Relay batch (spec §3.3): rows per tick — deliberately a module
-#: constant, NOT a setting (the batch/policy precedent of notify).
+#: constant, NOT a setting (the batch/policy precedent of notification).
 POLL_BATCH_SIZE = 20
 
 #: Stable fail-fast message of the relay's transport gate; the URL value

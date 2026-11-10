@@ -17,10 +17,10 @@
  *   - `audit_logs` — append-only journal, never wiped;
  *   - `sessions`   — the auth-cookie invariant (GH #252 §3.1): storageState
  *                    logins from globalSetup must survive per-test resets;
- *   - `domain_events`, `notify_tasks`, `notify_task_attempts` — the
- *                    nondeterministic notify journal chain (#482 §5),
+ *   - `domain_events`, `notification_tasks`, `notification_task_attempts` — the
+ *                    nondeterministic notification journal chain (#482 §5),
  *                    blacklisted from the canon like `audit_logs`
- *                    (`notify_templates` stays: deterministic seed).
+ *                    (`notification_templates` stays: deterministic seed).
  *
  * The canon file is data-only (DELETE + INSERT in one transaction with
  * `BEGIN IMMEDIATE`, so the write lock is taken up front — no WAL upgrade

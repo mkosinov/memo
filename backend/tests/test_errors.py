@@ -83,7 +83,7 @@ class TestErrorCodeEnum:
             "PHONE_INVALID",               # 422 — create/edit: blank or over 20 chars after trim
             "USER_NOT_FOUND",              # 404 — /users/{id} отсутствует
             # GH #499 — client booking (§4.2/§5)
-            "NOTIFY_TRANSPORT_UNAVAILABLE",  # 503 — OTP transport not configured (fail-closed)
+            "NOTIFICATION_TRANSPORT_UNAVAILABLE",  # 503 — OTP transport not configured (fail-closed)
             "TARIFF_REQUIRED",               # 422 — paid service, visit without tariff_id
             "TARIFF_NOT_FOUND",              # 422 — tariff_id foreign to the activity's service
         }

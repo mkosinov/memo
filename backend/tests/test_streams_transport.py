@@ -3,19 +3,19 @@
 
 The core's ``autoclaim`` is a RAW PEL transfer: claimed entries move to
 the calling consumer's PEL and are handed to the caller as stored — the
-core NEVER re-XADDs them back to the stream. Notify's ``RedisQueue``
+core NEVER re-XADDs them back to the stream. Notification's ``RedisQueue``
 wraps the transfer with re-XADD + ack for its fresh-delivery semantics;
 the #580 subscribers redeliver by processing the claimed entry directly
 (a re-XADD on every reclaim would churn the relay stream, spec §3.6).
 
 Marked ``redis`` with the declarative ``skipif`` guard over
-``REDIS_URL``; per-test key-prefix workspace (tests/notify_redis_support).
+``REDIS_URL``; per-test key-prefix workspace (tests/notification_redis_support).
 """
 
 import json
 
 from src.streams.transport import ENVELOPE_KEY, PAYLOAD_FIELD, StreamTransport
-from tests.notify_redis_support import (
+from tests.notification_redis_support import (
     RedisContour,
     contour_fixture,
     make_status,
@@ -30,7 +30,7 @@ contour = contour_fixture()  # per-test isolated workspace (GH #483 §3.6)
 
 def _core(contour: RedisContour, **kwargs: object) -> StreamTransport:
     """A core transport bound to this test's key prefix — generic stream
-    names (the core knows no notify vocabulary)."""
+    names (the core knows no notification vocabulary)."""
     return StreamTransport(redis_url(), key_prefix=contour.prefix, **kwargs)
 
 
@@ -42,7 +42,7 @@ class TestRawAutoclaim:
         to the CALLER via XAUTOCLAIM — the stream entry count must not
         grow (no re-XADD in the core), the entry stays unacked in the
         new consumer's PEL (ack is the caller's decision)."""
-        stream_name = "notify:statuses"  # any name — the core is generic
+        stream_name = "notification:statuses"  # any name — the core is generic
         group = "dispatcher"
         dead = _core(contour, consumer_name="core-dead")
         dead.ensure_group(stream_name, group)

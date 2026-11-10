@@ -452,7 +452,7 @@ describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
 
   it("shows «Вход временно недоступен» when the transport is down (503)", async () => {
     mockedRequestOtpCode.mockRejectedValue(
-      new ApiError(503, "notify transport unavailable", "NOTIFY_TRANSPORT_UNAVAILABLE"),
+      new ApiError(503, "notification transport unavailable", "NOTIFICATION_TRANSPORT_UNAVAILABLE"),
     );
     renderOverlay();
 

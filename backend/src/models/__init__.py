@@ -41,10 +41,10 @@ from src.models.user_profile import UserProfile
 from src.models.user_settings import UserSettings
 from src.models.visit import Visit
 from src.models.visitor import Visitor
-from src.notify.models import (  # noqa: F401 — bare registration import (#482)
-    NotifyTask,
-    NotifyTaskAttempt,
-    NotifyTemplate,
+from src.notification.models import (  # noqa: F401 — bare registration import (#482)
+    NotificationTask,
+    NotificationTaskAttempt,
+    NotificationTemplate,
 )
 
 __all__ = [

@@ -42,27 +42,27 @@ class Settings(BaseSettings):
     # only under the exact ``ENV == "development"`` (staging/preview
     # stay 503). The production transport arrives with #476/#485.
     OTP_TRANSPORT: str = ""
-    # ── Notify subsystem (#482 part 1, spec §3.9; family #476 §4.5) ──────
+    # ── Notification subsystem (#482 part 1, spec §3.9; family #476 §4.5) ─
     # Disabled by default: nothing boots until the stack opts in (the
     # dispatcher process arrives in part 2).
-    NOTIFY_ENABLED: bool = False
+    NOTIFICATION_ENABLED: bool = False
     # Seconds; dispatcher journal-polling interval (spec §3.8).
-    NOTIFY_POLL_INTERVAL: int = 1
+    NOTIFICATION_POLL_INTERVAL: int = 1
     # CSV without spaces, case-insensitive; order = channel priority.
-    NOTIFY_CHANNEL_PRIORITY: str = "telegram"
+    NOTIFICATION_CHANNEL_PRIORITY: str = "telegram"
     # Seconds; a queued task older than this is re-enqueued (spec §3.8).
-    NOTIFY_REENQUEUE_AFTER: int = 120
+    NOTIFICATION_REENQUEUE_AFTER: int = 120
     #: Max send attempts per channel in the delivery worker — transport
     #: failures only (family #476 §4.5; part 3, GH #484).
-    NOTIFY_SEND_RETRIES: int = 3
-    # Transport endpoint for the notify queue — Redis Streams (part 2,
+    NOTIFICATION_SEND_RETRIES: int = 3
+    # Transport endpoint for the notification queue — Redis Streams (part 2,
     # spec §3.3). Empty = transport not configured. SecretStr: the URL
     # carries credentials and must never surface in repr/logs/errors.
     REDIS_URL: SecretStr = SecretStr("")
     # ── The domain-events relay (#580, spec §4.4) ─────────────────────────
     # Gate of the relay process ``python -m src.domain_events.relay`` —
-    # a deliberate mirror of ``NOTIFY_ENABLED``: off by default, the
-    # contour opts in (dev.sh --notify exports it).
+    # a deliberate mirror of ``NOTIFICATION_ENABLED``: off by default, the
+    # contour opts in (dev.sh --notification exports it).
     DOMAIN_EVENTS_ENABLED: bool = False
     # Seconds; the relay tick (spec §3.3) — the depth of the unpublished
     # tail is drained in POLL_BATCH_SIZE batches every interval.
@@ -94,15 +94,15 @@ class Settings(BaseSettings):
     BUSINESS_TIMEZONE: str = "Europe/Moscow"
 
     @model_validator(mode="after")
-    def _force_notify_off_in_testing(self) -> "Settings":
-        """The testing profile never runs the enabled notify subsystem
+    def _force_notification_off_in_testing(self) -> "Settings":
+        """The testing profile never runs the enabled notification subsystem
         (family #476 §3.3, US-7): a standard pytest pass must not require
-        Redis. An accidental ``NOTIFY_ENABLED=true`` is forced off — and
+        Redis. An accidental ``NOTIFICATION_ENABLED=true`` is forced off — and
         so is ``DOMAIN_EVENTS_ENABLED`` (the #580 relay mirror of the
         same gate)."""
         if self.ENV == "testing":
-            if self.NOTIFY_ENABLED:
-                self.NOTIFY_ENABLED = False
+            if self.NOTIFICATION_ENABLED:
+                self.NOTIFICATION_ENABLED = False
             if self.DOMAIN_EVENTS_ENABLED:
                 self.DOMAIN_EVENTS_ENABLED = False
         return self
@@ -137,28 +137,28 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_redis_url_in_production(self) -> "Settings":
-        """An enabled production notify subsystem demands an authenticated
+        """An enabled production notification subsystem demands an authenticated
         TLS transport: ``rediss://`` with credentials (GH #483 spec §3.3 —
         unencrypted and unauthenticated are rejected alike). Error
         messages state the requirement only — never the URL value."""
-        if self.ENV != "production" or not self.NOTIFY_ENABLED:
+        if self.ENV != "production" or not self.NOTIFICATION_ENABLED:
             return self
         url = self.REDIS_URL.get_secret_value()
         if not url:
             raise ValueError(
                 "REDIS_URL must be set when ENV=production and "
-                "NOTIFY_ENABLED=true (notify transport not configured)"
+                "NOTIFICATION_ENABLED=true (notification transport not configured)"
             )
         parsed = urlparse(url)
         if parsed.scheme != "rediss":
             raise ValueError(
                 "REDIS_URL must use rediss:// (TLS) when ENV=production "
-                "and NOTIFY_ENABLED=true"
+                "and NOTIFICATION_ENABLED=true"
             )
         if not (parsed.username or parsed.password):
             raise ValueError(
                 "REDIS_URL must include credentials when ENV=production "
-                "and NOTIFY_ENABLED=true"
+                "and NOTIFICATION_ENABLED=true"
             )
         return self
 

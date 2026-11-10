@@ -40,16 +40,16 @@ _ensure_port_free() {
 # ── Parse arguments ────────────────────────────────────────────────
 RESTART=false
 ADMIN_MODE=false
-NOTIFY_MODE=false
+NOTIFICATION_MODE=false
 for arg in "$@"; do
     case "$arg" in
         -r|--restart) RESTART=true ;;
         --admin|-a)   ADMIN_MODE=true ;;
-        --notify)     NOTIFY_MODE=true ;;
+        --notification) NOTIFICATION_MODE=true ;;
     esac
 done
 
-# Notify child PIDs (--notify section below); empty when the flag is off
+# Notification child PIDs (--notification section below); empty when the flag is off
 REDIS_PID=""
 DISPATCHER_PID=""
 WORKER_PID=""
@@ -90,27 +90,27 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# ── Notify contour (--notify, spec §3.5) ──────────────────────────
-# The notify contour uses a DEDICATED Redis: silently reusing someone
+# ── Notification contour (--notification, spec §3.5) ───────────────
+# The notification contour uses a DEDICATED Redis: silently reusing someone
 # else's answering instance is forbidden (stream payloads carry PII).
-if $NOTIFY_MODE; then
-    export NOTIFY_ENABLED=true
+if $NOTIFICATION_MODE; then
+    export NOTIFICATION_ENABLED=true
     # The domain-events relay (#580 §4.5) rides the same contour: its
-    # own gate mirrors NOTIFY_ENABLED — export it or the child exits 0.
+    # own gate mirrors NOTIFICATION_ENABLED — export it or the child exits 0.
     export DOMAIN_EVENTS_ENABLED=true
     # Until part 4 the part-3 registry knows ONLY the mock channel (spec
     # §3.3): without this export the worker's loud registry check stops it
     # on the default priority "telegram". Contours drop the export when a
     # real channel lands.
-    export NOTIFY_CHANNEL_PRIORITY=mock
+    export NOTIFICATION_CHANNEL_PRIORITY=mock
     if [ -n "${REDIS_URL:-}" ]; then
         # Explicit REDIS_URL — a conscious choice of another instance:
         # no port check, no own redis-server.
-        echo -e "${BLUE}Notify: REDIS_URL set explicitly — not starting a local redis-server${NC}"
+        echo -e "${BLUE}Notification: REDIS_URL set explicitly — not starting a local redis-server${NC}"
     else
         export REDIS_URL="redis://localhost:6379/0"
         if _port_in_use 6379; then
-            echo -e "${YELLOW}  ✗ Port 6379 already in use — notify contour cannot start${NC}" >&2
+            echo -e "${YELLOW}  ✗ Port 6379 already in use — notification contour cannot start${NC}" >&2
             echo -e "${YELLOW}    Free the port or set REDIS_URL explicitly (a conscious choice of another instance)${NC}" >&2
             exit 1
         fi
@@ -145,16 +145,16 @@ if _ensure_port_free 8000; then
     BACKEND_PID=$!
 fi
 
-# ── Start notify dispatcher + worker + events relay (--notify) ─────
+# ── Start notification dispatcher + worker + events relay (--notification) ─
 # Spawned via the project venv python with `exec` so $! is the real
 # process: `uv run` does not forward SIGTERM to its child, which would
 # orphan the dispatcher/worker/relay on stack shutdown.
-if $NOTIFY_MODE; then
-    echo -e "${BLUE}Starting notify dispatcher...${NC}"
-    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.dispatcher) &
+if $NOTIFICATION_MODE; then
+    echo -e "${BLUE}Starting notification dispatcher...${NC}"
+    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notification.dispatcher) &
     DISPATCHER_PID=$!
-    echo -e "${BLUE}Starting notify worker...${NC}"
-    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notify.worker) &
+    echo -e "${BLUE}Starting notification worker...${NC}"
+    (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.notification.worker) &
     WORKER_PID=$!
     echo -e "${BLUE}Starting domain events relay...${NC}"
     (cd "$BACKEND_DIR" && ENV_FILE=.env.dev exec .venv/bin/python -m src.domain_events.relay) &
@@ -184,8 +184,8 @@ echo -e "${GREEN}  Web:       http://localhost:3000${NC}"
 if [ -n "$ADMIN_PID" ]; then
     echo -e "${GREEN}  Admin:     http://localhost:3001${NC}"
 fi
-if $NOTIFY_MODE; then
-    echo -e "${GREEN}  Notify:    dispatcher + worker + events relay${NC}"
+if $NOTIFICATION_MODE; then
+    echo -e "${GREEN}  Notification: dispatcher + worker + events relay${NC}"
 fi
 echo -e "${GREEN}  API docs:  http://localhost:8000/docs${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

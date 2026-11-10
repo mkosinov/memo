@@ -12,7 +12,7 @@ A Record is data that comes from the booking flow. It links a Client to an Activ
 | seats | integer | ✅ | — | — | — | Computed: len(visits), never set by user |
 | comment | string | ❌ | — | — | null | Комментарий |
 | custom_price | integer | ❌ | — | — | null | Override price (replaces sum of visit prices) |
-| notify | boolean | ❌ | — | — | false | «отправлять оповещения» (#482): fixed at creation — saved as `true` ONLY when an audit actor is in context (anonymous booking → `false`); never edited after creation; read live by the notify dispatcher. Internal state: not exposed in API responses |
+| notify | boolean | ❌ | — | — | false | «отправлять оповещения» (#482): fixed at creation — saved as `true` ONLY when an audit actor is in context (anonymous booking → `false`); never edited after creation; read live by the notification dispatcher. Internal state: not exposed in API responses |
 | visits | array | ✅ | — | — | — | List of VisitItems |
 
 An **anonymous visit** is a VisitItem with neither `name` nor `visitor_id`: it is created as a Visit row with `visitor_id = NULL` (#257) and carries a real tariff/price/status like any other visit — there is no separate counter field anymore.

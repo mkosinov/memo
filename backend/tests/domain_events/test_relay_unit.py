@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import src.models  # noqa: F401 — registration first; breaks the models↔notify import cycle
+import src.models  # noqa: F401 — registration first; breaks the models↔notification import cycle
 from src.domain_events import relay
 from src.domain_events.models import DomainEvent
 from src.streams.transport import StreamTransportError

@@ -1,8 +1,8 @@
 """GH #580 Task 4 (spec §3.3/§4.4) — the relay process entry ``main()``
 and the ``DOMAIN_EVENTS_*`` settings.
 
-Mirrors the notify dispatcher's gate tests (``TestMain`` /
-``TestMainTransportGates`` of ``test_notify_dispatcher.py``):
+Mirrors the notification dispatcher's gate tests (``TestMain`` /
+``TestMainTransportGates`` of ``test_notification_dispatcher.py``):
 
 - disabled (``DOMAIN_EVENTS_ENABLED=false``, the default) → log and
   return WITHOUT touching the transport;
@@ -11,7 +11,7 @@ Mirrors the notify dispatcher's gate tests (``TestMain`` /
 - adapter selection: no injected transport → ``connect_or_exit`` over
   the unwrapped ``REDIS_URL``; the transport it builds is what the loop
   runs;
-- the settings mirror ``NOTIFY_ENABLED``: default off, and the testing
+- the settings mirror ``NOTIFICATION_ENABLED``: default off, and the testing
   profile forces an accidental opt-in off (a standard pytest pass must
   not require Redis — family US-7/S2).
 """
@@ -39,7 +39,7 @@ _LOGGER_NAME = "memo.domain_events.relay"
 
 class _ListHandler(logging.Handler):
     """In-memory sink — caplog is unusable in this repo (see
-    tests/test_notify_dispatcher.py for the alembic fileConfig story)."""
+    tests/test_notification_dispatcher.py for the alembic fileConfig story)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -152,7 +152,7 @@ class TestMainGate:
 
 
 class TestDomainEventsSettings:
-    def test_defaults_mirror_notify_gate(self) -> None:
+    def test_defaults_mirror_notification_gate(self) -> None:
         s = Settings(_env_file=None, ENV="development")
         assert s.DOMAIN_EVENTS_ENABLED is False
         assert s.DOMAIN_EVENTS_POLL_INTERVAL == 1.0

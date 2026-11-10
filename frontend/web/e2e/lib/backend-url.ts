@@ -34,7 +34,7 @@ const CANONICAL_RECIPE = [
   '    cd frontend/web && WEB_PORT=3007 BACKEND_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 \\',
   '      TEST_DB_PATH=backend/test_memo.db pnpm exec playwright test',
   'Both URL vars, same host; WEB_PORT stays off the admin shard ports (3002-3005),',
-  'the notify pair (3006/8005), the playground (3100/3101) and legacy dev (3000/8000) front ports.',
+  'the notification pair (3006/8005), the playground (3100/3101) and legacy dev (3000/8000) front ports.',
   'OTP_TRANSPORT=dev is REQUIRED: without a transport the code request is fail-closed 503 (#499 §4.2).',
 ].join('\n');
 

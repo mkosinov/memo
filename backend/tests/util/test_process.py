@@ -1,10 +1,10 @@
 """GH #580 Task 4 (spec §3.3/§3.6) — the shared process mechanics moved
 from ``src/notify/process.py`` to the neutral ``src/util/process.py``.
 
-``run_loop`` gains a PARAMETERIZED log prefix (the notify home had
-«notify dispatcher» hardcoded into the failure line); notify passes its
-historical prefix so its log contract is unchanged, the domain-events
-relay passes its own. ``install_signal_handlers`` moves verbatim.
+``run_loop`` gains a PARAMETERIZED log prefix (the prefix was hardcoded
+into the failure line at the old home); the notification family passes
+«notification dispatcher», the domain-events relay passes its own.
+``install_signal_handlers`` moves verbatim.
 """
 
 from __future__ import annotations
@@ -62,8 +62,8 @@ class TestRunLoop:
     async def test_crashing_iteration_is_isolated_and_logged_with_prefix(
         self,
     ) -> None:
-        """One crash is logged with the CALLER's prefix (spec §3.6: the
-        prefix was hardcoded «notify dispatcher» at the old home) and
+        """One crash is logged with the CALLER's prefix (spec §3.6: at
+        the old home the failure line carried one hardcoded prefix) and
         never kills the loop — the next iteration still runs."""
         stop = asyncio.Event()
         calls = 0
@@ -85,10 +85,10 @@ class TestRunLoop:
             "my process: cycle loop iteration failed" in m for m in messages
         ), messages
 
-    async def test_notify_prefix_spells_the_historical_line(self) -> None:
-        """The notify family's call keeps its historical message
-        («notify dispatcher: …») — the move is behavior-identical for
-        notify when it passes the prefix explicitly."""
+    async def test_notification_prefix_spells_the_family_line(self) -> None:
+        """The notification family's call spells its line
+        («notification dispatcher: …») — the prefix is passed explicitly
+        by the caller, nothing is hardcoded inside the loop."""
         stop = asyncio.Event()
 
         async def iteration() -> None:
@@ -102,11 +102,12 @@ class TestRunLoop:
                 0.001,
                 iteration,
                 log=_LOGGER,
-                log_prefix="notify dispatcher",
+                log_prefix="notification dispatcher",
             )
 
         assert any(
-            "notify dispatcher: delivery loop iteration failed" in m for m in messages
+            "notification dispatcher: delivery loop iteration failed" in m
+            for m in messages
         ), messages
 
     async def test_stop_event_ends_the_loop_without_iteration(self) -> None:

@@ -2,7 +2,7 @@
 
 Runs the real alembic chain against clean temporary SQLite files,
 staging PRE-migration data at the switchover migration's parent
-(``a7c3e9f1b2d4``) the way ``test_notify_migration`` stages post-shape
+(``a7c3e9f1b2d4``) the way ``test_notification_migration`` stages post-shape
 checks:
 
 * backfill — both DEAD sets are marked ``published_at`` at the migration
@@ -22,6 +22,12 @@ checks:
   duplicate roots (insurance; today they cannot exist — the old
   ``processed_at`` guard worked);
 * round-trip: downgrade to the parent restores the pre-#580 shape.
+
+#581 note: at HEAD the #581 rename migration has since carried the
+ledger and the index into ``notification_event_attempts`` /
+``uq_notification_tasks_event_scenario_root`` — the post-upgrade
+INSERTs/asserts below use those HEAD names, while the PARENT-level
+staging (pre-rename world) keeps the old ``notify_*`` names.
 """
 
 from pathlib import Path
@@ -131,11 +137,15 @@ def _insert_root_task(
     event_id: str,
     *,
     parent_task_id: str | None = None,
+    table: str = "notify_tasks",
 ) -> None:
-    """A notify_tasks row (chain root by default — parent NULL)."""
+    """A tasks-table row (chain root by default — parent NULL). The
+    table name is a parameter: the pre-#581 parent world stages into
+    ``notify_tasks``, post-upgrade inserts go to
+    ``notification_tasks``."""
     _run(
         url,
-        "INSERT INTO notify_tasks (id, event_id, scenario, status,"
+        f"INSERT INTO {table} (id, event_id, scenario, status,"
         " root_task_id, parent_task_id, created_at, updated_at)"
         " VALUES (:id, :event_id, 'new_record', 'queued', :id,"
         " :parent_task_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
@@ -242,25 +252,26 @@ def test_domain_events_migration(tmp_path: Path) -> None:
     )
 
     # the attempts ledger: exact columns + UNIQUE(event_id, scenario)
-    ledger_columns = _columns(url, "notify_event_attempts")
+    # — at HEAD the table carries its #581 name
+    ledger_columns = _columns(url, "notification_event_attempts")
     assert ledger_columns == {"event_id", "scenario", "attempts", "last_error"}, (
-        f"notify_event_attempts column drift: {sorted(ledger_columns)}"
+        f"notification_event_attempts column drift: {sorted(ledger_columns)}"
     )
     _run(
         url,
-        "INSERT INTO notify_event_attempts (event_id, scenario, attempts,"
-        " last_error) VALUES ('evt-pending', 'new_record', 0, NULL)",
+        "INSERT INTO notification_event_attempts (event_id, scenario,"
+        " attempts, last_error) VALUES ('evt-pending', 'new_record', 0, NULL)",
     )
     _expect_integrity_error(
         url,
-        "INSERT INTO notify_event_attempts (event_id, scenario, attempts,"
-        " last_error) VALUES ('evt-pending', 'new_record', 1, 'boom')",
+        "INSERT INTO notification_event_attempts (event_id, scenario,"
+        " attempts, last_error) VALUES ('evt-pending', 'new_record', 1, 'boom')",
         {},
     )
 
 
 def test_domain_events_migration_roots_without_duplicates(tmp_path: Path) -> None:
-    """«Корни без дублей» (test_notify_migration style): on a CLEAN
+    """«Корни без дублей» (test_notification_migration style): on a CLEAN
     pre-switch DB the partial root index lands and is ENFORCED — a
     second root for the same (event_id, scenario) is rejected, a chain
     CONTINUATION with the same pair is not (it inherits the root's
@@ -271,30 +282,35 @@ def test_domain_events_migration_roots_without_duplicates(tmp_path: Path) -> Non
 
     command.upgrade(_alembic_config(url), "head")
 
-    sql = _index_sql(url, "uq_notify_tasks_event_scenario_root")
-    assert sql is not None, "partial root index uq_notify_tasks_event_scenario_root missing"
+    # at HEAD the root index carries its #581 name (#580 created it as
+    # uq_notify_tasks_event_scenario_root; the rename migration carried
+    # the definition over verbatim)
+    sql = _index_sql(url, "uq_notification_tasks_event_scenario_root")
+    assert sql is not None, (
+        "partial root index uq_notification_tasks_event_scenario_root missing"
+    )
     assert "CREATE UNIQUE INDEX" in sql.upper()
     assert "event_id" in sql and "scenario" in sql
     assert "parent_task_id IS NULL" in sql, (
         f"root index lost the partial predicate: {sql}"
     )
 
-    # live enforcement on the migrated DB
+    # live enforcement on the migrated DB (the #581 table name)
     _insert_event_head(url, "evt-dup")
-    _insert_root_task(url, "root-2", "evt-dup")
+    _insert_root_task(url, "root-2", "evt-dup", table="notification_tasks")
     _expect_integrity_error(
         url,
-        "INSERT INTO notify_tasks (id, event_id, scenario, status, root_task_id,"
-        " parent_task_id, created_at, updated_at)"
-        " VALUES ('root-2b', 'evt-dup', 'new_record', 'queued', 'root-2b', NULL,"
-        " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        "INSERT INTO notification_tasks (id, event_id, scenario, status,"
+        " root_task_id, parent_task_id, created_at, updated_at)"
+        " VALUES ('root-2b', 'evt-dup', 'new_record', 'queued', 'root-2b',"
+        " NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
         {},
     )
     # a CONTINUATION (parent set) with the same (event_id, scenario) is fine
     _run(
         url,
-        "INSERT INTO notify_tasks (id, event_id, scenario, status, root_task_id,"
-        " parent_task_id, created_at, updated_at)"
+        "INSERT INTO notification_tasks (id, event_id, scenario, status,"
+        " root_task_id, parent_task_id, created_at, updated_at)"
         " VALUES ('cont-1', 'evt-dup', 'new_record', 'queued', 'root-2',"
         " 'root-2', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
     )
@@ -353,12 +369,13 @@ def test_domain_events_migration_roundtrip(tmp_path: Path) -> None:
     assert "processed_at IS NULL" in sql
     assert "processing_error IS NULL" in sql
 
-    # the #580 notify additions are gone
+    # the #580 notify additions are gone (the #581 downgrade has
+    # renamed the tables back on the way)
     assert _index_sql(url, "ix_domain_events_unpublished") is None
     assert _index_sql(url, "uq_notify_tasks_event_scenario_root") is None
     assert "notify_event_attempts" not in _table_names(url)
 
-    # and the way back up re-applies the switchover
+    # and the way back up re-applies the switchover (head = #581 names)
     command.upgrade(_alembic_config(url), "head")
     assert "published_at" in _columns(url, "domain_events")
-    assert "notify_event_attempts" in _table_names(url)
+    assert "notification_event_attempts" in _table_names(url)

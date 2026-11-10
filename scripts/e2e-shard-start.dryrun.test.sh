@@ -125,40 +125,40 @@
 #   Watch intervals are env-overridden (SHARD_STACK_WATCH_S=1) to keep
 #   the suite tight; stub children are real background processes.
 #
-# Feature #483 Task 8 (enabled notify e2e stack, spec §3.5; #484 Task 8
+# Feature #483 Task 8 (enabled notification e2e stack, spec §3.5; #484 Task 8
 # adds the worker child + the mock priority export, spec §3.3/§3.8):
-#   NOTIFY_E2E_ENABLED=1 + SHARD_ID=notify switches the script from a
-#   numbered shard to THE enabled notify stack: own port pair (defaults
+#   NOTIFICATION_E2E_ENABLED=1 + SHARD_ID=notification switches the script from a
+#   numbered shard to THE enabled notification stack: own port pair (defaults
 #   backend 8005 / web 3006, outside the shard ranges, overridable via
-#   NOTIFY_E2E_BACKEND_PORT / NOTIFY_E2E_SHARD_PORT), an OWN derived
+#   NOTIFICATION_E2E_BACKEND_PORT / NOTIFICATION_E2E_SHARD_PORT), an OWN derived
 #   SHARD_RUN_TAG + manual run lease (no collision with shards), the
-#   required URL vars pointed at the own pair, NOTIFY_ENABLED=true,
-#   NOTIFY_CHANNEL_PRIORITY=mock,mock2 (#485 Task 6: TWO mock channels —
+#   required URL vars pointed at the own pair, NOTIFICATION_ENABLED=true,
+#   NOTIFICATION_CHANNEL_PRIORITY=mock,mock2 (#485 Task 6: TWO mock channels —
 #   the §12 scenario-3 chain leg needs the second priority slot),
 #   REDIS_URL ONLY from an explicitly passed value (else a local ephemeral
-#   redis-server child on NOTIFY_E2E_REDIS_PORT, default 6380 — never
+#   redis-server child on NOTIFICATION_E2E_REDIS_PORT, default 6380 — never
 #   6379), and the dispatcher AND the worker as child processes
 #   (.venv/bin/python with exec, dev.sh precedent).
 #   Trap cleanup is extended to the new children.
 #   → Case 17a: enabled defaults + EXPLICIT REDIS_URL — no redis child;
 #     derived ports/tag/URLs; lease `pid 001f45 3006 8005 0 0 epoch`
 #     written + removed; dispatcher AND worker spawned with
-#     NOTIFY_ENABLED=[true], ENV_FILE=[.env.test], the explicit REDIS_URL
+#     NOTIFICATION_ENABLED=[true], ENV_FILE=[.env.test], the explicit REDIS_URL
 #     and the stack DB; DB wipe happened (TEST_DB_PATH contains test_memo
-#     → guard passes); both notify children killed by the trap
+#     → guard passes); both notification children killed by the trap
 #     (DISPATCHER-TERMED / WORKER-TERMED).
 #   → Case 17b: local-redis mode + custom port pair — redis-server stub
-#     spawned with --save/--appendonly no on NOTIFY_E2E_REDIS_PORT, the
+#     spawned with --save/--appendonly no on NOTIFICATION_E2E_REDIS_PORT, the
 #     dispatcher and the worker see REDIS_URL pointed at it; tag derives
 #     from the CUSTOM port; ALL THREE children killed by the trap (TERMED
 #     lines).
-#   → Case 17c: guard negatives (direct calls): enabled×shard-id, notify
+#   → Case 17c: guard negatives (direct calls): enabled×shard-id, notification
 #     id×default mode, garbage flag value, both shard-range port
-#     collisions, non-numeric NOTIFY_E2E_REDIS_PORT — each exit 1 with
+#     collisions, non-numeric NOTIFICATION_E2E_REDIS_PORT — each exit 1 with
 #     its diagnostic BEFORE any machinery. Plus a bespoke missing-binary
 #     guard call (PATH emptied for the child; bash invoked by absolute
 #     path — env resolves the command via the NEW environment).
-#   → Case 17e: BUSY redis port (a REAL listener on NOTIFY_E2E_REDIS_PORT)
+#   → Case 17e: BUSY redis port (a REAL listener on NOTIFICATION_E2E_REDIS_PORT)
 #     — the guard fires BEFORE the lease write and the wipes: exit 1 +
 #     diagnostic, NO lease in the runs dir, the provided DB file
 #     byte-intact.
@@ -166,7 +166,7 @@
 #     ignored, NO redis-server / dispatcher / worker child is ever
 #     spawned; the legacy run (names, lease-less, wipe) is byte-identical.
 #   Harness additions: a `redis-server` stub and a staged
-#   backend/.venv/bin/python stub (the notify spawns are PATH-FREE
+#   backend/.venv/bin/python stub (the notification spawns are PATH-FREE
 #   file calls; the stub labels the child by argv — DISPATCHER/WORKER)
 #   journal their argv/env and model LIVE children with
 #   TERM-journaling traps; the uv stub additionally journals the
@@ -525,24 +525,24 @@ EOF
 
 chmod +x "$STUBS/pnpm" "$STUBS/rm" "$STUBS/curl" "$STUBS/lsof" "$STUBS/python3" "$STUBS/redis-server"
 
-# Notify-child stub (#483 Case 17, #484 Task 8): the enabled stack spawns
+# Notification-child stub (#483 Case 17, #484 Task 8): the enabled stack spawns
 # the dispatcher AND the worker via the FILE PATH backend/.venv/bin/python
 # (dev.sh precedent: exec so $! is the real process) — not PATH-resolved,
 # so the stub must live at the staged path. Journals the spawn env
-# (NOTIFY_ENABLED / REDIS_URL / ENV_FILE / DATABASE_URL — the contract
-# Case 17a pins — plus NOTIFY_CHANNEL_PRIORITY, the #484 export), labeling
+# (NOTIFICATION_ENABLED / REDIS_URL / ENV_FILE / DATABASE_URL — the contract
+# Case 17a pins — plus NOTIFICATION_CHANNEL_PRIORITY, the #484 export), labeling
 # the child by its argv (WORKER vs DISPATCHER), then models a LIVE child;
 # TERM → journal line (the trap-kill assertion reads it).
 mkdir -p "$STAGE/backend/.venv/bin"
 cat > "$STAGE/backend/.venv/bin/python" <<'EOF'
 #!/bin/sh
 case "$*" in
-  *src.notify.worker*) _tag=WORKER ;;
+  *src.notification.worker*) _tag=WORKER ;;
   *) _tag=DISPATCHER ;;
 esac
-printf '%s-SPAWN argv=[%s] NOTIFY_ENABLED=[%s] REDIS_URL=[%s] ENV_FILE=[%s] DATABASE_URL=[%s] NOTIFY_CHANNEL_PRIORITY=[%s]\n' \
-  "$_tag" "$*" "${NOTIFY_ENABLED:-unset}" "${REDIS_URL:-unset}" "${ENV_FILE:-unset}" \
-  "${DATABASE_URL:-unset}" "${NOTIFY_CHANNEL_PRIORITY:-unset}" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
+printf '%s-SPAWN argv=[%s] NOTIFICATION_ENABLED=[%s] REDIS_URL=[%s] ENV_FILE=[%s] DATABASE_URL=[%s] NOTIFICATION_CHANNEL_PRIORITY=[%s]\n' \
+  "$_tag" "$*" "${NOTIFICATION_ENABLED:-unset}" "${REDIS_URL:-unset}" "${ENV_FILE:-unset}" \
+  "${DATABASE_URL:-unset}" "${NOTIFICATION_CHANNEL_PRIORITY:-unset}" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"
 sleep 600 &
 _s=$!
 trap 'kill "$_s" 2>/dev/null; printf "%s-TERMED\n" "$_tag" >> "${SHARD_DRYRUN_JOURNAL:-/dev/null}"; exit 0' TERM INT
@@ -668,14 +668,14 @@ run_shard_raw() {
 }
 
 # enabled_launch <log> <journal> <db> (#483 Case 17) — launch the ENABLED
-# notify stack: SHARD_ID=notify + NOTIFY_E2E_ENABLED=1, NO port/URL vars —
+# notification stack: SHARD_ID=notification + NOTIFICATION_E2E_ENABLED=1, NO port/URL vars —
 # the script must derive the own pair (and the URL vars from it) itself.
 # Extra knobs ride RUN_EXTRA_ENV (same `env` mechanism as shard_launch).
 # Sets SHARD_LAUNCH_PID.
 enabled_launch() {
   local log="$1" journal="$2" db="$3"
   # shellcheck disable=SC2086
-  SHARD_ID=notify NOTIFY_E2E_ENABLED=1 \
+  SHARD_ID=notification NOTIFICATION_E2E_ENABLED=1 \
     TEST_DB_PATH="$db" \
     SHARD_DRYRUN_JOURNAL="$journal" \
     SHARD_RUNS_DIR="$RUNS_DIR" \
@@ -1826,7 +1826,7 @@ else
   FAIL=1
 fi
 
-# ── Case 17 (#483 Task 8, spec §3.5): enabled notify e2e stack ─────────────
+# ── Case 17 (#483 Task 8, spec §3.5): enabled notification e2e stack ─────────────
 
 # 17a — defaults + EXPLICIT REDIS_URL: own port pair derived (3006/8005),
 # own tag derived from the backend port (8005 → 001f45), URL vars derived
@@ -1834,7 +1834,7 @@ fi
 # explicit REDIS_URL (NO local redis child), DB wiped (test_memo guard
 # passes), dispatcher killed by the extended trap.
 CASE17_DIR="$WORK/case17"; mkdir -p "$CASE17_DIR"
-CASE17A_DB="$CASE17_DIR/test_memo_notify_e2e.db"
+CASE17A_DB="$CASE17_DIR/test_memo_notification_e2e.db"
 printf 'seed' > "$CASE17A_DB"
 CASE17A_TAG=001f45
 CASE17A_LEASE="$RUNS_DIR/${CASE17A_TAG}.run"
@@ -1883,13 +1883,13 @@ else
   FAIL=1
 fi
 assert_reached_next_dev "$CASE17_DIR/journal" "Case 17a (positive control)" || FAIL=1
-if grep -Fq "NEXT_DIST_DIR=[.next-shard-notify_${CASE17A_TAG}] SHARD_PORT=[3006]" "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#483): derived web port 3006 + tagged build dir .next-shard-notify_${CASE17A_TAG}"
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-notification_${CASE17A_TAG}] SHARD_PORT=[3006]" "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#483): derived web port 3006 + tagged build dir .next-shard-notification_${CASE17A_TAG}"
 else
-  echo "FAIL Case 17a (#483): expected NEXT_DIST_DIR=[.next-shard-notify_${CASE17A_TAG}] SHARD_PORT=[3006] in journal"
+  echo "FAIL Case 17a (#483): expected NEXT_DIST_DIR=[.next-shard-notification_${CASE17A_TAG}] SHARD_PORT=[3006] in journal"
   FAIL=1
 fi
-assert_storage_exports "$CASE17_DIR/journal" notify "_${CASE17A_TAG}" "Case 17a (#483)" || FAIL=1
+assert_storage_exports "$CASE17_DIR/journal" notification "_${CASE17A_TAG}" "Case 17a (#483)" || FAIL=1
 assert_tag_export "$CASE17_DIR/journal" "$CASE17A_TAG" "Case 17a (#483)" || FAIL=1
 if grep -Fq "BACKEND_URL=[http://127.0.0.1:8005] NEXT_PUBLIC_API_URL=[http://127.0.0.1:8005]" "$CASE17_DIR/journal" 2>/dev/null; then
   echo "PASS Case 17a (#483): URL vars derived to the own backend pair (:8005)"
@@ -1909,10 +1909,10 @@ else
   echo "FAIL Case 17a (#483): expected FILE_ABSENT — DB wipe missing or the test_memo guard rejected the path"
   FAIL=1
 fi
-if grep -Fq "RM: -rf $STAGE/backend/test_files_shardnotify_${CASE17A_TAG}" "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#483): files wipe targeted the notify-scoped storage dir"
+if grep -Fq "RM: -rf $STAGE/backend/test_files_shardnotification_${CASE17A_TAG}" "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#483): files wipe targeted the notification-scoped storage dir"
 else
-  echo "FAIL Case 17a (#483): expected 'RM: -rf .../test_files_shardnotify_${CASE17A_TAG}' in journal"
+  echo "FAIL Case 17a (#483): expected 'RM: -rf .../test_files_shardnotification_${CASE17A_TAG}' in journal"
   FAIL=1
 fi
 if grep -q '^REDIS-SERVER ' "$CASE17_DIR/journal" 2>/dev/null; then
@@ -1921,10 +1921,10 @@ if grep -q '^REDIS-SERVER ' "$CASE17_DIR/journal" 2>/dev/null; then
 else
   echo "PASS Case 17a (#483): explicit REDIS_URL — no redis-server child spawned"
 fi
-if grep -Fq "DISPATCHER-SPAWN argv=[-m src.notify.dispatcher] NOTIFY_ENABLED=[true] REDIS_URL=[redis://127.0.0.1:6399/0] ENV_FILE=[.env.test]" "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#483): dispatcher spawned with NOTIFY_ENABLED=true + the explicit REDIS_URL + .env.test"
+if grep -Fq "DISPATCHER-SPAWN argv=[-m src.notification.dispatcher] NOTIFICATION_ENABLED=[true] REDIS_URL=[redis://127.0.0.1:6399/0] ENV_FILE=[.env.test]" "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#483): dispatcher spawned with NOTIFICATION_ENABLED=true + the explicit REDIS_URL + .env.test"
 else
-  echo "FAIL Case 17a (#483): expected DISPATCHER-SPAWN line (NOTIFY_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
+  echo "FAIL Case 17a (#483): expected DISPATCHER-SPAWN line (NOTIFICATION_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
   FAIL=1
 fi
 if grep -q '^DISPATCHER-TERMED$' "$CASE17_DIR/journal" 2>/dev/null; then
@@ -1933,17 +1933,17 @@ else
   echo "FAIL Case 17a (#483): dispatcher child survived the trap (no DISPATCHER-TERMED line)"
   FAIL=1
 fi
-# #484 Task 8: the worker is the SECOND notify child of the enabled stack.
-if grep -Fq "WORKER-SPAWN argv=[-m src.notify.worker] NOTIFY_ENABLED=[true] REDIS_URL=[redis://127.0.0.1:6399/0] ENV_FILE=[.env.test]" "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#484): worker spawned as the second child (NOTIFY_ENABLED=true, the explicit REDIS_URL, .env.test)"
+# #484 Task 8: the worker is the SECOND notification child of the enabled stack.
+if grep -Fq "WORKER-SPAWN argv=[-m src.notification.worker] NOTIFICATION_ENABLED=[true] REDIS_URL=[redis://127.0.0.1:6399/0] ENV_FILE=[.env.test]" "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#484): worker spawned as the second child (NOTIFICATION_ENABLED=true, the explicit REDIS_URL, .env.test)"
 else
-  echo "FAIL Case 17a (#484): expected WORKER-SPAWN line (NOTIFY_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
+  echo "FAIL Case 17a (#484): expected WORKER-SPAWN line (NOTIFICATION_ENABLED=[true], explicit REDIS_URL, ENV_FILE=[.env.test])"
   FAIL=1
 fi
-if grep -Eq '^WORKER-SPAWN .*NOTIFY_CHANNEL_PRIORITY=\[mock,mock2\]' "$CASE17_DIR/journal" 2>/dev/null; then
-  echo "PASS Case 17a (#485): worker spawn env carries NOTIFY_CHANNEL_PRIORITY=[mock,mock2] (two mock channels — §12 scenario 3's chain leg)"
+if grep -Eq '^WORKER-SPAWN .*NOTIFICATION_CHANNEL_PRIORITY=\[mock,mock2\]' "$CASE17_DIR/journal" 2>/dev/null; then
+  echo "PASS Case 17a (#485): worker spawn env carries NOTIFICATION_CHANNEL_PRIORITY=[mock,mock2] (two mock channels — §12 scenario 3's chain leg)"
 else
-  echo "FAIL Case 17a (#485): worker spawn env missing NOTIFY_CHANNEL_PRIORITY=[mock,mock2]"
+  echo "FAIL Case 17a (#485): worker spawn env missing NOTIFICATION_CHANNEL_PRIORITY=[mock,mock2]"
   FAIL=1
 fi
 if grep -q '^WORKER-TERMED$' "$CASE17_DIR/journal" 2>/dev/null; then
@@ -1962,14 +1962,14 @@ assert_no_default_next_rm "$CASE17_DIR/journal" "Case 17a (S5)" || FAIL=1
 assert_fixture_intact "Case 17a (S5)" || FAIL=1
 
 # 17b — local-redis mode + CUSTOM port pair: no REDIS_URL → the script
-# spawns its own ephemeral redis-server child on NOTIFY_E2E_REDIS_PORT and
+# spawns its own ephemeral redis-server child on NOTIFICATION_E2E_REDIS_PORT and
 # points REDIS_URL at it; the tag derives from the CUSTOM backend port
 # (8105 → 001fa9); BOTH new children are killed by the trap.
-CASE17B_DB="$CASE17_DIR/test_memo_notify_e2e_b.db"
+CASE17B_DB="$CASE17_DIR/test_memo_notification_e2e_b.db"
 printf 'seed' > "$CASE17B_DB"
 CASE17B_TAG=001fa9
 CASE17B_LEASE="$RUNS_DIR/${CASE17B_TAG}.run"
-RUN_EXTRA_ENV="NOTIFY_E2E_BACKEND_PORT=8105 NOTIFY_E2E_SHARD_PORT=3106 NOTIFY_E2E_REDIS_PORT=6390"
+RUN_EXTRA_ENV="NOTIFICATION_E2E_BACKEND_PORT=8105 NOTIFICATION_E2E_SHARD_PORT=3106 NOTIFICATION_E2E_REDIS_PORT=6390"
 enabled_run "$CASE17_DIR/run-b.log" "$CASE17_DIR/journal-b" "$CASE17B_DB"
 RUN_EXTRA_ENV=""
 
@@ -1987,27 +1987,27 @@ else
 fi
 if grep -Fq "REDIS-SERVER argv=[--bind 127.0.0.1 --port 6390 --save" "$CASE17_DIR/journal-b" 2>/dev/null \
    && grep -Fq -- "--appendonly no]" "$CASE17_DIR/journal-b" 2>/dev/null; then
-  echo "PASS Case 17b (#483): local ephemeral redis-server spawned on NOTIFY_E2E_REDIS_PORT (--save/--appendonly no)"
+  echo "PASS Case 17b (#483): local ephemeral redis-server spawned on NOTIFICATION_E2E_REDIS_PORT (--save/--appendonly no)"
 else
   echo "FAIL Case 17b (#483): expected REDIS-SERVER spawn line (--port 6390, --save, --appendonly no)"
   FAIL=1
 fi
-if grep -Fq "DISPATCHER-SPAWN argv=[-m src.notify.dispatcher] NOTIFY_ENABLED=[true] REDIS_URL=[redis://localhost:6390/0]" "$CASE17_DIR/journal-b" 2>/dev/null; then
+if grep -Fq "DISPATCHER-SPAWN argv=[-m src.notification.dispatcher] NOTIFICATION_ENABLED=[true] REDIS_URL=[redis://localhost:6390/0]" "$CASE17_DIR/journal-b" 2>/dev/null; then
   echo "PASS Case 17b (#483): dispatcher REDIS_URL points at the spawned local redis"
 else
   echo "FAIL Case 17b (#483): expected dispatcher REDIS_URL=[redis://localhost:6390/0]"
   FAIL=1
 fi
-if grep -Fq "WORKER-SPAWN argv=[-m src.notify.worker] NOTIFY_ENABLED=[true] REDIS_URL=[redis://localhost:6390/0]" "$CASE17_DIR/journal-b" 2>/dev/null; then
+if grep -Fq "WORKER-SPAWN argv=[-m src.notification.worker] NOTIFICATION_ENABLED=[true] REDIS_URL=[redis://localhost:6390/0]" "$CASE17_DIR/journal-b" 2>/dev/null; then
   echo "PASS Case 17b (#484): worker REDIS_URL points at the spawned local redis"
 else
   echo "FAIL Case 17b (#484): expected worker REDIS_URL=[redis://localhost:6390/0]"
   FAIL=1
 fi
-if grep -Fq "NEXT_DIST_DIR=[.next-shard-notify_${CASE17B_TAG}] SHARD_PORT=[3106]" "$CASE17_DIR/journal-b" 2>/dev/null; then
+if grep -Fq "NEXT_DIST_DIR=[.next-shard-notification_${CASE17B_TAG}] SHARD_PORT=[3106]" "$CASE17_DIR/journal-b" 2>/dev/null; then
   echo "PASS Case 17b (#483): custom web port 3106 honored; tag derives from the CUSTOM backend port (${CASE17B_TAG})"
 else
-  echo "FAIL Case 17b (#483): expected NEXT_DIST_DIR=[.next-shard-notify_${CASE17B_TAG}] SHARD_PORT=[3106]"
+  echo "FAIL Case 17b (#483): expected NEXT_DIST_DIR=[.next-shard-notification_${CASE17B_TAG}] SHARD_PORT=[3106]"
   FAIL=1
 fi
 if grep -Fq "BACKEND_URL=[http://127.0.0.1:8105] NEXT_PUBLIC_API_URL=[http://127.0.0.1:8105]" "$CASE17_DIR/journal-b" 2>/dev/null; then
@@ -2034,16 +2034,16 @@ fi
 # 17c — guard negatives (direct calls; the guards fire before machinery).
 # Each spec line: label ␠ midds (space-joined K=V for `env`) ␠ want-stderr.
 # '+' in the want stands for a space (the messages carry spaces; literal
-# underscores must survive) — "requires+SHARD_ID=notify".
+# underscores must survive) — "requires+SHARD_ID=notification".
 # The enabled DB path is pre-provided so a REJECTED run can only be the
 # guard's verdict — the machinery (wipe/uv/pnpm) is unreachable past it.
 for spec in \
-  "enabled-shard-id NOTIFY_E2E_ENABLED=1 SHARD_ID=1 requires+SHARD_ID=notify" \
-  "notify-no-flag SHARD_ID=notify requires+NOTIFY_E2E_ENABLED=1" \
-  "bad-flag NOTIFY_E2E_ENABLED=yes SHARD_ID=notify NOTIFY_E2E_ENABLED+must+be" \
-  "web-port-collision NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_SHARD_PORT=3003 collides" \
-  "backend-port-collision NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_BACKEND_PORT=8002 collides" \
-  "redis-port-non-numeric NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_REDIS_PORT=6380x NOTIFY_E2E_REDIS_PORT+must+be+a+number"
+  "enabled-shard-id NOTIFICATION_E2E_ENABLED=1 SHARD_ID=1 requires+SHARD_ID=notification" \
+  "notification-no-flag SHARD_ID=notification requires+NOTIFICATION_E2E_ENABLED=1" \
+  "bad-flag NOTIFICATION_E2E_ENABLED=yes SHARD_ID=notification NOTIFICATION_E2E_ENABLED+must+be" \
+  "web-port-collision NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification NOTIFICATION_E2E_SHARD_PORT=3003 collides" \
+  "backend-port-collision NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification NOTIFICATION_E2E_BACKEND_PORT=8002 collides" \
+  "redis-port-non-numeric NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification NOTIFICATION_E2E_REDIS_PORT=6380x NOTIFICATION_E2E_REDIS_PORT+must+be+a+number"
 do
   _label="${spec%% *}"; _rest="${spec#* }"
   _want="${_rest##* }"
@@ -2051,7 +2051,7 @@ do
   _want_pat="${_want//+/ }"   # '+' → spaces (underscores stay literal)
   set +e
   # shellcheck disable=SC2086
-  env $_mids TEST_DB_PATH="$CASE17_DIR/test_memo_notify_e2e.db" \
+  env $_mids TEST_DB_PATH="$CASE17_DIR/test_memo_notification_e2e.db" \
     bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-$_label.out" 2>&1
   _grc=$?
   set -e
@@ -2072,8 +2072,8 @@ done
 # guard is builtin-only (flag guards, port defaults, tag derivation).
 CASE17_EMPTY_PATH="$CASE17_DIR/empty-path"; mkdir -p "$CASE17_EMPTY_PATH"
 set +e
-env PATH="$CASE17_EMPTY_PATH" NOTIFY_E2E_ENABLED=1 SHARD_ID=notify \
-  TEST_DB_PATH="$CASE17_DIR/test_memo_notify_e2e.db" \
+env PATH="$CASE17_EMPTY_PATH" NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification \
+  TEST_DB_PATH="$CASE17_DIR/test_memo_notification_e2e.db" \
   /bin/bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-redis-missing.out" 2>&1
 _grc=$?
 set -e
@@ -2085,7 +2085,7 @@ else
   FAIL=1
 fi
 
-# 17e — BUSY redis port: a REAL listener holds NOTIFY_E2E_REDIS_PORT; the
+# 17e — BUSY redis port: a REAL listener holds NOTIFICATION_E2E_REDIS_PORT; the
 # guard must abort BEFORE the lease write and the wipes — exit 1 +
 # diagnostic, NO lease in the runs dir (the derived tag 001f45.run from
 # the default backend port 8005), the provided DB file byte-intact.
@@ -2125,10 +2125,10 @@ done
 
 if [ -n "$CASE17E_PORT" ]; then
   echo "  → Case 17e holder up on :$CASE17E_PORT (pid $CASE17E_HOLDER_PID)"
-  CASE17E_DB="$CASE17_DIR/test_memo_notify_e2e_busy.db"
+  CASE17E_DB="$CASE17_DIR/test_memo_notification_e2e_busy.db"
   printf 'seed' > "$CASE17E_DB"
   set +e
-  NOTIFY_E2E_ENABLED=1 SHARD_ID=notify NOTIFY_E2E_REDIS_PORT="$CASE17E_PORT" \
+  NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification NOTIFICATION_E2E_REDIS_PORT="$CASE17E_PORT" \
     TEST_DB_PATH="$CASE17E_DB" \
     PATH="$STUBS:$PATH" \
     bash "$SCRIPT_UNDER_TEST" > "$CASE17_DIR/guard-redis-busy.out" 2>&1
@@ -2161,7 +2161,7 @@ else
 fi
 
 # 17d (S2) — default-mode control: REDIS_URL in the env is IGNORED, no
-# notify children, legacy names/lease-less run byte-identical.
+# notification children, legacy names/lease-less run byte-identical.
 CASE17D_DB="$CASE17_DIR/test_memo_shard1.db"
 printf 'seed' > "$CASE17D_DB"
 RUN_EXTRA_ENV="REDIS_URL=redis://127.0.0.1:6399/0"
@@ -2179,9 +2179,9 @@ if [ "$LAST_RC" -eq 143 ] && grep -q '^PNPM_EXEC_NEXT_DEV ' "$CASE17_DIR/journal
    && ! grep -q '^DISPATCHER-SPAWN ' "$CASE17_DIR/journal-d" 2>/dev/null \
    && ! grep -q '^WORKER-SPAWN ' "$CASE17_DIR/journal-d" 2>/dev/null \
    && grep -Fq "BACKEND_URL=[http://127.0.0.1:8001] NEXT_PUBLIC_API_URL=[http://127.0.0.1:8001]" "$CASE17_DIR/journal-d" 2>/dev/null; then
-  echo "PASS Case 17d (S2): default mode ignores REDIS_URL — no notify children, caller URLs untouched"
+  echo "PASS Case 17d (S2): default mode ignores REDIS_URL — no notification children, caller URLs untouched"
 else
-  echo "FAIL Case 17d (S2): default mode changed (rc=$LAST_RC, notify children, or URL derivation leaked)"
+  echo "FAIL Case 17d (S2): default mode changed (rc=$LAST_RC, notification children, or URL derivation leaked)"
   FAIL=1
 fi
 

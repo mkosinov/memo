@@ -66,5 +66,5 @@ uv run python -m src.cli create-user --phone "+79990000001" --role admin
   plain `image_url` paths served by the web frontend
   (`frontend/web/public/images/...`).
 - **Operational data** — activities, clients, records, visits, payments.
-- **Positions `master`/`admin` and the `new_record` notify template** — seeded
+- **Positions `master`/`admin` and the `new_record` notification template** — seeded
   by migrations; the loader only verifies they exist.

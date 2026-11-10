@@ -13,7 +13,7 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Import ALL models so they register with Base.metadata
-import src.models  # noqa: F401 — registration first; breaks the models↔notify/domain_events import cycle (dispatcher precedent)
+import src.models  # noqa: F401 — registration first; breaks the models↔notification/domain_events import cycle (dispatcher precedent)
 from src.auth.password_setup import (
     PasswordSetupToken,  # noqa: F401 — password_setup_tokens (#348)
 )
@@ -40,10 +40,10 @@ from src.models import (  # noqa: F401
     Visit,
     Visitor,
 )
-from src.notify.models import (  # noqa: F401 — notify subsystem tables (#482)
-    NotifyTask,
-    NotifyTaskAttempt,
-    NotifyTemplate,
+from src.notification.models import (  # noqa: F401 — notification subsystem tables (#482)
+    NotificationTask,
+    NotificationTaskAttempt,
+    NotificationTemplate,
 )
 
 config = context.config

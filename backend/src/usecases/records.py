@@ -249,8 +249,8 @@ async def create_record(
     # No actor gate here: domain events are DATA, not an action log.
     # #580 Task 2: the journal + snapshot builder seams moved to the
     # producer side (src/domain_events + neighbor module) — the producer
-    # no longer imports notify. LAZY imports — cycle discipline (see
-    # _mark_record_audit above).
+    # no longer imports the notification package. LAZY imports — cycle
+    # discipline (see _mark_record_audit above).
     from src.domain_events.journal import mark_domain_event
     from src.usecases.record_snapshots import build_new_record_snapshot
 

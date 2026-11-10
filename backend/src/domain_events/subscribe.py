@@ -20,7 +20,7 @@ its own: it is a thin composition of the transport core
   relay stream.
 
 SYNC surface only, like every consumer of the streams transport: async
-callers wrap each call in ``asyncio.to_thread`` (the notify dispatcher
+callers wrap each call in ``asyncio.to_thread`` (the notification dispatcher
 pattern; the Task-6 dispatcher group loop will follow it).
 """
 

@@ -1341,7 +1341,7 @@ export async function uploadPortrait(file: File): Promise<PortraitResponse> {
 // thrown ApiError(401) for the login form to render.
 
 // 202 ALWAYS for any valid phone (staff numbers are indistinguishable — no
-// enumeration oracle, spec §4.2); 503 NOTIFY_TRANSPORT_UNAVAILABLE when no
+// enumeration oracle, spec §4.2); 503 NOTIFICATION_TRANSPORT_UNAVAILABLE when no
 // transport is configured (fail-closed).
 export async function requestOtpCode(phone: string): Promise<OtpRequestResponse> {
   return api('/api/v1/auth/otp/request', OtpRequestResponseSchema, {

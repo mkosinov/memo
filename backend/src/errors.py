@@ -46,7 +46,7 @@ class ErrorCode(str, Enum):
 
     # 503 — OTP code transport not configured (#499 §4.2, fail-closed;
     # the production transport arrives with the #476 notify family)
-    NOTIFY_TRANSPORT_UNAVAILABLE = "NOTIFY_TRANSPORT_UNAVAILABLE"
+    NOTIFICATION_TRANSPORT_UNAVAILABLE = "NOTIFICATION_TRANSPORT_UNAVAILABLE"
 
     # 422 — password policy violation (GH #247 auth, spec §5)
     PASSWORD_POLICY = "PASSWORD_POLICY"
@@ -125,7 +125,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Неверный телефон или пароль",
     ErrorCode.AUTH_UNAUTHORIZED: "Требуется вход в систему",
     ErrorCode.AUTH_LOCKED_OUT: "Слишком много неудачных попыток входа",
-    ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE: "Вход временно недоступен",
+    ErrorCode.NOTIFICATION_TRANSPORT_UNAVAILABLE: "Вход временно недоступен",
     ErrorCode.PASSWORD_POLICY: "Пароль: от 8 до 64 символов, пробелы по краям обрезаются",
     ErrorCode.ACCOUNT_DEACTIVATED: "Учётка деактивирована",
     ErrorCode.PASSWORD_LINK_INVALID: "Ссылка недействительна или истекла",

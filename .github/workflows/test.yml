@@ -47,19 +47,20 @@ jobs:
           retention-days: 7
 
 
-  # GH #483 (spec §3.6): the ENABLED notify contour. Marked `redis` tests
-  # run against a REAL Redis service container; after that unit layer the
-  # SAME job boots the enabled e2e stack (NOTIFY_E2E_ENABLED=1) against the
-  # same container, runs the single S1 Playwright scenario and re-checks
-  # the queue with the marked backend test. The default `backend-tests`
-  # job above stays byte-identical (S2 invariant: the standard run needs
-  # no Redis); its 80% coverage threshold is protected by the
-  # [tool.coverage.run] omit of the notify transport modules (they are
-  # measured HERE instead). Empty-green guard: a `pytest -m redis` run
+  # GH #483 (spec §3.6): the ENABLED notification contour. Marked `redis`
+  # tests run against a REAL Redis service container; after that unit layer
+  # the SAME job boots the enabled e2e stack
+  # (NOTIFICATION_E2E_ENABLED=1) against the same container, runs the
+  # single S1 Playwright scenario and re-checks the queue with the marked
+  # backend test. The default `backend-tests` job above stays
+  # byte-identical (S2 invariant: the standard run needs no Redis); its
+  # 80% coverage threshold is protected by the
+  # [tool.coverage.run] omit of the notification transport modules (they
+  # are measured HERE instead). Empty-green guard: a `pytest -m redis` run
   # that collects nothing — or skips everything, e.g. because the service
   # container never came up — exits 0 and would show a green job that
   # proves nothing; the guard step turns that into a job failure.
-  notify-tests:
+  notification-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -71,7 +72,7 @@ jobs:
       # Spec §7 fallback: flip to "0" to drop the e2e layer (stack + S1
       # scenario + marked queue check) without code surgery if the job
       # proves too heavy until #484; the marked unit layer always stays.
-      NOTIFY_TESTS_E2E_ENABLED: "1"
+      NOTIFICATION_TESTS_E2E_ENABLED: "1"
 
     services:
       redis:
@@ -116,14 +117,14 @@ jobs:
         working-directory: frontend/admin
 
       # ── Unit layer: marked tests against the service container ────────
-      # #484 §3.3/§3.8: NOTIFY_CHANNEL_PRIORITY=mock — until part 4 the
+      # #484 §3.3/§3.8: NOTIFICATION_CHANNEL_PRIORITY=mock — until part 4 the
       # part-3 channel registry knows only the mock channel; the default
       # "telegram" would trip the loud registry gate in any process that
       # resolves the priority against the registry.
-      - name: Run marked notify tests (real Redis)
+      - name: Run marked notification tests (real Redis)
         run: uv run pytest -m redis -v --tb=short --junitxml=test-results.xml
         env:
-          NOTIFY_CHANNEL_PRIORITY: mock
+          NOTIFICATION_CHANNEL_PRIORITY: mock
 
       # Empty-green guard (spec §3.6): the job MUST fail when 0 marked
       # tests were collected or every one of them was skipped — a green
@@ -165,12 +166,12 @@ jobs:
       # ── E2E layer: enabled stack + S1 (gated, spec §7 fallback) ────────
       # CI guard (as in e2e-tests): fail EARLY if the S1 spec resolves 0
       # files, before the stack starts.
-      - name: Spec-file guard (notify S1)
-        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
+      - name: Spec-file guard (notification S1)
+        if: env.NOTIFICATION_TESTS_E2E_ENABLED == '1'
         run: |
           list_output=$(mktemp)
-          if ! pnpm exec playwright test --project=e2e --list e2e/notify-s1-enabled-stack.spec.ts > "$list_output"; then
-            echo "ERROR: playwright --list failed for e2e/notify-s1-enabled-stack.spec.ts."
+          if ! pnpm exec playwright test --project=e2e --list e2e/notification-s1-enabled-stack.spec.ts > "$list_output"; then
+            echo "ERROR: playwright --list failed for e2e/notification-s1-enabled-stack.spec.ts."
             echo "Likely cause: bad --project arg vs playwright.config.ts or a spec import error."
             rm -f "$list_output"
             exit 1
@@ -178,31 +179,42 @@ jobs:
           spec_count=$(grep -c '\.spec\.ts' "$list_output" || true)
           rm -f "$list_output"
           if [ "$spec_count" -eq 0 ]; then
-            echo "ERROR: notify S1 spec resolved 0 spec files (config/testMatch regression)."
+            echo "ERROR: notification S1 spec resolved 0 spec files (config/testMatch regression)."
             exit 1
           fi
-          echo "Spec-file guard OK: notify S1 spec resolved."
+          # GH #581 (spec §3.6): the spec's skip gate must key on the
+          # CURRENT env literal. A half-done env rename leaves the spec
+          # skipping on the stale name — Playwright executes 0 tests and
+          # still exits 0, a green-empty e2e leg that proves nothing.
+          # Grep the gate literal in the spec file itself and go red when
+          # it is missing.
+          if ! grep -q 'NOTIFICATION_E2E_ENABLED' e2e/notification-s1-enabled-stack.spec.ts; then
+            echo "ERROR: gate literal NOTIFICATION_E2E_ENABLED missing from e2e/notification-s1-enabled-stack.spec.ts."
+            echo "Likely cause: the spec's env skip-gate still keys on a stale env name — every test would be skipped and Playwright would exit 0 (green-empty run)."
+            exit 1
+          fi
+          echo "Spec-file guard OK: notification S1 spec resolved + gate literal present."
         working-directory: frontend/admin
         env:
-          NOTIFY_E2E_ENABLED: "1"
+          NOTIFICATION_E2E_ENABLED: "1"
           SHARD_PORT: "3006"
           BACKEND_URL: http://127.0.0.1:8005
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8005
-          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notification_e2e.db
 
-      - name: Start notify e2e stack (enabled contour)
-        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
-        # #484: NOTIFY_CHANNEL_PRIORITY=mock rides the job env into the
-        # stack's notify children (the shard script exports it as well —
-        # belt and braces for the enabled contours until part 4).
+      - name: Start notification e2e stack (enabled contour)
+        if: env.NOTIFICATION_TESTS_E2E_ENABLED == '1'
+        # #484: NOTIFICATION_CHANNEL_PRIORITY=mock rides the job env into
+        # the stack's notification children (the shard script exports it as
+        # well — belt and braces for the enabled contours until part 4).
         env:
-          NOTIFY_CHANNEL_PRIORITY: mock
+          NOTIFICATION_CHANNEL_PRIORITY: mock
         run: |
-          NOTIFY_E2E_ENABLED=1 \
-          SHARD_ID=notify \
+          NOTIFICATION_E2E_ENABLED=1 \
+          SHARD_ID=notification \
           SHARD_PORT=3006 \
           BACKEND_PORT=8005 \
-          TEST_DB_PATH=backend/test_memo_notify_e2e.db \
+          TEST_DB_PATH=backend/test_memo_notification_e2e.db \
           BACKEND_URL=http://127.0.0.1:8005 \
           NEXT_PUBLIC_API_URL=http://127.0.0.1:8005 \
             bash scripts/e2e-shard-start.sh &
@@ -226,32 +238,32 @@ jobs:
         working-directory: .
 
       - name: Run Playwright S1 scenario (enabled stack)
-        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
-        run: pnpm exec playwright test --project=e2e e2e/notify-s1-enabled-stack.spec.ts --workers=1
+        if: env.NOTIFICATION_TESTS_E2E_ENABLED == '1'
+        run: pnpm exec playwright test --project=e2e e2e/notification-s1-enabled-stack.spec.ts --workers=1
         working-directory: frontend/admin
         env:
-          NOTIFY_E2E_ENABLED: "1"
-          NOTIFY_CHANNEL_PRIORITY: mock
+          NOTIFICATION_E2E_ENABLED: "1"
+          NOTIFICATION_CHANNEL_PRIORITY: mock
           SHARD_PORT: "3006"
           BACKEND_URL: http://127.0.0.1:8005
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8005
-          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notification_e2e.db
 
       # Spec §3.6: after the S1 scenario — the marked queue check: the
       # stream holds ≥ 1 task with the §4.2 payload, correlated with the
       # stack DB (REDIS_URL comes from the job env — the service container).
       - name: Marked S1 queue check (stream ↔ stack DB)
-        if: env.NOTIFY_TESTS_E2E_ENABLED == '1'
-        run: uv run pytest tests/test_notify_redis_s1_queue.py -v --tb=short
+        if: env.NOTIFICATION_TESTS_E2E_ENABLED == '1'
+        run: uv run pytest tests/test_notification_redis_s1_queue.py -v --tb=short
         env:
-          NOTIFY_CHANNEL_PRIORITY: mock
-          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notify_e2e.db
+          NOTIFICATION_CHANNEL_PRIORITY: mock
+          TEST_DB_PATH: ${{ github.workspace }}/backend/test_memo_notification_e2e.db
 
-      - name: Upload Playwright report (notify S1)
+      - name: Upload Playwright report (notification S1)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report-notify
+          name: e2e-report-notification
           path: |
             frontend/admin/playwright-report/**
             frontend/admin/test-results/**

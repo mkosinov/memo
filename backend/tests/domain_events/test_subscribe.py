@@ -16,7 +16,7 @@ the caller, nothing is re-XADDed) and ``close`` with
 ``keep_if_pending``.
 
 Marked ``redis`` with the declarative ``skipif`` guard over
-``REDIS_URL``; per-test key-prefix workspace (tests/notify_redis_support).
+``REDIS_URL``; per-test key-prefix workspace (tests/notification_redis_support).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import pytest
 from src.domain_events.subscribe import Subscriber
 from src.domain_events.types import STREAM_KEY_PREFIX, register_type, stream_key
 from src.streams.transport import StreamTransport
-from tests.notify_redis_support import (
+from tests.notification_redis_support import (
     RedisContour,
     contour_fixture,
     redis_marks,

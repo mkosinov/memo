@@ -1,14 +1,16 @@
 """Generic Redis Streams transport core (GH #580 spec §3.6).
 
 The shared mechanics of every Redis Streams producer/consumer of the
-backend — extracted from ``src/notify/redis_queue.py`` (GH #483 spec
+backend — extracted from the notification subsystem's queue adapter
+(``src/notification/redis_queue.py``, GH #483 spec
 §3.1, ADR 013) so the domain-events relay/subscribers (``src/domain_events``,
-#580) reuse them without importing notify. The core knows NO stream
-names: callers bring their own vocabulary (notify — the ``notify:*``
+#580) reuse them without importing the notification subsystem. The core knows NO stream
+names: callers bring their own vocabulary (the notification subsystem —
+the ``notification:*``
 streams via ``RedisQueue``; domain events — ``domain_events:<type>``).
 
 SYNC ``redis-py`` client only — no queue library; async callers wrap
-every call in ``asyncio.to_thread`` (the notify dispatcher/worker
+every call in ``asyncio.to_thread`` (the notification dispatcher/worker
 pattern), worker processes call the same sync surface directly.
 
 Reliable delivery = consumer groups: :meth:`StreamTransport.claim` is a
@@ -18,14 +20,14 @@ entry id; the underscore marks the key as transport-reserved),
 :meth:`StreamTransport.ack` is ``XACK`` by entry id (a duplicate ack is
 a harmless no-op), and :meth:`StreamTransport.autoclaim` is the RAW
 ``XAUTOCLAIM`` PEL transfer — it hands claimed entries to the caller
-WITHOUT re-adding them to the stream (notify's queue wraps it with
+WITHOUT re-adding them to the stream (the notification queue wraps it with
 re-XADD + ack for its fresh-delivery semantics; a subscriber redelivers
 by processing the claimed entry — a re-XADD on every reclaim would
 churn the stream, #580 spec §3.6 rev.2).
 
 Trimming: every ``XADD`` carries ``MAXLEN ~ 10_000`` — a stream is
 transport only, never the archive (real retention lives in a durable
-journal elsewhere: notify — the DB per ADR 008, domain events — the
+journal elsewhere: notifications — the DB per ADR 008, domain events — the
 ``domain_events`` table); Redis trims whole macro-nodes at the ceiling
 (approximate — tiny streams may briefly exceed the cap), a write is
 never rejected, and a pending entry trimmed under the ceiling is
@@ -63,7 +65,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Iterator
 
 #: Default logger of the generic core; a caller with its own journal
-#: (notify: ``memo.notify.redis_queue``) passes its logger explicitly.
+#: (notification: ``memo.notification.redis_queue``) passes its logger explicitly.
 DEFAULT_LOGGER_NAME = "memo.streams.transport"
 
 logger = logging.getLogger(DEFAULT_LOGGER_NAME)
@@ -86,15 +88,15 @@ ENVELOPE_KEY = "_qid"
 #: Pool ceiling (GH #483 spec §3.1: ≈10).
 MAX_POOL_CONNECTIONS = 10
 #: ``socket_timeout`` must exceed ANY read ``BLOCK`` parameter the
-#: caller uses (the notify worker's blocking reads set the margin).
+#: caller uses (the notification worker's blocking reads set the margin).
 SOCKET_TIMEOUT_SECONDS = 30.0
 #: Default ``XAUTOCLAIM min-idle-time`` — a caller with a re-enqueue
-#: threshold (notify: ``NOTIFY_REENQUEUE_AFTER``, 120 s) passes its
+#: threshold (notification: ``NOTIFICATION_REENQUEUE_AFTER``, 120 s) passes its
 #: setting explicitly at construction.
 DEFAULT_RECLAIM_MIN_IDLE_MS = 120_000
 
 #: Stable fail-fast message of the GENERIC gate; a caller with a stable
-#: public message (notify: ``TRANSPORT_NOT_CONFIGURED_MESSAGE``) passes
+#: public message (notification: ``TRANSPORT_NOT_CONFIGURED_MESSAGE``) passes
 #: its own. The URL value NEVER appears next to it.
 DEFAULT_NOT_CONFIGURED_MESSAGE = "streams transport not configured"
 
@@ -104,7 +106,7 @@ class StreamTransportError(Exception):
 
     Raised for every redis-py error surfacing through core methods —
     callers distinguish a transport outage from a domain error by this
-    class (notify: the ``NotifyTransportError`` alias). The core never
+    class (notification: the ``NotificationTransportError`` alias). The core never
     swallows it: the failure stays loud. The text carries the original
     exception class and message (never message bodies; the Redis URL
     value never appears in it).
@@ -141,8 +143,8 @@ class StreamTransport:
     correct. ``key_prefix`` namespaces every stream — the test contour's
     isolation on a shared instance; production keeps the default (no
     prefix). ``logger`` routes the core's journal (terminal trim losses,
-    keep-if-pending warnings) into the caller's volume — notify keeps
-    ``memo.notify.redis_queue`` for its stable log contracts.
+    keep-if-pending warnings) into the caller's volume — the notification subsystem keeps
+    ``memo.notification.redis_queue`` for its stable log contracts.
     """
 
     def __init__(
@@ -223,7 +225,7 @@ class StreamTransport:
 
     def claim(self, stream: str, group: str, count: int = CLAIM_BATCH) -> list[dict[str, Any]]:
         """Non-blocking ``XREADGROUP >`` with the ``_qid`` envelope; the
-        group parameter picks the consuming half (notify: dispatcher
+        group parameter picks the consuming half (notification: dispatcher
         up-streams / worker tasks), ``count`` is the per-stream
         ``XREADGROUP COUNT`` ceiling — the cap is applied AT THE SERVER
         (entries beyond it are NOT claimed; a caller batching smaller
@@ -288,7 +290,7 @@ class StreamTransport:
         """RAW ``XAUTOCLAIM`` over one group's PEL — a PEL transfer to
         this consumer, page by page, WITHOUT re-adding anything to the
         stream and without acking: the CALLER decides what a redelivery
-        means (notify's queue re-XADDs a verbatim copy and acks the old
+        means (the notification queue re-XADDs a verbatim copy and acks the old
         id; a domain-events subscriber processes the claimed entry as-is
         and acks after materializing — #580 §3.6).
 
@@ -452,7 +454,7 @@ class StreamTransport:
 
 class _Pingable(Protocol):
     """The gate's structural seam: anything it may construct and probe —
-    the core itself, or a delegating facade (notify's ``RedisQueue``)
+    the core itself, or a delegating facade (the notification ``RedisQueue``)
     that satisfies ``ping`` without inheriting from the core."""
 
     def ping(self) -> None: ...
@@ -468,7 +470,7 @@ def connect_or_exit[TransportT: _Pingable](
     **kwargs: Any,
 ) -> TransportT:
     """The fail-fast transport gate consumed by the process entries
-    (notify dispatcher/worker — GH #483 spec §3.1; generic since #580
+    (notification dispatcher/worker — GH #483 spec §3.1; generic since #580
     §3.6):
 
     - empty URL (transport not configured) → journal +
@@ -478,10 +480,10 @@ def connect_or_exit[TransportT: _Pingable](
 
     The URL value NEVER appears in messages or the journal — only the
     fact "not configured / unavailable". ``transport_factory`` builds
-    the caller's own facade (notify: ``RedisQueue`` — delegation, not
+    the caller's own facade (notification: ``RedisQueue`` — delegation, not
     inheritance; anything PING-able satisfies the seam) and is what the
     gate returns; ``logger`` routes the gate's journal into the
-    caller's volume (notify: ``memo.notify.redis_queue``).
+    caller's volume (notification: ``memo.notification.redis_queue``).
     """
     gate_logger = logger if logger is not None else logging.getLogger(DEFAULT_LOGGER_NAME)
     if not url:

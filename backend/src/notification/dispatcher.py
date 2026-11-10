@@ -39,7 +39,7 @@ and the TaskGroup winds down cleanly.
   the old cycle 1 is gone with the #580 switchover: the journal lost
   its consumer-state columns — the dispatcher's event INPUT is the
   ``notification`` consumer group from #580 Task 6.)
-- **Cycle 2 — ``notify:statuses``**: ``reclaim_hanging()`` at process
+- **Cycle 2 — ``notification:statuses``**: ``reclaim_hanging()`` at process
   start, then claim → per event one append-only attempt row + the §4.3
   derived task state + the rev.5 CHAIN rules in ONE commit → the
   spawned continuation (if any) is enqueued → ack. Chain (part-4 spec
@@ -59,7 +59,7 @@ and the TaskGroup winds down cleanly.
   only) and ACKED; any other error keeps the item unacked — the
   reliable-list reclaim at the next process start redelivers it
   (at-least-once, §4.4).
-- **Cycle 3 — ``notify:inbound``**: routed by the handler registry
+- **Cycle 3 — ``notification:inbound``**: routed by the handler registry
   (channel → handler). The pilot registry is EMPTY: log warning + ack.
 - **Cycle 4 — the events group read** (interval ``NOTIFICATION_POLL_INTERVAL``):
   claim a batch of the ``notification`` group on
@@ -317,7 +317,7 @@ async def reenqueue_stale_tasks(
             await session.commit()
 
 
-# ── cycle 2: notify:statuses (§3.8; family §4.3/§4.4) ───────────────────────
+# ── cycle 2: notification:statuses (§3.8; family §4.3/§4.4) ───────────────────────
 
 
 async def _chain_root(session: AsyncSession, task: NotificationTask) -> NotificationTask:
@@ -475,7 +475,7 @@ async def apply_status_event(
 async def statuses_once(
     session_factory: async_sessionmaker[AsyncSession], queue: NotificationQueue
 ) -> None:
-    """Claim ``notify:statuses`` → apply each event in its own commit →
+    """Claim ``notification:statuses`` → apply each event in its own commit →
     ack. The two-layer brak rule (#484 spec §3.5): (1) shape
     pre-validation, (2) ``ValueError`` from ``apply_status_event``
     (unknown task/stage after a valid form) — both journalled
@@ -532,11 +532,11 @@ async def statuses_once(
             await asyncio.to_thread(queue.ack_status, item)
 
 
-# ── cycle 3: notify:inbound (§3.8) ──────────────────────────────────────────
+# ── cycle 3: notification:inbound (§3.8) ──────────────────────────────────────────
 
 
 async def inbound_once(queue: NotificationQueue) -> None:
-    """Claim ``notify:inbound`` → route by the handler registry. The pilot
+    """Claim ``notification:inbound`` → route by the handler registry. The pilot
     registry is empty, so every event is logged as a warning and acked —
     producers do not exist yet; the routing form is the fixed contract.
     Queue calls go through ``asyncio.to_thread`` (§3.1)."""

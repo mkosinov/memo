@@ -11,8 +11,8 @@ limits anything).
 
 Pieces:
 
-- the §4.4 Redis key templates ``notify:{channel}:cap:<ГГГГММДД>`` /
-  ``notify:{channel}:cap-notified:<ГГГГММДД>`` (the date is the
+- the §4.4 Redis key templates ``notification:{channel}:cap:<ГГГГММДД>`` /
+  ``notification:{channel}:cap-notified:<ГГГГММДД>`` (the date is the
   process's naive UTC — ``utc_now().date()`` after the #529 wave) and
   the shared 48 h window TTL;
 - ``CapStore`` — the sync Redis seam of the window counters (ADR 013:
@@ -69,11 +69,11 @@ logger = logging.getLogger("memo.notification.limits")
 #: Counter of the channel's sends of the UTC day (``{yyyymmdd}`` —
 #: ГГГГММДД). Atomic INCR after every successful send; the FIRST INCR
 #: of a window sets the 48 h EXPIRE (spec §4.4).
-CAP_KEY_TEMPLATE = "notify:{channel}:cap:{yyyymmdd}"
+CAP_KEY_TEMPLATE = "notification:{channel}:cap:{yyyymmdd}"
 
 #: Flag «the admin service message of this window was sent» (spec
 #: §4.4) — set only AFTER a successful send, TTL 48 h.
-CAP_NOTIFIED_KEY_TEMPLATE = "notify:{channel}:cap-notified:{yyyymmdd}"
+CAP_NOTIFIED_KEY_TEMPLATE = "notification:{channel}:cap-notified:{yyyymmdd}"
 
 #: Both window keys live 48 h — past the UTC-day boundary they cover,
 #: then Redis drops them (transport, not retention: ADR 008/013).

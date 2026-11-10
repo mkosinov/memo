@@ -1,5 +1,5 @@
 """GH #484 (part 3 of the notify family #476; spec §3.1/§3.3/§3.7) —
-the notification WORKER process: the delivery loop consuming ``notify:tasks``.
+the notification WORKER process: the delivery loop consuming ``notification:tasks``.
 
 Standalone entry ``python -m src.notification.worker`` — the second process
 entry of the family. The worker has NO database (ADR 009): the frozen
@@ -128,7 +128,7 @@ ASSEMBLY_ERROR_MESSAGE = "не удалось собрать текст увед
 
 
 def parse_task_payload(raw: dict[str, Any]) -> TaskPayload:
-    """Validate a ``notify:tasks`` payload (spec §3.1; §4.2 rev.5 — the
+    """Validate a ``notification:tasks`` payload (spec §3.1; §4.2 rev.5 — the
     task is ONE channel, ADR 014): ``task_id`` — a NON-EMPTY STRING (a
     UUID String(36): ``NotificationTask.id``, the AbstractModel PK — the shape
     scenarios and the re-enqueue cycle actually put on the seam; the

@@ -57,7 +57,7 @@ class ChannelLimits:
     (потолок, пауза, адрес служебных сообщений)».
 
     Declaration only — the MECHANISM (Redis counter
-    ``notify:{channel}:cap:<ГГГГММДД>`` with the 48 h EXPIRE, the send
+    ``notification:{channel}:cap:<ГГГГММДД>`` with the 48 h EXPIRE, the send
     pause between sequential sends, the one-per-window admin message on
     first exhaustion) is Task 3's registry machinery reading these
     fields; nothing here counts, sleeps, or sends:

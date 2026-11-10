@@ -6,7 +6,7 @@ backend — extracted from the notification subsystem's queue adapter
 §3.1, ADR 013) so the domain-events relay/subscribers (``src/domain_events``,
 #580) reuse them without importing the notification subsystem. The core knows NO stream
 names: callers bring their own vocabulary (the notification subsystem —
-the ``notify:*``
+the ``notification:*``
 streams via ``RedisQueue``; domain events — ``domain_events:<type>``).
 
 SYNC ``redis-py`` client only — no queue library; async callers wrap

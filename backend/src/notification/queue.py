@@ -37,7 +37,7 @@ from typing import Any, Protocol, runtime_checkable
 
 # ── Contracts (family #476 §4.2/§4.3, rev.5) — JSON dicts, no ORM objects ────
 
-#: Task payload of ``notify:tasks`` (§4.2 rev.5 — task = one channel,
+#: Task payload of ``notification:tasks`` (§4.2 rev.5 — task = one channel,
 #: ADR 014): ``{task_id, channel, address, payload, template_id,
 #: template_body, template_channel, root_task_id, created_at,
 #: resend_of}`` — the frozen task row verbatim; the worker assembles
@@ -47,7 +47,7 @@ from typing import Any, Protocol, runtime_checkable
 #: keys its transport parse mode by it (#485 Task 4, spec §6.2).
 TaskPayload = dict[str, Any]
 
-#: Worker stage event of ``notify:statuses`` (§4.3 rev.5):
+#: Worker stage event of ``notification:statuses`` (§4.3 rev.5):
 #: ``{task_id, stage: sending|sent|failed, channel, outcome, error,
 #: sent_text, occurred_at}`` — ``sent_text`` carries the actually
 #: transmitted text (None when the attempt died before transmission).
@@ -75,7 +75,7 @@ def build_task_payload(task: Any, created_at: str) -> TaskPayload:
         "resend_of": task.resend_of,
     }
 
-#: Channel reply of ``notify:inbound`` — the format is FIXED (family
+#: Channel reply of ``notification:inbound`` — the format is FIXED (family
 #: §4.3; part-2 spec §3.2, GH #483):
 #: ``{channel, external_address, kind, text, task_id, occurred_at}``.
 #: All keys required; ``text`` ≤ 4000 chars; ``external_address`` ≤ 20
@@ -103,7 +103,7 @@ class NotificationQueue(Protocol):
     in here (Redis Streams — ``redis_queue.RedisQueue``, ADR 013)."""
 
     def enqueue_task(self, payload: TaskPayload) -> None:
-        """Push a ready delivery task (§4.2) to ``notify:tasks``."""
+        """Push a ready delivery task (§4.2) to ``notification:tasks``."""
         ...
 
     def claim_statuses(self) -> list[StatusEvent]:
@@ -122,7 +122,7 @@ class NotificationQueue(Protocol):
 
     def pending_worker_task_ids(self) -> set[str]:
         """Task ids currently claimed-but-unacked by the ``worker``
-        group on ``notify:tasks`` — the PEL probe of the dispatcher's
+        group on ``notification:tasks`` — the PEL probe of the dispatcher's
         re-enqueue predicate (family §3.3 rev.5: a task the worker
         HOLDS — a channel pause, a retry sleep — is not hanging). A
         transport failure raises :class:`NotificationTransportError`."""
@@ -135,7 +135,7 @@ class NotificationQueue(Protocol):
         ...
 
     def claim_inbound(self) -> list[InboundEvent]:
-        """Reliable claim for ``notify:inbound`` channel replies."""
+        """Reliable claim for ``notification:inbound`` channel replies."""
         ...
 
     def ack_inbound(self, item: InboundEvent) -> None:
@@ -151,7 +151,7 @@ class WorkerQueue(Protocol):
     as an alias for part-1/2 tests)."""
 
     def claim_tasks(self) -> list[TaskPayload]:
-        """Reliable claim for ``notify:tasks`` delivery tasks (§4.4)."""
+        """Reliable claim for ``notification:tasks`` delivery tasks (§4.4)."""
         ...
 
     def ack_task(self, item: TaskPayload) -> None:
@@ -159,12 +159,12 @@ class WorkerQueue(Protocol):
         ...
 
     def publish_status(self, event: StatusEvent) -> None:
-        """Publish a §4.3 worker stage event to ``notify:statuses``."""
+        """Publish a §4.3 worker stage event to ``notification:statuses``."""
         ...
 
     def ensure_worker_group(self) -> None:
         """Worker-start duty (§3.1): create the ``worker`` group on
-        ``notify:tasks`` (``id=0 MKSTREAM`` — the accumulated backlog
+        ``notification:tasks`` (``id=0 MKSTREAM`` — the accumulated backlog
         stays deliverable; this is the point of part 3)."""
         ...
 
@@ -219,7 +219,7 @@ class FakeQueue:
     def push_inbound(self, event: InboundEvent) -> None:
         self._inbound.append(event)
 
-    # ── reliable list: notify:tasks (worker half, #484 §3.1) ────────────────
+    # ── reliable list: notification:tasks (worker half, #484 §3.1) ────────────────
 
     def claim_tasks(self) -> list[TaskPayload]:
         claimed, self._tasks = self._tasks, []
@@ -247,7 +247,7 @@ class FakeQueue:
     def ensure_worker_group(self) -> None:
         """No-op: plain lists need no consumer groups (§3.1 seam)."""
 
-    # ── reliable list: notify:statuses ───────────────────────────────────────
+    # ── reliable list: notification:statuses ───────────────────────────────────────
 
     def claim_statuses(self) -> list[StatusEvent]:
         claimed, self._statuses = self._statuses, []
@@ -261,7 +261,7 @@ class FakeQueue:
         with contextlib.suppress(ValueError):
             self._servicing_statuses.remove(item)
 
-    # ── reliable list: notify:inbound ────────────────────────────────────────
+    # ── reliable list: notification:inbound ────────────────────────────────────────
 
     def claim_inbound(self) -> list[InboundEvent]:
         claimed, self._inbound = self._inbound, []

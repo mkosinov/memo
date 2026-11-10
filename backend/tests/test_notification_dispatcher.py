@@ -1,8 +1,8 @@
 """GH #482 Task 9 (spec §3.8; family #476 §4.3/§4.4): dispatcher process.
 
 Three loops of one ``asyncio.TaskGroup`` over the queue port: the
-re-enqueue sweep, ``notify:statuses`` reading (§4.3 derived state),
-``notify:inbound`` reading (empty pilot registry). Covered (spec §5,
+re-enqueue sweep, ``notification:statuses`` reading (§4.3 derived state),
+``notification:inbound`` reading (empty pilot registry). Covered (spec §5,
 US-5–US-8):
 
 - #580 Task 3: the journal-polling cycle and the event 3-attempts
@@ -260,7 +260,7 @@ class _TransportBrokenQueue(FakeQueue):
     def enqueue_task(self, payload: dict) -> None:
         if self._fail_enqueue:
             raise NotificationTransportError(
-                "streams transport failed during publish notify:tasks:"
+                "streams transport failed during publish notification:tasks:"
                 " ConnectionError: mock-dead-redis"
             )
         super().enqueue_task(payload)
@@ -268,7 +268,7 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_statuses(self):
         if self._fail_claim:
             raise NotificationTransportError(
-                "streams transport failed during claim notify:statuses/dispatcher:"
+                "streams transport failed during claim notification:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_statuses()
@@ -276,7 +276,7 @@ class _TransportBrokenQueue(FakeQueue):
     def claim_inbound(self):
         if self._fail_claim:
             raise NotificationTransportError(
-                "streams transport failed during claim notify:inbound/dispatcher:"
+                "streams transport failed during claim notification:inbound/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
         return super().claim_inbound()
@@ -567,7 +567,7 @@ class TestMainExitCodePropagation:
         assert TRANSPORT_NOT_CONFIGURED_MESSAGE in proc.stdout + proc.stderr
 
 
-# ── cycle 2: notify:statuses → attempts + derived state (§4.3) ──────────────
+# ── cycle 2: notification:statuses → attempts + derived state (§4.3) ──────────────
 
 
 class TestStatusesCycle:
@@ -1166,7 +1166,7 @@ class TestStatusesBrakRule:
         assert _task_row(task.id, "status")["status"] == "sent"
 
 
-# ── cycle 3: notify:inbound (§3.8, empty pilot registry) ────────────────────
+# ── cycle 3: notification:inbound (§3.8, empty pilot registry) ────────────────────
 
 
 class TestInboundCycle:
@@ -1581,7 +1581,7 @@ class TestReenqueueWorkerPEL:
         class _ProbeBrokenQueue(FakeQueue):
             def pending_worker_task_ids(self) -> set[str]:
                 raise NotificationTransportError(
-                    "streams transport failed during pending notify:tasks/worker:"
+                    "streams transport failed during pending notification:tasks/worker:"
                     " ConnectionError: mock-dead-redis"
                 )
 
@@ -1789,7 +1789,7 @@ class TestTransportFailureDoesNotKillCycles:
             if len(ticks) >= 3:
                 stop.set()
             raise NotificationTransportError(
-                "streams transport failed during claim notify:statuses/dispatcher:"
+                "streams transport failed during claim notification:statuses/dispatcher:"
                 " ConnectionError: mock-dead-redis"
             )
 

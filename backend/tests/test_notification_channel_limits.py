@@ -8,8 +8,8 @@ counters are faked at the seams, spec §13: «лимиты (пауза мока�
 потолок по Redis-счётчику, "админ не задан → сообщения нет", "второго
 сообщения в окне нет")»):
 
-- the §4.4 key templates ``notify:{channel}:cap:<ГГГГММДД>`` /
-  ``notify:{channel}:cap-notified:<ГГГГММДД>`` and the 48 h TTL;
+- the §4.4 key templates ``notification:{channel}:cap:<ГГГГММДД>`` /
+  ``notification:{channel}:cap-notified:<ГГГГММДД>`` and the 48 h TTL;
 - the §6.3 admin service message text (channel-generic; for the
   ``telegram`` channel it IS the spec's exact sentence);
 - the cap gate (``ChannelLimiter.governed_send``): under the ceiling —
@@ -68,18 +68,18 @@ pytestmark = pytest.mark.unit
 
 class TestCapWindowKeys:
     def test_cap_key_template_is_the_spec_shape(self) -> None:
-        assert CAP_KEY_TEMPLATE == "notify:{channel}:cap:{yyyymmdd}"
+        assert CAP_KEY_TEMPLATE == "notification:{channel}:cap:{yyyymmdd}"
 
     def test_cap_notified_key_template_is_the_spec_shape(self) -> None:
-        assert CAP_NOTIFIED_KEY_TEMPLATE == "notify:{channel}:cap-notified:{yyyymmdd}"
+        assert CAP_NOTIFIED_KEY_TEMPLATE == "notification:{channel}:cap-notified:{yyyymmdd}"
 
     def test_cap_key_formats_channel_and_naive_utc_date(self) -> None:
-        assert cap_key("telegram", date(2026, 10, 25)) == "notify:telegram:cap:20261025"
+        assert cap_key("telegram", date(2026, 10, 25)) == "notification:telegram:cap:20261025"
 
     def test_cap_notified_key_formats_channel_and_naive_utc_date(self) -> None:
         assert (
             cap_notified_key("mock", date(2026, 1, 2))
-            == "notify:mock:cap-notified:20260102"
+            == "notification:mock:cap-notified:20260102"
         )
 
     def test_window_ttl_is_48_hours(self) -> None:

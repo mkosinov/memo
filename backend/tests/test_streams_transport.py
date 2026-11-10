@@ -42,7 +42,7 @@ class TestRawAutoclaim:
         to the CALLER via XAUTOCLAIM — the stream entry count must not
         grow (no re-XADD in the core), the entry stays unacked in the
         new consumer's PEL (ack is the caller's decision)."""
-        stream_name = "notify:statuses"  # any name — the core is generic
+        stream_name = "notification:statuses"  # any name — the core is generic
         group = "dispatcher"
         dead = _core(contour, consumer_name="core-dead")
         dead.ensure_group(stream_name, group)

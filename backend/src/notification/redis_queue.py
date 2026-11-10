@@ -1,7 +1,7 @@
 """Redis Streams transport of the notification queue (GH #483 spec §3.1; ADR 013).
 
 ``RedisQueue`` implements the ``NotificationQueue`` port (``queue.py``) as the
-notify stream/group vocabulary on top of the GENERIC streams core
+notification stream/group vocabulary on top of the GENERIC streams core
 ``src/streams/transport.py`` (GH #580 spec §3.6) — delegation, not
 inheritance: the domain-events relay/subscribers (#580) reuse the same
 core without importing notification. All mechanics — pool construction
@@ -22,9 +22,9 @@ transport only, real retention lives in the DB per ADR 008; Redis
 silently trims the oldest entries at the ceiling, and a write is never
 rejected):
 
-- ``notify:tasks`` (down)  — group ``worker`` (the worker half, #484);
-- ``notify:statuses``      — group ``dispatcher`` (this part);
-- ``notify:inbound``       — group ``dispatcher`` (this part).
+- ``notification:tasks`` (down)  — group ``worker`` (the worker half, #484);
+- ``notification:statuses``      — group ``dispatcher`` (this part);
+- ``notification:inbound``       — group ``dispatcher`` (this part).
 
 Reliable delivery = consumer groups: ``claim_*`` is a NON-blocking
 ``XREADGROUP >`` (entries land in the consumer's PEL), ``ack_*`` is
@@ -80,13 +80,13 @@ logger = logging.getLogger("memo.notification.redis_queue")
 
 # ── stream / group vocabulary (spec §3.1; ADR 013) ──────────────────────────
 
-TASKS_STREAM = "notify:tasks"
-STATUSES_STREAM = "notify:statuses"
-INBOUND_STREAM = "notify:inbound"
+TASKS_STREAM = "notification:tasks"
+STATUSES_STREAM = "notification:statuses"
+INBOUND_STREAM = "notification:inbound"
 
 #: Consumer group of the dispatcher process on the up-streams (part 2).
 DISPATCHER_GROUP = "dispatcher"
-#: Consumer group of the worker process on ``notify:tasks`` — the
+#: Consumer group of the worker process on ``notification:tasks`` — the
 #: worker half's group (claim/ack/reclaim, part 3 #484 spec §3.1).
 WORKER_GROUP = "worker"
 
@@ -146,17 +146,17 @@ class RedisQueue:
     # ── producer side (off-protocol; worker side from part 3) ────────────
 
     def publish_status(self, event: StatusEvent) -> None:
-        """``XADD`` a §4.3 stage event to ``notify:statuses`` (mirrors
+        """``XADD`` a §4.3 stage event to ``notification:statuses`` (mirrors
         ``FakeQueue.publish_status``; off the DISPATCHER protocol per
         ADR 013 — typed on ``WorkerQueue`` since part 3, #484 §3.1)."""
         self._core.publish(STATUSES_STREAM, event)
 
     def publish_inbound(self, event: InboundEvent) -> None:
-        """``XADD`` a §3.2 inbound event to ``notify:inbound`` (mirrors
+        """``XADD`` a §3.2 inbound event to ``notification:inbound`` (mirrors
         ``FakeQueue.push_inbound``; deliberately NOT on the protocol)."""
         self._core.publish(INBOUND_STREAM, event)
 
-    # ── reliable delivery: notify:statuses / notify:inbound ──────────────
+    # ── reliable delivery: notification:statuses / notification:inbound ──────────────
 
     def claim_statuses(self) -> list[StatusEvent]:
         return self._core.claim(STATUSES_STREAM, DISPATCHER_GROUP)
@@ -170,7 +170,7 @@ class RedisQueue:
     def ack_inbound(self, item: InboundEvent) -> None:
         self._core.ack(INBOUND_STREAM, DISPATCHER_GROUP, item[ENVELOPE_KEY])
 
-    # ── worker half: notify:tasks, group ``worker`` (part 3 #484 §3.1) ───
+    # ── worker half: notification:tasks, group ``worker`` (part 3 #484 §3.1) ───
 
     def claim_tasks(self) -> list[TaskPayload]:
         """Non-blocking claim of the ``worker`` group (``XREADGROUP >``,
@@ -183,7 +183,7 @@ class RedisQueue:
 
     def ensure_worker_group(self) -> None:
         """Worker-start duty (spec §3.1): the ``worker`` group on
-        ``notify:tasks`` — ``id=0 MKSTREAM``, so the backlog accumulated
+        ``notification:tasks`` — ``id=0 MKSTREAM``, so the backlog accumulated
         before the group existed stays deliverable (deliberate: tasks
         piled up with no consumer — that is what part 3 consumes;
         «improving» to ``$`` is forbidden). ONLY the concrete BUSYGROUP
@@ -198,7 +198,7 @@ class RedisQueue:
 
     def pending_worker_task_ids(self) -> set[str]:
         """Task ids in the PEL of the ``worker`` group on
-        ``notify:tasks`` — the dispatcher's re-enqueue predicate probe
+        ``notification:tasks`` — the dispatcher's re-enqueue predicate probe
         (family §3.3 rev.5). The PEL paging (XPENDING + XRANGE) lives in
         the core; this side only maps payloads to task ids.
 

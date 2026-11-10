@@ -24,7 +24,7 @@ The deliberate differences from ``mock`` — and the reasons:
   contour kill channel 1 while channel 2 still delivers — with the
   display name ``Mock 2`` for the §6.3 service sentence;
 - mock2's OWN bounded Redis artifact list
-  (``notify:mock2:deliveries``): per-channel attribution — the chain
+  (``notification:mock2:deliveries``): per-channel attribution — the chain
   scenarios must see WHICH channel delivered; a blended list would
   lose exactly that.
 
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 #: Bounded-artifact list of mock2's Redis recorder — its OWN list,
 #: never mock's (spec §12 scenario 3: per-channel attribution — WHICH
 #: channel delivered).
-MOCK2_DELIVERIES_LIST = "notify:mock2:deliveries"
+MOCK2_DELIVERIES_LIST = "notification:mock2:deliveries"
 
 # ── mock2's OWN limit settings (spec §4.4/§6.3) ──────────────────────────────
 #

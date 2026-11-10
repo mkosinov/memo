@@ -11,7 +11,7 @@ assertions live HERE, against the contour Redis:
   ``NotificationTask`` row — with a PREFIX-FREE address (no ``fail-*``
   scripting: the plain-address delivery path) goes through ONE worker
   iteration (``delivery_once``) wired to the REAL ``RedisListRecorder``
-  (the registry factory's artifact): the ``notify:mock:deliveries`` list
+  (the registry factory's artifact): the ``notification:mock:deliveries`` list
   under the contour's key prefix holds ``{address, text}`` with the
   ready text verbatim, and the task leaves delivery (acked);
 - the recorder's ``LTRIM`` keeps the artifact bounded (spec §3.6): 1001

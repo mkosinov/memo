@@ -141,7 +141,7 @@ def _dispatcher_payload(task: NotificationTask) -> dict[str, Any]:
 def _stream_payloads(client: Redis) -> list[dict[str, Any]]:
     """Everything currently in the task stream — the observation surface
     (XRANGE; after a FLUSHDB every entry can only come from the cycle)."""
-    stream = f"{_PREFIX}notify:tasks"
+    stream = f"{_PREFIX}notification:tasks"
     return [
         json.loads(fields["payload"])
         for _entry_id, fields in client.xrange(stream, min="-", max="+")

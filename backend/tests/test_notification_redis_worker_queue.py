@@ -1,6 +1,6 @@
 """GH #484 Task 3 (spec §3.1; family #476 §4.2/§4.4): the WORKER half
 of the real ``RedisQueue`` transport — the ``worker`` consumer group
-on ``notify:tasks``.
+on ``notification:tasks``.
 
 Marked ``redis`` with a declarative ``skipif`` guard over ``REDIS_URL``
 (§3.6): without the variable every test here skips and the standard

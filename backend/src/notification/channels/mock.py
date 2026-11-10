@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from src.notification.assembly import EscapeMode
 
 #: Bounded-artifact list of the Redis recorder (spec §3.6).
-MOCK_DELIVERIES_LIST = "notify:mock:deliveries"
+MOCK_DELIVERIES_LIST = "notification:mock:deliveries"
 #: ``LTRIM`` ceiling of the Redis recorder (spec §3.6: 1000 entries).
 MOCK_DELIVERIES_CAP = 1000
 

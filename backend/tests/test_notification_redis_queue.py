@@ -30,9 +30,9 @@ WORKER_TEST_GROUP = "worker-test"  # part-3 worker stand-in for reading tasks
 
 
 def _read_tasks(contour: RedisContour) -> list[dict[str, Any]]:
-    """Consume ``notify:tasks`` via a test worker group (XREADGROUP ``>``),
+    """Consume ``notification:tasks`` via a test worker group (XREADGROUP ``>``),
     mirroring what part 3 will do."""
-    stream = f"{contour.prefix}notify:tasks"
+    stream = f"{contour.prefix}notification:tasks"
     contour.client.xgroup_create(stream, WORKER_TEST_GROUP, id="0", mkstream=True)
     reply = contour.client.xreadgroup(
         WORKER_TEST_GROUP,
@@ -78,7 +78,7 @@ class TestEnqueueTask:
         the transport-reserved ``_qid`` envelope exists only on CLAIMED
         items, never inside the stored payload."""
         contour.queue().enqueue_task(make_task())
-        stream = f"{contour.prefix}notify:tasks"
+        stream = f"{contour.prefix}notification:tasks"
         (_entry_id, fields) = contour.client.xrange(stream, min="-", max="+")[0]
         assert set(fields) == {"payload"}
         assert "_qid" not in fields["payload"]
@@ -116,7 +116,7 @@ class TestAckStatus:
         (claimed,) = q.claim_statuses()
         q.ack_status(claimed)
         # the entry left the group PEL...
-        stream = f"{contour.prefix}notify:statuses"
+        stream = f"{contour.prefix}notification:statuses"
         assert contour.client.xpending(stream, "dispatcher")["pending"] == 0
         # the acked id can never come back: nothing is left in the PEL
         assert q.claim_statuses() == []
@@ -154,7 +154,7 @@ class TestInboundMirror:
         (claimed,) = q.claim_inbound()
         q.ack_inbound(claimed)
         q.ack_inbound(claimed)  # duplicate
-        stream = f"{contour.prefix}notify:inbound"
+        stream = f"{contour.prefix}notification:inbound"
         assert contour.client.xpending(stream, "dispatcher")["pending"] == 0
 
 
@@ -167,7 +167,7 @@ class TestConsumerGroups:
         q = contour.queue()
         q.ensure_consumer_groups()
         q.ensure_consumer_groups()  # idempotent — BUSYGROUP suppressed
-        for stream_name in ("notify:statuses", "notify:inbound"):
+        for stream_name in ("notification:statuses", "notification:inbound"):
             groups = contour.client.xinfo_groups(f"{contour.prefix}{stream_name}")
             assert [g["name"] for g in groups] == ["dispatcher"]
 
@@ -181,7 +181,7 @@ class TestConsumerGroups:
         q.publish_status(make_status())
         (q.claim_statuses(),)  # a real delivery materializes the consumer
         consumers = contour.client.xinfo_consumers(
-            f"{contour.prefix}notify:statuses", "dispatcher"
+            f"{contour.prefix}notification:statuses", "dispatcher"
         )
         assert f"dispatcher-{os.getpid()}" in [c["name"] for c in consumers]
 
@@ -196,7 +196,7 @@ class TestReclaimHanging:
         dead.ensure_consumer_groups()
         dead.publish_status(make_status(task_id=7))
         (claimed,) = dead.claim_statuses()
-        stream = f"{contour.prefix}notify:statuses"
+        stream = f"{contour.prefix}notification:statuses"
         assert contour.client.xpending(stream, "dispatcher")["pending"] == 1
 
         fresh = contour.queue(reclaim_min_idle_ms=30)
@@ -243,7 +243,7 @@ class TestReclaimHanging:
         dead.ensure_consumer_groups()
         dead.publish_status(make_status(task_id=9))
         (claimed,) = dead.claim_statuses()
-        stream = f"{contour.prefix}notify:statuses"
+        stream = f"{contour.prefix}notification:statuses"
         assert contour.client.xdel(stream, claimed["_qid"]) == 1
 
         with capture_notification_logs() as messages:
@@ -253,7 +253,7 @@ class TestReclaimHanging:
         terminal = [m for m in messages if "unrecoverable" in m]
         assert terminal, "trimmed-entry loss must be logged terminally"
         assert claimed["_qid"] in terminal[0]
-        assert "notify:statuses" in terminal[0]
+        assert "notification:statuses" in terminal[0]
         # no message bodies in logs (hygiene): the payload text never leaks
         assert "Готовый текст" not in terminal[0]
 
@@ -266,7 +266,7 @@ class TestGracefulStop:
         q.ensure_consumer_groups()
         q.publish_status(make_status())
         q.claim_statuses()
-        stream = f"{contour.prefix}notify:statuses"
+        stream = f"{contour.prefix}notification:statuses"
         assert contour.client.xinfo_consumers(stream, "dispatcher")
 
         q.close()

@@ -4,7 +4,7 @@ Runs AFTER the S1 Playwright scenario against the SAME enabled e2e stack
 (``scripts/e2e-shard-start.sh`` in ``NOTIFY_E2E_ENABLED=1`` mode): the
 scenario created a record with the «отправлять оповещения» checkbox, the
 stack's dispatcher turned the journaled event into a task and enqueued
-it. This check reads the REAL ``notify:tasks`` stream of that stack:
+it. This check reads the REAL ``notification:tasks`` stream of that stack:
 
 - the stream holds **≥ 1** task (never an exact count — the re-enqueue
   cycle may legitimately add a duplicate, family §4.4);
@@ -97,9 +97,9 @@ PAYLOAD_KEYS = {
 
 
 def _stream_payloads(client: Redis) -> list[dict[str, Any]]:
-    """Every payload of the stack's ``notify:tasks`` (DEFAULT key — the
+    """Every payload of the stack's ``notification:tasks`` (DEFAULT key — the
     production stream vocabulary; no contour prefix, spec §3.5)."""
-    entries = client.xrange("notify:tasks")
+    entries = client.xrange("notification:tasks")
     return [json.loads(fields["payload"]) for _entry_id, fields in entries]
 
 

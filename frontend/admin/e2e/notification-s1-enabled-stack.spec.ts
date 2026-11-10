@@ -13,17 +13,17 @@ const BACKEND = resolveBackendUrl();
 void BACKEND; // GH #387 fence — both URL vars must be present and same-host
 
 /**
- * GH #483 Task 8 — User Scenario S1 (spec §4): the ENABLED notify stack.
+ * GH #483 Task 8 — User Scenario S1 (spec §4): the ENABLED notification stack.
  *
- * The stack is up with the notify subsystem enabled (dispatcher child +
- * a real Redis; scripts/e2e-shard-start.sh in NOTIFY_E2E_ENABLED=1 mode).
+ * The stack is up with the notification subsystem enabled (dispatcher child +
+ * a real Redis; scripts/e2e-shard-start.sh in NOTIFICATION_E2E_ENABLED=1 mode).
  * Creating a record with the «отправлять оповещения» checkbox on a future
  * activity for a fresh client (consent is ON by default, family spec §3.8
  * — part 1 wired the checkbox flag) passes NORMALLY: the records UI is
  * unchanged. The dispatcher then turns the journaled event into a queued
- * notify task (the post-scenario QUEUE assertion itself — stream ≥ 1 task
+ * notification task (the post-scenario QUEUE assertion itself — stream ≥ 1 task
  * with the family §4.2 payload — is the marked backend test
- * backend/tests/test_notify_redis_s1_queue.py, run AFTER this scenario;
+ * backend/tests/test_notification_redis_s1_queue.py, run AFTER this scenario;
  * spec §3.6). Here we assert the DB side of that pipeline as a SYNC
  * POINT: the queued task row must exist before cleanup deletes the
  * record — a deleted record would make the live-read scenario close the
@@ -34,14 +34,14 @@ void BACKEND; // GH #387 fence — both URL vars must be present and same-host
  *
  * Run against the enabled stack only (skipped everywhere else — standard
  * shards stay byte-identical, S2):
- *   stack:  NOTIFY_E2E_ENABLED=1 SHARD_ID=notify \
- *           TEST_DB_PATH=backend/test_memo_notify_e2e.db \
+ *   stack:  NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification \
+ *           TEST_DB_PATH=backend/test_memo_notification_e2e.db \
  *           bash scripts/e2e-shard-start.sh
- *   run:    cd frontend/admin && NOTIFY_E2E_ENABLED=1 SHARD_PORT=3006 \
+ *   run:    cd frontend/admin && NOTIFICATION_E2E_ENABLED=1 SHARD_PORT=3006 \
  *           BACKEND_URL=http://127.0.0.1:8005 \
  *           NEXT_PUBLIC_API_URL=http://127.0.0.1:8005 \
- *           TEST_DB_PATH=backend/test_memo_notify_e2e.db \
- *           pnpm exec playwright test e2e/notify-s1-enabled-stack.spec.ts
+ *           TEST_DB_PATH=backend/test_memo_notification_e2e.db \
+ *           pnpm exec playwright test e2e/notification-s1-enabled-stack.spec.ts
  * (both URL vars, same host — GH #387; no SHARD_ID so the standalone
  * TEST_DB_PATH resolution applies).
  */
@@ -55,10 +55,10 @@ function futureStart(): { date: string; start: string } {
   return { date, start: `${date}T12:00:00` };
 }
 
-test.describe('Notify enabled stack — S1 (GH #483)', () => {
+test.describe('Notification enabled stack — S1 (GH #483)', () => {
   test.skip(
-    process.env.NOTIFY_E2E_ENABLED !== '1',
-    'S1 targets the enabled notify stack: run with NOTIFY_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #483 §3.5/§4)',
+    process.env.NOTIFICATION_E2E_ENABLED !== '1',
+    'S1 targets the enabled notification stack: run with NOTIFICATION_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #483 §3.5/§4)',
   );
 
   test('record with «отправлять оповещения» creates normally and the dispatcher queues the task', async ({
@@ -73,7 +73,7 @@ test.describe('Notify enabled stack — S1 (GH #483)', () => {
     const uid = Date.now();
     const nationalDigits = `999${String(uid).slice(-7)}`;
     const testPhone = `+7${nationalDigits}`;
-    const testClientName = `Notify S1 Client ${uid}`;
+    const testClientName = `Notification S1 Client ${uid}`;
 
     // `any` (house pattern, activity-details-modal.spec.ts): the rows are
     // assigned inside expect.poll callbacks, which control-flow analysis
@@ -102,7 +102,7 @@ test.describe('Notify enabled stack — S1 (GH #483)', () => {
         .locator('button:has-text("Добавить посетителя")')
         .click();
       const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
-      await visitorRow.locator('input').first().fill(`Notify S1 Visitor ${uid % 100000}`);
+      await visitorRow.locator('input').first().fill(`Notification S1 Visitor ${uid % 100000}`);
 
       const checkbox = page.locator('[data-testid="checkbox-notifications"]');
       await checkbox.check();
@@ -146,7 +146,7 @@ test.describe('Notify enabled stack — S1 (GH #483)', () => {
       //    the pipeline reached the queue before cleanup runs.
       await expect.poll(async () => {
         taskRow = queryDBRow(
-          `SELECT status FROM notify_tasks WHERE client_id='${clientRow!.id}' AND scenario='new_record'`,
+          `SELECT status FROM notification_tasks WHERE client_id='${clientRow!.id}' AND scenario='new_record'`,
         );
         return taskRow !== null;
       }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);

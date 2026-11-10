@@ -24,9 +24,9 @@ void BACKEND; // GH #387 fence — both URL vars must be present and same-host
  * GH #484 Task 8 — User Scenario S6, the E2E leg (spec §4): mock
  * delivery through the FULL enabled stack.
  *
- * The stack runs with the notify subsystem enabled AND the WORKER child
- * (scripts/e2e-shard-start.sh in NOTIFY_E2E_ENABLED=1 mode spawns
- * dispatcher + worker; NOTIFY_CHANNEL_PRIORITY=mock — §3.8). Creating a
+ * The stack runs with the notification subsystem enabled AND the WORKER child
+ * (scripts/e2e-shard-start.sh in NOTIFICATION_E2E_ENABLED=1 mode spawns
+ * dispatcher + worker; NOTIFICATION_CHANNEL_PRIORITY=mock — §3.8). Creating a
  * record with the «отправлять оповещения» checkbox on a future activity
  * for a fresh client passes NORMALLY and the records UI is unchanged
  * (the record lands in the records list). The pipeline then runs
@@ -35,7 +35,7 @@ void BACKEND; // GH #387 fence — both URL vars must be present and same-host
  *
  * Per the S1-precedent split (spec §3.6), the DELIVERY assertions
  * (recorder artifact `{address, text}`, LTRIM bound) live in the marked
- * backend check `backend/tests/test_notify_redis_s6_delivery.py`. Here
+ * backend check `backend/tests/test_notification_redis_s6_delivery.py`. Here
  * the DB view of the COMPLETED pipeline is the SYNC POINT: the task row
  * must reach `sent` before cleanup — this is exactly what fails without
  * the worker in the stack (the row stays `queued` forever), which is the
@@ -43,14 +43,14 @@ void BACKEND; // GH #387 fence — both URL vars must be present and same-host
  *
  * Run against the enabled stack only (skipped everywhere else — standard
  * shards stay byte-identical, S2/S10):
- *   stack:  NOTIFY_E2E_ENABLED=1 SHARD_ID=notify \
- *           TEST_DB_PATH=backend/test_memo_notify_e2e.db \
+ *   stack:  NOTIFICATION_E2E_ENABLED=1 SHARD_ID=notification \
+ *           TEST_DB_PATH=backend/test_memo_notification_e2e.db \
  *           bash scripts/e2e-shard-start.sh
- *   run:    cd frontend/admin && NOTIFY_E2E_ENABLED=1 SHARD_PORT=3006 \
+ *   run:    cd frontend/admin && NOTIFICATION_E2E_ENABLED=1 SHARD_PORT=3006 \
  *           BACKEND_URL=http://127.0.0.1:8005 \
  *           NEXT_PUBLIC_API_URL=http://127.0.0.1:8005 \
- *           TEST_DB_PATH=backend/test_memo_notify_e2e.db \
- *           pnpm exec playwright test e2e/notify-s6-mock-delivery.spec.ts
+ *           TEST_DB_PATH=backend/test_memo_notification_e2e.db \
+ *           pnpm exec playwright test e2e/notification-s6-mock-delivery.spec.ts
  * (both URL vars, same host — GH #387; no SHARD_ID so the standalone
  * TEST_DB_PATH resolution applies).
  */
@@ -64,10 +64,10 @@ function futureStart(): { date: string; start: string } {
   return { date, start: `${date}T12:00:00` };
 }
 
-test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
+test.describe('Notification enabled stack — S6 mock delivery (GH #484)', () => {
   test.skip(
-    process.env.NOTIFY_E2E_ENABLED !== '1',
-    'S6 targets the enabled notify stack WITH the worker child: run with NOTIFY_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #484 §3.8/§4)',
+    process.env.NOTIFICATION_E2E_ENABLED !== '1',
+    'S6 targets the enabled notification stack WITH the worker child: run with NOTIFICATION_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #484 §3.8/§4)',
   );
 
   test('record with «отправлять оповещения» delivers through the worker — records UI unchanged', async ({
@@ -82,9 +82,9 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
     const uid = Date.now();
     const nationalDigits = `999${String(uid).slice(-7)}`;
     const testPhone = `+7${nationalDigits}`;
-    const testClientName = `Notify S6 Client ${uid}`;
+    const testClientName = `Notification S6 Client ${uid}`;
 
-    // `any` (house pattern, notify-s1 spec): the rows are assigned
+    // `any` (house pattern, notification-s1 spec): the rows are assigned
     // inside expect.poll callbacks, which control-flow analysis cannot
     // see — a `T | null` annotation narrows to `null`/`never` in the
     // finally block and breaks the optional-chain cleanup accesses.
@@ -111,7 +111,7 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
         .locator('button:has-text("Добавить посетителя")')
         .click();
       const visitorRow = page.locator('[data-testid="visitor-form-row"]').first();
-      await visitorRow.locator('input').first().fill(`Notify S6 Visitor ${uid % 100000}`);
+      await visitorRow.locator('input').first().fill(`Notification S6 Visitor ${uid % 100000}`);
 
       const checkbox = page.locator('[data-testid="checkbox-notifications"]');
       await checkbox.check();
@@ -164,13 +164,13 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
 
       // 5. SYNC POINT (worker-dependent, the S6 core) — the task row
       //    must reach `sent`: the worker consumed the stream, delivered
-      //    through the mock channel (NOTIFY_CHANNEL_PRIORITY=mock) and
+      //    through the mock channel (NOTIFICATION_CHANNEL_PRIORITY=mock) and
       //    the dispatcher reader applied the §4.3 statuses. Without the
       //    worker child in the stack the row stays `queued` forever —
       //    this poll is the RED-phase failure of Task 8.
       await expect.poll(async () => {
         taskRow = queryDBRow(
-          `SELECT status FROM notify_tasks WHERE client_id='${clientRow!.id}' AND scenario='new_record'`,
+          `SELECT status FROM notification_tasks WHERE client_id='${clientRow!.id}' AND scenario='new_record'`,
         );
         return taskRow !== null && taskRow.status === 'sent';
       }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(true);
@@ -187,12 +187,12 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
 
 /**
  * GH #485 Task 6 — spec §12 User Scenarios 1, 2, 5 (§13: the E2E leg
- * «продолжение специ notify-s6-mock-delivery», scenarios 1–3, 5; the
+ * «продолжение специ notification-s6-mock-delivery», scenarios 1–3, 5; the
  * spawn half of scenario 3 needs TWO mock channels in the priority —
  * the contour covers it with injected channels, the enabled stack runs
- * NOTIFY_CHANNEL_PRIORITY=mock).
+ * NOTIFICATION_CHANNEL_PRIORITY=mock).
  *
- * The scenario driver is the #484 seam: the notify ADDRESS (= the
+ * The scenario driver is the #484 seam: the notification ADDRESS (= the
  * client phone, frozen verbatim) scripts the mock outcome — the
  * `fail-app:` prefix is the unresolvable-address analogue (worker-484
  * spec §3.6), a plain phone delivers to the recorder. Record creation
@@ -204,10 +204,10 @@ test.describe('Notify enabled stack — S6 mock delivery (GH #484)', () => {
  * Same run recipe as the S6 test above (both URL vars, same host —
  * GH #387; no SHARD_ID so the standalone TEST_DB_PATH applies).
  */
-test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
+test.describe("Notification enabled stack — §12 scenarios (GH #485)", () => {
   test.skip(
-    process.env.NOTIFY_E2E_ENABLED !== "1",
-    "targets the enabled notify stack WITH the worker child: run with NOTIFY_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #485 §12/§13)",
+    process.env.NOTIFICATION_E2E_ENABLED !== "1",
+    "targets the enabled notification stack WITH the worker child: run with NOTIFICATION_E2E_ENABLED=1 against scripts/e2e-shard-start.sh in enabled mode (GH #485 §12/§13)",
   );
 
   test("§12-1: delivered task keeps the actually-sent text in its attempt", async ({
@@ -218,7 +218,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     const { start } = futureStart();
     const activity = await createTestActivity(request, { start });
     const uid = Date.now();
-    const clientName = `Notify 485 S1 Client ${uid}`;
+    const clientName = `Notification 485 S1 Client ${uid}`;
     const client = await createTestClient(request, {
       name: clientName,
       phone: `+7999${String(uid).slice(-7)}`,
@@ -245,7 +245,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         .poll(
           async () => {
             taskRow = queryDBRow(
-              `SELECT id, status, delivery_outcome FROM notify_tasks
+              `SELECT id, status, delivery_outcome FROM notification_tasks
            WHERE client_id='${client.id}' AND scenario='new_record'`,
             );
             return taskRow !== null && taskRow.status === "sent";
@@ -260,7 +260,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // by the worker from the FROZEN template — client name + the seed
       // greeting are in the rendering by construction.
       const attempts = queryDBRows(
-        `SELECT stage, outcome, sent_text FROM notify_task_attempts
+        `SELECT stage, outcome, sent_text FROM notification_task_attempts
          WHERE task_id='${taskRow!.id}'`,
       );
       const sent = attempts.find(
@@ -287,7 +287,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     const uid = Date.now();
     const markerPhone = `fail-app:+7999${String(uid).slice(-7)}`;
     const client = await createTestClient(request, {
-      name: `Notify 485 S2 Client ${uid}`,
+      name: `Notification 485 S2 Client ${uid}`,
       phone: markerPhone,
     });
 
@@ -310,7 +310,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         .poll(
           async () => {
             taskRow = queryDBRow(
-              `SELECT id, status, delivery_outcome, root_task_id FROM notify_tasks
+              `SELECT id, status, delivery_outcome, root_task_id FROM notification_tasks
            WHERE client_id='${client.id}' AND scenario='new_record'
              AND channel='mock'`,
             );
@@ -328,7 +328,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // the outcome category): the app_error row holds the scripted
       // mock message; the final not_delivered row closes the channel.
       const attempts = queryDBRows(
-        `SELECT stage, outcome, error FROM notify_task_attempts
+        `SELECT stage, outcome, error FROM notification_task_attempts
          WHERE task_id='${taskRow!.id}'`,
       );
       const failedWithCause = attempts.find(
@@ -349,17 +349,17 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // mock2's task fails with the SAME cause) — exactly two tasks,
       // one per channel (UNIQUE(root_task_id, channel)).
       const chainRows = queryDBRows(
-        `SELECT channel, status FROM notify_tasks
+        `SELECT channel, status FROM notification_tasks
          WHERE root_task_id='${taskRow!.root_task_id}' ORDER BY created_at`,
       );
       expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
       expect(chainRows.every((r) => r.status === "failed")).toBe(true);
       const mock2Row = queryDBRow(
-        `SELECT id FROM notify_tasks
+        `SELECT id FROM notification_tasks
          WHERE root_task_id='${taskRow!.root_task_id}' AND channel='mock2'`,
       );
       const mock2Attempts = queryDBRows(
-        `SELECT stage, outcome, error FROM notify_task_attempts
+        `SELECT stage, outcome, error FROM notification_task_attempts
          WHERE task_id='${mock2Row!.id}'`,
       );
       expect(
@@ -393,23 +393,23 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     const { start } = futureStart();
     const activity = await createTestActivity(request, { start });
     const uid = Date.now();
-    const clientName = `Notify 485 S3 Client ${uid}`;
+    const clientName = `Notification 485 S3 Client ${uid}`;
     const clientPhone = `+7996${String(uid).slice(-7)}`;
     const client = await createTestClient(request, {
       name: clientName,
       phone: clientPhone,
     });
 
-    // The §4.4 window key: notify:{channel}:cap:<ГГГГММДД> — the UTC
+    // The §4.4 window key: notification:{channel}:cap:<ГГГГММДД> — the UTC
     // date of the naive-UTC wall clock the limiter uses. Pre-set
     // mock's counter to its declared cap (MOCK_DAILY_CAP = 25,
-    // backend/src/notify/channels/mock.py) with the store's 48 h TTL.
+    // backend/src/notification/channels/mock.py) with the store's 48 h TTL.
     const yyyymmdd = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-    const redisPort = process.env.NOTIFY_E2E_REDIS_PORT || "6380";
+    const redisPort = process.env.NOTIFICATION_E2E_REDIS_PORT || "6380";
     const redis = (cmd: string): string =>
       execSync(`redis-cli -p ${redisPort} ${cmd}`, { encoding: "utf-8" }).trim();
-    const mockCapKey = `notify:mock:cap:${yyyymmdd}`;
-    const mock2CapKey = `notify:mock2:cap:${yyyymmdd}`;
+    const mockCapKey = `notification:mock:cap:${yyyymmdd}`;
+    const mock2CapKey = `notification:mock2:cap:${yyyymmdd}`;
     redis(`SET ${mockCapKey} 25 EX 172800`);
 
     // `any` — the house pattern (see the S6 test above).
@@ -432,7 +432,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       await expect.poll(async () => {
         mock2Task = queryDBRow(
           `SELECT id, status, root_task_id, address, template_body
-           FROM notify_tasks
+           FROM notification_tasks
            WHERE client_id='${client.id}' AND scenario='new_record'
              AND channel='mock2'`,
         );
@@ -445,7 +445,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // human-readable cap cause, and the chain OUTCOME is written on
       // the root: any channel's success delivers the chain (§8.2).
       rootTask = queryDBRow(
-        `SELECT id, status, delivery_outcome FROM notify_tasks
+        `SELECT id, status, delivery_outcome FROM notification_tasks
          WHERE client_id='${client.id}' AND scenario='new_record'
            AND channel='mock'`,
       );
@@ -455,7 +455,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // …channel 1's attempt carries the cause (§6.3 — the refusal
       // reason rides the app_error status)…
       const mockAttempts = queryDBRows(
-        `SELECT stage, outcome, error FROM notify_task_attempts
+        `SELECT stage, outcome, error FROM notification_task_attempts
          WHERE task_id='${rootTask!.id}'`,
       );
       expect(
@@ -469,7 +469,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
 
       // …and channel 2's attempt keeps the actually-delivered text.
       const mock2Attempts = queryDBRows(
-        `SELECT stage, outcome, sent_text FROM notify_task_attempts
+        `SELECT stage, outcome, sent_text FROM notification_task_attempts
          WHERE task_id='${mock2Task!.id}'`,
       );
       const sent = mock2Attempts.find(
@@ -481,7 +481,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       // …the chain is exactly two tasks — one per channel
       // (UNIQUE(root_task_id, channel)).
       const chainRows = queryDBRows(
-        `SELECT channel FROM notify_tasks WHERE root_task_id='${mock2Task!.root_task_id}' ORDER BY created_at`,
+        `SELECT channel FROM notification_tasks WHERE root_task_id='${mock2Task!.root_task_id}' ORDER BY created_at`,
       );
       expect(chainRows.map((r) => r.channel)).toEqual(["mock", "mock2"]);
     } finally {
@@ -502,7 +502,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     //    freezes for mock tasks (tier-2 lookup: event_type + channel IS
     //    NULL, deterministic order — render.py find_template).
     const template = queryDBRow(
-      `SELECT id, body FROM notify_templates
+      `SELECT id, body FROM notification_templates
        WHERE event_type='new_record' AND channel IS NULL
        ORDER BY created_at, id LIMIT 1`,
     );
@@ -516,11 +516,11 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
     const editedBody = `${marker}: правка шаблона из теста — {{ client.name }}, ждём вас!`;
 
     const clientA = await createTestClient(request, {
-      name: `Notify 485 S5 A ${uid}`,
+      name: `Notification 485 S5 A ${uid}`,
       phone: `+7998${String(uid).slice(-7)}`,
     });
     const clientB = await createTestClient(request, {
-      name: `Notify 485 S5 B ${uid}`,
+      name: `Notification 485 S5 B ${uid}`,
       phone: `+7997${String(uid).slice(-7)}`,
     });
 
@@ -545,7 +545,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         .poll(
           async () => {
             taskA = queryDBRow(
-              `SELECT id, status, template_body FROM notify_tasks
+              `SELECT id, status, template_body FROM notification_tasks
            WHERE client_id='${clientA.id}' AND scenario='new_record'`,
             );
             return taskA !== null && taskA.template_body === originalBody;
@@ -558,11 +558,11 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       //    (the established test seam; the per-test canon reset also
       //    restores the row — the finally restore is belt-and-braces).
       queryDB(
-        `UPDATE notify_templates SET body='${editedBody}' WHERE id='${template!.id}'`,
+        `UPDATE notification_templates SET body='${editedBody}' WHERE id='${template!.id}'`,
       );
       expect(
         queryDBRow(
-          `SELECT body FROM notify_templates WHERE id='${template!.id}'`,
+          `SELECT body FROM notification_templates WHERE id='${template!.id}'`,
         )!.body,
       ).toBe(editedBody);
 
@@ -579,7 +579,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         .poll(
           async () => {
             taskB = queryDBRow(
-              `SELECT id, status, template_body FROM notify_tasks
+              `SELECT id, status, template_body FROM notification_tasks
            WHERE client_id='${clientB.id}' AND scenario='new_record'`,
             );
             return (
@@ -596,7 +596,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
         .poll(
           async () => {
             taskA = queryDBRow(
-              `SELECT id, status, template_body FROM notify_tasks
+              `SELECT id, status, template_body FROM notification_tasks
            WHERE client_id='${clientA.id}' AND scenario='new_record'`,
             );
             return taskA !== null && taskA.status === "sent";
@@ -608,7 +608,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
 
       const sentText = (taskId: string): string => {
         const rows = queryDBRows(
-          `SELECT stage, outcome, sent_text FROM notify_task_attempts
+          `SELECT stage, outcome, sent_text FROM notification_task_attempts
            WHERE task_id='${taskId}'`,
         );
         const sent = rows.find(
@@ -626,7 +626,7 @@ test.describe("Notify enabled stack — §12 scenarios (GH #485)", () => {
       //    the finally start and the canon reset would render the edit),
       //    then the created rows (terminal-state rule above).
       queryDB(
-        `UPDATE notify_templates SET body='${originalBody}' WHERE id='${template!.id}'`,
+        `UPDATE notification_templates SET body='${originalBody}' WHERE id='${template!.id}'`,
       );
       if (recordB?.id) await cleanupRecord(request, recordB.id);
       if (recordA?.id) await cleanupRecord(request, recordA.id);

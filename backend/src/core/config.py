@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # ── The domain-events relay (#580, spec §4.4) ─────────────────────────
     # Gate of the relay process ``python -m src.domain_events.relay`` —
     # a deliberate mirror of ``NOTIFICATION_ENABLED``: off by default, the
-    # contour opts in (dev.sh --notify exports it).
+    # contour opts in (dev.sh --notification exports it).
     DOMAIN_EVENTS_ENABLED: bool = False
     # Seconds; the relay tick (spec §3.3) — the depth of the unpublished
     # tail is drained in POLL_BATCH_SIZE batches every interval.

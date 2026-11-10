@@ -1,13 +1,13 @@
-"""GH #580 — seam guard: the notify e2e contour wires the domain-events relay.
+"""GH #580 — seam guard: the notification e2e contour wires the domain-events relay.
 
 The CI incident class this pins is the ``dev.sh`` ↔ shard-script drift:
-Task 4 wired the relay into ``dev.sh --notify`` ONLY, so the enabled
+Task 4 wired the relay into ``dev.sh --notification`` ONLY (pre-#581 name: ``--notify``), so the enabled
 contour of ``scripts/e2e-shard-start.sh`` started backend + dispatcher +
 worker but NOT the relay — and never exported ``DOMAIN_EVENTS_ENABLED``
 (default False → the relay child would exit 0 anyway). The post-#580
 chain is journal mark → relay XADD → dispatcher group consumer → task
 row; without the relay the S1 predicate can never become true (the
-deterministic 30s timeout of ``e2e/notify-s1-enabled-stack.spec.ts:64``).
+deterministic 30s timeout of ``e2e/notification-s1-enabled-stack.spec.ts:64``).
 
 Plain text assertions on the script content (no bash execution): the
 seam, not the runtime, is what drifted. The three legs of the wiring —

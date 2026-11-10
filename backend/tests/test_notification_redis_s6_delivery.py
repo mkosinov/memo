@@ -1,7 +1,7 @@
 """GH #484 Task 8 (spec §4 S6, §3.6) — the marked backend half of the
 mock-delivery scenario: the ``RedisListRecorder`` delivery artifact.
 
-The E2E leg (``frontend/admin/e2e/notify-s6-mock-delivery.spec.ts``)
+The E2E leg (``frontend/admin/e2e/notification-s6-mock-delivery.spec.ts``)
 proves the FULL enabled stack (dispatcher + worker +
 ``NOTIFICATION_CHANNEL_PRIORITY=mock``) drives the task row to ``sent`` with the
 records UI unchanged. Per the S1-precedent split (spec §3.6) the DELIVERY

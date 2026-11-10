@@ -82,12 +82,12 @@ async function loginAndSaveStorageState(
 const CANON_EXCEPTIONS = new Set([
   'audit_logs',
   'sessions',
-  // #482 §5 — nondeterministic notify journal chain (audit_logs precedent),
-  // mirrors BLACKLIST_TABLES in scripts/gen_seed_canon.py (notify_templates
+  // #482 §5 — nondeterministic notification journal chain (audit_logs precedent),
+  // mirrors BLACKLIST_TABLES in scripts/gen_seed_canon.py (notification_templates
   // is NOT excepted — deterministic seed, stays in the canon):
   'domain_events',
-  'notify_tasks',
-  'notify_task_attempts',
+  'notification_tasks',
+  'notification_task_attempts',
 ]);
 
 /**

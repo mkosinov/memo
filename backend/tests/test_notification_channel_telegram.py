@@ -213,7 +213,7 @@ class TestTelegramSettings:
         assert "hash-value" not in repr(settings.TELEGRAM_API_HASH)
         assert "session-value" not in repr(settings.TELEGRAM_SESSION)
 
-    def test_existing_notify_settings_untouched(self) -> None:
+    def test_existing_notification_settings_untouched(self) -> None:
         assert settings.NOTIFICATION_CHANNEL_PRIORITY == "telegram"
         assert settings.NOTIFICATION_SEND_RETRIES == 3
 

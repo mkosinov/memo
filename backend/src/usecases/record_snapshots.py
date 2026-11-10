@@ -2,7 +2,7 @@
 
 MOVED from ``src/notify/snapshots.py`` (#580 Task 2): snapshot assembly
 is a PRODUCER duty (family §4.1) — the producer module must not import
-the notify package.
+the notification package.
 
 The builder runs BEFORE the scenario's commit, reading ONLY local rows
 in the same transaction (``session.get`` / one visits select): the

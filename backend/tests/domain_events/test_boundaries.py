@@ -37,11 +37,11 @@ from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 
-NOTIFY = "src.notification"
+NOTIFICATION = "src.notification"
 DOMAIN_EVENTS = "src.domain_events"
 
 # ── the canonical seam (spec §8): domain_events submodules per consumer ────
-NOTIFY_ALLOWED = frozenset({"types", "subscribe", "models"})
+NOTIFICATION_ALLOWED = frozenset({"types", "subscribe", "models"})
 PRODUCER_ALLOWED = frozenset({"types", "journal", "models"})
 MODELS_REGISTRATION = frozenset({"models"})
 
@@ -124,16 +124,16 @@ def _violations(py: Path, package: str, allowed: frozenset[str] | None) -> list[
     return found
 
 
-class TestDomainEventsNeverImportsNotify:
+class TestDomainEventsNeverImportsNotification:
     """Seam rule 1 — the service module is standalone (spec §8)."""
 
-    def test_no_notify_imports_inside_domain_events(self) -> None:
+    def test_no_notification_imports_inside_domain_events(self) -> None:
         offenders: list[str] = []
         for py in _src_files():
             rel = py.relative_to(SRC_DIR)
             if rel.parts[0] != "domain_events":
                 continue
-            offenders += _violations(py, NOTIFY, allowed=None)
+            offenders += _violations(py, NOTIFICATION, allowed=None)
         assert not offenders, (
             "src/domain_events must not import src.notification (spec §8 — the "
             "carve-out direction; notification is the consumer, not a "
@@ -144,13 +144,13 @@ class TestDomainEventsNeverImportsNotify:
 class TestStreamsImportsNeitherSide:
     """Seam rule 2 — the transport core sits below both (spec §3.6/§8)."""
 
-    def test_no_notify_or_domain_events_imports_inside_streams(self) -> None:
+    def test_no_notification_or_domain_events_imports_inside_streams(self) -> None:
         offenders: list[str] = []
         for py in _src_files():
             rel = py.relative_to(SRC_DIR)
             if rel.parts[0] != "streams":
                 continue
-            offenders += _violations(py, NOTIFY, allowed=None)
+            offenders += _violations(py, NOTIFICATION, allowed=None)
             offenders += _violations(py, DOMAIN_EVENTS, allowed=None)
         assert not offenders, (
             "src/streams is the shared transport core — it must not import "
@@ -162,15 +162,15 @@ class TestStreamsImportsNeitherSide:
 class TestConsumerSeamAllowlists:
     """Seam rules 3-6 — one canonical allowlist per consumer (spec §8)."""
 
-    def test_notify_imports_only_the_subscriber_seam(self) -> None:
+    def test_notification_imports_only_the_subscriber_seam(self) -> None:
         offenders: list[str] = []
         for py in _src_files():
             rel = py.relative_to(SRC_DIR)
             if rel.parts[0] == "notification":
-                offenders += _violations(py, DOMAIN_EVENTS, NOTIFY_ALLOWED)
+                offenders += _violations(py, DOMAIN_EVENTS, NOTIFICATION_ALLOWED)
         assert not offenders, (
             "notification (the subscriber) may import from src/domain_events "
-            f"only {sorted(NOTIFY_ALLOWED)} — subscribe + the registry, plus "
+            f"only {sorted(NOTIFICATION_ALLOWED)} — subscribe + the registry, plus "
             "the row shape as the handler payload (spec §8): "
             f"{offenders}"
         )

@@ -1,4 +1,4 @@
-"""Notify subsystem ORM models (#482, spec §3.1/§3.5/§3.6; family #476;
+"""Notification subsystem ORM models (#482, spec §3.1/§3.5/§3.6; family #476;
 per-channel reshape — #485 part 4, ADR 014).
 
 ``DomainEvent`` lives in ``src/domain_events/models.py`` (#580 Task 2);

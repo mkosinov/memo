@@ -1323,7 +1323,8 @@ class TestEventsCycle:
 
 
 class TestScenarioAttemptsLedger:
-    """Spec §5.2 scenario 4 — the DoD test ``test_notify_scenario_attempts_ledger``.
+    """Spec §5.2 scenario 4 — the DoD test (pre-#581 name:
+    ``test_notify_scenario_attempts_ledger``).
 
     A failing scenario grows the ``notification_event_attempts`` ledger via the
     RETURN CYCLE (not a manual invocation); the entry stays unacked until
@@ -1337,7 +1338,7 @@ class TestScenarioAttemptsLedger:
 
     pytestmark = redis_marks
 
-    async def test_notify_scenario_attempts_ledger(
+    async def test_notification_scenario_attempts_ledger(
         self,
         db_engine,
         db_session,

@@ -63,7 +63,7 @@ def _inbound(task_id: str = "123e4567-e89b-12d3-a456-426614174000") -> InboundEv
 
 
 class TestProtocolSeam:
-    def test_fake_queue_satisfies_notify_queue_protocol(self) -> None:
+    def test_fake_queue_satisfies_notification_queue_protocol(self) -> None:
         assert isinstance(FakeQueue(), NotificationQueue)
 
 

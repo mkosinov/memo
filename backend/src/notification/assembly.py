@@ -1,4 +1,4 @@
-r"""Notify text assembly — the WORKER-side, database-free half of the
+r"""Notification text assembly — the WORKER-side, database-free half of the
 render seam (#485 part 4, ADR 014; grows out of the part-1 render
 module of #482 §3.5).
 
@@ -6,7 +6,7 @@ Deliberately NO database imports here: the worker process has no DB
 (ADR 009) yet assembles the task text itself (rev.5, ADR 014) from the
 FROZEN ``template_body`` + ``payload`` that ride the task payload
 (§4.2). The dispatcher-side half — template LOOKUP from
-``notify_templates`` — stays in :mod:`src.notification.render`.
+``notification_templates`` — stays in :mod:`src.notification.render`.
 
 Decisions pinned by the spec (§5.2/§5.3):
 

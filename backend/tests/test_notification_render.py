@@ -1,4 +1,4 @@
-"""#482 Task 7 (spec §3.5, family #476 §4.1): notify text rendering.
+"""#482 Task 7 (spec §3.5, family #476 §4.1): notification text rendering.
 
 ``src/notification/render.py`` renders a §4.1 snapshot through a sandboxed
 Jinja2 template taken from ``notification_templates``:

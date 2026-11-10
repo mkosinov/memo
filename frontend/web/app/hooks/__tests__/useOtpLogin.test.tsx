@@ -44,7 +44,7 @@ describe("useOtpLogin — code request (US-4)", () => {
 
   it("maps 503 to «Вход временно недоступен» and stays requestable", async () => {
     mockedRequest.mockRejectedValue(
-      new ApiError(503, "notify transport unavailable", "NOTIFICATION_TRANSPORT_UNAVAILABLE"),
+      new ApiError(503, "notification transport unavailable", "NOTIFICATION_TRANSPORT_UNAVAILABLE"),
     );
 
     const { result } = renderHook(() => useOtpLogin());

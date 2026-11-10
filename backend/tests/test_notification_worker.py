@@ -599,7 +599,7 @@ def _proc_env(**overrides: str) -> dict[str, str]:
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("REDIS_URL", "ENV", "NOTIFY_", "NOTIFICATION_"))
+        if not k.startswith(("REDIS_URL", "ENV", "NOTIFICATION_"))
     }
     env.update(overrides)
     return env

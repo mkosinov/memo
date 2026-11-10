@@ -1,7 +1,7 @@
 """GH #483 Task 8 (spec §3.6, §4 S1) — the post-scenario queue check.
 
 Runs AFTER the S1 Playwright scenario against the SAME enabled e2e stack
-(``scripts/e2e-shard-start.sh`` in ``NOTIFY_E2E_ENABLED=1`` mode): the
+(``scripts/e2e-shard-start.sh`` in ``NOTIFICATION_E2E_ENABLED=1`` mode): the
 scenario created a record with the «отправлять оповещения» checkbox, the
 stack's dispatcher turned the journaled event into a task and enqueued
 it. This check reads the REAL ``notification:tasks`` stream of that stack:
@@ -26,7 +26,7 @@ Isolation profile (differs from the unit-contour modules on purpose):
 this check consumes the stack's PRODUCTION vocabulary (no key prefix —
 spec §3.5: the enabled stack runs unprefixed) and is therefore bound to
 the enabled-stack environment, not to a scratch workspace. The runner
-(CI notify job / local enabled-stack session) provides BOTH variables:
+(CI notification-tests job / local enabled-stack session) provides BOTH variables:
 
 - ``REDIS_URL``    — the stack's Redis (CI service container / the local
   ephemeral child the stack spawned);

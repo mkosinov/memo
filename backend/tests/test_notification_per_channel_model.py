@@ -1,6 +1,6 @@
 """#485 Task 1 — per-channel delivery task model (ADR 014, spec §4).
 
-The notify data model reshaped for «task = one channel»:
+The notification data model reshaped for «task = one channel»:
 
 - ``NotificationTask``: ``channel``/``address``/``payload``/``template_id``/
   ``template_body`` frozen at creation; chain identity via

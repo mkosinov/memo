@@ -2,7 +2,7 @@
 FULL Redis wipe — the dispatcher's DB re-enqueue cycle against the real
 adapter.
 
-The scenario: a «queued» notify task lives in the DB (part-1 models);
+The scenario: a «queued» notification task lives in the DB (part-1 models);
 its payload was already handed to the real stream (the enqueue point).
 The transport is then wiped COMPLETELY — ``FLUSHDB`` of the contour's
 own dedicated DB index, harder than any partial failure: no streams, no

@@ -54,7 +54,7 @@ def _decode(fields: dict[str, str]) -> dict[str, Any]:
 
 
 class TestProtocolSeam:
-    def test_redis_queue_satisfies_notify_queue_protocol(
+    def test_redis_queue_satisfies_notification_queue_protocol(
         self, contour: RedisContour
     ) -> None:
         assert isinstance(contour.queue(), NotificationQueue)

@@ -2,7 +2,7 @@
 
 MOVED to ``tests/usecases/`` (#580 Task 2): the builder is a PRODUCER
 duty (family §4.1) and now lives at ``src/usecases/record_snapshots.py``
-— the producer no longer imports notify. Asserts are unchanged by the
+— the producer no longer imports the notification package. Asserts are unchanged by the
 move.
 
 The snapshot builder runs BEFORE the scenario's commit (local reads in

@@ -3,7 +3,7 @@
 
 The core's ``autoclaim`` is a RAW PEL transfer: claimed entries move to
 the calling consumer's PEL and are handed to the caller as stored — the
-core NEVER re-XADDs them back to the stream. Notify's ``RedisQueue``
+core NEVER re-XADDs them back to the stream. Notification's ``RedisQueue``
 wraps the transfer with re-XADD + ack for its fresh-delivery semantics;
 the #580 subscribers redeliver by processing the claimed entry directly
 (a re-XADD on every reclaim would churn the relay stream, spec §3.6).

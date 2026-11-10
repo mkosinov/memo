@@ -3,7 +3,7 @@ scenario 3: «Первый канал упал — доставка проход
 цепочки»; family #476 US-5).
 
 The e2e leg of scenario 3 needs TWO mock channels in the enabled
-stack's priority — the notify-tests contour covers the chain spawn with
+stack's priority — the notification-tests contour covers the chain spawn with
 INJECTED instances, the production registry of the e2e stack carries
 this second STATIC mock (``NOTIFICATION_CHANNEL_PRIORITY=mock,mock2`` in
 ``scripts/e2e-shard-start.sh``). Everything else mirrors the #484 mock

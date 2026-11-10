@@ -69,7 +69,7 @@ MOCK_DELIVERIES_CAP = 1000
 # Declaration only — the Task-3 registry mechanism consumes the fields;
 # the mock inherits it «для контурных тестов потолка» (spec §4.4).
 
-#: A deliberately SMALL daily ceiling: a notify-tests contour run can
+#: A deliberately SMALL daily ceiling: a notification-tests contour run can
 #: exhaust the cap window without hundreds of deliveries (US-4 of the
 #: family; Task 6 contours may also inject their own ``ChannelLimits``).
 MOCK_DAILY_CAP = 25

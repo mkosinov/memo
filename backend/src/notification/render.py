@@ -1,7 +1,7 @@
-r"""Notify templates: dispatcher-side lookup + render entry (sandboxed
+r"""Notification templates: dispatcher-side lookup + render entry (sandboxed
 Jinja2, templates from the DB — #482 §3.5; rev.5/ADR 014, #485 part 4).
 
-Two seams of the template subsystem live in the notify family:
+Two seams of the template subsystem live in the notify family (#476):
 
 - HERE (:func:`find_template`) — the §3.7 rev.5 LOOKUP rule with DB
   access: exact ``(event_type, channel)`` → ``(event_type, NULL)``

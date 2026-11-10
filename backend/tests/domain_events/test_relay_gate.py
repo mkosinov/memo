@@ -152,7 +152,7 @@ class TestMainGate:
 
 
 class TestDomainEventsSettings:
-    def test_defaults_mirror_notify_gate(self) -> None:
+    def test_defaults_mirror_notification_gate(self) -> None:
         s = Settings(_env_file=None, ENV="development")
         assert s.DOMAIN_EVENTS_ENABLED is False
         assert s.DOMAIN_EVENTS_POLL_INTERVAL == 1.0

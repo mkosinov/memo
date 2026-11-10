@@ -104,7 +104,7 @@ NotificationTransportError = StreamTransportError
 
 
 class RedisQueue:
-    """``NotificationQueue`` over Redis Streams + consumer groups — the notify
+    """``NotificationQueue`` over Redis Streams + consumer groups — the notification
     vocabulary delegating to the generic streams core.
 
     Consumer names are unique per live process (``<group>-<pid>`` —

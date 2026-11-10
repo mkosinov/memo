@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-10
+
+### Changed
+- **GH #581 — Волна переименования notify → notification: пакет, таблицы,
+  env, литералы Redis, контур запуска/CI, код ошибки, живая
+  документация** — branch `581-notification-rename` (6 коммитов
+  `b60ebe44..` + docs-коммит Task 6, base `d249f2c5` = main; спека
+  `docs/specs/2026-11-09-notification-rename-581-design.md`, план
+  `docs/plans/2026-11-09-notification-rename-581-plan.md` 6/6):
+  - **Миграция и модели (T1 `b60ebe44`):** ревизия переименования
+    `notify_tasks`/`notify_task_attempts`/`notify_event_attempts`/
+    `notify_templates` → `notification_*`, индексов `uq_notify_*` →
+    `uq_notification_*`, колонки согласия `clients.notify_enabled` →
+    `clients.notification_enabled`; ORM-слой синхронно.
+  - **Пакет, классы, env, лог-неймспейс (T2 `47333084`):**
+    `backend/src/notify` → `backend/src/notification`, символы
+    `Notify*` → `Notification*`; env `NOTIFY_*` → `NOTIFICATION_*`
+    (5 кодовых + скриптовые); логгеры `memo.notify.*` →
+    `memo.notification.*`, префикс процесса «notification dispatcher».
+  - **Литералы Redis (T3 `45e41ed5`):** стримы `notify:tasks/statuses/
+    inbound` → `notification:*`, cap-ключи и ключи доставок мок-каналов.
+  - **Контур и CI (T4 `845e3c78`):** `dev.sh --notification`
+    (`NOTIFICATION_MODE`), `SHARD_ID=notification`, env-пара
+    `NOTIFICATION_E2E_*`, джоба `notify-tests` → `notification-tests`,
+    артефакт `e2e-report-notification`, укрепление Spec-file guard.
+  - **Код ошибки (T5 `0ec77d14`):** внешний контракт
+    `NOTIFY_TRANSPORT_UNAVAILABLE` → `NOTIFICATION_TRANSPORT_UNAVAILABLE`
+    (backend, api-client, веб-тесты, `.env.example`, `auth.md`).
+  - **Документация и греп-контроль (T6):** `docs/domain-rules/notify.md`
+    → `notification.md` (git mv), обновлены `domain-events.md`,
+    `_overview.md`, `records.md`, `tests_workflow.md`,
+    `docs/release/v1-2026-12-01.md`, комментарии живых файлов (§3.8);
+    выходной греп §10 — остаток только allowlist.
+  - Семантика не меняется; `records.notify` и skip-причина `notify_off`
+    не переименованы (спека §2.1); исторический канон (спеки/планы/
+    статусы, старые записи CHANGELOG, `alembic/versions`,
+    докстринги-провенанс) не переписывался (§2.3).
+
 ## [Unreleased] — 2026-11-08
 
 ### Added

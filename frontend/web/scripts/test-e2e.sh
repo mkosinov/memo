@@ -21,7 +21,7 @@
 #   WEB_E2E_RUN_TAG=a1b2c3 bash frontend/web/scripts/test-e2e.sh  # parallel run
 #
 # NEVER touches: playground 3100/3101, admin shard ports 3002-3005, the
-# notify pair 3006/8005, legacy dev 3000/8000 — ports come exclusively
+# notification pair 3006/8005, legacy dev 3000/8000 — ports come exclusively
 # from the dynamic window via allocate_shard_ports.
 
 set -euo pipefail

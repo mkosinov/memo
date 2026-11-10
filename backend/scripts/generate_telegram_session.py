@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Telethon session string for the notify Telegram channel.
+"""Generate the Telethon session string for the notification Telegram channel.
 
 GH #485 part 4 Task 4 (spec §6.1): the worker authenticates as the
 STUDIO'S USER ACCOUNT via a pre-generated ``StringSession`` — no session

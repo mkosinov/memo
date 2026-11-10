@@ -248,7 +248,7 @@ def pollute(stack: CanonStack) -> dict[str, Any]:
     return {"r1_id": r1_id, "p1_id": p1_id, "uuid_ids": uuid_ids}
 
 
-# The default new_record notify template: seeded by an alembic DATA
+# The default new_record notification template: seeded by an alembic DATA
 # migration with a FIXED uuid precisely so the row enters the deterministic
 # canon (#482 §5); create_all does not run migrations, so the fixture
 # reproduces that insert before canon generation — mirror of
@@ -280,7 +280,7 @@ async def canon_stack(tmp_path: Path) -> CanonStack:
          separate process);
       2. import the model modules BEFORE create_all (Base.metadata is
          empty without them; src.models is the aggregate import covering
-         auth/session.py and notify/models.py too);
+         auth/session.py and notification/models.py too);
       3. create_all + assert the exception tables and notification_templates
          exist in the built schema;
       4. real seed_data(), then an explicit COMMIT and engine dispose
@@ -572,7 +572,7 @@ async def test_wipes_user_settings_whole(canon_stack: CanonStack) -> None:
 
 
 async def test_keeps_by_design_exceptions(canon_stack: CanonStack) -> None:
-    """keeps the by-design exceptions: audit_logs, sessions and the notify journal tables (#482)"""
+    """keeps the by-design exceptions: audit_logs, sessions and the notification journal tables (#482)"""
     db = canon_stack.db
     admin_id = scalar(
         db, "SELECT id FROM users WHERE phone = '+79990000001'"

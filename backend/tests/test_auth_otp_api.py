@@ -7,7 +7,7 @@ limits are called, not reimplemented):
 - ``POST /api/v1/auth/otp/request`` — domain phone validation (422
   ``PHONE_INVALID``), ALWAYS 202 on a valid number, staff phones are
   silently skipped (no code row, no dev_code — no enumeration oracle),
-  503 ``NOTIFY_TRANSPORT_UNAVAILABLE`` without a configured transport
+  503 ``NOTIFICATION_TRANSPORT_UNAVAILABLE`` without a configured transport
   (fail-closed in EVERY environment), ``dev_code`` only under the exact
   ``ENV == "development"`` + dev transport, masked dev log (no raw code);
 - ``POST /api/v1/auth/otp/verify`` — atomic code absorption, the client
@@ -166,7 +166,7 @@ class TestOtpRequest:
         monkeypatch.setattr(settings, "OTP_TRANSPORT", "")
         resp = _request_code(api_client)
         assert resp.status_code == 503
-        assert resp.json()["detail"]["code"] == ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE.value
+        assert resp.json()["detail"]["code"] == ErrorCode.NOTIFICATION_TRANSPORT_UNAVAILABLE.value
         assert _otp_rows() == [], "fail-closed fires before issuing"
 
     def test_dev_transport_refused_outside_development(
@@ -180,7 +180,7 @@ class TestOtpRequest:
         monkeypatch.setattr(settings, "OTP_TRANSPORT", "dev")
         resp = _request_code(api_client)
         assert resp.status_code == 503
-        assert resp.json()["detail"]["code"] == ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE.value
+        assert resp.json()["detail"]["code"] == ErrorCode.NOTIFICATION_TRANSPORT_UNAVAILABLE.value
 
     def test_unknown_transport_value_503(self, api_client, monkeypatch) -> None:
         monkeypatch.setattr(settings, "OTP_TRANSPORT", "banana")

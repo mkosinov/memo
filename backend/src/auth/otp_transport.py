@@ -2,7 +2,7 @@
 
 The transport is an INTERFACE with a fail-closed default: with no
 transport explicitly configured the code request answers 503
-``NOTIFY_TRANSPORT_UNAVAILABLE`` in EVERY environment (staging and
+``NOTIFICATION_TRANSPORT_UNAVAILABLE`` in EVERY environment (staging and
 preview included — «любое окружение кроме точно development» is not a
 side door). Two selection rules (spec §4.2):
 
@@ -37,7 +37,7 @@ logger = logging.getLogger("memo.auth.otp_transport")
 
 class OtpTransportUnavailableError(Exception):
     """No transport is configured — the request endpoint maps this to
-    503 ``NOTIFY_TRANSPORT_UNAVAILABLE`` (fail-closed, §4.2)."""
+    503 ``NOTIFICATION_TRANSPORT_UNAVAILABLE`` (fail-closed, §4.2)."""
 
 
 class OtpTransport(Protocol):

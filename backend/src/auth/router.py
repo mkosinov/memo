@@ -356,7 +356,7 @@ def _transport_unavailable() -> HTTPException:
     return HTTPException(
         status_code=503,
         detail=ErrorDetail(
-            code=ErrorCode.NOTIFY_TRANSPORT_UNAVAILABLE,
+            code=ErrorCode.NOTIFICATION_TRANSPORT_UNAVAILABLE,
             message="Вход временно недоступен",
         ).model_dump(),
     )
@@ -389,7 +389,7 @@ async def otp_request(
 
     PUBLIC_ROUTE + Origin-vs-CORS line (#499 §4.2). Domain phone
     validation (422 ``PHONE_INVALID``); without a configured transport
-    the endpoint is fail-closed 503 ``NOTIFY_TRANSPORT_UNAVAILABLE`` in
+    the endpoint is fail-closed 503 ``NOTIFICATION_TRANSPORT_UNAVAILABLE`` in
     EVERY environment (the code is neither written nor counted); a
     staff phone is silently skipped (no code, no send — the 202 is
     byte-identical, no enumeration oracle). ``dev_code`` appears only

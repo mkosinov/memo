@@ -204,3 +204,40 @@ class AuthCallInitiateResponse(BaseModel):
     #: response; the DB keeps just its pepper-keyed digest.
     handle: str | None = None
     call: AuthCallInfo | None = None
+
+
+class AuthCallStatusRequest(BaseModel):
+    """``POST /api/v1/auth/call/status`` body (#593 §Эндпоинты).
+
+    Strict body (extra keys → 422). ``handle`` is the raw one-time
+    handle the initiate handed out; only its digest is stored, and an
+    invalid/consumed one answers the indistinguishable 404.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)
+
+
+class AuthCallStatusResponse(BaseModel):
+    """The poll answer — ``{"status": "waiting" | "confirmed" | "expired"}``.
+
+    The RAW handle and any provider detail never appear here (US-7); on
+    ``confirmed`` the client session cookie rides the same response
+    (set by the router AFTER the consume transaction committed).
+    """
+
+    status: Literal["waiting", "confirmed", "expired"]
+
+
+class AuthCallDevDoneRequest(BaseModel):
+    """``POST /api/v1/auth/call/dev-done`` body (#593 §Эндпоинты, дев-режим).
+
+    The dev imitation of the client's call: flip the check the initiate
+    created (resolved through the same one-time handle). Strict body
+    (extra keys → 422).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)

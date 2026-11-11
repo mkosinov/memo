@@ -1,4 +1,5 @@
-"""Callcheck initiate gates — in-memory, one 15-minute window (#593 Task 3).
+"""Callcheck in-memory flow state (#593 Task 3 initiate gates + Task 4
+status debounce).
 
 The initiate-flow rate state the Task 2 store deliberately does not own
 («Rate gates are NOT here — they are initiate-flow state (Task 3)»).
@@ -21,10 +22,15 @@ counted before the transport call): a refused/failed initiate consumes
 nothing. The windows are SEPARATE from the OTP counters — same numbers,
 own budget per method.
 
+Task 4 adds the STATUS-side state — the provider-poll debounce (spec
+§Эндпоинты: one provider ``status`` call per phone per 3-s window; no
+numeric gate — the poll volume is bounded by the check window itself,
+5 min / 3 s ≈ ≤100 calls per check, and the window tail is never cut).
+
 In-memory single-process store (spec risk №7, the OTP assumption).
 Numbers are code-owned constants («пересмотр константы — кодом»).
 
-Spec: docs/specs/2026-11-11-auth-callcheck-design.md §Гейты
+Spec: docs/specs/2026-11-11-auth-callcheck-design.md §Гейты, §Эндпоинты
 Domain rules: docs/domain-rules/auth.md «Методы авторизации клиента (#593)»
 """
 
@@ -50,6 +56,13 @@ CALL_DISTINCT_PHONES_PER_IP = 5
 #: availability failure (503), not a caller lockout.
 CALL_INITIATE_GLOBAL_CAP = 100
 
+#: The provider-poll debounce window (spec §Эндпоинты): at most ONE
+#: provider ``status`` call per phone per window. NOT a numeric gate —
+#: there is no 429 and no budget; a debounced poll simply skips the
+#: provider (answered from the local state). The frontend polls ~4 s,
+#: so the debounce only bites hammering.
+CALL_STATUS_DEBOUNCE = timedelta(seconds=3)
+
 # Module-level counter store: key → (count, window start). The count
 # resets whenever a registration arrives after the previous window
 # expired (the ``_FAILURE_COUNTERS`` mechanics).
@@ -63,15 +76,20 @@ _PHONES_PER_IP: dict[str, tuple[set[str], datetime]] = {}
 # registration anchors the window.
 _GLOBAL: tuple[int, datetime] | None = None
 
+# Status-debounce registry: phone → the last ALLOWED provider-poll
+# attempt. A best-effort in-memory map (single process, risk №7): it
+# bounds provider traffic, not correctness.
+_STATUS_DEBOUNCE: dict[str, datetime] = {}
+
 
 def _prune(now: datetime) -> None:
     """Drop counter entries whose window expired (called on each access)."""
-    expired = [k for k, (_, started) in _COUNTERS.items()
-               if now - started >= CALL_INITIATE_WINDOW]
+    expired = [k for k, (_, started) in _COUNTERS.items() if now - started >= CALL_INITIATE_WINDOW]
     for key in expired:
         del _COUNTERS[key]
-    expired_ips = [k for k, (_, started) in _PHONES_PER_IP.items()
-                   if now - started >= CALL_INITIATE_WINDOW]
+    expired_ips = [
+        k for k, (_, started) in _PHONES_PER_IP.items() if now - started >= CALL_INITIATE_WINDOW
+    ]
     for key in expired_ips:
         del _PHONES_PER_IP[key]
 
@@ -100,15 +118,11 @@ def _counter_exception(key: str, now: datetime) -> HTTPException | None:
         return None
     if now - started >= CALL_INITIATE_WINDOW:
         return None  # stale window — does not block
-    remaining = max(
-        1, int((CALL_INITIATE_WINDOW - (now - started)).total_seconds())
-    )
+    remaining = max(1, int((CALL_INITIATE_WINDOW - (now - started)).total_seconds()))
     return AuthService._locked_out(retry_after=remaining)
 
 
-def _phones_exception(
-    phone: str, client_ip: str, now: datetime
-) -> HTTPException | None:
+def _phones_exception(phone: str, client_ip: str, now: datetime) -> HTTPException | None:
     """429 when this initiate would add a 6th distinct phone for the IP.
 
     The limit is on the COUNT of distinct numbers — a repeat initiate to
@@ -123,9 +137,7 @@ def _phones_exception(
         return None
     if now - started >= CALL_INITIATE_WINDOW:
         return None  # stale window — does not block
-    remaining = max(
-        1, int((CALL_INITIATE_WINDOW - (now - started)).total_seconds())
-    )
+    remaining = max(1, int((CALL_INITIATE_WINDOW - (now - started)).total_seconds()))
     return AuthService._locked_out(retry_after=remaining)
 
 
@@ -193,3 +205,25 @@ def register_call_initiate(phone: str, client_ip: str) -> None:
         _GLOBAL = (1, now)
     else:
         _GLOBAL = (_GLOBAL[0] + 1, _GLOBAL[1])
+
+
+def call_status_debounce_allows(phone: str) -> bool:
+    """True when a provider ``status`` call for this phone may run now.
+
+    The Task 4 status-flow debounce (spec §Эндпоинты): at most one
+    provider poll per phone per ``CALL_STATUS_DEBOUNCE`` window. The
+    attempt is registered the moment it is allowed — failed provider
+    calls count too (the debounce bounds ATTEMPTS, so a failing provider
+    is not hammered either). TTL-cleaned on access (entries older than
+    the window are dropped; the map cannot grow with dead phones).
+    """
+    now = utc_now()
+    expired = [p for p, at in _STATUS_DEBOUNCE.items() if now - at >= CALL_STATUS_DEBOUNCE]
+    for p in expired:
+        del _STATUS_DEBOUNCE[p]
+
+    last = _STATUS_DEBOUNCE.get(phone)
+    if last is not None and now - last < CALL_STATUS_DEBOUNCE:
+        return False
+    _STATUS_DEBOUNCE[phone] = now
+    return True

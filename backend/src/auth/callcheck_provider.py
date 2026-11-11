@@ -120,6 +120,20 @@ class DevCallcheckProvider:
         # honest dev answer (the dev-done imitator never confirmed it).
         return self._checks.get(check_id, CallcheckStatus.WAITING)
 
+    def dev_done(self, check_id: str) -> None:
+        """The dev call imitation (Task 4, the ``dev_code`` analog): flip
+        the check to CONFIRMED — as if the client called and the provider
+        matched the caller id. Lives ON the transport (never behind a
+        separate route flag): the ``/auth/call/dev-done`` route resolves
+        the singleton via :func:`get_callcheck_transport` and calls THIS
+        method, so the imitation flips the exact registry initiate wrote
+        to. A no-op on an unknown id (a restarted process, a stale row —
+        the poll then honestly keeps answering waiting).
+        """
+        if check_id in self._checks:
+            self._checks[check_id] = CallcheckStatus.CONFIRMED
+            logger.info("callcheck dev transport: call imitated, check_id=%s", check_id)
+
 
 # The dev-transport singleton: resolved once, reused across requests so
 # the Task 4 dev-done imitator flips the SAME instance initiate used.

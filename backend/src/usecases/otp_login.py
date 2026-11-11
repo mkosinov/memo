@@ -69,7 +69,7 @@ class InvalidOtpError(Exception):
     MESSAGE = "Неверный код подтверждения или истёк срок действия"
 
 
-async def _phone_unavailable_for_client_login(
+async def phone_unavailable_for_client_login(
     db_session: AsyncSession,
     phone: str,
 ) -> bool:
@@ -81,6 +81,10 @@ async def _phone_unavailable_for_client_login(
     refuses archived accounts, so the login could never resolve). Both
     skip code generation and the transport entirely — the 202 is
     byte-identical to a real send, no enumeration oracle.
+
+    Public since #593: the callcheck initiate path shares this EXACT
+    predicate for its own silent 202 (spec §Эндпоинты — «тот же
+    предикат, что и в запросе кода»); one rule, one home.
     """
     row = (
         await db_session.execute(select(User.role, User.is_active).where(User.phone == phone))
@@ -108,7 +112,7 @@ async def request_otp_code(
     if transport is None:
         raise OtpTransportUnavailableError()
 
-    if await _phone_unavailable_for_client_login(db_session, phone):
+    if await phone_unavailable_for_client_login(db_session, phone):
         return None
 
     code = await get_otp_service().issue(db_session, phone, client_ip)

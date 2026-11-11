@@ -140,6 +140,12 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     #    session cookie (own-cabinet surface, no master scope). ──
     ("POST", "/api/v1/auth/otp/request"): "public OTP request (#499 §4.2) — code authority, anonymous by design",
     ("POST", "/api/v1/auth/otp/verify"): "public OTP verify (#499 §4.2) — code authority; issues the client session",
+    # ── Client-auth callcheck (#593 spec §Реестр/§Эндпоинты): anonymous
+    #    by design — the method registry is a read-only availability
+    #    list; initiate's authority is the rate-limited one-time check
+    #    handle. No session, no master scope. ──
+    ("GET", "/api/v1/auth/methods"): "client-auth method registry (#593 §Реестр) — read-only availability, anonymous",
+    ("POST", "/api/v1/auth/call/initiate"): "public callcheck initiate (#593 §Эндпоинты) — check authority, anonymous by design",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",

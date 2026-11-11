@@ -9,6 +9,7 @@ when ``master`` is null (a master user without a linked profile is valid).
 Spec: docs/specs/2026-09-08-auth-design.md §3.6
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -157,3 +158,49 @@ class AuthMethodResponse(BaseModel):
 
     id: Literal["sms_otp", "call"]
     available: bool
+
+
+class AuthCallInitiateRequest(BaseModel):
+    """``POST /api/v1/auth/call/initiate`` body (#593 §Эндпоинты).
+
+    Strict body (extra keys → 422). ``phone`` carries no schema bounds:
+    the CANONICAL domain rule (:func:`src.domain.phones.validate_canonical_phone`)
+    owns the validation, so a non-``+7XXXXXXXXXX`` value answers the
+    domain code ``PHONE_INVALID`` (422 before gates and provider — a
+    typo must not hide behind a 503; the ``OtpRequestRequest``
+    precedent).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+
+
+class AuthCallInfo(BaseModel):
+    """The check the client must complete — the ``call`` block (#593).
+
+    ``phone`` — the number the CLIENT calls, strictly ``+7…`` (without
+    the plus some operators reject the call, especially from abroad —
+    a provider requirement); ``pretty`` — the display form for the call
+    screen; ``expires_at`` — the window deadline (the add moment plus
+    the client-side constant; the provider response carries no time).
+    """
+
+    phone: str
+    pretty: str
+    expires_at: datetime
+
+
+class AuthCallInitiateResponse(BaseModel):
+    """202 body of a callcheck initiate — ``{}`` or ``{handle, call}``.
+
+    The silent staff skip answers the EMPTY object (serialized with
+    ``exclude_none`` — the ``OtpRequestResponse`` parity: nothing was
+    created, so nothing is surfaced; the 202 is indistinguishable from
+    a real initiate at the response-shape level the spec fixes).
+    """
+
+    #: The RAW one-time status handle (uuid4-hex) — present ONLY in the
+    #: response; the DB keeps just its pepper-keyed digest.
+    handle: str | None = None
+    call: AuthCallInfo | None = None

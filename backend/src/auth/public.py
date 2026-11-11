@@ -74,4 +74,9 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # read-only availability list for the login picker; resolvers (not
     # env vars) decide the flags, so the route leaks no configuration.
     ("GET", "/api/v1/auth/methods"),
+    # GH #593 (spec §Эндпоинты): the callcheck initiate — the authority
+    # is the check itself (rate-limited + one-time handle); public with
+    # its own Origin-vs-CORS line (verify_origin), like the OTP pair.
+    # status/dev-done join in Tasks 4-5.
+    ("POST", "/api/v1/auth/call/initiate"),
 })

@@ -243,6 +243,12 @@ class TestPublicRoutes:
             ("POST", "/api/v1/auth/password-setup"),
             ("POST", "/api/v1/auth/otp/request"),
             ("POST", "/api/v1/auth/otp/verify"),
+            # #593 Task 1: the client-auth method registry (spec
+            # §Реестр) — the allowlist-equality set missed it then.
+            ("GET", "/api/v1/auth/methods"),
+            # #593 Task 3: the callcheck initiate (spec §Эндпоинты) —
+            # public with the Origin-vs-CORS line, like the OTP pair.
+            ("POST", "/api/v1/auth/call/initiate"),
         }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:

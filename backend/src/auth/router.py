@@ -43,7 +43,10 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 
-from src.auth.callcheck_provider import get_callcheck_transport
+from src.auth.callcheck_provider import (
+    CallcheckProviderError,
+    get_callcheck_transport,
+)
 from src.auth.otp_transport import get_otp_transport
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import (
@@ -63,12 +66,15 @@ from src.auth.session import ABSOLUTE_CAP
 from src.core.config import settings
 from src.db import SessionDep
 from src.domain.errors import PhoneInvalidError
-from src.domain.phones import validate_phone
+from src.domain.phones import pretty_phone, validate_canonical_phone, validate_phone
 from src.errors import ErrorCode, ErrorDetail
 from src.models.client import Client
 from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.auth import (
+    AuthCallInfo,
+    AuthCallInitiateRequest,
+    AuthCallInitiateResponse,
     AuthMeResponse,
     AuthMethodResponse,
     AuthUser,
@@ -83,6 +89,10 @@ from src.schemas.auth import (
     PasswordSetupValidateResponse,
 )
 from src.schemas.my import MyClientResponse
+from src.usecases.callcheck_login import (
+    CallcheckUnavailableError,
+    initiate_auth_call,
+)
 from src.usecases.otp_login import (
     InvalidOtpError,
     OtpTransportUnavailableError,
@@ -495,3 +505,56 @@ async def otp_verify(
             )
         ).scalar_one_or_none()
     return MyClientResponse(phone=user.phone, name=name)
+
+
+@router.post(
+    "/call/initiate",
+    status_code=202,
+    response_model=AuthCallInitiateResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_origin)],
+)
+async def call_initiate(
+    payload: AuthCallInitiateRequest,
+    request: Request,
+    db_session: SessionDep,
+) -> AuthCallInitiateResponse:
+    """Start a verification-by-call check — ALWAYS 202 on a valid number.
+
+    PUBLIC_ROUTE + Origin-vs-CORS line (#593 §Эндпоинты, the OTP-route
+    posture). The phone must be the CANONICAL ``+7XXXXXXXXXX`` string —
+    anything else answers 422 ``PHONE_INVALID`` BEFORE the gates and
+    the provider (a typo must not hide behind a 503). A staff phone is
+    silently skipped (the shared ``otp/request`` predicate — the 202
+    body is the empty object, no check exists, no enumeration oracle).
+    Without a configured transport — or on ANY provider failure — the
+    endpoint is fail-closed 503 ``NOTIFICATION_TRANSPORT_UNAVAILABLE``:
+    nothing is written, no budget is spent. Success answers the RAW
+    one-time ``handle`` (only its digest is persisted) and the
+    ``call`` block whose ``phone`` is strictly ``+7…`` (some operators
+    reject the plus-less form, especially from abroad).
+    """
+    try:
+        phone = validate_canonical_phone(payload.phone)
+    except PhoneInvalidError as exc:
+        raise _phone_invalid(str(exc)) from exc
+
+    try:
+        initiation = await initiate_auth_call(
+            db_session,
+            phone=phone,
+            client_ip=_client_ip(request),
+        )
+    except (CallcheckUnavailableError, CallcheckProviderError) as exc:
+        raise _transport_unavailable() from exc
+
+    if initiation is None:  # the silent staff skip — indistinguishable 202
+        return AuthCallInitiateResponse()
+    return AuthCallInitiateResponse(
+        handle=initiation.handle,
+        call=AuthCallInfo(
+            phone=initiation.call_phone,
+            pretty=pretty_phone(initiation.call_phone),
+            expires_at=initiation.expires_at,
+        ),
+    )

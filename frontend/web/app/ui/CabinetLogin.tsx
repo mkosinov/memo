@@ -10,6 +10,10 @@ import type { CabinetAuth } from "../hooks/useCabinetAuth";
 const CABINET_CONTACT_MESSAGE =
   "Здравствуйте! Не удаётся войти в личный кабинет — помогите, пожалуйста.";
 
+export interface CabinetLoginProps {
+  auth: CabinetAuth;
+}
+
 /** The anonymous branch of the cabinet (#523): the phone form → the SAME
  * auth screen as the booking form (#593: method picker — SMS code or
  * confirmation call). Rendered by /cabinet and every cabinet section for an
@@ -55,10 +59,6 @@ export function CabinetLogin({ auth }: CabinetLoginProps) {
       </Button>
     </form>
   );
-}
-
-export interface CabinetLoginProps {
-  auth: CabinetAuth;
 }
 
 export default CabinetLogin;

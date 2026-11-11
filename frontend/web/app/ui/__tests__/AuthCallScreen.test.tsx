@@ -49,6 +49,16 @@ describe("AuthCallScreen — экран звонка (#593)", () => {
     expect(screen.getByTestId("auth-call-timer")).toHaveTextContent("04:00");
   });
 
+  it("keeps the per-second countdown OUT of aria-live (no screen-reader spam)", () => {
+    renderScreen({ secondsLeft: 240 });
+
+    // The ticking text must not announce every second; state transitions
+    // («Время вышло» / «Проверка недействительна») announce via role="status".
+    const timerBlock = screen.getByTestId("auth-call-timer").parentElement;
+    expect(timerBlock).not.toHaveAttribute("aria-live");
+    expect(screen.getByTestId("auth-call-timer")).not.toHaveAttribute("aria-live");
+  });
+
   it("pads the timer below one minute", () => {
     renderScreen({ secondsLeft: 5 });
 

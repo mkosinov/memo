@@ -99,7 +99,11 @@ export function AuthCallScreen({
       </p>
 
       {phase === "calling" && (
-        <div className="text-center mb-6" aria-live="polite">
+        /* No aria-live here: the text ticks every second — a live region
+           would spam screen readers. State transitions announce themselves
+           via the role="status" headings above («Время вышло» / «Проверка
+           недействительна»). */
+        <div className="text-center mb-6">
           <p className="text-xs text-[#888888] mb-1">Осталось времени</p>
           <p
             data-testid="auth-call-timer"

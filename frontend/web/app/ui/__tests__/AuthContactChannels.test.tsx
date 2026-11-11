@@ -38,6 +38,26 @@ describe("AuthContactChannels — панель «Связаться» (#593 US-4
     expect(await screen.findByText(/Скопировано/i)).toBeInTheDocument();
   });
 
+  it("no clipboard (non-secure http) → NO success feedback, shows a failure hint instead", async () => {
+    // `navigator.clipboard?.writeText` resolves (undefined) when the API is
+    // absent — the feedback invariant must treat that as a failure.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    renderChannels();
+
+    fireEvent.click(screen.getByRole("button", { name: /Скопировать текст/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/Не удалось скопировать/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Скопировано/i)).not.toBeInTheDocument();
+    // The message text stays selectable — the manual fallback.
+    expect(screen.getByTestId("auth-contact-channels")).toHaveTextContent(
+      "МК, 20 мая, 14:00",
+    );
+  });
+
   it("renders both messenger links with the encoded text when both contacts are set", () => {
     vi.stubEnv("NEXT_PUBLIC_CONTACT_TELEGRAM", "memo_admin");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_WHATSAPP", "79990001122");

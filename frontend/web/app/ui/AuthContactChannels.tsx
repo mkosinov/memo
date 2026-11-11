@@ -19,7 +19,7 @@ const COPIED_FEEDBACK_MS = 2500;
  * the copy button remain — the empty-registry client can still reach out).
  */
 export function AuthContactChannels({ message }: AuthContactChannelsProps) {
-  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"idle" | "copied" | "failed">("idle");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -32,14 +32,27 @@ export function AuthContactChannels({ message }: AuthContactChannelsProps) {
   const tg = telegramLink(message);
   const wa = whatsappLink(message);
 
+  const flashFeedback = (kind: "copied" | "failed") => {
+    setFeedback(kind);
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setFeedback("idle"), COPIED_FEEDBACK_MS);
+  };
+
   const handleCopy = async () => {
+    // A MISSING clipboard API must read as failure: `clipboard?.writeText`
+    // resolves (undefined) when absent (non-secure http) — the success badge
+    // would lie. On any failure the message text stays selectable (the
+    // manual fallback), so we only swap the feedback.
+    const write = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+    if (write === undefined) {
+      flashFeedback("failed");
+      return;
+    }
     try {
-      await navigator.clipboard?.writeText(message);
-      setCopied(true);
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+      await write(message);
+      flashFeedback("copied");
     } catch {
-      // No clipboard (or permission refused) — the text stays selectable.
+      flashFeedback("failed");
     }
   };
 
@@ -55,9 +68,17 @@ export function AuthContactChannels({ message }: AuthContactChannelsProps) {
           type="button"
           onClick={() => void handleCopy()}
           data-testid="auth-contact-copy"
-          className="text-sm text-[#004D56] underline underline-offset-2 hover:opacity-80 transition"
+          className={
+            feedback === "failed"
+              ? "text-sm text-[#C8503C]"
+              : "text-sm text-[#004D56] underline underline-offset-2 hover:opacity-80 transition"
+          }
         >
-          {copied ? "Скопировано" : "Скопировать текст"}
+          {feedback === "copied"
+            ? "Скопировано"
+            : feedback === "failed"
+              ? "Не удалось скопировать — скопируйте текст вручную"
+              : "Скопировать текст"}
         </button>
 
         {wa !== null && (

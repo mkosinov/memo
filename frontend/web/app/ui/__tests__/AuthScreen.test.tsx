@@ -33,7 +33,7 @@ import {
 } from "@memo/api-client";
 import { createQueryWrapper } from "../../__tests__/fixtures/cabinet";
 import { useOtpLogin } from "../../hooks/useOtpLogin";
-import { AuthScreen } from "../AuthScreen";
+import { AuthScreen, toScreenPhase } from "../AuthScreen";
 
 const mockedGetAuthMethods = getAuthMethods as unknown as Mock;
 const mockedInitiate = initiateCallAuth as unknown as Mock;
@@ -236,6 +236,23 @@ describe("AuthScreen — ветка SMS (#593: остаётся рабочей)"
 
     fireEvent.click(screen.getByRole("button", { name: /назад/i }));
     await screen.findByTestId("auth-method-picker");
+  });
+});
+
+describe("toScreenPhase — hook phase → screen phase (#593)", () => {
+  it("passes the terminal dead ends through", () => {
+    expect(toScreenPhase("expired")).toBe("expired");
+    expect(toScreenPhase("invalid")).toBe("invalid");
+  });
+
+  it("maps a retry-initiate in flight onto the expired view (disabled button)", () => {
+    expect(toScreenPhase("initiating")).toBe("expired");
+  });
+
+  it("renders the live screen for calling AND confirmed (the last frame before the parent continues)", () => {
+    expect(toScreenPhase("calling")).toBe("calling");
+    expect(toScreenPhase("confirmed")).toBe("calling");
+    expect(toScreenPhase("idle")).toBe("calling");
   });
 });
 

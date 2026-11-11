@@ -7,11 +7,26 @@ import { AuthContactChannels } from "./AuthContactChannels";
 import { OtpStep } from "./OtpStep";
 import { useAuthMethods } from "@/app/hooks/useAuthMethods";
 import { useCallAuth } from "@/app/hooks/useCallAuth";
-import type { CallAuth } from "@/app/hooks/useCallAuth";
+import type { CallAuth, CallAuthPhase } from "@/app/hooks/useCallAuth";
 import type { OtpLogin } from "@/app/hooks/useOtpLogin";
+import type { AuthCallScreenPhase } from "./AuthCallScreen";
 
 /** Internal branch of the auth screen. */
 type AuthView = "picker" | "sms" | "call";
+
+/** Maps the call hook's phase onto the screen's render phases.
+ *
+ * - the dead ends pass through;
+ * - a retry-initiate in flight keeps the EXPIRED view (its «Позвонить ещё
+ *   раз» button goes disabled) until the new check lands;
+ * - everything else — `calling`, and `confirmed`/`idle` for their single
+ *   frame before the parent continues its flow — renders the live screen.
+ */
+export function toScreenPhase(phase: CallAuthPhase): AuthCallScreenPhase {
+  if (phase === "expired" || phase === "invalid") return phase;
+  if (phase === "initiating") return "expired";
+  return "calling";
+}
 
 export interface AuthScreenProps {
   /** The phone being confirmed (existing field's value; normalized per method). */
@@ -87,19 +102,7 @@ export function AuthScreen({
           phone={call.call.phone}
           pretty={call.call.pretty}
           secondsLeft={call.secondsLeft}
-          /* `initiating` here is only a «Позвонить ещё раз» in flight — keep
-             the expired view (disabled button) until the new check lands;
-             `confirmed` renders the live screen for the last frame before
-             the parent continues its flow. */
-          phase={
-            call.phase === "expired" ||
-            call.phase === "invalid" ||
-            call.phase === "initiating"
-              ? call.phase === "initiating"
-                ? "expired"
-                : call.phase
-              : "calling"
-          }
+          phase={toScreenPhase(call.phase)}
           initiating={call.phase === "initiating"}
           onRetry={() => void call.retry()}
           onRestart={backToPicker}

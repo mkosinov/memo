@@ -9,6 +9,8 @@ when ``master`` is null (a master user without a linked profile is valid).
 Spec: docs/specs/2026-09-08-auth-design.md §3.6
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -141,3 +143,17 @@ class OtpVerifyRequest(BaseModel):
 
     phone: str
     code: str = Field(min_length=1)
+
+
+class AuthMethodResponse(BaseModel):
+    """One entry of the ``GET /api/v1/auth/methods`` registry (#593 §Реестр).
+
+    ``available`` = the method's transport RESOLVER returned an object —
+    never «the env var is non-empty»: an off, environment-gated or
+    misconfigured transport is honestly unavailable, so the frontend
+    picker never offers a method whose endpoints would 503. Future
+    methods (Telegram/Max) join the ``Literal`` with their resolvers.
+    """
+
+    id: Literal["sms_otp", "call"]
+    available: bool

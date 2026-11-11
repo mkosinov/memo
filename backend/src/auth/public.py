@@ -70,4 +70,8 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # their own Origin-vs-CORS line (verify_origin).
     ("POST", "/api/v1/auth/otp/request"),
     ("POST", "/api/v1/auth/otp/verify"),
+    # GH #593 (spec §Реестр): the client-auth method registry — a
+    # read-only availability list for the login picker; resolvers (not
+    # env vars) decide the flags, so the route leaks no configuration.
+    ("GET", "/api/v1/auth/methods"),
 })

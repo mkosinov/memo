@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 
+from src.auth.callcheck_provider import get_callcheck_transport
+from src.auth.otp_transport import get_otp_transport
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import (
     CLIENT_SESSION_COOKIE,
@@ -68,6 +70,7 @@ from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.auth import (
     AuthMeResponse,
+    AuthMethodResponse,
     AuthUser,
     ChangePasswordRequest,
     LoginRequest,
@@ -208,6 +211,26 @@ async def me(
 ) -> AuthMeResponse:
     """Resolve the current session — 401 ``AUTH_UNAUTHORIZED`` when absent."""
     return await _build_me_response(db_session, authed)
+
+
+@router.get("/methods", response_model=list[AuthMethodResponse])
+async def auth_methods() -> list[AuthMethodResponse]:
+    """The client-auth method registry — honest availability (#593 §Реестр).
+
+    PUBLIC_ROUTE (read-only, no credentials — nothing to forge). The
+    single source the frontend picker builds from: ``available`` = the
+    method's transport RESOLVER returned an object, never «the env var
+    is non-empty» — an off, environment-gated (``dev`` outside
+    development) or misconfigured (unknown selector) transport is
+    honestly unavailable, so the picker never offers a method whose
+    endpoints would 503. ``sms_otp`` — the #499/#586 OTP seam; ``call``
+    — the #593 callcheck seam. Future methods (Telegram/Max) join this
+    list with their own resolvers.
+    """
+    return [
+        AuthMethodResponse(id="sms_otp", available=get_otp_transport() is not None),
+        AuthMethodResponse(id="call", available=get_callcheck_transport() is not None),
+    ]
 
 
 @router.post(

@@ -249,6 +249,13 @@ class TestPublicRoutes:
             # #593 Task 3: the callcheck initiate (spec §Эндпоинты) —
             # public with the Origin-vs-CORS line, like the OTP pair.
             ("POST", "/api/v1/auth/call/initiate"),
+            # #593 Task 4: the status poll + the dev imitation (spec
+            # §Эндпоинты) — the one-time handle is the authority;
+            # dev-done is resolver-gated per request (404 unless the
+            # dev transport) but allowlisted in every configuration so
+            # the default-deny walk stays exact.
+            ("POST", "/api/v1/auth/call/status"),
+            ("POST", "/api/v1/auth/call/dev-done"),
         }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:

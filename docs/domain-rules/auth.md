@@ -79,6 +79,14 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Клиентская сессия: та же таблица/механика (sliding 7/30, отзыв удалением строки), **отдельная cookie** `memo_client_session` (сосуществует с `memo_session` в одном браузере); резолверы читают каждый своё имя cookie + проверяют роль — перекрёстное предъявление даёт 401. `GET /api/v1/my/client` → `{phone, name}`. Выход — общий `POST /api/v1/auth/logout`: удаляет предъявленную сессию любого вида.
 - Бронирование: `POST /api/v1/my/records` — строгая схема `MyRecordCreate` (`extra="forbid"`; из провода нет `client_id`/`visitor_id`/`price`/`custom_price`/`notify`), владелец только из сессии, цена визита сервером из `tariff_id` (обязателен, если у услуги есть тарифы — нулевая цена платной услуги недостижима; без тарифов — 0), 1–20 визитов, наследует проверки создания (404 активность, 409 вместимость), анти-спам 20 записей/40 визитов за 15 минут на учётку. Спека: `docs/specs/2026-10-20-web-client-auth-booking-design.md`.
 
+## Методы авторизации клиента (#593 — спека, Gate B OK 2026-11-11; внедрение — IMPL)
+
+- Клиент подтверждает телефон выбранным методом; доступные методы отдаёт `GET /api/v1/auth/methods` — честная доступность = резолвер транспорта вернул объект (не «переменная непуста»): выключенный метод в пикере не показывается. Метод `sms_otp` — транспорт #586; метод `call` — вход по звонку sms.ru callcheck (клиент сам звонит на выданный номер, звонок сбрасывается и бесплатен).
+- Метод `call`: `POST /api/v1/auth/call/initiate` (телефон канонический `+7…`, иначе 422; стафф-номера — молчаливый 202 без проверки, как у `otp/request`) → `callcheck/add`; номер клиенту — **строго `+7…`** (без плюса часть операторов не пропускает, особенно из-за рубежа); IP клиента валидируется и передаётся провайдеру (роуминг-подмена 8-800). Строка `auth_calls` — одна на телефон, новая заменяет старую (как `otp_codes`); журнал `auth_call_attempts` пишется только на успех провайдера и терминальные исходы. `POST /api/v1/auth/call/status` — опрос по одноразовому хэндлу (в БД хэш): 100/400 → waiting, 401 → confirmed (погашение хэндла + финализация — одна транзакция; параллельные опросы дают ровно одну сессию), 402 → expired, прочее → waiting без смены состояния; статус провайдера проверяется раньше локальной экспирации; окно 5 минут — константа клиента. `POST /api/v1/auth/call/dev-done` — дев-имитация звонка: маршрут существует только при дев-транспорте в development (двойной гейт, как `dev_code`).
+- Гейты initiate: 5/телефон, 20/IP, 5 разных номеров/IP за 15 минут + глобальный потолок (100/15 мин на процесс, fail-closed 503); регистрация лимитов — только на успех провайдера. Транспорт fail-closed: без `CALLCHECK_TRANSPORT` метод выключен (в реестре недоступен, initiate 503); валидатор: `smsru` + пустой ключ или `dev` при `ENV=production` → ошибка старта.
+- Сессии клиента **не ротируются** при входе (решение владельца 2026-11-11): параллельные сессии уважаются, гашение — только явным выходом («Выйти из устройства» / «Выйти со всех устройств»); контраст с `auth/login` сотрудников, где логин ротирует.
+- Звонок и SMS — restricted-аутентификаторы (NIST SP 800-63B-4): принятие риска зафиксировано; путь усиления — методы-мессенджеры (Telegram/Max, слот в реестре).
+
 ## Sessions
 - Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_session` carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.
 - Lifetime: **sliding** — idle window 7 days (any authenticated request extends it; written at most once per hour) + **absolute cap 30 days** from creation, then a fresh login. Cookie Max-Age = the cap; the row governs validity.
@@ -111,6 +119,9 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | POST | /api/v1/users/{id}/password-link | admin | выдать одноразовую ссылку установки пароля (#348) |
 | POST | /api/v1/auth/otp/request | public | клиентский OTP: всегда 202 на валидный номер (#499, спека) |
 | POST | /api/v1/auth/otp/verify | public | код → клиентская сессия `memo_client_session` (#499, спека) |
+| GET | /api/v1/auth/methods | public | доступные методы входа клиента (#593, спека) |
+| POST | /api/v1/auth/call/initiate | public | вход звонком: создать проверку callcheck (#593, спека) |
+| POST | /api/v1/auth/call/status | public | опрос проверки по одноразовому хэндлу; при 401 — клиентская сессия (#593, спека) |
 | GET | /api/v1/public/photos | public | анонимная фото-витрина: forced `is_public=true`, минимальная схема `PhotoPublicResponse` (ADR-015, #493) |
 | GET | /api/v1/my/client | клиентская сессия | `{phone, name}` — кто вошёл (#499, спека) |
 | POST | /api/v1/my/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |

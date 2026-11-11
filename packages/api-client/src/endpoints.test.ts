@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
@@ -1773,6 +1773,67 @@ describe('verifyOtpCode', () => {
         body: JSON.stringify({ phone: '+79991234567', code: '123456' }),
       },
     );
+  });
+});
+
+// ─── Client auth method registry & callcheck (GH #593 spec §Эндпоинты) ─────
+
+describe('getAuthMethods', () => {
+  it('calls GET /api/v1/auth/methods', async () => {
+    vi.mocked(api).mockResolvedValue([
+      { id: 'sms_otp', available: true },
+      { id: 'call', available: false },
+    ]);
+    const methods = await getAuthMethods();
+    expect(api).toHaveBeenCalledWith('/api/v1/auth/methods', expect.anything());
+    expect(methods).toEqual([
+      { id: 'sms_otp', available: true },
+      { id: 'call', available: false },
+    ]);
+  });
+});
+
+describe('initiateCallAuth', () => {
+  it('calls POST /api/v1/auth/call/initiate with {phone}', async () => {
+    vi.mocked(api).mockResolvedValue({
+      handle: 'raw-handle',
+      call: {
+        phone: '+79995552255',
+        pretty: '+7 999 555-22-55',
+        expires_at: '2026-11-11T12:05:00Z',
+      },
+    });
+    await initiateCallAuth('+79991234567');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/call/initiate',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: '+79991234567' }),
+      },
+    );
+  });
+
+  it('resolves the empty 202 (silent staff skip) as-is', async () => {
+    vi.mocked(api).mockResolvedValue({});
+    const res = await initiateCallAuth('+79991234567');
+    expect(res).toEqual({});
+  });
+});
+
+describe('callAuthStatus', () => {
+  it('calls POST /api/v1/auth/call/status with {handle}', async () => {
+    vi.mocked(api).mockResolvedValue({ status: 'waiting' });
+    const res = await callAuthStatus('raw-handle');
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/auth/call/status',
+      expect.anything(),
+      {
+        method: 'POST',
+        body: JSON.stringify({ handle: 'raw-handle' }),
+      },
+    );
+    expect(res).toEqual({ status: 'waiting' });
   });
 });
 

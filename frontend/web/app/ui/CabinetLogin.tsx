@@ -2,33 +2,32 @@
 
 import type { FormEvent } from "react";
 import { Button } from "./Button";
-import { OtpStep } from "./OtpStep";
+import { AuthScreen } from "./AuthScreen";
 import type { CabinetAuth } from "../hooks/useCabinetAuth";
 
-export interface CabinetLoginProps {
-  auth: CabinetAuth;
-}
+/** The cabinet's «Связаться» text (#593): a simple greeting — no booking
+ * context exists here (contrast with the booking form's request details). */
+const CABINET_CONTACT_MESSAGE =
+  "Здравствуйте! Не удаётся войти в личный кабинет — помогите, пожалуйста.";
 
 /** The anonymous branch of the cabinet (#523): the phone form → the SAME
- * «Подтвердите телефон» OTP step as the booking form. Rendered by /cabinet
- * and every cabinet section for an anonymous visitor (#513: no data). */
+ * auth screen as the booking form (#593: method picker — SMS code or
+ * confirmation call). Rendered by /cabinet and every cabinet section for an
+ * anonymous visitor (#513: no data). */
 export function CabinetLogin({ auth }: CabinetLoginProps) {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     auth.submitPhone();
   };
 
-  if (auth.step === "otp") {
+  if (auth.step === "auth") {
     return (
-      <OtpStep
+      <AuthScreen
         phone={auth.phone}
-        requesting={auth.otp.stage === "requesting"}
-        codeSent={auth.otp.stage === "entering" || auth.otp.stage === "verifying"}
-        verifying={auth.otp.stage === "verifying"}
-        error={auth.otp.error}
-        devCode={auth.otp.devCode}
-        onRequestCode={() => void auth.otp.requestCode(auth.phone)}
-        onVerify={auth.verifyCode}
+        contactMessage={CABINET_CONTACT_MESSAGE}
+        otp={auth.otp}
+        onSmsVerify={auth.verifyCode}
+        onCallConfirmed={auth.handleAuthConfirmed}
         onBack={auth.backToPhone}
       />
     );
@@ -56,6 +55,10 @@ export function CabinetLogin({ auth }: CabinetLoginProps) {
       </Button>
     </form>
   );
+}
+
+export interface CabinetLoginProps {
+  auth: CabinetAuth;
 }
 
 export default CabinetLogin;

@@ -121,6 +121,12 @@ import {
   type OtpRequestResponse,
   MyClientSchema,
   type MyClient,
+  AuthMethodListSchema,
+  type AuthMethodList,
+  AuthCallInitiateResponseSchema,
+  type AuthCallInitiateResponse,
+  AuthCallStatusResponseSchema,
+  type AuthCallStatusResponse,
   type MyRecordCreate,
   MyRecordResponseSchema,
   type MyRecordResponse,
@@ -1356,6 +1362,37 @@ export async function verifyOtpCode(phone: string, code: string): Promise<MyClie
   return api('/api/v1/auth/otp/verify', MyClientSchema, {
     method: 'POST',
     body: JSON.stringify({ phone, code }),
+  });
+}
+
+// ─── Client auth method registry & callcheck (GH #593 spec §Эндпоинты) ─────
+// The client-auth method registry — the single source the frontend picker
+// builds from: an unavailable method is honestly absent there, never offered
+// with endpoints that would 503.
+
+// GET /auth/methods — [{id: "sms_otp" | "call", available: bool}].
+export async function getAuthMethods(): Promise<AuthMethodList> {
+  return api('/api/v1/auth/methods', AuthMethodListSchema);
+}
+
+// POST /auth/call/initiate — 202 {handle, call: {phone, pretty, expires_at}}
+// on a real check; the silent staff-skip 202 is the EMPTY object (the
+// initiate itself never fails soft: 422 PHONE_INVALID before gates, 429
+// gates, 503 fail-closed transport).
+export async function initiateCallAuth(phone: string): Promise<AuthCallInitiateResponse> {
+  return api('/api/v1/auth/call/initiate', AuthCallInitiateResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+// POST /auth/call/status — poll by the one-time handle → waiting/confirmed/
+// expired; `confirmed` carries the memo_client_session cookie on the same
+// response; an invalid/consumed handle throws ApiError(404).
+export async function callAuthStatus(handle: string): Promise<AuthCallStatusResponse> {
+  return api('/api/v1/auth/call/status', AuthCallStatusResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({ handle }),
   });
 }
 

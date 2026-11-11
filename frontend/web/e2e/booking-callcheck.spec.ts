@@ -30,6 +30,7 @@ import {
   initiateViaUi,
   imitateDevCall,
   cleanupCallcheckData,
+  escSql,
   uniqueTestPhone,
 } from './fixtures/callcheck';
 import { createTomorrowActivity, deleteTestActivity } from './fixtures/admin-activity';
@@ -123,7 +124,7 @@ test.describe('#593 booking callcheck (dev transport)', () => {
           `FROM records r ` +
           `JOIN clients c ON r.client_id = c.id ` +
           `LEFT JOIN users u ON u.phone = c.phone ` +
-          `WHERE c.phone = '${phone}'`,
+          `WHERE c.phone = '${escSql(phone)}'`,
       );
       expect(row, 'the booking record exists under the test phone').not.toBeNull();
       expect(row!.activity_id).toBe(activity.id);

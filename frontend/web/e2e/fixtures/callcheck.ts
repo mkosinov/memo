@@ -20,7 +20,7 @@
  * standalone backend saturates after ~2 consecutive local runs (429
  * AUTH_LOCKED_OUT on initiate) — restart it between full-suite reruns.
  */
-import type { APIRequestContext, Page } from 'playwright/test';
+import type { APIRequestContext, Page, Response } from 'playwright/test';
 import { queryDB, queryDBRow } from './db-query';
 import { resolveBackendUrl } from '../lib/backend-url';
 import { resolveWebPort } from '../lib/stack-port';
@@ -42,7 +42,10 @@ export const E2E_CONTACT_TELEGRAM =
 export const E2E_CONTACT_WHATSAPP =
   process.env.NEXT_PUBLIC_CONTACT_WHATSAPP || '+79005550100';
 
-const esc = (value: string): string => value.replace(/'/g, "''");
+/** SQL string escaper — the otp-code.ts donor convention (a phone with a
+ * quote must never smuggle SQL into the CLI invocation). Exported for the
+ * specs' own DB asserts, which build SQL with the same phones. */
+export const escSql = (value: string): string => value.replace(/'/g, "''");
 
 /** Synchronous sleep (the helpers run in sync contexts). */
 function sleepSync(ms: number): void {
@@ -57,19 +60,24 @@ function sleepSync(ms: number): void {
  * teardown) — a CLI write can collide with an in-flight backend commit
  * ("database is locked"). The donor's 5×200 ms busy-wait is too tight
  * under that contention, so the callcheck writes carry their own budget:
- * 6 attempts with growing sleeps (~4.5 s total), then the caller's policy
+ * 6 attempts with growing between-attempt sleeps (200..1000 ms, ~3 s
+ * total — never a sleep AFTER the last try), then the caller's policy
  * (the backdate FAILS loud — it is the test path; the cleanup warns and
  * moves on — it must never mask a test result).
  */
+const WRITE_ATTEMPTS = 6;
+
 function writeWithBackoff(sql: string, what: string): boolean {
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
     try {
       queryDB(sql);
       return true;
     } catch (err) {
       const msg = String((err as Error)?.message || err);
       if (!msg.includes('database is locked')) throw err;
-      sleepSync(200 * (attempt + 1));
+      if (attempt < WRITE_ATTEMPTS - 1) {
+        sleepSync(200 * (attempt + 1));
+      }
     }
   }
   console.warn(`[callcheck] SQL write gave up on a locked DB (${what})`);
@@ -92,47 +100,57 @@ export interface CallInitiation {
   call: { phone: string; pretty: string; expires_at: string };
 }
 
-/** Click «Подтвердить звонком» and capture the initiate response — the
- * RAW handle exists ONLY on this wire (the DB stores its HMAC digest),
- * so response interception is the only way the spec can imitate the call. */
-export async function initiateViaUi(page: Page): Promise<CallInitiation> {
-  const respPromise = page.waitForResponse(
-    (r) =>
-      r.url().includes('/api/v1/auth/call/initiate') &&
-      r.request().method() === 'POST',
+/** The initiate response predicate: the app's own POST wire. */
+function isInitiateResponse(r: Response): boolean {
+  return (
+    r.url().includes('/api/v1/auth/call/initiate') &&
+    r.request().method() === 'POST'
   );
-  await page.locator('[data-testid="auth-method-call"]').click();
-  const resp = await respPromise;
+}
+
+/** Validate an initiate response into a {@link CallInitiation}.
+ *
+ * One shared validator for EVERY capture path: non-202 (gate 429,
+ * transport 503, validation 422) and the empty-202 staff skip both fail
+ * loud with the response body — the caller never proceeds with a handle
+ * it does not have. */
+async function parseInitiate(resp: Response): Promise<CallInitiation> {
+  const bodyText = await resp.text();
   if (resp.status() !== 202) {
     throw new Error(
-      `[callcheck] initiate answered HTTP ${resp.status()}: ${(await resp.text()).slice(0, 200)}`,
+      `[callcheck] initiate answered HTTP ${resp.status()}: ${bodyText.slice(0, 200)}`,
     );
   }
-  const body = (await resp.json()) as Partial<CallInitiation>;
+  let body: Partial<CallInitiation>;
+  try {
+    body = JSON.parse(bodyText) as Partial<CallInitiation>;
+  } catch {
+    throw new Error(
+      `[callcheck] initiate 202 body is not JSON: ${bodyText.slice(0, 200)}`,
+    );
+  }
   if (!body.handle || !body.call) {
     // The silent staff skip — an indistinguishable empty 202 (nothing to poll).
     throw new Error(
-      `[callcheck] initiate 202 body has no handle/call (staff skip?): ${JSON.stringify(body).slice(0, 200)}`,
+      `[callcheck] initiate 202 body has no handle/call (staff skip?): ${bodyText.slice(0, 200)}`,
     );
   }
   return body as CallInitiation;
 }
 
+/** Click «Подтвердить звонком» and capture the initiate response — the
+ * RAW handle exists ONLY on this wire (the DB stores its HMAC digest),
+ * so response interception is the only way the spec can imitate the call. */
+export async function initiateViaUi(page: Page): Promise<CallInitiation> {
+  const respPromise = page.waitForResponse(isInitiateResponse);
+  await page.locator('[data-testid="auth-method-call"]').click();
+  return parseInitiate(await respPromise);
+}
+
 /** Await an initiate response around an action the spec itself triggers
  * (e.g. the «Позвонить ещё раз» button — not the picker's method button). */
 export async function captureInitiate(page: Page): Promise<CallInitiation> {
-  const resp = await page.waitForResponse(
-    (r) =>
-      r.url().includes('/api/v1/auth/call/initiate') &&
-      r.request().method() === 'POST',
-  );
-  const body = (await resp.json()) as Partial<CallInitiation>;
-  if (resp.status() !== 202 || !body.handle || !body.call) {
-    throw new Error(
-      `[callcheck] initiate answered HTTP ${resp.status()}: ${JSON.stringify(body).slice(0, 200)}`,
-    );
-  }
-  return body as CallInitiation;
+  return parseInitiate(await page.waitForResponse(isInitiateResponse));
 }
 
 /** The dev call imitation: `POST /auth/call/dev-done` with the web Origin
@@ -169,7 +187,7 @@ export async function imitateDevCall(
 export function backdateAuthCallWindow(phone: string): void {
   const ok = writeWithBackoff(
     `UPDATE auth_calls SET created_at = datetime('now', '-${CALLCHECK_WINDOW_SECONDS + 20} seconds') ` +
-      `WHERE phone = '${esc(phone)}'`,
+      `WHERE phone = '${escSql(phone)}'`,
     `backdate auth_calls for ${phone}`,
   );
   if (!ok) {
@@ -179,10 +197,12 @@ export function backdateAuthCallWindow(phone: string): void {
   }
 }
 
-/** Assert the phone's check row exists and is still live (a purge would
- * turn the US-5 poll into the 404 dead end instead of «Время вышло»). */
+/** Read the phone's live check row (null = none). A backdate caller MUST
+ * assert a `pending` row BEFORE time-travelling: a silent no-op UPDATE
+ * (the row already purged/consumed) would surface only later as an
+ * unexplained «Время вышло»/404 timeout instead of failing at the cause. */
 export function readAuthCallRow(phone: string): Record<string, any> | null {
-  return queryDBRow(`SELECT * FROM auth_calls WHERE phone = '${esc(phone)}'`);
+  return queryDBRow(`SELECT * FROM auth_calls WHERE phone = '${escSql(phone)}'`);
 }
 
 /** Purge everything a callcheck spec created (Full Cycle cleanup):
@@ -192,7 +212,7 @@ export function readAuthCallRow(phone: string): Record<string, any> | null {
  * cleanup failure must never mask the test's own result (the leftover
  * rows are inert: random phones, self-purging auth_calls). */
 export function cleanupCallcheckData(phone: string): void {
-  const p = esc(phone);
+  const p = escSql(phone);
   writeWithBackoff(
     `DELETE FROM visits WHERE record_id IN ` +
       `(SELECT r.id FROM records r JOIN clients c ON r.client_id = c.id WHERE c.phone = '${p}')`,

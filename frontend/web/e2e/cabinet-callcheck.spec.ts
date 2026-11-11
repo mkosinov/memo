@@ -23,6 +23,8 @@ import {
   imitateDevCall,
   backdateAuthCallWindow,
   cleanupCallcheckData,
+  readAuthCallRow,
+  escSql,
   uniqueTestPhone,
 } from './fixtures/callcheck';
 import { queryDBRow } from './fixtures/db-query';
@@ -69,7 +71,7 @@ test.describe('#593 cabinet callcheck (dev transport)', () => {
       // VERIFY DB: the finalizer find-or-created the auth user with the
       // phone confirmed (the shared client-login finalizer, #593).
       const user = queryDBRow(
-        `SELECT phone_is_confirmed FROM users WHERE phone = '${phone}'`,
+        `SELECT phone_is_confirmed FROM users WHERE phone = '${escSql(phone)}'`,
       );
       expect(user, 'the auth user exists under the test phone').not.toBeNull();
       expect(Number(user!.phone_is_confirmed)).toBe(1);
@@ -90,6 +92,14 @@ test.describe('#593 cabinet callcheck (dev transport)', () => {
 
       const first = await initiateViaUi(page);
       await expect(page.locator('[data-testid="auth-call-timer"]')).toBeVisible();
+
+      // The time-travel needs a LIVE row: assert it exists and is still
+      // `pending` BEFORE backdating — a no-op UPDATE (the row already
+      // purged or consumed) must fail HERE, not as a later «Время вышло»
+      // timeout with no cause.
+      const checkRow = readAuthCallRow(phone);
+      expect(checkRow, 'the live check row exists before the time-travel').not.toBeNull();
+      expect(checkRow!.status).toBe('pending');
 
       // Time-travel the live check past its 300-s window (the dev check
       // expires through the local window only — see the fixture). The

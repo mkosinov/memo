@@ -7,6 +7,8 @@ import type { Mock } from 'vitest';
 
 // ─── Mock @memo/api-client ─────────────────────────────────────────────────
 vi.mock('@memo/api-client', () => ({
+  getPublicActivities: vi.fn(),
+  // #600: staff route must no longer be called by the web schedule — kept as a spy.
   getActivities: vi.fn(),
   getServices: vi.fn(),
   getMasters: vi.fn(),
@@ -14,12 +16,14 @@ vi.mock('@memo/api-client', () => ({
 }));
 
 import {
+  getPublicActivities,
   getActivities,
   getServices,
   getMasters,
   getLocations,
 } from '@memo/api-client';
 
+const mockedGetPublicActivities = getPublicActivities as Mock;
 const mockedGetActivities = getActivities as Mock;
 const mockedGetServices = getServices as Mock;
 const mockedGetMasters = getMasters as Mock;
@@ -115,60 +119,44 @@ const mockLocations = [
   },
 ];
 
+// #600: public route payload — exactly the 8 ADR-015 fields; the unchanged
+// mapper must consume only these (no is_private/comment/timestamps).
 const mockActivities = [
   {
     id: 'act-1',
-    master_id: 'm-1',
     service_id: 'svc-1',
+    master_id: 'm-1',
     location_id: 'loc-1',
     start: '2026-06-01T10:00:00',
     duration: 120,
     capacity: 10,
-    is_private: false,
-    comment: null,
-    record_info: null,
-    created_at: '',
-    updated_at: '',
-    is_active: true,
     occupied: 2,
   },
   {
     id: 'act-2',
-    master_id: 'm-1',
     service_id: 'svc-2',
+    master_id: 'm-1',
     location_id: 'loc-1',
     start: '2026-06-01T14:00:00',
     duration: 90,
     capacity: 10,
-    is_private: false,
-    comment: null,
-    record_info: null,
-    created_at: '',
-    updated_at: '',
-    is_active: true,
     occupied: 0,
   },
   {
     id: 'act-3',
-    master_id: 'm-1',
     service_id: 'svc-1',
+    master_id: 'm-1',
     location_id: 'loc-2',
     start: '2026-06-02T10:00:00',
     duration: 120,
     capacity: 10,
-    is_private: false,
-    comment: null,
-    record_info: null,
-    created_at: '',
-    updated_at: '',
-    is_active: true,
     occupied: 5,
   },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function createWrapper() {
+function createWrapperWithClient() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -177,13 +165,18 @@ function createWrapper() {
       },
     },
   });
-  return function Wrapper({ children }: { children: ReactNode }) {
+  function wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  };
+  }
+  return { wrapper, queryClient };
+}
+
+function createWrapper() {
+  return createWrapperWithClient().wrapper;
 }
 
 function mockDefaultResolve(): void {
-  mockedGetActivities.mockResolvedValue({ items: mockActivities, total: mockActivities.length });
+  mockedGetPublicActivities.mockResolvedValue({ items: mockActivities, total: mockActivities.length });
   mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
   mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
   mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
@@ -279,7 +272,7 @@ describe('useSchedule', () => {
     expect(unlinked?.materialDetails).toBeUndefined();
   });
 
-  it('calls API functions with correct params', async () => {
+  it('calls the public activities API with date range and per_page=100', async () => {
     mockDefaultResolve();
     const filters: ScheduleFiltersView = {
       dateStart: '2026-07-01',
@@ -291,16 +284,39 @@ describe('useSchedule', () => {
     });
 
     await waitFor(() => {
-      expect(mockedGetActivities).toHaveBeenCalledTimes(1);
+      expect(mockedGetPublicActivities).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockedGetActivities).toHaveBeenCalledWith({
+    expect(mockedGetPublicActivities).toHaveBeenCalledWith({
       date_from: '2026-07-01',
       date_to: '2026-07-10',
+      per_page: 100,
     });
+    // #600: staff-guarded /api/v1/activities must no longer be hit by the web schedule
+    expect(mockedGetActivities).not.toHaveBeenCalled();
     expect(mockedGetServices).toHaveBeenCalledTimes(1);
     expect(mockedGetMasters).toHaveBeenCalledTimes(1);
     expect(mockedGetLocations).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches the public list under the ["activities","public",from,to] key', async () => {
+    mockDefaultResolve();
+    const filters: ScheduleFiltersView = {
+      dateStart: '2026-07-01',
+      dateEnd: '2026-07-10',
+    };
+    const { wrapper, queryClient } = createWrapperWithClient();
+    const { result } = renderHook(() => useSchedule(filters), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(
+      queryClient.getQueryData(['activities', 'public', '2026-07-01', '2026-07-10']),
+    ).toEqual({ items: mockActivities, total: mockActivities.length });
+    // legacy staff-route cache key must stay empty
+    expect(queryClient.getQueryData(['activities', '2026-07-01', '2026-07-10'])).toBeUndefined();
   });
 
   it('filters by date with getByDate', async () => {
@@ -353,7 +369,7 @@ describe('useSchedule', () => {
   });
 
   it('returns error when API fails', async () => {
-    mockedGetActivities.mockRejectedValue(new Error('Network error'));
+    mockedGetPublicActivities.mockRejectedValue(new Error('Network error'));
     mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
     mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
     mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
@@ -370,7 +386,7 @@ describe('useSchedule', () => {
   });
 
   it('returns empty schedules when data is empty', async () => {
-    mockedGetActivities.mockResolvedValue({ items: [], total: 0 });
+    mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
     mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
     mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
     mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });

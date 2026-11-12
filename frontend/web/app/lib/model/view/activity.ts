@@ -10,10 +10,11 @@ export interface NextTimeOption {
 
 export interface ActivityView {
   id: string;
+  /** Service id — lets detail overlays query service-scoped data (e.g. photos, #576). */
+  serviceId: string;
   title: string;
   category: ActivityTag;
   imageUrl: string;
-  guestPhotos?: string[];
   time: string;
   duration: string;
   location: { id: string; title: string; address?: string };

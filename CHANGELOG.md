@@ -44,11 +44,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Env-примеры (T7 `6bbc12fb`):** `CALLCHECK_TRANSPORT` +
     `SMSRU_CALLCHECK_API_KEY` в `backend/.env.example`; контакты
     «Связаться» в web-примерах.
-  - Tests: полный pytest **4097p/0f** (новые сьюты 59+17+10+35+34+3 +
-    смежные регрессии), web vitest **571/571**, api-client **575/575**,
-    e2e callcheck **4/4 ×3** + SMS-регрессия **4/4**, mypy/ruff/tsc
-    чистые; visual gate G4.5 **exit 0** (рев.8: 1 машинная проверка на
-    `/cabinet` + 4 manual через web-e2e).
+   - Tests: полный pytest **4097p/0f** (новые сьюты 59+17+10+35+34+3 +
+     смежные регрессии), web vitest **571/571**, api-client **575/575**,
+     e2e callcheck **4/4 ×3** + SMS-регрессия **4/4**, mypy/ruff/tsc
+     чистые; visual gate G4.5 **exit 0** (рев.8: 1 машинная проверка на
+     `/cabinet` + 4 manual через web-e2e).
+- **GH #576 — Публичные фото услуги и её занятий в деталях расписания
+  (web): полоса миниатюр в деталях занятия для гостя** — branch
+  `576-web-activity-photos` (6 задач `d112968c..714bd412`, base
+  `35b7521f`; 26 файлов, +1342/−278; спека
+  `docs/specs/2026-11-12-web-activity-photos-576-design.md` рев.3, план
+  `docs/plans/2026-11-12-web-activity-photos-576-plan.md` 6/6 — оба на
+  main, unchanged by IMPL; дом-правило `photos.md` влито со спекой
+  `856fc5eb`):
+  - **Бэкенд — фильтр `service_id` на публичной витрине (T1
+    `d112968c`):** кирпич `PublicPhotoListParams(PaginationParams)`
+    (вместо админского `PhotoListParams` — админ-фильтры не протекают
+    на анонимный маршрут); объединяющая семантика variant A (прямые
+    фото услуги + фото её занятий, LEFT OUTER JOIN) + двухгрупповой
+    порядок (прямые раньше, внутри групп `created_at desc, id asc`);
+    `is_public` принудителен, без фильтра ответ прежней формы.
+  - **api-client (T2 `2238a60a`):** `service_id` в
+    `PhotoPublicListParams` у `getPublicPhotos`.
+  - **Web-модель (T3 `8046a7f7`+`a122efc2`+`66f14176`):** `serviceId`
+    вниз по цепочке `WebScheduleDTO`→`ScheduleView`→`ActivityView`;
+    мёртвая цепочка `photos`/`guestPhotos` удалена (3 DTO-модуля +
+    мёртвый маппер `to-activity-vm` с тестом).
+  - **Хук `useServicePhotos` (T4 `2e92591a`):** один запрос
+    `getPublicPhotos({service_id, per_page: 20})` на ключе
+    `['photos','public','service',id]`, кэш-политики как у
+    `useGallery`, allowlist-маппинг `toGalleryPhotoView`.
+  - **Полоса миниатюр в `ActivityDetail` (T5 `f426320d`):** обложка +
+    фото услуги/занятий под главной картинкой, клик меняет главную
+    (локальное состояние, `aria-current`), a11y (group/tabindex/
+    aria-label/focus-visible), lazy-миниатюры с явными width/height;
+    без обложки главная — первое фото, пусто — ряда нет.
+  - **e2e (T6 `64c762a7`+`714bd412`):** `activity-photos.spec.ts`
+    US-1…US-4 — фикстуры через API (2 публичных прямых + 2 занятия +
+    1 непубличное, filename из `public/images/` по канону #513),
+    мутационно-верифицируемый спек.
+  - Tests: backend таргет (фото-сьюты) **259/259** (в т.ч.
+    `test_api_photos.py` 79/79), web vitest **570/570** (64 файла),
+    api-client **577/577**, e2e **4/4** + cabinet-photos санити
+    **1/1**, tsc (web + api-client) и ruff/mypy чистые; visual gate
+    G4.5 — exit 1 (§7 overlay seam: runner не кликает в детали, не
+    продуктовый дефект) → **пользовательское перекрытие Option A**:
+    e2e принят визуальной верификацией фазы; follow-up — **#602**
+    (уже заведён).
+   - Status: `docs/status/2026-11-12-web-activity-photos-576.md`
 
 ## [Unreleased] — 2026-11-10
 

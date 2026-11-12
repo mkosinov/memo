@@ -1382,8 +1382,8 @@ describe('create mode', () => {
 
     // Make the form valid and submit — saving becomes true and stays true
     // (mutate is fire-and-forget; callbacks own the resolution). Combobox
-    // picks (GH #280): клик по триггеру → клик по опции; вместимость — руками
-    // (у shared mockLocations нет defaultCapacity).
+    // picks (GH #280) для мастера/услуги; локация — чекбокс-группа (GH #595);
+    // вместимость — руками (у shared mockLocations нет defaultCapacity).
     const pickIn = (containerTestId: string, optionValue: string) => {
       fireEvent.click(
         within(screen.getByTestId(containerTestId)).getByTestId('combobox-trigger'),
@@ -1392,7 +1392,7 @@ describe('create mode', () => {
     };
     pickIn('create-master', 'm1');
     pickIn('create-service', 's1'); // длительность «02:30» заполнится сама
-    pickIn('create-location', 'alpika');
+    fireEvent.click(screen.getByLabelText('Альпика'));
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('btn-create-activity'));
     expect(addActivity).toHaveBeenCalledTimes(1);

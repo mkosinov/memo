@@ -166,6 +166,12 @@ vi.mock("../hooks/useGallery", () => ({
   useGallery: () => mocks.useGallery(),
 }));
 
+// GH #576: ActivityDetail queries service photos — keep page tests hermetic
+// (the real hook needs a QueryClient and fires getPublicPhotos).
+vi.mock("../hooks/useServicePhotos", () => ({
+  useServicePhotos: () => ({ photos: [], isLoading: false, error: null }),
+}));
+
 // ── Helpers ─────────────────────────────────────────────────
 
 function renderHome() {

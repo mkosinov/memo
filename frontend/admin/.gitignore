@@ -24,6 +24,7 @@
 # next.js
 /.next/
 /.next-shard-*/
+/.next-e2e*/
 /.next-tester*/
 /out/
 

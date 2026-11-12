@@ -677,4 +677,98 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       }
     }
   });
+
+  // ── Scenario 15 (GH #598 US-3): a long client tab scrolls to its LAST
+  //    element — the pre-#598 shell could clip overflow content out of
+  //    reach (#262 дефект-2); with the scroll owner moved to the inner
+  //    panels every element stays reachable.
+
+  /**
+   * Rect of the client tab's inner scroll owner (GH #598): the
+   * `.overflow-y-auto` div inside `client-tab` — document order makes it
+   * the tab's content scroller (the delete footer band sits outside it).
+   * Falls back to the `client-tab` root if the class lookup ever drifts.
+   */
+  async function clientTabScrollAreaRect(
+    page: import('@playwright/test').Page,
+  ): Promise<{ top: number; bottom: number } | null> {
+    return page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="client-tab"]');
+      const scroller = tab?.querySelector('.overflow-y-auto');
+      const el = (scroller ?? tab) as HTMLElement | null;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    });
+  }
+
+  test('15. US-3: long client tab — last visit row and comments reachable by scroll (no clipping)', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — client + activity + a 15-visit record: each visit is a
+    //    table row, so the client tab's content runs far past the fixed
+    //    modal body (deliberately long tab, spec §6 US-3). Capacity is
+    //    raised for the factory activity — the create guard 409s on
+    //    occupied+seats > capacity (domain records.md), and the default
+    //    capacity 8 cannot host 15 seats.
+    const ts = Date.now();
+    const client = await createTestClient(request);
+    const activity = await createTestActivity(request, { capacity: 20 });
+    const visits = Array.from({ length: 15 }, (_, i) => ({
+      name: `us3-visit-${i}-${ts}`,
+      price: 3500,
+    }));
+    const record: any = await createTestRecord(request, activity.id, client.id, {
+      visits,
+    });
+    const lastVisitId = record.visits[record.visits.length - 1].id;
+
+    try {
+      // 2. ACTION — open the modal scoped to the record, switch to its
+      //    client tab, settle on the LAST factory visit row.
+      await openModal(page, { recordId: record.id });
+
+      const clientTab = page.locator(`[data-testid="tab-client-${record.id}"]`);
+      await expect(clientTab).toBeVisible({ timeout: 15_000 });
+      await clientTab.click();
+      await expect(page.locator('[data-testid="client-tab"]')).toBeVisible();
+
+      // Settle on the LAST factory visit row (InlineEditRow renders the
+      // mode-independent per-row testid `visit-row-{visitId}`).
+      const lastRow = page.locator(`[data-testid="visit-row-${lastVisitId}"]`);
+      await expect(lastRow).toBeVisible({ timeout: 15_000 });
+
+      // Discrimination precheck: the tab genuinely overflows — the last
+      // row starts BELOW the visible scroll area (otherwise the reach
+      // assertions below degrade to no-ops on short content).
+      const area = await clientTabScrollAreaRect(page);
+      expect(area).not.toBeNull();
+      const foldedBox = await lastRow.boundingBox();
+      expect(foldedBox!.y).toBeGreaterThan(area!.bottom - 2);
+
+      // 3. VERIFY UI — the last visit row scrolls into the visible area:
+      //    under the #262 clipping regime (overflow-hidden shell with no
+      //    scroll owner) scrollIntoViewIfNeeded would time out.
+      await lastRow.scrollIntoViewIfNeeded();
+      const rowBox = await lastRow.boundingBox();
+      expect(rowBox!.y).toBeGreaterThanOrEqual(area!.top - 2);
+      expect(rowBox!.y + rowBox!.height).toBeLessThanOrEqual(area!.bottom + 2);
+
+      // …and so does the literal last element of the scroll content —
+      //    the comments block below the visits/payments tables.
+      const comments = page.locator('[data-testid="record-comments"]');
+      await comments.scrollIntoViewIfNeeded();
+      const commentsBox = await comments.boundingBox();
+      expect(commentsBox!.y).toBeGreaterThanOrEqual(area!.top - 2);
+      expect(commentsBox!.y + commentsBox!.height).toBeLessThanOrEqual(
+        area!.bottom + 2,
+      );
+    } finally {
+      // CLEANUP — always runs, even if the test fails
+      await cleanupRecord(request, record.id);
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+      await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
 });

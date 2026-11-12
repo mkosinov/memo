@@ -2,6 +2,7 @@ import { test, expect } from './fixtures/test';
 import { gotoScheduleWeek } from './fixtures/helpers';
 import { openCombobox, pickComboboxOption } from './helpers/combobox';
 import { openCreateDialog } from './helpers/clicks';
+import { hallTitleWithDefault, locationCheckByTitle } from './helpers/location-group';
 import { queryDBRow } from './fixtures/db-query';
 
 /**
@@ -13,9 +14,11 @@ import { queryDBRow } from './fixtures/db-query';
  *   S4 — stamp panel ready (master + service + location) → click an empty
  *        slot → card appears with NO dialog.
  *
- * GH #280 (spec §5 US-3): picking a service/location through the create
- * form's comboboxes autofills duration/capacity (and shows age read-only +
- * tariffs); re-picking OVERWRITES — and the autofilled values reach the
+ * GH #280 (spec §5 US-3): picking a service through the create form's
+ * combobox autofills duration (and shows age read-only + tariffs);
+ * re-picking OVERWRITES. GH #595: the location is a checkbox group —
+ * checking halls drives the capacity field (§4.2: exactly 1 → autofill,
+ * 2+ → hidden + per-hall defaults), and the resulting values reach the
  * created activity (DB check).
  *
  * State purity: the per-test seed reset (#252, auto fixture in
@@ -80,11 +83,11 @@ test('S2: empty week — hint, click-create via dialog, card appears, hint disap
   const dialog = await openCreateDialog(page);
 
   await test.step('fill create form and submit', async () => {
-    // Combobox picks (GH #280): trigger inside the create-* container +
-    // click on the option; index 0 of the list is the pinned clear option.
+    // Dictionary picks (GH #280) + the location checkbox group (GH #595):
+    // one hall with a default checked — its default autofills capacity.
     await pickComboboxOption(page, 'create-master');
     await pickComboboxOption(page, 'create-service');
-    await pickComboboxOption(page, 'create-location');
+    await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
 
     await dialog.getByTestId('btn-create-activity').click();
     await expect(dialog).toBeHidden();
@@ -96,7 +99,7 @@ test('S2: empty week — hint, click-create via dialog, card appears, hint disap
   await expect(page.getByTestId('schedule-empty-hint')).toHaveCount(0);
 });
 
-test('US-3: service/location picks autofill duration/capacity; re-pick overwrites', async ({
+test('US-3: service pick autofills duration; hall checks drive the capacity field; the values reach the DB', async ({
   page,
 }) => {
   // ARRANGE: empty week — the dialog opens with a slot prefill
@@ -127,15 +130,29 @@ test('US-3: service/location picks autofill duration/capacity; re-pick overwrite
   await expect(dialog.getByTestId('create-duration')).toHaveValue(exp2.duration);
   await expect(dialog.getByTestId('age-display')).toHaveText(exp2.age);
 
-  // Location pick → capacity from the dictionary (locations.capacity is
-  // the default); re-pick overwrites.
-  const loc1 = await pickComboboxOption(page, 'create-location');
-  const cap1 = queryDBRow(`SELECT capacity FROM locations WHERE id='${loc1.id}'`)!;
+  // Hall checks drive the capacity field (GH #595 §4.2; locations.capacity
+  // is the default). Exactly 1 → the field carries that hall's default
+  // (halls picked by title — the directory truth, both WITH defaults)…
+  const title1 = hallTitleWithDefault(0);
+  await locationCheckByTitle(dialog, title1).check();
+  const cap1 = queryDBRow(`SELECT capacity FROM locations WHERE title='${title1}'`)!;
   await expect(dialog.getByTestId('create-capacity')).toHaveValue(
     String(cap1.capacity),
   );
-  const loc2 = await pickComboboxOption(page, 'create-location', 1);
-  const cap2 = queryDBRow(`SELECT capacity FROM locations WHERE id='${loc2.id}'`)!;
+
+  // …TWO checked (GH #595) → the field hides, the per-hall-defaults hint
+  // shows instead…
+  const title2 = hallTitleWithDefault(1);
+  await locationCheckByTitle(dialog, title2).check();
+  const cap2 = queryDBRow(`SELECT capacity FROM locations WHERE title='${title2}'`)!;
+  await expect(dialog.getByTestId('create-capacity')).toBeHidden();
+  await expect(dialog.getByTestId('create-capacity-hint')).toHaveText(
+    'Вместимость — по умолчанию каждого зала',
+  );
+
+  // …and changing the set back to exactly 1 re-exposes the field with the
+  // REMAINING hall's default (the overwrite rule for checkbox sets).
+  await locationCheckByTitle(dialog, title1).uncheck();
   await expect(dialog.getByTestId('create-capacity')).toHaveValue(
     String(cap2.capacity),
   );
@@ -154,7 +171,8 @@ test('US-3: service/location picks autofill duration/capacity; re-pick overwrite
   );
   expect(created).not.toBeNull();
   expect(created!.service_id).toBe(svc2.id);
-  expect(created!.location_id).toBe(loc2.id);
+  const hall2Row = queryDBRow(`SELECT id FROM locations WHERE title='${title2}'`)!;
+  expect(created!.location_id).toBe(hall2Row.id);
   expect(created!.duration).toBe(exp2.durationMinutes);
   expect(created!.capacity).toBe(cap2.capacity);
 });

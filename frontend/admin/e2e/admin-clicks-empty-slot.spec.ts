@@ -3,6 +3,7 @@ import { test, expect } from './fixtures/test';
 import { waitForScheduleReady, gotoScheduleWeek } from './fixtures/helpers';
 import { clickEmptySlot } from './helpers/clicks';
 import { pickComboboxOption } from './helpers/combobox';
+import { hallTitleWithDefault, locationCheckByTitle } from './helpers/location-group';
 import { queryDBRows } from './fixtures/db-query';
 
 /**
@@ -13,7 +14,8 @@ import { queryDBRows } from './fixtures/db-query';
  *   US-1 — click an empty slot → dialog opens with the row composition
  *          «Дата и время + Длительность + Приватное» → «Услуга + возраст +
  *          Вместимость (+ тарифы)» → «Мастер + Локация» → «Создать»;
- *          create-заполнение через комбобоксы → card count grows by 1.
+ *          create-заполнение: комбобоксы мастера/услуги + чекбокс-группа
+ *          локаций (GH #595) → card count grows by 1.
  *   US-2 — slot prefill (calendar date of the clicked slot, minutes snapped
  *          to the grid); changing the datetime to a date in ANOTHER week
  *          creates the activity on the CHOSEN date: no card appears in the
@@ -108,7 +110,9 @@ test('US-1: create form matches the edit form — blocks, order, creation', asyn
   ).length;
   await test.step('fill create form and submit', async () => {
     await pickComboboxOption(page, 'create-master');
-    await pickComboboxOption(page, 'create-location');
+    // GH #595: the location is a checkbox group — one hall with a
+    // default checked (its default autofills the capacity).
+    await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
 
     await dialog.getByTestId('btn-create-activity').click();
     await expect(dialog).toBeHidden();
@@ -153,7 +157,9 @@ test('US-2: slot prefill; datetime changed to another week → activity in ITS w
   // ACT: change the datetime to a date in ANOTHER week and fill the form.
   const service = await pickComboboxOption(page, 'create-service');
   await pickComboboxOption(page, 'create-master');
-  await pickComboboxOption(page, 'create-location');
+  // GH #595: the location is a checkbox group — one hall (with a
+  // default) checked.
+  await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
   await dialog.getByTestId('create-datetime').fill(OTHER_WEEK_DT);
 
   await dialog.getByTestId('btn-create-activity').click();

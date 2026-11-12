@@ -9,6 +9,7 @@ import { createTestActivity, cleanup } from './fixtures/factories';
 import { clickFabRobust } from './fixtures/server-push';
 import { openCreateDialog, clickWithFallback } from './helpers/clicks';
 import { openCombobox, pickComboboxOption } from './helpers/combobox';
+import { hallTitleWithDefault, locationCheckByTitle } from './helpers/location-group';
 
 /**
  * GH #261 — «Сохраняем…» loading toast in the common toast stack (spec §6).
@@ -40,11 +41,11 @@ async function submitCreateDialog(
   dialog: import('@playwright/test').Locator,
 ) {
   // GH #280: dictionary picks go through the create-* combobox containers
-  // (trigger + option click) — the native selectOption is gone with the
-  // old form. Duration/capacity autofill from the picked service/location.
+  // (trigger + option click); GH #595: the location is a checkbox group —
+  // one hall with a default checked, its default autofills the capacity.
   await pickComboboxOption(page, 'create-master');
   await pickComboboxOption(page, 'create-service');
-  await pickComboboxOption(page, 'create-location');
+  await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
   await dialog.getByTestId('btn-create-activity').click();
 }
 

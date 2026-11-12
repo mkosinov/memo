@@ -16,6 +16,7 @@ A Location is a physical studio space where master classes take place.
 | image_url | string | ❌ | — | — | null | URL картинки |
 | location_hint | string | ❌ | — | — | null | Как найти |
 | tag_ids | array | ❌ | — | — | [] | IDs тегов |
+| is_public | boolean | ❌ | — | — | true | Видимость в web: `true` = показывается на сайте; `false` = скрыта только с сайта, в админе полностью рабочая (#601) |
 
 ## Cross-field Rules
 - None.
@@ -23,6 +24,7 @@ A Location is a physical studio space where master classes take place.
 ## Invariants
 - Locations can be hard-deleted via `DELETE /{id}` with the dependency-resolution mechanism; archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore`. See `_overview.md` → "Hard-delete FK dependency matrix".
 - capacity is informational — not enforced at Activity level
+- `is_public = false` скрывает локацию только с сайта: её нет в публичном словаре, её занятия исключены из публичной витрины серверно, бронь занятия по прямому id → 404 (#601, поверх #600). В админе локация полностью рабочая: сетка, формы, дропдауны. Архив — другое правило: «выведена из работы», скрывает и из админа (по умолчанию). Скрытие с сайта ≠ архив.
 
 ## Business Logic
 
@@ -36,8 +38,9 @@ A Location is a physical studio space where master classes take place.
 ## API Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/v1/locations | List records — `?status=active` (default) \| `archived` \| `all` |
-| GET | /api/v1/locations/{id} | Get |
+| GET | /api/v1/public/locations | Анонимный словарь для web: голый массив, без параметров; только неархивированные с `is_public = true`; схема ровно 4 поля (`id, title, address, location_hint`); порядок `sort_order ASC, title ASC, id ASC`; потолок `BARE_LIST_MAX_ROWS` (#601) |
+| GET | /api/v1/locations | List records — `?status=active` (default) \| `archived` \| `all` — требует `locations:read` (аноним/клиент → 401, #601) |
+| GET | /api/v1/locations/{id} | Get — требует `locations:read` (аноним/клиент → 401, #601) |
 | POST | /api/v1/locations | Create |
 | PUT | /api/v1/locations/{id} | Full update |
 | PATCH | /api/v1/locations/{id} | Partial update |
@@ -50,7 +53,7 @@ A Location is a physical studio space where master classes take place.
 - **Paginated `GET /api/v1/locations`**: `page` (≥1), `per_page` (1-100, default 20), `status` (active|archived|all, default active), `sort_by` (Literal whitelist: `title, short_title, capacity, address, location_hint, description, archived, yandex_map_url, created_at`; 422 on unknown), `sort_order` (asc|desc, default asc). Default order: `sort_order ASC, title ASC, id ASC` (spec §4.4).
 - **`?id=` narrowing (GH #232, uniform entry form GH #371)**: repeated query keys, UUID-only (garbage → 422), ≤100 distinct after dedup (>100 → 422 `too_long`); typed `id IN (…)` narrowing via `ids_in_predicate`, ANDs conjunctively with `status`/`q` (an archived id under the default active status stays empty); valid-but-unknown → 200 + empty. On the wire unchanged since #232 (the former sibling param); GH #371 moves the contract into the model — one `LocationListParams(SortParams[LocationSortBy], PaginationParams)` as `Annotated[..., Query()]` (no scalar query siblings; `id` inherited from `PaginationParams` — same UUID-only/dedup/≤100 contract).
 - **Bare `GET /api/v1/locations/all`**: bare JSON array (no envelope), `status` parity with paginated, deterministic order = same default. Protective `BARE_LIST_MAX_ROWS = 1000` → 422 English error naming entity + paginated endpoint (spec §4.3).
-- **Consumers**: Locations table = server-paginated via `LocationsContext`; dropdowns/lookup maps (Records/Schedule/useLocations/useRecordData) = `/all` (spec §5.5).
+- **Consumers**: Locations table = server-paginated via `LocationsContext`; dropdowns/lookup maps (Records/Schedule/useLocations/useRecordData) = `/all` (spec §5.5); web (client site `useLocations`/`useSchedule`) = `/api/v1/public/locations` только (#601 — bare list/get закрыты `locations:read`).
 - **Search matrix (spec §6)**: **list `?q=` (GH #212) is the delivered contract** — substring on `Location.title` + `Location.short_title` + `Location.address` + `Location.description` (each field ilike'd separately), plus exact `Location.id` equality when `q` parses as a full 36-char UUID. The three URL fields (`yandex_map_url`, `review_url`, `image_url`) are **EXACT full-string equality only** — a pasted full Yandex-map / review / image URL finds the row, partial URLs NEVER match (no ilike on URL columns). `q: str | None` declared on the list params model with `min_length=2` / `max_length=100` via Pydantic `Field` → out-of-range → **422 VALIDATION_ERROR**. The `q` predicate lands BEFORE the COUNT (inherited from `BaseRepository.list`), so `total` always reflects the q-filtered set. The per-entity search-fields matrix lives in `LocationService.search_fields` (`src/services/location.py`). Dictionary form dropdowns still consume `/all` directly via `getAllLocations` (#214 combobox; client filter over the bare array).
 
 ## Relationships

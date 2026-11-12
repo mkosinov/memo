@@ -509,6 +509,62 @@ describe('DayView', () => {
     });
   });
 
+  describe('create-modal location prefill (GH #595 §4.4)', () => {
+    const baseCtx = {
+      loading: false,
+      error: null,
+      selectedDay: new Date(2026, 5, 15),
+      filterMasterIds: [],
+      filterLocationIds: [],
+      activities: [
+        createMockActivity({ id: 'ev_1', masterId: 'm1', locationId: 'alpika', date: '2026-06-15' }),
+      ],
+    };
+
+    it('locations mode: a column slot click threads the column id into createDefaults.locationId', () => {
+      renderDayView({ ...baseCtx, columnMode: 'locations' });
+
+      fireEvent.click(screen.getByTestId('day-view-column-alpika'));
+
+      const modal = screen.getByTestId('activity-details-modal');
+      expect(modal).toHaveAttribute('data-mode', 'create');
+      // Колонка = локация: её id — источник префилла чекбокса (отметка
+      // применяется во вкладке по прибытии справочника, Task 2)
+      expect(modal).toHaveAttribute(
+        'data-defaults',
+        JSON.stringify({ date: '2026-06-15', startMinutes: 600, locationId: 'alpika' }),
+      );
+    });
+
+    it('masters mode: a slot click opens WITHOUT locationId (master ids never prefill)', () => {
+      renderDayView({ ...baseCtx, columnMode: 'masters' });
+
+      fireEvent.click(screen.getByTestId('day-view-column-m1'));
+
+      expect(screen.getByTestId('activity-details-modal')).toHaveAttribute(
+        'data-defaults',
+        JSON.stringify({ date: '2026-06-15', startMinutes: 600 }),
+      );
+    });
+
+    it('archived location columns are view-only: a click opens no create modal at all', () => {
+      renderDayView({
+        ...baseCtx,
+        columnMode: 'locations',
+        scheduleLocations: [{ ...mockLocationResponseArchived }],
+        activities: [
+          ...baseCtx.activities,
+          createMockActivity({ id: 'ev_2', masterId: 'm1', locationId: 'loc-2', locationName: 'Гранд Отель Поляна', date: '2026-06-15' }),
+        ],
+        _showArchivedLocations: true,
+      });
+
+      fireEvent.click(screen.getByTestId('day-view-column-loc-2'));
+
+      expect(screen.queryByTestId('activity-details-modal')).not.toBeInTheDocument();
+    });
+  });
+
   describe('archived columns (GH #267)', () => {
     // Full schedule dictionaries: one active master (m1) + one archived (m-arch).
     const fullMasters = [mockMasterResponseArchived];

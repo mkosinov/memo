@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
-import { ActivityForm, type CapacityHint } from './ActivityForm';
+import { ActivityForm } from './ActivityForm';
 import type { Location } from '@memo/domain';
 import {
   formatTime,
@@ -109,10 +109,10 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
     durationValid &&
     (capacityHidden ? firstWithoutDefault === undefined : Number(capacity) >= 1);
 
-  const capacityHint: CapacityHint | undefined = capacityHidden
+  const capacityHint: string | undefined = capacityHidden
     ? firstWithoutDefault
-      ? { text: `У зала «${firstWithoutDefault.title}» не задана вместимость`, tone: 'danger' }
-      : { text: 'Вместимость — по умолчанию каждого зала', tone: 'default' }
+      ? `У зала «${firstWithoutDefault.title}» не задана вместимость`
+      : 'Вместимость — по умолчанию каждого зала'
     : undefined;
 
   // Снап и пересборка значения при каждом ручном изменении — как в эталоне

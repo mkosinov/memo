@@ -31,13 +31,6 @@ export type LocationFieldBinding =
   | { mode: 'single'; onLocationChange: (locationId: string) => void }
   | { mode: 'multi'; ids: string[]; onToggle: (locationId: string) => void };
 
-/** GH #595 §4.2: hint line rendered in place of the hidden capacity field. */
-export interface CapacityHint {
-  text: string;
-  /** 'danger' — block reason (a hall without default); 'default' — policy note. */
-  tone: 'default' | 'danger';
-}
-
 interface ActivityFormProps {
   values: ActivityFormValues;
   services: Service[];
@@ -58,7 +51,7 @@ interface ActivityFormProps {
    * place, aria-live="polite" (a disabled button does not announce its reason).
    */
   capacityHidden?: boolean;
-  capacityHint?: CapacityHint;
+  capacityHint?: string;
   /** data-testid on the root wrapper (Task-1 pattern: `settings-tab` today). */
   containerTestId?: string;
   /**
@@ -234,13 +227,8 @@ export function ActivityForm({
       {/* GH #595 §4.2: подсказка вместо скрытого поля вместимости; aria-live —
           задизейбленная кнопка не анонсирует причину скринридеру. */}
       {capacityHidden && capacityHint && (
-        <p
-          data-testid={testIds?.capacityHint}
-          aria-live="polite"
-          className="text-xs"
-          style={{ color: capacityHint.tone === 'danger' ? 'var(--danger)' : 'var(--ink-light)' }}
-        >
-          {capacityHint.text}
+        <p data-testid={testIds?.capacityHint} aria-live="polite" className="text-xs">
+          {capacityHint}
         </p>
       )}
 

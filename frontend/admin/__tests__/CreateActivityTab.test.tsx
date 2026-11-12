@@ -1,17 +1,23 @@
 /**
  * CreateActivityTab — режим create общего ActivityForm (GH #280, унификация
  * с формой редактирования; GH #595 — чекбокс-группа локаций и правила
- * вместимости §4.1–§4.2). Тестируем обёртку: префилл даты-времени из слота
- * (со снапом к сетке), автозаполнение длительности/вместимости из справочников,
- * гейты «Создать» (дата-время непусто, ЧЧ:ММ > 0, вместимость ≥ 1),
- * мультивыбор локаций (автозаполнение при ровно 1, скрытие поля и подсказки
- * aria-live при 2+, блок зала без умолчания), отбрасывание отсутствующих id
- * при рефетче, префилл-ид по прибытии списка, callback-семантику addActivity.
+ * вместимости §4.1–§4.2, мульти-отправка §4.3). Тестируем обёртку: префилл
+ * даты-времени из слота (со снапом к сетке), автозаполнение
+ * длительности/вместимости из справочников, гейты «Создать» (дата-время
+ * непусто, ЧЧ:ММ > 0, вместимость ≥ 1), мультивыбор локаций (автозаполнение
+ * при ровно 1, скрытие поля и подсказки aria-live при 2+, блок зала без
+ * умолчания), отбрасывание отсутствующих id при рефетче, префилл-ид по
+ * прибытии списка, мульти-отправку addActivities: порядок входов = порядок
+ * чекбоксов, вместимость по правилу §4.2, полный/частичный/нулевой успех,
+ * порядок сообщения ошибки, disabled полей на время полёта.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { createMockScheduleData, createMockGridSettings, createMockUIContext } from './helpers/mockContexts';
 import { mockMasters, mockServices } from './helpers/mockData';
+import type { AddActivityInput, AddActivityOutcome } from '@/contexts/schedule/ScheduleDataContext';
+import type { ActivityResponse } from '@memo/api-client';
+import { ApiError } from '@memo/api-client';
 
 // 1. Mock context modules (before importing the component)
 vi.mock('@/contexts/schedule/ScheduleDataContext', () => ({
@@ -28,7 +34,6 @@ import { CreateActivityTab } from '@/app/components/modal/ActivityDetailsModal/C
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
-import { parseApiError } from '@/app/lib/api/parseApiError';
 
 const mockUseScheduleData = vi.mocked(useScheduleData);
 const mockUseGridSettings = vi.mocked(useGridSettings);
@@ -50,6 +55,32 @@ const locations = [
 const defaults = { date: '2026-10-21', startMinutes: 840 };
 const onSavingChange = vi.fn();
 const onSaved = vi.fn();
+
+// ── §4.3 исходы addActivities ────────────────────────────────────────────
+
+/** Минимальный ActivityResponse — вкладка читает только status/locationId. */
+function createdOutcome(locationId: string): AddActivityOutcome {
+  const activity = {
+    id: `created-${locationId}`,
+    master_id: 'm1',
+    service_id: 's1',
+    location_id: locationId,
+    start: '2026-10-21T14:00:00',
+    duration: 150,
+    capacity: 6,
+    is_private: false,
+    comment: null,
+    record_info: null,
+    created_at: '',
+    updated_at: '',
+    occupied: 0,
+  } as unknown as ActivityResponse;
+  return { locationId, status: 'fulfilled', activity };
+}
+
+function rejectedOutcome(locationId: string, error: unknown): AddActivityOutcome {
+  return { locationId, status: 'rejected', error };
+}
 
 function renderTab(overrides?: {
   defaults?: { date: string; startMinutes: number; locationId?: string };
@@ -359,9 +390,11 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
   });
 
   it('private toggle flips role="switch" and submits isPrivate: true (US-4)', () => {
-    const addActivity = vi.fn();
+    const addActivities = vi.fn((inputs: AddActivityInput[]) =>
+      Promise.resolve(inputs.map((i) => createdOutcome(i.locationId))),
+    );
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     fillValidForm();
@@ -372,13 +405,13 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     expect(toggle).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByTestId('btn-create-activity'));
-    expect(addActivity.mock.calls[0][0]).toMatchObject({ isPrivate: true });
+    expect(addActivities.mock.calls[0][0][0]).toMatchObject({ isPrivate: true });
   });
 
-  it('submits exact payload: field datetime → start (snapped local ISO), ЧЧ:ММ → minutes', () => {
-    const addActivity = vi.fn();
+  it('§4.3 exactly 1: submits a single-element array; field datetime → start (snapped local ISO), ЧЧ:ММ → minutes, capacity = field value', () => {
+    const addActivities = vi.fn(() => Promise.resolve([createdOutcome('l1')]));
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     fillValidForm();
@@ -389,8 +422,8 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '4' } });
     fireEvent.click(screen.getByTestId('btn-create-activity'));
 
-    expect(addActivity).toHaveBeenCalledTimes(1);
-    expect(addActivity).toHaveBeenCalledWith(
+    expect(addActivities).toHaveBeenCalledTimes(1);
+    expect(addActivities).toHaveBeenCalledWith([
       {
         masterId: 'm1',
         serviceId: 's1',
@@ -400,52 +433,88 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
         capacity: 4,
         isPrivate: false,
       },
-      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
-    );
+    ]);
   });
 
-  it('transitional (Task 2): 2+ checked submits single addActivity for the FIRST location by checkbox order', () => {
-    const addActivity = vi.fn();
+  it('§4.3 2+: one addActivities call, inputs in CHECKBOX order (not click order), per-location default capacity', () => {
+    const addActivities = vi.fn((inputs: AddActivityInput[]) =>
+      Promise.resolve(inputs.map((i) => createdOutcome(i.locationId))),
+    );
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     pickInCombobox('create-master', 'm1');
-    pickInCombobox('create-service', 's1');
-    // Отмечены в порядке Лофт → Студия; по порядку чекбоксов первая — Студия.
+    pickInCombobox('create-service', 's1'); // 150 мин
+    // Отмечены в порядке Лофт → Студия; порядок входов — порядок чекбоксов
+    // (Студия l1 первая в справочнике), вместимость каждого — его умолчание (§4.2).
     toggleLocation('Лофт');
     toggleLocation('Студия');
     fireEvent.click(screen.getByTestId('btn-create-activity'));
 
-    expect(addActivity).toHaveBeenCalledTimes(1);
-    expect(addActivity.mock.calls[0][0]).toMatchObject({
-      locationId: 'l1',
-      capacity: 6, // умолчание локации отправки (§4.2: поле скрыто при 2+)
-    });
+    expect(addActivities).toHaveBeenCalledTimes(1);
+    const inputs = addActivities.mock.calls[0][0];
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map((i) => i.locationId)).toEqual(['l1', 'l2']);
+    // общие поля идентичны, различие — только locationId и вместимость
+    for (const input of inputs) {
+      expect(input).toMatchObject({
+        masterId: 'm1',
+        serviceId: 's1',
+        start: '2026-10-21T14:00:00',
+        durationMinutes: 150,
+        isPrivate: false,
+      });
+    }
+    expect(inputs[0].capacity).toBe(6); // Студия
+    expect(inputs[1].capacity).toBe(10); // Лофт
   });
 
-  it('success toast names the chosen calendar date: «Создано: … среда, 21 октября, 14:00»', () => {
-    const addActivity = vi.fn();
+  it('§4.3 full success N=1: closes the form, toast «Создано: {услуга} — {дата}, {время}» (прежний текст)', async () => {
+    const addActivities = vi.fn(() => Promise.resolve([createdOutcome('l1')]));
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     fillValidForm();
     fireEvent.click(screen.getByTestId('btn-create-activity'));
 
-    // mutate fire-and-forget: тост рождается в onSuccess (симулируем settle мутации)
-    const callbacks = addActivity.mock.calls[0][1] as { onSuccess: () => void; onError: () => void };
-    callbacks.onSuccess();
-
     const { showToast } = mockUseUI();
-    expect(showToast).toHaveBeenCalledWith('Создано: Картина маслом — среда, 21 октября, 14:00');
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Создано: Картина маслом — среда, 21 октября, 14:00'),
+    );
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it('on error: toast with parsed message and error kind, values kept, modal not closed', () => {
-    const addActivity = vi.fn();
+  it('§4.3 full success N=2: closes the form, toast «Создано занятий: 2 ({услуга} — {дата}, {время})»', async () => {
+    const addActivities = vi.fn(() =>
+      Promise.resolve([createdOutcome('l1'), createdOutcome('l2')]),
+    );
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
+    renderTab();
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+    toggleLocation('Студия');
+    toggleLocation('Лофт');
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'Создано занятий: 2 (Картина маслом — среда, 21 октября, 14:00)',
+      ),
+    );
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('§4.3 full failure N=1: parsed-message error toast, values kept, form not closed', async () => {
+    const addActivities = vi.fn(() =>
+      Promise.resolve([rejectedOutcome('l1', new ApiError(422, 'бэк', 'VALIDATION_ERROR'))]),
+    );
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     fillValidForm();
@@ -454,47 +523,154 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
 
     fireEvent.click(screen.getByTestId('btn-create-activity'));
 
-    const err = { code: 'VALIDATION_ERROR' };
-    const callbacks = addActivity.mock.calls[0][1] as {
-      onSuccess: () => void;
-      onError: (e: unknown) => void;
-    };
-    callbacks.onError(err);
-
     const { showToast } = mockUseUI();
-    expect(showToast).toHaveBeenCalledWith(parseApiError(err).message, 'error');
+    // N=1 — прежний error-тост без счётчика (parseApiError → код VALIDATION_ERROR)
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Проверьте правильность заполнения полей', 'error'),
+    );
     expect(screen.getByTestId('create-datetime')).toHaveValue('2026-10-28T15:00');
     expect(screen.getByLabelText('Студия')).toBeChecked();
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('button stays disabled while saving; no double submit; onSavingChange toggles true→false', () => {
-    const addActivity = vi.fn();
+  it('§4.3 partial 1 of 2: form open, successful location auto-unchecked, capacity reappears with the remaining default, counted toast via parseApiError (network fallback)', async () => {
+    // Студия создана, Лофт отказал с сетевой ошибкой (без ответа) —
+    // сообщение тоста проходит parseApiError → «Ошибка сети».
+    const addActivities = vi.fn(() =>
+      Promise.resolve([createdOutcome('l1'), rejectedOutcome('l2', new TypeError('fetch failed'))]),
+    );
     mockUseScheduleData.mockReturnValue(
-      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivity }),
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
+    renderTab();
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+    toggleLocation('Студия');
+    toggleLocation('Лофт');
+    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-21T16:00' } });
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Создано 1 из 2 (Картина маслом): Ошибка сети', 'error'),
+    );
+
+    // Форма открыта, прочие поля не сброшены (§4.3)
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.getByTestId('create-datetime')).toHaveValue('2026-10-21T16:00');
+
+    // Успешная локация снята; набор стал ровно 1 → поле вместимости
+    // появляется с умолчанием ОСТАВШЕЙСЯ локации (§4.2 единое правило).
+    expect(screen.getByLabelText('Студия')).not.toBeChecked();
+    expect(screen.getByLabelText('Лофт')).toBeChecked();
+    expect(screen.getByTestId('create-capacity')).toHaveValue(10);
+  });
+
+  it('§4.3 error ORDER: 2 failures settling in REVERSE checkbox order → toast carries the first-by-checkbox-order message', async () => {
+    // Оба отказа завершаются в обратном порядке чекбоксов (Лофт раньше
+    // Студии); исходы приходят в порядке входов (контракт Task 1) — тост
+    // несёт сообщение ПЕРВОЙ по порядку чекбоксов (Студия), не последней
+    // завершившейся.
+    const errByLocation = [new ApiError(500, 'Отказ: Студия'), new ApiError(500, 'Отказ: Лофт')];
+    const addActivities = vi.fn((inputs: AddActivityInput[]) => {
+      const flights = inputs.map(
+        (_, i) => new Promise<number>((resolve) => setTimeout(() => resolve(i), inputs.length - i)),
+      );
+      return Promise.all(flights).then(() =>
+        inputs.map((input, i) => rejectedOutcome(input.locationId, errByLocation[i])),
+      );
+    });
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
+    renderTab();
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+    toggleLocation('Лофт'); // завершится ПЕРВЫМ (обратный порядок)
+    toggleLocation('Студия'); // первая по порядку чекбоксов, завершится последней
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'Создано 0 из 2 (Картина маслом): Отказ: Студия',
+        'error',
+      ),
+    );
+  });
+
+  it('§4.3 full failure 0 of 2: nothing unchecked, counted toast, unlock after the flight', async () => {
+    const addActivities = vi.fn(() =>
+      Promise.resolve([
+        rejectedOutcome('l1', new ApiError(500, 'Отказ: Студия')),
+        rejectedOutcome('l2', new ApiError(500, 'Отказ: Лофт')),
+      ]),
+    );
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
+    renderTab();
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+    toggleLocation('Студия');
+    toggleLocation('Лофт');
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Создано 0 из 2 (Картина маслом): Отказ: Студия', 'error'),
+    );
+
+    // Полный сбой: ничего не снимается, форма открыта, лок снят — поля
+    // и кнопка снова доступны (§4.3).
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Студия')).toBeChecked();
+    expect(screen.getByLabelText('Лофт')).toBeChecked();
+    await waitFor(() => expect(screen.getByTestId('btn-create-activity')).toBeEnabled());
+    expect(screen.getByTestId('create-datetime')).toBeEnabled();
+  });
+
+  it('§4.3 saving lock: fields and checkboxes disabled in flight, no double submit, onSavingChange true→false', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const addActivities = vi.fn(() => gate.then(() => [createdOutcome('l1')]));
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
     );
     renderTab();
     fillValidForm();
 
     const btn = screen.getByTestId('btn-create-activity');
     fireEvent.click(btn);
-
-    // во время запроса: кнопка задизейблена, повторный клик не отправляет
-    expect(btn).toBeDisabled();
     expect(onSavingChange).toHaveBeenCalledWith(true);
-    fireEvent.click(btn);
-    expect(addActivity).toHaveBeenCalledTimes(1);
 
-    // успех: onSavingChange(false), кнопка снова активна (act — колбэк мутации
-    // вызван вручную, состояние должно сброситься в DOM)
-    const callbacks = addActivity.mock.calls[0][1] as {
-      onSuccess: () => void;
-      onError: () => void;
-    };
-    act(() => {
-      callbacks.onSuccess();
+    // В полёте заблокированы кнопка, поля и чекбоксы локаций (§4.3)
+    expect(btn).toBeDisabled();
+    expect(screen.getByTestId('create-datetime')).toBeDisabled();
+    expect(screen.getByTestId('create-duration')).toBeDisabled();
+    expect(screen.getByTestId('create-capacity')).toBeDisabled();
+    expect(screen.getByTestId('create-private')).toBeDisabled();
+    expect(
+      within(screen.getByTestId('create-service')).getByTestId('combobox-trigger'),
+    ).toBeDisabled();
+    expect(
+      within(screen.getByTestId('create-master')).getByTestId('combobox-trigger'),
+    ).toBeDisabled();
+    expect(screen.getByLabelText('Студия')).toBeDisabled();
+    expect(screen.getByLabelText('Лофт')).toBeDisabled();
+
+    // Повторный клик по заблокированной кнопке не отправляет
+    fireEvent.click(btn);
+    expect(addActivities).toHaveBeenCalledTimes(1);
+
+    // Завершение полёта: лок снят, поля разблокированы
+    await act(async () => {
+      release();
     });
+    await waitFor(() => expect(btn).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId('create-datetime')).toBeEnabled());
     expect(onSavingChange).toHaveBeenCalledWith(false);
-    expect(btn).toBeEnabled();
   });
 });

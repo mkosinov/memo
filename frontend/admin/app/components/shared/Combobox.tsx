@@ -14,12 +14,14 @@ export interface ComboboxProps {
   options: ComboboxOption[];
   onChange: (value: string) => void;  // '' emitted only via the clear option
   clearLabel: string;         // required — pinned clear option's label
-  className?: string;         // applied to the trigger
-  ariaLabel?: string;         // accessible name for the trigger
-  containerTestId?: string;   // data-testid on the outer wrapper (pattern: select-service / select-location)
+  className?: string;             // applied to the trigger
+  ariaLabel?: string;             // accessible name for the trigger
+  containerTestId?: string;       // data-testid on the outer wrapper (pattern: select-service / select-location)
+  /** GH #595 §4.3: create-form flight lock — disabled trigger can't open the dropdown. */
+  disabled?: boolean;
 }
 
-export function Combobox({ value, options, onChange, clearLabel, className = '', ariaLabel, containerTestId }: ComboboxProps) {
+export function Combobox({ value, options, onChange, clearLabel, className = '', ariaLabel, containerTestId, disabled }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -159,6 +161,7 @@ export function Combobox({ value, options, onChange, clearLabel, className = '',
       <button
         ref={triggerRef}
         type="button"
+        disabled={disabled}
         onClick={() => (isOpen ? closeDropdown() : openDropdown())}
         aria-haspopup="listbox"
         aria-expanded={isOpen}

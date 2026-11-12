@@ -52,6 +52,11 @@ interface ActivityFormProps {
    */
   capacityHidden?: boolean;
   capacityHint?: string;
+  /**
+   * GH #595 §4.3: the create tab locks every field and checkbox for the whole
+   * N-request flight (saving until allSettled). Edit mode never passes it.
+   */
+  disabled?: boolean;
   /** data-testid on the root wrapper (Task-1 pattern: `settings-tab` today). */
   containerTestId?: string;
   /**
@@ -98,6 +103,7 @@ export function ActivityForm({
   locationField,
   capacityHidden,
   capacityHint,
+  disabled,
   containerTestId,
   testIds,
 }: ActivityFormProps) {
@@ -137,6 +143,7 @@ export function ActivityForm({
             style={inputStyle}
             value={values.startDateTime}
             onChange={(e) => onDateTimeChange(e.target.value)}
+            disabled={disabled}
             data-testid={testIds?.datetime ?? 'input-datetime'}
           />
         </div>
@@ -152,6 +159,7 @@ export function ActivityForm({
             style={inputStyle}
             value={values.durationStr}
             onChange={(e) => onDurationChange(e.target.value)}
+            disabled={disabled}
             data-testid={testIds?.duration ?? 'input-duration'}
           />
         </div>
@@ -162,6 +170,7 @@ export function ActivityForm({
             role="switch"
             aria-checked={values.isPrivate}
             onClick={onPrivateToggle}
+            disabled={disabled}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
               values.isPrivate ? 'bg-brand' : 'bg-ink-faint'
             }`}
@@ -189,6 +198,7 @@ export function ActivityForm({
             onChange={(v) => onServiceChange(v)}
             className={inputClass}
             ariaLabel="Услуга"
+            disabled={disabled}
             containerTestId={testIds?.serviceContainer}
           />
         </div>
@@ -218,6 +228,7 @@ export function ActivityForm({
               style={inputStyle}
               value={values.capacity}
               onChange={(e) => onCapacityChange(e.target.value)}
+              disabled={disabled}
               data-testid={testIds?.capacity ?? 'input-capacity'}
             />
           </div>
@@ -256,6 +267,7 @@ export function ActivityForm({
             value={values.masterId}
             onChange={(value) => onMasterChange(value)}
             className={`${inputClass} appearance-none`}
+            disabled={disabled}
             containerTestId={testIds?.masterContainer}
           />
         </div>
@@ -280,6 +292,7 @@ export function ActivityForm({
                         className="accent-brand"
                         checked={locationField.ids.includes(loc.id)}
                         onChange={() => locationField.onToggle(loc.id)}
+                        disabled={disabled}
                       />
                       <span className="truncate">{loc.title}</span>
                     </label>
@@ -299,6 +312,7 @@ export function ActivityForm({
                 onChange={(v) => locationField.onLocationChange(v)}
                 className={inputClass}
                 ariaLabel="Локация"
+                disabled={disabled}
                 containerTestId={testIds?.locationContainer}
               />
             </>

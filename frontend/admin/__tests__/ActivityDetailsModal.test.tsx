@@ -24,7 +24,7 @@ import {
   createMockGridSettings,
   createMockUIContext,
 } from './helpers/mockContexts';
-import type { ScheduleDataContextType } from '@/contexts/schedule/ScheduleDataContext';
+import type { ScheduleDataContextType, AddActivityOutcome } from '@/contexts/schedule/ScheduleDataContext';
 import type { Tariff } from '@memo/domain';
 
 // ─── API Client Mock ───────────────────────────────────────────────────────
@@ -1364,11 +1364,15 @@ describe('create mode', () => {
     expect(screen.getByTestId('btn-delete-activity')).toBeInTheDocument();
   });
 
-  it('blocks close via backdrop and close button while saving, closes otherwise', () => {
-    // Saving is driven through the real form: addActivity hangs (no callback)
-    // → CreateActivityTab reports saving=true; resolving via onError → false.
-    const addActivity = vi.fn<ScheduleDataContextType['addActivity']>();
-    mockUseScheduleData.mockReturnValue(createMockScheduleData({ addActivity }));
+  it('blocks close via backdrop and close button while saving, closes otherwise', async () => {
+    // Saving is driven through the real form: addActivities hangs on a
+    // deferred promise (GH #595 §4.3) → CreateActivityTab reports saving=true;
+    // resolving with a rejected outcome (error path, form stays open) → false.
+    let release!: (outcomes: AddActivityOutcome[]) => void;
+    const addActivities = vi.fn<ScheduleDataContextType['addActivities']>(
+      () => new Promise<AddActivityOutcome[]>((resolve) => { release = resolve; }),
+    );
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ addActivities }));
     const onClose = vi.fn();
     render(
       <ActivityDetailsModal
@@ -1381,7 +1385,7 @@ describe('create mode', () => {
     );
 
     // Make the form valid and submit — saving becomes true and stays true
-    // (mutate is fire-and-forget; callbacks own the resolution). Combobox
+    // until the batch promise settles (allSettled lock, §4.3). Combobox
     // picks (GH #280) для мастера/услуги; локация — чекбокс-группа (GH #595);
     // вместимость — руками (у shared mockLocations нет defaultCapacity).
     const pickIn = (containerTestId: string, optionValue: string) => {
@@ -1395,18 +1399,17 @@ describe('create mode', () => {
     fireEvent.click(screen.getByLabelText('Альпика'));
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '8' } });
     fireEvent.click(screen.getByTestId('btn-create-activity'));
-    expect(addActivity).toHaveBeenCalledTimes(1);
+    expect(addActivities).toHaveBeenCalledTimes(1);
 
     // While saving=true: no close-cross rendered, backdrop click is inert.
     expect(() => screen.getByLabelText('Закрыть')).toThrow();
     fireEvent.click(screen.getByTestId('details-modal-backdrop'));
     expect(onClose).not.toHaveBeenCalled();
 
-    // Once the mutation resolves (error path keeps the form open), both close
+    // Once the batch resolves (error path keeps the form open), both close
     // paths work again.
-    const callbacks = addActivity.mock.calls[0][1];
-    act(() => {
-      callbacks?.onError?.(new Error('server down'));
+    await act(async () => {
+      release([{ locationId: 'alpika', status: 'rejected', error: new Error('server down') }]);
     });
     fireEvent.click(screen.getByTestId('details-modal-backdrop'));
     expect(onClose).toHaveBeenCalledTimes(1);

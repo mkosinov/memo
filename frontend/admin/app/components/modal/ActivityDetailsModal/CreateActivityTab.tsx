@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
+import type { AddActivityOutcome } from '@/contexts/schedule/ScheduleDataContext';
 import { useGridSettings } from '@/contexts/schedule/GridSettingsContext';
 import { useUI } from '@/contexts/UIContext';
 import { ActivityForm } from './ActivityForm';
@@ -58,14 +59,16 @@ function hasDefault(loc: Location): boolean {
 /**
  * Единственная вкладка модалки в режиме создания (GH #258/#259, spec §2.1;
  * GH #280 — общий ActivityForm с формой редактирования; GH #595 — мультивыбор
- * локаций чекбоксами и правила вместимости §4.1–§4.2). Локальный черновик
- * (никаких instant-patch), отправка кнопкой «Создать» → addActivity с готовым
- * `start` из значения поля. Услуга/набор локаций авто-заполняют длительность/
- * вместимость (domain-rules/activities.md); вместимость ≥ 1 — путь «пустое
- * поле → 0 в payload» исчез. Конфликт-валидации нет (D8).
+ * локаций чекбоксами и правила вместимости §4.1–§4.2, мульти-отправка §4.3).
+ * Локальный черновик (никаких instant-patch), отправка кнопкой «Создать» →
+ * addActivities: по одному вызову на каждую отмеченную локацию (общие мастер/
+ * услуга/start/длительность/приватность), saving-лок до allSettled. Услуга/
+ * набор локаций авто-заполняют длительность/вместимость
+ * (domain-rules/activities.md); вместимость ≥ 1 — путь «пустое поле → 0 в
+ * payload» исчез. Конфликт-валидации нет (D8).
  */
 export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) {
-  const { masters, services, locations, addActivity } = useScheduleData();
+  const { masters, services, locations, addActivities } = useScheduleData();
   const { gridFrequency } = useGridSettings();
   const { showToast } = useUI();
 
@@ -198,45 +201,64 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
     // как есть; composeLocalISO добавляет канонические секунды ':00'.
     const [datePart, timePart] = startDateTime.split('T');
     const start = composeLocalISO(datePart, hhmmToMinutes(timePart));
-    // Переходный путь (задача 2): отправка ещё одиночная — уходит первая
-    // отмеченная по порядку чекбоксов локация; при 2+ поле скрыто, вместимость
-    // каждой локации — её умолчание (§4.2). Мульти-отправка addActivities —
-    // следующая задача.
-    const firstChecked = checkedLocations[0];
-    const effectiveCapacity = capacityHidden
-      ? (firstChecked.defaultCapacity ?? 0)
-      : Number(capacity);
+    // §4.3: N вызовов одним действием — по одному на каждую отмеченную
+    // локацию В ПОРЯДКЕ ЧЕКБОКСОВ (порядок исходов = порядок входов); мастер/
+    // услуга/старт/длительность/приватность общие, различие — locationId и
+    // вместимость (умолчание локации при 2+, значение поля — при ровно 1, §4.2).
+    const inputs = checkedLocations.map((loc) => ({
+      masterId,
+      serviceId,
+      locationId: loc.id,
+      start,
+      durationMinutes,
+      capacity: capacityHidden ? (loc.defaultCapacity ?? 0) : Number(capacity),
+      isPrivate,
+    }));
+    const total = inputs.length;
     setSaving(true);
     onSavingChange(true);
-    addActivity(
-      {
-        masterId,
-        serviceId,
-        locationId: firstChecked.id,
-        start,
-        durationMinutes,
-        capacity: effectiveCapacity,
-        isPrivate,
-      },
-      {
-        onSuccess: () => {
-          setSaving(false);
-          onSavingChange(false);
-          // Дата — из значения поля (занятие могло уйти в чужую неделю — тост
-          // называет выбранную дату, не день недели; spec §50).
-          showToast(`Создано: ${service?.name} — ${formatDateRu(datePart)}, ${timePart}`);
-          onSaved();
-        },
-        onError: (err) => {
-          setSaving(false);
-          onSavingChange(false);
-          // Форма остаётся открытой с введённым (spec §2.1.7).
-          showToast(parseApiError(err).message, 'error');
-        },
-      },
-    );
-    // IMPORTANT: mutate() — fire-and-forget; NO synchronous setSaving(false) here.
-    // saving=true lives until a callback — modal must not close, button must not press (spec §2.1.7).
+    // saving-лок до allSettled всех N вызовов; состояние наблюдателя мутации
+    // не используется (колбэки/ isPending в TanStack v5 «Consecutive
+    // mutations» отражают лишь последний вызов).
+    addActivities(inputs).then((outcomes) => {
+      setSaving(false);
+      onSavingChange(false);
+      const okIds = new Set(
+        outcomes.filter((o) => o.status === 'fulfilled').map((o) => o.locationId),
+      );
+      if (okIds.size === total) {
+        // Полный успех: закрытие + тост; дата — из значения поля (канон #280).
+        showToast(
+          total === 1
+            ? `Создано: ${service?.name} — ${formatDateRu(datePart)}, ${timePart}`
+            : `Создано занятий: ${total} (${service?.name} — ${formatDateRu(datePart)}, ${timePart})`,
+        );
+        onSaved();
+        return;
+      }
+      // Частичный сбой: успешные локации автоснимаются (повтор шлёт только
+      // остаток — без дубликатов); переход к ровно 1 — единое правило §4.2
+      // (поле появляется с умолчанием оставшейся). Полный сбой — ничего не
+      // снимается, прочие поля не сбрасываются в обоих случаях.
+      if (okIds.size > 0) {
+        applyLocationSet(locationIds.filter((id) => !okIds.has(id)));
+      }
+      // Сообщение первой неудавшейся ПО ПОРЯДКУ ЧЕКБОКОВ: исходы идут в
+      // порядке входов, порядок завершения промисов не влияет. Сообщение —
+      // через parseApiError (сетевой фолбэк включён).
+      const firstRejected = outcomes.find(
+        (o): o is Extract<AddActivityOutcome, { status: 'rejected' }> => o.status === 'rejected',
+      );
+      const message = parseApiError(firstRejected?.error).message;
+      // N=1 — прежний error-тост без счётчика; N≥2 — счётчик «K из N».
+      if (total >= 2) {
+        showToast(`Создано ${okIds.size} из ${total} (${service?.name}): ${message}`, 'error');
+      } else {
+        showToast(message, 'error');
+      }
+    });
+    // IMPORTANT: no synchronous setSaving(false) here — saving=true lives
+    // until allSettled; fields stay locked for the whole flight (§4.3).
   };
 
   return (
@@ -264,6 +286,7 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
         locationField={{ mode: 'multi', ids: locationIds, onToggle: handleLocationToggle }}
         capacityHidden={capacityHidden}
         capacityHint={capacityHint}
+        disabled={saving}
       />
 
       <button

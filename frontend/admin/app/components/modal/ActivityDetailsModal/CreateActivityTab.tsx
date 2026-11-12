@@ -35,6 +35,14 @@ interface Props {
   defaults: CreateDefaults;
   onSavingChange: (saving: boolean) => void;
   onSaved: () => void;
+  /**
+   * GH #598 минимальный мост кнопки в футер: вкладка публикует наверх canSave
+   * (образец — onSavingChange) и регистрирует submit. Подъём всей формы
+   * состояния НЕ делается — canSave выводится из ~8 локальных полей.
+   */
+  onCanSaveChange: (canSave: boolean) => void;
+  /** Регистрация submit для футерной кнопки (вызывается на каждом рендере — держит актуальное замыкание). */
+  onSubmitRegister: (submit: () => void) => void;
 }
 
 // Create-mode anchors (GH #280 spec §55): same elements as the edit эталон,
@@ -60,14 +68,24 @@ function hasDefault(loc: Location): boolean {
  * Единственная вкладка модалки в режиме создания (GH #258/#259, spec §2.1;
  * GH #280 — общий ActivityForm с формой редактирования; GH #595 — мультивыбор
  * локаций чекбоксами и правила вместимости §4.1–§4.2, мульти-отправка §4.3).
- * Локальный черновик (никаких instant-patch), отправка кнопкой «Создать» →
- * addActivities: по одному вызову на каждую отмеченную локацию (общие мастер/
- * услуга/start/длительность/приватность), saving-лок до allSettled. Услуга/
- * набор локаций авто-заполняют длительность/вместимость
+ * Локальный черновик (никаких instant-patch), отправка кнопкой «Создать» из
+ * ФУТЕРА модалки (GH #598: сама кнопка живёт в CreateActivityPanel, сюда
+ * приходит только клик через зарегистрированный submit) → addActivities: по
+ * одному вызову на каждую отмеченную локацию (общие мастер/услуга/start/
+ * длительность/приватность), saving-лок до allSettled. Занятие создаётся на
+ * ВЫБРАННУЮ дату — из значения поля, не «открытая неделя + день недели».
+ * Услуга/набор локаций авто-заполняют длительность/вместимость
  * (domain-rules/activities.md); вместимость ≥ 1 — путь «пустое поле → 0 в
- * payload» исчез. Конфликт-валидации нет (D8).
+ * payload» исчез. Конфликт-валидации нет (D8). Формы (<form>) здесь нет и
+ * не вводится — Enter-отправка не заявлена (её нет и сегодня).
  */
-export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) {
+export function CreateActivityTab({
+  defaults,
+  onSavingChange,
+  onSaved,
+  onCanSaveChange,
+  onSubmitRegister,
+}: Props) {
   const { masters, services, locations, addActivities } = useScheduleData();
   const { gridFrequency } = useGridSettings();
   const { showToast } = useUI();
@@ -261,6 +279,18 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
     // until allSettled; fields stay locked for the whole flight (§4.3).
   };
 
+  // GH #598: публикация canSave наверх — тот же паттерн, что onSavingChange.
+  useEffect(() => {
+    onCanSaveChange(canSave);
+  }, [canSave, onCanSaveChange]);
+
+  // Регистрация submit без массива зависимостей — обновляется на каждом
+  // рендере, чтобы футерная кнопка звала замыкание с актуальным состоянием
+  // полей (родитель хранит функцию в ref — цикла ре-рендеров нет).
+  useEffect(() => {
+    onSubmitRegister(submit);
+  });
+
   return (
     <div className="p-4 space-y-3">
       <ActivityForm
@@ -288,17 +318,6 @@ export function CreateActivityTab({ defaults, onSavingChange, onSaved }: Props) 
         capacityHint={capacityHint}
         disabled={saving}
       />
-
-      <button
-        type="button"
-        data-testid="btn-create-activity"
-        onClick={submit}
-        disabled={!canSave || saving}
-        className="w-full rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-        style={{ backgroundColor: 'var(--brand)' }}
-      >
-        Создать
-      </button>
 
     </div>
   );

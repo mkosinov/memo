@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import fs from 'fs';
 import path from 'path';
@@ -17,6 +17,8 @@ import {
   mockRecord,
   mockVisitor,
   mockTariffs,
+  mockMasters,
+  mockServices,
 } from './helpers/mockData';
 
 import {
@@ -24,6 +26,7 @@ import {
   createMockGridSettings,
   createMockUIContext,
 } from './helpers/mockContexts';
+import { parseApiError } from '@/app/lib/api/parseApiError';
 import type { ScheduleDataContextType, AddActivityOutcome } from '@/contexts/schedule/ScheduleDataContext';
 import type { Tariff } from '@memo/domain';
 
@@ -1418,6 +1421,309 @@ describe('create mode', () => {
     expect(screen.getByLabelText('Закрыть')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Закрыть'));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── GH #598: фикс-высота h-[85dvh] + владелец скролла ───────────────────────
+// Контейнер модалки занятия несёт фикс-класс во ВСЕХ режимах (высота стабильна
+// между вкладками — исходная жалоба #74); скролл принадлежит внутреннему
+// div-у панели-потребителя (min-h-0 + overscroll-contain), не обёртке общего
+// Modal. Тело несёт тестид — селектор геометрических ассертов e2e (US-2).
+
+describe('ActivityDetailsModal — fixed height & scroll ownership (GH #598)', () => {
+  it('create mode: container carries the fixed height class h-[85dvh]', () => {
+    render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        activity={null}
+        mode="create"
+        createDefaults={{ date: '2026-10-21', startMinutes: 840 }}
+      />,
+    );
+    expect(screen.getByTestId('activity-details-modal-container').className).toMatch(
+      /(?:^|\s)h-\[85dvh\]/,
+    );
+  });
+
+  it('edit mode: container carries the fixed height class h-[85dvh]', () => {
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    expect(screen.getByTestId('activity-details-modal-container').className).toMatch(
+      /(?:^|\s)h-\[85dvh\]/,
+    );
+  });
+
+  it('quickAdd mode: container carries the fixed height class h-[85dvh]', () => {
+    render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        activity={mockActivity}
+        mode="quickAdd"
+      />,
+    );
+    expect(screen.getByTestId('activity-details-modal-container').className).toMatch(
+      /(?:^|\s)h-\[85dvh\]/,
+    );
+  });
+
+  it('create mode: scrolling body owns the scroll (testid + min-h-0 + overscroll-contain)', () => {
+    render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        activity={null}
+        mode="create"
+        createDefaults={{ date: '2026-10-21', startMinutes: 840 }}
+      />,
+    );
+    const scrollBody = screen.getByTestId('activity-details-modal-scroll-body');
+    // min-h-0: flex-потомок обязан мочь сжиматься ниже контента, иначе
+    // фикс-высота клиппит (дефект-2 #262); overscroll-contain: прокрутка не
+    // «протекает» на страницу под модалкой.
+    expect(scrollBody.className).toContain('overflow-y-auto');
+    expect(scrollBody.className).toContain('min-h-0');
+    expect(scrollBody.className).toContain('overscroll-contain');
+    // форма живёт внутри скроллящегося тела
+    expect(scrollBody.contains(screen.getByTestId('create-master'))).toBe(true);
+  });
+
+  it('edit mode: scrolling body owns the scroll (same testid + classes)', () => {
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+    const scrollBody = screen.getByTestId('activity-details-modal-scroll-body');
+    expect(scrollBody.className).toContain('overflow-y-auto');
+    expect(scrollBody.className).toContain('min-h-0');
+    expect(scrollBody.className).toContain('overscroll-contain');
+    expect(scrollBody.contains(screen.getByTestId('input-datetime'))).toBe(true);
+  });
+});
+
+// ─── GH #598: кнопка «Создать» в футере create-режима ────────────────────────
+// Пере-дом из CreateActivityTab.test.tsx: кнопка переехала из скроллящегося
+// тела в футер Modal (testid сохранён), гейты те же (canSave || saving);
+// вкладка публикует canSave/submit наверх минимальным мостом (образец —
+// onSavingChange). Матрица гейтов и submit-payload покрыты здесь — рендером
+// панели с футером; в старом доме остался только контракт моста.
+
+describe('create mode — footer «Создать» button (GH #598, re-domed from CreateActivityTab)', () => {
+  // Локации — локальный фиксстур с defaultCapacity (в shared mockLocations
+  // этого поля нет) — тот же прецедент, что и в старом доме матрицы.
+  const locations = [
+    { id: 'l1', title: 'Студия', defaultCapacity: 6 },
+    { id: 'l2', title: 'Лофт', defaultCapacity: 10 },
+  ];
+  // Слот: среда 2026-10-21, 14:00 (840 минут — на 30-минутной сетке).
+  const defaults = { date: '2026-10-21', startMinutes: 840 };
+  // GH #595: отправка — пакет addActivities (исходы по каждой локации).
+  const addActivities = vi.fn<ScheduleDataContextType['addActivities']>();
+  const onClose = vi.fn();
+
+  function renderCreateModal() {
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
+    return render(
+      <ActivityDetailsModal
+        isOpen={true}
+        onClose={onClose}
+        activity={null}
+        mode="create"
+        createDefaults={defaults}
+      />,
+    );
+  }
+
+  /** Выбор в комбобоксе по тестиду контейнера: клик по триггеру → клик по опции. */
+  function pickInCombobox(containerTestId: string, optionValue: string) {
+    fireEvent.click(within(screen.getByTestId(containerTestId)).getByTestId('combobox-trigger'));
+    fireEvent.click(screen.getByTestId(`combobox-option-${optionValue}`));
+  }
+
+  /** Валидная форма: мастер m1 + услуга s1 (длит. 150) + чекбокс локации l1 (вмест. 6). */
+  function fillValidForm() {
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+    fireEvent.click(screen.getByLabelText('Студия'));
+  }
+
+  /** Успешный исход по каждой входной локации (§4.3: порядок исходов = входов). */
+  const createdOutcome = (locationId: string): AddActivityOutcome => ({
+    locationId,
+    status: 'fulfilled',
+    activity: { id: `created-${locationId}` } as Extract<
+      AddActivityOutcome,
+      { status: 'fulfilled' }
+    >['activity'],
+  });
+
+  beforeEach(() => {
+    addActivities.mockReset();
+    // По умолчанию — полный успех (тост/закрытие в .then пакета, не в колбэках).
+    addActivities.mockImplementation((inputs) =>
+      Promise.resolve(inputs.map((i) => createdOutcome(i.locationId))),
+    );
+    onClose.mockClear();
+  });
+
+  it('renders «Создать» in the modal footer — outside the scroll body — disabled until valid', () => {
+    renderCreateModal();
+    const btn = screen.getByTestId('btn-create-activity');
+    expect(btn).toBeDisabled(); // дата-время префиллита, справочники не выбраны
+
+    // Кнопка в футерной полосе (shrink-0), НЕ внутри скроллящегося тела —
+    // всегда видна без прокрутки (US-2).
+    expect(btn.closest('div.shrink-0')).not.toBeNull();
+    const scrollBody = screen.getByTestId('activity-details-modal-scroll-body');
+    expect(scrollBody.contains(btn)).toBe(false);
+
+    fillValidForm();
+    expect(btn).toBeEnabled();
+  });
+
+  it('gates «Создать» until master+service+location chosen (slot prefill alone is not enough)', () => {
+    renderCreateModal();
+    const btn = screen.getByTestId('btn-create-activity');
+    expect(btn).toBeDisabled();
+
+    pickInCombobox('create-master', 'm1');
+    expect(btn).toBeDisabled();
+    pickInCombobox('create-service', 's1'); // длительность заполнится сама
+    expect(btn).toBeDisabled(); // 0 отмеченных локаций → блок (§4.1: ≥1)
+    fireEvent.click(screen.getByLabelText('Студия')); // вместимость — умолчание 6
+    expect(btn).toBeEnabled();
+  });
+
+  it('gates «Создать»: empty datetime, bad duration, capacity < 1 each block the button', () => {
+    renderCreateModal();
+    const btn = screen.getByTestId('btn-create-activity');
+    fillValidForm();
+    expect(btn).toBeEnabled();
+
+    // Дата-время очищено → блок («значение даты-времени непусто»)
+    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-21T14:00' } });
+    expect(btn).toBeEnabled();
+
+    // Длительность: некорректный формат и 00:00 → блок
+    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '99' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '00:00' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:30' } });
+    expect(btn).toBeEnabled();
+
+    // Вместимость: пусто / 0 / -1 → блок; 1 → ок (GH #280: путь «пусто → 0» исчез)
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '-1' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '1' } });
+    expect(btn).toBeEnabled();
+  });
+
+  it('private toggle flips role="switch" and submits isPrivate: true (US-4)', async () => {
+    renderCreateModal();
+    fillValidForm();
+
+    const toggle = screen.getByTestId('create-private');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    await waitFor(() => expect(addActivities).toHaveBeenCalledTimes(1));
+    expect(addActivities.mock.calls[0][0][0]).toMatchObject({ isPrivate: true });
+  });
+
+  it('submits exact payload: field datetime → start (snapped local ISO), ЧЧ:ММ → minutes', async () => {
+    renderCreateModal();
+    fillValidForm();
+    // Ручной выбор даты другой недели + несетевой слот: уходит ВЫБОР поля,
+    // не «открытая неделя + день недели» (поведение GH #280).
+    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-28T15:17' } });
+    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:15' } });
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '4' } });
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    await waitFor(() => expect(addActivities).toHaveBeenCalledTimes(1));
+    // §4.3: пакетный контракт — массив входов (здесь ровно 1, без колбэков).
+    expect(addActivities).toHaveBeenCalledWith([
+      {
+        masterId: 'm1',
+        serviceId: 's1',
+        locationId: 'l1',
+        start: '2026-10-28T15:30:00', // снап 15:17 → 15:30, канонические секунды
+        durationMinutes: 75,
+        capacity: 4,
+        isPrivate: false,
+      },
+    ]);
+  });
+
+  it('success toast names the chosen calendar date and closes the modal (onSaved)', async () => {
+    renderCreateModal();
+    fillValidForm();
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    // Тост/закрытие рождаются в .then пакета addActivities (полный успех).
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Создано: Картина маслом — среда, 21 октября, 14:00'),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('on error: toast with parsed message and error kind, values kept, modal not closed', async () => {
+    renderCreateModal();
+    fillValidForm();
+    // меняем дату-время, чтобы проверить «значения НЕ сброшены»
+    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-28T15:00' } });
+    const err = { code: 'VALIDATION_ERROR' };
+    addActivities.mockImplementationOnce(() =>
+      Promise.resolve([{ locationId: 'l1', status: 'rejected' as const, error: err }]),
+    );
+
+    fireEvent.click(screen.getByTestId('btn-create-activity'));
+
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(parseApiError(err).message, 'error'),
+    );
+    expect(screen.getByTestId('create-datetime')).toHaveValue('2026-10-28T15:00');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('footer button stays disabled while saving; no double submit; re-enabled on success', async () => {
+    renderCreateModal();
+    fillValidForm();
+    // Пакет висит до ручного release (снапшот saving-лока, §4.3).
+    let release!: (outcomes: AddActivityOutcome[]) => void;
+    addActivities.mockImplementationOnce(
+      () => new Promise<AddActivityOutcome[]>((resolve) => { release = resolve; }),
+    );
+
+    const btn = screen.getByTestId('btn-create-activity');
+    fireEvent.click(btn);
+    expect(addActivities).toHaveBeenCalledTimes(1);
+
+    // во время запроса: кнопка задизейблена (saving поднят onSavingChange),
+    // повторный клик не отправляет
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(addActivities).toHaveBeenCalledTimes(1);
+
+    // успех: кнопка снова активна (пакет зарезолвлен — состояние сброшено в DOM)
+    await act(async () => {
+      release([createdOutcome('l1')]);
+    });
+    await waitFor(() => expect(btn).toBeEnabled());
   });
 });
 

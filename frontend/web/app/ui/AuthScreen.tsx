@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthMethodPicker } from "./AuthMethodPicker";
 import { AuthCallScreen } from "./AuthCallScreen";
 import { AuthContactChannels } from "./AuthContactChannels";
@@ -41,6 +41,10 @@ export interface AuthScreenProps {
   onCallConfirmed: () => void;
   /** Back to the caller's surface (booking form / cabinet phone form). */
   onBack: () => void;
+  /** A prechosen method applied at mount (spec rev.8 — the cabinet login
+   * form's picker): "sms" opens the code step, "call" initiates at once.
+   * null/undefined (default) → the method picker, as before. */
+  initialMethod?: "sms" | "call" | null;
 }
 
 /**
@@ -58,10 +62,16 @@ export function AuthScreen({
   onSmsVerify,
   onCallConfirmed,
   onBack,
+  initialMethod = null,
 }: AuthScreenProps) {
   const registry = useAuthMethods();
   const call: CallAuth = useCallAuth();
-  const [view, setView] = useState<AuthView>("picker");
+  // Destructured for the stable-callback deps below (the `call` object is a
+  // fresh literal every render; `initiate` itself is ref-stable in the hook).
+  const { initiate: initiateCallCheck, retry: retryCallCheck } = call;
+  const [view, setView] = useState<AuthView>(
+    initialMethod === "sms" ? "sms" : "picker",
+  );
   const [contactOpen, setContactOpen] = useState(false);
 
   // `confirmed` continues the caller's flow exactly once per check (handle):
@@ -78,12 +88,21 @@ export function AuthScreen({
     }
   }, [call.phase, call.call, onCallConfirmed]);
 
-  const handleSelectCall = async () => {
-    const ok = await call.initiate(phone);
+  const handleSelectCall = useCallback(async () => {
+    const ok = await initiateCallCheck(phone);
     if (ok) setView("call");
     // A refusal keeps the picker with the step-local error (503/429/422 —
     // the server's structured text via the existing channel).
-  };
+  }, [initiateCallCheck, phone]);
+
+  // The prechosen call method (cabinet login form, rev.8): applied once at
+  // mount — a refusal lands on the picker with the error, same as a click.
+  const autoInitiatedRef = useRef(false);
+  useEffect(() => {
+    if (initialMethod !== "call" || autoInitiatedRef.current) return;
+    autoInitiatedRef.current = true;
+    void handleSelectCall();
+  }, [initialMethod, handleSelectCall]);
 
   const backToPicker = () => {
     call.reset();
@@ -104,7 +123,7 @@ export function AuthScreen({
           secondsLeft={call.secondsLeft}
           phase={toScreenPhase(call.phase)}
           initiating={call.phase === "initiating"}
-          onRetry={() => void call.retry()}
+          onRetry={() => void retryCallCheck()}
           onRestart={backToPicker}
           onOtherMethod={backToPicker}
         />

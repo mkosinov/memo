@@ -47,7 +47,8 @@ import {
   callAuthStatus,
   ApiError,
 } from "@memo/api-client";
-import { createQueryWrapper } from "./fixtures/cabinet";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 const mockedGetMyClient = getMyClient as unknown as Mock;
 const mockedRequestOtpCode = requestOtpCode as unknown as Mock;
@@ -58,10 +59,22 @@ const mockedCallAuthStatus = callAuthStatus as unknown as Mock;
 
 const PHONE = "+79991234567";
 
-const QueryWrapper = createQueryWrapper();
+// A file-local client (not the shared fixture) so the registry cache can be
+// reset between tests — the login-form picker must reflect each test's own
+// registry mock, not the previous case's cached response.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function QueryWrapper({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Fresh registry cache per test — the picker-on-load tests override the
+  // registry mock and must not see a previous case's cached response.
+  queryClient.clear();
   mockedGetMyClient.mockRejectedValue(new ApiError(401, "unauthorized"));
   // Dev-like registry (#593): both methods available.
   mockedGetAuthMethods.mockResolvedValue([
@@ -118,6 +131,83 @@ describe("Cabinet page — anonymous", () => {
     expect(
       screen.getByRole("button", { name: /войти/i }),
     ).toBeInTheDocument();
+  });
+
+  it("renders the method picker ON LOAD, before any phone input (spec rev.8)", async () => {
+    renderCabinet();
+
+    const picker = await screen.findByTestId("auth-method-picker");
+    expect(
+      within(picker).getByRole("button", { name: /Подтвердить звонком/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(picker).getByRole("button", { name: /Код по SMS/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("login-form picker mirrors the registry: no call method → no call button", async () => {
+    mockedGetAuthMethods.mockResolvedValue([
+      { id: "sms_otp", available: true },
+      { id: "call", available: false },
+    ]);
+    renderCabinet();
+
+    const picker = await screen.findByTestId("auth-method-picker");
+    expect(
+      within(picker).queryByRole("button", { name: /Подтвердить звонком/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(picker).getByRole("button", { name: /Код по SMS/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("preselected «Код по SMS» applies on «Войти»: the code step opens directly", async () => {
+    renderCabinet();
+    // Wait for the registry-backed picker, then preselect the SMS branch.
+    const picker = await screen.findByTestId("auth-method-picker");
+    fireEvent.click(
+      within(picker).getByRole("button", { name: /Код по SMS/i }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Номер телефона"), {
+      target: { value: PHONE },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /войти/i }));
+
+    // Straight into the code step — no auth-step picker in between.
+    expect(
+      await screen.findByRole("button", { name: /Отправить код/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("auth-method-picker"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preselected «Подтвердить звонком» applies on «Войти»: initiate + the call screen", async () => {
+    renderCabinet();
+    const picker = await screen.findByTestId("auth-method-picker");
+    fireEvent.click(
+      within(picker).getByRole("button", { name: /Подтвердить звонком/i }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Номер телефона"), {
+      target: { value: PHONE },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /войти/i }));
+
+    await screen.findByTestId("auth-call-screen");
+    expect(mockedInitiateCallAuth).toHaveBeenCalledWith(PHONE);
+  });
+
+  it("no preselection → «Войти» opens the auth-step picker (прежний порядок)", async () => {
+    renderCabinet();
+    fireEvent.change(await screen.findByLabelText("Номер телефона"), {
+      target: { value: PHONE },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /войти/i }));
+
+    expect(await screen.findByTestId("auth-method-picker")).toBeInTheDocument();
+    expect(mockedInitiateCallAuth).not.toHaveBeenCalled();
   });
 
   it("does not render the logged-in phone block", async () => {

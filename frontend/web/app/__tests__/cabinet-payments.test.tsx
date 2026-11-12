@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Mock } from "vitest";
 
 // ── Hook mocks: the page is the composition layer (#513); the auth
@@ -7,6 +9,16 @@ import type { Mock } from "vitest";
 // useMyPayments.test.tsx and to-my-payment-vm.test.ts.
 vi.mock("../hooks/useCabinetAuth", () => ({
   useCabinetAuth: vi.fn(),
+}));
+// The login form's method picker (rev.8) rides react-query — hermetic idle
+// registry here; the picker itself is covered by cabinet.test.tsx.
+vi.mock("../hooks/useAuthMethods", () => ({
+  useAuthMethods: () => ({
+    methods: [],
+    availableMethods: [],
+    isPending: false,
+    unavailable: true,
+  }),
 }));
 vi.mock("../hooks/useMyPayments", () => ({
   useMyPayments: vi.fn(),
@@ -24,6 +36,15 @@ import {
 
 const mockedUseCabinetAuth = useCabinetAuth as unknown as Mock;
 const mockedUseMyPayments = useMyPayments as unknown as Mock;
+
+/** The login form's picker needs a QueryClient (useAuthMethods is mocked
+ * above; the provider is still required by the useQuery call itself). */
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(ui: ReactNode) {
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 function mockSession(status: CabinetSessionStatus) {
   mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status));
@@ -47,7 +68,7 @@ describe("Cabinet payments page — anonymous", () => {
   it("shows the phone login form and no section data", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(
       await screen.findByLabelText("Номер телефона"),
@@ -58,7 +79,7 @@ describe("Cabinet payments page — anonymous", () => {
   it("renders neither the cabinet nav nor payment rows nor session phone", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     await screen.findByLabelText("Номер телефона");
     expect(screen.queryByTestId("cabinet-nav")).not.toBeInTheDocument();
@@ -69,7 +90,7 @@ describe("Cabinet payments page — anonymous", () => {
   it("never requests payments while anonymous (enabled=false)", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     await screen.findByLabelText("Номер телефона");
     expect(mockedUseMyPayments).toHaveBeenCalledWith(1, false);
@@ -82,7 +103,7 @@ describe("Cabinet payments page — checking", () => {
   it("shows the loader while the session is being checked", () => {
     mockSession("checking");
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(screen.getByTestId("cabinet-checking")).toBeInTheDocument();
     expect(screen.queryByTestId("cabinet-nav")).not.toBeInTheDocument();
@@ -93,7 +114,7 @@ describe("Cabinet payments page — checking", () => {
 
 describe("Cabinet payments page — authenticated", () => {
   it("shows the section nav with «Мои платежи» active and the session phone", async () => {
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     const nav = screen.getByTestId("cabinet-nav");
     expect(nav).toBeInTheDocument();
@@ -126,7 +147,7 @@ describe("Cabinet payments page — authenticated", () => {
       pageCount: 1,
     });
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     const rows = await screen.findAllByTestId("my-payment-row");
     expect(rows).toHaveLength(3);
@@ -147,7 +168,7 @@ describe("Cabinet payments page — authenticated", () => {
   it("shows the loader while payments are pending", () => {
     mockPayments({ isPending: true });
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(screen.getByTestId("my-payments-loading")).toBeInTheDocument();
     expect(screen.queryByTestId("my-payment-row")).not.toBeInTheDocument();
@@ -156,7 +177,7 @@ describe("Cabinet payments page — authenticated", () => {
   it("shows an error message when the payments request fails", () => {
     mockPayments({ error: new Error("network down") });
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(screen.getByTestId("my-payments-error")).toBeInTheDocument();
     expect(screen.queryByTestId("my-payment-row")).not.toBeInTheDocument();
@@ -169,7 +190,7 @@ describe("Cabinet payments page — empty state and pagination", () => {
   it("shows «У вас пока нет платежей» when the client has no payments", () => {
     mockPayments({ rows: [], total: 0, pageCount: 1 });
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(screen.getByTestId("my-payments-empty")).toBeInTheDocument();
     expect(screen.getByText("У вас пока нет платежей")).toBeInTheDocument();
@@ -179,7 +200,7 @@ describe("Cabinet payments page — empty state and pagination", () => {
   it("renders pagination when the list spills past one page and switches pages", async () => {
     mockPayments({ rows: [myPaymentRowView()], total: 45, page: 1, pageCount: 3 });
 
-    render(<CabinetPaymentsPage />);
+    renderPage(<CabinetPaymentsPage />);
 
     expect(screen.getByTestId("list-pagination")).toBeInTheDocument();
     expect(screen.getByTestId("list-pagination-info")).toHaveTextContent(

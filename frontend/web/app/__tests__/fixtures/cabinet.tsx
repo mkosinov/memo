@@ -129,7 +129,10 @@ export type CabinetSessionStatus =
 export const CABINET_CLIENT = { phone: "+79001234567", name: "Анна Иванова" } as const;
 
 /** The `useCabinetAuth` return value for the given session status — wire it
- *  with `mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status))`. */
+ *  with `mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status))`.
+ *  The auth-screen fields stay at their idle defaults (step `login`, no
+ *  method prechoice) — the section pages only consume the anonymous/authed
+ *  branch, the flows live in cabinet.test.tsx. */
 export function cabinetAuthValue(status: CabinetSessionStatus) {
   return {
     session: {
@@ -137,6 +140,11 @@ export function cabinetAuthValue(status: CabinetSessionStatus) {
       client: status === "authenticated" ? { ...CABINET_CLIENT } : null,
       refresh: vi.fn(),
     },
+    step: "login" as const,
+    phone: "",
+    setPhone: vi.fn(),
+    preferredMethod: null,
+    setPreferredMethod: vi.fn(),
     handleLogout: vi.fn(),
   };
 }

@@ -8,18 +8,27 @@ import type { ClientSession } from "./useClientSession";
 import { useOtpLogin } from "./useOtpLogin";
 import type { OtpLogin } from "./useOtpLogin";
 
+/** The method ids the auth screen knows (registry `AuthMethod.id` minus the
+ * `sms_otp` wire name — the UI calls it «sms»). */
+export type PreferredAuthMethod = "sms" | "call";
+
 /** The cabinet login/logout wiring (#523 shell, extracted for reuse by the
  * section screens #513): session detection + the phone → auth step flow +
  * logout. Pure wiring — the markup lives in CabinetLogin/CabinetSessionCard.
  * The step was renamed `otp` → `auth` (#593): several methods, not only the
- * one-time password. */
+ * one-time password. `preferredMethod` is the login-form picker's prechoice
+ * (spec rev.8: the picker renders on load; «Войти» then applies it — null
+ * keeps the auth step's own picker order). */
 export interface CabinetAuth {
   session: ClientSession;
   otp: OtpLogin;
-  /** Login sub-step: the phone form or the auth screen (method picker). */
+  /** Login sub-step: the phone form (with the picker prechoice) or the auth screen. */
   step: "login" | "auth";
   phone: string;
   setPhone: (phone: string) => void;
+  /** The login-form picker prechoice — applied by «Войти». */
+  preferredMethod: PreferredAuthMethod | null;
+  setPreferredMethod: (method: PreferredAuthMethod | null) => void;
   /** Phone-form submit: a valid RU phone advances to the auth screen. */
   submitPhone: () => void;
   /** Back from the auth screen to the phone form. */
@@ -37,6 +46,8 @@ export function useCabinetAuth(): CabinetAuth {
   const otp = useOtpLogin();
   const [phone, setPhone] = useState("");
   const [step, setStep] = useState<"login" | "auth">("login");
+  const [preferredMethod, setPreferredMethod] =
+    useState<PreferredAuthMethod | null>(null);
 
   const submitPhone = () => {
     if (!isValidPhoneNumber(phone, "RU")) return;
@@ -73,6 +84,8 @@ export function useCabinetAuth(): CabinetAuth {
     step,
     phone,
     setPhone,
+    preferredMethod,
+    setPreferredMethod,
     submitPhone,
     backToPhone,
     handleAuthConfirmed,

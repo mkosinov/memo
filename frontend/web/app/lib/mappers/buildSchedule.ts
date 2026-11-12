@@ -1,7 +1,6 @@
 import { ScheduleDTO, buildSchedule, resolveById } from '@memo/domain';
 import type { ScheduleIndex } from '@memo/domain';
 import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
-import type { PhotoDTO } from '@/app/lib/model/dto/schedule';
 import type { TariffView } from '@/app/lib/model/view/tariff';
 
 // ─── Re-export for backward compatibility ──────────────────────────────────
@@ -9,7 +8,6 @@ export type { ScheduleIndex } from '@memo/domain';
 
 // ─── Web-specific extension ────────────────────────────────────────────────
 export interface WebScheduleDTO extends ScheduleDTO {
-  photos: PhotoDTO[];
   material: string;
   size: string;
   /** Service tariffs for the booking overlay (#499); empty for tariff-free services. */
@@ -97,7 +95,6 @@ export function buildWebSchedule(
       tags: buildTagSet(service.tags ?? []),
       masterAvatar: master.avatar_url ?? undefined,
       // Web-only fields
-      photos: [],
       material,
       size: '',
     };

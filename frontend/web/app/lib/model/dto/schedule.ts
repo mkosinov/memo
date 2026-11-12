@@ -1,9 +1,3 @@
-export interface PhotoDTO {
-  url: string;
-  isPublic: boolean;
-  tags: string[];
-}
-
 export interface NextTimeDTO {
   id: string;
   date: string;
@@ -15,7 +9,6 @@ export interface ScheduleDTO {
   title: string;
   tags: string[];
   image_url: string;
-  photos: PhotoDTO[];
   time: string;
   duration_minutes: number;
   location_id: string;

@@ -11,7 +11,6 @@ export interface ActivityDTO {
   title: string;
   category: ActivityTag;
   image_url: string;
-  guest_photos?: string[];
   time: string;
   duration_minutes: number;
   location_id: string;

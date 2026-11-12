@@ -35,10 +35,10 @@ const mocks = vi.hoisted(() => ({
 const mockSchedules = [
   {
     id: "act-1",
+    serviceId: "service-1",
     title: "Акварельный пейзаж",
     tags: ["взрослым"],
     imageUrl: "/test-activity.jpg",
-    photos: [{ url: "/guest1.jpg", isPublic: true, tags: [] }],
     time: "14:00",
     duration: "2 часа",
     location: { id: "loc-1", title: "Студия на Арбате", address: "ул. Арбат, 1" },
@@ -61,10 +61,10 @@ const mockSchedules = [
   },
   {
     id: "act-2",
+    serviceId: "service-2",
     title: "Семейное рисование",
     tags: ["вместе"],
     imageUrl: "/test-activity-2.jpg",
-    photos: [],
     time: "16:00",
     duration: "1.5 часа",
     location: { id: "loc-2", title: "Парк Горького", address: "ул. Крымский Вал, 9" },
@@ -85,10 +85,10 @@ const mockSchedules = [
   },
   {
     id: "act-3",
+    serviceId: "service-3",
     title: "Гончарное дело",
     tags: ["вместе"],
     imageUrl: "/test-activity-3.jpg",
-    photos: [],
     time: "12:00",
     duration: "2 часа",
     location: { id: "loc-1", title: "Студия на Арбате" },

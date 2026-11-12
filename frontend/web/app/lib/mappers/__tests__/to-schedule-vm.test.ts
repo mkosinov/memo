@@ -30,9 +30,6 @@ function makeRawSchedule(overrides?: Partial<WebScheduleDTO>): WebScheduleDTO {
     tags: ['хит', 'для детей'],
     masterAvatar: 'https://example.com/avatar.jpg',
     // Web-only fields
-    photos: [
-      { url: 'https://example.com/photo1.jpg', isPublic: true, tags: ['интерьер'] },
-    ],
     material: 'Масло',
     size: '30x40 см',
     ...overrides,
@@ -50,6 +47,12 @@ describe('toScheduleView', () => {
     expect(vm.masterName).toBe('Ольга Середа');
     expect(vm.masterAvatar).toBe('https://example.com/avatar.jpg');
     expect(vm.guestsCount).toBe(3);
+  });
+
+  it('passes serviceId through to the view model', () => {
+    const vm = toScheduleView(makeRawSchedule({ serviceId: 'service-42' }));
+
+    expect(vm.serviceId).toBe('service-42');
   });
 
   it('passes tariffs through to the view model', () => {
@@ -103,15 +106,6 @@ describe('toScheduleView', () => {
   it('handles empty tags', () => {
     const vm = toScheduleView(makeRawSchedule({ tags: [] }));
     expect(vm.tagColors).toEqual([]);
-  });
-
-  it('maps photos array', () => {
-    const photos = [
-      { url: 'https://example.com/p1.jpg', isPublic: true, tags: ['интерьер'] },
-      { url: 'https://example.com/p2.jpg', isPublic: false, tags: [] },
-    ];
-    const vm = toScheduleView(makeRawSchedule({ photos }));
-    expect(vm.photos).toEqual(photos);
   });
 
   it('handles optional price hint', () => {
@@ -181,10 +175,10 @@ describe('toCardProps', () => {
   it('extracts card subset from ScheduleView', () => {
     const vm: ScheduleView = {
       id: 'sched-1',
+      serviceId: 'service-1',
       title: 'Морской пейзаж',
       tags: ['хит'],
       imageUrl: 'https://example.com/image.jpg',
-      photos: [],
       time: '14:00',
       duration: '2 ч 30 мин',
       location: { id: 'alpika', title: 'Альпика' },

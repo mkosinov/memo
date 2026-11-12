@@ -5,10 +5,10 @@ import { ActivityDetail } from "../ActivityDetail";
 
 const mockActivity: ActivityView = {
   id: "act-1",
+  serviceId: "service-1",
   title: "Морской пейзаж",
   imageUrl: "/images/activity.jpg",
   category: "вместе",
-  guestPhotos: ["/images/guest1.jpg", "/images/guest2.jpg", "/images/guest3.jpg"],
   teacherName: "Анна Иванова",
   teacherAvatar: "/images/teacher.jpg",
   dateFormatted: "20 мая, понедельник",

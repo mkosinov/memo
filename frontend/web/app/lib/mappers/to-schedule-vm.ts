@@ -18,10 +18,10 @@ function getTagColors(tags: string[]): string[] {
 export function toScheduleView(raw: WebScheduleDTO): ScheduleView {
   return {
     id: raw.id,
+    serviceId: raw.serviceId,
     title: raw.serviceTitle,
     tags: raw.tags ?? [],
     imageUrl: raw.image_url ?? '',
-    photos: raw.photos,
     time: raw.time,
     duration: formatDuration(raw.durationMinutes),
     location: {

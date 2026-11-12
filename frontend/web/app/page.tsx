@@ -46,10 +46,10 @@ function toCardProps(vm: ScheduleView): MKCardProps & { id: string } {
 function toActivityView(s: ScheduleView): ActivityView {
   return {
     id: s.id,
+    serviceId: s.serviceId,
     title: s.title,
     category: (s.tags[0] || "") as ActivityTag,
     imageUrl: s.imageUrl,
-    guestPhotos: s.photos?.map((p) => p.url),
     time: s.time,
     duration: s.duration,
     location: s.location,

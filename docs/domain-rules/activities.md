@@ -97,3 +97,9 @@ THE canonical string representation of an activity in the admin frontend — use
 | start: datetime | start: string | ⚠️ Type difference |
 | All fields required | All fields required | ✅ |
 | is_private: default False | is_private: optional | ⚠️ |
+
+## Activity modal fixed height (GH #598)
+
+- **Общий `Modal`** (`frontend/admin/app/components/shared/modal/Modal.tsx`) получил опциональный проп `heightClass` — фикс-высота контейнера. Класс **дополняет** базовый потолок `max-h-[85vh]`, а не заменяет его: потолок остаётся на месте и безвреден (85dvh ≤ 85vh, при фикс-высоте он не активен).
+- **Модалка занятия** (ActivityDetailsModal) передаёт `h-[85dvh]` во всех режимах — осознанный суперсед #262 ТОЛЬКО для этой модалки (высота стабильна между вкладками, футер с кнопкой «Создать» всегда виден).
+- **Дефолт всех остальных модалок не изменился** — авторазмер по контенту с потолком (#262). Защищено тест-замком `frontend/admin/__tests__/ModalShell.test.tsx`; замок расширен на `dvh` (регэкс `/(?:^|\s)h-\[\d+(d)?vh\]/`, якорь обязателен — без него матчер ловит `h-[85vh]` внутри базового `max-h-[85vh]`).

@@ -2,6 +2,13 @@ import { test, expect } from './fixtures/test';
 import { gotoScheduleDay, closeModal } from './fixtures/helpers';
 import { openCreateDialog, clickWithFallback } from './helpers/clicks';
 import { pickComboboxOption } from './helpers/combobox';
+import {
+  checkedLocationChecks,
+  hallTitleWithDefault,
+  locationCheckByTitle,
+  locationChecks,
+  waitForLocationDirectory,
+} from './helpers/location-group';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 
 /**
@@ -18,6 +25,14 @@ import { queryDBRow, queryDBRows } from './fixtures/db-query';
  *   US-4 — private: the «Приватное» switch (role="switch") creates a
  *          private activity (DB is_private=1 + the card's edit form shows
  *          the private state).
+ *
+ * GH #595 spec §6 on top (location field = checkbox group):
+ *   US-2 — single hall: the autofilled capacity is manually editable
+ *          before submit (e2e-level editability, §8); the DB carries the
+ *          manual value.
+ *   US-5 — §4.4 prefill: a slot click in a day-by-locations column
+ *          pre-checks that column's hall (capacity autofilled);
+ *          negative — master-columns day gives NO pre-check.
  *
  * Navigation deep-links to the far-future date 2099-01-05 where no seed
  * activity ever exists (#138: /schedule?view=day&date=… — the URL is the
@@ -82,7 +97,18 @@ test('S3: day view — hint, click-create via dialog, card appears', async ({ pa
   await test.step('fill create form and submit', async () => {
     await pickComboboxOption(page, 'create-master');
     await pickComboboxOption(page, 'create-service');
-    await pickComboboxOption(page, 'create-location');
+
+    // GH #595 US-2 (single-hall flow): check exactly ONE hall (a hall
+    // WITH a default, picked by title from the directory truth) — its
+    // default capacity autofills the field (§4.2)…
+    const hallTitle = hallTitleWithDefault();
+    await locationCheckByTitle(dialog, hallTitle).check();
+    const hall = queryDBRow(
+      `SELECT capacity FROM locations WHERE title='${hallTitle}'`,
+    )!;
+    await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+      String(hall.capacity),
+    );
 
     await dialog.getByTestId('btn-create-activity').click();
     await expect(dialog).toBeHidden();
@@ -92,6 +118,110 @@ test('S3: day view — hint, click-create via dialog, card appears', async ({ pa
   await expect(page.locator('[data-testid^="activity-"]').first()).toBeVisible();
   // …and the empty-day hint is gone.
   await expect(page.getByTestId('schedule-empty-hint')).toHaveCount(0);
+});
+
+test('US-2 (GH #595): single hall — the autofilled capacity is manually editable before submit', async ({
+  page,
+}) => {
+  // ARRANGE: empty day — the created activity is the only row on it.
+  await navigateToEmptyDay(page);
+
+  // ACT: open the create dialog (master-columns day — no §4.4 prefill),
+  // pick dictionaries, check exactly one hall (with a default — the
+  // directory truth picks the title).
+  const dialog = await openCreateDialog(page);
+  await pickComboboxOption(page, 'create-master');
+  await pickComboboxOption(page, 'create-service');
+  const hallTitle = hallTitleWithDefault();
+  await locationCheckByTitle(dialog, hallTitle).check();
+  const hall = queryDBRow(
+    `SELECT id, capacity FROM locations WHERE title='${hallTitle}'`,
+  )!;
+
+  // The §4.2 autofill landed…
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+    String(hall.capacity),
+  );
+  // …and the field is EDITABLE at the e2e level (§8): overwrite manually —
+  // a value distinct from every hall default (default + 3).
+  const manualCapacity = Number(hall.capacity) + 3;
+  await dialog.getByTestId('create-capacity').fill(String(manualCapacity));
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+    String(manualCapacity),
+  );
+
+  await dialog.getByTestId('btn-create-activity').click();
+  await expect(dialog).toBeHidden();
+
+  // ASSERT: the created activity carries the MANUALLY edited capacity
+  // (not the hall default), on the checked hall.
+  const row = queryDBRow(
+    `SELECT location_id, capacity FROM activities WHERE substr(start,1,10)='${EMPTY_DAY}'`,
+  )!;
+  expect(row.location_id).toBe(hall.id);
+  expect(row.capacity).toBe(manualCapacity);
+});
+
+test('US-5 (GH #595): empty-slot click in a locations column pre-checks that column’s hall checkbox, capacity autofilled', async ({
+  page,
+}) => {
+  // ARRANGE: day-by-locations view — every hall gets its own column
+  // (`day-view-column-<locationId>`, #361 testids).
+  await gotoScheduleDay(page, EMPTY_DAY, { col: 'locations' });
+  const directorySize = Number(
+    queryDBRow('SELECT COUNT(*) AS c FROM locations')!.c,
+  );
+
+  // ACT: click a slot in the SECOND column — proves the column→hall
+  // mapping, not just "whichever hall sorts first".
+  const columns = page.locator('[data-testid^="day-view-column-"]');
+  const secondColumn = columns.nth(1);
+  await expect(secondColumn).toBeVisible();
+  const columnHallId = (
+    (await secondColumn.getAttribute('data-testid')) ?? ''
+  ).replace(/^day-view-column-/, '');
+  expect(columnHallId).not.toBe('');
+  const hallTitleRow = queryDBRow(
+    `SELECT title, capacity FROM locations WHERE id='${columnHallId}'`,
+  )!;
+
+  const slot = secondColumn.locator('[data-testid="empty-slot"]').first();
+  await expect(slot).toBeVisible();
+  await clickWithFallback(slot);
+
+  const dialog = page.getByRole('dialog', { name: 'Новое занятие' });
+  await expect(dialog).toBeVisible();
+
+  // ASSERT (§4.4): the directory arrived and EXACTLY ONE box is checked —
+  // the clicked column's hall…
+  await waitForLocationDirectory(dialog, directorySize);
+  await expect(checkedLocationChecks(dialog)).toHaveCount(1);
+  await expect(locationCheckByTitle(dialog, hallTitleRow.title)).toBeChecked();
+  // …and the exactly-1 rule autofilled its default capacity (§4.2).
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue(
+    String(hallTitleRow.capacity),
+  );
+});
+
+test('US-5 (GH #595) negative: master-columns day view — the create form opens with NO hall pre-checked', async ({
+  page,
+}) => {
+  // ARRANGE: master-columns day (the col default) on the empty day.
+  await navigateToEmptyDay(page);
+  const directorySize = Number(
+    queryDBRow('SELECT COUNT(*) AS c FROM locations')!.c,
+  );
+
+  // ACT: open the create dialog from a slot — the column is a MASTER
+  // column, so §4.4 gives no location prefill.
+  const dialog = await openCreateDialog(page);
+
+  // ASSERT: the directory arrived (settle anchor — §4.1 renders the group
+  // empty until the list loads), and no box is checked.
+  await expect(locationChecks(dialog)).toHaveCount(directorySize);
+  await expect(checkedLocationChecks(dialog)).toHaveCount(0);
+  // …and no capacity autofill happened without a checked hall.
+  await expect(dialog.getByTestId('create-capacity')).toHaveValue('');
 });
 
 test('US-5: closing the form without «Создать» — no side effects', async ({ page }) => {
@@ -136,7 +266,9 @@ test('US-4: «Приватное» switch creates a private activity', async ({ 
 
   await pickComboboxOption(page, 'create-master');
   await pickComboboxOption(page, 'create-service');
-  await pickComboboxOption(page, 'create-location');
+  // GH #595: the location is a checkbox group now — one hall (with a
+  // default) checked.
+  await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
   await dialog.getByTestId('btn-create-activity').click();
   await expect(dialog).toBeHidden();
 

@@ -9,6 +9,8 @@
  *   2. After delete-visitor, the row is absent from the visits table
  *   3. The undo toast "Удалено. Отменить" is visible after deleting a saved row
  *   4. Payment totals in the /records table reflect an added payment without reload
+ *   5. GH #595 §9: the create-form location group renders one checkbox per
+ *      directory location on /schedule
  *
  * Approach: each test creates its own activity via factories on the seed's
  * REFERENCE week (GH #422 — factory default start), so the grid opened on
@@ -36,6 +38,8 @@ import {
   closeModal,
   installReferenceWeekClock,
 } from './fixtures/helpers';
+import { openCreateDialog } from './helpers/clicks';
+import { queryDBRow } from './fixtures/db-query';
 import { SEED_WEEK_MONDAY } from './fixtures/seed-week';
 
 // GH #422: Check 4 asserts on the /records TABLE whose default period is
@@ -314,4 +318,31 @@ test('Check 4: /records payment totals update after add, no F5', async ({ page, 
     await cleanup(request, `/api/v1/activities/${activity.id}`);
     await cleanup(request, `/api/v1/clients/${client.id}`);
   }
+});
+
+// GH #595 §9 (visual compliance): the create-form location group on
+// /schedule — the container `create-location` renders ONE checkbox
+// (`create-location-check`) per directory location (archived included).
+test('Check 5: create-form location checkbox group — one check per directory location (GH #595 §9)', async ({
+  page,
+}) => {
+  log('Check 5 start');
+
+  // /schedule on the seed reference week — the grid always has free slots.
+  await gotoScheduleWeek(page, SEED_WEEK_MONDAY);
+  const dialog = await openCreateDialog(page);
+
+  // The group container is rendered…
+  const group = page.getByTestId('create-location');
+  await expect(group).toBeVisible();
+  // …and carries one checkbox per directory row (DB is the truth — all
+  // halls, archived included; the schedule fetches status:'all').
+  const directorySize = Number(queryDBRow('SELECT COUNT(*) AS c FROM locations')!.c);
+  await expect(group.getByTestId('create-location-check')).toHaveCount(directorySize);
+  log(`Check 5: create-location renders ${directorySize} checkboxes`);
+
+  await page.screenshot({ path: `${SHOTS}/check5-create-location-group.png`, fullPage: false });
+
+  await closeModal(page);
+  log('Check 5 PASS');
 });

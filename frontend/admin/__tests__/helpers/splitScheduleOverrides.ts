@@ -31,6 +31,7 @@ const DATA_KEYS = [
   'loading',
   'error',
   'addActivity',
+  'addActivities',
   'updateActivity',
   'deleteActivityDeferred',
   'deleteActivityConfirmed',

@@ -86,11 +86,17 @@ export function DayView() {
   const [modalActivity, setModalActivity] = useState<ScheduleAdminDTO | null>(null);
   const [modalMode, setModalMode] = useState<'edit' | 'quickAdd' | 'create'>('edit');
   const [modalStartMinutes, setModalStartMinutes] = useState(0);
+  // GH #595 §4.4: префилл-локация кликнутой колонки — приходит только из
+  // пер-колоночного замкнутого обработчика (режим колонок-по-локациям).
+  const [modalLocationId, setModalLocationId] = useState<string | undefined>(undefined);
 
   // Day view renders a single day — the slot's calendar date IS selectedDay
-  // regardless of the weekday index the column reports (GH #280).
-  const openCreateModal = useCallback((_dayIndex: number, startMinutes: number) => {
+  // regardless of the weekday index the column reports (GH #280). Третий
+  // параметр — DayView-внутренний: сигнатура общего колбэка DayColumn
+  // (dayIndex, startMinutes) не меняется, WeekView делит её без предотметки.
+  const openCreateModal = useCallback((_dayIndex: number, startMinutes: number, locationId?: string) => {
     setModalStartMinutes(startMinutes);
+    setModalLocationId(locationId);
     setModalActivity(null);
     setModalMode('create');
     setModalOpen(true);
@@ -492,7 +498,16 @@ export function DayView() {
                 ghostSlotIndex={ghostPosition?.slotIndex ?? null}
                 ghostColumnId={ghostPosition?.columnId ?? null}
                 onCreateActivity={handleCreateActivity}
-                onOpenCreateModal={openCreateModal}
+                // GH #595 §4.4: в режиме колонок-по-локациям каждая колонка
+                // замыкает свой id (он же locationId) в пер-колоночный
+                // обработчик открытия — префилл предотметит чекбокс этой
+                // локации; мастер-колонки — общий колбэк без предотметки.
+                onOpenCreateModal={
+                  columnMode === 'locations'
+                    ? (dayIndex: number, startMinutes: number) =>
+                        openCreateModal(dayIndex, startMinutes, col.id)
+                    : openCreateModal
+                }
                 onOpenEditModal={openEditModal}
                 onQuickAdd={openQuickAdd}
                 stampReady={stamp.ready}
@@ -620,7 +635,7 @@ export function DayView() {
           onClose={closeModal}
           activity={modalActivity}
           mode={modalMode}
-          createDefaults={{ date: selectedDayISO, startMinutes: modalStartMinutes }}
+          createDefaults={{ date: selectedDayISO, startMinutes: modalStartMinutes, locationId: modalLocationId }}
         />
       )}
 

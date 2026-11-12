@@ -206,6 +206,8 @@ function DataConsumer() {
     scheduleMasters: fullScheduleMasters,
     scheduleLocations: fullScheduleLocations,
     addActivity,
+    // #595: the batch create path — per-location outcomes surfaced to tests.
+    addActivities,
     updateActivity,
     deleteActivityDeferred,
     deleteActivityConfirmed,
@@ -220,6 +222,9 @@ function DataConsumer() {
   } = useScheduleData();
   const [copyResult, setCopyResult] = React.useState('');
   const [deleteOutcome, setDeleteOutcome] = React.useState('');
+  // #595: promise outcomes of the promisified create path, surfaced to tests.
+  const [addOutcome, setAddOutcome] = React.useState('');
+  const [batchOutcome, setBatchOutcome] = React.useState('');
 
   return (
     <div>
@@ -269,6 +274,61 @@ function DataConsumer() {
       >
         AddWithStart
       </button>
+      {/* #595: addActivity RETURNS A PROMISE — callbacks still fire; the test
+          observes resolve/reject + callback invocation through the span. */}
+      <button
+        data-testid="add-activity-await"
+        onClick={() => {
+          let successCalled = false;
+          let errorArg = '';
+          addActivity(
+            {
+              masterId: 'm1',
+              serviceId: 's1',
+              locationId: 'alpika',
+              start: '2026-10-28T15:30:00',
+              durationMinutes: 75,
+              capacity: 4,
+              isPrivate: false,
+            },
+            {
+              onSuccess: () => { successCalled = true; },
+              onError: (err) => { errorArg = (err as Error).message; },
+            },
+          )
+            .then(() => setAddOutcome(`resolved;success:${successCalled}`))
+            .catch((err: Error) =>
+              setAddOutcome(`rejected;error:${err.message};onError:${errorArg}`),
+            );
+        }}
+      >
+        AddAwait
+      </button>
+      <span data-testid="add-outcome">{addOutcome}</span>
+      {/* #595: the batch path — 3 parallel creates, outcomes joined for tests. */}
+      <button
+        data-testid="add-activities"
+        onClick={() => {
+          void addActivities([
+            { masterId: 'm1', serviceId: 's1', locationId: 'alpika', start: '2026-10-28T15:30:00', durationMinutes: 75, capacity: 10, isPrivate: false },
+            { masterId: 'm1', serviceId: 's1', locationId: 'loc2', start: '2026-10-28T15:30:00', durationMinutes: 75, capacity: 6, isPrivate: false },
+            { masterId: 'm1', serviceId: 's1', locationId: 'loc3', start: '2026-10-28T15:30:00', durationMinutes: 75, capacity: 8, isPrivate: false },
+          ]).then((outcomes) =>
+            setBatchOutcome(
+              outcomes
+                .map((o) =>
+                  o.status === 'fulfilled'
+                    ? `${o.locationId}:ok`
+                    : `${o.locationId}:err:${(o.error as Error).message}`,
+                )
+                .join('|'),
+            ),
+          );
+        }}
+      >
+        AddBatch
+      </button>
+      <span data-testid="batch-outcome">{batchOutcome}</span>
       <button
         data-testid="update-activity"
         onClick={() => updateActivity(activities[0]?.id ?? '', { occupied: 5 })}
@@ -1583,3 +1643,110 @@ function weekEndKey(): string {
   monday.setDate(monday.getDate() + 6);
   return toISODate(monday);
 }
+
+// ─── Promisified create path (#595, spec §4.3/§5) ─────────────────────────────
+
+describe('ScheduleDataProvider — промисный путь создания (#595)', () => {
+  beforeEach(() => {
+    __resetNavigation();
+    vi.clearAllMocks();
+    vi.mocked(getAllMasters).mockResolvedValue([] as never);
+    vi.mocked(getAllLocations).mockResolvedValue([] as never);
+    vi.mocked(getAllServices).mockResolvedValue([] as never);
+    vi.mocked(getActivities).mockResolvedValue(wrap([]) as never);
+    vi.mocked(createActivity).mockResolvedValue({} as never);
+    vi.mocked(patchActivity).mockResolvedValue({} as never);
+    vi.mocked(dryRunDeleteActivity).mockResolvedValue(undefined);
+    vi.mocked(deleteActivityWithExpected).mockResolvedValue(undefined);
+    seedDictionaries();
+  });
+
+  /** Render + settle the initial load; the invalidation spy attaches AFTER
+   *  settle so it counts ONLY mutation-driven invalidations. */
+  async function renderSettled() {
+    const utils = renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+    const invalidateSpy = vi.spyOn(utils.queryClient, 'invalidateQueries');
+    return { ...utils, invalidateSpy };
+  }
+
+  it('addActivity возвращает промис: resolve, onSuccess вызван, инвалидация семейства activities ровно 1 раз', async () => {
+    vi.mocked(createActivity).mockResolvedValue({
+      id: 'new-1', master_id: 'm1', service_id: 's1', location_id: 'alpika',
+      start: '2026-10-28T15:30:00', duration: 75, capacity: 4,
+      is_private: false, comment: null, record_info: null,
+      created_at: '', updated_at: '', occupied: 0,
+    } as never);
+    const { invalidateSpy } = await renderSettled();
+    const fetchCallsBefore = vi.mocked(getActivities).mock.calls.length;
+
+    act(() => {
+      screen.getByTestId('add-activity-await').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('add-outcome').textContent).toBe('resolved;success:true');
+    });
+    // Family rule (#239) — ONE create settles → exactly ONE ['activities']
+    // prefix invalidation (formerly the hook-level onSuccess).
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activities'] });
+    // The prefix invalidation refetches the active week query.
+    await waitFor(() => {
+      expect(vi.mocked(getActivities).mock.calls.length).toBeGreaterThan(fetchCallsBefore);
+    });
+  });
+
+  it('addActivity реджектится: onError вызван с ошибкой, инвалидация после settle ровно 1 раз', async () => {
+    vi.mocked(createActivity).mockRejectedValue(new Error('create failed'));
+    const { invalidateSpy } = await renderSettled();
+
+    act(() => {
+      screen.getByTestId('add-activity-await').click();
+    });
+
+    await waitFor(() => {
+      // onError:${message} — the callback fired AND received the error.
+      expect(screen.getByTestId('add-outcome').textContent).toBe(
+        'rejected;error:create failed;onError:create failed',
+      );
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activities'] });
+  });
+
+  it('addActivities: 3 параллельных вызова (2 успеха + 1 отказ) — инвалидация ровно 1 раз, исходы по локациям', async () => {
+    vi.mocked(createActivity)
+      .mockResolvedValueOnce({ id: 'new-1', location_id: 'alpika' } as never)
+      .mockResolvedValueOnce({ id: 'new-2', location_id: 'loc2' } as never)
+      .mockRejectedValueOnce(new Error('loc3 rejected'));
+    const { invalidateSpy } = await renderSettled();
+
+    act(() => {
+      screen.getByTestId('add-activities').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('batch-outcome').textContent).toBe(
+        'alpika:ok|loc2:ok|loc3:err:loc3 rejected',
+      );
+    });
+    // N parallel POSTs, one per checked location, in input (checkbox) order.
+    expect(createActivity).toHaveBeenCalledTimes(3);
+    const locationIds = vi.mocked(createActivity).mock.calls.map(
+      ([payload]) => (payload as { location_id: string }).location_id,
+    );
+    expect(locationIds).toEqual(['alpika', 'loc2', 'loc3']);
+    // ONE family invalidation after ALL settles — not one per call.
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activities'] });
+  });
+});

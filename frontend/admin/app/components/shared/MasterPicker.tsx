@@ -20,6 +20,8 @@ interface MasterPickerProps {
   className?: string;
   ariaLabel?: string;
   containerTestId?: string;   // data-testid on the Combobox outer wrapper
+  /** GH #595 §4.3: create-form flight lock — disables the underlying Combobox. */
+  disabled?: boolean;
 }
 
 function getMasterLabel(m: MasterBase): string {
@@ -29,7 +31,7 @@ function getMasterLabel(m: MasterBase): string {
   return m.name ?? '';
 }
 
-export function MasterPicker({ masters, value, onChange, className, ariaLabel, containerTestId }: MasterPickerProps) {
+export function MasterPicker({ masters, value, onChange, className, ariaLabel, containerTestId, disabled }: MasterPickerProps) {
   const options: ComboboxOption[] = (Array.isArray(masters) ? masters : []).map((m) => ({
     value: m.id,
     label: getMasterLabel(m),
@@ -46,6 +48,7 @@ export function MasterPicker({ masters, value, onChange, className, ariaLabel, c
       className={className}
       ariaLabel={ariaLabel}
       containerTestId={containerTestId}
+      disabled={disabled}
     />
   );
 }

@@ -50,6 +50,9 @@ export function createMockScheduleData(
     loading: false,
     error: null,
     addActivity: vi.fn(),
+    // #595: batch create — resolves an empty outcome array by default;
+    // override per-test with the per-location outcomes under test.
+    addActivities: vi.fn(() => Promise.resolve([])),
     updateActivity: vi.fn(),
     // #286: deferred delete — resolves the enqueued outcome by default;
     // override per-test (e.g. `{ kind: 'needs-confirm', dependencies: [], refetched: false }`).

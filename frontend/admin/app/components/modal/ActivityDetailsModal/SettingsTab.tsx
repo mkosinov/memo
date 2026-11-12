@@ -141,9 +141,12 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
         setMasterId(value);
         onUpdate({ masterId: value });
       }}
-      onLocationChange={(v) => {
-        setLocationId(v);
-        onUpdate({ locationId: v });
+      locationField={{
+        mode: 'single',
+        onLocationChange: (v) => {
+          setLocationId(v);
+          onUpdate({ locationId: v });
+        },
       }}
     />
   );

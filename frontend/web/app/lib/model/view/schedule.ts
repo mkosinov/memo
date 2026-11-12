@@ -8,10 +8,11 @@ export interface NextTimeOption {
 
 export interface ScheduleView {
   id: string;
+  /** Service id — passed through so detail overlays can query service-scoped data (e.g. photos, #576). */
+  serviceId: string;
   title: string;
   tags: string[];
   imageUrl: string;
-  photos: { url: string; isPublic: boolean; tags: string[] }[];
   time: string;
   duration: string;
   location: { id: string; title: string; address?: string };

@@ -514,6 +514,174 @@ class TestPhotosPublicRoute:
         assert [p["id"] for p in probed.json()["items"]] == baseline_ids
 
 
+@pytest.fixture()
+def service_showcase_fixture(
+    api_client, create_service, create_activity,
+):
+    """#576 сетап витрины для фильтра ``service_id``.
+
+    Сервис S (две группы: прямые фото + фото занятий A(S)) против чужого
+    сервиса Sx; публичные против приватных; created_at закреплены явно:
+
+    - прямые S (public): ``d_new`` 06-10; ``d_tie_a``/``d_tie_b`` — обе
+      06-05 (тай-брейк ``id asc``);
+    - через занятие A(S) (public): ``v_new`` 06-08; ``v_tie_a``/
+      ``v_tie_b`` — обе 06-03 (тай-брейк ``id asc``);
+    - чужие (public): ``x_direct`` (Sx напрямую) 07-01, ``x_via``
+      (Ax(Sx)) 07-02 — вне обеих групп S;
+    - приватные: ``d_priv`` (прямое S), ``v_priv`` (занятие A(S)).
+    """
+    s = create_service(title="Showcase pottery")
+    sx = create_service(title="Alien painting")
+    a = create_activity(service_id=s["id"])
+    ax = create_activity(service_id=sx["id"])
+
+    def post_photo(filename: str, **extra: object) -> dict:
+        resp = api_client.post(
+            PHOTOS_URL, json={"filename": filename, **extra}
+        )
+        assert resp.status_code == 201, (
+            f"photo POST failed: {resp.status_code}: {resp.text}"
+        )
+        return resp.json()
+
+    def pin(photo: dict, dt: str) -> dict:
+        query_db_params(
+            "UPDATE photos SET created_at = :dt WHERE id = :id",
+            {"dt": dt, "id": photo["id"]},
+        )
+        return photo
+
+    return {
+        "s": s, "a": a,
+        # direct S, public
+        "d_new": pin(
+            post_photo("d_new.jpg", service_id=s["id"], is_public=True),
+            "2026-06-10 12:00:00",
+        ),
+        "d_tie_a": pin(
+            post_photo("d_tie_a.jpg", service_id=s["id"], is_public=True),
+            "2026-06-05 12:00:00",
+        ),
+        "d_tie_b": pin(
+            post_photo("d_tie_b.jpg", service_id=s["id"], is_public=True),
+            "2026-06-05 12:00:00",
+        ),
+        # via activity A(S), public
+        "v_new": pin(
+            post_photo("v_new.jpg", activity_id=a["id"], is_public=True),
+            "2026-06-08 12:00:00",
+        ),
+        "v_tie_a": pin(
+            post_photo("v_tie_a.jpg", activity_id=a["id"], is_public=True),
+            "2026-06-03 12:00:00",
+        ),
+        "v_tie_b": pin(
+            post_photo("v_tie_b.jpg", activity_id=a["id"], is_public=True),
+            "2026-06-03 12:00:00",
+        ),
+        # alien service/activity — public but outside both S groups
+        "x_direct": pin(
+            post_photo("x_direct.jpg", service_id=sx["id"], is_public=True),
+            "2026-07-01 12:00:00",
+        ),
+        "x_via": pin(
+            post_photo("x_via.jpg", activity_id=ax["id"], is_public=True),
+            "2026-07-02 12:00:00",
+        ),
+        # private discriminators
+        "d_priv": post_photo("d_priv.jpg", service_id=s["id"]),
+        "v_priv": post_photo("v_priv.jpg", activity_id=a["id"]),
+    }
+
+
+class TestPublicPhotosServiceFilter:
+    """#576: ``service_id`` на публичной витрине — объединяющая семантика
+    variant A (прямые фото услуги + фото её занятий) и двухгрупповой
+    порядок."""
+
+    def test_service_id_unifies_direct_and_activity(
+        self, anon_client, service_showcase_fixture
+    ) -> None:
+        """#576 сценарий 1: фильтр возвращает публичные прямые фото
+        услуги И публичные фото её занятий; чужая услуга, чужое занятие
+        и приватные — за бортом."""
+        fx = service_showcase_fixture
+        resp = anon_client.get(
+            "/api/v1/public/photos", params={"service_id": fx["s"]["id"]}
+        )
+        assert resp.status_code == 200, resp.text
+        expected = {
+            fx[k]["id"]
+            for k in ("d_new", "d_tie_a", "d_tie_b",
+                      "v_new", "v_tie_a", "v_tie_b")
+        }
+        assert {p["id"] for p in resp.json()["items"]} == expected
+        assert resp.json()["total"] == 6
+
+    def test_service_id_two_group_order(
+        self, anon_client, service_showcase_fixture
+    ) -> None:
+        """#576 сценарий 2: прямые фото услуги раньше фото занятий — даже
+        более свежих (``v_new`` 06-08 идёт ПОСЛЕ прямых тай-пар 06-05);
+        внутри групп ``created_at desc``, на равных датах — ``id asc``."""
+        fx = service_showcase_fixture
+        resp = anon_client.get(
+            "/api/v1/public/photos",
+            params={"service_id": fx["s"]["id"], "per_page": 100},
+        )
+        assert resp.status_code == 200, resp.text
+        got = [p["id"] for p in resp.json()["items"]]
+        direct_ties = sorted([fx["d_tie_a"]["id"], fx["d_tie_b"]["id"]])
+        via_ties = sorted([fx["v_tie_a"]["id"], fx["v_tie_b"]["id"]])
+        assert got == [
+            fx["d_new"]["id"], *direct_ties,   # группа 1: прямые
+            fx["v_new"]["id"], *via_ties,      # группа 2: занятия
+        ]
+
+    def test_service_id_unknown_empty_list(
+        self, anon_client, service_showcase_fixture
+    ) -> None:
+        """#576 сценарий 3: несуществующий service_id → пустой список
+        (200, не 404)."""
+        resp = anon_client.get(
+            "/api/v1/public/photos",
+            params={"service_id": "00000000-0000-0000-0000-000000000000"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0
+
+    def test_no_filter_feed_unchanged_and_subset(
+        self, anon_client, service_showcase_fixture
+    ) -> None:
+        """#576 сценарий 4 (регресс): без фильтра — прежняя лента: ВСЕ
+        публичные фото, закреплённый порядок ``created_at desc`` +
+        ``id asc``; выборка с фильтром ⊆ выборка без фильтра."""
+        fx = service_showcase_fixture
+        baseline = anon_client.get(
+            "/api/v1/public/photos", params={"per_page": 100}
+        )
+        assert baseline.status_code == 200, baseline.text
+        got = [p["id"] for p in baseline.json()["items"]]
+        direct_ties = sorted([fx["d_tie_a"]["id"], fx["d_tie_b"]["id"]])
+        via_ties = sorted([fx["v_tie_a"]["id"], fx["v_tie_b"]["id"]])
+        assert got == [
+            fx["x_via"]["id"],     # 07-02
+            fx["x_direct"]["id"],  # 07-01
+            fx["d_new"]["id"],     # 06-10
+            fx["v_new"]["id"],     # 06-08
+            *direct_ties,          # 06-05, id asc
+            *via_ties,             # 06-03, id asc
+        ]
+
+        filtered = anon_client.get(
+            "/api/v1/public/photos", params={"service_id": fx["s"]["id"]}
+        )
+        assert filtered.status_code == 200, filtered.text
+        assert {p["id"] for p in filtered.json()["items"]} <= set(got)
+
+
 class TestPhotosBareGetClosed:
     """#493 сценарий 3: bare GET закрыты от анонима (staff-only, photos:read)."""
 

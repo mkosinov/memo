@@ -59,6 +59,7 @@ const createdResponse = {
 
 const mockActivity: ActivityView = {
   id: "act-1",
+  serviceId: "service-1",
   title: "Тестовое мероприятие",
   imageUrl: "/test-image.jpg",
   category: "вместе",
@@ -75,7 +76,6 @@ const mockActivity: ActivityView = {
   priceFormatted: "1 000 – 1 500 ₽",
   categoryColor: "#5B8C7A",
   location: { id: "loc-1", title: "Парк Горького", address: "ул. Тестовая, 1" },
-  guestPhotos: [],
   tariffs: [
     { id: "tariff-adult", title: "Взрослый", price: 1500 },
     { id: "tariff-kid", title: "Детский (5–11 лет)", price: 1050 },

@@ -399,6 +399,7 @@ export async function getPhotos(params?: PhotoListParams): Promise<PhotoListResp
 }
 
 export interface PhotoPublicListParams {
+  service_id?: string;
   page?: number;
   per_page?: number;
   id?: string[];
@@ -409,6 +410,7 @@ export interface PhotoPublicListParams {
 export async function getPublicPhotos(params?: PhotoPublicListParams): Promise<PhotoPublicListResponse> {
   const search = new URLSearchParams();
   if (params) {
+    if (params.service_id) search.set('service_id', params.service_id);
     if (params.id) params.id.forEach((i) => search.append('id', i));
     if (params.page !== undefined) search.set('page', String(params.page));
     if (params.per_page !== undefined) search.set('per_page', String(params.per_page));

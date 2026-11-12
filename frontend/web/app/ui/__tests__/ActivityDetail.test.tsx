@@ -1,14 +1,31 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ActivityView } from "../../lib/model/view/activity";
+import type { GalleryPhotoView } from "../../lib/model/view/gallery";
 import { ActivityDetail } from "../ActivityDetail";
+
+// ── Mock the service-photos hook (GH #576): the strip unit tests stay
+// hermetic — the real hook needs a QueryClient and fires getPublicPhotos.
+vi.mock("../../hooks/useServicePhotos", () => ({
+  useServicePhotos: vi.fn(),
+}));
+
+import { useServicePhotos } from "../../hooks/useServicePhotos";
+
+const useServicePhotosMock = vi.mocked(useServicePhotos);
+
+// Default: no service photos — the strip must not interfere with any
+// pre-existing behaviour test.
+beforeEach(() => {
+  useServicePhotosMock.mockReturnValue({ photos: [], isLoading: false, error: null });
+});
 
 const mockActivity: ActivityView = {
   id: "act-1",
+  serviceId: "service-1",
   title: "Морской пейзаж",
   imageUrl: "/images/activity.jpg",
   category: "вместе",
-  guestPhotos: ["/images/guest1.jpg", "/images/guest2.jpg", "/images/guest3.jpg"],
   teacherName: "Анна Иванова",
   teacherAvatar: "/images/teacher.jpg",
   dateFormatted: "20 мая, понедельник",
@@ -264,5 +281,116 @@ describe("ActivityDetail", () => {
     expect(pills.length).toBe(6);
     const seventh = screen.queryByText("24 мая, пятница 10:30 – 12:30");
     expect(seventh).not.toBeInTheDocument();
+  });
+
+  // ── Photo strip (GH #576, spec §6.5): cover + service photos ──
+
+  describe("photo strip", () => {
+    const stripPhotos: GalleryPhotoView[] = [
+      { id: "p1", url: "/img/p1.jpg", caption: "Процесс" },
+      { id: "p2", url: "/img/p2.jpg", caption: "" },
+    ];
+
+    function mockPhotos(photos: GalleryPhotoView[]) {
+      useServicePhotosMock.mockReturnValue({ photos, isLoading: false, error: null });
+    }
+
+    it("renders the strip: cover first, then service photos in API order", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      const strip = screen.getByTestId("activity-photo-strip");
+      expect(strip).toBeInTheDocument();
+      const thumbs = screen.getAllByTestId("activity-photo-thumb");
+      expect(thumbs).toHaveLength(3);
+      const srcs = thumbs.map((t) => t.querySelector("img")!.getAttribute("src"));
+      expect(srcs).toEqual(["/images/activity.jpg", "/img/p1.jpg", "/img/p2.jpg"]);
+    });
+
+    it("defaults the main image to the cover", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      const main = screen.getByTestId("activity-photo-main");
+      expect(main.tagName).toBe("IMG");
+      expect(main.getAttribute("src")).toBe("/images/activity.jpg");
+    });
+
+    it("swaps the main image on thumbnail click and returns to the cover", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      const thumbs = screen.getAllByTestId("activity-photo-thumb");
+      fireEvent.click(thumbs[2]);
+      expect(screen.getByTestId("activity-photo-main").getAttribute("src")).toBe("/img/p2.jpg");
+      fireEvent.click(thumbs[0]);
+      expect(screen.getByTestId("activity-photo-main").getAttribute("src")).toBe("/images/activity.jpg");
+    });
+
+    it("marks the active thumbnail with aria-current", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      const thumbs = screen.getAllByTestId("activity-photo-thumb");
+      expect(thumbs[0].getAttribute("aria-current")).toBe("true");
+      expect(thumbs[1].getAttribute("aria-current")).toBeNull();
+      fireEvent.click(thumbs[1]);
+      expect(thumbs[0].getAttribute("aria-current")).toBeNull();
+      expect(thumbs[1].getAttribute("aria-current")).toBe("true");
+    });
+
+    it("without a cover: main defaults to the first photo, strip skips the cover thumbnail", () => {
+      mockPhotos(stripPhotos);
+      render(
+        <ActivityDetail
+          isOpen
+          onClose={vi.fn()}
+          activityId="act-1"
+          activities={[{ ...mockActivity, imageUrl: "" }]}
+        />
+      );
+      expect(screen.getByTestId("activity-photo-main").getAttribute("src")).toBe("/img/p1.jpg");
+      const thumbs = screen.getAllByTestId("activity-photo-thumb");
+      expect(thumbs).toHaveLength(2);
+      const srcs = thumbs.map((t) => t.querySelector("img")!.getAttribute("src"));
+      expect(srcs).toEqual(["/img/p1.jpg", "/img/p2.jpg"]);
+    });
+
+    it("empty photo set: no strip, main image block keeps today's behaviour", () => {
+      mockPhotos([]);
+      renderDetail();
+      expect(screen.queryByTestId("activity-photo-strip")).not.toBeInTheDocument();
+      expect(screen.getByTestId("activity-photo-main").getAttribute("src")).toBe("/images/activity.jpg");
+    });
+
+    it("a11y: labelled keyboard-scrollable group, native button thumbs with lazy imgs", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      const strip = screen.getByTestId("activity-photo-strip");
+      expect(strip.getAttribute("role")).toBe("group");
+      expect(strip.getAttribute("aria-label")).toBeTruthy();
+      expect(strip.getAttribute("tabindex")).toBe("0");
+      // jsdom applies no Tailwind: pin the scroll-container contract on the class list
+      expect(strip.className).toContain("overflow-x-auto");
+      expect(strip.className).toContain("no-scrollbar");
+      expect(strip.className).toContain("flex");
+
+      const thumbs = screen.getAllByTestId("activity-photo-thumb");
+      thumbs.forEach((thumb) => {
+        expect(thumb.tagName).toBe("BUTTON");
+        expect(thumb.getAttribute("aria-label")).toBeTruthy();
+        const img = thumb.querySelector("img")!;
+        expect(img.getAttribute("loading")).toBe("lazy");
+        expect(img.getAttribute("decoding")).toBe("async");
+        expect(img.getAttribute("width")).toBeTruthy();
+        expect(img.getAttribute("height")).toBeTruthy();
+      });
+      // Descriptive labels: cover named as cover, photos via caption / index
+      expect(thumbs[0].getAttribute("aria-label")).toBe("Обложка занятия");
+      expect(thumbs[1].getAttribute("aria-label")).toBe("Фото: Процесс");
+      expect(thumbs[2].getAttribute("aria-label")).toBe("Фото 2");
+    });
+
+    it("main image is eager — no lazy loading on it", () => {
+      mockPhotos(stripPhotos);
+      renderDetail();
+      expect(screen.getByTestId("activity-photo-main").getAttribute("loading")).toBeNull();
+    });
   });
 });

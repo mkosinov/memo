@@ -424,6 +424,24 @@ describe('getPublicPhotos (#493: /api/v1/public/photos)', () => {
       PhotoPublicListResponseSchema,
     );
   });
+
+  it('sends service_id filter param (#576)', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 12 });
+    await getPublicPhotos({ service_id: 'svc-7', per_page: 12 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/photos?service_id=svc-7&per_page=12',
+      PhotoPublicListResponseSchema,
+    );
+  });
+
+  it('omits service_id when not provided', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 12 });
+    await getPublicPhotos({ per_page: 12 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/photos?per_page=12',
+      PhotoPublicListResponseSchema,
+    );
+  });
 });
 
 // ─── Activities ─────────────────────────────────────────────────────────────

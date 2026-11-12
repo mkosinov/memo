@@ -25,7 +25,7 @@ Two staff roles exist (`UserRole`, `backend/src/models/enums.py`): `admin`, `mas
 ## Public Access (no session)
 The API is default-deny; only this allowlist works anonymously (constant `PUBLIC_ROUTES`, `backend/src/auth/public.py`):
 - Audience URL namespaces (`/public/*`, `/my`, `/my/{role}`) are codified in **ADR-015** (`docs/decisions/015-api-url-audience-namespaces.md`): bare `/api/v1/{entity}` paths are the staff CRM; `/api/v1/public/{entity}` is the anonymous showcase namespace. The prefix alone exposes nothing — every anonymous route is still a conscious `PUBLIC_ROUTES` entry, not a side effect of the prefix.
-- `GET` dictionaries: masters, locations, services, tags, activities — фото-словаря в этом перечне больше нет: bare фото-GET (`/api/v1/photos`, `/api/v1/photos/{id}`) закрыты #493 (staff-only, `photos:read`, anon → 401); анонимная фото-витрина — отдельный маршрут `GET /api/v1/public/photos` (ADR-015)
+- `GET` dictionaries: masters, locations, services, tags — из этого перечня уже ушли два словаря: bare фото-GET (`/api/v1/photos`, `/api/v1/photos/{id}`) закрыты #493 (staff-only, `photos:read`, anon → 401), анонимная фото-витрина — отдельный маршрут `GET /api/v1/public/photos` (ADR-015); bare занятия-GET (`/api/v1/activities`, `/api/v1/activities/{id}`) закрыты #600 (staff-only, `activities:read`, anon → 401), анонимная витрина расписания — отдельный маршрут `GET /api/v1/public/activities` (точечный публичный маршрут отложен до потребителя)
 - `GET /api/v1/health`
 - `/api/v1/auth/*` (login / logout / me)
 - `POST /api/v1/auth/otp/request` + `POST /api/v1/auth/otp/verify` — клиентский OTP-вход (#499, спека; добавляются в `PUBLIC_ROUTES` явно — allowlist точный, не маска)

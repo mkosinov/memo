@@ -163,7 +163,6 @@ describe('buildWebSchedule', () => {
     expect(dto.masterAvatar).toBe('https://example.com/avatar.jpg');
     // Web-only fields
     expect(dto.size).toBe('');
-    expect(dto.photos).toEqual([]);
   });
 
   describe('materials from links (GH #223 §9)', () => {

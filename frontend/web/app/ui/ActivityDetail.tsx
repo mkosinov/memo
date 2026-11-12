@@ -2,6 +2,7 @@
 
 import type { ActivityView } from "@/app/lib/model/view/activity";
 import { useState } from "react";
+import { useServicePhotos } from "../hooks/useServicePhotos";
 import { Overlay } from "./Overlay";
 import { Button } from "./Button";
 
@@ -65,7 +66,29 @@ export function ActivityDetail({
   onSelectActivity,
 }: ActivityDetailProps) {
   const activity = activities.find((a) => a.id === activityId);
+  // GH #576 (spec §6.4–6.5): one service-scoped photo query feeds the strip.
+  // Hooks run before the not-found early return (rules of hooks); real usage
+  // always mounts with a resolvable activityId (page.tsx gates the mount).
+  const { photos } = useServicePhotos(activity?.serviceId ?? "");
+  const [selectedSrc, setSelectedSrc] = useState<string | null>(null);
   if (!activity) return null;
+
+  // Strip composition (spec §6.5): cover first (when present), then service
+  // photos in API order; the strip renders only when the photo set is
+  // non-empty — an empty response leaves the photo block as it is today.
+  const hasCover = Boolean(activity.imageUrl);
+  const hasStrip = photos.length > 0;
+  const defaultMainSrc = hasCover ? activity.imageUrl : photos[0]?.url ?? activity.imageUrl;
+  const mainSrc = selectedSrc ?? defaultMainSrc;
+
+  const stripItems = [
+    ...(hasCover ? [{ key: "cover", src: activity.imageUrl, label: "Обложка занятия" }] : []),
+    ...photos.map((photo, index) => ({
+      key: photo.id,
+      src: photo.url,
+      label: photo.caption ? `Фото: ${photo.caption}` : `Фото ${index + 1}`,
+    })),
+  ];
 
   return (
     <Overlay isOpen={isOpen} onClose={onClose} size="dynamic" title={activity.title}
@@ -79,8 +102,50 @@ export function ActivityDetail({
 
         {/* 1. Photo */}
         <div className="rounded-xl overflow-hidden flex-shrink-0 -mx-4 -mt-4">
-          <img src={activity.imageUrl} alt="" className="w-full aspect-video object-cover" />
+          <img
+            data-testid="activity-photo-main"
+            src={mainSrc}
+            alt=""
+            className="w-full aspect-video object-cover"
+          />
         </div>
+
+        {/* 1b. Thumbnail strip (GH #576, spec §6.5): cover + service photos.
+            Keyboard-scrollable group; thumbnails are native buttons swapping
+            the main image via local state — no extra requests. */}
+        {hasStrip && (
+          <div
+            data-testid="activity-photo-strip"
+            className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar"
+            role="group"
+            aria-label="Фотографии занятия"
+            tabIndex={0}
+          >
+            {stripItems.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                data-testid="activity-photo-thumb"
+                aria-label={item.label}
+                aria-current={mainSrc === item.src ? "true" : undefined}
+                onClick={() => setSelectedSrc(item.src)}
+                className={`flex-shrink-0 rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#004D56] ${
+                  mainSrc === item.src ? "ring-2 ring-[#004D56]" : "ring-1 ring-black/10"
+                }`}
+              >
+                <img
+                  src={item.src}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  width={80}
+                  height={56}
+                  className="w-20 h-14 object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 2. Date + time */}
         <div className="flex items-center gap-2 text-sm text-[#1a1a1a]">

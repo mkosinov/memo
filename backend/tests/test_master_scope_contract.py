@@ -146,6 +146,8 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     #    handle. No session, no master scope. ──
     ("GET", "/api/v1/auth/methods"): "client-auth method registry (#593 §Реестр) — read-only availability, anonymous",
     ("POST", "/api/v1/auth/call/initiate"): "public callcheck initiate (#593 §Эндпоинты) — check authority, anonymous by design",
+    ("POST", "/api/v1/auth/call/status"): "public callcheck poll (#593 §Эндпоинты) — one-time handle authority; confirmed issues the client session",
+    ("POST", "/api/v1/auth/call/dev-done"): "public dev imitation (#593 §Эндпоинты) — resolver-gated (404 unless dev transport), handle authority",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
     ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
     ("PUT", "/api/v1/my"): "own profile (#262)",

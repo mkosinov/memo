@@ -128,6 +128,24 @@ class PhotoListParams(SortParams[PhotoSortBy], PaginationParams):
     sort_order: SortOrder = "desc"
 
 
+class PublicPhotoListParams(PaginationParams):
+    """Query params for ``GET /api/v1/public/photos`` — the #576 brick.
+
+    Deliberately NOT ``PhotoListParams``: that schema carries the admin
+    filter surface (``q`` / ``tag_id`` / ``is_public`` / ``sort_by`` …,
+    see the fields above) — wiring it into the anonymous showcase route
+    would activate those filters for anonymous callers (surface
+    widening, ADR-015). The showcase adds exactly ONE filter on top of
+    pagination: ``service_id`` (#576), typed per the ``client_id``
+    precedent in ``PhotoListParams`` — a plain optional string whose
+    value is discriminated by the query itself, not by UUID validation.
+    Injected ONLY as ``Annotated[PublicPhotoListParams, Query()]`` — no
+    scalar-param siblings (fastapi #12481, domain rule 8).
+    """
+
+    service_id: str | None = None
+
+
 class PhotoResponse(BaseModel):
     """Response schema for a photo."""
 

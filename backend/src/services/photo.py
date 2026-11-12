@@ -13,11 +13,11 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any, overload
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, delete, exists, or_, select, update
+from sqlalchemy import ColumnElement, case, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.domain.sorting import SortKeyMap, SortKeySpec, apply_sort
+from src.domain.sorting import SortExpr, SortKeyMap, SortKeySpec, apply_sort
 from src.events.emitter import mark_changed
 from src.models.activity import Activity
 from src.models.client import Client
@@ -32,16 +32,15 @@ from src.schemas.photo import (
     PhotoPublicResponse,
     PhotoResponse,
     PhotoUpdate,
+    PublicPhotoListParams,
 )
 from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from pydantic import BaseModel
-
-    from src.schemas.pagination import PaginationParams
 
 # Sort whitelist (GH #211 §6.8): filename | is_public | created_at.
 # FK columns and the denormalized client_name are NOT sortable.
@@ -400,6 +399,7 @@ async def list_photos_view(
     master_key: str | None = ...,
     *,
     item_mapper: None = ...,
+    order_by: Sequence[SortExpr] | None = ...,
 ) -> tuple[list[PhotoResponse], int]: ...
 
 
@@ -410,6 +410,7 @@ async def list_photos_view[ResponseT](
     master_key: str | None = ...,
     *,
     item_mapper: Callable[[Photo], ResponseT],
+    order_by: Sequence[SortExpr] | None = ...,
 ) -> tuple[list[ResponseT], int]: ...
 
 
@@ -419,6 +420,7 @@ async def list_photos_view(
     master_key: str | None = None,
     *,
     item_mapper: Callable[[Photo], Any] | None = None,
+    order_by: Sequence[SortExpr] | None = None,
 ) -> tuple[list[Any], int]:
     """Paginated photo list composite riding the repo row core (GH #213
     §5.2; Corridor 3 free function — GH #217 Task 3, ADR 007 / canon
@@ -443,6 +445,11 @@ async def list_photos_view(
 
     Returns ``(items, total)``; the router assembles the
     ``PaginatedResponse`` envelope echoing the client's page/per_page.
+
+    ``order_by`` (GH #576): caller-supplied ORDER BY override — when
+    given, it REPLACES the ``apply_sort`` resolution (the public
+    showcase ``service_id`` two-group order rides this seam; None →
+    the shared resolver, unchanged admin behavior).
     """
     client_name = select(Client.name).where(Client.id == Photo.client_id).scalar_subquery()
     stmt = select(Photo, client_name.label("client_name")).options(selectinload(Photo.tags))
@@ -487,14 +494,16 @@ async def list_photos_view(
     # nulls wrapping is inert, the effective order is byte-identical;
     # ``Photo.id asc`` tail keeps the cross-page stability. The
     # ``PhotoSortBy`` Literal (schema, 422) guarantees a valid key;
-    # ``UnknownSortKeyError`` is the direct-call safety net.
-    order_exprs = apply_sort(
-        _SORT_COLUMNS, params.sort_by, params.sort_order, Photo.id
-    )
+    # ``UnknownSortKeyError`` is the direct-call safety net. GH #576:
+    # an explicit ``order_by`` overrides the resolver entirely.
+    if order_by is None:
+        order_by = apply_sort(
+            _SORT_COLUMNS, params.sort_by, params.sort_order, Photo.id
+        )
     rows, total = await get_base_repository().list_custom(
         db_session,
         stmt,
-        order_by=order_exprs,
+        order_by=order_by,
         limit=params.per_page,
         offset=(params.page - 1) * params.per_page,
     )
@@ -512,14 +521,19 @@ async def list_photos_view(
 
 async def list_public_photos_view(
     db_session: AsyncSession,
-    params: PaginationParams,
+    params: PublicPhotoListParams,
 ) -> tuple[list[PhotoPublicResponse], int]:
     """``/api/v1/public/photos`` showcase composite (ADR-015).
 
-    Forced ``is_public=True``, pinned default sort (``created_at desc`` +
-    ``id asc`` — the shared list defaults), minimal per-audience schema.
-    Owner filters are unreachable: only the PaginationParams brick is
-    wired through. The admin ``client_name`` subquery still runs (shared
+    Forced ``is_public=True``, pinned default sort (``created_at desc``
+    + ``id asc`` — the shared list defaults), minimal per-audience
+    schema. ``service_id`` (#576): union predicate (variant A — direct
+    OR via activity, the shared stmt builder branch with the LEFT
+    OUTER JOIN) plus a two-group ORDER BY override — direct service
+    photos first (``Photo.service_id == X`` → 1, else 0, DESC), then
+    the pinned order INSIDE each group. Other owner filters are
+    unreachable: only the pagination brick + ``service_id`` are wired
+    through. The admin ``client_name`` subquery still runs (shared
     stmt) but its result is dropped by the explicit item mapper
     (``MyPhotoItem`` pattern — ``tag.title`` strings).
     """
@@ -528,8 +542,23 @@ async def list_public_photos_view(
         page=params.page,
         per_page=params.per_page,
         id=params.id,
+        service_id=params.service_id,
         is_public=True,
     )
+
+    order_by: list[SortExpr] | None = None
+    if params.service_id is not None:
+        # GH #576: two-group order — the direct-group flag dominates
+        # recency (an older direct photo outranks a newer via-activity
+        # one); the pinned created_at desc / id asc sorts each group.
+        direct_group = case(
+            (Photo.service_id == params.service_id, 1), else_=0
+        )
+        order_by = [
+            direct_group.desc(),
+            Photo.created_at.desc(),
+            Photo.id.asc(),
+        ]
 
     def _public_item(photo: Photo) -> PhotoPublicResponse:
         return PhotoPublicResponse(
@@ -539,5 +568,5 @@ async def list_public_photos_view(
         )
 
     return await list_photos_view(
-        db_session, list_params, item_mapper=_public_item
+        db_session, list_params, item_mapper=_public_item, order_by=order_by
     )

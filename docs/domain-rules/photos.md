@@ -46,6 +46,7 @@ Response-only field: `client_name` (nullable, denormalized on GET /api/v1/photos
 - File storage is external (S3-compatible); this entity stores metadata only
 
 ### Frontend
+- **Галерея деталей занятия в web (#576):** миниатюры = обложка услуги `image_url` (первая миниатюра, главная картинка по умолчанию, при наличии), затем публичные прямые фото услуги, затем публичные фото её занятий (один запрос `GET /api/v1/public/photos?service_id=…`, ≤20); клик по миниатюре ставит её в главную; пусто после allowlist — ряда нет. Видимость владельца не проверяется (контур один — `is_public` фото).
 - PhotoGallery public/private toggle
 - Bulk upload with tag picker
 - Owner slots are mutually exclusive in the UI: picking `activity_id` clears `service_id` and vice versa (no auto-fill)
@@ -63,7 +64,7 @@ Mechanics (T5): the list builder folds in a correlated EXISTS (`EXISTS(activitie
 |--------|------|--------|-------------|
 | GET | /api/v1/photos | `page`, `per_page`, `q` (filename substring, 2–100 chars), `client_id`, `location_id` (direct-only), `activity_id`, `service_id` (variant A: direct OR via activity), `is_public` (bool, only when sent), `tag_id` (repeatable, AND), `sort_by` (`filename` \| `is_public` \| `created_at`), `sort_order` | Paginated list (`PaginatedResponse[PhotoResponse]` envelope with honest total). Staff-only (#493): anon → 401, guard `photos:read` |
 | GET | /api/v1/photos/{id} | — | Get. Staff-only (#493): anon → 401, guard `photos:read` |
-| GET | /api/v1/public/photos | `page`, `per_page` (capped by the shared list limit) | Анонимная витрина (ADR-015, #493): forced `is_public=true`, sort закреплён сервером (`created_at desc` + `id asc`), минимальная схема `PhotoPublicResponse` (теги — названия-строки, без владельческих полей); envelope `PaginatedResponse[PhotoPublicResponse]` |
+| GET | /api/v1/public/photos | `page`, `per_page` (capped by the shared list limit), `service_id` (#576) | Анонимная витрина (ADR-015, #493): forced `is_public=true`, sort закреплён сервером (`created_at desc` + `id asc`), минимальная схема `PhotoPublicResponse` (теги — названия-строками, без владельческих полей); envelope `PaginatedResponse[PhotoPublicResponse]`. `service_id` (#576) — объединяющая семантика variant A (прямые фото услуги + фото её занятий), порядок двухгрупповой: сначала прямые фото услуги, затем фото занятий, внутри групп закреплённый; прочие фильтры владельцев не подключены, видимость владельца не проверяется (контур один — `is_public`) |
 | POST | /api/v1/photos | — | Create |
 | PUT | /api/v1/photos/{id} | — | Full update (filename + is_public required) |
 | PATCH | /api/v1/photos/{id} | — | Partial update (tag_ids hard-replace when sent) |

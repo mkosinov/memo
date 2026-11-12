@@ -26,7 +26,7 @@ Isolated playground serving merged main: dedicated worktree with its OWN `.next`
 
 ### START
 1. Worktree prep (copy-if-absent applies ONLY to gitignored files; deps ALWAYS re-sync):
-   - Copy gitignored files from main root if absent in worktree: `backend/.env.dev`, `backend/memo.db` (seeded DB — never re-seed, never delete the original).
+   - Copy gitignored files from main root if absent in worktree: `backend/memo.db` (seeded DB — never re-seed, never delete the original). `backend/.env.dev` is TRACKED in git — it arrives via checkout/reset on its own and needs no copying.
    - `cd /root/workspace/worktrees/playground/backend && uv sync` (retry with `uv sync --extra dev` if uvicorn missing) — MANDATORY on every START, idempotent, but required after `reset --hard` (backend deps on main change, e.g. #266).
    - `cd /root/workspace/worktrees/playground/frontend/admin && CI=true pnpm install` — same rule (frontend deps on main change, e.g. #275).
    - `cd /root/workspace/worktrees/playground/frontend/web && CI=true pnpm install` — same rule.

@@ -109,7 +109,7 @@ RUFF_BUDGET: dict[str, int] = {
     "E712": 0,
     "F841": 10,
     "RUF001": 9,
-    "RUF002": 4,
+    "RUF002": 3,
     "RUF003": 2,
     "RUF005": 1,
     "RUF012": 23,

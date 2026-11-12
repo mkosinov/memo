@@ -154,15 +154,19 @@ async def get_optional_scope(
     db_session: Annotated[AsyncSession, Depends(db_manager.get_db_session)],
     request: Request,
 ) -> ScopeContext:
-    """Scope dependency for PUBLIC routes that narrow for a logged-in master.
+    """Optional-scope dependency: unscoped for anonymous, narrowed for a
+    logged-in master.
 
-    ``GET /activities`` (+ ``/{id}``) are PUBLIC_ROUTES (the public site
-    reads the schedule), yet a logged-in ``master`` must see only his own
-    rows (D1). Anonymous / expired sessions resolve to an UNSCOPED
-    context (``master_key=None``) — the public behaviour is untouched;
-    a valid session resolves exactly as ``get_scope``. No 401 is ever
-    raised here: the session cookie is simply absent or stale for the
-    public surface.
+    Born for the once-public activity GETs (T2 — the public site read
+    the schedule there); its users have since been guarded (#479
+    records create, #493 photos, #600 activities reads), so anonymous
+    requests are answered 401 by the permission guard BEFORE this
+    dependency ever runs. What survives is the narrowing contract: a
+    logged-in master gets only his own rows (D1) — ``get_optional_scope``
+    stays the scope seam on those routes. Anonymous / expired sessions
+    resolve to an UNSCOPED context (``master_key=None``); a valid
+    session resolves exactly as ``get_scope``. No 401 is ever raised
+    here: this dependency never rejects, it only narrows.
     """
     # Shared session resolution (same block require_session uses —
     # extracted so the strict and optional paths cannot drift).

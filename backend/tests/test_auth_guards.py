@@ -12,8 +12,10 @@ Spec §3.7's access matrix exercised end-to-end through the real app:
   ``clients:write`` (spec §2.5: read-only payments + clients, no
   materials);
 * public surface intact (User Scenario 5): anonymous dictionary GETs →
-  200; the photo showcase rides ``GET /api/v1/public/photos`` (ADR-015;
-  bare photo GETs are staff-only since GH #493 — ``photos:read``);
+  200; the photo showcase rides ``GET /api/v1/public/photos`` and the
+  schedule ``GET /api/v1/public/activities`` (ADR-015; bare photo GETs
+  are staff-only since GH #493 — ``photos:read``; bare activity GETs
+  since GH #600 — ``activities:read``);
   ``POST /api/v1/records`` is CLOSED since GH #479 — anonymous → 401,
   the full contract is staff-only (``records:write``);
 * Sec-Fetch-Site (User Scenario 6): an authenticated mutation with
@@ -88,13 +90,12 @@ _PUBLIC_GETS = [
     "/api/v1/locations",
     "/api/v1/services",
     "/api/v1/tags",
-    "/api/v1/activities",
     # GH #493: the anonymous photo showcase lives at /public/photos —
     # bare ``GET /api/v1/photos`` is guarded now (photos:read).
     "/api/v1/public/photos",
     # GH #600: the anonymous schedule list (private rows excluded
-    # server-side) — the bare activity GETs flip to activities:read
-    # in #600 Task 2.
+    # server-side) — bare activity GETs are guarded now
+    # (activities:read, #600 Task 2).
     "/api/v1/public/activities",
     "/api/v1/health",
 ]

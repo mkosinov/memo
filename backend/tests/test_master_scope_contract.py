@@ -54,7 +54,7 @@ pytestmark = pytest.mark.misc
 #: ``get_optional_scope`` → service ``master_key`` filters). Module names
 #: relative to ``src/api/v1``.
 SCOPE_WIRED_ROUTERS: frozenset[str] = frozenset({
-    "activities",  # T2: list kwargs + get_scoped (optional scope — public list)
+    "activities",  # T2: list kwargs + get_scoped (optional scope — staff-only since #600)
     "records",     # T2: list/view stmt-builder + get_scoped (+ create gate)
     "clients",     # T3: EXISTS-scope list + get_scoped + mask + /get
     "visitors",    # T2: visibility predicate + get_scoped gates
@@ -71,8 +71,14 @@ SCOPE_WIRED_ROUTERS: frozenset[str] = frozenset({
 #: these are the routes whose behavior T2–T5 pin per entity.
 SCOPE_WIRED_ROUTES: dict[str, dict[tuple[str, str], str]] = {
     "activities": {
-        ("GET", "/api/v1/activities"): "public list, get_optional_scope (T2)",
-        ("GET", "/api/v1/activities/{id}"): "public get, get_optional_scope (T2)",
+        ("GET", "/api/v1/activities"): (
+            "staff-only list since #600 Task 2 (activities:read); "
+            "get_optional_scope → master narrowing (T2)"
+        ),
+        ("GET", "/api/v1/activities/{id}"): (
+            "staff-only get since #600 Task 2 (activities:read); "
+            "get_optional_scope + get_scoped (T2)"
+        ),
     },
     "records": {
         ("GET", "/api/v1/records"): "get_scope → scoped stmt (T2)",

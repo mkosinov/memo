@@ -9,10 +9,16 @@ use entity-specific names (``{master_id}``, ``{photo_id}``, …), so the
 contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
-- ``GET`` dictionaries: masters, locations, services, tags, activities;
+- ``GET`` dictionaries: masters, locations, services, tags — bare
+  activity GETs left the list with #600 (staff-only, activities:read),
+  like bare photo GETs before them (#493); each keeps its anonymous
+  showcase in the ``/public`` namespace below;
 - ``GET /api/v1/public/photos`` — ``photos`` is NOT anonymous: bare
   photo GETs are staff-only (``photos:read``); the showcase lives at
   ``GET /api/v1/public/photos`` (ADR-015 audience namespace);
+- ``GET /api/v1/public/activities`` — the anonymous schedule list
+  (#600): bare activity GETs are staff-only (``activities:read``),
+  private rows are excluded server-side;
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout / me) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -45,15 +51,15 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/v1/services/{id}"),
         ("GET", "/api/v1/tags"),
         ("GET", "/api/v1/tags/{id}"),
-        ("GET", "/api/v1/activities"),
-        ("GET", "/api/v1/activities/{id}"),
+        # GH #600: bare ("GET", "/api/v1/activities") and ("GET",
+        # "/api/v1/activities/{id}") were removed from here — both routes
+        # carry the activities:read guard now; the anonymous schedule is
+        # the /public/activities entry below (ADR-015).
         # ADR-015: anonymous showcase namespace. The prefix exposes nothing —
         # entries here ARE the exposure (default-deny walk).
         ("GET", "/api/v1/public/photos"),
         # GH #600: the anonymous schedule list — minimal audience schema,
         # private rows excluded server-side (is_private IS NOT TRUE).
-        # The two OLD bare activity entries above stay until Task 2 of
-        # the #600 plan flips the shared routes to activities:read.
         ("GET", "/api/v1/public/activities"),
         # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
         # "/api/v1/photos/{id}") were removed from here — both routes carry

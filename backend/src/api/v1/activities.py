@@ -56,6 +56,11 @@ _WRITE_GUARD = [
     Depends(verify_fetch_metadata),
 ]
 
+# GH #600 Task 2 (#493 photos precedent): bare activity GETs are staff-only
+# (activities:read) — the anonymous schedule lives at
+# GET /api/v1/public/activities (ADR-015).
+_READ_GUARD = [Depends(require_permission("activities:read"))]
+
 
 async def _to_response(
     service: ActivityService,
@@ -84,7 +89,8 @@ def _map_response(activity: ActivityResponse, occupied: int) -> ActivityResponse
     return activity
 
 
-@router.get("", response_model=PaginatedResponse[ActivityResponse])
+@router.get("", response_model=PaginatedResponse[ActivityResponse],
+            dependencies=_READ_GUARD)
 async def list_activities(
     service: _ServiceDep,
     session: SessionDep,
@@ -93,11 +99,14 @@ async def list_activities(
     # set filter (#232 — ``?id=`` starts working here); the former
     # date/service/q filters ride along 1:1.
     params: Annotated[ActivityListParams, Query()],
-    # GH #263 T2 (D1): the route stays PUBLIC, but a logged-in master
-    # sees only his own activities — master_key (or the empty-scope
-    # sentinel) becomes the ``master_id`` equality kwarg; anonymous /
-    # admin → master_key=None → no filter (unchanged behaviour). A
-    # Depends sibling beside a query model is legal (rule 8).
+    # GH #263 T2 (D1): a logged-in master sees only his own activities —
+    # master_key (or the empty-scope sentinel) becomes the ``master_id``
+    # equality kwarg; admin → master_key=None → no filter (unchanged
+    # behaviour). The list is STAFF-ONLY since #600 Task 2
+    # (activities:read guard above) — the anonymous schedule lives at
+    # /api/v1/public/activities (ADR-015); get_optional_scope keeps the
+    # master narrowing as today. A Depends sibling beside a query model
+    # is legal (rule 8).
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> PaginatedResponse[ActivityResponse]:
     """Return all activities, optionally filtered by date range and service.
@@ -131,12 +140,16 @@ async def list_activities(
     )
 
 
-@router.get("/{activity_id}", response_model=ActivityResponse)
+@router.get("/{activity_id}", response_model=ActivityResponse,
+            dependencies=_READ_GUARD)
 async def get_activity(
     activity_id: str,
     service: _ServiceDep,
     session: SessionDep,
-    # GH #263 T2: public route + master narrowing (see list_activities).
+    # GH #263 T2: master narrowing (see list_activities). Staff-only
+    # since #600 Task 2 (activities:read guard above) — the anonymous
+    # schedule lives at /api/v1/public/activities (ADR-015);
+    # get_optional_scope narrows a logged-in master to his own rows.
     scope: ScopeContext = Depends(get_optional_scope),
 ) -> ActivityResponse:
     """Return a single activity by ID with computed occupied count.

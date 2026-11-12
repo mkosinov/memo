@@ -405,6 +405,23 @@ export const ActivityResponseSchema = z.object({
 
 export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
 
+/** #600: public schedule activity — minimal audience schema (ADR-015),
+ * only what the anonymous web schedule consumes: 8 fields, no is_private /
+ * comment / record_info, no timestamps, no denormalized titles.
+ * `occupied` rides the same SUM(seats) computation as the staff list;
+ * private activities never leave through this schema (forced server-side). */
+export const ActivityPublicResponseSchema = z.object({
+  id: z.string(),
+  service_id: z.string(),
+  master_id: z.string(),
+  location_id: z.string(),
+  start: z.string(), // floating local time (RFC 5545), NOT an instant — no zone suffix
+  duration: z.number(), // minutes
+  capacity: z.number(),
+  occupied: z.number(), // computed: SUM(seats) of active records
+});
+export type ActivityPublicResponse = z.infer<typeof ActivityPublicResponseSchema>;
+
 // ─── CopyWeekResult (#242: POST /api/v1/activities/copy-week response) ──────
 // Merge breakdown — each counter asserted independently by backend tests.
 
@@ -1225,6 +1242,9 @@ export const TagListResponseSchema = paginatedSchema(TagResponseSchema);
 export const MaterialListResponseSchema = paginatedSchema(MaterialResponseSchema);
 export const ServiceListResponseSchema = paginatedSchema(ServiceResponseSchema);
 export const ActivityListResponseSchema = paginatedSchema(ActivityResponseSchema);
+
+export const ActivityPublicListResponseSchema = paginatedSchema(ActivityPublicResponseSchema);
+export type ActivityPublicListResponse = z.infer<typeof ActivityPublicListResponseSchema>;
 export const PaymentListResponseSchema = paginatedSchema(PaymentResponseSchema);
 export const RecordListResponseSchema = paginatedSchema(RecordResponseSchema);
 export const RecordViewListResponseSchema = paginatedSchema(RecordViewResponseSchema);

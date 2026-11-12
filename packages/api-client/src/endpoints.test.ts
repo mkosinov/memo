@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -493,6 +493,35 @@ describe('getActivities', () => {
     expect(api).toHaveBeenCalledWith(
       '/api/v1/activities?date_from=2024-01-01&date_to=2024-01-07&service_id=s-1&q=%D0%BA%D0%B5%D1%80%D0%B0%D0%BC%D0%B8%D0%BA%D0%B0&page=2&per_page=50',
       expect.anything(),
+    );
+  });
+});
+
+describe('getPublicActivities (#600: /api/v1/public/activities)', () => {
+  it('calls the public route with date range and pagination params', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 2, per_page: 50 });
+    await getPublicActivities({ date_from: '2026-11-13', date_to: '2026-11-19', page: 2, per_page: 50 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/activities?date_from=2026-11-13&date_to=2026-11-19&page=2&per_page=50',
+      ActivityPublicListResponseSchema,
+    );
+  });
+
+  it('calls the public route bare when no params are given', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 20 });
+    await getPublicActivities();
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/activities',
+      ActivityPublicListResponseSchema,
+    );
+  });
+
+  it('omits unspecified date params (private rows are excluded server-side)', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 12 });
+    await getPublicActivities({ per_page: 12 });
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/activities?per_page=12',
+      ActivityPublicListResponseSchema,
     );
   });
 });

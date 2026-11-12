@@ -311,17 +311,26 @@ export async function createActivityPhotosFixtures(): Promise<ActivityPhotosFixt
     // is its day's sole carousel card (top → clickable, no stack order
     // assumptions). Days: D+1 us1, D+2 us2, D+3 us3, D+4 us4, D+5 the
     // us1 companion (the cross-activity union pin).
+    // The dates are captured ONCE and reused in the scenarios: the
+    // sleep-gapped photo POSTs below take seconds — recomputing «now»
+    // there could straddle UTC midnight and point a scenario's chip one
+    // day off its activity.
+    const us1Date = isoDateDaysAhead(1);
+    const us2Date = isoDateDaysAhead(2);
+    const us3Date = isoDateDaysAhead(3);
+    const us4Date = isoDateDaysAhead(4);
+    const us1CompanionDate = isoDateDaysAhead(5);
     const created = await Promise.all([
       createActivity(ctx, us1Svc.id, masters[0].id, locations[0].id,
-        isoDateDaysAhead(1), '12:00:00', us1Svc.duration || 90),
+        us1Date, '12:00:00', us1Svc.duration || 90),
       createActivity(ctx, us2Svc.id, masters[0].id, locations[0].id,
-        isoDateDaysAhead(2), '12:00:00', us2Svc.duration || 90),
+        us2Date, '12:00:00', us2Svc.duration || 90),
       createActivity(ctx, us3Svc.id, masters[0].id, locations[0].id,
-        isoDateDaysAhead(3), '12:00:00', us3Svc.duration || 90),
+        us3Date, '12:00:00', us3Svc.duration || 90),
       createActivity(ctx, us4Svc.id, masters[0].id, locations[0].id,
-        isoDateDaysAhead(4), '12:00:00', us4Svc.duration || 90),
+        us4Date, '12:00:00', us4Svc.duration || 90),
       createActivity(ctx, us1Svc.id, masters[0].id, locations[0].id,
-        isoDateDaysAhead(5), '12:00:00', us1Svc.duration || 90),
+        us1CompanionDate, '12:00:00', us1Svc.duration || 90),
     ]);
     activityIds.push(...created);
     const [us1Activity, us2Activity, us3Activity, us4Activity, us1Companion] =
@@ -382,20 +391,20 @@ export async function createActivityPhotosFixtures(): Promise<ActivityPhotosFixt
         serviceId: us1Svc.id,
         cover: us1Svc.image_url!,
         activityId: us1Activity,
-        isoDate: isoDateDaysAhead(1),
+        isoDate: us1Date,
         servicePhotos: [US1_SVC_NEW, US1_SVC_OLD],
         activityPhotos: [US1_ACT_NEW, US1_ACT_OLD],
         hiddenPhoto: US1_HIDDEN,
       },
       us1Companion: {
         activityId: us1Companion,
-        isoDate: isoDateDaysAhead(5),
+        isoDate: us1CompanionDate,
       },
       us2: {
         serviceId: us2Svc.id,
         cover: us2Svc.image_url!,
         activityId: us2Activity,
-        isoDate: isoDateDaysAhead(2),
+        isoDate: us2Date,
         servicePhotos: [US2_SVC_NEW, US2_SVC_OLD],
         activityPhotos: [],
       },
@@ -403,7 +412,7 @@ export async function createActivityPhotosFixtures(): Promise<ActivityPhotosFixt
         serviceId: us3Svc.id,
         cover: us3Svc.image_url!,
         activityId: us3Activity,
-        isoDate: isoDateDaysAhead(3),
+        isoDate: us3Date,
         servicePhotos: [],
         activityPhotos: [US3_ACT_NEW, US3_ACT_OLD],
       },
@@ -411,7 +420,7 @@ export async function createActivityPhotosFixtures(): Promise<ActivityPhotosFixt
         serviceId: us4Svc.id,
         cover: us4Svc.image_url!,
         activityId: us4Activity,
-        isoDate: isoDateDaysAhead(4),
+        isoDate: us4Date,
         servicePhotos: [],
         activityPhotos: [],
       },

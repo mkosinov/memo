@@ -147,8 +147,11 @@ test.describe.serial('#576 activity photo strip — US-1…US-4', () => {
       )
       .toBeGreaterThan(0);
 
-    // The far group works too: an activity photo thumb.
-    await thumbs.nth(3).click();
+    // The far group works too: an activity photo thumb — the first one
+    // sits right after the cover + service photos (derived, so a future
+    // extra service photo can't rot the index).
+    const firstActivityThumb = 1 + scenario.servicePhotos.length;
+    await thumbs.nth(firstActivityThumb).click();
     await expect(main).toHaveAttribute('src', scenario.activityPhotos[0]);
 
     // US-1: the cover thumb brings the cover back.

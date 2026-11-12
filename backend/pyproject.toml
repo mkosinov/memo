@@ -27,6 +27,9 @@ dependencies = [
     # Prod reference-data loader (src/seed/reference.py) reads the YAML
     # templates in seed-data/ — declared directly, not via uvicorn's extra.
     "pyyaml>=6.0.2",
+    # GH #593 — the sms.ru callcheck provider client (src/auth/smsru_client.py):
+    # the first production outbound HTTP call; per-call AsyncClient with a timeout.
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]

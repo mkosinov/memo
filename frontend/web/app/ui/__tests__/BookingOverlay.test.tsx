@@ -4,7 +4,8 @@ import type { Mock } from "vitest";
 import type { ActivityView } from "../../lib/model/view/activity";
 import { BookingActivityOverlay } from "../BookingActivityOverlay";
 
-// ── Mock the client-branch API (#499): session detection, OTP, booking ──────
+// ── Mock the client-branch API (#499/#593): session detection, OTP,
+// method registry, callcheck, booking ───────────────────────────────────────
 vi.mock("@memo/api-client", () => {
   class ApiError extends Error {
     constructor(
@@ -22,6 +23,9 @@ vi.mock("@memo/api-client", () => {
     requestOtpCode: vi.fn(),
     verifyOtpCode: vi.fn(),
     createMyRecord: vi.fn(),
+    getAuthMethods: vi.fn(),
+    initiateCallAuth: vi.fn(),
+    callAuthStatus: vi.fn(),
   };
 });
 
@@ -30,13 +34,20 @@ import {
   requestOtpCode,
   verifyOtpCode,
   createMyRecord,
+  getAuthMethods,
+  initiateCallAuth,
+  callAuthStatus,
   ApiError,
 } from "@memo/api-client";
+import { createQueryWrapper } from "../../__tests__/fixtures/cabinet";
 
 const mockedGetMyClient = getMyClient as unknown as Mock;
 const mockedRequestOtpCode = requestOtpCode as unknown as Mock;
 const mockedVerifyOtpCode = verifyOtpCode as unknown as Mock;
 const mockedCreateMyRecord = createMyRecord as unknown as Mock;
+const mockedGetAuthMethods = getAuthMethods as unknown as Mock;
+const mockedInitiateCallAuth = initiateCallAuth as unknown as Mock;
+const mockedCallAuthStatus = callAuthStatus as unknown as Mock;
 
 const createdResponse = {
   id: "rec-1",
@@ -78,14 +89,17 @@ const mockActivityNoTariffs: ActivityView = {
 };
 
 function renderOverlay(props: Partial<React.ComponentProps<typeof BookingActivityOverlay>> = {}) {
+  const Wrapper = createQueryWrapper();
   return render(
-    <BookingActivityOverlay
-      isOpen={props.isOpen ?? true}
-      onClose={props.onClose ?? vi.fn()}
-      activityId={props.activityId ?? "act-1"}
-      activities={props.activities ?? [mockActivity, mockActivityNoTariffs]}
-      tariffsStatus={props.tariffsStatus}
-    />,
+    <Wrapper>
+      <BookingActivityOverlay
+        isOpen={props.isOpen ?? true}
+        onClose={props.onClose ?? vi.fn()}
+        activityId={props.activityId ?? "act-1"}
+        activities={props.activities ?? [mockActivity, mockActivityNoTariffs]}
+        tariffsStatus={props.tariffsStatus}
+      />
+    </Wrapper>,
   );
 }
 
@@ -101,11 +115,28 @@ beforeEach(() => {
   mockedRequestOtpCode.mockReset();
   mockedVerifyOtpCode.mockReset();
   mockedCreateMyRecord.mockReset();
-  // Default: no client session — the OTP step path.
+  mockedGetAuthMethods.mockReset();
+  mockedInitiateCallAuth.mockReset();
+  mockedCallAuthStatus.mockReset();
+  // Default: no client session — the auth step path.
   mockedGetMyClient.mockRejectedValue(new ApiError(401, "unauthorized"));
   mockedRequestOtpCode.mockResolvedValue({});
   mockedVerifyOtpCode.mockResolvedValue({ phone: "+79991234567", name: null });
   mockedCreateMyRecord.mockResolvedValue(createdResponse);
+  // Default registry: dev-like, both methods available (#593).
+  mockedGetAuthMethods.mockResolvedValue([
+    { id: "sms_otp", available: true },
+    { id: "call", available: true },
+  ]);
+  mockedInitiateCallAuth.mockResolvedValue({
+    handle: "handle-1",
+    call: {
+      phone: "+79995552255",
+      pretty: "+7 999 555-22-55",
+      expires_at: new Date(Date.now() + 300_000).toISOString(),
+    },
+  });
+  mockedCallAuthStatus.mockResolvedValue({ status: "waiting" });
 });
 
 /** Fill a valid contact form; pass phone=null to skip the session-owned field. */
@@ -122,6 +153,14 @@ async function clickSubmit() {
   await waitFor(() => expect(submitBtn).not.toBeDisabled());
   fireEvent.click(submitBtn);
   return submitBtn;
+}
+
+/** The auth step (#593) opens on the method picker — pick the SMS branch. */
+async function chooseSmsMethod() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Код по SMS/i }),
+  );
+  return screen.findByRole("button", { name: /Отправить код/i });
 }
 
 describe("BookingActivityOverlay — real tariffs (US-1)", () => {
@@ -328,8 +367,8 @@ describe("BookingActivityOverlay — form flow", () => {
   });
 });
 
-describe("BookingActivityOverlay — OTP step for anonymous submit (US-1)", () => {
-  it("shows the confirm-phone step instead of creating a record", async () => {
+describe("BookingActivityOverlay — auth step for anonymous submit (US-1, #593)", () => {
+  it("shows the method picker instead of creating a record", async () => {
     renderOverlay();
 
     fillContactForm();
@@ -337,8 +376,12 @@ describe("BookingActivityOverlay — OTP step for anonymous submit (US-1)", () =
     await clickSubmit();
 
     expect(screen.getByText("Подтвердите телефон")).toBeInTheDocument();
+    expect(await screen.findByTestId("auth-method-picker")).toBeInTheDocument();
     expect(screen.getByText("+79991234567")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Отправить код/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Подтвердить звонком/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Код по SMS/i })).toBeInTheDocument();
     expect(mockedCreateMyRecord).not.toHaveBeenCalled();
   });
 
@@ -361,6 +404,7 @@ describe("BookingActivityOverlay — OTP step for anonymous submit (US-1)", () =
     });
 
     await clickSubmit();
+    await chooseSmsMethod();
 
     // Step 1: request the code for the form phone.
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
@@ -400,6 +444,7 @@ describe("BookingActivityOverlay — OTP step for anonymous submit (US-1)", () =
     fillContactForm();
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
     await clickSubmit();
+    await chooseSmsMethod();
 
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
     expect(await screen.findByText(/654321/)).toBeInTheDocument();
@@ -412,6 +457,7 @@ describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
     fillContactForm();
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
     await clickSubmit();
+    await chooseSmsMethod();
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
     await screen.findByTestId("otp-code-input");
   }
@@ -459,6 +505,7 @@ describe("BookingActivityOverlay — OTP step errors (US-4)", () => {
     fillContactForm();
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
     await clickSubmit();
+    await chooseSmsMethod();
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
 
     const errorBlock = await screen.findByTestId("otp-step-error");
@@ -499,6 +546,112 @@ describe("BookingActivityOverlay — authenticated client", () => {
   });
 });
 
+describe("BookingActivityOverlay — вход звонком (#593)", () => {
+  it("full anonymous flow: звонок → poll confirmed → авто-отправка записи → success", async () => {
+    mockedCallAuthStatus.mockResolvedValue({ status: "confirmed" });
+    renderOverlay();
+
+    fillContactForm("Иван", "+79991234567");
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Подтвердить звонком/i }),
+    );
+    const callScreen = await screen.findByTestId("auth-call-screen");
+    expect(mockedInitiateCallAuth).toHaveBeenCalledWith("+79991234567");
+    expect(
+      within(callScreen).getByTestId("auth-call-number"),
+    ).toHaveAttribute("href", "tel:+79995552255");
+
+    // confirmed → the session exists → the pending record auto-submits.
+    await waitFor(() => expect(mockedCreateMyRecord).toHaveBeenCalledTimes(1));
+    expect(mockedCreateMyRecord).toHaveBeenCalledWith({
+      activity_id: "act-1",
+      phone: "+79991234567",
+      comment: null,
+      visits: [{ name: null, age: null, tariff_id: "tariff-adult" }],
+    });
+    expect(await screen.findByTestId("booking-success")).toBeInTheDocument();
+    // The SMS branch was never touched.
+    expect(mockedRequestOtpCode).not.toHaveBeenCalled();
+  });
+
+  it("shows the call screen with the honest call facts and the window timer", async () => {
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Подтвердить звонком/i }),
+    );
+
+    const callScreen = await screen.findByTestId("auth-call-screen");
+    expect(callScreen).toHaveTextContent(/бесплатен/i);
+    expect(callScreen).toHaveTextContent(/роуминг/i);
+    expect(within(callScreen).getByTestId("auth-call-timer")).toHaveTextContent(
+      /^0[45]:/,
+    );
+    // «Другой способ» returns to the picker.
+    fireEvent.click(screen.getByRole("button", { name: /Другой способ/i }));
+    await screen.findByTestId("auth-method-picker");
+  });
+
+  it("«Связаться» reveals the panel prefilled with the request details", async () => {
+    renderOverlay();
+
+    fillContactForm("Иван", "+79991234567");
+    increaseTariffSeats("tariff-counter-tariff-adult", 2);
+    await clickSubmit();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Связаться/i }));
+    const panel = await screen.findByTestId("auth-contact-channels");
+    expect(panel).toHaveTextContent("Тестовое мероприятие");
+    expect(panel).toHaveTextContent("20 мая");
+    expect(panel).toHaveTextContent("+79991234567");
+    expect(panel).toHaveTextContent("Иван");
+  });
+
+  it("empty registry → «Вход временно недоступен» + «Связаться», no record", async () => {
+    mockedGetAuthMethods.mockResolvedValue([
+      { id: "sms_otp", available: false },
+      { id: "call", available: false },
+    ]);
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+
+    expect(await screen.findByText("Вход временно недоступен")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Связаться/i })).toBeInTheDocument();
+    expect(mockedCreateMyRecord).not.toHaveBeenCalled();
+    expect(mockedRequestOtpCode).not.toHaveBeenCalled();
+    expect(mockedInitiateCallAuth).not.toHaveBeenCalled();
+  });
+
+  it("initiate 503 → «Вход временно недоступен» in the step, SMS still selectable", async () => {
+    mockedInitiateCallAuth.mockRejectedValue(
+      new ApiError(503, "notification transport unavailable", "NOTIFICATION_TRANSPORT_UNAVAILABLE"),
+    );
+    renderOverlay();
+
+    fillContactForm();
+    increaseTariffSeats("tariff-counter-tariff-adult", 1);
+    await clickSubmit();
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Подтвердить звонком/i }),
+    );
+
+    expect(await screen.findByTestId("otp-step-error")).toHaveTextContent(
+      "Вход временно недоступен",
+    );
+    expect(screen.getByTestId("auth-method-picker")).toBeInTheDocument();
+    expect(mockedCreateMyRecord).not.toHaveBeenCalled();
+  });
+});
+
 describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
   async function submitExpectingRefusal() {
     renderOverlay();
@@ -506,7 +659,8 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
     await clickSubmit();
 
-    // Anonymous: walk through the OTP step first.
+    // Anonymous: walk through the auth step first (SMS branch).
+    await chooseSmsMethod();
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
     fireEvent.change(await screen.findByTestId("otp-code-input"), {
       target: { value: "123456" },
@@ -541,12 +695,26 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
       new ApiError(409, "Недостаточно мест", "ACTIVITY_AT_CAPACITY"),
     );
 
-    const { rerender } = renderOverlay();
+    // One stable wrapper component (one QueryClient) so the overlay KEEPS its
+    // state across the close/reopen rerenders — the point of this test.
+    const Wrapper = createQueryWrapper();
+    const OverlayAt = ({ open }: { open: boolean }) => (
+      <Wrapper>
+        <BookingActivityOverlay
+          isOpen={open}
+          onClose={vi.fn()}
+          activityId="act-1"
+          activities={[mockActivity, mockActivityNoTariffs]}
+        />
+      </Wrapper>
+    );
+    const { rerender } = render(<OverlayAt open />);
     fillContactForm();
     increaseTariffSeats("tariff-counter-tariff-adult", 1);
     await clickSubmit();
 
-    // Anonymous: walk through the OTP step to the refusal.
+    // Anonymous: walk through the auth step (SMS branch) to the refusal.
+    await chooseSmsMethod();
     fireEvent.click(screen.getByRole("button", { name: /Отправить код/i }));
     fireEvent.change(await screen.findByTestId("otp-code-input"), {
       target: { value: "123456" },
@@ -557,22 +725,8 @@ describe("BookingActivityOverlay — booking refusal and retry (US-3)", () => {
     const otpCallsAfterWalkthrough = mockedRequestOtpCode.mock.calls.length;
 
     // Close and reopen the overlay (it stays mounted in the page tree).
-    rerender(
-      <BookingActivityOverlay
-        isOpen={false}
-        onClose={vi.fn()}
-        activityId="act-1"
-        activities={[mockActivity, mockActivityNoTariffs]}
-      />,
-    );
-    rerender(
-      <BookingActivityOverlay
-        isOpen
-        onClose={vi.fn()}
-        activityId="act-1"
-        activities={[mockActivity, mockActivityNoTariffs]}
-      />,
-    );
+    rerender(<OverlayAt open={false} />);
+    rerender(<OverlayAt open />);
 
     // No stale error block after reopen…
     expect(screen.queryByTestId("booking-error")).not.toBeInTheDocument();

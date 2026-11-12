@@ -933,6 +933,48 @@ export const MyClientSchema = z.object({
 });
 export type MyClient = z.infer<typeof MyClientSchema>;
 
+// ─── Client auth method registry & callcheck (GH #593 spec §Эндпоинты) ──────
+
+// One GET /auth/methods entry: `available` = the method's transport RESOLVER
+// returned an object (honest availability) — an unavailable method is never
+// offered by the picker. Future methods (Telegram/Max) join the enum with
+// their own resolvers.
+export const AuthMethodSchema = z.object({
+  id: z.enum(['sms_otp', 'call']),
+  available: z.boolean(),
+});
+export type AuthMethod = z.infer<typeof AuthMethodSchema>;
+
+export const AuthMethodListSchema = z.array(AuthMethodSchema);
+export type AuthMethodList = z.infer<typeof AuthMethodListSchema>;
+
+// 202 body of POST /auth/call/initiate. The silent staff skip answers the
+// EMPTY object (exclude_none — the OtpRequestResponse parity), so both
+// `handle` and `call` are optional, never null.
+export const AuthCallInfoSchema = z.object({
+  /** The number the CLIENT calls — strictly `+7XXXXXXXXXX` (RFC 3966 tel:). */
+  phone: z.string(),
+  /** Display form for the call screen (`+7 999 555-22-55`). */
+  pretty: z.string(),
+  /** Window deadline (ISO datetime; the add moment + the client constant). */
+  expires_at: z.string(),
+});
+export type AuthCallInfo = z.infer<typeof AuthCallInfoSchema>;
+
+export const AuthCallInitiateResponseSchema = z.object({
+  /** Raw one-time status handle (uuid4-hex) — present only in the response. */
+  handle: z.string().optional(),
+  call: AuthCallInfoSchema.optional(),
+});
+export type AuthCallInitiateResponse = z.infer<typeof AuthCallInitiateResponseSchema>;
+
+// POST /auth/call/status 200 body: `confirmed` sets the client-session
+// cookie on the SAME response; an invalid/consumed handle answers 404.
+export const AuthCallStatusResponseSchema = z.object({
+  status: z.enum(['waiting', 'confirmed', 'expired']),
+});
+export type AuthCallStatusResponse = z.infer<typeof AuthCallStatusResponseSchema>;
+
 // POST /my/records body (spec §5) — the strict booking wire. From the wire
 // there is deliberately NO client_id/visitor_id/price/custom_price/notify/
 // status: the owner comes ONLY from the client session, prices are computed

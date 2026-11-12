@@ -9,6 +9,12 @@
 #   - OTP_TRANSPORT=dev is exported for the backend: without a transport
 #     POST /auth/otp/request is fail-closed 503 (#499 §4.2) and NO client
 #     login can ever happen — the whole #513 fixture depends on it;
+#   - CALLCHECK_TRANSPORT=dev is exported for the backend (#593): the
+#     callcheck method's dev transport — the registry reports `call`
+#     available and /auth/call/dev-done exists to imitate the client's
+#     call (the callcheck specs run the whole login flow on it);
+#   - NEXT_PUBLIC_CONTACT_* are exported for the web server (#593 US-4):
+#     the «Связаться» messenger links must be baked into the bundle;
 #   - the storageState login lives in Playwright globalSetup (the donor's
 #     globalSetup does the same, minus the OTP flow).
 #
@@ -143,11 +149,14 @@ rm -rf "$ABS_FILES_DIR"
 # spellings listed. OTP_TRANSPORT=dev: REQUIRED for the #513 login (see
 # the header) — the dev transport also gates the response's dev_code echo,
 # which the fixture deliberately does NOT use (the code is read from the
-# DB). ENV stays at its default "development".
+# DB). CALLCHECK_TRANSPORT=dev: the #593 callcheck method — without it the
+# registry reports `call` unavailable and the callcheck specs cannot run.
+# ENV stays at its default "development" (the dev transports' second gate).
 cd "$BACKEND_DIR"
 ENV_FILE=.env.test DATABASE_URL="$DATABASE_URL" PYTHONPATH=src \
   CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT" \
   OTP_TRANSPORT=dev \
+  CALLCHECK_TRANSPORT=dev \
   uv run uvicorn src.main:app --host 0.0.0.0 --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 echo "[web-e2e] Backend PID: $BACKEND_PID"
@@ -216,7 +225,14 @@ echo "[web-e2e] Seed canon snapshotted."
 # ── Start the Next.js web dev server ──────────────────────────────────────
 cd "$WEB_DIR"
 echo "[web-e2e] Starting web dev server on :$WEB_PORT..."
-NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" pnpm exec next dev -p "$WEB_PORT" &
+# NEXT_PUBLIC_CONTACT_* (#593 US-4): the «Связаться» messenger links —
+# baked into the bundle at compile time, so they must ride the server env
+# (next dev does NOT load .env.test). Mirrors .env.test defaults; an
+# exported env var always wins over the file.
+NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" \
+NEXT_PUBLIC_CONTACT_TELEGRAM="${NEXT_PUBLIC_CONTACT_TELEGRAM:-MemoE2eAdmin}" \
+NEXT_PUBLIC_CONTACT_WHATSAPP="${NEXT_PUBLIC_CONTACT_WHATSAPP:-+79005550100}" \
+  pnpm exec next dev -p "$WEB_PORT" &
 FRONTEND_PID=$!
 echo "[web-e2e] Web PID: $FRONTEND_PID"
 

@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     # only under the exact ``ENV == "development"`` (staging/preview
     # stay 503). The production transport arrives with #476/#485.
     OTP_TRANSPORT: str = ""
+    # #593 — the callcheck (вход по звонку) transport selector, the
+    # OTP_TRANSPORT mirror. Fail-closed: empty (the default) → NO
+    # provider → the ``call`` method is honestly unavailable in the
+    # /auth/methods registry and initiate answers 503. ``dev`` → the
+    # dev provider, only under the exact ``ENV == "development"``;
+    # ``smsru`` → the real provider (demands the key below — the
+    # fail-fast validator enforces the pairing at startup).
+    CALLCHECK_TRANSPORT: str = ""
+    # The sms.ru ``api_id`` (#593). SecretStr — never surfaces in
+    # repr/logs/errors; required when CALLCHECK_TRANSPORT=smsru.
+    SMSRU_CALLCHECK_API_KEY: SecretStr = SecretStr("")
     # ── Notification subsystem (#482 part 1, spec §3.9; family #476 §4.5) ─
     # Disabled by default: nothing boots until the stack opts in (the
     # dispatcher process arrives in part 2).
@@ -159,6 +170,27 @@ class Settings(BaseSettings):
             raise ValueError(
                 "REDIS_URL must include credentials when ENV=production "
                 "and NOTIFICATION_ENABLED=true"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_callcheck_transport(self) -> "Settings":
+        """#593 fail-fast wiring validation (spec §Конфигурация): a
+        misconfigured callcheck transport refuses to boot instead of
+        failing per-request. ``smsru`` demands the api key; ``dev`` must
+        never run in production (the demo-seed principle — default-deny
+        by environment). Messages name the requirement only — never the
+        key value."""
+        if self.CALLCHECK_TRANSPORT == "smsru" and not (
+            self.SMSRU_CALLCHECK_API_KEY.get_secret_value()
+        ):
+            raise ValueError(
+                "SMSRU_CALLCHECK_API_KEY must be set when "
+                "CALLCHECK_TRANSPORT=smsru (callcheck provider not configured)"
+            )
+        if self.CALLCHECK_TRANSPORT == "dev" and self.ENV == "production":
+            raise ValueError(
+                "CALLCHECK_TRANSPORT=dev is not allowed when ENV=production"
             )
         return self
 

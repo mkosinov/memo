@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Mock } from "vitest";
 
 // ── Hook mocks: the page is the composition layer (#513); the auth
@@ -7,6 +9,16 @@ import type { Mock } from "vitest";
 // useMyPhotos.test.tsx and to-my-photo-vm.test.ts.
 vi.mock("../hooks/useCabinetAuth", () => ({
   useCabinetAuth: vi.fn(),
+}));
+// The login form's method picker (rev.8) rides react-query — hermetic idle
+// registry here; the picker itself is covered by cabinet.test.tsx.
+vi.mock("../hooks/useAuthMethods", () => ({
+  useAuthMethods: () => ({
+    methods: [],
+    availableMethods: [],
+    isPending: false,
+    unavailable: true,
+  }),
 }));
 vi.mock("../hooks/useMyPhotos", () => ({
   useMyPhotos: vi.fn(),
@@ -24,6 +36,15 @@ import {
 
 const mockedUseCabinetAuth = useCabinetAuth as unknown as Mock;
 const mockedUseMyPhotos = useMyPhotos as unknown as Mock;
+
+/** The login form's picker needs a QueryClient (useAuthMethods is mocked
+ * above; the provider is still required by the useQuery call itself). */
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(ui: ReactNode) {
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 function mockSession(status: CabinetSessionStatus) {
   mockedUseCabinetAuth.mockReturnValue(cabinetAuthValue(status));
@@ -47,7 +68,7 @@ describe("Cabinet photos page — anonymous", () => {
   it("shows the phone login form and no section data", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(
       await screen.findByLabelText("Номер телефона"),
@@ -58,7 +79,7 @@ describe("Cabinet photos page — anonymous", () => {
   it("renders neither the cabinet nav nor photo cards nor session phone", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     await screen.findByLabelText("Номер телефона");
     expect(screen.queryByTestId("cabinet-nav")).not.toBeInTheDocument();
@@ -69,7 +90,7 @@ describe("Cabinet photos page — anonymous", () => {
   it("never requests photos while anonymous (enabled=false)", async () => {
     mockSession("anonymous");
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     await screen.findByLabelText("Номер телефона");
     expect(mockedUseMyPhotos).toHaveBeenCalledWith(1, false);
@@ -82,7 +103,7 @@ describe("Cabinet photos page — checking", () => {
   it("shows the loader while the session is being checked", () => {
     mockSession("checking");
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(screen.getByTestId("cabinet-checking")).toBeInTheDocument();
     expect(screen.queryByTestId("cabinet-nav")).not.toBeInTheDocument();
@@ -93,7 +114,7 @@ describe("Cabinet photos page — checking", () => {
 
 describe("Cabinet photos page — authenticated", () => {
   it("shows the section nav with «Мои фото» active and the session phone", async () => {
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     const nav = screen.getByTestId("cabinet-nav");
     expect(nav).toBeInTheDocument();
@@ -120,7 +141,7 @@ describe("Cabinet photos page — authenticated", () => {
       pageCount: 1,
     });
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     const cards = await screen.findAllByTestId("my-photo-card");
     expect(cards).toHaveLength(3);
@@ -141,7 +162,7 @@ describe("Cabinet photos page — authenticated", () => {
   it("shows the loader while photos are pending", () => {
     mockPhotos({ isPending: true });
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(screen.getByTestId("my-photos-loading")).toBeInTheDocument();
     expect(screen.queryByTestId("my-photo-card")).not.toBeInTheDocument();
@@ -150,7 +171,7 @@ describe("Cabinet photos page — authenticated", () => {
   it("shows an error message when the photos request fails", () => {
     mockPhotos({ error: new Error("network down") });
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(screen.getByTestId("my-photos-error")).toBeInTheDocument();
     expect(screen.queryByTestId("my-photo-card")).not.toBeInTheDocument();
@@ -163,7 +184,7 @@ describe("Cabinet photos page — empty state and pagination", () => {
   it("shows «У вас пока нет фото» when the client has no photos", () => {
     mockPhotos({ cards: [], total: 0, pageCount: 1 });
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(screen.getByTestId("my-photos-empty")).toBeInTheDocument();
     expect(screen.getByText("У вас пока нет фото")).toBeInTheDocument();
@@ -173,7 +194,7 @@ describe("Cabinet photos page — empty state and pagination", () => {
   it("renders pagination when the list spills past one page and switches pages", async () => {
     mockPhotos({ cards: [myPhotoCardView()], total: 45, page: 1, pageCount: 3 });
 
-    render(<CabinetPhotosPage />);
+    renderPage(<CabinetPhotosPage />);
 
     expect(screen.getByTestId("list-pagination")).toBeInTheDocument();
     expect(screen.getByTestId("list-pagination-info")).toHaveTextContent(

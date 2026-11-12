@@ -43,6 +43,13 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 
+from src.auth.callcheck_provider import (
+    CallcheckProviderError,
+    DevCallcheckProvider,
+    get_callcheck_transport,
+)
+from src.auth.callcheck_store import get_callcheck_store
+from src.auth.otp_transport import get_otp_transport
 from src.auth.passwords import PasswordPolicyError
 from src.auth.permissions import (
     CLIENT_SESSION_COOKIE,
@@ -61,13 +68,20 @@ from src.auth.session import ABSOLUTE_CAP
 from src.core.config import settings
 from src.db import SessionDep
 from src.domain.errors import PhoneInvalidError
-from src.domain.phones import validate_phone
+from src.domain.phones import pretty_phone, validate_canonical_phone, validate_phone
 from src.errors import ErrorCode, ErrorDetail
 from src.models.client import Client
 from src.models.staff import Staff
 from src.models.user import User
 from src.schemas.auth import (
+    AuthCallDevDoneRequest,
+    AuthCallInfo,
+    AuthCallInitiateRequest,
+    AuthCallInitiateResponse,
+    AuthCallStatusRequest,
+    AuthCallStatusResponse,
     AuthMeResponse,
+    AuthMethodResponse,
     AuthUser,
     ChangePasswordRequest,
     LoginRequest,
@@ -80,6 +94,12 @@ from src.schemas.auth import (
     PasswordSetupValidateResponse,
 )
 from src.schemas.my import MyClientResponse
+from src.usecases.callcheck_login import (
+    CallcheckUnavailableError,
+    initiate_auth_call,
+    poll_auth_call_status,
+)
+from src.usecases.client_login import set_client_session_cookie
 from src.usecases.otp_login import (
     InvalidOtpError,
     OtpTransportUnavailableError,
@@ -208,6 +228,26 @@ async def me(
 ) -> AuthMeResponse:
     """Resolve the current session — 401 ``AUTH_UNAUTHORIZED`` when absent."""
     return await _build_me_response(db_session, authed)
+
+
+@router.get("/methods", response_model=list[AuthMethodResponse])
+async def auth_methods() -> list[AuthMethodResponse]:
+    """The client-auth method registry — honest availability (#593 §Реестр).
+
+    PUBLIC_ROUTE (read-only, no credentials — nothing to forge). The
+    single source the frontend picker builds from: ``available`` = the
+    method's transport RESOLVER returned an object, never «the env var
+    is non-empty» — an off, environment-gated (``dev`` outside
+    development) or misconfigured (unknown selector) transport is
+    honestly unavailable, so the picker never offers a method whose
+    endpoints would 503. ``sms_otp`` — the #499/#586 OTP seam; ``call``
+    — the #593 callcheck seam. Future methods (Telegram/Max) join this
+    list with their own resolvers.
+    """
+    return [
+        AuthMethodResponse(id="sms_otp", available=get_otp_transport() is not None),
+        AuthMethodResponse(id="call", available=get_callcheck_transport() is not None),
+    ]
 
 
 @router.post(
@@ -452,15 +492,7 @@ async def otp_verify(
     except InvalidOtpError as exc:
         raise _invalid_otp() from exc
 
-    response.set_cookie(
-        key=CLIENT_SESSION_COOKIE,
-        value=token,
-        max_age=int(ABSOLUTE_CAP.total_seconds()),
-        httponly=True,
-        samesite="lax",
-        secure=settings.ENV == "production",
-        path="/",
-    )
+    set_client_session_cookie(response, token)
 
     # The name comes from the linked card regardless of its archive flag
     # (the /my/client rule — the owner is the account, the card is data).
@@ -472,3 +504,132 @@ async def otp_verify(
             )
         ).scalar_one_or_none()
     return MyClientResponse(phone=user.phone, name=name)
+
+
+@router.post(
+    "/call/initiate",
+    status_code=202,
+    response_model=AuthCallInitiateResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(verify_origin)],
+)
+async def call_initiate(
+    payload: AuthCallInitiateRequest,
+    request: Request,
+    db_session: SessionDep,
+) -> AuthCallInitiateResponse:
+    """Start a verification-by-call check — ALWAYS 202 on a valid number.
+
+    PUBLIC_ROUTE + Origin-vs-CORS line (#593 §Эндпоинты, the OTP-route
+    posture). The phone must be the CANONICAL ``+7XXXXXXXXXX`` string —
+    anything else answers 422 ``PHONE_INVALID`` BEFORE the gates and
+    the provider (a typo must not hide behind a 503). A staff phone is
+    silently skipped (the shared ``otp/request`` predicate — the 202
+    body is the empty object, no check exists, no enumeration oracle).
+    Without a configured transport — or on ANY provider failure — the
+    endpoint is fail-closed 503 ``NOTIFICATION_TRANSPORT_UNAVAILABLE``:
+    nothing is written, no budget is spent. Success answers the RAW
+    one-time ``handle`` (only its digest is persisted) and the
+    ``call`` block whose ``phone`` is strictly ``+7…`` (some operators
+    reject the plus-less form, especially from abroad).
+    """
+    try:
+        phone = validate_canonical_phone(payload.phone)
+    except PhoneInvalidError as exc:
+        raise _phone_invalid(str(exc)) from exc
+
+    try:
+        initiation = await initiate_auth_call(
+            db_session,
+            phone=phone,
+            client_ip=_client_ip(request),
+        )
+    except (CallcheckUnavailableError, CallcheckProviderError) as exc:
+        raise _transport_unavailable() from exc
+
+    if initiation is None:  # the silent staff skip — indistinguishable 202
+        return AuthCallInitiateResponse()
+    return AuthCallInitiateResponse(
+        handle=initiation.handle,
+        call=AuthCallInfo(
+            phone=initiation.call_phone,
+            pretty=pretty_phone(initiation.call_phone),
+            expires_at=initiation.expires_at,
+        ),
+    )
+
+
+@router.post(
+    "/call/status",
+    response_model=AuthCallStatusResponse,
+    dependencies=[Depends(verify_origin)],
+)
+async def call_status(
+    payload: AuthCallStatusRequest,
+    request: Request,
+    response: Response,
+    db_session: SessionDep,
+) -> AuthCallStatusResponse:
+    """Poll the check by its one-time handle → waiting / confirmed / expired.
+
+    PUBLIC_ROUTE + Origin-vs-CORS line (#593 §Эндпоинты, the OTP-route
+    posture). An invalid, replaced or CONSUMED handle answers the
+    indistinguishable 404 — the endpoint never discloses which checks
+    exist. The provider is asked FIRST (debounced 3 s per phone; any
+    provider failure is a soft ``waiting`` — no state change, no
+    journal row), the local window closes a check only when the
+    provider did not confirm it: a late call is confirmed until the
+    purge margin. ``confirmed`` is the atomic consume + the SHARED
+    client-login finalizer (find-or-create, ``phone_is_confirmed``,
+    NO rotation) in ONE transaction — parallel polls of one handle
+    yield exactly one session, the losers see 404; the cookie is set
+    AFTER the commit, only on this answer. No numeric gate: the volume
+    is bounded by the window and the debounce.
+    """
+    poll = await poll_auth_call_status(
+        db_session,
+        handle=payload.handle,
+        client_ip=_client_ip(request),
+    )
+    if poll is None:
+        raise HTTPException(status_code=404)
+
+    if poll.token is not None:
+        set_client_session_cookie(response, poll.token)
+    return AuthCallStatusResponse(status=poll.status.value)
+
+
+@router.post(
+    "/call/dev-done",
+    status_code=204,
+    dependencies=[Depends(verify_origin)],
+)
+async def call_dev_done(
+    payload: AuthCallDevDoneRequest,
+    request: Request,
+    db_session: SessionDep,
+) -> Response:
+    """The dev imitation of the client's call (the ``dev_code`` analog).
+
+    PUBLIC_ROUTE + Origin-vs-CORS line. The route is gated by the
+    RESOLVER — the double gate of ``dev_code`` evaluated per request
+    (settings resolve at call time): unless
+    ``get_callcheck_transport()`` returns the DEV transport
+    (``CALLCHECK_TRANSPORT=dev`` AND the exact ``ENV == "development"``
+    — the ENV default IS development, so one ENV gate is not enough),
+    the answer is the indistinguishable 404. On the dev transport the
+    check resolved by the handle is flipped to confirmed ON the
+    resolved singleton — the imitation lives in the transport, never
+    behind a separate flag; the next status poll confirms and
+    finalizes through the ordinary flow.
+    """
+    transport = get_callcheck_transport()
+    if not isinstance(transport, DevCallcheckProvider):
+        raise HTTPException(status_code=404)
+
+    row = await get_callcheck_store().find_by_handle(db_session, payload.handle)
+    if row is None:
+        raise HTTPException(status_code=404)
+
+    transport.dev_done(row.provider_check_id)
+    return Response(status_code=204)

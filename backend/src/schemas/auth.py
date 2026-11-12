@@ -9,6 +9,9 @@ when ``master`` is null (a master user without a linked profile is valid).
 Spec: docs/specs/2026-09-08-auth-design.md §3.6
 """
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -141,3 +144,100 @@ class OtpVerifyRequest(BaseModel):
 
     phone: str
     code: str = Field(min_length=1)
+
+
+class AuthMethodResponse(BaseModel):
+    """One entry of the ``GET /api/v1/auth/methods`` registry (#593 §Реестр).
+
+    ``available`` = the method's transport RESOLVER returned an object —
+    never «the env var is non-empty»: an off, environment-gated or
+    misconfigured transport is honestly unavailable, so the frontend
+    picker never offers a method whose endpoints would 503. Future
+    methods (Telegram/Max) join the ``Literal`` with their resolvers.
+    """
+
+    id: Literal["sms_otp", "call"]
+    available: bool
+
+
+class AuthCallInitiateRequest(BaseModel):
+    """``POST /api/v1/auth/call/initiate`` body (#593 §Эндпоинты).
+
+    Strict body (extra keys → 422). ``phone`` carries no schema bounds:
+    the CANONICAL domain rule (:func:`src.domain.phones.validate_canonical_phone`)
+    owns the validation, so a non-``+7XXXXXXXXXX`` value answers the
+    domain code ``PHONE_INVALID`` (422 before gates and provider — a
+    typo must not hide behind a 503; the ``OtpRequestRequest``
+    precedent).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+
+
+class AuthCallInfo(BaseModel):
+    """The check the client must complete — the ``call`` block (#593).
+
+    ``phone`` — the number the CLIENT calls, strictly ``+7…`` (without
+    the plus some operators reject the call, especially from abroad —
+    a provider requirement); ``pretty`` — the display form for the call
+    screen; ``expires_at`` — the window deadline (the add moment plus
+    the client-side constant; the provider response carries no time).
+    """
+
+    phone: str
+    pretty: str
+    expires_at: datetime
+
+
+class AuthCallInitiateResponse(BaseModel):
+    """202 body of a callcheck initiate — ``{}`` or ``{handle, call}``.
+
+    The silent staff skip answers the EMPTY object (serialized with
+    ``exclude_none`` — the ``OtpRequestResponse`` parity: nothing was
+    created, so nothing is surfaced; the 202 is indistinguishable from
+    a real initiate at the response-shape level the spec fixes).
+    """
+
+    #: The RAW one-time status handle (uuid4-hex) — present ONLY in the
+    #: response; the DB keeps just its pepper-keyed digest.
+    handle: str | None = None
+    call: AuthCallInfo | None = None
+
+
+class AuthCallStatusRequest(BaseModel):
+    """``POST /api/v1/auth/call/status`` body (#593 §Эндпоинты).
+
+    Strict body (extra keys → 422). ``handle`` is the raw one-time
+    handle the initiate handed out; only its digest is stored, and an
+    invalid/consumed one answers the indistinguishable 404.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)
+
+
+class AuthCallStatusResponse(BaseModel):
+    """The poll answer — ``{"status": "waiting" | "confirmed" | "expired"}``.
+
+    The RAW handle and any provider detail never appear here (US-7); on
+    ``confirmed`` the client session cookie rides the same response
+    (set by the router AFTER the consume transaction committed).
+    """
+
+    status: Literal["waiting", "confirmed", "expired"]
+
+
+class AuthCallDevDoneRequest(BaseModel):
+    """``POST /api/v1/auth/call/dev-done`` body (#593 §Эндпоинты, дев-режим).
+
+    The dev imitation of the client's call: flip the check the initiate
+    created (resolved through the same one-time handle). Strict body
+    (extra keys → 422).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)

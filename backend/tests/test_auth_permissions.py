@@ -243,6 +243,19 @@ class TestPublicRoutes:
             ("POST", "/api/v1/auth/password-setup"),
             ("POST", "/api/v1/auth/otp/request"),
             ("POST", "/api/v1/auth/otp/verify"),
+            # #593 Task 1: the client-auth method registry (spec
+            # §Реестр) — the allowlist-equality set missed it then.
+            ("GET", "/api/v1/auth/methods"),
+            # #593 Task 3: the callcheck initiate (spec §Эндпоинты) —
+            # public with the Origin-vs-CORS line, like the OTP pair.
+            ("POST", "/api/v1/auth/call/initiate"),
+            # #593 Task 4: the status poll + the dev imitation (spec
+            # §Эндпоинты) — the one-time handle is the authority;
+            # dev-done is resolver-gated per request (404 unless the
+            # dev transport) but allowlisted in every configuration so
+            # the default-deny walk stays exact.
+            ("POST", "/api/v1/auth/call/status"),
+            ("POST", "/api/v1/auth/call/dev-done"),
         }) == PUBLIC_ROUTES
 
     def test_events_sse_route_is_not_public(self) -> None:

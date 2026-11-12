@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-12
+
+### Added
+- **GH #593 — Вход по звонку (sms.ru callcheck) + «Связаться»: метод
+  авторизации «звонок» в дополнение к SMS-коду** — branch
+  `593-auth-callcheck` (7 задач `8d10668c..ef9afa79` + доки рев.8, base
+  `27fcde93`; 68 файлов, +7629/−273; спека
+  `docs/specs/2026-11-11-auth-callcheck-design.md` рев.8, план
+  `docs/plans/2026-11-11-auth-callcheck-plan.md` рев.8, 7/7):
+  - **Провайдер и реестр (T1 `8d10668c`):** `SmsRuClient`
+    (`callcheck/add` + `callcheck/status`), шов `CallcheckProvider` +
+    резолвер транспорта `CALLCHECK_TRANSPORT` (пусто → метод выключен
+    fail-closed; `dev`; `smsru` + `SMSRU_CALLCHECK_API_KEY` SecretStr,
+    не в логах); честный реестр методов `GET /auth/methods`.
+  - **Хранение (T2 `2b64241e`):** миграция `b9e1d3f5a7c2` —
+    `auth_calls` (одна строка на телефон, новая заменяет старую) +
+    append-only `auth_call_attempts`; `CallcheckStore`, хэши
+    хэндла/телефона/IP, окно 5 минут.
+  - **Initiate (T3 `8dd4f4a7`):** `POST /auth/call/initiate` — телефон
+    канонический `+7…` (иначе 422), стафф-номера — молчаливый 202;
+    гейты 5/телефон, 20/IP, 5 номеров/IP за 15 мин + глобальный потолок
+    (fail-closed 503); учёт лимитов — только на успех провайдера.
+  - **Status + dev-done (T4 `8ee79564`+`2ee128ca`):** `POST
+    /auth/call/status` — опрос по одноразовому хэндлу; confirmed =
+    погашение хэндла + финализация клиентского входа одной транзакцией
+    (сессии клиента не ротируются); `POST /auth/call/dev-done` —
+    дев-имитация звонка, двойной гейт (дев-транспорт в development),
+    иначе 404.
+  - **Единый экран авторизации web (T5 `ee63d5b3`+`c8bad4c3`+`ef9afa79`):**
+    пикер методов из реестра (на `/cabinet` — при загрузке, рев.8),
+    экран звонка (`tel:` `+7…`, таймер), панель «Связаться»
+    (`NEXT_PUBLIC_CONTACT_TELEGRAM`/`WHATSAPP`, скрытие при пустых).
+  - **Web-e2e (T6 `c33038f0`+`5378b089`):** флоу на дев-транспорте
+    US-1…US-5 (`booking-callcheck`/`cabinet-callcheck`), SMS-регрессия.
+  - **Env-примеры (T7 `6bbc12fb`):** `CALLCHECK_TRANSPORT` +
+    `SMSRU_CALLCHECK_API_KEY` в `backend/.env.example`; контакты
+    «Связаться» в web-примерах.
+  - Tests: полный pytest **4097p/0f** (новые сьюты 59+17+10+35+34+3 +
+    смежные регрессии), web vitest **571/571**, api-client **575/575**,
+    e2e callcheck **4/4 ×3** + SMS-регрессия **4/4**, mypy/ruff/tsc
+    чистые; visual gate G4.5 **exit 0** (рев.8: 1 машинная проверка на
+    `/cabinet` + 4 manual через web-e2e).
+
 ## [Unreleased] — 2026-11-10
 
 ### Changed

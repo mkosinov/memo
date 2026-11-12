@@ -7,7 +7,7 @@ import { Overlay } from "./Overlay";
 import { Button } from "./Button";
 import { Counter } from "./Counter";
 import { ContactForm } from "./ContactForm";
-import { OtpStep } from "./OtpStep";
+import { AuthScreen } from "./AuthScreen";
 import {
   buildMyRecordCreate,
   SEATS_KEY,
@@ -49,8 +49,10 @@ function formatPrice(price: number): string {
   return `${price.toLocaleString("ru-RU")} ₽`;
 }
 
-/** Overlay content machine (#499): form → (OTP step for anonymous) → success. */
-type Step = "form" | "otp" | "success";
+/** Overlay content machine (#499 → #593): form → (auth step for anonymous) → success.
+ * The step was renamed `otp` → `auth`: one screen, several methods (SMS code,
+ * confirmation call) — there is no one-time password in the call branch. */
+type Step = "form" | "auth" | "success";
 
 export function BookingActivityOverlay({
   isOpen,
@@ -171,7 +173,7 @@ export function BookingActivityOverlay({
     if (authenticated) {
       void sendRecord(payload);
     } else {
-      setStep("otp");
+      setStep("auth");
     }
   };
 
@@ -184,9 +186,40 @@ export function BookingActivityOverlay({
     if (pendingPayload) await sendRecord(pendingPayload);
   };
 
-  const handleOtpBack = () => {
+  /** Call-check confirmed (#593): the poll's response set the session cookie —
+   * the same continuation as a verified code: back to the form (session phone)
+   * and the pending record goes out through the authorized path. */
+  const handleCallConfirmed = () => {
+    setStep("form");
+    void session.refresh();
+    if (pendingPayload) void sendRecord(pendingPayload);
+  };
+
+  const handleAuthBack = () => {
     setStep("form");
     otp.reset();
+  };
+
+  /** The «Связаться» prefilled text (#593): the request details a client who
+   * cannot log in still hands the administrator. */
+  const buildContactMessage = (): string => {
+    if (!activity) return "";
+    const guests = hasTariffs
+      ? tariffs
+          .filter((t) => (counts[t.id] ?? 0) > 0)
+          .map((t) => `${t.title}: ${counts[t.id]}`)
+          .join(", ")
+      : `${SEATS_LABEL}: ${totalCount}`;
+    return [
+      "Здравствуйте! Хочу записаться:",
+      `${activity.title}`,
+      `Дата и время: ${activity.dateFormatted}, ${activity.time}`,
+      guests ? `Гости: ${guests}` : null,
+      contactName ? `Имя: ${contactName}` : null,
+      `Телефон: ${phoneValue}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
   };
 
   const handleRetry = () => {
@@ -259,19 +292,16 @@ export function BookingActivityOverlay({
     );
   }
 
-  if (step === "otp") {
+  if (step === "auth") {
     return (
       <Overlay isOpen={isOpen} onClose={onClose} size="full">
-        <OtpStep
+        <AuthScreen
           phone={phoneValue}
-          requesting={otp.stage === "requesting"}
-          codeSent={otp.stage === "entering" || otp.stage === "verifying"}
-          verifying={otp.stage === "verifying"}
-          error={otp.error}
-          devCode={otp.devCode}
-          onRequestCode={() => void otp.requestCode(phoneValue)}
-          onVerify={handleVerifyCode}
-          onBack={handleOtpBack}
+          contactMessage={buildContactMessage()}
+          otp={otp}
+          onSmsVerify={handleVerifyCode}
+          onCallConfirmed={handleCallConfirmed}
+          onBack={handleAuthBack}
         />
       </Overlay>
     );

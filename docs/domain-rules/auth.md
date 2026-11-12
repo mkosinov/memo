@@ -122,6 +122,7 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | GET | /api/v1/auth/methods | public | доступные методы входа клиента (#593, спека) |
 | POST | /api/v1/auth/call/initiate | public | вход звонком: создать проверку callcheck (#593, спека) |
 | POST | /api/v1/auth/call/status | public | опрос проверки по одноразовому хэндлу; при 401 — клиентская сессия (#593, спека) |
+| POST | /api/v1/auth/call/dev-done | public | дев-имитация звонка для разработки/e2e: verify_origin; маршрут существует только при дев-транспорте в development (двойной гейт, как `dev_code`), иначе 404 (#593, спека) |
 | GET | /api/v1/public/photos | public | анонимная фото-витрина: forced `is_public=true`, минимальная схема `PhotoPublicResponse` (ADR-015, #493) |
 | GET | /api/v1/my/client | клиентская сессия | `{phone, name}` — кто вошёл (#499, спека) |
 | POST | /api/v1/my/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |

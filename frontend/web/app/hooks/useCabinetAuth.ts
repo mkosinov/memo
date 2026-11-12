@@ -8,20 +8,33 @@ import type { ClientSession } from "./useClientSession";
 import { useOtpLogin } from "./useOtpLogin";
 import type { OtpLogin } from "./useOtpLogin";
 
+/** The method ids the auth screen knows (registry `AuthMethod.id` minus the
+ * `sms_otp` wire name — the UI calls it «sms»). */
+export type PreferredAuthMethod = "sms" | "call";
+
 /** The cabinet login/logout wiring (#523 shell, extracted for reuse by the
- * section screens #513): session detection + the phone → OTP step flow +
- * logout. Pure wiring — the markup lives in CabinetLogin/CabinetSessionCard. */
+ * section screens #513): session detection + the phone → auth step flow +
+ * logout. Pure wiring — the markup lives in CabinetLogin/CabinetSessionCard.
+ * The step was renamed `otp` → `auth` (#593): several methods, not only the
+ * one-time password. `preferredMethod` is the login-form picker's prechoice
+ * (spec rev.8: the picker renders on load; «Войти» then applies it — null
+ * keeps the auth step's own picker order). */
 export interface CabinetAuth {
   session: ClientSession;
   otp: OtpLogin;
-  /** Login sub-step: the phone form or the «Подтвердите телефон» step. */
-  step: "login" | "otp";
+  /** Login sub-step: the phone form (with the picker prechoice) or the auth screen. */
+  step: "login" | "auth";
   phone: string;
   setPhone: (phone: string) => void;
-  /** Phone-form submit: a valid RU phone advances to the OTP step. */
+  /** The login-form picker prechoice — applied by «Войти». */
+  preferredMethod: PreferredAuthMethod | null;
+  setPreferredMethod: (method: PreferredAuthMethod | null) => void;
+  /** Phone-form submit: a valid RU phone advances to the auth screen. */
   submitPhone: () => void;
-  /** Back from the OTP step to the phone form. */
+  /** Back from the auth screen to the phone form. */
   backToPhone: () => void;
+  /** Auth confirmed (any method) — refresh the session; the screen flips. */
+  handleAuthConfirmed: () => void;
   /** OTP verify — on success refreshes the session (screen flips). */
   verifyCode: (code: string) => Promise<void>;
   /** «Выйти»: drops the session cookie and returns to the login form. */
@@ -32,16 +45,24 @@ export function useCabinetAuth(): CabinetAuth {
   const session = useClientSession(true);
   const otp = useOtpLogin();
   const [phone, setPhone] = useState("");
-  const [step, setStep] = useState<"login" | "otp">("login");
+  const [step, setStep] = useState<"login" | "auth">("login");
+  const [preferredMethod, setPreferredMethod] =
+    useState<PreferredAuthMethod | null>(null);
 
   const submitPhone = () => {
     if (!isValidPhoneNumber(phone, "RU")) return;
-    setStep("otp");
+    setStep("auth");
   };
 
   const backToPhone = () => {
     otp.reset();
     setStep("login");
+  };
+
+  /** The call branch confirmed (#593): the status poll already set the
+   * client-session cookie — refresh and let the redirect take over. */
+  const handleAuthConfirmed = () => {
+    void session.refresh();
   };
 
   const verifyCode = async (code: string) => {
@@ -63,8 +84,11 @@ export function useCabinetAuth(): CabinetAuth {
     step,
     phone,
     setPhone,
+    preferredMethod,
+    setPreferredMethod,
     submitPhone,
     backToPhone,
+    handleAuthConfirmed,
     verifyCode,
     handleLogout,
   };

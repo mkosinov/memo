@@ -11,8 +11,10 @@ export type OtpLoginStage = "idle" | "requesting" | "entering" | "verifying";
 /** Fail-closed transport (#499 US-4): no configured transport → 503 → this message. */
 export const OTP_UNAVAILABLE_MESSAGE = "Вход временно недоступен";
 
-/** Localized step fallback — used unless the refusal carries a structured server message. */
-const OTP_FAILURE_MESSAGE = "Не удалось подтвердить телефон";
+/** Localized step fallback — used unless the refusal carries a structured server
+ * message. Shared by the call-auth branch (#593): step-local failures reuse the
+ * same texts, no new hardcoded strings. */
+export const OTP_FAILURE_MESSAGE = "Не удалось подтвердить телефон";
 
 function otpErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {

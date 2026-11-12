@@ -11,14 +11,12 @@ Two entry points called by the auth router (the HTTP mapping — 202 /
   send limits) and the transport hand-off.
 * :func:`verify_otp_login` — the Task 2 ``verify`` (HMAC + TTL + attempt
   gates, ATOMIC code absorption in this transaction), then the §3
-  account flow: reuse the client account for the phone or create
-  ``user(role=client, phone)`` + the client card (find-or-create by
-  exact phone, ACTIVE cards only, first active on duplicates under the
-  stable creation-order sort) + the ``UserSettings`` defaults row (GH
-  #319 — same transaction), ``phone_is_confirmed = true``; a concurrent
-  verify on the same new phone loses the unique-``users.phone`` race,
-  re-reads the winner's row and continues (idempotent login). The
-  client session row is added in the SAME commit as the code absorption.
+  account flow + the session row via the SHARED finalizer
+  (:func:`src.usecases.client_login.finalize_client_login` — extracted
+  by #593 Task 4 so ``call/status`` confirms through the exact same
+  code: find-or-create the client account, ``phone_is_confirmed=true``,
+  no rotation); the client session row is added in the SAME commit as
+  the code absorption.
 
 Commit discipline mirrors ``AuthService`` (not ``@transactional`` —
 auth is not an events-emitting entity): the caller-owned session
@@ -34,18 +32,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
-from src.auth.otp import OtpCode
 from src.auth.otp_service import get_otp_service
 from src.auth.otp_transport import OtpTransportUnavailableError, get_otp_transport
-from src.auth.session import new_session
 from src.models.enums import UserRole
 from src.models.user import User
-from src.services.client import get_client_service
-from src.services.user_settings import UserSettingsService
+from src.usecases.client_login import finalize_client_login
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +62,7 @@ class InvalidOtpError(Exception):
     MESSAGE = "Неверный код подтверждения или истёк срок действия"
 
 
-async def _phone_unavailable_for_client_login(
+async def phone_unavailable_for_client_login(
     db_session: AsyncSession,
     phone: str,
 ) -> bool:
@@ -81,6 +74,10 @@ async def _phone_unavailable_for_client_login(
     refuses archived accounts, so the login could never resolve). Both
     skip code generation and the transport entirely — the 202 is
     byte-identical to a real send, no enumeration oracle.
+
+    Public since #593: the callcheck initiate path shares this EXACT
+    predicate for its own silent 202 (spec §Эндпоинты — «тот же
+    предикат, что и в запросе кода»); one rule, one home.
     """
     row = (
         await db_session.execute(select(User.role, User.is_active).where(User.phone == phone))
@@ -108,80 +105,12 @@ async def request_otp_code(
     if transport is None:
         raise OtpTransportUnavailableError()
 
-    if await _phone_unavailable_for_client_login(db_session, phone):
+    if await phone_unavailable_for_client_login(db_session, phone):
         return None
 
     code = await get_otp_service().issue(db_session, phone, client_ip)
     await transport.send(phone, code)
     return code
-
-
-async def _reuse_client_user(
-    db_session: AsyncSession,
-    phone: str,
-) -> User | None:
-    """The client account for this phone, if one exists (re-login).
-
-    A successful confirmation always stamps ``phone_is_confirmed = true``
-    (spec §3) — idempotent on an already-confirmed account. The lookup
-    is role-scoped: a staff holder can never surface here (request-side
-    silence means no code row exists for its phone in the first place).
-    """
-    user = (
-        await db_session.execute(
-            select(User).where(
-                User.phone == phone,
-                User.role == UserRole.CLIENT.value,
-            )
-        )
-    ).scalar_one_or_none()
-    if user is not None:
-        user.phone_is_confirmed = True
-    return user
-
-
-async def _create_client_user(
-    db_session: AsyncSession,
-    phone: str,
-) -> User:
-    """§3: card + passwordless client account + settings, one transaction.
-
-    The card comes from the active-only exact-phone find-or-create
-    (duplicates → first active under the stable sort). The account is
-    ``role=client``, ``password_hash=NULL`` (the invariant — client
-    accounts never hold a password), linked to the card, confirmed.
-    A concurrent verify on the same new phone: the unique
-    ``users.phone`` insert loses the race → rollback, re-absorb the
-    code (the rollback resurrects its row), re-read the winner's
-    account and continue — the idempotent-login rule.
-    """
-    card = await get_client_service().get_or_create_active_by_phone(db_session, phone)
-    user = User(
-        phone=phone,
-        role=UserRole.CLIENT.value,
-        client_id=card.id,
-        phone_is_confirmed=True,
-    )
-    db_session.add(user)
-    try:
-        await db_session.flush()  # materializes user.id (the create_row pattern)
-    except IntegrityError:
-        await db_session.rollback()
-        await db_session.execute(sa_delete(OtpCode).where(OtpCode.phone == phone))
-        winner = (
-            await db_session.execute(
-                select(User).where(
-                    User.phone == phone,
-                    User.role == UserRole.CLIENT.value,
-                )
-            )
-        ).scalar_one()
-        return winner
-
-    # GH #319: the guaranteed child row in the SAME transaction — after
-    # the user flush, so the FK target exists (the create_user order).
-    await UserSettingsService.insert_defaults(db_session, user.id)
-    return user
 
 
 async def verify_otp_login(
@@ -194,8 +123,9 @@ async def verify_otp_login(
     """Verify the code and issue the client session — one commit.
 
     ``verify`` absorbs the code row INSIDE this transaction (one-time
-    use, §4.1); the account find-or-create (§3) and the new session row
-    join it, and the single commit makes the login atomic with the
+    use, §4.1); the SHARED finalizer's account flow (§3 — extracted to
+    :mod:`src.usecases.client_login` by #593 Task 4) and the new session
+    row join it, and the single commit makes the login atomic with the
     absorption. Any code refusal raises :class:`InvalidOtpError` (the
     unified answer; the gates may raise 429 first — a tripped budget
     rejects even the correct code). Returns ``(user, token)``; the
@@ -204,11 +134,7 @@ async def verify_otp_login(
     if not await get_otp_service().verify(db_session, phone, code, client_ip):
         raise InvalidOtpError(InvalidOtpError.MESSAGE)
 
-    user = await _reuse_client_user(db_session, phone)
-    if user is None:
-        user = await _create_client_user(db_session, phone)
+    user, token = await finalize_client_login(db_session, phone=phone)
 
-    session = new_session(user.id)
-    db_session.add(session)
     await db_session.commit()
-    return user, session.token
+    return user, token

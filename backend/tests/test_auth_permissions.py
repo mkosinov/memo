@@ -233,6 +233,11 @@ class TestPublicRoutes:
             ("GET", "/api/v1/activities"),
             ("GET", "/api/v1/activities/{id}"),
             ("GET", "/api/v1/public/photos"),
+            # GH #600: the anonymous schedule list — minimal audience
+            # schema, private rows excluded server-side. The two bare
+            # activity entries stay until #600 Task 2 flips the shared
+            # routes to activities:read.
+            ("GET", "/api/v1/public/activities"),
             # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed
             # from the allowlist — the route carries records:write now;
             # guest booking is #499.

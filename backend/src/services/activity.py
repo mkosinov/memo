@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -26,9 +26,11 @@ from src.repositories.generic import BaseRepository, get_base_repository
 from src.repositories.search import SearchField, ids_in_predicate, search_predicate
 from src.schemas.activity import (
     ActivityCreate,
+    ActivityPublicResponse,
     ActivityResponse,
     ActivityUpdate,
     CopyWeekResult,
+    PublicActivityListParams,
 )
 from src.schemas.common import PaginatedResponse
 from src.services.decorators import transactional
@@ -536,3 +538,75 @@ async def sum_active_seats_bulk(
         .group_by(Record.activity_id)
     )
     return {row[0]: int(row[1]) for row in result.all()}
+
+
+async def list_public_activities_view(
+    db_session: AsyncSession,
+    params: PublicActivityListParams,
+) -> tuple[list[ActivityPublicResponse], int]:
+    """``/api/v1/public/activities`` schedule composite (ADR-015, #600).
+
+    Modeled on ``list_public_photos_view`` (the #493 precedent): a
+    module-level free function behind the anonymous route, with a
+    per-audience schema and FORCED visibility — the NULL-safe
+    ``is_private IS NOT TRUE`` predicate excludes private rows
+    server-side (a private lesson is invisible to clients, never a
+    client-side concern). Sort is pinned: ``start ASC, id ASC`` (the
+    web schedule's deterministic feed; no sort surface). Date window:
+    whole-day inclusive bounds via the shared ``day_range`` canon; when
+    ``date_from`` is absent the lower bound defaults to TODAY (the web
+    schedule never shows the past) — ``date_to`` stays open-ended when
+    absent. The typed ``?id=`` set narrowing (the pagination brick,
+    #232) ANDs with the predicate — narrowing never expands visibility:
+    a private id yields an empty page, not a leak.
+
+    The shared ``ActivityService.list`` is NOT touched (admin grid +
+    master scope ride it — #600 domain rule: never reintroduce
+    private-filtering there). ``occupied`` uses the same bulk
+    SUM(seats) computation as the staff list
+    (``sum_active_seats_bulk``), so the public and staff counts can
+    never drift apart.
+
+    Returns ``(items, total)``; the router assembles the
+    ``PaginatedResponse`` envelope echoing the client's page/per_page.
+    """
+    # Default window: from today when date_from is absent (UTC canon —
+    # stored ``start`` values are naive UTC, ``src/util/utc.py``).
+    date_from = params.date_from
+    if date_from is None:
+        date_from = datetime.now(UTC).date()
+    from_dt, to_dt = day_range(date_from, params.date_to)
+
+    stmt = select(Activity).where(Activity.is_private.is_not(True))
+    id_pred = ids_in_predicate(Activity.id, params.id)
+    if id_pred is not None:
+        stmt = stmt.where(id_pred)
+    if from_dt is not None:
+        stmt = stmt.where(Activity.start >= from_dt)
+    if to_dt is not None:
+        stmt = stmt.where(Activity.start <= to_dt)
+
+    items_orm, total = await get_base_repository().list_entity(
+        db_session,
+        stmt,
+        order_by=[Activity.start.asc(), Activity.id.asc()],
+        limit=params.per_page,
+        offset=(params.page - 1) * params.per_page,
+    )
+    occupied_map = await sum_active_seats_bulk(
+        db_session, [a.id for a in items_orm]
+    )
+    items = [
+        ActivityPublicResponse(
+            id=a.id,
+            service_id=a.service_id,
+            master_id=a.master_id,
+            location_id=a.location_id,
+            start=a.start,
+            duration=a.duration,
+            capacity=a.capacity,
+            occupied=occupied_map.get(a.id, 0),
+        )
+        for a in items_orm
+    ]
+    return items, total

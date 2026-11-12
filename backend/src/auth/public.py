@@ -50,6 +50,11 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # ADR-015: anonymous showcase namespace. The prefix exposes nothing —
         # entries here ARE the exposure (default-deny walk).
         ("GET", "/api/v1/public/photos"),
+        # GH #600: the anonymous schedule list — minimal audience schema,
+        # private rows excluded server-side (is_private IS NOT TRUE).
+        # The two OLD bare activity entries above stay until Task 2 of
+        # the #600 plan flips the shared routes to activities:read.
+        ("GET", "/api/v1/public/activities"),
         # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
         # "/api/v1/photos/{id}") were removed from here — both routes carry
         # the photos:read guard now; the anonymous showcase is the

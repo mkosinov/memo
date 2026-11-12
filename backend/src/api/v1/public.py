@@ -12,8 +12,13 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from src.db import SessionDep
+from src.schemas.activity import (
+    ActivityPublicResponse,
+    PublicActivityListParams,
+)
 from src.schemas.common import PaginatedResponse
 from src.schemas.photo import PhotoPublicResponse, PublicPhotoListParams
+from src.services.activity import list_public_activities_view
 from src.services.photo import list_public_photos_view
 
 router = APIRouter(tags=["public"])
@@ -34,4 +39,23 @@ async def list_public_photos(
     Other owner filters stay unwired; unknown query params are ignored
     (repo convention: silent result, not 4xx)."""
     items, total = await list_public_photos_view(session, params)
+    return PaginatedResponse(items=items, total=total, page=params.page, per_page=params.per_page)
+
+
+@router.get("/activities", response_model=PaginatedResponse[ActivityPublicResponse])
+async def list_public_activities(
+    session: SessionDep,
+    params: Annotated[PublicActivityListParams, Query()],
+) -> PaginatedResponse[ActivityPublicResponse]:
+    """Public schedule list (GH #600): minimal ``ActivityPublicResponse``
+    schema (exactly what the web schedule consumes), private rows
+    excluded server-side (NULL-safe ``is_private IS NOT TRUE`` — a
+    private lesson is invisible to clients), pinned order ``start`` +
+    ``id``. ``date_from``/``date_to`` bound the window as whole days;
+    without ``date_from`` the window starts TODAY (the web schedule
+    never shows the past). ``?id=`` narrowing ANDs with the predicate —
+    a private id yields an empty page, never a leak. Other admin
+    filters (``q``/``service_id``) stay unwired; unknown query params
+    are ignored (repo convention: silent result, not 4xx)."""
+    items, total = await list_public_activities_view(session, params)
     return PaginatedResponse(items=items, total=total, page=params.page, per_page=params.per_page)

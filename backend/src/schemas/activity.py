@@ -83,6 +83,49 @@ class ActivityResponse(ActivityBase):
     service_title: str | None = None
 
 
+class PublicActivityListParams(PaginationParams):
+    """Query params for ``GET /api/v1/public/activities`` (ADR-015, #600).
+
+    Deliberately NOT ``ActivityListParams``: that schema carries the
+    admin filter surface (``q`` / ``service_id``, see the fields above)
+    — wiring it into the anonymous schedule route would activate those
+    filters for anonymous callers (surface widening, ADR-015). The
+    schedule adds exactly TWO filters on top of the pagination brick:
+    ``date_from``/``date_to`` (``date``, whole-day inclusive via the
+    shared ``day_range`` canon). When ``date_from`` is absent the view
+    defaults the window's lower bound to today (the web schedule never
+    shows the past). Injected ONLY as ``Annotated[
+    PublicActivityListParams, Query()]`` — no scalar-param siblings
+    (fastapi #12481, domain rule 8).
+    """
+
+    date_from: date | None = None
+    date_to: date | None = None
+
+
+class ActivityPublicResponse(BaseModel):
+    """Public schedule activity — deliberately NOT ActivityResponse (ADR-015).
+
+    Audience schema for the anonymous schedule
+    ``GET /api/v1/public/activities`` (#600): only what the web schedule
+    consumes. ``occupied`` rides the same bulk SUM(seats) computation as
+    the staff list. ``is_private``/``comment``/``record_info``,
+    timestamps and ``service_title`` never leave through this schema —
+    ``is_private`` is a forced server-side exclusion on the route.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    service_id: str
+    master_id: str
+    location_id: str
+    start: datetime
+    duration: int  # minutes
+    capacity: int
+    occupied: int = 0  # computed: SUM(seats) of active Records
+
+
 class ActivityCopyWeekRequest(BaseModel):
     """Request schema for copy-week (GH #242, spec §4).
 

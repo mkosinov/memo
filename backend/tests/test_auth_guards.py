@@ -92,6 +92,10 @@ _PUBLIC_GETS = [
     # GH #493: the anonymous photo showcase lives at /public/photos —
     # bare ``GET /api/v1/photos`` is guarded now (photos:read).
     "/api/v1/public/photos",
+    # GH #600: the anonymous schedule list (private rows excluded
+    # server-side) — the bare activity GETs flip to activities:read
+    # in #600 Task 2.
+    "/api/v1/public/activities",
     "/api/v1/health",
 ]
 

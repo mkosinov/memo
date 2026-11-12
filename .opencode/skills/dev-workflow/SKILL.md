@@ -174,7 +174,8 @@ The tester's timeout cap on a suite = `max(30 min, 2 × expected duration)`, whe
 the table's WORST case, not the idle number — under concurrent suites a run slows down, and a
 cap sized from the idle time kills a legitimate run (the timeout then masquerades as a test
 failure). Keep this table updated after each run so legitimately long suites are never killed
-by the cap:
+by the cap — the tester records every measured duration to `.opencode/state/suite-timings.json`;
+when a recorded actual exceeds a row here, the row is stale: re-measure and update the table:
 
 | Suite | Command | Expected duration | Notes |
 |---|---|---|---|

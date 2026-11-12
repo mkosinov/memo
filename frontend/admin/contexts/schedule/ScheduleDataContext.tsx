@@ -103,6 +103,13 @@ export type AddActivityCallbacks = {
   onError?: (err: unknown) => void;
 };
 
+/** #595 (spec §5) — per-location outcome of a batch create (`addActivities`).
+ *  Array order matches the inputs order (the tab's checkbox order), so the
+ *  first failure by checkbox order = the first `rejected` entry in order. */
+export type AddActivityOutcome =
+  | { locationId: string; status: 'fulfilled'; activity: ActivityResponse }
+  | { locationId: string; status: 'rejected'; error: unknown };
+
 interface ScheduleDataProviderProps {
   children: React.ReactNode;
   // inputs from the composition (spec §3: data context is NOT independent):
@@ -126,7 +133,16 @@ export interface ScheduleDataContextType {
   scheduleLocations: LocationResponse[];
   loading: boolean;
   error: Error | null;
-  addActivity: (activity: AddActivityInput, callbacks?: AddActivityCallbacks) => void;
+  /** #595 (spec §4.3/§5): fire-and-create promise path — resolves with the
+   *  created activity, rejects on a failed create. The legacy per-call
+   *  callbacks are preserved (invoked manually on resolve/reject); the
+   *  ['activities'] family invalidation runs exactly once after the call
+   *  settles — the same refetch single consumers always got. */
+  addActivity: (activity: AddActivityInput, callbacks?: AddActivityCallbacks) => Promise<ActivityResponse>;
+  /** #595: N parallel creates → one ['activities'] invalidation after ALL
+   *  settle → per-location outcomes (input order). Toasts are the create
+   *  tab's concern (Task 3), not the context's. */
+  addActivities: (inputs: AddActivityInput[]) => Promise<AddActivityOutcome[]>;
   updateActivity: (id: string, updates: {
     dayIndex?: number;
     startMinutes?: number;
@@ -257,13 +273,14 @@ export function ScheduleDataProvider({
   // objects — otherwise these useCallbacks (and the context value) would
   // churn on every provider re-render, breaking zoom isolation (DoD-1 /
   // spec §3).
-  const { mutate: createActivityMutate } = useMutation({
+  const { mutateAsync: createActivityMutateAsync } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: (data: Parameters<typeof apiCreateActivity>[0]) => apiCreateActivity(data),
-    // Family rule via the shared map (#239): the ['activities'] prefix —
-    // strictly wider than this week's activityRange key, also refreshes
-    // activitiesForRecords readers.
-    onSuccess: () => invalidateEntities(queryClient, ['activities']),
+    // #595 (spec §4.3): NO hook-level onSuccess invalidation — N parallel
+    // creates would invalidate N times. Both addActivity and addActivities
+    // invalidate the ['activities'] family exactly once after the call(s)
+    // settle. The mutationKey stays — the Topbar «Сохраняем…» indicator
+    // (useMutationState) tracks pending creates regardless of callbacks.
   });
 
   // THE race fix (spec §5): no artificial 5s timeout — the PATCH settles
@@ -332,30 +349,80 @@ export function ScheduleDataProvider({
   });
 
   // Actions
-  const addActivity = useCallback((activity: AddActivityInput, callbacks?: AddActivityCallbacks) => {
-    // GH #280: `start` (create form) goes to the payload as-is; the legacy
-    // dayIndex+startMinutes (grid stamps) still converts via the open week.
-    const start = activity.start !== undefined
-      ? activity.start
-      : composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
+  // #595: shared input → API payload conversion (single source for both the
+  // promise path and the batch path).
+  const buildCreatePayload = useCallback(
+    (activity: AddActivityInput): Parameters<typeof apiCreateActivity>[0] => {
+      // GH #280: `start` (create form) goes to the payload as-is; the legacy
+      // dayIndex+startMinutes (grid stamps) still converts via the open week.
+      const start = activity.start !== undefined
+        ? activity.start
+        : composeLocalISO(dayIndexToDate(currentWeek, activity.dayIndex), activity.startMinutes);
+      return {
+        master_id: activity.masterId,
+        service_id: activity.serviceId,
+        location_id: activity.locationId,
+        start,
+        duration: activity.durationMinutes,
+        capacity: activity.capacity,
+        is_private: activity.isPrivate ?? false,
+        comment: activity.comment ?? null,
+        record_info: null,
+      };
+    },
+    [currentWeek],
+  );
 
-    createActivityMutate({
-      master_id: activity.masterId,
-      service_id: activity.serviceId,
-      location_id: activity.locationId,
-      start,
-      duration: activity.durationMinutes,
-      capacity: activity.capacity,
-      is_private: activity.isPrivate ?? false,
-      comment: activity.comment ?? null,
-      record_info: null,
-    }, callbacks);
-    // Dep is the STABLE `mutate` (v5 useCallback over the once-created
-    // observer), not the mutation result object — that object gets a new
-    // identity every render and would give the data context value a new
-    // identity on every provider re-render, breaking zoom isolation
-    // (DoD-1 / spec §3).
-  }, [currentWeek, createActivityMutate]);
+  // #595 (spec §4.3): the create is a PROMISE (mutateAsync inside). Per-call
+  // `mutate` callbacks in TanStack v5 fire only for the LAST call
+  // («Consecutive mutations») and observer `isPending` reflects only the last
+  // call — N parallel creates must observe completion via promises. The
+  // legacy callbacks stay for existing consumers (fired manually); the
+  // ['activities'] family invalidation that used to live in the hook-level
+  // onSuccess runs HERE, exactly once per call, after it settles (family
+  // rule #239 — the prefix also refreshes activitiesForRecords readers).
+  const addActivity = useCallback(
+    (activity: AddActivityInput, callbacks?: AddActivityCallbacks): Promise<ActivityResponse> => {
+      const promise = createActivityMutateAsync(buildCreatePayload(activity)).then(
+        (created) => {
+          invalidateEntities(queryClient, ['activities']);
+          callbacks?.onSuccess?.();
+          return created;
+        },
+        (err: unknown) => {
+          invalidateEntities(queryClient, ['activities']);
+          callbacks?.onError?.(err);
+          throw err;
+        },
+      );
+      // Fire-and-forget consumers (WeekView/DayView grid stamps, DnD copy)
+      // ignore the returned promise — mark the chain handled so a rejection
+      // never surfaces as an unhandled rejection (the old fire-and-forget
+      // `mutate` swallowed errors the same way). Awaiting callers still get
+      // the rejection.
+      promise.catch(() => {});
+      return promise;
+    },
+    [createActivityMutateAsync, buildCreatePayload, queryClient],
+  );
+
+  // #595 (spec §4.3): N parallel creates → Promise.allSettled → EXACTLY ONE
+  // ['activities'] family invalidation after everything settles. Returns
+  // per-location outcomes in input order; toasts live in the create tab.
+  const addActivities = useCallback(
+    async (inputs: AddActivityInput[]): Promise<AddActivityOutcome[]> => {
+      const settled = await Promise.allSettled(
+        inputs.map((input) => createActivityMutateAsync(buildCreatePayload(input))),
+      );
+      invalidateEntities(queryClient, ['activities']);
+      return settled.map((outcome, i): AddActivityOutcome =>
+        outcome.status === 'fulfilled'
+          ? { locationId: inputs[i].locationId, status: 'fulfilled', activity: outcome.value }
+          : { locationId: inputs[i].locationId, status: 'rejected', error: outcome.reason },
+      );
+    },
+    [createActivityMutateAsync, buildCreatePayload, queryClient],
+  );
 
   const updateActivityFn = useCallback((id: string, updates: {
     dayIndex?: number;
@@ -575,6 +642,7 @@ export function ScheduleDataProvider({
     loading: activitiesLoading,
     error: activitiesError ?? null,
     addActivity,
+    addActivities,
     updateActivity: updateActivityFn,
     deleteActivityDeferred,
     deleteActivityConfirmed,
@@ -587,7 +655,7 @@ export function ScheduleDataProvider({
     filteredItems, scheduleIndex, masters, services, locations,
     scheduleMasters, scheduleServices, scheduleLocations,
     activitiesLoading, activitiesError,
-    addActivity, updateActivityFn, deleteActivityDeferred, deleteActivityConfirmed,
+    addActivity, addActivities, updateActivityFn, deleteActivityDeferred, deleteActivityConfirmed,
     pendingActivityConfirm, copyLastWeek,
     gridStartMinutes, gridEndMinutes,
   ]);

@@ -43,13 +43,10 @@ from sqlalchemy import select
 # dependency signatures at registration time (same as Request in
 # permissions.py) — hence the TC002 noqa.
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
-from starlette.requests import Request  # runtime — get_type_hints (see above)
 
 from src.auth.permissions import (
-    SESSION_COOKIE,
     AuthedUser,
     require_session,
-    resolve_authed,
 )
 from src.db import db_manager
 from src.models.enums import UserRole
@@ -152,25 +149,28 @@ async def get_scope(
 
 async def get_optional_scope(
     db_session: Annotated[AsyncSession, Depends(db_manager.get_db_session)],
-    request: Request,
+    # B008 (`Depends` in defaults) is the idiomatic FastAPI dependency
+    # pattern used across this repo (cf. get_scope above).
+    authed: AuthedUser = Depends(require_session),
 ) -> ScopeContext:
-    """Optional-scope dependency: unscoped for anonymous, narrowed for a
-    logged-in master.
+    """Scope seam for permission-guarded routes (D1 narrowing).
 
-    Born for the once-public activity GETs (T2 — the public site read
-    the schedule there); its users have since been guarded (#479
-    records create, #493 photos, #600 activities reads), so anonymous
-    requests are answered 401 by the permission guard BEFORE this
-    dependency ever runs. What survives is the narrowing contract: a
-    logged-in master gets only his own rows (D1) — ``get_optional_scope``
-    stays the scope seam on those routes. Anonymous / expired sessions
-    resolve to an UNSCOPED context (``master_key=None``); a valid
-    session resolves exactly as ``get_scope``. No 401 is ever raised
-    here: this dependency never rejects, it only narrows.
+    Born lenient for the once-public activity GETs (T2 — the public
+    site read the schedule there); every user since (#479 records
+    create, #493 photos, #600 activities reads) carries a
+    ``require_permission`` guard, so anonymous requests are answered
+    401 by that guard BEFORE this dependency ever runs — the lenient
+    unscoped-context branch was dead code on every wired route. What
+    survives is the narrowing contract: a logged-in master gets only
+    his own rows (D1); a valid session resolves exactly as
+    ``get_scope``.
+
+    #600 N+1 guard: the session RIDES ``require_session`` — the SAME
+    dependency callable the permission-guard subtree already resolved —
+    so FastAPI's per-request dependency cache deduplicates the resolve
+    to ONE sessions+users SELECT pair per request. The former body
+    called ``resolve_authed`` directly: a second independent pair per
+    scope resolve, caught by the activities-list SELECT-count guard
+    (tests/test_list_activities_query_count.py).
     """
-    # Shared session resolution (same block require_session uses —
-    # extracted so the strict and optional paths cannot drift).
-    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
-    if authed is None:
-        return ScopeContext(user_id="", role="", master_key=None)
     return await resolve_scope(db_session, authed)

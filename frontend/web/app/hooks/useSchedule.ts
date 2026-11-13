@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { getActivities, getMasters, getServices, getLocations } from '@memo/api-client';
+import { getPublicActivities, getMasters, getServices, getLocations } from '@memo/api-client';
 import type { PaginatedResponse } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
@@ -32,8 +32,9 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
   const queries = useQueries({
     queries: [
       {
-        queryKey: ['activities', date_from, date_to],
-        queryFn: () => getActivities({ date_from, date_to }),
+        // #600: anonymous public list (ADR-015) — staff route is auth-guarded.
+        queryKey: ['activities', 'public', date_from, date_to],
+        queryFn: () => getPublicActivities({ date_from, date_to, per_page: 100 }),
         staleTime: 0,
         refetchInterval: 60_000,
       },

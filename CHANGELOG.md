@@ -10,6 +10,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-13
 
 ### Added
+- **GH #600 — Публичная витрина занятий: приватные (is_private) не видны
+  клиентам в web** — branch `600-activity-public-visibility` (7 задач
+  `4a3f6c5d..4b21bba4`, base `ddd77447` = origin/main; 25 файлов,
+  +1204/−77; спека
+  `docs/specs/2026-11-12-activity-private-visibility-600-design.md`
+  рев.4, план
+  `docs/plans/2026-11-12-activity-public-visibility-600-plan.md` 7/7 —
+  оба на main (`26a6b830`) вместе с дом-правилом `auth.md` (Public
+  Access), unchanged by IMPL):
+  - **Публичный список (T1 `4a3f6c5d`):** `GET /api/v1/public/activities`
+    по образцу публичных фото — схема `ActivityPublicResponse` ровно 8
+    полей (id, service_id, master_id, location_id, start, duration,
+    capacity, occupied; никогда is_private/comment/record_info/метки
+    времени), NULL-безопасное серверное исключение приватных
+    (`IS NOT TRUE`), детерминированный сорт `start asc, id asc`, окно
+    дат с дефолтом «от текущей даты», allowlist-запись.
+  - **Охрана старых GET (T2 `99688980`):** `GET /activities` и
+    `GET /activities/{id}` под `activities:read` — аноним и клиентская
+    сессия → 401; allowlist-вычистка в 3 носителях; readiness-проба
+    admin-e2e globalSetup переведена на публичный маршрут.
+  - **Бронь приватного id → 404 (T3 `3c58c482`):** предикат приватности
+    в пробе существования `POST /my/records` ДО валидации тарифа (без
+    бокового канала 422-против-404); ответ байт-в-байт паритетен
+    несуществующему. Точечный публичный маршрут отложен владельцем до
+    потребителя (гейт B рев.4).
+  - **api-client (T4 `ffaae2bc`):** `getPublicActivities` + zod-схемы по
+    прецеденту публичных фото.
+  - **Web-расписание (T5 `0db86771`):** `useSchedule` на публичный
+    маршрут, явный `per_page=100` (закрыто молчаливое усечение серверным
+    дефолтом 20 при окнах до 30 дней), ключ кэша
+    `['activities','public',from,to]`; dev-стенд: 0 обращений к
+    staff-GET.
+  - **E2E (T6 `1e295f16` + T7 `4b21bba4`):** US-1/US-2 — приватное
+    отсутствует в сетке (позитивный контроль на месте), бронь приватного
+    id → 404 с паритетом тел, RED доказан в обе стороны; страж мастера
+    US-4 (ромб виден мастеру, новый testid `activity-private-badge`);
+    US-5 — регресс `copy-last-week` 8/8 без правок.
+  - Tests: backend unit-сьюты зелёные (бронь **37/37** + RED-проба),
+    api-client **580/580** (tsc/eslint/build чистые), web vitest
+    **571/571**, web e2e **2/2** + sentinel **2/2** + мастер-страж
+    **1/1**, ActivityCard **50/50**; visual gate — §7 «N/A»
+    as-approved, скрипт exit 0.
+  - **Пост-гейт фиксы:** N+1 — `get_optional_scope` переведён на кэшированный
+    `require_session` (дубль session-SELECT убран, гард списка занятий 8→6,
+    порог ≤7 не тронут); бюджет ruff TC002 подтянут до факта 13.
+   - Status: `docs/status/2026-11-13-activity-public-visibility-600.md`
 - **GH #598 — Модалка занятия (админ): постоянная высота 85dvh + кнопка
   «Создать» в футере** — branch `598-activity-modal-fixed-height` (3
   коммита `f9d21df7..59b609c9`, base `ddd77447`; 11 файлов, +840/−93;

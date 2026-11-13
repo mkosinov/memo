@@ -8,7 +8,11 @@ and enforces, for every ``APIRoute`` under ``/api/v1``:
   router-level, or signature-level), **or** its ``(method, normalized path)``
   is in ``PUBLIC_ROUTES``;
 * every ``PUBLIC_ROUTES`` entry matches a real route (staleness — a removed
-  endpoint must not linger in the allowlist).
+  endpoint must not linger in the allowlist);
+* a guarded route is NOT allowlisted (GH #600 Task 2): the walk above is
+  blind to «guarded AND allowlisted» — both clauses pass it — so a second
+  assert pins that a permission guard always ships with its allowlist
+  pruning (sole exception: ``GET /api/v1/auth/me``, 401-by-design probe).
 
 Path normalization (the ``src/auth/public.py`` docstring convention): real
 routers use entity-specific param names (``{master_id}``, ``{photo_id}``, …)
@@ -136,6 +140,14 @@ def _route_methods(route: Any) -> set[str]:
 
 
 class TestDefaultDenyContract:
+    #: Guarded routes deliberately ALSO allowlisted: anonymous hits the
+    #: guard's 401 — the entry documents the surface, it opens nothing.
+    #: /auth/me is the session probe (the SPA calls it before login and
+    #: EXPECTS 401, not 404, when unauthenticated).
+    _GUARDED_AND_PUBLIC_OK: frozenset[tuple[str, str]] = frozenset({
+        ("GET", "/api/v1/auth/me"),
+    })
+
     def test_every_api_v1_route_is_guarded_or_allowlisted(self, app) -> None:
         """No /api/v1 APIRoute may be both dependency-free and off-allowlist."""
         violations: list[str] = []
@@ -148,6 +160,46 @@ class TestDefaultDenyContract:
         assert not violations, (
             "Unguarded /api/v1 routes (add an auth dependency or extend "
             f"PUBLIC_ROUTES — spec §2.6/§2.7): {violations}"
+        )
+
+    def test_guarded_routes_are_not_allowlisted(self, app) -> None:
+        """«Guarded but still allowlisted» — the walk above is blind to the
+        combo (a route that is BOTH passes it on either clause).
+
+        GH #600 Task 2: a permission guard added to a formerly public
+        route must come with the PUBLIC_ROUTES pruning in the same
+        commit — a lingering entry is a stale promise of anonymous
+        access. Exceptions only via ``_GUARDED_AND_PUBLIC_OK`` (401-by-
+        design probes, documented)."""
+        violations: list[str] = []
+        for route in _api_v1_routes(app):
+            if not _route_has_auth_dependency(route):
+                continue
+            for method in sorted(_route_methods(route)):
+                key = (method, _normalize(route.path))
+                if key in PUBLIC_ROUTES and key not in self._GUARDED_AND_PUBLIC_OK:
+                    violations.append(f"{method} {route.path}")
+        assert not violations, (
+            "Guarded /api/v1 routes still present in PUBLIC_ROUTES (a guard "
+            "must ship with its allowlist pruning — GH #600): "
+            f"{violations}"
+        )
+
+    def test_guarded_and_public_exception_map_is_not_stale(self, app) -> None:
+        """Every ``_GUARDED_AND_PUBLIC_OK`` entry is a real guarded route
+        that is really allowlisted (a fixed route must not linger)."""
+        real_guarded_public: set[tuple[str, str]] = set()
+        for route in _api_v1_routes(app):
+            if not _route_has_auth_dependency(route):
+                continue
+            for method in sorted(_route_methods(route)):
+                key = (method, _normalize(route.path))
+                if key in PUBLIC_ROUTES:
+                    real_guarded_public.add(key)
+        stale = sorted(self._GUARDED_AND_PUBLIC_OK - real_guarded_public)
+        assert not stale, (
+            f"Stale _GUARDED_AND_PUBLIC_OK entries (no guarded+allowlisted "
+            f"route behind them): {stale}"
         )
 
     def test_public_routes_allowlist_has_no_stale_entries(self, app) -> None:

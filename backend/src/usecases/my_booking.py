@@ -76,8 +76,16 @@ async def create_my_record(
         raise gate
 
     # ── Activity probe: 404 + the service key + the response `start` ──
+    # GH #600: ``is_private IS NOT TRUE`` rides the SAME query, before any
+    # tariff validation — a private id is indistinguishable from a missing
+    # one (404 either way, no 422-vs-404 side channel).
     activity = (
-        await db_session.execute(select(Activity).where(Activity.id == data.activity_id))
+        await db_session.execute(
+            select(Activity).where(
+                Activity.id == data.activity_id,
+                Activity.is_private.is_not(True),
+            )
+        )
     ).scalar_one_or_none()
     if activity is None:
         raise HTTPException(

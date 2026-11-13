@@ -167,9 +167,11 @@ class TestHappyPath:
         for visit in body["visits"]:
             assert set(visit) == {"name", "age", "tariff_id", "price"}
 
-        # `start` — the activity's date, byte-identical to the activity read.
-        activity_resp = api_client.get(f"/api/v1/activities/{tariff_activity['id']}")
-        assert body["start"] == activity_resp.json()["start"]
+        # `start` — the activity's date, identical to the created activity's
+        # start. The staff GET /activities/{id} is guarded since GH #600 (a
+        # client-session jar gets 401), so the factory response — the same
+        # API serialization — is the reference value.
+        assert body["start"] == tariff_activity["start"]
 
         # Named + anonymous visits, prices from the tariffs.
         by_tariff = {v["tariff_id"]: v for v in body["visits"]}
@@ -470,6 +472,75 @@ class TestScenarioChecks:
         assert resp.status_code == 409
         assert resp.json()["detail"]["code"] == ErrorCode.ACTIVITY_AT_CAPACITY.value
         assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
+
+
+# ─── GH #600: a private activity id books exactly like a missing one ───────────
+
+
+class TestPrivateActivityHidden404:
+    """A private ``activity_id`` is indistinguishable from a nonexistent one.
+
+    The ``is_private IS NOT TRUE`` predicate sits in the existence probe's
+    WHERE — the same single query, BEFORE any tariff validation — so a
+    private id can't be told apart from a missing one via error-code
+    differences (the 422-vs-404 side channel stays closed), and no rows
+    are ever written.
+    """
+
+    def test_private_activity_404_body_identical_to_missing(
+        self, api_client, create_activity,
+    ) -> None:
+        # Built BEFORE _owner wipes the staff jar (create_activity rides it).
+        private = create_activity(is_private=True)
+        _owner(api_client)
+
+        resp_private = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": private["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+        resp_missing = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": "00000000-0000-0000-0000-000000000000",
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+
+        assert resp_private.status_code == 404, resp_private.text
+        assert resp_missing.status_code == 404, resp_missing.text
+        assert resp_private.content == resp_missing.content, (
+            "a private activity id must be byte-identical to a missing one"
+        )
+        assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
+
+    def test_private_404_before_tariff_validation(
+        self, api_client, create_activity,
+    ) -> None:
+        """The predicate fires BEFORE the tariff checks: a paid service's
+        private activity with a tariff-less visit → 404, never 422
+        TARIFF_REQUIRED."""
+        private = create_activity(is_private=True)
+        _insert_tariff(private["service_id"], "Взрослый", 3500)
+        _owner(api_client)
+
+        resp = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": private["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{"name": "Анна"}],  # no tariff_id — would be 422
+        })
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == ErrorCode.ACTIVITY_NOT_FOUND.value
+        assert query_db("SELECT COUNT(*) AS n FROM records")[0]["n"] == 0
+
+    def test_public_activity_still_books(self, api_client, free_activity) -> None:
+        """The predicate does not over-match: a normal activity still
+        books per the contract."""
+        _owner(api_client)
+        resp = api_client.post(MY_RECORDS_URL, json={
+            "activity_id": free_activity["id"],
+            "phone": CLIENT_PHONE,
+            "visits": [{}],
+        })
+        assert resp.status_code == 201, resp.text
 
 
 # ─── anti-spam: 20 records / 40 visits per account per 15 minutes ──────────────

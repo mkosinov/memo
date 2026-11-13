@@ -238,8 +238,12 @@ export default async function globalSetup() {
   // defaults and factory dates must not drift apart). date_from/date_to
   // are derived from the constant itself, never serialized from the real
   // clock, so the guard stays deterministic on any run date.
+  // GH #600: the probe rides the PUBLIC schedule route — the bare
+  // /api/v1/activities is staff-only (activities:read) and this fetch is
+  // deliberately anonymous (it runs BEFORE the admin login below; the
+  // bare route would 401 and abort globalSetup).
   const backendBase = resolveBackendUrl();
-  const activitiesUrl = `${backendBase}/api/v1/activities?date_from=${SEED_WEEK_MONDAY}&date_to=${SEED_WEEK_SUNDAY}`;
+  const activitiesUrl = `${backendBase}/api/v1/public/activities?date_from=${SEED_WEEK_MONDAY}&date_to=${SEED_WEEK_SUNDAY}`;
 
   let activitiesResponse: Response | null = null;
   let lastErr: any = null;
@@ -254,7 +258,7 @@ export default async function globalSetup() {
   }
 
   if (!activitiesResponse || !activitiesResponse.ok) {
-    throw new Error(`[#152] Backend /api/v1/activities not responding at ${activitiesUrl} after 5 retries. Last error: ${lastErr?.message || 'HTTP ' + activitiesResponse?.status}. Backend not started? Run \`bash scripts/test-all.sh\` to start the full stack.`);
+    throw new Error(`[#152] Backend /api/v1/public/activities not responding at ${activitiesUrl} after 5 retries. Last error: ${lastErr?.message || 'HTTP ' + activitiesResponse?.status}. Backend not started? Run \`bash scripts/test-all.sh\` to start the full stack.`);
   }
   const activitiesJson = await activitiesResponse.json() as any;
   // #182: activities list is paginated ({items,total,page,per_page}) — unwrap envelope

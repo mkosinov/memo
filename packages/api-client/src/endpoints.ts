@@ -94,6 +94,8 @@ import {
   TagAllResponseSchema,
   MaterialAllResponseSchema,
   ActivityListResponseSchema,
+  ActivityPublicListResponseSchema,
+  type ActivityPublicListResponse,
   PaymentListResponseSchema,
   RecordListResponseSchema,
   VisitorListResponseSchema,
@@ -498,6 +500,28 @@ export async function getActivities(params: {
   if (params.per_page) search.set('per_page', String(params.per_page));
   const qs = search.toString();
   return api(`/api/v1/activities${qs ? `?${qs}` : ''}`, ActivityListResponseSchema);
+}
+
+export interface ActivityPublicListParams {
+  date_from?: string; // YYYY-MM-DD
+  date_to?: string; // YYYY-MM-DD
+  page?: number;
+  per_page?: number;
+}
+
+/** #600 / ADR-015: anonymous schedule list — minimal schema, private
+ * activities are excluded server-side and not a parameter; without
+ * date_from the window starts today. */
+export async function getPublicActivities(params?: ActivityPublicListParams): Promise<ActivityPublicListResponse> {
+  const search = new URLSearchParams();
+  if (params) {
+    if (params.date_from) search.set('date_from', params.date_from);
+    if (params.date_to) search.set('date_to', params.date_to);
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.per_page !== undefined) search.set('per_page', String(params.per_page));
+  }
+  const qs = search.toString();
+  return api(`/api/v1/public/activities${qs ? `?${qs}` : ''}`, ActivityPublicListResponseSchema);
 }
 
 export async function getActivity(id: string): Promise<ActivityResponse> {

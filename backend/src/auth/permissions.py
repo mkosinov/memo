@@ -171,9 +171,11 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
     """Resolve a session token into an ``AuthedUser``, or ``None``.
 
     The shared resolution core for ``require_session`` (strict: raises
-    401 on miss) and ``get_optional_scope`` (lenient: anonymous /
-    expired → unscoped). One session-cookie lookup shape, no drift
-    between the strict and optional consumers.
+    401 on miss) and, through it, ``get_optional_scope`` (#600: the
+    scope seam rides the same ``require_session`` dependency via
+    FastAPI's per-request cache — one resolve pair per request, the
+    N+1 guard on the activities list keeps it honest). One
+    session-cookie lookup shape, no drift between the consumers.
 
     GH #344 (spec §4.1): a successful resolve ALSO stages the request's
     audit actor (``user_id`` + ``role`` contextvar) — both guard paths

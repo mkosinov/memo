@@ -5,6 +5,7 @@ import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useUI } from '@/contexts/UIContext';
 import type { ScheduleAdminDTO } from '@memo/domain';
 import { formatActivityContext } from '@/lib/utils';
+import { formatDateRu, parseLocalISO } from '@/lib/datetime';
 import { TabNav, type Tab } from './TabNav';
 import { SettingsTab } from './SettingsTab';
 import { ClientTab } from './ClientTab';
@@ -264,11 +265,27 @@ function ExistingActivityContent({
 
   // Activity update callback for settings — payload is the context's
   // minutes-based update shape (GH #142).
+  // GH #553: a resolved date-time patch (`start`) is the ONLY vocal
+  // instant-patch — the activity may leave the open week (its card
+  // "disappears" on the refetch), so the toast names the chosen date. Text
+  // mirrors the create toast (service — formatDateRu date, time; info kind =
+  // the showToast default). All other fields stay silent, and a rejection
+  // stays silent too — the mutation's onError rolls the optimistic entry
+  // back (no error toast exists for activity updates). The catch-guard
+  // mirrors the context's own guard: a rejection never surfaces as
+  // unhandled. The modal never closes on a patch outcome (gate B).
   const handleActivityUpdate = useCallback(
     (updates: Parameters<typeof updateActivity>[1]) => {
-      updateActivity(activity.id, updates);
+      updateActivity(activity.id, updates)
+        .then(() => {
+          if (updates.start == null) return;
+          const { date, time } = parseLocalISO(updates.start);
+          const serviceName = services.find((s) => s.id === activity.serviceId)?.name;
+          showToast(`Сохранено: ${serviceName} — ${formatDateRu(date)}, ${time}`);
+        })
+        .catch(() => {});
     },
-    [activity.id, updateActivity],
+    [activity.id, activity.serviceId, services, updateActivity, showToast],
   );
 
   // Switch to new record tab

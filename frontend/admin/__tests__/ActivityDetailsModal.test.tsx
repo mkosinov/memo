@@ -941,6 +941,80 @@ describe('SettingsTab — datetime patch sends full date (GH #553)', () => {
   });
 });
 
+// ─── GH #553: тост успеха патча даты-времени (уровень модалки) ───────────────
+// Единственный «озвученный» instant-patch: успешный start-патч может увезти
+// занятие из открытой недели (карточка «исчезнет» по рефетчу) — успех сопровождается
+// тостом общего стека, текст зеркален созданию («Сохранено: <услуга> — <дата>,
+// <время>»), вид — дефолтный info (toast-info). Остальные поля молчат; реджект —
+// молчаливый откат (error-тоста у обновления занятия нет); модалка не закрывается
+// ни при каком исходе (решение гейта B).
+
+describe('ActivityDetailsModal — date-time patch success toast (GH #553)', () => {
+  it('shows the «Сохранено: …» toast (default info kind) when a start patch resolves; modal stays open', async () => {
+    const updateActivity = vi.fn(() => Promise.resolve());
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    // 14:25 snaps to 14:30 on the 30-min grid (same trigger as the SettingsTab
+    // payload test above) → { start: '2026-06-09T14:30:00' }
+    fireEvent.change(screen.getByTestId('input-datetime'), { target: { value: '2026-06-09T14:25' } });
+    expect(updateActivity).toHaveBeenCalledWith(mockActivity.id, { start: '2026-06-09T14:30:00' });
+
+    // Toast fires in the mutation's .then — service name resolves via the
+    // context services list (s1 = «Картина маслом»), date-time via the shared
+    // datetime helpers from updates.start. Single-arg call = default info
+    // kind (→ toast-info in the real stack).
+    const { showToast } = mockUseUI();
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith('Сохранено: Картина маслом — вторник, 9 июня, 14:30'),
+    );
+    // Gate B: the modal never closes on a date-time patch outcome.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('stays silent on non-start patches (other instant-patch fields keep today’s behavior)', async () => {
+    const updateActivity = vi.fn(() => Promise.resolve());
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={vi.fn()} activity={mockActivity} mode="edit" />,
+    );
+
+    // A capacity instant-patch (>= 1 gate) resolves fine — but no toast.
+    fireEvent.change(screen.getByTestId('input-capacity'), { target: { value: '10' } });
+    expect(updateActivity).toHaveBeenCalledWith(mockActivity.id, { capacity: 10 });
+
+    // Settle anchor (mutation promise flushed inside act) before the negative
+    // assert, so a late toast cannot silently green the test.
+    await act(async () => {});
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('shows no success toast when the start patch rejects (silent rollback, as today)', async () => {
+    const updateActivity = vi.fn(() => Promise.reject(new Error('server down')));
+    mockUseScheduleData.mockReturnValue(createMockScheduleData({ updateActivity }));
+    const showToast = vi.fn();
+    mockUseUI.mockReturnValue(createMockUIContext({ showToast }));
+    const onClose = vi.fn();
+    render(
+      <ActivityDetailsModal isOpen={true} onClose={onClose} activity={mockActivity} mode="edit" />,
+    );
+
+    fireEvent.change(screen.getByTestId('input-datetime'), { target: { value: '2026-06-09T14:25' } });
+
+    // Rejection settled: rollback is the mutation's business, the patch stays
+    // silent (no error toast for activity updates, no success toast either),
+    // and the rejection must not surface as unhandled.
+    await act(async () => {});
+    expect(showToast).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {

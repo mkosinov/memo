@@ -123,6 +123,35 @@ function FieldRenderer({ field, value, onChange, error }: FieldRendererProps) {
         </div>
       );
 
+    // GH #601 §2.6: switch button verbatim from ActivityForm `toggle-private`
+    // — role="switch" + aria-checked, direct binding (checked = value).
+    case 'boolean': {
+      const checked = Boolean(value);
+      return (
+        <div className="flex flex-col gap-1">
+          {labelEl}
+          <button
+            id={inputId}
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(field.key, !checked)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              checked ? 'bg-brand' : 'bg-ink-faint'
+            }`}
+            data-testid={field.testId ?? `toggle-${field.key}`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                checked ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+          {errorEl}
+        </div>
+      );
+    }
+
     default:
       return null;
   }
@@ -138,11 +167,20 @@ export function LocationModal({
   subtitle,
 }: LocationModalProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    if (!location) return {};
     const initial: Record<string, unknown> = {};
     LOCATION_FIELDS.forEach((f) => {
+      if (!location) {
+        // Create mode: only the boolean carries a non-empty default (true —
+        // GH #601 §2.6); text/number stay unset so the create UX (empty
+        // inputs, required-field errors) is unchanged.
+        if (f.type === 'boolean') initial[f.key] = true;
+        return;
+      }
+      // Edit mode: nullish fallback — a boolean field defaults to `true`,
+      // NOT the non-number empty string ('' would leave the switch as a
+      // string and 422 the strict payload).
       initial[f.key] =
-        location[f.key] ?? (f.type === 'number' ? 0 : '');
+        location[f.key] ?? (f.type === 'boolean' ? true : f.type === 'number' ? 0 : '');
     });
     return initial;
   });

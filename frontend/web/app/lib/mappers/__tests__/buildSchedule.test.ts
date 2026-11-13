@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWebSchedule, type WebScheduleDTO } from '../buildSchedule';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
 
 function makeActivity(overrides?: Partial<ActivityResponse>): ActivityResponse {
   return {
@@ -61,23 +61,16 @@ function makeMaster(overrides?: Partial<MasterViewResponse>): MasterViewResponse
   } as MasterViewResponse;
 }
 
-function makeLocation(overrides?: Partial<LocationResponse>): LocationResponse {
+// #601: the location map carries PUBLIC dictionary rows — exactly the 4
+// ADR-015 fields; the builder reads only title/address/location_hint.
+function makeLocation(overrides?: Partial<LocationPublicResponse>): LocationPublicResponse {
   return {
     id: 'loc-1',
     title: 'Альпика',
     address: 'ул. Тестовая, 1',
-    description: 'Уютная студия',
-    capacity: 20,
-    yandex_map_url: null,
-    review_url: null,
-    record_info: null,
-    image_url: null,
     location_hint: 'Вход со двора',
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
     ...overrides,
-  } as LocationResponse;
+  };
 }
 
 describe('buildWebSchedule', () => {
@@ -266,7 +259,7 @@ describe('buildWebSchedule', () => {
     const activities = [makeActivity()];
     const services = new Map([['service-1', makeService()]]);
     const masters = new Map([['master-1', makeMaster()]]);
-    const locations = new Map<string, LocationResponse>();
+    const locations = new Map<string, LocationPublicResponse>();
 
     const result = buildWebSchedule(activities, services, masters, locations);
 

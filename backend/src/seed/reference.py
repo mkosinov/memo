@@ -109,6 +109,11 @@ class LocationIn(_In):
     address: str | None = None
     description: str | None = None
     capacity: int = Field(ge=0)
+    # GH #601: web visibility — false hides the location from the client
+    # site only (admin keeps it fully working). CSV owners' table conversion
+    # rule (spec §2.7, canon): column «видно клиентам» — пусто/«да» → true,
+    # «нет» → false. TODO: enforce in the CSV→YAML converter when it lands.
+    is_public: bool = True
     yandex_map_url: str | None = None
     review_url: str | None = None
     record_info: str | None = None
@@ -488,6 +493,10 @@ async def _apply_locations(
     existing = {loc.title: loc for loc in (await session.scalars(select(Location))).all()}
     stats = summary.bucket("Локации")
     for index, item in enumerate(rows):
+        # Apply whitelist — every column the file owns. GH #601: is_public
+        # included, so a re-run flips web visibility per the file. CSV
+        # conversion rule (spec §2.7): «видно клиентам» пусто/«да» → true,
+        # «нет» → false.
         fields: dict[str, Any] = {
             "short_title": item.short_title,
             "address": item.address,
@@ -499,6 +508,7 @@ async def _apply_locations(
             "image_url": item.image_url,
             "location_hint": item.location_hint,
             "sort_order": item.sort_order if item.sort_order is not None else index,
+            "is_public": item.is_public,
         }
         row = existing.get(item.title)
         if row is None:

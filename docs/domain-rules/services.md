@@ -9,7 +9,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | title | string | ✅ | 1 | 200 | — | Название услуги |
 | description | string | ✅ | — | — | — | Описание |
 | image_url | string | ✅ | — | — | — | URL картинки |
-| specialty | string | ✅ | — | — | — | Специализация |
+| specialty_id | UUID (specialties) | ✅ | — | — | — | Направление — ссылка на справочник (`specialties.md`, GH #599); в ответах строковое `specialty` (название) сохраняется для отображения |
 | min_age | integer | ✅ | 0 | 18 | — | Минимальный возраст |
 | max_age | integer | ❌ | 0 | 18 | — | Максимальный возраст; nullable — `null` = без верхней границы (миграция `275ba490cab8`). Диапазон 0–18 — клиентская валидация формы |
 | duration | integer | ✅ | 15 | 480 | — | Длительность в минутах |
@@ -44,7 +44,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 - **No age validation** that min_age <= max_age at code level.
 
 ### Frontend
-- **Auto-fill:** When Service selected in Activity → fills duration, capacity, minAge
+- **Auto-fill:** When Service selected in Activity → fills duration (capacity autofills from the LOCATION's `defaultCapacity`, not the service — GH #595/#551, см. `activities.md`; «minAge» — устаревшее слово этой строки, поля в форме нет)
 - **Domain `Service` (frontend, `@memo/domain`):** carries `tariffs: Tariff[]` (`id`/`title`/`price`/`description`) populated by `transformService` in `frontend/admin/lib/transformers.ts`; `durationMinutes` is the canonical duration field — no decimal-hours twin (GH #142).
 - **Tariff display:** Read-only list below service select (title + price ₽)
 - **Tariff autofill by visitor age (GH #284, owner decisions 2026-09-19):** one shared resolver is the single owner of the default-tariff rule — first `audience="kid"` tariff when the visitor age is in the «Дети» select range (3–11), otherwise first `audience="adult"` (covers 12–17, «Взрослый», empty age); no match → first tariff in the list (legacy behavior; may cross audiences). `all` never participates. **Age change ALWAYS re-resolves** — it overwrites a manual tariff pick, no undo (owner decision: explicit substitution, admin controls the final price). The 3–11 boundary is intentionally hardcoded: one shared constant feeds both the AgeSelect options and the classifier — NO studio-level setting. Client always sends an explicit tariff; the server persists it as-is (no server-side default computation). Consumers: draft row factory, row age-change handler, NewRecordTab, ClientRecordTab anonymous add, AddVisitorForm initial pick, `useRecordMutations.defaultTariff` callers.

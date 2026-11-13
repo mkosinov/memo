@@ -51,8 +51,10 @@ const esc = (value: string): string => value.replace(/'/g, "''");
 /**
  * The current-week future slot: tomorrow at 12:00 UTC while tomorrow is
  * still within this week, else today at 23:30 (the week's last day).
+ * #601: exported for location-visibility-pair.ts (the location edition
+ * of this fixture) — one slot rule, two fixtures.
  */
-function weekSlot(): { date: string; time: string; tab: 'Завтра' | 'Сегодня' } {
+export function weekSlot(): { date: string; time: string; tab: 'Завтра' | 'Сегодня' } {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000)

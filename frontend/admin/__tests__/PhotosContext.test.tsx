@@ -93,6 +93,7 @@ function makeLocation(id: string, overrides: Partial<LocationResponse> = {}): Lo
     review_url: null,
     record_info: null,
     image_url: null,
+    is_public: true,
     archived: false,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',

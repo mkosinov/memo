@@ -33,6 +33,8 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   PhotoPublicResponseSchema,
+  LocationPublicResponseSchema,
+  LocationPublicListResponseSchema,
   PhotoListResponseSchema,
   PhotoCreateSchema,
   PhotoUpdateSchema,
@@ -1069,6 +1071,7 @@ const validLocation = {
   review_url: 'https://yandex.ru/reviews/...',
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
+  is_public: true, // GH #601: web-visibility flag (true = shown on the site)
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -1126,6 +1129,18 @@ describe('LocationResponseSchema', () => {
   it('parses location without short_title (field absent)', () => {
     const result = LocationResponseSchema.parse(validLocation);
     expect(result.short_title).toBeUndefined();
+  });
+
+  // GH #601: web-visibility flag — true = shown on the client site.
+  it('parses location with is_public false (hidden from the site)', () => {
+    const data = { ...validLocation, is_public: false };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.is_public).toBe(false);
+  });
+
+  it('rejects non-boolean is_public', () => {
+    const data = { ...validLocation, is_public: 'yes' };
+    expect(() => LocationResponseSchema.parse(data)).toThrow();
   });
 
   it('parses location with null short_title', () => {
@@ -1482,6 +1497,50 @@ describe('PhotoPublicResponseSchema (#493: ADR-015 audience schema)', () => {
       id: 'p2', filename: 'f.jpg', client_id: null,
     } as never) as Record<string, unknown>;
     expect(withOwner).not.toHaveProperty('client_id'); // extra keys stripped, owner data never typed
+  });
+});
+
+describe('LocationPublicResponseSchema (#601: ADR-015 audience schema)', () => {
+  it('accepts the 4-field public dictionary row', () => {
+    const parsed = LocationPublicResponseSchema.parse({
+      id: 'l1',
+      title: 'Альпика',
+      address: 'Альпика, 1 этаж',
+      location_hint: '1 этаж, светлая студия с панорамными окнами',
+    });
+    expect(parsed).toStrictEqual({
+      id: 'l1',
+      title: 'Альпика',
+      address: 'Альпика, 1 этаж',
+      location_hint: '1 этаж, светлая студия с панорамными окнами',
+    });
+  });
+
+  it('accepts null address/location_hint and strips staff-only keys (zod non-strict)', () => {
+    const parsed = LocationPublicResponseSchema.parse({
+      id: 'l2',
+      title: 'Поляна 1389',
+      address: null,
+      location_hint: null,
+      capacity: 30,
+      is_public: true,
+      archived: false,
+    } as never) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('capacity'); // extra keys stripped — staff data never typed
+    expect(parsed).not.toHaveProperty('is_public');
+  });
+
+  it('rejects a row missing title', () => {
+    expect(() =>
+      LocationPublicResponseSchema.parse({ id: 'l3', address: null, location_hint: null }),
+    ).toThrow();
+  });
+
+  it('list schema parses the dictionary as a bare array (no envelope)', () => {
+    const rows = LocationPublicListResponseSchema.parse([
+      { id: 'l1', title: 'А', address: null, location_hint: null },
+    ]);
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -2091,6 +2150,8 @@ describe('Type exports', () => {
       record_info: '',
       image_url: '',
       location_hint: '',
+      // GH #601: the canonical PUT always carries the current flag value.
+      is_public: true,
       tag_ids: [],
     };
     expect(l.title).toBe('Обновлённая студия');
@@ -2311,6 +2372,12 @@ describe('LocationCreateSchema', () => {
     expect(result.image_url).toBe('');
     expect(result.location_hint).toBe('');
     expect(result.tag_ids).toEqual([]);
+    expect(result.is_public).toBe(true); // GH #601: default = visible
+  });
+
+  it('accepts is_public false (GH #601: hidden from the web)', () => {
+    const result = LocationCreateSchema.parse({ ...validLocationCreate, is_public: false });
+    expect(result.is_public).toBe(false);
   });
 
   it('parses with all fields', () => {
@@ -2357,6 +2424,17 @@ describe('LocationUpdateSchema', () => {
       capacity: 20,
     });
     expect(result.title).toBe('Обновлённое');
+  });
+
+  // GH #601 §2.1: the modal's canonical PUT carries the current flag value —
+  // is_public must be part of the full update contract (extra="forbid" parity).
+  it('accepts is_public in the full update payload', () => {
+    const result = LocationUpdateSchema.parse({
+      title: 'Обновлённое',
+      capacity: 20,
+      is_public: false,
+    });
+    expect(result.is_public).toBe(false);
   });
 
   it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {

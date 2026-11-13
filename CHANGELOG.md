@@ -10,6 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-13
 
 ### Added
+- **GH #601 — Флаг «не показывать в web» для локаций** — branch
+  `601-locations-web-visibility` (6 задач + 2 фикс-коммита
+  `fecf11fd..78cbd9b2`, base `92896269` = origin/main; 54 файла,
+  +2113/−120; спека
+  `docs/specs/2026-11-12-locations-web-visibility-601-design.md`
+  рев.4 (`43139353`), план
+  `docs/plans/2026-11-12-locations-web-visibility-601-plan.md` 6/6
+  (`ddd77447`) — оба на main, unchanged by IMPL):
+  - **Колонка is_public (T1 `fecf11fd`):** `locations.is_public` NOT
+    NULL DEFAULT true (true = видна клиентам), миграция
+    `c1d3e5f7a9b1`, schema/zod-зеркало api-client.
+  - **Публичный словарь + охрана bare GET (T2 `487e32d9`):**
+    `GET /api/v1/public/locations` по образцу #600 — полный список
+    одним массивом без пагинации (потолок `BARE_LIST_MAX_ROWS`), только
+    неархивированные с `is_public = true`, детерминированный сорт
+    `sort_order ASC, title ASC, id ASC`, схема `LocationPublicResponse`
+    ровно 4 поля (id, title, address, location_hint); bare
+    `GET /locations[/id]` под `locations:read` (аноним/клиент → 401).
+  - **Занятия скрытых/архивных локаций (T3 `e9287d09`):** серверное
+    исключение из публичной витрины занятий #600 + бронь по прямому
+    id → 404 (паритет несуществующему, предикат до валидации тарифа —
+    без бокового канала); админ-сетка и скоуп мастера не тронуты.
+  - **Админ (T4 `55912ca6`):** switch «Видно клиентам» в модалке
+    (создание и редактирование, `toggle-is-public`), бейдж «Не в web»
+    в таблице, admin-e2e US-1/US-4 (payload-ассерты PUT/POST,
+    «неизменность» админки, анонимная проба словаря, round-trip);
+    попутно закрыт латентный 422 — PUT модалки нёс `tag_ids` вне
+    `LocationUpdate` (`extra=forbid`), каждое сохранение падало (окно
+    известно с #203).
+  - **Web (T5 `cbd55c17`):** `useLocations` переведён на публичный
+    словарь (фильтр локаций + расписание web), web-e2e US-2/US-3
+    (бронь скрытого id под клиентской сессией → 404, без записи)/US-4
+    (фаза «включил → проверил»).
+  - **Сид (T6 `7d89e111`):** предзагрузка прод-справочников принимает
+    и применяет is_public из YAML, тест несёт обе полярности (US-5).
+  - **Фиксы:** allowlist-запись публичного маршрута в scope-contract
+    носителе (`94823fa9`); бейдж no-wrap на узких вьюпортах
+    (`78cbd9b2`).
+  - Tests: backend **174** (словарь/гарды/auth-контракт) + **63**
+    (витрина/бронь/scope-contract) + **66** (сид/регрессия) pass;
+    admin vitest **3171/3171** (tsc + next build чистые); admin-e2e
+    **3/3**; web-e2e **3/3** полный + **1/1** изолированный US-2;
+    api-client **584/584** (type-check + build чистые); web
+    type-check чистый; visual gate — GREEN exit 0 (1 машинная
+    проверка: бейдж на /locations mobile; 1 manual-review пункт
+    делегирован admin-e2e по дизайну спеки).
+  - Status: `docs/status/2026-11-13-locations-web-visibility-601.md`
 - **GH #600 — Публичная витрина занятий: приватные (is_private) не видны
   клиентам в web** — branch `600-activity-public-visibility` (7 задач
   `4a3f6c5d..4b21bba4`, base `ddd77447` = origin/main; 25 файлов,

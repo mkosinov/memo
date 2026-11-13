@@ -12,7 +12,7 @@ and enforces, for every ``APIRoute`` under ``/api/v1``:
 * a guarded route is NOT allowlisted (GH #600 Task 2): the walk above is
   blind to «guarded AND allowlisted» — both clauses pass it — so a second
   assert pins that a permission guard always ships with its allowlist
-  pruning (sole exception: ``GET /api/v1/auth/me``, 401-by-design probe).
+  pruning (no exceptions since #584 — the former /auth/me probe is gone).
 
 Path normalization (the ``src/auth/public.py`` docstring convention): real
 routers use entity-specific param names (``{master_id}``, ``{photo_id}``, …)
@@ -156,11 +156,9 @@ def _route_methods(route: Any) -> set[str]:
 class TestDefaultDenyContract:
     #: Guarded routes deliberately ALSO allowlisted: anonymous hits the
     #: guard's 401 — the entry documents the surface, it opens nothing.
-    #: /auth/me is the session probe (the SPA calls it before login and
-    #: EXPECTS 401, not 404, when unauthenticated).
-    _GUARDED_AND_PUBLIC_OK: frozenset[tuple[str, str]] = frozenset({
-        ("GET", "/api/v1/auth/me"),
-    })
+    #: EMPTY since #584 (spec §4.5): the sole former exception — the
+    #: /auth/me 401-by-design probe — died with the route itself.
+    _GUARDED_AND_PUBLIC_OK: frozenset[tuple[str, str]] = frozenset()
 
     def test_every_api_v1_route_is_guarded_or_allowlisted(self, app) -> None:
         """No /api/v1 APIRoute may be both dependency-free and off-allowlist."""

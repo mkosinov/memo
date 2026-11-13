@@ -136,7 +136,8 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     # ── Auth surface: resolves the session itself, no scope needed ──
     ("POST", "/api/v1/auth/login"): "auth surface (anonymous by design)",
     ("POST", "/api/v1/auth/logout"): "auth surface (own session teardown)",
-    ("GET", "/api/v1/auth/me"): "auth surface (returns own principal + permissions)",
+    # ADR-015 (#584, spec §4.5): ("GET", "/api/v1/auth/me") was removed
+    # with the route — the own-principal surface is the /my entries above.
     ("POST", "/api/v1/auth/change-password"): "auth surface (own password, require_session)",
     # ── Public password setup (#348 §5/§7): anonymous by design — the
     #    authority is the one-time token; no session, no master scope. ──

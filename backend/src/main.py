@@ -308,8 +308,9 @@ def create_app() -> FastAPI:
     app.include_router(my_client_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
-    # GH #247 — login / logout / me are PUBLIC_ROUTES by design (spec §3.6);
-    # the router itself carries no blanket guards.
+    # GH #247 — login / logout are PUBLIC_ROUTES by design (spec §3.6);
+    # the router itself carries no blanket guards (the former /me probe
+    # was removed — #584 ADR-015 §4.5).
     app.include_router(auth_router, prefix="/api/v1/auth")
 
     # GH #262 Task 2 — public avatar serving (spec §3.4): StaticFiles

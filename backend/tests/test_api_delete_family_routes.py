@@ -216,7 +216,7 @@ class TestUserSettingsDeleteContract:
         (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
         POST is a clean 201 again.
         """
-        me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        me = api_client.get("/api/v1/my").json()["id"]
         delete_settings_row(me)
         resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text

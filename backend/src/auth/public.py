@@ -20,11 +20,13 @@ Exactly this list, no more, no less:
   (#600): bare activity GETs are staff-only (``activities:read``),
   private rows are excluded server-side;
 - ``GET /api/v1/health``;
-- the auth endpoints themselves (login / logout / me) + the public
+- the auth endpoints themselves (login / logout) + the public
   password-setup pair (#348 spec §5/§7: the authority of
   ``password-setup`` is the one-time token itself — validate probes a
   link, setup consumes it; both feed the shared per-IP failure counter
-  on invalid tokens).
+  on invalid tokens). The former ``GET /api/v1/auth/me`` entry is GONE
+  (#584 ADR-015, spec §4.5): the route was removed — «кто я» is the
+  session-guarded ``GET /api/v1/my`` whoami.
 
 NOT here: ``GET /api/v1/events`` (SSE, GH #239) — it gets a session guard
 in T7; user-settings — own-only since #247; and ``POST /api/v1/records``
@@ -70,7 +72,9 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # booking is a separate contract (#499).
         ("POST", "/api/v1/auth/login"),
         ("POST", "/api/v1/auth/logout"),
-        ("GET", "/api/v1/auth/me"),
+        # ADR-015 (#584, spec §4.5): ("GET", "/api/v1/auth/me") was removed
+        # here together with the route itself — the session probe is the
+        # guarded whoami ``GET /api/v1/my`` now.
         # GH #348 (spec §5/§7): the public password-setup pair — the
         # authority is the one-time token itself (256-bit). Invalid-token
         # attempts feed the shared §3.4 per-IP failure counter.

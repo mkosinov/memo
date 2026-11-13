@@ -13,8 +13,8 @@ Covered:
 - cross-presentation 401: the client resolver reads ONLY
   ``memo_client_session`` (a staff ``memo_session`` jar is invisible) and
   requires ``role=client`` (a staff token copied into the client cookie
-  name is still 401); conversely the staff surface (``/auth/me``) does
-  not read ``memo_client_session``;
+  name is still 401); conversely the staff branches (``/my/admin``,
+  ``/my/master``) do not read ``memo_client_session``;
 - garbage cookie / archived user → 401 (shared resolve core);
 - spec §3 invariant: archiving the CLIENT CARD keeps the account link
   (``users.client_id``) and the cabinet working — the owner is the
@@ -177,10 +177,11 @@ class TestCrossPresentation:
     def test_client_cookie_invisible_to_staff_surface_401(
         self, api_client, client_token,
     ) -> None:
-        """A client session presented to a staff endpoint (``/auth/me`` reads
-        only ``memo_session``) is invisible → 401."""
+        """A client session presented to a staff branch (``/my/admin``
+        reads only ``memo_session``) is invisible → 401 (#584 §9: the
+        client cookie never crosses into a staff branch)."""
         _jar_with_client_cookie(api_client, client_token)
-        resp = api_client.get("/api/v1/auth/me")
+        resp = api_client.get("/api/v1/my/admin")
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
 
@@ -287,7 +288,7 @@ class TestLogoutBothKinds:
         # governs validity.
         api_client.cookies.clear()
         api_client.cookies.set("memo_session", staff_token)
-        assert api_client.get("/api/v1/auth/me").status_code == 200
+        assert api_client.get("/api/v1/my").status_code == 200
 
     def test_both_cookies_revokes_both(self, api_client, client_token) -> None:
         """#499 spec §4.2: whichever cookie is presented, that session is
@@ -307,7 +308,7 @@ class TestLogoutBothKinds:
         assert api_client.get(MY_CLIENT_URL).status_code == 401
         api_client.cookies.clear()
         api_client.cookies.set("memo_session", staff_token)
-        assert api_client.get("/api/v1/auth/me").status_code == 401
+        assert api_client.get("/api/v1/my").status_code == 401
 
     def test_logout_without_cookies_204_idempotent(self, api_client) -> None:
         api_client.cookies.clear()

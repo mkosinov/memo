@@ -1,10 +1,12 @@
-"""Auth router — login / logout / me / change-password / password-setup.
+"""Auth router — login / logout / change-password / password-setup.
 
-login / logout / me are PUBLIC_ROUTES (spec §2.7): the API is default-deny
-but these admit anonymous calls by design — ``me`` answers 401
-``AUTH_UNAUTHORIZED`` for a missing/expired session so the frontend can
-distinguish "no session" from "wrong password" (getMe resolves 401 →
-guest, §4.1). ``change-password`` (#262 §4) is session-guarded and NOT
+login / logout are PUBLIC_ROUTES (spec §2.7): the API is default-deny
+but these admit anonymous calls by design. The former session probe
+``GET /me`` was REMOVED (#584 ADR-015, spec §4.5) — «кто я» lives at
+``GET /api/v1/my`` (whoami: any session cookie, account data + roles,
+401 on an empty role list) and the staff profile on the
+``/my/master|admin`` branches; both reuse the ``_build_me_response``
+account half. ``change-password`` (#262 §4) is session-guarded and NOT
 public (it mutates credentials).
 
 The public password-setup pair (#348 spec §5/§7) — ``POST
@@ -219,15 +221,6 @@ async def logout(request: Request, db_session: SessionDep) -> Response:
     resp.delete_cookie(key=CLIENT_SESSION_COOKIE, path="/")
     resp.delete_cookie(key=SESSION_COOKIE, path="/")
     return resp
-
-
-@router.get("/me", response_model=AuthMeResponse)
-async def me(
-    db_session: SessionDep,
-    authed: AuthedUser = Depends(require_session),
-) -> AuthMeResponse:
-    """Resolve the current session — 401 ``AUTH_UNAUTHORIZED`` when absent."""
-    return await _build_me_response(db_session, authed)
 
 
 @router.get("/methods", response_model=list[AuthMethodResponse])

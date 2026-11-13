@@ -223,7 +223,7 @@ def login_as(app):
     with ``hash_password`` — the ``_user`` pattern), then::
 
         other = login_as(phone, password)
-        other.get("/api/v1/auth/me")
+        other.get("/api/v1/my")
 
     No ``with`` block: the client must outlive the factory call, and the
     app lifespan is a no-op in testing (hub.drain only), so a plain

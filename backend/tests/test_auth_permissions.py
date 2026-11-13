@@ -154,7 +154,7 @@ class TestAuthedUser:
         assert user.staff_id is None
         assert user.permissions == frozenset({"*"})
         # D10: no master_id attr remains on the principal — the wire key
-        # survives only in the /auth/me response builder.
+        # survives only in the login response builder (_build_me_response).
         assert not hasattr(user, "master_id")
 
     def test_master_user_with_linked_profile(self) -> None:
@@ -242,7 +242,9 @@ class TestPublicRoutes:
             # guest booking is #499.
             ("POST", "/api/v1/auth/login"),
             ("POST", "/api/v1/auth/logout"),
-            ("GET", "/api/v1/auth/me"),
+            # ADR-015 (#584, spec §4.5): ("GET", "/api/v1/auth/me") left
+            # the allowlist together with the route — the session probe is
+            # the guarded whoami ``GET /api/v1/my`` now.
             ("POST", "/api/v1/auth/password-setup/validate"),
             ("POST", "/api/v1/auth/password-setup"),
             ("POST", "/api/v1/auth/otp/request"),

@@ -88,8 +88,8 @@ class ProfileService:
 
         ``staff``/``master`` resolve to ``None`` when absent OR archived —
         for ``/my`` an archived card is ``has_staff=false`` (editing gate;
-        the own-name display rule for the user block lives in /auth/me,
-        spec §4 Display rule).
+        the own-name display rule for the user block lives in the login
+        response builder ``_build_me_response``, spec §4 Display rule).
         """
         user = await self._get_user(db_session, user_id)
 

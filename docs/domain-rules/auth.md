@@ -112,7 +112,6 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 |--------|------|--------|-------------|
 | POST | /api/v1/auth/login | public | phone + password → user + permissions + Set-Cookie |
 | POST | /api/v1/auth/logout | public | deletes session, clears cookie |
-| GET | /api/v1/auth/me | public (401 when no session) | current user + permissions |
 | POST | /api/v1/auth/password-setup/validate | public | проверка токена ссылки установки пароля (#348) |
 | POST | /api/v1/auth/password-setup | public | установка пароля по одноразовой ссылке (#348) |
 | PATCH | /api/v1/users/{id} | admin | правка телефона учётки (#348) |

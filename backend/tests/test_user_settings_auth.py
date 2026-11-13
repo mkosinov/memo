@@ -29,10 +29,10 @@ def other_user():
 
 
 def _me_id(api_client) -> str:
-    """Session user id via /api/v1/auth/me."""
-    resp = api_client.get("/api/v1/auth/me")
+    """Session user id via the whoami GET /api/v1/my (#584 §4.1)."""
+    resp = api_client.get("/api/v1/my")
     assert resp.status_code == 200, resp.text
-    return resp.json()["user"]["id"]
+    return resp.json()["id"]
 
 
 def _create_own_settings(api_client, **fields) -> dict:

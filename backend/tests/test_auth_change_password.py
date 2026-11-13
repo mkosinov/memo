@@ -1,4 +1,4 @@
-"""GH #262 Task 3: POST /auth/change-password + avatar in the me snapshot.
+"""GH #262 Task 3: POST /auth/change-password + avatar in the login snapshot.
 
 API-level tests through the shared ``api_client`` (session-scoped
 TestClient, ``anon``/``login_as`` conftest pattern from test_api_my.py).
@@ -14,9 +14,11 @@ D6; domain-rules/auth.md «Change password (#262)»):
   rows of the user are deleted (``token != current``); the lockout-ladder
   fields are untouched (D6: does not feed the ladder);
 - no session → 401 ``AUTH_UNAUTHORIZED``;
-- /auth/me: ``master.avatar_url`` present (null when no card) and the
+- login body: ``master.avatar_url`` present (null when no card) and the
   snapshot name/avatar read from the card **regardless of card archive**
-  (Display rule, spec §4).
+  (Display rule, spec §4). Since #584 (ADR-015 §4.5) the LOGIN response
+  is the carrier of the ``_build_me_response`` snapshot — the former
+  ``/auth/me`` probe is gone.
 """
 
 from __future__ import annotations
@@ -64,6 +66,17 @@ def _make_user_login(login_as, _hashed_passwords, *, role: str = "admin"):
     phone = f"+7999{_uuid7()}"
     insert_user(phone, _hashed_passwords["old"], role=role)
     return login_as(phone, PASSWORD), login_as(phone, PASSWORD)
+
+
+def _login_body(client, phone: str) -> dict:
+    """The login response body — the surviving carrier of the #262
+    snapshot (``_build_me_response`` feeds login; ``/auth/me`` is gone,
+    #584 §4.5). Re-login rotates the token; only the body is asserted."""
+    resp = client.post(
+        "/api/v1/auth/login", json={"phone": phone, "password": PASSWORD}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
 def _uuid7() -> str:
@@ -145,7 +158,7 @@ class TestChangePassword:
         current, other = _make_user_login(login_as, _hashed_passwords)
         current_token = _token_of(current)
         other_token = _token_of(other)
-        user_id = current.get("/api/v1/auth/me").json()["user"]["id"]
+        user_id = current.get("/api/v1/my").json()["id"]
         rows_before = query_db(
             f"SELECT token FROM sessions WHERE user_id = '{user_id}'"
         )
@@ -155,7 +168,7 @@ class TestChangePassword:
 
         assert resp.status_code == 204
         # Current session survives…
-        assert current.get("/api/v1/auth/me").status_code == 200
+        assert current.get("/api/v1/my").status_code == 200
         # …and only its row remains among the two.
         rows_after = query_db(
             f"SELECT token FROM sessions WHERE user_id = '{user_id}'"
@@ -167,7 +180,7 @@ class TestChangePassword:
     ) -> None:
         """D6: change-password does not feed the login lockout ladder."""
         current, _ = _make_user_login(login_as, _hashed_passwords)
-        user_id = current.get("/api/v1/auth/me").json()["user"]["id"]
+        user_id = current.get("/api/v1/my").json()["id"]
 
         resp = _call(current)
 
@@ -185,7 +198,7 @@ class TestChangePassword:
     ) -> None:
         current, other = _make_user_login(login_as, _hashed_passwords)
         other_token = _token_of(other)
-        user_id = current.get("/api/v1/auth/me").json()["user"]["id"]
+        user_id = current.get("/api/v1/my").json()["id"]
         hash_before = query_db(
             f"SELECT password_hash FROM users WHERE id = '{user_id}'"
         )[0]["password_hash"]
@@ -198,14 +211,14 @@ class TestChangePassword:
             f"SELECT password_hash FROM users WHERE id = '{user_id}'"
         )[0]["password_hash"]
         assert hash_after == hash_before
-        assert other.get("/api/v1/auth/me").status_code == 200
+        assert other.get("/api/v1/my").status_code == 200
 
     def test_new_password_active_after_change(
         self, api_client, login_as, _hashed_passwords, anon,
     ) -> None:
         """The stored hash is replaced: old password stops working."""
         current, _ = _make_user_login(login_as, _hashed_passwords)
-        phone = current.get("/api/v1/auth/me").json()["user"]["phone"]
+        phone = current.get("/api/v1/my").json()["phone"]
 
         assert _call(current).status_code == 204
 
@@ -226,10 +239,11 @@ class TestChangePassword:
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
 
 
-# ─── /auth/me snapshot: avatar_url + archive-independent name ──────────────────
+# ─── login snapshot: avatar_url + archive-independent name (#262; the
+#     /auth/me carrier was removed — #584 ADR-015 §4.5) ────────────────────────
 
 
-class TestMeSnapshotAvatar:
+class TestLoginSnapshotAvatar:
     def test_master_snapshot_includes_avatar_url(
         self, api_client, login_as, _hashed_passwords,
     ) -> None:
@@ -248,7 +262,7 @@ class TestMeSnapshotAvatar:
         )
         client = login_as(phone, PASSWORD)
 
-        master = client.get("/api/v1/auth/me").json()["master"]
+        master = _login_body(client, phone)["master"]
 
         assert master == {
             "first_name": "Мария",
@@ -264,7 +278,7 @@ class TestMeSnapshotAvatar:
         insert_user(phone, _hashed_passwords["old"], role="admin")
         client = login_as(phone, PASSWORD)
 
-        body = client.get("/api/v1/auth/me").json()
+        body = _login_body(client, phone)
 
         assert body["user"]["master_id"] is None
         assert body["master"] is None
@@ -299,7 +313,7 @@ class TestMeSnapshotAvatar:
         )
         client = login_as(phone, PASSWORD)
 
-        master = client.get("/api/v1/auth/me").json()["master"]
+        master = _login_body(client, phone)["master"]
 
         assert master == {
             "first_name": "Ольга",

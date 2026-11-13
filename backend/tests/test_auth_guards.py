@@ -210,7 +210,7 @@ class TestAdminPasses:
             # session user's row, then a plain GET must return 200.
             # §5.5 anomaly pattern: the User factory already created the
             # row — delete it explicitly so the POST scenario is real.
-            me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+            me = api_client.get("/api/v1/my").json()["id"]
             delete_settings_row(me)
             created = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
             assert created.status_code == 201, created.text

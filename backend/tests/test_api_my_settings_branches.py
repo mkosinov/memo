@@ -275,7 +275,7 @@ def _admitted_session(api_client, branch: str, login_as, _my_hash: str):
     master login; /my/client → a directly minted client cookie.
     """
     if branch == ADMIN_SETTINGS:
-        me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        me = api_client.get("/api/v1/my").json()["id"]
         return api_client, me
     if branch == MASTER_SETTINGS:
         phone = f"+7999{secrets.token_hex(7)}"

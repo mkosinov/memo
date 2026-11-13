@@ -16,10 +16,10 @@ pytestmark = pytest.mark.api
 
 @pytest.fixture
 def me(api_client) -> str:
-    """The api_client session user's id."""
-    resp = api_client.get("/api/v1/auth/me")
+    """The api_client session user's id (whoami — #584 §4.1)."""
+    resp = api_client.get("/api/v1/my")
     assert resp.status_code == 200, resp.text
-    return resp.json()["user"]["id"]
+    return resp.json()["id"]
 
 
 class TestUserSettingsPatchArchivedVisibility:

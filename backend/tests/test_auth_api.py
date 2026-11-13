@@ -20,9 +20,10 @@ Covered:
   ENV=testing) + ``Max-Age`` = ABSOLUTE_CAP seconds;
 - login: wrong password → 401 ``AUTH_INVALID_CREDENTIALS``; 5th failure →
   429 ``AUTH_LOCKED_OUT`` + ``Retry-After``;
-- me: with cookie → 200 (admin ``["*"]``; master gets the linked master
-  snapshot via master_id join); without cookie → 401 ``AUTH_UNAUTHORIZED``;
-- logout: 204, cookie cleared, subsequent me → 401;
+- me REMOVED (#584 ADR-015, spec §4.5): ``GET /api/v1/auth/me`` → 404 for
+  an anonymous jar AND a live session — «кто я» is the guarded whoami
+  ``GET /api/v1/my`` (its contracts live in ``test_api_my.py``);
+- logout: 204, cookie cleared, subsequent whoami → 401;
 - login rotates: the old cookie is dead after a re-login;
 - guard smoke test: a throwaway route with
   ``require_permission("payments:write")`` — anonymous 401, admin 200,
@@ -95,7 +96,7 @@ def _admin_user(_password_hashes):
 @pytest.fixture
 def _master_profile():
     """Insert a staff card row directly — returns its id (#266: people live
-    in staff; /auth/me wire shape keeps the ``master_id`` key per D10)."""
+    in staff; the login wire shape keeps the ``master_id`` key per D10)."""
     import uuid as _uuid
 
     staff_id = str(_uuid.uuid4())
@@ -273,27 +274,24 @@ class TestLogin:
         assert int(fifth.headers["retry-after"]) > 0
 
 
-# ─── me ────────────────────────────────────────────────────────────────────────
+# ─── me — REMOVED (#584 ADR-015, spec §4.5) ────────────────────────────────────
 
 
-class TestMe:
-    def test_me_with_cookie_admin(self, anon_client, _admin_user) -> None:
+class TestMeRemoved:
+    """The session probe ``GET /api/v1/auth/me`` is GONE — «кто я» moved
+    to ``GET /api/v1/my`` (whoami, #584 §4.1) and the staff profile to
+    the ``/my/master|admin`` branches (§4.3). The 404 must come from
+    route ABSENCE (not a guard), so it answers the same for an anonymous
+    jar and for a LIVE session."""
+
+    def test_me_anonymous_404(self, anon_client) -> None:
+        resp = anon_client.get("/api/v1/auth/me")
+        assert resp.status_code == 404, resp.text
+
+    def test_me_with_live_session_404(self, anon_client, _admin_user) -> None:
         _login(anon_client, _admin_user["phone"])
         resp = anon_client.get("/api/v1/auth/me")
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["user"]["id"] == _admin_user["id"]
-        assert resp.json()["permissions"] == ["*"]
-
-    def test_me_without_cookie_401_unauthorized(self, anon_client, _admin_user) -> None:
-        resp = anon_client.get("/api/v1/auth/me")
-        assert resp.status_code == 401
-        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
-
-    def test_me_with_garbage_cookie_401(self, anon_client, _admin_user) -> None:
-        anon_client.cookies.set("memo_session", "not-a-real-token")
-        resp = anon_client.get("/api/v1/auth/me")
-        assert resp.status_code == 401
-        assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+        assert resp.status_code == 404, resp.text
 
 
 # ─── logout ────────────────────────────────────────────────────────────────────
@@ -315,7 +313,7 @@ class TestLogout:
         assert cleared in ('""', "", None)
         assert "max-age=0" in cookie.lower()
 
-        me = anon_client.get("/api/v1/auth/me")
+        me = anon_client.get("/api/v1/my")
         assert me.status_code == 401
 
     def test_logout_without_session_204_idempotent(self, anon_client) -> None:
@@ -340,7 +338,7 @@ class TestSessionRotation:
 
         # The old token must no longer resolve
         anon_client.cookies.set("memo_session", old_token)
-        me = anon_client.get("/api/v1/auth/me")
+        me = anon_client.get("/api/v1/my")
         assert me.status_code == 401
 
 

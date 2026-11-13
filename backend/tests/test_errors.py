@@ -289,7 +289,7 @@ class TestDeleteFamilyForm422:
         # user-settings: GET resolves the session user's own row (none
         # in a fresh world) → create one.
         if api_client.get("/api/v1/my/admin/settings").status_code == 404:
-            me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+            me = api_client.get("/api/v1/my").json()["id"]
             resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
             assert resp.status_code == 201, resp.text
             return f"/api/v1/my/admin/settings/{resp.json()['id']}"

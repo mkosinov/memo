@@ -900,6 +900,47 @@ describe('SettingsTab — capacity gate (вместимость ≥ 1, GH #280)'
   });
 });
 
+// ─── SettingsTab — datetime patch source (GH #553: полная дата) ─────────────
+// The datetime instant-patch sends the FULL calendar date — `{ start }` from
+// composeLocalISO(datePart, snappedMinutes), the same floating-local ISO the
+// create form sends (#280). The chosen date is no longer discarded; the legacy
+// `dayIndex + startMinutes` keys belong to the grid senders (dnd, slot stamps)
+// and must NOT appear in the form's payload. Empty/partial field values send
+// nothing at all (broken `start` in PATCH is impossible by construction).
+
+describe('SettingsTab — datetime patch sends full date (GH #553)', () => {
+  it('sends { start } with the chosen full date+snapped time, not dayIndex + startMinutes', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    // 14:25 snaps to 14:30 on the 30-min grid (mockGridSettings)
+    fireEvent.change(input, { target: { value: '2026-06-09T14:25' } });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith({ start: '2026-06-09T14:30:00' });
+    // the legacy grid keys must not ride along
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('dayIndex');
+    expect(payload).not.toHaveProperty('startMinutes');
+  });
+
+  it('keeps the chosen date outside the open week (date is not discarded)', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    // mockActivity sits on 2026-06-13; pick a date from a DIFFERENT week
+    fireEvent.change(input, { target: { value: '2026-07-01T10:00' } });
+    expect(onUpdate).toHaveBeenCalledWith({ start: '2026-07-01T10:00:00' });
+  });
+
+  it('does not patch when the field is cleared (empty value)', () => {
+    const onUpdate = vi.fn();
+    render(<SettingsTab activity={mockActivity} onUpdate={onUpdate} />);
+    const input = screen.getByTestId('input-datetime');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+});
+
 // ─── ClientTab — Layout & Feature Tests ──────────────────────────────────────
 
 describe('ClientTab — layout & features', () => {

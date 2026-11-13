@@ -145,6 +145,25 @@ class LocationResponse(LocationBase):
         return not self.is_active
 
 
+class LocationPublicResponse(BaseModel):
+    """Public location dictionary item — deliberately NOT LocationResponse (ADR-015).
+
+    Audience schema for the anonymous dictionary
+    ``GET /api/v1/public/locations`` (#601 spec §2.2): exactly the 4
+    fields the web consumes — ``address``/``location_hint`` are
+    nullable. Everything else (capacity, description, the URL trio,
+    ``is_public`` itself, timestamps) never leaves through this schema;
+    archived and hidden rows are excluded server-side on the route.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    address: str | None = None
+    location_hint: str | None = None
+
+
 class ReorderRequest(BaseModel):
     """Request body for reordering locations."""
 

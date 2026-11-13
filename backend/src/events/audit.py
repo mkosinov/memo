@@ -10,12 +10,14 @@ one commit for action + journal; a method error rolls both back together.
 
 Components:
 
-* **Actor** — ``{user_id, role}`` request contextvar set by the shared
-  ``resolve_authed`` core (spec §4.1): both the strict guard and the
-  lenient optional resolver put it there; no extra DB hits. The author
-  comes ONLY from the server session — never from request data. Rule:
-  no actor → no journal insertion (seeds, CLI, session-less fixtures,
-  anonymous record creation are not journaled, spec §12).
+* **Actor** — ``{user_id, roles}`` request contextvar staged by the
+  resolvers (spec §4.1): the classic ``resolve_authed`` puts its
+  single-role 1-tuple there, the #584 combined whoami guard stages the
+  primary account with the FULL resolved role list; no extra DB hits.
+  The author comes ONLY from the server session — never from request
+  data. Rule: no actor → no journal insertion (seeds, CLI,
+  session-less fixtures, anonymous record creation are not journaled,
+  spec §12).
 
 * **Accumulator** — the list of raw row dicts staged by
   :func:`mark_audit` (explicit marks per spec §4.3) and

@@ -9,7 +9,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | title | string | ✅ | 1 | 200 | — | Название услуги |
 | description | string | ✅ | — | — | — | Описание |
 | image_url | string | ✅ | — | — | — | URL картинки |
-| specialty | string | ✅ | — | — | — | Специализация |
+| specialty_id | UUID (specialties) | ✅ | — | — | — | Направление — ссылка на справочник (`specialties.md`, GH #599); в ответах строковое `specialty` (название) сохраняется для отображения |
 | min_age | integer | ✅ | 0 | 18 | — | Минимальный возраст |
 | max_age | integer | ❌ | 0 | 18 | — | Максимальный возраст; nullable — `null` = без верхней границы (миграция `275ba490cab8`). Диапазон 0–18 — клиентская валидация формы |
 | duration | integer | ✅ | 15 | 480 | — | Длительность в минутах |

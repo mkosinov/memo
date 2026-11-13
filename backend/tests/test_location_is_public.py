@@ -80,8 +80,8 @@ class TestLocationSchemaIsPublic:
 
     def test_location_response_from_attributes_reads_is_public(self) -> None:
         """LocationResponse picks is_public up from ORM attributes."""
-        from types import SimpleNamespace
         from datetime import UTC, datetime
+        from types import SimpleNamespace
 
         from src.schemas.location import LocationResponse
 

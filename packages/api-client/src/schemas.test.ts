@@ -33,6 +33,8 @@ import {
   type ActivityResponse,
   PhotoResponseSchema,
   PhotoPublicResponseSchema,
+  LocationPublicResponseSchema,
+  LocationPublicListResponseSchema,
   PhotoListResponseSchema,
   PhotoCreateSchema,
   PhotoUpdateSchema,
@@ -1495,6 +1497,50 @@ describe('PhotoPublicResponseSchema (#493: ADR-015 audience schema)', () => {
       id: 'p2', filename: 'f.jpg', client_id: null,
     } as never) as Record<string, unknown>;
     expect(withOwner).not.toHaveProperty('client_id'); // extra keys stripped, owner data never typed
+  });
+});
+
+describe('LocationPublicResponseSchema (#601: ADR-015 audience schema)', () => {
+  it('accepts the 4-field public dictionary row', () => {
+    const parsed = LocationPublicResponseSchema.parse({
+      id: 'l1',
+      title: 'Альпика',
+      address: 'Альпика, 1 этаж',
+      location_hint: '1 этаж, светлая студия с панорамными окнами',
+    });
+    expect(parsed).toStrictEqual({
+      id: 'l1',
+      title: 'Альпика',
+      address: 'Альпика, 1 этаж',
+      location_hint: '1 этаж, светлая студия с панорамными окнами',
+    });
+  });
+
+  it('accepts null address/location_hint and strips staff-only keys (zod non-strict)', () => {
+    const parsed = LocationPublicResponseSchema.parse({
+      id: 'l2',
+      title: 'Поляна 1389',
+      address: null,
+      location_hint: null,
+      capacity: 30,
+      is_public: true,
+      archived: false,
+    } as never) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('capacity'); // extra keys stripped — staff data never typed
+    expect(parsed).not.toHaveProperty('is_public');
+  });
+
+  it('rejects a row missing title', () => {
+    expect(() =>
+      LocationPublicResponseSchema.parse({ id: 'l3', address: null, location_hint: null }),
+    ).toThrow();
+  });
+
+  it('list schema parses the dictionary as a bare array (no envelope)', () => {
+    const rows = LocationPublicListResponseSchema.parse([
+      { id: 'l1', title: 'А', address: null, location_hint: null },
+    ]);
+    expect(rows).toHaveLength(1);
   });
 });
 

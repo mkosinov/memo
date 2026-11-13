@@ -90,6 +90,8 @@ import {
   PositionAllResponseSchema,
   MasterViewAllResponseSchema,
   LocationAllResponseSchema,
+  LocationPublicListResponseSchema,
+  type LocationPublicListResponse,
   ServiceAllResponseSchema,
   TagAllResponseSchema,
   MaterialAllResponseSchema,
@@ -369,6 +371,13 @@ export async function resolveDeletePosition(id: string, payload: ResolveDeletePo
 
 export async function getLocations(params?: ListParams): Promise<PaginatedResponse<LocationResponse>> {
   return api(`/api/v1/locations${listQuery(params)}`, LocationListResponseSchema);
+}
+
+/** #601 / ADR-015: anonymous location dictionary for the client site —
+ * bare array of 4-field rows, no parameters; archived and hidden
+ * (is_public=false) rows are excluded server-side. */
+export async function getPublicLocations(): Promise<LocationPublicListResponse> {
+  return api('/api/v1/public/locations', LocationPublicListResponseSchema);
 }
 
 // ─── Photos (GH #211: paginated list with filters/sort) ─────────────────────

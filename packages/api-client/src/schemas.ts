@@ -236,6 +236,18 @@ export const LocationResponseSchema = z.object({
 
 export type LocationResponse = z.infer<typeof LocationResponseSchema>;
 
+/** #601: public location dictionary item — minimal audience schema
+ * (ADR-015, naming per PhotoPublicResponseSchema): exactly the 4 fields
+ * the web consumes; archived and is_public=false rows are excluded
+ * server-side, `is_public` itself never leaves through this schema. */
+export const LocationPublicResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  address: z.string().nullable(),
+  location_hint: z.string().nullable(),
+});
+export type LocationPublicResponse = z.infer<typeof LocationPublicResponseSchema>;
+
 // ─── PhotoResponse ──────────────────────────────────────────────────────────
 
 export const PhotoResponseSchema = z.object({
@@ -1263,6 +1275,10 @@ export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 
 export const PhotoPublicListResponseSchema = paginatedSchema(PhotoPublicResponseSchema);
 export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSchema>;
+
+// #601: public location dictionary — BARE array (no envelope, no params).
+export const LocationPublicListResponseSchema = z.array(LocationPublicResponseSchema);
+export type LocationPublicListResponse = z.infer<typeof LocationPublicListResponseSchema>;
 
 // GH #513 — the three client-cabinet /my lists (same {items, total, page,
 // per_page} envelope; per-endpoint item shapes above).

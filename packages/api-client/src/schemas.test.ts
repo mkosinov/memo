@@ -71,6 +71,10 @@ import {
   MasterSnapshotSchema,
   MyProfileSchema,
   MyProfileUpdateSchema,
+  MyWhoamiSchema,
+  MyStaffProfileSchema,
+  type MyWhoami,
+  type MyStaffProfile,
   ChangePasswordSchema,
   OtpRequestSchema,
   OtpRequestResponseSchema,
@@ -387,7 +391,7 @@ describe('Strict response fields (#480 §3.3)', () => {
 
   it.each([
     ['StaffAccountSchema.role', StaffAccountSchema, () => ({ ...accountRow, role: 'superuser' })],
-    ['AuthUserSchema.role (auth/me + login body)', AuthMeSchema, () => ({
+    ['AuthUserSchema.role (login body)', AuthMeSchema, () => ({
       ...authMeBody,
       user: { ...authMeBody.user, role: 'superuser' },
     })],
@@ -2655,6 +2659,100 @@ describe('MyProfileUpdateSchema (GH #262 — omitted=keep, null=clear)', () => {
   });
 });
 
+// ─── «Кто я» + staff branches (#584 spec §4.1/§4.3) ──────────────────────
+
+describe('MyWhoamiSchema (#584 §4.1 — GET /api/v1/my)', () => {
+  it('parses a staff whoami (id, phone, email, roles)', () => {
+    const parsed = MyWhoamiSchema.parse({
+      id: 'u-1',
+      phone: '+79990000001',
+      email: 'admin@example.com',
+      roles: ['admin', 'master'],
+    });
+    expect(parsed.id).toBe('u-1');
+    expect(parsed.roles).toEqual(['admin', 'master']);
+  });
+
+  it('parses a client whoami — client accounts carry no email → null', () => {
+    const parsed: MyWhoami = MyWhoamiSchema.parse({
+      id: 'u-2',
+      phone: '+79991234567',
+      email: null,
+      roles: ['client'],
+    });
+    expect(parsed.email).toBeNull();
+    expect(parsed.roles).toEqual(['client']);
+  });
+
+  it('rejects an unknown role value (fail-closed, #480 §3.3)', () => {
+    expect(() =>
+      MyWhoamiSchema.parse({ id: 'u-1', phone: '+79990000001', email: null, roles: ['superuser'] }),
+    ).toThrow();
+  });
+
+  it('rejects a body without roles (the branch admit list is mandatory)', () => {
+    expect(() => MyWhoamiSchema.parse({ id: 'u-1', phone: '+79990000001', email: null })).toThrow();
+  });
+});
+
+describe('MyStaffProfileSchema (#584 §4.3 — GET/PUT /api/v1/my/{master|admin})', () => {
+  const adminBranchBody = {
+    role: 'admin',
+    has_staff: false,
+    has_master: false,
+    first_name: null,
+    last_name: null,
+    avatar_url: null,
+    specialties: null,
+    patronymic: null,
+    birth_date: null,
+    residence_address: null,
+    birth_place: null,
+    passport_series_number: null,
+    passport_issued_date: null,
+    passport_issued_by: null,
+    registration_address: null,
+    // The account half that moved here from /auth/me (#584 §4.3).
+    user_id: 'u-1',
+    phone: '+79990000001',
+    email: 'admin@example.com',
+    permissions: ['*'],
+    // Master-branch-only additions: always on the wire, null in the admin
+    // branch (backend serializes the None defaults).
+    master_section: null,
+    master: null,
+  };
+
+  it('parses an admin-branch profile (master additions present as null)', () => {
+    const parsed = MyStaffProfileSchema.parse(adminBranchBody);
+    expect(parsed.user_id).toBe('u-1');
+    expect(parsed.permissions).toEqual(['*']);
+    expect(parsed.master_section).toBeNull();
+    expect(parsed.master).toBeNull();
+  });
+
+  it('parses a master-branch profile with the section and the snapshot', () => {
+    const parsed: MyStaffProfile = MyStaffProfileSchema.parse({
+      ...adminBranchBody,
+      role: 'master',
+      has_staff: true,
+      has_master: true,
+      first_name: 'Анна',
+      last_name: 'Иванова',
+      specialties: ['живопись'],
+      master_section: { specialties: ['живопись'], color: '#004D56' },
+      master: { first_name: 'Анна', last_name: 'Иванова', avatar_url: null },
+    });
+    expect(parsed.master_section).toEqual({ specialties: ['живопись'], color: '#004D56' });
+    expect(parsed.master?.last_name).toBe('Иванова');
+  });
+
+  it('rejects a body without the account half (moved from /auth/me)', () => {
+    const { user_id: _u, permissions: _p, master_section: _ms, master: _m, ...stripped } = adminBranchBody;
+    expect(() => MyStaffProfileSchema.parse(stripped)).toThrow();
+  });
+});
+
 describe('ChangePasswordSchema (GH #262)', () => {
   it('requires both current and new password', () => {
     expect(() => ChangePasswordSchema.parse({ current_password: 'a' })).toThrow();
@@ -2837,7 +2935,7 @@ describe('MyRecordResponseSchema (GH #499 §5 — 201 body)', () => {
 
 // ─── Client cabinet read (GH #513 — the three /my lists) ────────────────────
 
-describe('MyRecordItemSchema (GH #513 — GET /my/records items)', () => {
+describe('MyRecordItemSchema (GH #513 — GET /my/client/records items)', () => {
   const validVisit = { id: 'v-1', visitor_name: 'Мария', status: 'waiting', price: 1500 };
   const validItem = {
     id: 'r-1',
@@ -2878,7 +2976,7 @@ describe('MyRecordItemSchema (GH #513 — GET /my/records items)', () => {
   });
 });
 
-describe('MyPhotoItemSchema (GH #513 — GET /my/photos items)', () => {
+describe('MyPhotoItemSchema (GH #513 — GET /my/client/photos items)', () => {
   const validItem = {
     id: 'p-1',
     filename: '2026/10/photo-1.jpg',

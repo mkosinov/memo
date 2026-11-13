@@ -843,6 +843,30 @@ export const AuthMeSchema = z.object({
   master: MasterSnapshotSchema.nullable().optional(),
 });
 export type AuthMe = z.infer<typeof AuthMeSchema>;
+// #584 §4.5: /auth/me is deleted — this shape now parses ONLY the login
+// response. The guest bootstrap is the whoami chain (MyWhoamiSchema →
+// MyStaffProfileSchema).
+
+// The staff branch literal union (#584 §4.3): the staff surface mounts under
+// STATIC prefixes /api/v1/my/{master|admin} — the branch is an audience
+// address over the same account/rows, never a dynamic path segment.
+export type StaffBranch = 'master' | 'admin';
+
+// ─── «Кто я» (GH #584 spec §4.1 — GET /api/v1/my) ─────────────────────────
+// Mirrors backend MyWhoamiResponse: account data of the PRIMARY identity
+// plus every resolved role. A role enters the list only via a valid cookie
+// of its own audience (client/master/admin); order is not guaranteed.
+// Client accounts carry no email → null. No password/lock fields.
+
+export const MyWhoamiSchema = z.object({
+  id: z.string(),
+  phone: z.string(),
+  email: z.string().nullable(),
+  // Strict enum (fail-closed, #480 §3.3) — the frontend branches on
+  // membership ("master" ∈ roles), so an unknown role must fail loudly.
+  roles: z.array(UserRoleSchema),
+});
+export type MyWhoami = z.infer<typeof MyWhoamiSchema>;
 
 // ─── My profile (GH #262 spec §4 — mirrors backend src/schemas/my.py) ─────
 // One flat shape for GET and PUT. PUT semantics (domain-rules/profile.md):
@@ -850,6 +874,8 @@ export type AuthMe = z.infer<typeof AuthMeSchema>;
 // columns only — first_name/last_name reject null server-side). The names
 // and avatar_url write the linked STAFF CARD; specialties is read-only here
 // (the admin owns the master section, #266 D5).
+// #584 §4.3: the bare GET/PUT /my moved under the staff branches — this is
+// now the base of MyStaffProfileSchema, not a standalone response.
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 
@@ -896,11 +922,38 @@ export const MyProfileUpdateSchema = z.strictObject({
 }).partial();
 export type MyProfileUpdate = z.input<typeof MyProfileUpdateSchema>;
 
-// POST /my/portrait success body (GH #262 Task 2).
-export const PortraitResponseSchema = z.object({
+// ─── Staff branch profile (GH #584 spec §4.3 — GET/PUT /api/v1/my/{branch})
+// Mirrors backend MyStaffProfileResponse: the flat profile PLUS the account
+// half that moved here from /auth/me (user_id, phone, email, permissions).
+// The master-branch-only additions are ALWAYS on the wire — null in the
+// admin branch (backend serializes the None defaults; no exclude_none).
+
+// Minimal display view of the ACTIVE masters section — the master branch
+// fills it; an archived/absent section is simply null.
+export const MyMasterSectionSchema = z.object({
+  specialties: z.array(z.string()),
+  color: z.string(),
+});
+export type MyMasterSection = z.infer<typeof MyMasterSectionSchema>;
+
+export const MyStaffProfileSchema = MyProfileSchema.extend({
+  user_id: z.string(),
+  phone: z.string(),
+  email: z.string().nullable(),
+  permissions: z.array(z.string()),
+  master_section: MyMasterSectionSchema.nullable(),
+  // The login-shaped card snapshot the admin shell renders
+  // (archive-independent Display rule, backend MasterSnapshot).
+  master: MasterSnapshotSchema.nullable(),
+});
+export type MyStaffProfile = z.infer<typeof MyStaffProfileSchema>;
+
+// POST /my/{branch}/avatar success body (GH #262 Task 2; the /portrait →
+// /avatar rename, #584 decision 2026-11-13 — upload contract unchanged).
+export const AvatarResponseSchema = z.object({
   avatar_url: z.string(),
 });
-export type PortraitResponse = z.infer<typeof PortraitResponseSchema>;
+export type AvatarResponse = z.infer<typeof AvatarResponseSchema>;
 
 // POST /auth/change-password body (GH #262 spec §4) — mirrors backend
 // ChangePasswordRequest: wrong current → 401, policy breach → 422.
@@ -992,7 +1045,7 @@ export const AuthCallStatusResponseSchema = z.object({
 });
 export type AuthCallStatusResponse = z.infer<typeof AuthCallStatusResponseSchema>;
 
-// POST /my/records body (spec §5) — the strict booking wire. From the wire
+// POST /my/client/records body (spec §5; #584 §4.2) — the strict booking wire. From the wire
 // there is deliberately NO client_id/visitor_id/price/custom_price/notify/
 // status: the owner comes ONLY from the client session, prices are computed
 // server-side from tariff_id, notifications are never opted into here.
@@ -1041,7 +1094,7 @@ export type MyRecordResponse = z.infer<typeof MyRecordResponseSchema>;
 // decides the owner — no client_id anywhere on the wire) and carry NO own
 // filters: the query is the bare pagination brick, see endpoints.ts.
 
-// GET /my/records items[] visit — per-endpoint shape, deliberately NOT
+// GET /my/client/records items[] visit — per-endpoint shape, deliberately NOT
 // VisitResponse: no tariff_id/visitor_id/record_id/custom_price/timestamps
 // (the spec's «не входят» list). `visitor_name` is the linked Visitor's
 // name (null = anonymous seat, legal per domain); `price` is the
@@ -1055,7 +1108,7 @@ export const MyVisitItemSchema = z.object({
 });
 export type MyVisitItem = z.infer<typeof MyVisitItemSchema>;
 
-// GET /my/records items[] record. activity_date/start/end are computed
+// GET /my/client/records items[] record. activity_date/start/end are computed
 // server-side from the activity (the model stores only start + duration;
 // end = start + duration, time-of-day after a midnight rollover, date
 // always the start's date) — all three always present. No service fields:
@@ -1073,7 +1126,7 @@ export const MyRecordItemSchema = z.object({
 });
 export type MyRecordItem = z.infer<typeof MyRecordItemSchema>;
 
-// GET /my/photos items[] — per-endpoint shape, deliberately NOT
+// GET /my/client/photos items[] — per-endpoint shape, deliberately NOT
 // PhotoResponse: no client_id/client_name (the requester IS the client),
 // no service_id/activity_id/location_id owner slots, no updated_at.
 // `tags` are resolved server-side to tag NAMES (string[]) — tag objects
@@ -1088,7 +1141,7 @@ export const MyPhotoItemSchema = z.object({
 });
 export type MyPhotoItem = z.infer<typeof MyPhotoItemSchema>;
 
-// GET /my/payments items[] record context — ALWAYS present (record_id is a
+// GET /my/client/payments items[] record context — ALWAYS present (record_id is a
 // mandatory FK and payments are deleted with the record, so no null
 // branch) and exactly these three fields: full record data stays out.
 export const MyPaymentRecordContextSchema = z.object({

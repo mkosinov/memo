@@ -150,7 +150,19 @@ export function ActivityCard({ activity, master, locations = [], style, onEdit, 
           {formatTime(activity.startMinutes)}–{formatTime(activity.startMinutes + activity.durationMinutes)}
         </span>
         {activity.isPrivate && (
-          <svg className="w-5 h-5 flex-shrink-0 drop-shadow-sm mt-1 mr-1" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
+          // GH #600 US-4: stable selector for the private diamond —
+          // kebab-case data-testid convention of `btn-quick-add` /
+          // `compact-capacity` below. Attribute-only: no pixel change
+          // (visual baselines safe; data-testid never leaks into aria
+          // snapshots either).
+          <svg
+            data-testid="activity-private-badge"
+            className="w-5 h-5 flex-shrink-0 drop-shadow-sm mt-1 mr-1"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="1.5"
+          >
             <path d="M12 2L2 9l10 13 10-13L12 2z" />
             <path d="M2 9h20" />
             <path d="M12 2v20" />

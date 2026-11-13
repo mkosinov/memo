@@ -73,7 +73,7 @@ _GUARDED_ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
     ("clients-read", "GET", "/api/v1/clients", None),
     ("payments-read", "GET", "/api/v1/payments", None),
     ("materials-read", "GET", "/api/v1/materials", None),
-    ("user-settings-read", "GET", "/api/v1/user-settings", None),
+    ("user-settings-read", "GET", "/api/v1/my/admin/settings", None),
     ("events-stream", "GET", "/api/v1/events", None),
 ]
 
@@ -212,7 +212,7 @@ class TestAdminPasses:
             # row — delete it explicitly so the POST scenario is real.
             me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
             delete_settings_row(me)
-            created = api_client.post("/api/v1/user-settings", json={"user_id": me})
+            created = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
             assert created.status_code == 201, created.text
             resp = api_client.get(path)
             assert resp.status_code == 200, resp.text

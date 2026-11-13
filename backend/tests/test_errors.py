@@ -210,7 +210,7 @@ class TestDeleteFamilyForm422:
         "/api/v1/visits",
         "/api/v1/payments",
         "/api/v1/photos",
-        "/api/v1/user-settings",
+        "/api/v1/my/admin/settings",
         "/api/v1/visitors",
         "/api/v1/positions",
     )
@@ -258,7 +258,7 @@ class TestDeleteFamilyForm422:
             )
 
     @pytest.mark.parametrize(
-        "prefix", ["/api/v1/visits", "/api/v1/payments", "/api/v1/user-settings"],
+        "prefix", ["/api/v1/visits", "/api/v1/payments", "/api/v1/my/admin/settings"],
     )
     def test_dry_run_with_expected_only_body_ignored_leaf_204(
         self, api_client, prefix, create_record,
@@ -288,10 +288,10 @@ class TestDeleteFamilyForm422:
             return f"/api/v1/payments/{payment.json()['id']}"
         # user-settings: GET resolves the session user's own row (none
         # in a fresh world) → create one.
-        if api_client.get("/api/v1/user-settings").status_code == 404:
+        if api_client.get("/api/v1/my/admin/settings").status_code == 404:
             me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
-            resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+            resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
             assert resp.status_code == 201, resp.text
-            return f"/api/v1/user-settings/{resp.json()['id']}"
-        row = api_client.get("/api/v1/user-settings").json()
-        return f"/api/v1/user-settings/{row['id']}"
+            return f"/api/v1/my/admin/settings/{resp.json()['id']}"
+        row = api_client.get("/api/v1/my/admin/settings").json()
+        return f"/api/v1/my/admin/settings/{row['id']}"

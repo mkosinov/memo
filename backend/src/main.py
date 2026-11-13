@@ -33,7 +33,11 @@ from src.api.v1.services import router as services_router
 from src.api.v1.staff import router as staff_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
-from src.api.v1.user_settings import router as user_settings_router
+from src.api.v1.user_settings import (
+    admin_settings_router,
+    client_settings_router,
+    master_settings_router,
+)
 from src.api.v1.users import router as users_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.visits import router as visits_router
@@ -268,7 +272,16 @@ def create_app() -> FastAPI:
     app.include_router(visits_router, prefix="/api/v1/visits")
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
-    app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #584 (spec §4.4) — settings under the branches: the former
+    # /api/v1/user-settings island re-homes as ONE settings router on
+    # THREE STATIC prefixes (no root /my/settings): the staff instance
+    # answers the SAME account/rows on both staff branches (the branch
+    # is the audience address, not other data), the client instance is
+    # a ready surface behind require_client_session (no consumer yet).
+    # The old flat mount is retired (404).
+    app.include_router(master_settings_router, prefix="/api/v1/my/master/settings")
+    app.include_router(admin_settings_router, prefix="/api/v1/my/admin/settings")
+    app.include_router(client_settings_router, prefix="/api/v1/my/client/settings")
     # GH #348 — users vertical: admin-side phone edit + password-link issue.
     app.include_router(users_router, prefix="/api/v1/users")
     # GH #344 — audit journal reading (admin-only, spec §6).

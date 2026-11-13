@@ -175,11 +175,27 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/my/client/records"): "client cabinet read (#513) — client session, own records",
     ("GET", "/api/v1/my/client/photos"): "client cabinet read (#513) — client session, own photos",
     ("GET", "/api/v1/my/client/payments"): "client cabinet read (#513) — client session, payments of own records",
-    ("GET", "/api/v1/user-settings"): "own settings — per-user",
-    ("POST", "/api/v1/user-settings"): "own settings — per-user",
-    ("PUT", "/api/v1/user-settings"): "own settings — per-user",
-    ("PATCH", "/api/v1/user-settings"): "own settings — per-user",
-    ("DELETE", "/api/v1/user-settings/{id}"): "own settings — per-user",
+    # ── Own settings under the «my» branches (#584 §4.4; the former
+    #    /api/v1/user-settings island re-homed): rows are keyed by the
+    #    session user — per-user, not master-scoped. The master branch
+    #    is the master's own surface; the admin branch guard 403s a
+    #    non-admin master; the client branch is the client session's
+    #    own surface (a staff cookie is 401 there). ──
+    ("GET", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("POST", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("PUT", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("PATCH", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("DELETE", "/api/v1/my/master/settings/{id}"): "own settings, master branch (#584 §4.4) — per-user",
+    ("GET", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403 for a non-admin master",
+    ("POST", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("PUT", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("PATCH", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("DELETE", "/api/v1/my/admin/settings/{id}"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("GET", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("POST", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("PUT", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("PATCH", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("DELETE", "/api/v1/my/client/settings/{id}"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
     # ── Admin-only surfaces: master holds NO permission token for these
     #    (ROLE_PERMISSIONS has no staff/positions/materials/:write entries)
     #    → the permission gate answers 403 before scope would ever run.

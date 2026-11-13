@@ -600,7 +600,7 @@ class TestPublicBoundary:
 
 
 class TestUserSettingsDeleteFamilyShortSet:
-    """DELETE /api/v1/user-settings/{id} — the leaf SHORT-form contract
+    """DELETE /api/v1/my/admin/settings/{id} — the leaf SHORT-form contract
     (GH #324 §10: bare 422, dry_run 204, commit ``{expected: {}}``, 404
     of both kinds) + the settings entity extra: own-only 403 on a
     foreign row (the probe-read + ownership gate — spec §4.2).
@@ -629,7 +629,7 @@ class TestUserSettingsDeleteFamilyShortSet:
         """
         me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
         delete_settings_row(me)
-        resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+        resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -638,28 +638,28 @@ class TestUserSettingsDeleteFamilyShortSet:
         survives."""
         settings = self._own_row(api_client)
 
-        resp = api_client.delete(f"/api/v1/user-settings/{settings['id']}")
+        resp = api_client.delete(f"/api/v1/my/admin/settings/{settings['id']}")
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["detail"] == "expected_state_required"
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_dry_run_returns_204_row_alive(self, api_client) -> None:
         """§4.4: a leaf previews empty → 204 WITHOUT deleting."""
         settings = self._own_row(api_client)
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings['id']}",
             params={"dry_run": "true"},
         )
 
         assert resp.status_code == 204, resp.text
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_commit_unknown_id_with_body_returns_404(self, api_client) -> None:
         """§4.2: cannot-exist id WITH body → 404 (probe after the form)."""
         resp = api_client.request(
-            "DELETE", "/api/v1/user-settings/00000000-0000-0000-0000-000000000000",
+            "DELETE", "/api/v1/my/admin/settings/00000000-0000-0000-0000-000000000000",
             json={"expected": {}},
         )
         assert resp.status_code == 404, resp.text
@@ -674,12 +674,12 @@ class TestUserSettingsDeleteFamilyShortSet:
         settings = self._own_row(api_client)
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings['id']}",
             json={"expected": {}},
         )
 
         assert resp.status_code == 204, resp.text
-        recreated = api_client.get("/api/v1/user-settings")
+        recreated = api_client.get("/api/v1/my/admin/settings")
         assert recreated.status_code == 200
         assert recreated.json()["id"] != settings["id"]
 
@@ -688,10 +688,14 @@ class TestUserSettingsDeleteFamilyShortSet:
     ) -> None:
         """§4.2: the settings entity extra — a REAL second user hitting
         the admin's row gets 403 AUTH_FORBIDDEN in BOTH branches (the
-        probe-read + ownership gate runs first); the row survives."""
+        probe-read + ownership gate runs first); the row survives.
+
+        #584 §4.4: the foreign user (_make_staff_user → a master) rides
+        HIS master branch — admitted there, then stopped by the
+        ownership gate (not by the branch guard)."""
         settings = self._own_row(api_client)  # admin's own row
         other, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        url = f"/api/v1/user-settings/{settings['id']}"
+        url = f"/api/v1/my/master/settings/{settings['id']}"
 
         for resp in (
             other.request("DELETE", url, params={"dry_run": "true"}),
@@ -700,11 +704,11 @@ class TestUserSettingsDeleteFamilyShortSet:
             assert resp.status_code == 403, resp.text
             assert resp.json()["detail"]["code"] == "AUTH_FORBIDDEN"
         # The owner's row survives the foreign attempts.
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_no_session_401_before_form(self, anon) -> None:
-        """The router-level session guard fires before any delete-family
+        """The router-level branch guard fires before any delete-family
         work: an anonymous bare DELETE gets 401 (never a form 422 — the
         contract never widens access)."""
-        resp = anon.delete("/api/v1/user-settings/00000000-0000-0000-0000-000000000000")
+        resp = anon.delete("/api/v1/my/admin/settings/00000000-0000-0000-0000-000000000000")
         assert resp.status_code == 401, resp.text

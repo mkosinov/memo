@@ -38,7 +38,7 @@ def me(api_client) -> dict:
 
 
 class TestGetUserSettings:
-    """GET /api/v1/user-settings — get-or-create (GH #319)"""
+    """GET /api/v1/my/admin/settings — get-or-create (GH #319)"""
 
     def test_get_creates_defaults_when_missing(self, api_client, me) -> None:
         """GH #319: GET with no row → 200 + model defaults + row in the DB.
@@ -50,7 +50,7 @@ class TestGetUserSettings:
 
         delete_settings_row(me["id"])
 
-        resp = api_client.get("/api/v1/user-settings")
+        resp = api_client.get("/api/v1/my/admin/settings")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["user_id"] == me["id"]
@@ -70,7 +70,7 @@ class TestGetUserSettings:
 
     def test_get_response_is_no_store(self, api_client, me) -> None:
         """GH #319: the get-or-create response must not be cached."""
-        resp = api_client.get("/api/v1/user-settings")
+        resp = api_client.get("/api/v1/my/admin/settings")
         assert resp.status_code == 200
         assert resp.headers.get("Cache-Control") == "no-store"
 
@@ -78,7 +78,7 @@ class TestGetUserSettings:
         # Create settings first (§5.5 anomaly pattern: delete the factory
         # row explicitly so POST starts from a clean slate)
         delete_settings_row(me["id"])
-        create_resp = api_client.post("/api/v1/user-settings", json={
+        create_resp = api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"],
             "theme": "dark",
             "language": "en",
@@ -88,7 +88,7 @@ class TestGetUserSettings:
         assert create_resp.status_code == 201, f"Create failed: {create_resp.text}"
 
         # Get
-        resp = api_client.get("/api/v1/user-settings")
+        resp = api_client.get("/api/v1/my/admin/settings")
         assert resp.status_code == 200
         body = resp.json()
         assert body["user_id"] == me["id"]
@@ -108,7 +108,7 @@ class TestGetUserSettings:
         scenario starts from a clean slate.
         """
         delete_settings_row(me["id"])
-        create_resp = api_client.post("/api/v1/user-settings", json={
+        create_resp = api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"],
             "theme": "light",
         })
@@ -116,12 +116,12 @@ class TestGetUserSettings:
         settings_id = create_resp.json()["id"]
 
         api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings_id}",
             json={"expected": {}},
         )
 
         # Get-or-create: defaults come back (a NEW row, not the deleted one)
-        resp = api_client.get("/api/v1/user-settings")
+        resp = api_client.get("/api/v1/my/admin/settings")
         assert resp.status_code == 200
         body = resp.json()
         assert body["id"] != settings_id
@@ -132,21 +132,21 @@ class TestGetUserSettings:
         """Old clients still send ?user_id= — FastAPI drops the undeclared
         param and own-row semantics win (spec §3.8)."""
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={
+        api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"], "theme": "dark",
         })
 
-        resp = api_client.get("/api/v1/user-settings?user_id=some-other-user")
+        resp = api_client.get("/api/v1/my/admin/settings?user_id=some-other-user")
         assert resp.status_code == 200
         assert resp.json()["user_id"] == me["id"]
 
 
 class TestCreateUserSettings:
-    """POST /api/v1/user-settings — user from the session (GH #319)"""
+    """POST /api/v1/my/admin/settings — user from the session (GH #319)"""
 
     def test_create_with_defaults(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        resp = api_client.post("/api/v1/user-settings", json={})
+        resp = api_client.post("/api/v1/my/admin/settings", json={})
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         body = resp.json()
         assert body["user_id"] == me["id"]
@@ -160,7 +160,7 @@ class TestCreateUserSettings:
 
     def test_create_with_all_fields(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        resp = api_client.post("/api/v1/user-settings", json={
+        resp = api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"],
             "theme": "dark",
             "language": "en",
@@ -178,7 +178,7 @@ class TestCreateUserSettings:
     def test_create_archived_visibility_defaults(self, api_client, me) -> None:
         """GH #267: create without the new toggles → masters ON, locations OFF."""
         delete_settings_row(me["id"])
-        resp = api_client.post("/api/v1/user-settings", json={})
+        resp = api_client.post("/api/v1/my/admin/settings", json={})
         assert resp.status_code == 201, f"Create failed: {resp.text}"
         body = resp.json()
         assert body["show_archived_masters"] is True
@@ -194,7 +194,7 @@ class TestCreateUserSettings:
         """
         delete_settings_row(me["id"])
         delete_settings_row(other_user["id"])
-        resp = api_client.post("/api/v1/user-settings", json={
+        resp = api_client.post("/api/v1/my/admin/settings", json={
             "user_id": other_user["id"],
             "theme": "dark",
         })
@@ -213,26 +213,26 @@ class TestCreateUserSettings:
 
     def test_create_duplicate_user_id_returns_422(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
-        resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
+        resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
         # IntegrityError is caught by the global handler → 422
         assert resp.status_code == 422
         assert resp.json()["detail"]["code"] == ErrorCode.INTEGRITY_VIOLATION.value
 
 
 class TestUpdateUserSettings:
-    """PUT /api/v1/user-settings (own-only — no user_id param)"""
+    """PUT /api/v1/my/admin/settings (own-only — no user_id param)"""
 
     def test_update_returns_404_when_no_settings(self, api_client, me) -> None:
         delete_settings_row(me["id"])  # §5.5 anomaly pattern
-        resp = api_client.put("/api/v1/user-settings", json={"theme": "dark"})
+        resp = api_client.put("/api/v1/my/admin/settings", json={"theme": "dark"})
         assert resp.status_code == 404
 
     def test_update_theme(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
 
-        resp = api_client.put("/api/v1/user-settings", json={"theme": "dark"})
+        resp = api_client.put("/api/v1/my/admin/settings", json={"theme": "dark"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["theme"] == "dark"
@@ -240,17 +240,17 @@ class TestUpdateUserSettings:
 
     def test_update_language(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
 
-        resp = api_client.put("/api/v1/user-settings", json={"language": "en"})
+        resp = api_client.put("/api/v1/my/admin/settings", json={"language": "en"})
         assert resp.status_code == 200
         assert resp.json()["language"] == "en"
 
     def test_update_column_orders(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
 
-        resp = api_client.put("/api/v1/user-settings", json={
+        resp = api_client.put("/api/v1/my/admin/settings", json={
             "column_order_staff": ["last_name", "first_name"],
             "column_order_locations": ["address"],
         })
@@ -261,9 +261,9 @@ class TestUpdateUserSettings:
 
     def test_update_all_fields(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
 
-        resp = api_client.put("/api/v1/user-settings", json={
+        resp = api_client.put("/api/v1/my/admin/settings", json={
             "theme": "dark",
             "language": "en",
             "column_order_staff": ["color"],
@@ -278,24 +278,24 @@ class TestUpdateUserSettings:
 
     def test_update_empty_body_noop(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
 
-        resp = api_client.put("/api/v1/user-settings", json={})
+        resp = api_client.put("/api/v1/my/admin/settings", json={})
         assert resp.status_code == 200
         assert resp.json()["theme"] == "light"  # unchanged
 
 
 class TestPatchSettings:
-    """Tests for PATCH /api/v1/user-settings (own-only — no user_id param)"""
+    """Tests for PATCH /api/v1/my/admin/settings (own-only — no user_id param)"""
 
     def test_patch_theme_only(self, api_client, me) -> None:
         """PATCH updates only theme."""
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={
+        api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"], "theme": "light", "language": "ru",
         })
 
-        response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
+        response = api_client.patch("/api/v1/my/admin/settings", json={"theme": "dark"})
         assert response.status_code == 200
         body = response.json()
         assert body["theme"] == "dark"
@@ -304,17 +304,17 @@ class TestPatchSettings:
     def test_patch_not_found_404(self, api_client, me) -> None:
         """PATCH with no own settings row returns 404."""
         delete_settings_row(me["id"])  # §5.5 anomaly pattern
-        response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
+        response = api_client.patch("/api/v1/my/admin/settings", json={"theme": "dark"})
         assert response.status_code == 404
 
     def test_patch_empty_body_noop(self, api_client, me) -> None:
         """PATCH with empty body makes no changes."""
         delete_settings_row(me["id"])
-        api_client.post("/api/v1/user-settings", json={
+        api_client.post("/api/v1/my/admin/settings", json={
             "user_id": me["id"], "theme": "light", "language": "ru",
         })
 
-        response = api_client.patch("/api/v1/user-settings", json={})
+        response = api_client.patch("/api/v1/my/admin/settings", json={})
         assert response.status_code == 200
         body = response.json()
         assert body["theme"] == "light"
@@ -322,26 +322,26 @@ class TestPatchSettings:
 
 
 class TestDeleteUserSettings:
-    """DELETE /api/v1/user-settings/{id}"""
+    """DELETE /api/v1/my/admin/settings/{id}"""
 
     def test_delete_returns_204(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        create_resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        create_resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
         settings_id = create_resp.json()["id"]
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings_id}",
             json={"expected": {}},
         )
         assert resp.status_code == 204
 
     def test_delete_removes_row(self, api_client, me) -> None:
         delete_settings_row(me["id"])
-        create_resp = api_client.post("/api/v1/user-settings", json={"user_id": me["id"]})
+        create_resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me["id"]})
         settings_id = create_resp.json()["id"]
 
         api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings_id}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings_id}",
             json={"expected": {}},
         )
 
@@ -352,7 +352,7 @@ class TestDeleteUserSettings:
 
     def test_delete_returns_404_for_nonexistent(self, api_client) -> None:
         resp = api_client.request(
-            "DELETE", "/api/v1/user-settings/nonexistent-id",
+            "DELETE", "/api/v1/my/admin/settings/nonexistent-id",
             json={"expected": {}},
         )
         assert resp.status_code == 404

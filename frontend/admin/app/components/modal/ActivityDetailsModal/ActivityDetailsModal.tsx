@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useScheduleData } from '@/contexts/schedule/ScheduleDataContext';
 import { useUI } from '@/contexts/UIContext';
 import type { ScheduleAdminDTO } from '@memo/domain';
@@ -77,6 +77,13 @@ export function ActivityDetailsModal({ isOpen, onClose, activity, mode, createDe
  * Create mode — single tab with the slot-prefilled creation form. No record
  * hooks, no delete footer; close cross is hidden while saving (Modal hides
  * the button when onClose is undefined).
+ *
+ * GH #598: контейнер фикс-высоты h-[85dvh]; «Создать» рендерится в футере
+ * Modal (вне скроллящегося тела, всегда видна). Мост — минимальный: вкладка
+ * публикует canSave (onCanSaveChange, образец — onSavingChange) и регистрирует
+ * submit (onSubmitRegister → ref, без подъёма состояния формы). <form> не
+ * вводится — кнопка работает тем же кликом по submit, Enter-отправка не
+ * заявлена.
  */
 function CreateActivityPanel({
   defaults,
@@ -89,12 +96,30 @@ function CreateActivityPanel({
   onSavingChange: (saving: boolean) => void;
   onClose: () => void;
 }) {
+  const [canSave, setCanSave] = useState(false);
+  const submitRef = useRef<(() => void) | null>(null);
+  const handleSubmitRegister = useCallback((submit: () => void) => {
+    submitRef.current = submit;
+  }, []);
+
   return (
     <Modal
       title="Новое занятие"
       titleId="activity-modal-title"
       onClose={saving ? undefined : onClose}
-      footer={null}
+      heightClass="h-[85dvh]"
+      footer={
+        <button
+          type="button"
+          data-testid="btn-create-activity"
+          onClick={() => submitRef.current?.()}
+          disabled={!canSave || saving}
+          className="w-full rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ backgroundColor: 'var(--brand)' }}
+        >
+          Создать
+        </button>
+      }
       testId="activity-details-modal-container"
     >
       <TabNav
@@ -102,8 +127,18 @@ function CreateActivityPanel({
         activeTab="create"
         onTabChange={() => {}}
       />
-      <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
-        <CreateActivityTab defaults={defaults} onSavingChange={onSavingChange} onSaved={onClose} />
+      <div
+        data-testid="activity-details-modal-scroll-body"
+        className="flex-1 flex flex-col overflow-y-auto min-h-0 overscroll-contain"
+        style={{ backgroundColor: 'var(--white)' }}
+      >
+        <CreateActivityTab
+          defaults={defaults}
+          onSavingChange={onSavingChange}
+          onSaved={onClose}
+          onCanSaveChange={setCanSave}
+          onSubmitRegister={handleSubmitRegister}
+        />
       </div>
     </Modal>
   );
@@ -113,6 +148,8 @@ function CreateActivityPanel({
  * Edit/quickAdd mode — the previous modal body verbatim (hooks, tabs memo,
  * handlers, delete footer). Extracted so its hooks are conditional at the
  * COMPONENT level, which satisfies the Rules of Hooks.
+ * GH #598: фикс-высота h-[85dvh] + владелец скролла — внутренний div ниже
+ * (min-h-0 + overscroll-contain); футер удаления не меняется.
  */
 function ExistingActivityContent({
   activity,
@@ -311,6 +348,7 @@ function ExistingActivityContent({
       title={activity.serviceTitle || 'Мероприятие'}
       context={contextLabel}
       onClose={onClose}
+      heightClass="h-[85dvh]"
       footer={
         <div data-testid="modal-footer">
           <button
@@ -330,7 +368,11 @@ function ExistingActivityContent({
         onTabChange={setActiveTab}
         onAddClick={handleAddClick}
       />
-      <div className="flex-1 flex flex-col overflow-y-auto" style={{ backgroundColor: 'var(--white)' }}>
+      <div
+        data-testid="activity-details-modal-scroll-body"
+        className="flex-1 flex flex-col overflow-y-auto min-h-0 overscroll-contain"
+        style={{ backgroundColor: 'var(--white)' }}
+      >
         {renderContent()}
       </div>
     </Modal>

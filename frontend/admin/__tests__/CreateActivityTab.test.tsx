@@ -9,7 +9,11 @@
  * умолчания), отбрасывание отсутствующих id при рефетче, префилл-ид по
  * прибытии списка, мульти-отправку addActivities: порядок входов = порядок
  * чекбоксов, вместимость по правилу §4.2, полный/частичный/нулевой успех,
- * порядок сообщения ошибки, disabled полей на время полёта.
+ * порядок сообщения ошибки, disabled полей на время полёта — и МИНИМАЛЬНЫЙ
+ * МОСТ КНОПКИ В ФУТЕР (GH #598): вкладка публикует canSave (onCanSaveChange)
+ * и регистрирует submit (onSubmitRegister) по образцу onSavingChange;
+ * inline-кнопки в теле вкладки нет (гейты кнопки — публикацией canSave здесь,
+ * рендером панели с футером — в ActivityDetailsModal.test.tsx).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
@@ -55,6 +59,9 @@ const locations = [
 const defaults = { date: '2026-10-21', startMinutes: 840 };
 const onSavingChange = vi.fn();
 const onSaved = vi.fn();
+// GH #598: мост кнопки в футер — публикация canSave и регистрация submit.
+const onCanSaveChange = vi.fn();
+const onSubmitRegister = vi.fn();
 
 // ── §4.3 исходы addActivities ────────────────────────────────────────────
 
@@ -90,6 +97,8 @@ function renderTab(overrides?: {
       defaults={overrides?.defaults ?? defaults}
       onSavingChange={onSavingChange}
       onSaved={onSaved}
+      onCanSaveChange={onCanSaveChange}
+      onSubmitRegister={onSubmitRegister}
     />,
   );
 }
@@ -112,6 +121,22 @@ function fillValidForm() {
   toggleLocation('Студия');
 }
 
+/**
+ * GH #598: последний зарегистрированный submit (обновляется на каждом
+ * рендере — замыкает актуальное состояние полей); клик футерной «Создать»
+ * зовёт ровно её. Замена inline-кнопки из #595-тестов после переезда
+ * кнопки в футер.
+ */
+function registeredSubmit(): () => void {
+  const calls = onSubmitRegister.mock.calls;
+  return calls[calls.length - 1][0] as () => void;
+}
+
+/** Гейт «Создать» после переезда кнопки в футер (#598): публикация canSave. */
+function expectCanSave(canSave: boolean) {
+  expect(onCanSaveChange).toHaveBeenLastCalledWith(canSave);
+}
+
 /** Перерисовать вкладку с новым значением контекста (рефетч справочника). */
 function rerenderWithLocations(view: ReturnType<typeof renderTab>, nextLocations: typeof locations, defs = defaults) {
   mockUseScheduleData.mockReturnValue(
@@ -123,7 +148,13 @@ function rerenderWithLocations(view: ReturnType<typeof renderTab>, nextLocations
     }),
   );
   view.rerender(
-    <CreateActivityTab defaults={defs} onSavingChange={onSavingChange} onSaved={onSaved} />,
+    <CreateActivityTab
+      defaults={defs}
+      onSavingChange={onSavingChange}
+      onSaved={onSaved}
+      onCanSaveChange={onCanSaveChange}
+      onSubmitRegister={onSubmitRegister}
+    />,
   );
 }
 
@@ -148,7 +179,9 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     expect(screen.getByTestId('create-datetime')).toBeInTheDocument();
     expect(screen.getByTestId('create-duration')).toBeInTheDocument();
     expect(screen.getByTestId('create-capacity')).toBeInTheDocument();
-    expect(screen.getByTestId('btn-create-activity')).toBeInTheDocument();
+    // GH #598: inline-кнопки в теле больше нет — «Создать» живёт в футере
+    // модалки (замок проживания — в ActivityDetailsModal.test.tsx).
+    expect(screen.queryByTestId('btn-create-activity')).not.toBeInTheDocument();
 
     // Приватность — тумблер role="switch", не чекбокс (spec VCC, US-4)
     const toggle = screen.getByRole('switch');
@@ -234,50 +267,52 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     expect(within(tariffs).getByText('Детский')).toBeInTheDocument();
   });
 
-  it('gates «Создать»: empty datetime, bad duration, capacity < 1 each block the button', () => {
+  // ─── GH #598: контракт минимального моста кнопки в футер ──────────────────
+  // Гейты (матрица canSave, submit-payload) живут в ActivityDetailsModal.test.tsx
+  // (рендер панели с футером); здесь — только публикация canSave и регистрация
+  // рабочего submit, по образцу существующего onSavingChange.
+
+  it('publishes canSave up via onCanSaveChange: false initially → true on a valid form (GH #598)', () => {
     renderTab();
-    const btn = screen.getByTestId('btn-create-activity');
+    expect(onCanSaveChange).toHaveBeenCalledWith(false);
     fillValidForm();
-    expect(btn).toBeEnabled();
-
-    // Дата-время очищено → блок («значение даты-времени непусто»)
-    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-21T14:00' } });
-    expect(btn).toBeEnabled();
-
-    // Длительность: некорректный формат и 00:00 → блок
-    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '99' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '00:00' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:30' } });
-    expect(btn).toBeEnabled();
-
-    // Вместимость: пусто / 0 / -1 → блок; 1 → ок (GH #280: путь «пусто → 0» исчез)
-    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '-1' } });
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '1' } });
-    expect(btn).toBeEnabled();
+    expect(onCanSaveChange).toHaveBeenLastCalledWith(true);
   });
 
-  it('gates «Создать» until master+service+location chosen; 0 checked locations block', () => {
+  it('registers a working submit via onSubmitRegister: the registered fn sends addActivities (GH #598)', () => {
+    const addActivities = vi.fn((inputs: AddActivityInput[]) =>
+      Promise.resolve(inputs.map((i) => createdOutcome(i.locationId))),
+    );
+    mockUseScheduleData.mockReturnValue(
+      createMockScheduleData({ masters: mockMasters, services: mockServices, locations, addActivities }),
+    );
     renderTab();
-    const btn = screen.getByTestId('btn-create-activity');
-    expect(btn).toBeDisabled(); // дата-время префиллита, справочники не выбраны
+    fillValidForm();
+
+    // Регистрация обновляется на каждом рендере — берём последнюю (замыкает
+    // актуальное состояние полей); клик по футерной кнопке зовёт её.
+    registeredSubmit()();
+
+    expect(addActivities).toHaveBeenCalledTimes(1);
+    expect(addActivities.mock.calls[0][0][0]).toMatchObject({
+      masterId: 'm1',
+      serviceId: 's1',
+      locationId: 'l1',
+    });
+  });
+
+  it('gates canSave until master+service+location chosen; 0 checked locations block (§4.1)', () => {
+    renderTab();
+    expectCanSave(false); // дата-время префиллита, справочники не выбраны
 
     pickInCombobox('create-master', 'm1');
-    expect(btn).toBeDisabled();
+    expectCanSave(false);
     pickInCombobox('create-service', 's1'); // длительность заполнится сама
-    expect(btn).toBeDisabled(); // 0 локаций → блок (§4.1: ≥1 отмеченной)
+    expectCanSave(false); // 0 локаций → блок (§4.1: ≥1 отмеченной)
     toggleLocation('Студия');
-    expect(btn).toBeEnabled();
+    expectCanSave(true);
     toggleLocation('Студия'); // сняли единственную → снова блок
-    expect(btn).toBeDisabled();
+    expectCanSave(false);
   });
 
   it('§4.2 2+: hides the capacity field, shows the policy hint aria-live=polite; defaults allow saving', () => {
@@ -292,10 +327,10 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     const hint = screen.getByTestId('create-capacity-hint');
     expect(hint).toHaveAttribute('aria-live', 'polite');
     expect(hint).toHaveTextContent('Вместимость — по умолчанию каждого зала');
-    expect(screen.getByTestId('btn-create-activity')).toBeEnabled();
+    expectCanSave(true);
   });
 
-  it('§4.2 2+: a checked hall without default blocks «Создать»; hint names the FIRST such by checkbox order', () => {
+  it('§4.2 2+: a checked hall without default blocks canSave; hint names the FIRST such by checkbox order', () => {
     renderTab();
     pickInCombobox('create-master', 'm1');
     pickInCombobox('create-service', 's1');
@@ -304,18 +339,17 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     // отмечается второй — подсказка называет её, не «Лофт».
     toggleLocation('Лофт');
     toggleLocation('Мансарда');
-    const btn = screen.getByTestId('btn-create-activity');
-    expect(btn).toBeDisabled();
+    expectCanSave(false);
     const hint = screen.getByTestId('create-capacity-hint');
     expect(hint).toHaveAttribute('aria-live', 'polite');
     expect(hint).toHaveTextContent('У зала «Мансарда» не задана вместимость');
 
     // снятие зала-нарушителя возвращает набор к ровно 1 → поле вместимости
-    // снова видно с умолчанием оставшейся локации (§4.2), кнопка разблокирована
+    // снова видно с умолчанием оставшейся локации (§4.2), canSave восстановлен
     toggleLocation('Мансарда');
     expect(screen.queryByTestId('create-capacity-hint')).not.toBeInTheDocument();
     expect(screen.getByTestId('create-capacity')).toHaveValue(10);
-    expect(btn).toBeEnabled();
+    expectCanSave(true);
   });
 
   it('§4.2 2+: defaultCapacity = 0 counts as «no default» and blocks', () => {
@@ -325,7 +359,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
 
     toggleLocation('Студия'); // умолчание 6
     toggleLocation('Ангар'); // умолчание 0 → незаданное
-    expect(screen.getByTestId('btn-create-activity')).toBeDisabled();
+    expectCanSave(false);
     expect(screen.getByTestId('create-capacity-hint')).toHaveTextContent(
       'У зала «Ангар» не задана вместимость',
     );
@@ -343,12 +377,12 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     expect(within(group).queryByLabelText('Лофт')).not.toBeInTheDocument();
     expect(within(group).getByLabelText('Студия')).toBeChecked();
     expect(screen.getByTestId('create-capacity')).toHaveValue(6);
-    expect(screen.getByTestId('btn-create-activity')).toBeDisabled(); // мастер/услуга не выбраны
+    expectCanSave(false); // мастер/услуга не выбраны
 
     // Рефетч без «Студии»: набор пуст → блок (0 локаций)
     rerenderWithLocations(view, [locations[2]]); // только Лофт
     expect(within(group).getByLabelText('Лофт')).not.toBeChecked();
-    expect(screen.getByTestId('btn-create-activity')).toBeDisabled();
+    expectCanSave(false);
   });
 
   it('§4.4 prefill: prefilled location id is checked when the list arrives, capacity auto-filled', () => {
@@ -404,7 +438,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-checked', 'true');
 
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
     expect(addActivities.mock.calls[0][0][0]).toMatchObject({ isPrivate: true });
   });
 
@@ -420,7 +454,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-28T15:17' } });
     fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:15' } });
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '4' } });
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     expect(addActivities).toHaveBeenCalledTimes(1);
     expect(addActivities).toHaveBeenCalledWith([
@@ -450,7 +484,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     // (Студия l1 первая в справочнике), вместимость каждого — его умолчание (§4.2).
     toggleLocation('Лофт');
     toggleLocation('Студия');
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     expect(addActivities).toHaveBeenCalledTimes(1);
     const inputs = addActivities.mock.calls[0][0];
@@ -477,7 +511,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     );
     renderTab();
     fillValidForm();
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     await waitFor(() =>
@@ -498,7 +532,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     pickInCombobox('create-service', 's1');
     toggleLocation('Студия');
     toggleLocation('Лофт');
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     await waitFor(() =>
@@ -521,7 +555,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     // меняем дату-время, чтобы проверить «значения НЕ сброшены»
     fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-28T15:00' } });
 
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     // N=1 — прежний error-тост без счётчика (parseApiError → код VALIDATION_ERROR)
@@ -548,7 +582,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     toggleLocation('Студия');
     toggleLocation('Лофт');
     fireEvent.change(screen.getByTestId('create-datetime'), { target: { value: '2026-10-21T16:00' } });
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     await waitFor(() =>
@@ -588,7 +622,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     pickInCombobox('create-service', 's1');
     toggleLocation('Лофт'); // завершится ПЕРВЫМ (обратный порядок)
     toggleLocation('Студия'); // первая по порядку чекбоксов, завершится последней
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     await waitFor(() =>
@@ -614,7 +648,7 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     pickInCombobox('create-service', 's1');
     toggleLocation('Студия');
     toggleLocation('Лофт');
-    fireEvent.click(screen.getByTestId('btn-create-activity'));
+    registeredSubmit()();
 
     const { showToast } = mockUseUI();
     await waitFor(() =>
@@ -622,11 +656,11 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     );
 
     // Полный сбой: ничего не снимается, форма открыта, лок снят — поля
-    // и кнопка снова доступны (§4.3).
+    // снова доступны (§4.3).
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Студия')).toBeChecked();
     expect(screen.getByLabelText('Лофт')).toBeChecked();
-    await waitFor(() => expect(screen.getByTestId('btn-create-activity')).toBeEnabled());
+    expectCanSave(true); // значения не изменились — гейт остаётся открыт
     expect(screen.getByTestId('create-datetime')).toBeEnabled();
   });
 
@@ -642,12 +676,14 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     renderTab();
     fillValidForm();
 
-    const btn = screen.getByTestId('btn-create-activity');
-    fireEvent.click(btn);
+    const submit = registeredSubmit();
+    act(() => {
+      submit();
+    });
     expect(onSavingChange).toHaveBeenCalledWith(true);
 
-    // В полёте заблокированы кнопка, поля и чекбоксы локаций (§4.3)
-    expect(btn).toBeDisabled();
+    // В полёте заблокированы поля и чекбоксы локаций (§4.3); футерная кнопка
+    // закрыта saving-гейтом (замок — в ActivityDetailsModal.test.tsx).
     expect(screen.getByTestId('create-datetime')).toBeDisabled();
     expect(screen.getByTestId('create-duration')).toBeDisabled();
     expect(screen.getByTestId('create-capacity')).toBeDisabled();
@@ -661,15 +697,17 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     expect(screen.getByLabelText('Студия')).toBeDisabled();
     expect(screen.getByLabelText('Лофт')).toBeDisabled();
 
-    // Повторный клик по заблокированной кнопке не отправляет
-    fireEvent.click(btn);
+    // Повторный вызов не отправляет: футер зовёт ПОСЛЕДНЮЮ регистрацию, а
+    // она уже замыкает saving=true (тот же инвариант, что у disabled-кнопки).
+    act(() => {
+      registeredSubmit()();
+    });
     expect(addActivities).toHaveBeenCalledTimes(1);
 
     // Завершение полёта: лок снят, поля разблокированы
     await act(async () => {
       release();
     });
-    await waitFor(() => expect(btn).toBeEnabled());
     await waitFor(() => expect(screen.getByTestId('create-datetime')).toBeEnabled());
     expect(onSavingChange).toHaveBeenCalledWith(false);
   });

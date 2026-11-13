@@ -293,3 +293,94 @@ test('US-4: «Приватное» switch creates a private activity', async ({ 
     'true',
   );
 });
+
+// GH #598 US-2 (spec §6): «Создать» renders in the Modal FOOTER — pinned
+// below the scrolling body, always visible without scrolling, and actually
+// clickable (no overlay intercepts the pointer). Pure geometry on the
+// create flow this file already owns; no DB side effects (nothing is
+// submitted — US-5 semantics for closing without «Создать»).
+test('US-2: «Создать» button — footer band outside the scroll body, clean hit-test, footer in viewport [GH #598]', async ({
+  page,
+}) => {
+  // ARRANGE: empty day → create dialog; fill the form (same picks as
+  // S3/US-4 — comboboxes for master/service, GH #595 checkbox for the
+  // hall) so canSave=true and the button is ENABLED for the hit-test —
+  // the strongest form of the assertion.
+  await navigateToEmptyDay(page);
+  const dialog = await openCreateDialog(page);
+  await pickComboboxOption(page, 'create-master');
+  await pickComboboxOption(page, 'create-service');
+  // GH #595: the location is a checkbox group now — one hall (with a
+  // default) checked.
+  await locationCheckByTitle(dialog, hallTitleWithDefault()).check();
+
+  const btn = dialog.getByTestId('btn-create-activity');
+  await expect(btn).toBeVisible();
+  await expect(btn).toBeEnabled();
+
+  // ASSERT (geometry, not class strings):
+  const modalBox = await page
+    .locator('[data-testid="activity-details-modal-container"]')
+    .boundingBox();
+  const bodyBox = await page
+    .locator('[data-testid="activity-details-modal-scroll-body"]')
+    .boundingBox();
+  const btnBox = await btn.boundingBox();
+  expect(modalBox).not.toBeNull();
+  expect(bodyBox).not.toBeNull();
+  expect(btnBox).not.toBeNull();
+
+  // …button bbox fully INSIDE the modal container bbox (1px rounding),
+  expect(btnBox!.y).toBeGreaterThanOrEqual(modalBox!.y - 1);
+  expect(btnBox!.x).toBeGreaterThanOrEqual(modalBox!.x - 1);
+  expect(btnBox!.y + btnBox!.height).toBeLessThanOrEqual(
+    modalBox!.y + modalBox!.height + 1,
+  );
+  expect(btnBox!.x + btnBox!.width).toBeLessThanOrEqual(
+    modalBox!.x + modalBox!.width + 1,
+  );
+
+  // …button bbox fully OUTSIDE the scroll body (the footer band starts at
+  //    or below the body's bottom edge — no vertical overlap),
+  expect(btnBox!.y).toBeGreaterThanOrEqual(bodyBox!.y + bodyBox!.height - 1);
+
+  // …hit-test: elementFromPoint at the button center resolves INSIDE the
+  //    button — no overlay/backdrop layer intercepts the click,
+  const hitInsideButton = await page.evaluate(
+    ({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      return (
+        el !== null &&
+        el.closest('[data-testid="btn-create-activity"]') !== null
+      );
+    },
+    {
+      x: btnBox!.x + btnBox!.width / 2,
+      y: btnBox!.y + btnBox!.height / 2,
+    },
+  );
+  expect(hitInsideButton).toBe(true);
+
+  // …and the footer wrapper (the container's bottom band hosting the
+  //    button) fits the viewport — never clipped off-screen.
+  const footerFitsViewport = await page.evaluate(() => {
+    const container = document.querySelector(
+      '[data-testid="activity-details-modal-container"]',
+    );
+    const footer = container?.lastElementChild as HTMLElement | null;
+    if (!footer || !footer.querySelector('[data-testid="btn-create-activity"]'))
+      return false;
+    const r = footer.getBoundingClientRect();
+    return (
+      r.top >= -1 &&
+      r.left >= -1 &&
+      r.bottom <= window.innerHeight + 1 &&
+      r.right <= window.innerWidth + 1
+    );
+  });
+  expect(footerFitsViewport).toBe(true);
+
+  // Close WITHOUT «Создать» — nothing persisted on the empty day.
+  await closeModal(page);
+  await expect(page.getByTestId('schedule-empty-hint')).toBeVisible();
+});

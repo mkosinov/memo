@@ -10,6 +10,12 @@
  *
  * Now the shell sizes to its CONTENT up to a max cap (max-h-*), and the
  * body wrapper never clips what a scrollable child can reveal.
+ *
+ * GH #598: an opt-in `heightClass` prop lets a consumer pin a fixed height
+ * (activity modal: h-[85dvh]) ON TOP of the unchanged base cap. The default
+ * stays content-sized — the lock regex below forbids vh AND dvh fixed
+ * classes, keeping the (?:^|\s) anchor so the `h-[85vh]` inside the base
+ * `max-h-[85vh]` cap is not a false match.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -34,19 +40,19 @@ describe('Modal shell — natural height with max cap (GH #262)', () => {
     renderModal();
     const shell = screen.getByTestId('modal-container');
     expect(shell.className).toContain('max-h-');
-    // no FIXED height (h-[85vh]) — only the max cap (max-h-[85vh])
-    expect(shell.className).not.toMatch(/(?:^|\s)h-\[\d+vh\]/);
+    // no FIXED height (h-[Nvh] / h-[Ndvh]) — only the max cap (max-h-[85vh])
+    expect(shell.className).not.toMatch(/(?:^|\s)h-\[\d+(d)?vh\]/);
     expect(MODAL_CONTAINER_CLASS).toContain('max-h-[85vh]');
-    expect(MODAL_CONTAINER_CLASS).not.toMatch(/(?:^|\s)h-\[\d+vh\]/);
+    expect(MODAL_CONTAINER_CLASS).not.toMatch(/(?:^|\s)h-\[\d+(d)?vh\]/);
   });
 
   it('small size caps height instead of fixing it (no stretched password form)', () => {
     renderModal({ size: 'small' });
     const shell = screen.getByTestId('modal-container');
     expect(shell.className).toContain('max-h-');
-    expect(shell.className).not.toMatch(/(?:^|\s)h-\[\d+vh\]/);
+    expect(shell.className).not.toMatch(/(?:^|\s)h-\[\d+(d)?vh\]/);
     expect(MODAL_SMALL_CLASS).toContain('max-h-[60vh]');
-    expect(MODAL_SMALL_CLASS).not.toMatch(/(?:^|\s)h-\[\d+vh\]/);
+    expect(MODAL_SMALL_CLASS).not.toMatch(/(?:^|\s)h-\[\d+(d)?vh\]/);
   });
 
   it('body wrapper keeps min-h-0 so a flex child can scroll, not clip', () => {
@@ -64,5 +70,20 @@ describe('Modal shell — natural height with max cap (GH #262)', () => {
     const body = screen.getByText('body').parentElement!;
     expect(footer!.contains(body)).toBe(false);
     expect(body.contains(footer!)).toBe(false);
+  });
+});
+
+describe('Modal shell — opt-in fixed height via heightClass (GH #598)', () => {
+  it('heightClass puts the passed fixed-height class on the container', () => {
+    renderModal({ heightClass: 'h-[85dvh]' });
+    const shell = screen.getByTestId('modal-container');
+    // anchored match: a standalone class, not a substring of another utility
+    expect(shell.className).toMatch(/(?:^|\s)h-\[85dvh\]/);
+  });
+
+  it('the fixed class SUPPLEMENTS the base cap — max-h-[85vh] stays', () => {
+    renderModal({ heightClass: 'h-[85dvh]' });
+    const shell = screen.getByTestId('modal-container');
+    expect(shell.className).toContain('max-h-[85vh]');
   });
 });

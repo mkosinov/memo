@@ -27,6 +27,13 @@ export interface ModalProps {
   footerBorder?: boolean;
   /** Modal size preset. 'small' uses max-h-[60vh] + max-w-lg. Default uses max-h-[85vh] + max-w-2xl. */
   size?: 'default' | 'small';
+  /**
+   * Fixed height Tailwind class (e.g. 'h-[85dvh]'). ADDED to the container on top
+   * of the base max-h cap, not replacing it (GH #598): the ceiling stays and is
+   * inert at a fixed height ≤ the cap. Default (no prop) — content-sized height
+   * up to the cap (GH #262).
+   */
+  heightClass?: string;
 }
 
 export function Modal({
@@ -40,6 +47,7 @@ export function Modal({
   testId = 'modal-container',
   footerBorder = true,
   size = 'default',
+  heightClass,
 }: ModalProps) {
   const containerClass = size === 'small' ? MODAL_SMALL_CLASS : MODAL_CONTAINER_CLASS;
   const defaultMaxWidth = size === 'small' ? MODAL_SMALL_MAX_WIDTH : MODAL_MAX_WIDTH;
@@ -47,7 +55,7 @@ export function Modal({
   return (
     <div
       data-testid={testId}
-      className={`relative bg-white rounded-xl shadow-2xl w-full ${maxWidthClass ?? defaultMaxWidth} mx-4 ${containerClass}`}
+      className={`relative bg-white rounded-xl shadow-2xl w-full ${maxWidthClass ?? defaultMaxWidth} mx-4 ${containerClass}${heightClass ? ` ${heightClass}` : ''}`}
     >
       {/* Header */}
       <div

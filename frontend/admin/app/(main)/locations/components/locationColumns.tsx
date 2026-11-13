@@ -27,7 +27,7 @@ export const locationColumns = (): ColumnDef<LocationResponse>[] => [
         {!l.is_public && (
           <span
             data-testid="location-web-hidden-badge"
-            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500"
+            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 whitespace-nowrap"
           >
             Не в web
           </span>

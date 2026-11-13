@@ -21,7 +21,9 @@ Covered:
   account, the card is data;
 - the shared ``POST /api/v1/auth/logout`` revokes whichever session kind
   is presented (client / staff / both), stays idempotent with no cookie,
-  and a client-only logout never touches the staff session row.
+  and a client-only logout never touches the staff session row;
+- ADR-015 (#584): the pre-branch flat ``/my/{records,photos,payments}``
+  paths are 404-retired (route absence, probed under a live session).
 
 Spec: docs/specs/2026-10-20-web-client-auth-booking-design.md §3, §4.3
 Domain rules: docs/domain-rules/auth.md («Клиентская аутентификация (#499)», Sessions)
@@ -205,6 +207,36 @@ class TestClientCardArchiveInvariant:
             f"SELECT client_id FROM users WHERE id = '{client_account['id']}'"
         )
         assert rows[0]["client_id"] is not None, "archive must not unlink the card"
+
+
+# ─── ADR-015 (#584): the flat cabinet paths are retired ────────────────────────
+
+
+class TestFlatPathsRetired:
+    """The pre-#584 flat ``/api/v1/my/{records,photos,payments}`` paths
+    are GONE — the cabinet lives under ``/api/v1/my/client/*``.
+
+    Probed WITH a live client session: the 404 must come from route
+    ABSENCE, not from a guard refusing the request (a 401 here would
+    mean the old path still exists behind the guard).
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/v1/my/records"),
+            ("POST", "/api/v1/my/records"),
+            ("GET", "/api/v1/my/photos"),
+            ("GET", "/api/v1/my/payments"),
+        ],
+    )
+    def test_old_flat_path_404_under_client_session(
+        self, client_jar, method: str, path: str,
+    ) -> None:
+        resp = client_jar.request(method, path, json={})
+        assert resp.status_code == 404, (
+            f"{method} {path} must be retired (404), got {resp.status_code}"
+        )
 
 
 # ─── shared logout: any session kind, idempotent ───────────────────────────────

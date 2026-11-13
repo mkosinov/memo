@@ -1,4 +1,8 @@
-"""GH #499 (spec §5) — client booking: POST /api/v1/my/records contract.
+"""GH #499 (spec §5) — client booking: POST /api/v1/my/client/records contract.
+
+Path moved from ``/api/v1/my/records`` to the client branch
+``/api/v1/my/client/*`` by ADR-015 (#584); the contract itself is
+unchanged.
 
 The session-based branch of the record-creation scenario: the owner comes
 ONLY from the client session (``require_client_session`` → the account's
@@ -37,7 +41,7 @@ from tests.conftest import insert_user, query_db, query_db_params
 pytestmark = pytest.mark.api
 
 CLIENT_PHONE = "+79995557701"
-MY_RECORDS_URL = "/api/v1/my/records"
+MY_RECORDS_URL = "/api/v1/my/client/records"
 
 
 # ─── helpers (conftest direct-SQL pattern, test_client_session_api) ────────────

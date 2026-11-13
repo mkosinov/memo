@@ -1,7 +1,8 @@
-"""GH #513 — client cabinet read: GET /api/v1/my/photos contract.
+"""GH #513 — client cabinet read: GET /api/v1/my/client/photos contract.
 
-The second /my read endpoint (spec §«Контракт API → GET
-/api/v1/my/photos»): ALL the client's photos regardless of publicity,
+The second cabinet read endpoint (spec §«Контракт API → GET
+/my/photos», moved under the client branch ``/my/client/*`` by
+ADR-015/#584 — contract unchanged): ALL the client's photos regardless of publicity,
 owner = the session's client card (``user.client_id``), fixed sorting
 (``created_at`` DESC, id ASC — the deterministic tie-break canon),
 ``PaginationParams`` brick as the only input, tags resolved server-side
@@ -36,7 +37,7 @@ from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
-MY_URL = "/api/v1/my/photos"
+MY_URL = "/api/v1/my/client/photos"
 
 
 # ─── helpers (conftest direct-SQL pattern, test_my_records_read_api) ───────────

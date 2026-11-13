@@ -1,7 +1,8 @@
-"""GH #513 — client cabinet read: GET /api/v1/my/records contract.
+"""GH #513 — client cabinet read: GET /api/v1/my/client/records contract.
 
-The first of the three /my read endpoints (spec §«Контракт API → GET
-/api/v1/my/records»): own records with visits, owner = the session's
+The first of the three cabinet read endpoints (spec §«Контракт API → GET
+/my/records», moved under the client branch ``/my/client/*`` by
+ADR-015/#584 — contract unchanged): own records with visits, owner = the session's
 client card (``user.client_id``), fixed sorting (activity start DESC,
 record id ASC; visits by id ASC), ``PaginationParams`` brick as the
 only input, per-visit SNAPSHOT price (visit ``custom_price`` when set,
@@ -38,7 +39,7 @@ from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
-MY_URL = "/api/v1/my/records"
+MY_URL = "/api/v1/my/client/records"
 
 
 # ─── helpers (conftest direct-SQL pattern, test_my_records_api) ────────────────

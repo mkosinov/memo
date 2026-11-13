@@ -68,16 +68,20 @@ from src.services.photo import PhotoService
 # delete) переопределяют generic-семантику — покрыты собственными наборами
 # ``tests/services/test_staff_service.py`` / ``test_position_service.py``
 # (HTTP-контракт добавит Task 4: api/v1/staff.py + position.py).
+# GH #599 Task 1: ``SpecialtyService`` (409-гард уникальности lower(title) на
+# create/patch + нормализация) — собственный набор ``test_api_specialties.py``;
+# HTTP-поверхность без GET/{id} и PUT.
 from src.services.position import PositionService
 from src.services.record import RecordService
 from src.services.service import ServiceService, get_service_service
+from src.services.specialty import SpecialtyService
 from src.services.staff import StaffService, get_staff_service
 from src.services.tag import TagService, get_tag_service
 from src.services.visitor import VisitorService, get_visitor_service
 
 GENERIC_CONTRACT_EXCEPTIONS: set[type] = {
     ServiceService, PhotoService, RecordService, ArchiveService,
-    StaffService, PositionService,
+    StaffService, PositionService, SpecialtyService,
 }
 
 

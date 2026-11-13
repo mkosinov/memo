@@ -70,6 +70,11 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
   * ``Position`` (GH #324) — ``staff_positions`` cascade NON-auto
     «Сотрудник»: the POSITION's side of the #266 edge (the same join is
     auto in FK_MATRIX[Staff] — the perspective rule); staff cards survive.
+  * ``Specialty`` (GH #599 Task 1) — ``staff_specialties`` cascade AUTO:
+    the dictionary's side of the #599 M2M edge (the materials pattern —
+    link rows die, staff cards survive). The ``services`` blocking node
+    (FK RESTRICT, counter over ALL services incl. archived) arrives with
+    Task 2 together with the Service-model FK edge.
 """
 
 from __future__ import annotations
@@ -96,6 +101,7 @@ from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
 from src.models.service_material import ServiceMaterial
+from src.models.specialty import Specialty, staff_specialties
 from src.models.staff import Staff
 from src.models.tag import (
     Tag,
@@ -228,6 +234,16 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         FKDependency(
             entity="staff_positions",
             relation="Должность",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
+        ),
+        # GH #599: the card's own specialty links (master-section M2M) —
+        # the staff_positions mirror; join rows die with the card.
+        FKDependency(
+            entity="staff_specialties",
+            relation="Направление",
             nullable=False,
             action="cascade",
             auto=True,
@@ -563,6 +579,25 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
             allowed_actions=["cascade"],
         ),
     ],
+    Specialty: [
+        # GH #599 Task 1: the dictionary's side of the staff_specialties
+        # edge — AUTO-cascade (the materials pattern: stripping links is
+        # a side effect of deleting the dictionary row; staff cards
+        # survive; commit carries ``{"resolutions": {}}``). The
+        # ``services`` blocking node (allowed_actions: [], counter over
+        # ALL services incl. archived) lands with Task 2 together with
+        # its Service-model FK edge — until the model maps
+        # ``services.specialty_id`` the schema→matrix guard sees no edge
+        # to declare.
+        FKDependency(
+            entity="staff_specialties",
+            relation="Сотрудник",
+            nullable=False,
+            action="cascade",
+            auto=True,
+            allowed_actions=["cascade"],
+        ),
+    ],
 }
 
 
@@ -672,6 +707,17 @@ async def _count_m_staff_positions(s: AsyncSession, entity_id: str) -> _CountRes
         select(func.count())
         .select_from(staff_positions)
         .where(staff_positions.c.staff_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
+async def _count_m_staff_specialties(s: AsyncSession, entity_id: str) -> _CountResult:
+    """GH #599: Staff → staff_specialties — the card's own specialty
+    links (the staff_positions mirror)."""
+    r = await s.execute(
+        select(func.count())
+        .select_from(staff_specialties)
+        .where(staff_specialties.c.staff_id == entity_id)
     )
     return r.scalar_one(), None
 
@@ -935,12 +981,25 @@ async def _count_pos_staff_positions(s: AsyncSession, entity_id: str) -> _CountR
     return r.scalar_one(), None
 
 
+async def _count_spec_staff_specialties(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Specialty → staff_specialties: join rows where specialty_id (the
+    dictionary's side of the #599 edge — auto-cascade, the materials
+    pattern; the staff cards survive)."""
+    r = await s.execute(
+        select(func.count())
+        .select_from(staff_specialties)
+        .where(staff_specialties.c.specialty_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Staff, "activities"): _count_m_activities,
     (Staff, "users"): _count_m_users,
     (Staff, "masters"): _count_m_masters,
     (Staff, "master_tags"): _count_m_master_tags,
     (Staff, "staff_positions"): _count_m_staff_positions,
+    (Staff, "staff_specialties"): _count_m_staff_specialties,
     (Location, "activities"): _count_l_activities,
     (Location, "location_tags"): _count_l_location_tags,
     (Location, "photos"): _count_l_photos,
@@ -976,6 +1035,7 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Visitor, "visits"): _count_v_visits,
     (Visitor, "visitor_tags"): _count_v_visitor_tags,
     (Position, "staff_positions"): _count_pos_staff_positions,
+    (Specialty, "staff_specialties"): _count_spec_staff_specialties,
 }
 
 
@@ -1651,6 +1711,16 @@ async def _ids_pos_staff_positions(s: AsyncSession, entity_id: str) -> list[str]
     return list(r.scalars().all())
 
 
+async def _ids_spec_staff_specialties(s: AsyncSession, entity_id: str) -> list[str]:
+    """Specialty → staff_specialties: the link rows' ``staff_id`` values
+    (auto dep — still collected: the ``expected`` commit payload is
+    per-entity and complete, the #324 convention)."""
+    r = await s.execute(
+        select(staff_specialties.c.staff_id).where(staff_specialties.c.specialty_id == entity_id)
+    )
+    return list(r.scalars().all())
+
+
 # ─── GH #345 §4.3: archivable-family id-collectors ─────────────────────────────
 # Manual pairs (no factory — join paths are heterogeneous): the staff
 # activities reach through the ``masters`` extension string
@@ -1719,6 +1789,7 @@ _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Visitor, "visits"): _ids_v_visits,
     (Visitor, "visitor_tags"): _ids_v_visitor_tags,
     (Position, "staff_positions"): _ids_pos_staff_positions,
+    (Specialty, "staff_specialties"): _ids_spec_staff_specialties,
     # GH #345 §4.3: the archivable family — non-auto deps only (the S5
     # race gate: an activity/record/visitor appearing mid-window must be
     # caught by the expected-subset check, not fall through as blocked).
@@ -2107,6 +2178,16 @@ async def _h_cascade_staff_positions(
     await session.execute(delete(staff_positions).where(staff_positions.c.staff_id == entity_id))
 
 
+async def _h_cascade_staff_specialties(
+    _self: GenericService[Any, Any, Any],
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Staff → staff_specialties auto-cascade (GH #599): hard-delete the
+    M2M join rows. Specialty dictionary entries themselves survive."""
+    await session.execute(delete(staff_specialties).where(staff_specialties.c.staff_id == entity_id))
+
+
 async def _h_cascade_master_tags(
     _self: GenericService[Any, Any, Any],
     session: AsyncSession,
@@ -2307,6 +2388,17 @@ async def _h_cascade_position_staff_positions(
     await session.execute(delete(staff_positions).where(staff_positions.c.position_id == entity_id))
 
 
+async def _h_cascade_specialty_staff_specialties(
+    _self: GenericService[Any, Any, Any],
+    session: AsyncSession,
+    entity_id: str,
+) -> None:
+    """Specialty → staff_specialties auto-cascade (join, GH #599):
+    hard-delete rows where specialty_id — the specialty is unlinked from
+    the staff cards, which survive (the materials pattern)."""
+    await session.execute(delete(staff_specialties).where(staff_specialties.c.specialty_id == entity_id))
+
+
 # ─── Dispatch tables ───────────────────────────────────────────────────────────
 # Per-(Model, dep_entity) → handler. Adding a new pair requires BOTH a
 # FKDependency entry in :data:`FK_MATRIX` above (with the right ``action``) AND
@@ -2330,6 +2422,7 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Staff, "masters"): _h_cascade_master_extension,
     (Staff, "master_tags"): _h_cascade_master_tags,
     (Staff, "staff_positions"): _h_cascade_staff_positions,
+    (Staff, "staff_specialties"): _h_cascade_staff_specialties,
     (Location, "location_tags"): _h_cascade_location_tags,
     (Service, "tariffs"): _h_cascade_service_tariffs,
     (Service, "service_tags"): _h_cascade_service_tags,
@@ -2352,4 +2445,5 @@ CASCADE_HANDLERS: dict[tuple[type[Base], str], _FkHandlerFn] = {
     (Photo, "photo_tags"): _h_cascade_photo_photo_tags,
     (Visitor, "visitor_tags"): _h_cascade_visitor_visitor_tags,
     (Position, "staff_positions"): _h_cascade_position_staff_positions,
+    (Specialty, "staff_specialties"): _h_cascade_specialty_staff_specialties,
 }

@@ -134,6 +134,11 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
         label_fields=("title",),
         snapshot_fields=("title", "is_system"),
     ),
+    "specialties": EntitySignature(
+        title="Направление",
+        label_fields=("title",),
+        snapshot_fields=("title",),
+    ),
     "activities": EntitySignature(
         title="Занятие",
         label_fields=("start", "duration"),

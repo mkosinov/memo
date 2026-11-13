@@ -65,6 +65,10 @@ class ErrorCode(str, Enum):
     SPECIALTY_REQUIRED = "SPECIALTY_REQUIRED"    # 422 — мастер-секция без специальности
     COLOR_REQUIRED = "COLOR_REQUIRED"            # 422 — мастер-секция без цвета
 
+    # 404 / 409 — specialty dictionary (GH #599)
+    SPECIALTY_NOT_FOUND = "SPECIALTY_NOT_FOUND"  # 404 — /specialties/{id} отсутствует
+    SPECIALTY_TITLE_TAKEN = "SPECIALTY_TITLE_TAKEN"  # 409 — коллизия lower(title) уникального индекса
+
     # 413 / 415 — avatar uploads (GH #262 Task 2, spec §3.4)
     FILE_TOO_LARGE = "FILE_TOO_LARGE"            # 413 — over the 5 MB limit
     FILE_INVALID_TYPE = "FILE_INVALID_TYPE"      # 415 — not JPEG/PNG/WebP
@@ -137,6 +141,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.POSITION_IS_SYSTEM: "Встроенная должность не удаляется",
     ErrorCode.SPECIALTY_REQUIRED: "Укажите специальность мастера",
     ErrorCode.COLOR_REQUIRED: "Укажите цвет мастера",
+    ErrorCode.SPECIALTY_NOT_FOUND: "Направление не найдено",
+    ErrorCode.SPECIALTY_TITLE_TAKEN: "Направление с таким названием уже существует",  # noqa: RUF001
     ErrorCode.FILE_TOO_LARGE: "Файл больше 5 МБ",
     ErrorCode.FILE_INVALID_TYPE: "Поддерживаются только JPEG, PNG и WebP",
     ErrorCode.COPY_WEEK_START_NOT_MONDAY: "Неделя должна начинаться с понедельника",  # noqa: RUF001

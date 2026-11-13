@@ -46,8 +46,12 @@ def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
     # GH #212 M5: full-Unicode case folding for ilike — stock SQLite lower()
     # folds ASCII only. Python str.lower agrees with SQLite lower() on ASCII,
     # so pre-existing ASCII queries are unaffected.
+    # ``deterministic=True`` (GH #599 R1): SQLite refuses NON-deterministic
+    # functions in INDEX expressions — the functional UNIQUE index on
+    # ``lower(title)`` needs the flag (str.lower is deterministic).
     dbapi_connection.create_function(
-        "lower", 1, lambda s: s.lower() if s is not None else None
+        "lower", 1, lambda s: s.lower() if s is not None else None,
+        deterministic=True,
     )
     # GH #221 §3: national-digit phone reduction as a SQL UDF, so the stored
     # value can be reduced inside a SQL expression. NULL in -> NULL out —

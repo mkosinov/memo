@@ -29,6 +29,7 @@ from src.api.v1.position import router as position_router
 from src.api.v1.public import router as public_router
 from src.api.v1.records import router as records_router
 from src.api.v1.services import router as services_router
+from src.api.v1.specialties import router as specialties_router
 from src.api.v1.staff import router as staff_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
@@ -257,6 +258,7 @@ def create_app() -> FastAPI:
     app.include_router(position_router, prefix="/api/v1/positions")
     app.include_router(locations_router, prefix="/api/v1/locations")
     app.include_router(services_router, prefix="/api/v1/services")
+    app.include_router(specialties_router, prefix="/api/v1/specialties")
     app.include_router(tags_router, prefix="/api/v1/tags")
     app.include_router(activities_router, prefix="/api/v1/activities")
     app.include_router(clients_router, prefix="/api/v1/clients")

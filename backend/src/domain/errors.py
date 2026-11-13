@@ -54,6 +54,21 @@ class SpecialtyRequiredError(Exception):
     """
 
 
+class SpecialtyTitleTakenError(Exception):
+    """Another specialty already holds this title case-insensitively (GH #599).
+
+    The collision is defined by the functional unique index on
+    ``lower(title)``; this error is raised BOTH by the UX-fast SELECT
+    precheck and by the authoritative ``IntegrityError`` catch around
+    the write (TOCTOU defense). The router maps it to 409
+    ``SPECIALTY_TITLE_TAKEN``.
+    """
+
+    def __init__(self, title: str) -> None:
+        super().__init__(f"Specialty title {title!r} is already taken")
+        self.title = title
+
+
 class ColorRequiredError(Exception):
     """Master section without a color (GH #266 D5 — обязателен).
 

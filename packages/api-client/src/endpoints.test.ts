@@ -1555,6 +1555,8 @@ describe('updateLocation', () => {
       record_info: '',
       image_url: '',
       location_hint: '',
+      // GH #601: the canonical PUT always carries the current flag value.
+      is_public: true,
       tag_ids: [],
     };
     await updateLocation('l-1', payload);

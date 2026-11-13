@@ -225,6 +225,10 @@ export const LocationResponseSchema = z.object({
   image_url: z.string().nullable(),
   location_hint: z.string().nullable().optional(),
   sort_order: z.number().optional(),
+  // GH #601: web-visibility flag — true = shown on the client site, false =
+  // hidden from the site only (fully working in admin). NOT NULL column,
+  // always serialized. Distinct from `archived`.
+  is_public: z.boolean(),
   archived: z.boolean(), // inverted: archived = true means the location is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
@@ -736,6 +740,10 @@ export const LocationCreateSchema = z.object({
   record_info: z.string().optional().default(''),
   image_url: z.string().optional().default(''),
   location_hint: z.string().optional().default(''),
+  // GH #601: web visibility — absent → true (visible). Mirrors backend
+  // LocationBase default; Update (.strict() below) carries the full PUT
+  // contract, patchLocation uses Partial<LocationUpdate>.
+  is_public: z.boolean().optional().default(true),
   tag_ids: z.array(z.string()).default([]),
 });
 

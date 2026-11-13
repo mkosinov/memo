@@ -1069,6 +1069,7 @@ const validLocation = {
   review_url: 'https://yandex.ru/reviews/...',
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
+  is_public: true, // GH #601: web-visibility flag (true = shown on the site)
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',
@@ -1126,6 +1127,18 @@ describe('LocationResponseSchema', () => {
   it('parses location without short_title (field absent)', () => {
     const result = LocationResponseSchema.parse(validLocation);
     expect(result.short_title).toBeUndefined();
+  });
+
+  // GH #601: web-visibility flag — true = shown on the client site.
+  it('parses location with is_public false (hidden from the site)', () => {
+    const data = { ...validLocation, is_public: false };
+    const result = LocationResponseSchema.parse(data);
+    expect(result.is_public).toBe(false);
+  });
+
+  it('rejects non-boolean is_public', () => {
+    const data = { ...validLocation, is_public: 'yes' };
+    expect(() => LocationResponseSchema.parse(data)).toThrow();
   });
 
   it('parses location with null short_title', () => {
@@ -2091,6 +2104,8 @@ describe('Type exports', () => {
       record_info: '',
       image_url: '',
       location_hint: '',
+      // GH #601: the canonical PUT always carries the current flag value.
+      is_public: true,
       tag_ids: [],
     };
     expect(l.title).toBe('Обновлённая студия');
@@ -2311,6 +2326,12 @@ describe('LocationCreateSchema', () => {
     expect(result.image_url).toBe('');
     expect(result.location_hint).toBe('');
     expect(result.tag_ids).toEqual([]);
+    expect(result.is_public).toBe(true); // GH #601: default = visible
+  });
+
+  it('accepts is_public false (GH #601: hidden from the web)', () => {
+    const result = LocationCreateSchema.parse({ ...validLocationCreate, is_public: false });
+    expect(result.is_public).toBe(false);
   });
 
   it('parses with all fields', () => {
@@ -2357,6 +2378,17 @@ describe('LocationUpdateSchema', () => {
       capacity: 20,
     });
     expect(result.title).toBe('Обновлённое');
+  });
+
+  // GH #601 §2.1: the modal's canonical PUT carries the current flag value —
+  // is_public must be part of the full update contract (extra="forbid" parity).
+  it('accepts is_public in the full update payload', () => {
+    const result = LocationUpdateSchema.parse({
+      title: 'Обновлённое',
+      capacity: 20,
+      is_public: false,
+    });
+    expect(result.is_public).toBe(false);
   });
 
   it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {

@@ -49,6 +49,10 @@ class LocationBase(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int = 0
+    # GH #601: web visibility — true = shown on the client site (default),
+    # false = hidden from the site only. Inherited by Create/Update (the
+    # modal's canonical PUT carries the current flag value) and Response.
+    is_public: bool = True
 
 
 class LocationCreate(LocationBase):
@@ -90,6 +94,9 @@ class LocationPatch(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int | None = None
+    # GH #601: web visibility (PATCH carries it separately — no Base
+    # inheritance). None means 'don't change'.
+    is_public: bool | None = None
 
 
 class LocationDeleteBody(BaseModel):

@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 // `/staff/reorder` was deliberately NOT carried over. Master-column order
 // persists as a user setting (`column_order_staff`, migration step 7).
 import { patchUserSettings, reorderLocations } from '@memo/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface UseColumnReorderOptions {
   columns: ReadonlyArray<{ id: string; name: string; sortOrder?: number }>;
@@ -18,6 +19,8 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
   const initializedRef = useRef(false);
   const onOrderChangeRef = useRef(onOrderChange);
   onOrderChangeRef.current = onOrderChange;
+  // #584 §5: the user-settings write rides the whoami-computed branch.
+  const { branch } = useAuth();
 
   // Sync columnOrder with columns: preserve user order, insert new IDs at correct position
   useEffect(() => {
@@ -131,7 +134,9 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
         // deleted in #266 (D8), so the master-column order is a per-user
         // setting persisted as `column_order_staff` (migration step 7).
         if (columnMode === 'masters') {
-          patchUserSettings({ column_order_staff: newOrder }).catch(console.error);
+          if (branch !== null) {
+            patchUserSettings(branch, { column_order_staff: newOrder }).catch(console.error);
+          }
         } else {
           reorderLocations(newOrder).catch(console.error);
         }
@@ -139,7 +144,7 @@ export function useColumnReorder({ columns, columnMode, initialOrder, onOrderCha
         return newOrder;
       });
     },
-    [columnMode],
+    [columnMode, branch],
   );
 
   const orderedColumns = useMemo(() => {

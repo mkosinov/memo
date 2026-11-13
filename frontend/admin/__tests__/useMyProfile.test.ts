@@ -1,11 +1,14 @@
 /**
- * useMyProfile — GH #262 T7 hook family (spec §5.5, D2/D4/D10).
+ * useMyProfile — GH #262 T7 hook family (spec §5.5, D2/D4/D10), migrated to
+ * the staff branches (#584 §5): every call rides the whoami-computed branch
+ * from AuthContext — GET/PUT /api/v1/my/{branch}, avatar POST
+ * /api/v1/my/{branch}/avatar (the former /my/portrait).
  *
- * The profile query lives on the ['me','profile'] key — a CHILD of the
- * ['me'] prefix so a single invalidateQueries(['me']) covers it. Profile
- * writes (PUT /my, portrait upload) invalidate ['me'] (the local snapshot)
- * PLUS the staff/masters families via lib/invalidate.ts (the public half of
- * the card changed). NO new EntityName, NO new SSE entity (D10).
+ * The profile query lives on the ['me','profile',branch] key — a CHILD of
+ * the ['me'] prefix so a single invalidateQueries(['me']) covers it. Profile
+ * writes (PUT, avatar upload) invalidate ['me'] (the local snapshot) PLUS
+ * the staff/masters families via lib/invalidate.ts (the public half of the
+ * card changed). NO new EntityName, NO new SSE entity (D10).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
@@ -16,33 +19,44 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
     ...actual,
-    getMyProfile: vi.fn(),
-    updateMyProfile: vi.fn(),
-    uploadPortrait: vi.fn(),
+    getMyStaffProfile: vi.fn(),
+    updateMyStaffProfile: vi.fn(),
+    uploadAvatar: vi.fn(),
     changePassword: vi.fn(),
   };
 });
 
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: vi.fn(),
+}));
+
 import {
   useMyProfile,
   useUpdateMyProfile,
-  useUploadPortrait,
+  useUploadAvatar,
   useChangePassword,
   ME_PROFILE_KEY,
 } from '../hooks/useMyProfile';
 import {
-  getMyProfile,
-  updateMyProfile,
-  uploadPortrait,
+  getMyStaffProfile,
+  updateMyStaffProfile,
+  uploadAvatar,
   changePassword,
 } from '@memo/api-client';
-import type { MyProfile, MyProfileUpdate } from '@memo/api-client';
-import { mockMyProfileMaster } from './helpers/mockData';
+import { useAuth } from '@/contexts/AuthContext';
+import type { MyProfileUpdate } from '@memo/api-client';
+import { mockMyStaffProfileMaster } from './helpers/mockData';
 
-const mockGetMyProfile = vi.mocked(getMyProfile);
-const mockUpdateMyProfile = vi.mocked(updateMyProfile);
-const mockUploadPortrait = vi.mocked(uploadPortrait);
+const mockGetMyStaffProfile = vi.mocked(getMyStaffProfile);
+const mockUpdateMyStaffProfile = vi.mocked(updateMyStaffProfile);
+const mockUploadAvatar = vi.mocked(uploadAvatar);
 const mockChangePassword = vi.mocked(changePassword);
+const mockUseAuth = vi.mocked(useAuth);
+
+/** Auth mock exposing only what the hook family reads: the branch (#584 §5). */
+function mockBranch(branch: 'master' | 'admin' | null) {
+  mockUseAuth.mockReturnValue({ branch } as unknown as ReturnType<typeof useAuth>);
+}
 
 function createQueryClientWrapper() {
   const queryClient = new QueryClient({
@@ -56,32 +70,64 @@ function createQueryClientWrapper() {
 }
 
 describe('useMyProfile (query)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBranch('master');
+  });
   afterEach(() => vi.restoreAllMocks());
 
-  it('exposes the ["me","profile"] key (child of the ["me"] prefix)', () => {
+  it('exposes the ["me","profile"] prefix (child of the ["me"] prefix)', () => {
     expect(ME_PROFILE_KEY).toEqual(['me', 'profile']);
   });
 
-  it('fetches the profile via getMyProfile on that key', async () => {
-    mockGetMyProfile.mockResolvedValue(mockMyProfileMaster as MyProfile);
+  it('fetches the profile via getMyStaffProfile(branch) on the branch key', async () => {
+    mockGetMyStaffProfile.mockResolvedValue(mockMyStaffProfileMaster);
     const { queryClient, wrapper } = createQueryClientWrapper();
 
     const { result } = renderHook(() => useMyProfile(), { wrapper });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mockGetMyProfile).toHaveBeenCalledTimes(1);
-    expect(result.current.data).toEqual(mockMyProfileMaster);
-    expect(queryClient.getQueryData(ME_PROFILE_KEY)).toEqual(mockMyProfileMaster);
+    expect(mockGetMyStaffProfile).toHaveBeenCalledTimes(1);
+    expect(mockGetMyStaffProfile).toHaveBeenCalledWith('master');
+    expect(result.current.data).toEqual(mockMyStaffProfileMaster);
+    expect(queryClient.getQueryData(['me', 'profile', 'master'])).toEqual(
+      mockMyStaffProfileMaster,
+    );
+  });
+
+  it('rides the admin branch when whoami computed it (branch switch → new key)', async () => {
+    mockBranch('admin');
+    mockGetMyStaffProfile.mockResolvedValue(mockMyStaffProfileMaster);
+    const { wrapper } = createQueryClientWrapper();
+
+    const { result } = renderHook(() => useMyProfile(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockGetMyStaffProfile).toHaveBeenCalledWith('admin');
+  });
+
+  it('stays disabled (no fetch) while the branch is unresolved (auth loading)', async () => {
+    mockBranch(null);
+    const { wrapper } = createQueryClientWrapper();
+
+    const { result } = renderHook(() => useMyProfile(), { wrapper });
+
+    // Give an (incorrect) immediate fetch attempt time to fire.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockGetMyStaffProfile).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe('idle');
   });
 });
 
 describe('useUpdateMyProfile (mutation)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBranch('master');
+  });
   afterEach(() => vi.restoreAllMocks());
 
-  it('calls updateMyProfile with the partial payload', async () => {
-    mockUpdateMyProfile.mockResolvedValue(mockMyProfileMaster as MyProfile);
+  it('calls updateMyStaffProfile(branch, partial payload)', async () => {
+    mockUpdateMyStaffProfile.mockResolvedValue(mockMyStaffProfileMaster);
     const { wrapper } = createQueryClientWrapper();
     const { result } = renderHook(() => useUpdateMyProfile(), { wrapper });
 
@@ -90,11 +136,11 @@ describe('useUpdateMyProfile (mutation)', () => {
       await result.current.mutateAsync(payload);
     });
 
-    expect(mockUpdateMyProfile).toHaveBeenCalledWith(payload);
+    expect(mockUpdateMyStaffProfile).toHaveBeenCalledWith('master', payload);
   });
 
   it('invalidates ["me"] + the staff/masters families on success', async () => {
-    mockUpdateMyProfile.mockResolvedValue(mockMyProfileMaster as MyProfile);
+    mockUpdateMyStaffProfile.mockResolvedValue(mockMyStaffProfileMaster);
     const { queryClient, wrapper } = createQueryClientWrapper();
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
     const { result } = renderHook(() => useUpdateMyProfile(), { wrapper });
@@ -111,22 +157,25 @@ describe('useUpdateMyProfile (mutation)', () => {
   });
 });
 
-describe('useUploadPortrait (mutation)', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('useUploadAvatar (mutation)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBranch('master');
+  });
   afterEach(() => vi.restoreAllMocks());
 
-  it('calls uploadPortrait and invalidates ["me"] + staff/masters', async () => {
-    mockUploadPortrait.mockResolvedValue({ avatar_url: '/api/v1/files/avatar/n.png' });
+  it('calls uploadAvatar(branch, file) and invalidates ["me"] + staff/masters', async () => {
+    mockUploadAvatar.mockResolvedValue({ avatar_url: '/api/v1/files/avatar/n.png' });
     const { queryClient, wrapper } = createQueryClientWrapper();
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUploadPortrait(), { wrapper });
+    const { result } = renderHook(() => useUploadAvatar(), { wrapper });
 
     const file = new File(['x'], 'a.png', { type: 'image/png' });
     await act(async () => {
       await result.current.mutateAsync(file);
     });
 
-    expect(mockUploadPortrait).toHaveBeenCalledWith(file);
+    expect(mockUploadAvatar).toHaveBeenCalledWith('master', file);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['me'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['staff'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['masters'] });
@@ -134,7 +183,10 @@ describe('useUploadPortrait (mutation)', () => {
 });
 
 describe('useChangePassword (mutation)', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockBranch('master');
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it('calls changePassword with current + new password', async () => {

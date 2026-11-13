@@ -39,7 +39,7 @@ vi.mock('@memo/api-client', () => {
 // `authenticated` so the settings provider settles.
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: vi.fn(() => ({
-    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated',
+    user: { id: 'u1' }, permissions: [], master: null, status: 'authenticated', branch: 'master' as const,
     login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn(),
   })),
 }));

@@ -42,7 +42,7 @@ vi.mock('@memo/api-client', () => {
 // GH #267: UserSettingsProvider gates loading on useAuth().status — mock the
 // auth hook to report `authenticated` so the settings provider settles.
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
+  useAuth: vi.fn(() => ({ status: 'authenticated', user: { id: 'u1' }, permissions: [], master: null, branch: 'master' as const, login: vi.fn(), logout: vi.fn(), can: vi.fn(() => false), refresh: vi.fn() })),
 }));
 
 // Partial mock — real QueryClient/QueryClientProvider stay intact; only
@@ -659,6 +659,7 @@ describe('Topbar', () => {
       expect(toggle).not.toBeChecked(); // instant UI flip
       await waitFor(() =>
         expect(patchUserSettings).toHaveBeenCalledWith(
+          'master',
           expect.objectContaining({ show_archived_masters: false }),
         ),
       );
@@ -673,6 +674,7 @@ describe('Topbar', () => {
       expect(toggle).toBeChecked(); // instant UI flip
       await waitFor(() =>
         expect(patchUserSettings).toHaveBeenCalledWith(
+          'master',
           expect.objectContaining({ show_archived_locations: true }),
         ),
       );

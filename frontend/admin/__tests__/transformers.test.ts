@@ -33,6 +33,7 @@ const locationFixture: LocationResponse = {
   review_url: 'https://yandex.ru/reviews/...',
   record_info: 'Запись по телефону',
   image_url: 'https://example.com/studio.jpg',
+  is_public: true,
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
   updated_at: '2024-06-01T12:00:00Z',

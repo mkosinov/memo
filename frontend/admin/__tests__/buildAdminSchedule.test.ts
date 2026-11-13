@@ -46,6 +46,7 @@ const mockLocation: LocationResponse = {
   record_info: null,
   image_url: null,
   location_hint: null,
+  is_public: true,
   archived: false,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',

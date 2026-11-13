@@ -12,6 +12,8 @@ vi.mock('@memo/api-client', () => ({
   getActivities: vi.fn(),
   getServices: vi.fn(),
   getMasters: vi.fn(),
+  // #601: locations come from the PUBLIC dictionary — staff list kept as a spy.
+  getPublicLocations: vi.fn(),
   getLocations: vi.fn(),
 }));
 
@@ -20,6 +22,7 @@ import {
   getActivities,
   getServices,
   getMasters,
+  getPublicLocations,
   getLocations,
 } from '@memo/api-client';
 
@@ -27,6 +30,7 @@ const mockedGetPublicActivities = getPublicActivities as Mock;
 const mockedGetActivities = getActivities as Mock;
 const mockedGetServices = getServices as Mock;
 const mockedGetMasters = getMasters as Mock;
+const mockedGetPublicLocations = getPublicLocations as Mock;
 const mockedGetLocations = getLocations as Mock;
 
 // ─── Sample data ────────────────────────────────────────────────────────────
@@ -86,36 +90,20 @@ const mockMasters = [
   },
 ];
 
+// #601: public location dictionary rows — exactly the 4 ADR-015 fields;
+// the schedule builder must consume only these (no capacity/is_public).
 const mockLocations = [
   {
     id: 'loc-1',
     title: 'Альпика',
     address: 'ул. Альпика, 1',
-    description: null,
-    capacity: 20,
-    yandex_map_url: null,
-    review_url: null,
-    record_info: null,
-    image_url: null,
     location_hint: '2 этаж',
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
   },
   {
     id: 'loc-2',
     title: 'Гранд Отель Поляна',
     address: 'ул. Просвещения, 60',
-    description: null,
-    capacity: 15,
-    yandex_map_url: null,
-    review_url: null,
-    record_info: null,
-    image_url: null,
     location_hint: null,
-    is_active: true,
-    created_at: '2026-01-01T00:00:00',
-    updated_at: '2026-01-01T00:00:00',
   },
 ];
 
@@ -179,7 +167,8 @@ function mockDefaultResolve(): void {
   mockedGetPublicActivities.mockResolvedValue({ items: mockActivities, total: mockActivities.length });
   mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
   mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
-  mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
+  // #601: bare array — the public dictionary has no paginated envelope.
+  mockedGetPublicLocations.mockResolvedValue(mockLocations);
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -296,7 +285,10 @@ describe('useSchedule', () => {
     expect(mockedGetActivities).not.toHaveBeenCalled();
     expect(mockedGetServices).toHaveBeenCalledTimes(1);
     expect(mockedGetMasters).toHaveBeenCalledTimes(1);
-    expect(mockedGetLocations).toHaveBeenCalledTimes(1);
+    // #601: locations arrive via the public dictionary (bare array);
+    // the staff-guarded /api/v1/locations must never be hit by the web.
+    expect(mockedGetPublicLocations).toHaveBeenCalledTimes(1);
+    expect(mockedGetLocations).not.toHaveBeenCalled();
   });
 
   it('caches the public list under the ["activities","public",from,to] key', async () => {
@@ -372,7 +364,7 @@ describe('useSchedule', () => {
     mockedGetPublicActivities.mockRejectedValue(new Error('Network error'));
     mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
     mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
-    mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
+    mockedGetPublicLocations.mockResolvedValue(mockLocations);
 
     const { result } = renderHook(() => useSchedule(), {
       wrapper: createWrapper(),
@@ -389,7 +381,7 @@ describe('useSchedule', () => {
     mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
     mockedGetServices.mockResolvedValue({ items: mockServices, total: mockServices.length });
     mockedGetMasters.mockResolvedValue({ items: mockMasters, total: mockMasters.length });
-    mockedGetLocations.mockResolvedValue({ items: mockLocations, total: mockLocations.length });
+    mockedGetPublicLocations.mockResolvedValue([]);
 
     const { result } = renderHook(() => useSchedule(), {
       wrapper: createWrapper(),

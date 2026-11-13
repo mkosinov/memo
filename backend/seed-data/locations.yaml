@@ -9,6 +9,10 @@
 #   - "" (пустая строка) = поле остаётся пустым.
 #   - image_url — путь к картинке в репозитории фронта (frontend/web/public),
 #     например "/images/hero-bg.jpg".
+#   - is_public — видно ли локацию клиентам на сайте (true/false,GH #601).
+#     false = скрыта только с сайта, в админке полностью рабочая.
+#     Конвертация из CSV владельца (колонка «видно клиентам», спека §2.7):
+#     пусто или «да» → is_public: true, «нет» → is_public: false.
 #
 # Проверка файла без записи в БД:
 #   cd backend && uv run python -m src.seed.reference --check
@@ -27,6 +31,7 @@ locations:
     yandex_map_url: ""
     review_url: ""
     sort_order: 0
+    is_public: true
     tags: []
 
   - title: Гранд Отель Поляна
@@ -40,6 +45,7 @@ locations:
     yandex_map_url: ""
     review_url: ""
     sort_order: 1
+    is_public: true
     tags: []
 
   - title: Поляна 1389
@@ -53,4 +59,5 @@ locations:
     yandex_map_url: ""
     review_url: ""
     sort_order: 2
+    is_public: true
     tags: []

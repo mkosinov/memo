@@ -6,29 +6,35 @@ import { useLocations } from '../useLocations';
 import { useSchedule } from '../useSchedule';
 
 // ─── Mock @memo/api-client ─────────────────────────────────────────────────
+// #601: locations come from the PUBLIC dictionary only — getLocations (the
+// staff route) is kept as a spy and must never be called by the web.
 vi.mock('@memo/api-client', () => ({
+  getPublicLocations: vi.fn(),
   getLocations: vi.fn(),
-  getActivities: vi.fn(),
+  getPublicActivities: vi.fn(),
   getServices: vi.fn(),
   getMasters: vi.fn(),
 }));
 
 import {
+  getPublicLocations,
   getLocations,
-  getActivities,
+  getPublicActivities,
   getServices,
   getMasters,
 } from '@memo/api-client';
 
+const mockedGetPublicLocations = getPublicLocations as Mock;
 const mockedGetLocations = getLocations as Mock;
-const mockedGetActivities = getActivities as Mock;
+const mockedGetPublicActivities = getPublicActivities as Mock;
 const mockedGetServices = getServices as Mock;
 const mockedGetMasters = getMasters as Mock;
 
+// #601: public dictionary rows — bare 4-field objects, no envelope.
 const mockLocationRows = [
-  { id: 'u1', title: 'Альпика', address: 'Альпика, 1 этаж' },
-  { id: 'u2', title: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
-  { id: 'u3', title: 'Поляна 1389', address: null },
+  { id: 'u1', title: 'Альпика', address: 'Альпика, 1 этаж', location_hint: '1 этаж' },
+  { id: 'u2', title: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби', location_hint: null },
+  { id: 'u3', title: 'Поляна 1389', address: null, location_hint: null },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -47,16 +53,14 @@ function createWrapper() {
 
 // GH #479: the hook rides the shared ['locations'] react-query cache
 // (same key and policy as useSchedule) — one request per page load.
+// GH #601: the source is the anonymous public dictionary (bare array).
 describe('useLocations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetLocations.mockResolvedValue({
-      items: mockLocationRows,
-      total: mockLocationRows.length,
-    });
+    mockedGetPublicLocations.mockResolvedValue(mockLocationRows);
   });
 
-  it('loads on mount and maps the paged envelope to LocationView', async () => {
+  it('loads on mount and maps the bare public array to LocationView', async () => {
     const { result } = renderHook(() => useLocations(), {
       wrapper: createWrapper(),
     });
@@ -67,7 +71,9 @@ describe('useLocations', () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(mockedGetLocations).toHaveBeenCalledTimes(1);
+    expect(mockedGetPublicLocations).toHaveBeenCalledTimes(1);
+    // #601: the staff-guarded paginated list must never be called by the web.
+    expect(mockedGetLocations).not.toHaveBeenCalled();
     expect(result.current.locations).toStrictEqual([
       { id: 'u1', title: 'Альпика', address: 'Альпика, 1 этаж' },
       { id: 'u2', title: 'Гранд Отель Поляна', address: 'Гранд Отель, лобби' },
@@ -76,8 +82,8 @@ describe('useLocations', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('empty directory → empty options (UI falls back to defaults)', async () => {
-    mockedGetLocations.mockResolvedValue({ items: [], total: 0 });
+  it('empty dictionary → empty options (UI falls back to defaults)', async () => {
+    mockedGetPublicLocations.mockResolvedValue([]);
 
     const { result } = renderHook(() => useLocations(), {
       wrapper: createWrapper(),
@@ -92,7 +98,7 @@ describe('useLocations', () => {
   });
 
   it('surfaces a failed fetch as error with an empty list', async () => {
-    mockedGetLocations.mockRejectedValue(new Error('backend down'));
+    mockedGetPublicLocations.mockRejectedValue(new Error('backend down'));
 
     const { result } = renderHook(() => useLocations(), {
       wrapper: createWrapper(),
@@ -116,12 +122,12 @@ describe('useLocations', () => {
       expect(second.result.current.isLoading).toBe(false);
     });
 
-    expect(mockedGetLocations).toHaveBeenCalledTimes(1);
+    expect(mockedGetPublicLocations).toHaveBeenCalledTimes(1);
     expect(first.result.current.locations).toEqual(second.result.current.locations);
   });
 
-  it('dedupes with useSchedule — same key, single locations request', async () => {
-    mockedGetActivities.mockResolvedValue({ items: [], total: 0 });
+  it('dedupes with useSchedule — same key, single public dictionary request', async () => {
+    mockedGetPublicActivities.mockResolvedValue({ items: [], total: 0 });
     mockedGetServices.mockResolvedValue({ items: [], total: 0 });
     mockedGetMasters.mockResolvedValue({ items: [], total: 0 });
 
@@ -134,7 +140,8 @@ describe('useLocations', () => {
       expect(locations.result.current.isLoading).toBe(false);
     });
 
-    expect(mockedGetLocations).toHaveBeenCalledTimes(1);
+    expect(mockedGetPublicLocations).toHaveBeenCalledTimes(1);
+    expect(mockedGetLocations).not.toHaveBeenCalled();
     expect(locations.result.current.locations.length).toBe(mockLocationRows.length);
   });
 });

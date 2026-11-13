@@ -60,13 +60,13 @@ const mockRestoreLocation = vi.mocked(restoreLocation);
 const locationCreatePayload: LocationCreate = {
   title: 'Studio', short_title: 'Studio', capacity: 10, address: '', description: '',
   yandex_map_url: '', review_url: '', record_info: '', image_url: '',
-  location_hint: '', tag_ids: [],
+  location_hint: '', is_public: true, tag_ids: [],
 };
 
 const locationResponse = {
   id: 'loc-1', title: 'Studio', address: 'Main St', description: null,
   capacity: 10, yandex_map_url: null, review_url: null, record_info: null,
-  image_url: null, archived: false, created_at: '', updated_at: '',
+  image_url: null, is_public: true, archived: false, created_at: '', updated_at: '',
 };
 
 function createQueryClientWrapper() {
@@ -141,6 +141,7 @@ describe('useLocationsMutations', () => {
           record_info: '',
           image_url: '',
           location_hint: '',
+          is_public: true,
           tag_ids: [],
         },
       };
@@ -170,6 +171,7 @@ describe('useLocationsMutations', () => {
         record_info: '',
         image_url: '',
         location_hint: '',
+        is_public: true,
         tag_ids: [],
       };
 

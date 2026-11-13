@@ -222,13 +222,14 @@ class TestPublicRoutes:
         # GH #600: bare activity GETs left the allowlist too — both
         # carry the activities:read guard now; the schedule showcase
         # is /public/activities.
+        # GH #601: bare location GETs left the allowlist too — both
+        # carry the locations:read guard now; the anonymous dictionary
+        # is /public/locations.
         assert frozenset({
             ("GET", "/api/v1/health"),
             # GH #266 D8: /masters is read-only acting masters; GET /{id}
             # was removed with the mutations (allowlist entry gone too).
             ("GET", "/api/v1/masters"),
-            ("GET", "/api/v1/locations"),
-            ("GET", "/api/v1/locations/{id}"),
             ("GET", "/api/v1/services"),
             ("GET", "/api/v1/services/{id}"),
             ("GET", "/api/v1/tags"),
@@ -237,6 +238,10 @@ class TestPublicRoutes:
             # GH #600: the anonymous schedule list — minimal audience
             # schema, private rows excluded server-side.
             ("GET", "/api/v1/public/activities"),
+            # GH #601: the anonymous location dictionary — minimal
+            # audience schema, archived + non-public rows excluded
+            # server-side.
+            ("GET", "/api/v1/public/locations"),
             # GH #479 (Изменение 5): ("POST", "/api/v1/records") removed
             # from the allowlist — the route carries records:write now;
             # guest booking is #499.

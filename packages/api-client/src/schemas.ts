@@ -225,12 +225,28 @@ export const LocationResponseSchema = z.object({
   image_url: z.string().nullable(),
   location_hint: z.string().nullable().optional(),
   sort_order: z.number().optional(),
+  // GH #601: web-visibility flag — true = shown on the client site, false =
+  // hidden from the site only (fully working in admin). NOT NULL column,
+  // always serialized. Distinct from `archived`.
+  is_public: z.boolean(),
   archived: z.boolean(), // inverted: archived = true means the location is in the archive (#207)
   created_at: z.string(), // ISO datetime string
   updated_at: z.string(), // ISO datetime string
 });
 
 export type LocationResponse = z.infer<typeof LocationResponseSchema>;
+
+/** #601: public location dictionary item — minimal audience schema
+ * (ADR-015, naming per PhotoPublicResponseSchema): exactly the 4 fields
+ * the web consumes; archived and is_public=false rows are excluded
+ * server-side, `is_public` itself never leaves through this schema. */
+export const LocationPublicResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  address: z.string().nullable(),
+  location_hint: z.string().nullable(),
+});
+export type LocationPublicResponse = z.infer<typeof LocationPublicResponseSchema>;
 
 // ─── PhotoResponse ──────────────────────────────────────────────────────────
 
@@ -736,6 +752,10 @@ export const LocationCreateSchema = z.object({
   record_info: z.string().optional().default(''),
   image_url: z.string().optional().default(''),
   location_hint: z.string().optional().default(''),
+  // GH #601: web visibility — absent → true (visible). Mirrors backend
+  // LocationBase default; Update (.strict() below) carries the full PUT
+  // contract, patchLocation uses Partial<LocationUpdate>.
+  is_public: z.boolean().optional().default(true),
   tag_ids: z.array(z.string()).default([]),
 });
 
@@ -1255,6 +1275,10 @@ export type PhotoListResponse = z.infer<typeof PhotoListResponseSchema>;
 
 export const PhotoPublicListResponseSchema = paginatedSchema(PhotoPublicResponseSchema);
 export type PhotoPublicListResponse = z.infer<typeof PhotoPublicListResponseSchema>;
+
+// #601: public location dictionary — BARE array (no envelope, no params).
+export const LocationPublicListResponseSchema = z.array(LocationPublicResponseSchema);
+export type LocationPublicListResponse = z.infer<typeof LocationPublicListResponseSchema>;
 
 // GH #513 — the three client-cabinet /my lists (same {items, total, page,
 // per_page} envelope; per-endpoint item shapes above).

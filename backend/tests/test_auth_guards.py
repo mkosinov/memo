@@ -87,7 +87,6 @@ _ENDPOINT_PARAMS = pytest.mark.parametrize(
 
 _PUBLIC_GETS = [
     "/api/v1/masters",
-    "/api/v1/locations",
     "/api/v1/services",
     "/api/v1/tags",
     # GH #493: the anonymous photo showcase lives at /public/photos —
@@ -97,6 +96,10 @@ _PUBLIC_GETS = [
     # server-side) — bare activity GETs are guarded now
     # (activities:read, #600 Task 2).
     "/api/v1/public/activities",
+    # GH #601: the anonymous location dictionary (archived + non-public
+    # rows excluded server-side) — bare location GETs are guarded now
+    # (locations:read, #601 Task 2).
+    "/api/v1/public/locations",
     "/api/v1/health",
 ]
 

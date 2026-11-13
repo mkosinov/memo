@@ -233,8 +233,9 @@ class TestSuccessPath:
         assert resp.status_code == 200, resp.text
         avatar_url = resp.json()["avatar_url"]
         assert _staff_avatar(staff_id) == avatar_url
-        # /my reflects the new avatar too.
-        assert client.get("/api/v1/my").json()["avatar_url"] == avatar_url
+        # /my reflects the new avatar too (#584: GET /my is whoami now —
+        # the profile shape rides the no-op PUT mirror).
+        assert client.put("/api/v1/my", json={}).json()["avatar_url"] == avatar_url
 
     def test_second_upload_deletes_previous_own_file(
         self, api_client, login_as, _my_hash

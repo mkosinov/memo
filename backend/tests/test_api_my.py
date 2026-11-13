@@ -1,5 +1,11 @@
 """GH #262 Task 1 — GET/PUT /api/v1/my (self-service «Мои данные»).
 
+#584 note: ``GET /api/v1/my`` is the «кто я» whoami surface now (its own
+contract tests: ``test_api_my_whoami.py``); the profile flat-shape reads
+below go through a no-op ``PUT /my {}`` — the same ``MyProfileResponse``
+— until the profile GET re-homes under the staff branches (/my/master,
+/my/admin) later in the #584 wave.
+
 Covers the plan RED list (spec §3.1/§4, D3/D7, domain-rules/profile.md):
 
 * GET flat profile exactly per §4 (role, has_staff, has_master, card
@@ -143,7 +149,14 @@ def _user_id(client) -> str:
     return me.json()["user"]["id"]
 
 
-# ─── GET /api/v1/my ────────────────────────────────────────────────────────────
+# ─── profile shape (via the PUT mirror — #584 moved GET /my to «кто я») ────────
+#
+# GET /api/v1/my is the #584 whoami surface now; the profile GET re-homes
+# under the staff branches (/my/master, /my/admin) later in the #584 wave.
+# Until then the profile-shape tests below read through a no-op
+# ``PUT /my {}`` — the same ``MyProfileResponse`` contract (GH #262: one
+# flat shape for GET and PUT), verified a no-op by
+# ``test_empty_body_changes_nothing``.
 
 
 class TestGetMyProfile:
@@ -164,7 +177,7 @@ class TestGetMyProfile:
         })
         assert resp.status_code == 200, resp.text
 
-        body = client.get("/api/v1/my").json()
+        body = client.put("/api/v1/my", json={}).json()
         assert set(body.keys()) == _FULL_PROFILE_SHAPE
         assert body == {
             "role": "master",
@@ -192,7 +205,7 @@ class TestGetMyProfile:
     ) -> None:
         """No card → has_staff/has_master false, public half all null."""
         client = _make_cardless_user(login_as, _my_hash)
-        body = client.get("/api/v1/my").json()
+        body = client.put("/api/v1/my", json={}).json()
         assert body["role"] == "admin"
         assert body["has_staff"] is False
         assert body["has_master"] is False
@@ -209,7 +222,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, archive_card=True
         )
-        body = client.get("/api/v1/my").json()
+        body = client.put("/api/v1/my", json={}).json()
         assert body["has_staff"] is False
         assert body["has_master"] is False
         assert body["first_name"] is None
@@ -224,7 +237,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, with_master=False, role="admin"
         )
-        body = client.get("/api/v1/my").json()
+        body = client.put("/api/v1/my", json={}).json()
         assert body["has_staff"] is True
         assert body["has_master"] is False
         assert body["first_name"] == "Мария"
@@ -237,7 +250,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, archive_section=True
         )
-        body = client.get("/api/v1/my").json()
+        body = client.put("/api/v1/my", json={}).json()
         assert body["has_staff"] is True
         assert body["has_master"] is False
         assert body["specialties"] is None
@@ -319,7 +332,7 @@ class TestPutMyProfile:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put("/api/v1/my", json={"first_name": None})
         assert resp.status_code == 422
-        assert client.get("/api/v1/my").json()["first_name"] == "Мария"
+        assert client.put("/api/v1/my", json={}).json()["first_name"] == "Мария"
 
     def test_names_required_when_present_empty(
         self, api_client, login_as, _my_hash
@@ -381,7 +394,7 @@ class TestPutMyProfile:
             f"SELECT specialty FROM masters WHERE staff_id = '{staff_id}'"
         )
         assert rows[0]["specialty"] == "живопись, керамика"
-        assert client.get("/api/v1/my").json()["specialties"] == [
+        assert client.put("/api/v1/my", json={}).json()["specialties"] == [
             "живопись", "керамика",
         ]
 
@@ -452,7 +465,7 @@ class TestPutMyProfile:
         assert rows[0]["first_name"] == "Мария"
         rows = query_db("SELECT COUNT(*) AS n FROM user_profiles")
         assert rows[0]["n"] == 0
-        assert client.get("/api/v1/my").json()["patronymic"] is None
+        assert client.put("/api/v1/my", json={}).json()["patronymic"] is None
 
 
     def test_single_transaction_injected_failure_rolls_back_everything(

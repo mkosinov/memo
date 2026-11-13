@@ -66,7 +66,7 @@ def real_user():
 @pytest.fixture
 def actor(real_user):
     """Open the actor contextvar around a test."""
-    token = audit.set_actor(user_id=real_user["id"], role="admin")
+    token = audit.set_actor(user_id=real_user["id"], roles=["admin"])
     yield real_user
     audit.reset_actor(token)
 

@@ -26,6 +26,24 @@ from src.domain.visit_status import VisitStatus  # noqa: TC001 — runtime pydan
 from src.models.enums import PaymentMethod  # noqa: TC001 — runtime pydantic model field
 
 
+class MyWhoamiResponse(BaseModel):
+    """``GET /api/v1/my`` — «кто я» (#584, spec §4.1).
+
+    Account data of the PRIMARY identity (the staff account when its
+    cookie resolved, else the client one) plus the full resolved role
+    list — a role enters the list only via a valid cookie of its own
+    audience: ``admin`` (staff cookie, role admin), ``master`` (staff
+    cookie, role master OR a master section), ``client`` (client
+    cookie). Order is not guaranteed. Client accounts carry no email →
+    ``null``. No password/lock fields, no internal card links.
+    """
+
+    id: str
+    phone: str
+    email: str | None = None
+    roles: list[str]
+
+
 class MyProfileResponse(BaseModel):
     """Flat GET/PUT response per spec §4 (same shape for both)."""
 

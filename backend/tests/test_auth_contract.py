@@ -73,17 +73,24 @@ def _is_auth_depend(call: Any) -> bool:
       check; a role guard, still an authenticating dependency;
     * ``require_client_session`` (#499 spec §3) — the client-cookie twin
       of ``require_session`` (identity check; authenticates the client
-      principal, the role barrier is part of the guard).
+      principal, the role barrier is part of the guard);
+    * ``require_any_session`` (#584 spec §4.1/§6) — the combined whoami
+      guard (either cookie audience; 401 on an empty role list).
 
     ``verify_fetch_metadata`` is deliberately NOT an auth dependency — it
     only rejects cross-site browser fetches and authenticates nobody.
     """
-    from src.auth.permissions import require_admin, require_client_session
+    from src.auth.permissions import (
+        require_admin,
+        require_any_session,
+        require_client_session,
+    )
 
     if (
         call is require_session
         or call is require_admin
         or call is require_client_session
+        or call is require_any_session
     ):
         return True
     return getattr(call, "__qualname__", "").startswith("require_permission")

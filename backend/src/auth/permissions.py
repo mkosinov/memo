@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException
-
+from sqlalchemy import select
 # ``Request`` MUST stay a runtime import (not TYPE_CHECKING): FastAPI
 # resolves dependency signatures via get_type_hints at registration time.
 from starlette.requests import Request
@@ -32,6 +32,8 @@ from src.core.config import settings
 from src.db import db_manager
 from src.errors import ErrorCode, ErrorDetail
 from src.models.enums import UserRole
+from src.models.master import Master
+from src.models.user import User
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -199,8 +201,32 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
         # actor here; see the WARNING in src/events/audit.py).
         from src.events.audit import set_actor
 
-        set_actor(user_id=authed.id, role=authed.role)
+        # #584: the actor record carries a role LIST now — the classic
+        # single-role guards stage a 1-tuple (their journal rows are
+        # byte-identical with the pre-#584 behavior).
+        set_actor(user_id=authed.id, roles=[authed.role])
     return authed
+
+
+async def resolve_authed_pure(token: str | None) -> AuthedUser | None:
+    """Resolve a session token WITHOUT staging the audit actor (#584 §6).
+
+    The same resolution core as :func:`resolve_authed` (sliding window,
+    lazy expiry, archived-account refusal) minus the journal side
+    effect — resolve and journaling are separate seams now.
+    ``resolve_authed`` keeps its inline staging for the classic guards
+    and the optional-scope seam (their single-record behavior is
+    unchanged); the combined whoami guard below resolves BOTH cookies
+    through here and stages ONE actor record itself.
+    """
+    if token is None:
+        return None
+    # Lazy import: src.auth.service imports this module (AuthedUser +
+    # ROLE_PERMISSIONS) — a module-level import would be circular.
+    from src.auth.service import get_auth_service
+
+    async with db_manager.async_session() as db_session:
+        return await get_auth_service().resolve(db_session, token)
 
 
 async def require_session(request: Request) -> AuthedUser:
@@ -235,6 +261,118 @@ async def require_client_session(request: Request) -> AuthedUser:
     if authed is None or authed.role != UserRole.CLIENT.value:
         raise _unauthorized()
     return authed
+
+
+# ─── #584 (spec §4.1/§6) — combined whoami guard ───────────────────────────────
+
+
+async def resolved_staff_roles(staff: AuthedUser) -> tuple[str, ...]:
+    """The staff-side role composition for a RESOLVED staff principal (§4.1).
+
+    * ``admin`` — the account role is admin;
+    * ``master`` — the account role is master OR the account has a
+      master section (``masters.staff_id`` via ``users.staff_id``); both
+      entries may appear (an admin with a master section).
+
+    The audience filter is upstream: only a resolved STAFF cookie
+    reaches here. A client account under the staff cookie contributes
+    nothing — its role matches no staff entry and it carries no staff
+    card, hence no master section.
+    """
+    roles: list[str] = []
+    if staff.role == UserRole.ADMIN.value:
+        roles.append(UserRole.ADMIN.value)
+    if staff.role == UserRole.MASTER.value or await _has_master_section(staff):
+        roles.append(UserRole.MASTER.value)
+    return tuple(roles)
+
+
+async def _has_master_section(staff: AuthedUser) -> bool:
+    """Does the account's staff card carry a ``masters`` extension row?"""
+    if staff.staff_id is None:
+        return False
+    async with db_manager.async_session() as db_session:
+        section = (
+            await db_session.execute(
+                select(Master.staff_id).where(Master.staff_id == staff.staff_id)
+            )
+        ).scalar_one_or_none()
+    return section is not None
+
+
+async def _account_email(user_id: str) -> str | None:
+    """The primary account's ``email`` column (client accounts carry none)."""
+    async with db_manager.async_session() as db_session:
+        email = (
+            await db_session.execute(
+                select(User.email).where(User.id == user_id)
+            )
+        ).scalar_one_or_none()
+    return email
+
+
+@dataclass(frozen=True)
+class WhoamiIdentities:
+    """What the combined whoami guard resolved (#584, spec §4.1).
+
+    ``roles`` is the full audience-filtered list, staff-side entries
+    first (the staff-first order is the actor's primary-role invariant);
+    ``primary`` is the staff account when its cookie resolved, else the
+    client account — the single audit-actor and response identity.
+    """
+
+    staff: AuthedUser | None
+    client: AuthedUser | None
+    primary: AuthedUser
+    roles: tuple[str, ...]
+    email: str | None
+
+
+async def require_any_session(request: Request) -> WhoamiIdentities:
+    """The combined «кто я» guard (#584, spec §4.1/§6) — whoami ONLY.
+
+    Two PURE resolves (``resolve_authed_pure`` — no actor staging inside
+    the resolve), each reading only its own cookie name; the role list
+    is composed with symmetric audience filters (a role enters the list
+    only via a valid cookie of its own audience — cross-presented tokens
+    resolve but contribute nothing). Empty list → the shared 401.
+
+    Then exactly ONE actor record (decision 2026-11-13): the primary
+    account — the staff one when its cookie resolved, else the client
+    one — carrying the FULL resolved role list. The losing probe never
+    creates its own record.
+    """
+    staff = await resolve_authed_pure(request.cookies.get(SESSION_COOKIE))
+    client = await resolve_authed_pure(
+        request.cookies.get(CLIENT_SESSION_COOKIE)
+    )
+
+    staff_side = await resolved_staff_roles(staff) if staff is not None else ()
+    client_side = (
+        (UserRole.CLIENT.value,)
+        if client is not None and client.role == UserRole.CLIENT.value
+        else ()
+    )
+    roles = staff_side + client_side
+    if not roles:
+        raise _unauthorized()
+
+    # Primary account: staff-first (spec §4.1 — «сотрудника, если его
+    # кука валидна, иначе клиентская»).
+    primary = staff if staff is not None else client
+    assert primary is not None  # a non-empty role list implies a resolve
+
+    # LAZY import — same cycle hazard as in resolve_authed above.
+    from src.events.audit import set_actor
+
+    set_actor(user_id=primary.id, roles=roles)
+    return WhoamiIdentities(
+        staff=staff,
+        client=client,
+        primary=primary,
+        roles=roles,
+        email=await _account_email(primary.id),
+    )
 
 
 def require_permission(perm: str) -> Callable[..., Awaitable[AuthedUser]]:

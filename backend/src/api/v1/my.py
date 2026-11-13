@@ -1,10 +1,12 @@
-"""Self-service «Мои данные» API — GET/PUT /api/v1/my (GH #262 Task 1)
+"""Self-service «Мои данные» API — PUT /api/v1/my (GH #262 Task 1)
 + multipart portrait upload POST /api/v1/my/portrait (Task 2).
 
-Own-data endpoints exactly like ``/auth/me``: guarded by
+``GET /api/v1/my`` is the #584 «кто я» surface now — it lives in its own
+router (``my_whoami.py``) behind the combined guard; the profile GET
+will re-home under the staff branches (/my/master, /my/admin) later in
+the #584 wave. PUT/portrait keep the classic shape below: guarded by
 ``require_session`` alone (NO permission token — the session user is the
-only addressable user, D11: /me is the auth snapshot, /my is the
-editable profile). Mutating routes additionally carry
+only addressable user, D11). Mutating routes additionally carry
 ``verify_fetch_metadata`` (#247 decision 14).
 """
 
@@ -74,19 +76,6 @@ def _error(status_code: int, code: ErrorCode, message: str) -> HTTPException:
         status_code=status_code,
         detail=ErrorDetail(code=code, message=message).model_dump(),
     )
-
-
-@router.get("", response_model=MyProfileResponse)
-async def get_my_profile(
-    authed: _SessionUser,
-    service: _ServiceDep,
-    session: SessionDep,
-) -> MyProfileResponse:
-    """Flat profile per spec §4 — read-only, never creates rows."""
-    try:
-        return await service.get(session, authed.id)
-    except ProfileOwnerNotFoundError as exc:
-        raise _owner_gone(exc) from exc
 
 
 @router.put("", response_model=MyProfileResponse, dependencies=_WRITE_GUARD)

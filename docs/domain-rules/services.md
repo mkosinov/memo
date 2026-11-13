@@ -14,6 +14,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 | max_age | integer | ❌ | 0 | 18 | — | Максимальный возраст; nullable — `null` = без верхней границы (миграция `275ba490cab8`). Диапазон 0–18 — клиентская валидация формы |
 | duration | integer | ✅ | 15 | 480 | — | Длительность в минутах |
 | record_info | string | ✅ | — | — | — | Информация для записи |
+| is_public | boolean | ✅ | — | — | true | Видимость в web (GH #606, зеркало #601): `false` = скрыта только с сайта, в админе полностью рабочая; скрытие ≠ архив |
 | tariffs | array | ❌ | — | — | [] | Тарифы (nested) |
 | tag_ids | array | ❌ | — | — | [] | IDs тегов |
 | materials | array | ❌ | — | — | [] | `[{material_id, note?}]` — GH #223 (landed, Task 13 / plan `docs/plans/2026-09-07-materials-services-link-223-plan.md`): create/PUT hard-replace, PATCH absent → preserve; unknown id → 422. Replaces the retired `material_hint` free-text column (dropped by migration `a9b1c3d5e7f2`) |
@@ -31,6 +32,7 @@ A Service represents a type of master class (painting, sculpture, etc.). It defi
 - `min_age` must be <= `max_age` (enforced in frontend only)
 
 ## Invariants
+- `is_public = false` скрывает услугу только с сайта: её нет в публичном справочнике `/public/services`, её занятия исключены из публичной витрины серверно, её фото не отдаются галереей (включая `?service_id=`-зонд), бронь занятия по прямому id → 404 (GH #606, поверх #600/#601). В админе услуга полностью рабочая: сетка, формы, создание занятий за неё. Скрытие с сайта ≠ архив.
 - Services can be hard-deleted via `DELETE /{id}` with the dependency-resolution mechanism; archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore`. See `_overview.md` → "Hard-delete FK dependency matrix".
 - Tariffs are updated in place by id on Service update (GH #357): matched rows keep their id (UPDATE), id-less rows are INSERTed, rows missing from the payload are DELETEd, unknown/foreign id → 422; deleting a tariff referenced by visits nulls `visits.tariff_id` (the visit row and its price snapshot survive)
 

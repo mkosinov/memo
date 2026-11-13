@@ -48,7 +48,13 @@ export function LocationsTable() {
     // null optionals coerce to the Create default (backend does the same).
     // #207: the Update schema carries no archive flag — archive/restore goes
     // through POST /locations/{id}/archive|restore, so PUT never flips it.
-    const payload: LocationUpdate = {
+    // GH #601 e2e finding (latent bug): backend LocationUpdate is
+    // extra="forbid" and has NO tag_ids (domain-rules parity gap), so sending
+    // tag_ids 422'd EVERY edit-modal save. The modal has no tags field — the
+    // wire payload mirrors backend LocationBase exactly; the cast bridges the
+    // zod mirror's legacy tag_ids (never serialized: updateLocation
+    // stringifies this object verbatim).
+    const payload: Omit<LocationUpdate, 'tag_ids'> = {
       title: data.title as string,
       short_title: (data.short_title as string | null | undefined) ?? '',
       address: (data.address as string | null | undefined) ?? '',
@@ -59,12 +65,15 @@ export function LocationsTable() {
       record_info: (data.record_info as string | null | undefined) ?? '',
       image_url: (data.image_url as string | null | undefined) ?? '',
       location_hint: (data.location_hint as string | null | undefined) ?? '',
-      tag_ids: (data.tag_ids as string[] | undefined) ?? [],
+      // GH #601: the modal's boolean field rides the canonical PUT as a
+      // boolean (is_private canon) — omitting it would flip the flag back to
+      // the backend default on every save.
+      is_public: data.is_public as boolean,
     };
     try {
       await updateLocation.mutateAsync({
         id: editLocation.id,
-        data: payload,
+        data: payload as LocationUpdate,
       });
       showToast('Локация обновлена');
       setEditLocation(null);

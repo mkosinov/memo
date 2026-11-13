@@ -18,7 +18,22 @@ export const locationColumns = (): ColumnDef<LocationResponse>[] => [
     width: 'flex-1',
     defaultVisible: true,
     // Pre-#139: name cell carried `font-medium` (all other cells default).
-    render: (l) => <span className="font-medium">{l.title}</span>,
+    // GH #601 §2.6: hidden-from-web locations («Видно клиентам» off) get the
+    // «Не в web» pill next to the title — muted pair from the «Архив» badge
+    // cell below; distinct from archive (hidden ≠ archived, spec §2.8).
+    render: (l) => (
+      <span className="font-medium inline-flex items-center gap-1.5">
+        {l.title}
+        {!l.is_public && (
+          <span
+            data-testid="location-web-hidden-badge"
+            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500"
+          >
+            Не в web
+          </span>
+        )}
+      </span>
+    ),
   },
   {
     key: 'short_title',

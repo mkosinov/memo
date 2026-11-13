@@ -8,7 +8,8 @@
  *        heading with the private service title.
  *
  *   US-2 «Бронь приватного id» (client session, the project's storageState
- *        default): a direct POST /api/v1/my/records with the PRIVATE
+ *        default): a direct POST /api/v1/my/client/records (#584 §4.2 —
+ *        the booking branch moved under /my/client) with the PRIVATE
  *        activity_id answers 404 BYTE-IDENTICAL to a missing id (no
  *        422-vs-404 side channel), and no record lands: the cabinet
  *        records page shows no card for the private service, no
@@ -75,7 +76,7 @@ test.describe('#600 US-2 — бронь приватного activity_id', () =>
       // the client session cookie (page.request shares the context) and
       // the web Origin — exactly the browser wire.
       const post = (activityId: string) =>
-        page.request.post(`${BACKEND}/api/v1/my/records`, {
+        page.request.post(`${BACKEND}/api/v1/my/client/records`, {
           data: {
             activity_id: activityId,
             phone: '+79001234567',

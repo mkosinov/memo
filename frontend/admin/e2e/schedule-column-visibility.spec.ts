@@ -15,7 +15,6 @@ import { gotoScheduleDay, waitForScheduleReady } from './fixtures/helpers';
  */
 
 const BACKEND = resolveBackendUrl();
-const DEV_USER_ID = 'dev-user-001';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,9 +35,12 @@ async function clearUserSettingsStorage(page: import('@playwright/test').Page) {
  * Reset user settings via the API to ensure column orders include all masters/locations.
  * Previous test runs may have saved partial column orders (a single id),
  * which causes DayView to render only that one column.
+ * #584 §4.4: the settings router moved under the staff branches (own-only
+ * — no user_id query parameter anywhere); this spec runs on the project's
+ * default ADMIN storageState, so the reset rides the admin branch.
  */
 async function resetUserSettings(request: import('@playwright/test').APIRequestContext) {
-  await request.put(`${BACKEND}/api/v1/user-settings?user_id=${DEV_USER_ID}`, {
+  await request.put(`${BACKEND}/api/v1/my/admin/settings`, {
     data: {
       column_order_staff: [],
       column_order_locations: [],

@@ -154,6 +154,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (высота 612px = 0.85×720 точно в обоих режимах, инвариант вкладок
     Δ=0.0px ≤ 5px, кнопка вне скролл-тела, футер в вьюпорте).
 
+### Fixed
+- **GH #553 — Редактирование занятия: честная календарная дата вместо
+  «открытая неделя + день недели»** — branch
+  `553-activity-edit-honest-date` (5 задач `e68d73f2..46feb8fd`, base
+  `2172bd75`; 6 файлов, +702/−36; спека
+  `docs/specs/2026-10-25-activity-edit-honest-date-design.md` рев.2.1,
+  план `docs/plans/2026-11-13-activity-edit-honest-date-plan.md` — оба
+  на main, unchanged by IMPL):
+  - **start-ветка обновления (T1 `e68d73f2`):** `updateActivity`
+    принимает тот же dual time-source юнион, что `addActivity`
+    (#280) — `start` (полный floating-local ISO из datetime-поля
+    формы; в PATCH payload as-is; дата может быть вне открытой
+    недели, прошедшие даты разрешены осознанно) WINS над легаси
+    `dayIndex`+`startMinutes` (после #553 — только штампы сетки
+    WeekView/DayView/dnd; при обоих источниках `start` WINS);
+    путь промисифицирован — `Promise<void>` (`mutateAsync` +
+    catch-guard, зеркало #595), fire-and-forget потребители
+    не тронуты.
+  - **Полная дата из формы (T2 `548c86c9`):** вкладка редактирования
+    отправляет выбранную календарную дату как есть; очистка поля →
+    '' → патча нет вовсе.
+  - **Тост успеха патча даты-времени (T3 `295a2dbb`):** «Сохранено:
+    {услуга} — {дата formatDateRu}, {время}» — ТОЛЬКО для
+    `start`-патчей (info kind, канон тостов #261); остальные поля и
+    отказы молчаливы (откат оптимистики владеет ошибками).
+  - **E2E (T4 `92b00468` + T5 `46feb8fd`):** US-1 перенос занятия в
+    другую неделю (выбранная дата соблюдена), US-2 перенос в тот же
+    день, US-3 правка только времени, US-5 открытие-закрытие без
+    правок; US-4 drag-тест зелёный без правок ожиданий.
+  - Tests: vitest units зелёные (ScheduleDataContext **54/54**,
+    ActivityDetailsModal spec **107/107** вкл. 3 toast-теста,
+    соседние specs зелёные, tsc + eslint чистые); e2e
+    `activity-details-modal.spec.ts` **20/20** (два pre-existing
+    сценария 14/15 — load-флейки, зелёные изолированно); визуальный
+    гейт: check 3 passed; checks 1–2 перекрыты решением пользователя
+    2026-11-13 вариант (a) — e2e приняты как верификация (VCC спеки
+    предшествует канону статической достижимости 2026-11-12;
+    follow-up #615).
+   - Status: `docs/status/2026-11-13-activity-edit-honest-date-553.md`
+
 ## [Unreleased] — 2026-11-12
 
 ### Added

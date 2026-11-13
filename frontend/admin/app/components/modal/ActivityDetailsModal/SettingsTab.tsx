@@ -53,16 +53,19 @@ export function SettingsTab({ activity, onUpdate }: SettingsTabProps) {
   // Handle datetime change
   const handleDateTimeChange = useCallback(
     (value: string) => {
+      // Empty guard (GH #553): clearing the field emits '' — no patch at all,
+      // a broken `start` in PATCH is impossible by construction.
       if (value) {
         const [datePart, timePart] = value.split('T');
         const rawMinutes = hhmmToMinutes(timePart);
         const snappedMinutes = snapMinutes(rawMinutes, gridFrequency);
         // Rebuild snapped datetime-local value for display
         setStartDateTime(composeLocalISO(datePart, snappedMinutes).slice(0, 16));
-        // Calculate day from date
-        const date = new Date(datePart + 'T12:00:00');
-        const dayOfWeek = (date.getDay() + 6) % 7; // Mon=0
-        onUpdate({ startMinutes: snappedMinutes, dayIndex: dayOfWeek });
+        // GH #553: send the FULL calendar date (floating-local ISO, byte-for-
+        // byte the create form's #280 pattern) — the chosen date is no longer
+        // discarded into a week-relative dayIndex; that legacy path belongs
+        // to the grid senders (dnd, slot stamps).
+        onUpdate({ start: composeLocalISO(datePart, snappedMinutes) });
       }
     },
     [onUpdate, gridFrequency],

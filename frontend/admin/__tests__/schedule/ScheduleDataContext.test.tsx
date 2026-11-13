@@ -105,6 +105,11 @@ function currentWeekDate(dayOffset: number): string {
   return toISODate(monday);
 }
 
+/** GH #553: a ready floating-local ISO start guaranteed OUTSIDE the open week
+ *  (Monday + 14d). The week-relative conversion can only emit in-week dates,
+ *  so a byte-identical payload.start also proves the conversion never ran. */
+const OUT_OF_WEEK_START = `${currentWeekDate(14)}T15:30:00`;
+
 // ─── Fixtures (raw API shapes) ─────────────────────────────────────────────
 
 const masterM1 = {
@@ -225,6 +230,8 @@ function DataConsumer() {
   // #595: promise outcomes of the promisified create path, surfaced to tests.
   const [addOutcome, setAddOutcome] = React.useState('');
   const [batchOutcome, setBatchOutcome] = React.useState('');
+  // GH #553: promise outcome of the promisified update path, surfaced to tests.
+  const [updateOutcome, setUpdateOutcome] = React.useState('');
 
   return (
     <div>
@@ -347,6 +354,36 @@ function DataConsumer() {
         data-testid="update-activity-with-capacity"
         onClick={() => updateActivity('a1', { serviceId: 's5', durationMinutes: 120, capacity: 8 })}
       />
+      {/* GH #553: edit-form branch — ready local-ISO start goes to the PATCH
+          payload as-is (the chosen date may be outside the open week). */}
+      <button
+        data-testid="update-activity-start"
+        onClick={() => updateActivity('a1', { start: OUT_OF_WEEK_START, durationMinutes: 90 })}
+      />
+      {/* GH #553: both time sources at once — documents the `start` priority;
+          no real sender ever sends both (form → start, grid → dayIndex+minutes). */}
+      <button
+        data-testid="update-activity-both"
+        onClick={() => updateActivity('a1', { start: OUT_OF_WEEK_START, dayIndex: 3, startMinutes: 480 })}
+      />
+      {/* GH #553: promisified update path — outcome span mirrors the #595
+          create-await pattern (resolve observed through the span). */}
+      <button
+        data-testid="update-activity-await"
+        onClick={() => {
+          updateActivity('a1', { start: OUT_OF_WEEK_START })
+            .then(() => setUpdateOutcome('resolved'))
+            .catch((err: Error) => setUpdateOutcome(`rejected;error:${err.message}`));
+        }}
+      />
+      {/* GH #553: fire-and-forget consumer (grid drag&drop / slot stamps) —
+          the promise is ignored; the context's internal guard must keep a
+          rejection from surfacing as an unhandled rejection. */}
+      <button
+        data-testid="update-activity-fire-forget"
+        onClick={() => updateActivity('a1', { dayIndex: 1, startMinutes: 720 })}
+      />
+      <span data-testid="update-outcome">{updateOutcome}</span>
       <button
         data-testid="delete-activity"
         onClick={() => {
@@ -1748,5 +1785,127 @@ describe('ScheduleDataProvider — промисный путь создания 
       expect(invalidateSpy).toHaveBeenCalledTimes(1);
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['activities'] });
+  });
+});
+
+// ─── Update `start` branch + promisified path (GH #553) ──────────────────────
+
+describe('ScheduleDataProvider — start-ветка обновления (GH #553)', () => {
+  beforeEach(() => {
+    __resetNavigation();
+    vi.clearAllMocks();
+    vi.mocked(getAllMasters).mockResolvedValue([] as never);
+    vi.mocked(getAllLocations).mockResolvedValue([] as never);
+    vi.mocked(getAllServices).mockResolvedValue([] as never);
+    vi.mocked(getActivities).mockResolvedValue(wrap([activityA1(0, 600)]) as never);
+    vi.mocked(createActivity).mockResolvedValue({} as never);
+    vi.mocked(patchActivity).mockResolvedValue({} as never);
+    vi.mocked(dryRunDeleteActivity).mockResolvedValue(undefined);
+    vi.mocked(deleteActivityWithExpected).mockResolvedValue(undefined);
+    seedDictionaries();
+  });
+
+  it('start уходит в PATCH как есть — конвертация открытой недели не вызывается', async () => {
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('update-activity-start').click();
+    });
+
+    await waitFor(() => {
+      expect(patchActivity).toHaveBeenCalledTimes(1);
+    });
+    // Byte-as-is: OUT_OF_WEEK_START sits two weeks after the open week, and
+    // the legacy conversion can only emit in-week dates — the identical value
+    // proves the open-week conversion never ran.
+    expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({
+      start: OUT_OF_WEEK_START,
+      duration: 90,
+    }));
+  });
+
+  it('оба источника сразу: побеждает start, dayIndex/startMinutes молча игнорируются', async () => {
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('update-activity-both').click();
+    });
+
+    await waitFor(() => {
+      expect(patchActivity).toHaveBeenCalledTimes(1);
+    });
+    expect(patchActivity).toHaveBeenCalledWith('a1', expect.objectContaining({
+      start: OUT_OF_WEEK_START,
+    }));
+    // The ignored legacy conversion would have produced Wednesday 08:00 of
+    // the OPEN week — never the out-of-week form value.
+    const payload = vi.mocked(patchActivity).mock.calls[0]?.[1];
+    expect(payload?.start).not.toBe(`${currentWeekDate(3)}T08:00:00`);
+  });
+
+  it('updateActivity возвращает промис: резолвится на успехе', async () => {
+    vi.mocked(patchActivity).mockResolvedValue(activityA1(0, 600) as never);
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('update-activity-await').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('update-outcome').textContent).toBe('resolved');
+    });
+    expect(patchActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('updateActivity реджектится на ошибке: await-потребитель получает ошибку', async () => {
+    vi.mocked(patchActivity).mockRejectedValue(new Error('patch failed'));
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    act(() => {
+      screen.getByTestId('update-activity-await').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('update-outcome').textContent).toBe('rejected;error:patch failed');
+    });
+  });
+
+  it('fire-and-forget guard: реджект обновления не создаёт unhandled rejection', async () => {
+    vi.mocked(patchActivity).mockRejectedValue(new Error('patch failed'));
+    renderDataProvider();
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    });
+
+    const onUnhandled = vi.fn();
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      act(() => {
+        // Fire-and-forget consumer: the returned promise is deliberately
+        // dropped (the grid's drag&drop / slot-stamp call shape).
+        screen.getByTestId('update-activity-fire-forget').click();
+      });
+      await waitFor(() => {
+        expect(patchActivity).toHaveBeenCalledTimes(1);
+      });
+      // Give the microtask/macrotask queue a beat — a would-be unhandled
+      // rejection (guard missing) fires unhandledRejection by then.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(onUnhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });

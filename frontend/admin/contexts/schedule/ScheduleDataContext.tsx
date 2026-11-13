@@ -103,6 +103,32 @@ export type AddActivityCallbacks = {
   onError?: (err: unknown) => void;
 };
 
+/** updateActivity input (GH #553; mirrors the GH #280 create-union doc): the
+ *  same dual time-source contract as `AddActivityTimeSource`, but flat — an
+ *  update PATCH may legally carry other fields alongside the time source.
+ *  `start` — ready floating-local ISO from the edit form's datetime field
+ *  (goes to the PATCH payload as-is; the chosen date may be outside the open
+ *  week); `dayIndex`+`startMinutes` — legacy week-relative conversion for the
+ *  grid (drag&drop and slot stamps know only the open week's weekday +
+ *  minutes). When both arrive, `start` WINS and `dayIndex`/`startMinutes`
+ *  are silently ignored (documenting priority unit-assert; no real sender
+ *  sends both — the form sends only `start`, the grid only
+ *  `dayIndex + startMinutes`). A partial `dayIndex` without `startMinutes`
+ *  is ignored as before (the both-fields condition). */
+export type UpdateActivityInput = {
+  start?: string;
+  dayIndex?: number;
+  startMinutes?: number;
+  durationMinutes?: number;
+  masterId?: string;
+  serviceId?: string;
+  locationId?: string;
+  capacity?: number;
+  isPrivate?: boolean;
+  comment?: string;
+  occupied?: number;
+};
+
 /** #595 (spec §5) — per-location outcome of a batch create (`addActivities`).
  *  Array order matches the inputs order (the tab's checkbox order), so the
  *  first failure by checkbox order = the first `rejected` entry in order. */
@@ -143,18 +169,12 @@ export interface ScheduleDataContextType {
    *  settle → per-location outcomes (input order). Toasts are the create
    *  tab's concern (Task 3), not the context's. */
   addActivities: (inputs: AddActivityInput[]) => Promise<AddActivityOutcome[]>;
-  updateActivity: (id: string, updates: {
-    dayIndex?: number;
-    startMinutes?: number;
-    durationMinutes?: number;
-    masterId?: string;
-    serviceId?: string;
-    locationId?: string;
-    capacity?: number;
-    isPrivate?: boolean;
-    comment?: string;
-    occupied?: number;
-  }) => void;
+  /** GH #553: promisified update — resolves when the PATCH settles, rejects
+   *  on failure (the edit modal awaits it for its success toast). Fire-and-
+   *  forget consumers (grid drag&drop, slot stamps) ignore the promise; the
+   *  context's internal guard keeps a rejection from surfacing as unhandled
+   *  for them — the same pattern as `addActivity` (#595). */
+  updateActivity: (id: string, updates: UpdateActivityInput) => Promise<void>;
   deleteActivityDeferred: (id: string) => Promise<DeleteActivityOutcome>;
   /** #286 confirm path (DeleteDialog onResolve): enqueue with `expected` =
    *  the FULL id lists from the confirmed dry-run tree's items (all three
@@ -287,7 +307,12 @@ export function ScheduleDataProvider({
   // naturally (success or real network error). The former timeout raced the
   // server-side write and rolled the optimistic UI back while the request kept
   // flying. onMutate/onError/onSettled below are verbatim from the old context.
-  const { mutate: updateActivityMutate } = useMutation({
+  // GH #553: `mutateAsync` — updateActivityFn returns the promise (the edit
+  // modal awaits it). The optimistic mechanics and the family invalidation
+  // stay in the hook-level callbacks below: they fire for every mutateAsync
+  // call, unlike per-call `mutate` callbacks (TanStack v5 «Consecutive
+  // mutations») — behavior identical to the former `mutate`.
+  const { mutateAsync: updateActivityMutateAsync } = useMutation({
     mutationKey: SCHEDULE_ACTIVITY_MUTATION_KEY,
     mutationFn: ({ id, data }: { id: string; data: ActivityPatch }) => apiPatchActivity(id, data),
     onMutate: async ({ id, data }) => {
@@ -424,18 +449,14 @@ export function ScheduleDataProvider({
     [createActivityMutateAsync, buildCreatePayload, queryClient],
   );
 
-  const updateActivityFn = useCallback((id: string, updates: {
-    dayIndex?: number;
-    startMinutes?: number;
-    durationMinutes?: number;
-    masterId?: string;
-    serviceId?: string;
-    locationId?: string;
-    capacity?: number;
-    isPrivate?: boolean;
-    comment?: string;
-    occupied?: number;
-  }) => {
+  // GH #553: the update is a PROMISE (mutateAsync inside) — the edit modal
+  // awaits it for its success toast. Optimistic snapshot/rollback and the
+  // ['activities'] family invalidation live in the hook-level callbacks and
+  // fire exactly as before. The internal guard marks the chain handled so
+  // fire-and-forget consumers (grid drag&drop, slot stamps) never get an
+  // unhandled rejection — mirrors `addActivity` above; awaiting callers
+  // still receive the rejection.
+  const updateActivityFn = useCallback((id: string, updates: UpdateActivityInput): Promise<void> => {
     const payload: ActivityPatch = {};
     if (updates.masterId !== undefined) payload.master_id = updates.masterId;
     if (updates.serviceId !== undefined) payload.service_id = updates.serviceId;
@@ -445,12 +466,25 @@ export function ScheduleDataProvider({
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
     if (updates.comment !== undefined) payload.comment = updates.comment;
     if (updates.occupied !== undefined) payload.occupied = updates.occupied;
-    // Handle time changes (e.g., drag & drop) — dayIndex + startMinutes → floating-local start
-    if (updates.dayIndex !== undefined && updates.startMinutes !== undefined) {
+    // Time sources (GH #553, mirror of the GH #280 create contract): `start`
+    // (edit form) goes to the payload AS-IS — no open-week conversion (the
+    // chosen date may be outside the open week) and it WINS over
+    // dayIndex+startMinutes when both are present. The legacy branch (grid
+    // drag&drop / slot stamps) converts via the open week as before.
+    if (updates.start != null) {
+      payload.start = updates.start;
+    } else if (updates.dayIndex !== undefined && updates.startMinutes !== undefined) {
+      // Handle time changes (e.g., drag & drop) — dayIndex + startMinutes → floating-local start
       payload.start = composeLocalISO(dayIndexToDate(currentWeek, updates.dayIndex), updates.startMinutes);
     }
-    updateActivityMutate({ id, data: payload });
-  }, [currentWeek, updateActivityMutate]);
+    const promise = updateActivityMutateAsync({ id, data: payload }).then(() => undefined);
+    // Fire-and-forget consumers (grid drag&drop, slot stamps) ignore the
+    // returned promise — mark the chain handled so a rejection never surfaces
+    // as an unhandled rejection (the old fire-and-forget `mutate` swallowed
+    // errors the same way). Awaiting callers still get the rejection.
+    promise.catch(() => {});
+    return promise;
+  }, [currentWeek, updateActivityMutateAsync]);
 
   // ── Deferred activity delete (#286, D3/D4) ──────────────────────────────
   // The context owns the mechanics; ActivityCard/ActivityDetailsModal only

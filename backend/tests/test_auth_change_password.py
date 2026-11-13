@@ -93,7 +93,7 @@ def _call(client, current: str = PASSWORD, new: str = "fresh-horse-2"):
 
 def _token_of(client) -> str | None:
     """The session token of a logged-in TestClient."""
-    token = client.cookies.get("memo_session")
+    token = client.cookies.get("memo_staff_session")
     assert token, "client must be logged in"
     return token
 

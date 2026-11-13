@@ -295,7 +295,7 @@ class TestGuards:
     def test_staff_token_in_client_cookie_401(self, api_client) -> None:
         """A LIVE staff session token copied into the client cookie name
         resolves, then fails the role barrier — the same single 401."""
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token, "fixture admin session missing"
         api_client.cookies.clear()
         api_client.cookies.set("memo_client_session", staff_token)

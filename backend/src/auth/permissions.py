@@ -8,7 +8,8 @@ server-side expansion (G1b simplification).
 
 ``require_session`` / ``require_permission`` — the FastAPI dependencies T7
 staples onto every guarded router (spec §3.5): the former resolves the
-``memo_session`` cookie via ``AuthService`` and yields the ``AuthedUser``,
+``memo_staff_session`` cookie via ``AuthService`` and yields the
+``AuthedUser``,
 the latter layers the permission matcher on top. ``get_auth_service`` is
 imported lazily inside ``require_session`` — ``service.py`` imports this
 module, so a module-level import would be circular.
@@ -138,13 +139,16 @@ async def verify_origin(request: Request) -> None:
 
 # ─── Session dependencies (T5) ─────────────────────────────────────────────────
 
-#: Cookie name carrying the opaque session token (spec §2.2).
-SESSION_COOKIE = "memo_session"
+#: Cookie name carrying the opaque session token (spec §2.2). RENAMED
+#: ``memo_session`` → ``memo_staff_session`` (#584 ADR-015, spec §2.6):
+#: the cookie pair mirrors the audiences; no prod → no transition.
+SESSION_COOKIE = "memo_staff_session"
 
 #: #499 (spec §4.3): client sessions ride the SAME session rows but a
 #: SEPARATE cookie name — a client and a staff session coexist in one
 #: browser without clobbering each other (site and admin share the API
-#: origin). Same attributes as ``memo_session``; only the name differs.
+#: origin). Same attributes as ``memo_staff_session``; only the name
+#: differs.
 CLIENT_SESSION_COOKIE = "memo_client_session"
 
 
@@ -222,15 +226,15 @@ async def resolve_authed(token: str | None) -> AuthedUser | None:
 
 
 async def require_session(request: Request) -> AuthedUser:
-    """Resolve the ``memo_session`` cookie into an ``AuthedUser``.
+    """Resolve the ``memo_staff_session`` cookie into an ``AuthedUser``.
 
     401 ``AUTH_UNAUTHORIZED`` for a missing cookie, unknown token, or an
     expired/archived session — the frontend treats all three as "no
     session" and redirects to login (spec §5).
 
-    #499 (spec §3): deliberately UNCHANGED — reads only ``memo_session``
-    and checks no role; client-session separation lives in
-    ``require_client_session`` below.
+    #499 (spec §3): deliberately UNCHANGED — reads only
+    ``memo_staff_session`` and checks no role; client-session separation
+    lives in ``require_client_session`` below.
     """
     authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
     if authed is None:
@@ -243,11 +247,12 @@ async def require_client_session(request: Request) -> AuthedUser:
 
     #499 (spec §3/§4.3): same session rows, same resolve core (sliding
     window, lazy expiry, archived-account refusal) — but ONLY the client
-    cookie name is read (a staff ``memo_session`` is invisible here) and
-    the resolved role must be ``client`` (a staff token copied into the
-    client cookie name resolves, then fails the role barrier). Both
-    cross-presentation shapes are the SAME 401 ``AUTH_UNAUTHORIZED`` as
-    no session at all. The staff resolver above stays untouched.
+    cookie name is read (a staff ``memo_staff_session`` is invisible
+    here) and the resolved role must be ``client`` (a staff token copied
+    into the client cookie name resolves, then fails the role barrier).
+    Both cross-presentation shapes are the SAME 401
+    ``AUTH_UNAUTHORIZED`` as no session at all. The staff resolver above
+    stays untouched.
     """
     authed = await resolve_authed(request.cookies.get(CLIENT_SESSION_COOKIE))
     if authed is None or authed.role != UserRole.CLIENT.value:

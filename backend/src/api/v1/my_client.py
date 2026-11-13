@@ -5,7 +5,7 @@ The ONE router of the client branch, merged from the former
 ``my_client.py`` (writes) + ``my_reads.py`` (reads) when the cabinet
 moved under the ``/my/client/*`` prefix. A SEPARATE router from the
 staff ``src/api/v1/my.py``: that router binds ``require_session`` (the
-staff ``memo_session`` cookie) at the ROUTER level, which would 401
+staff ``memo_staff_session`` cookie) at the ROUTER level, which would 401
 every client session. Every route here hangs behind
 ``require_client_session`` (cookie ``memo_client_session`` + role
 ``client`` — spec §3) instead, mounted under the same ``/api/v1/my``

@@ -161,7 +161,7 @@ class TestResolveAuthedActor:
         from src.auth.permissions import SESSION_COOKIE, resolve_authed
 
         token = api_client.cookies.get(SESSION_COOKIE)
-        assert token, "api_client must hold a memo_session cookie"
+        assert token, "api_client must hold a memo_staff_session cookie"
         authed = await resolve_authed(token)
         assert authed is not None
 

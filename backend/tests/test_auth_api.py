@@ -16,7 +16,9 @@ from an earlier test would 429 an otherwise-valid login.
 
 Covered:
 - login: 200 + ``{user, permissions, master?}`` body; ``Set-Cookie
-  memo_session`` with ``HttpOnly`` + ``SameSite=lax`` (no ``Secure`` under
+  memo_staff_session`` (renamed from ``memo_session`` — #584 ADR-015,
+  spec §2.6; the old name is accepted NOWHERE, see ``TestStaffCookieName``)
+  with ``HttpOnly`` + ``SameSite=lax`` (no ``Secure`` under
   ENV=testing) + ``Max-Age`` = ABSOLUTE_CAP seconds;
 - login: wrong password → 401 ``AUTH_INVALID_CREDENTIALS``; 5th failure →
   429 ``AUTH_LOCKED_OUT`` + ``Retry-After``;
@@ -171,11 +173,11 @@ def _cookie_header(resp) -> str:
 
 
 def _extract_token(set_cookie: str) -> str | None:
-    """``memo_session=<token>; ...`` → ``<token>``."""
+    """``memo_staff_session=<token>; ...`` → ``<token>``."""
     for part in set_cookie.split(";"):
         part = part.strip()
-        if part.startswith("memo_session="):
-            return part[len("memo_session="):]
+        if part.startswith("memo_staff_session="):
+            return part[len("memo_staff_session="):]
     return None
 
 
@@ -196,7 +198,7 @@ class TestLogin:
         assert body["master"] is None
 
         cookie = _cookie_header(resp)
-        assert "memo_session=" in cookie
+        assert "memo_staff_session=" in cookie
         assert "httponly" in cookie.lower()
         assert "samesite=lax" in cookie.lower()
         assert "secure" not in cookie.lower()  # ENV=testing → no Secure flag
@@ -245,7 +247,7 @@ class TestLogin:
         resp = _login(anon_client, _client_user["phone"])
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_INVALID_CREDENTIALS.value
-        assert "memo_session=" not in _cookie_header(resp)
+        assert "memo_staff_session=" not in _cookie_header(resp)
 
     def test_login_missing_fields_422(self, anon_client) -> None:
         resp = anon_client.post("/api/v1/auth/login", json={"phone": "+79990000001"})
@@ -308,7 +310,7 @@ class TestLogout:
         cookie = _cookie_header(resp)
         # Cookie cleared: present with an empty value (Starlette quotes it
         # as "") and a zeroed Max-Age.
-        assert "memo_session=" in cookie
+        assert "memo_staff_session=" in cookie
         cleared = _extract_token(cookie)
         assert cleared in ('""', "", None)
         assert "max-age=0" in cookie.lower()
@@ -337,9 +339,49 @@ class TestSessionRotation:
         assert new_token and new_token != old_token
 
         # The old token must no longer resolve
-        anon_client.cookies.set("memo_session", old_token)
+        anon_client.cookies.set("memo_staff_session", old_token)
         me = anon_client.get("/api/v1/my")
         assert me.status_code == 401
+
+
+# ─── staff cookie name (#584 ADR-015, spec §2.6) ───────────────────────────────
+
+
+class TestStaffCookieName:
+    """The staff session cookie is RENAMED ``memo_session`` →
+    ``memo_staff_session`` (no prod → no transition period). Login issues
+    ONLY the new name; a token presented under the OLD name is invisible
+    to the guards — the request is anonymous (401 on guarded routes)."""
+
+    def test_login_issues_new_name_only(
+        self, anon_client, _admin_user,
+    ) -> None:
+        resp = _login(anon_client, _admin_user["phone"])
+        assert resp.status_code == 200, resp.text
+        cookie = _cookie_header(resp)
+        assert "memo_staff_session=" in cookie
+        assert "memo_session=" not in cookie
+
+    def test_old_name_is_anonymous_even_with_live_token(
+        self, anon_client, _admin_user,
+    ) -> None:
+        resp = _login(anon_client, _admin_user["phone"])
+        token = _extract_token(_cookie_header(resp))
+        assert token, "login must set the staff session cookie"
+
+        # A LIVE token under the OLD name → the guards don't read that
+        # name anymore: the request is anonymous (DoD: 401 guarded).
+        anon_client.cookies.clear()
+        anon_client.cookies.set("memo_session", token)
+        old = anon_client.get("/api/v1/my")
+        assert old.status_code == 401, old.text
+        assert old.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
+
+        # The SAME token under the NEW name resolves (#584 §9).
+        anon_client.cookies.clear()
+        anon_client.cookies.set("memo_staff_session", token)
+        fresh = anon_client.get("/api/v1/my")
+        assert fresh.status_code == 200, fresh.text
 
 
 # ─── guard smoke test (T5 dependencies end-to-end) ────────────────────────────

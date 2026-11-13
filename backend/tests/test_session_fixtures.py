@@ -135,7 +135,7 @@ def test_truncate_respects_fk_order(db_engine):
 
 class TestAuthenticatedApiClient:
     def test_api_client_is_authenticated_admin(self, api_client) -> None:
-        """api_client arrives with a valid admin memo_session cookie jar.
+        """api_client arrives with a valid admin memo_staff_session cookie jar.
 
         The fixture INSERTs the admin after the per-test truncate and logs
         in via POST /api/v1/auth/login (spec §7) — the whoami

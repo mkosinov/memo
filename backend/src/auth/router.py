@@ -19,7 +19,8 @@ any work, even for a valid token). The login null-guard (NULL
 ``password_hash`` → ordinary 401, ladder untouched) lives in
 AuthService.login (#348 spec §4).
 
-Cookie (spec §2.2): ``memo_session`` carries only the opaque token —
+Cookie (spec §2.2): ``memo_staff_session`` (renamed from
+``memo_session``, #584 ADR-015 spec §2.6) carries only the opaque token —
 ``HttpOnly``, ``SameSite=Lax``, ``Secure`` iff production, ``Path=/``,
 ``Max-Age`` = ABSOLUTE_CAP seconds (the row governs actual validity; a
 stale cookie is simply not resolved). Login rotates: any token presented

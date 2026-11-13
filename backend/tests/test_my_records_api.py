@@ -320,8 +320,8 @@ class TestGuards:
     def test_staff_session_not_accepted_401(
         self, api_client, tariff_activity,
     ) -> None:
-        """The jar holds a LIVE staff ``memo_session`` — the client resolver
-        reads only ``memo_client_session`` → 401."""
+        """The jar holds a LIVE staff ``memo_staff_session`` — the client
+        resolver reads only ``memo_client_session`` → 401."""
         resp = api_client.post(MY_RECORDS_URL, json=_booking_payload(tariff_activity))
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value

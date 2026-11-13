@@ -143,9 +143,9 @@ def _request(client, method: str, path: str, json_body=None):
 
 
 def _cookie_header(client) -> str | None:
-    """``memo_session=<token>`` from a TestClient's cookie jar, or None."""
-    token = client.cookies.get("memo_session")
-    return f"memo_session={token}" if token else None
+    """``memo_staff_session=<token>`` from a TestClient's cookie jar, or None."""
+    token = client.cookies.get("memo_staff_session")
+    return f"memo_staff_session={token}" if token else None
 
 
 def _fill_activity_body(api_client, label: str, body: dict | None) -> dict | None:

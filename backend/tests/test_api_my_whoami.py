@@ -278,7 +278,7 @@ class TestPureResolve:
         from src.events import audit
 
         token = api_client.cookies.get(SESSION_COOKIE)
-        assert token, "api_client must hold a memo_session cookie"
+        assert token, "api_client must hold a memo_staff_session cookie"
 
         authed = await resolve_authed_pure(token)
 

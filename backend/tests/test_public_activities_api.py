@@ -222,3 +222,63 @@ class TestPublicActivitiesList:
         assert resp.status_code == 200, resp.text
         assert resp.json()["items"] == []
         assert resp.json()["total"] == 0
+
+
+# ─── GH #601: activities of hidden/archived locations stay server-side ────────
+
+
+@pytest.fixture
+def location_visibility_fixture(api_client, create_location, create_activity):
+    """Paired seeding for #601 spec §2.5: hidden + archived + visible
+    locations, each with an in-window activity.
+
+    ``create_activity``'s default ``start`` (tomorrow) keeps every twin
+    inside the default public window; archiving rides the staff client
+    BEFORE any probing (the archive endpoint is staff-only).
+    """
+    visible_loc = create_location(title="Visible Control")
+    hidden_loc = create_location(title="Hidden Twin", is_public=False)
+    archived_loc = create_location(title="Archived Twin")
+    resp = api_client.post(f"/api/v1/locations/{archived_loc['id']}/archive")
+    assert resp.status_code == 200, resp.text
+    return {
+        "visible": create_activity(location_id=visible_loc["id"]),
+        "hidden": create_activity(location_id=hidden_loc["id"]),
+        "archived": create_activity(location_id=archived_loc["id"]),
+    }
+
+
+class TestLocationVisibilityExclusion:
+    """GH #601 spec §2.5: activities whose location is archived OR hidden
+    (``is_public = false``) are excluded server-side — one join filter
+    beside the #600 private predicate (a hidden location's schedule is
+    not a client-side concern)."""
+
+    def test_hidden_and_archived_location_activities_absent_visible_present(
+        self, anon_client, location_visibility_fixture
+    ) -> None:
+        """Парный посев + позитивный контроль: занятие видимой локации в
+        выдаче, занятия скрытой и архивной локаций — нет."""
+        fx = location_visibility_fixture
+        resp = anon_client.get(URL)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        ids = [a["id"] for a in body["items"]]
+        # positive control: the visible-location activity IS here
+        assert fx["visible"]["id"] in ids, "visible control missing"
+        # the hidden-location twin is not (is_public=false — same window)
+        assert fx["hidden"]["id"] not in ids, "hidden-location activity leaked"
+        # the archived-location twin is not (archived ≠ hidden — both excluded)
+        assert fx["archived"]["id"] not in ids, "archived-location activity leaked"
+        assert body["total"] == 1
+
+    def test_hidden_location_activity_id_via_narrowing_stays_invisible(
+        self, anon_client, location_visibility_fixture
+    ) -> None:
+        """Guard: ``?id=`` сужает, но не расширяет видимость — занятие
+        скрытой локации через фильтр не достаётся (200 + пустой список)."""
+        fx = location_visibility_fixture
+        resp = anon_client.get(URL, params={"id": fx["hidden"]["id"]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+        assert resp.json()["total"] == 0

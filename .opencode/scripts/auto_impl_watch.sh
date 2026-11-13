@@ -16,6 +16,9 @@
 #         по restart-политике и ГИБНУТ все живые сессии менеджеров (инцидент 2026-09-20).
 # Вкл.:   docker exec opencode touch /root/.local/state/opencode/auto-impl.enabled
 # Выкл.:  docker exec opencode rm -f /root/.local/state/opencode/auto-impl.enabled
+# Проверка лока (--check-lock, #539): только страж, без цикла; запись лишь в
+#         $AUTO_IMPL_LOCK (без неё — отказ с кодом 2). Коды: 0 старт разрешён,
+#         3 живой двойник, 2 misuse, 1 ошибка. Тесты: test_auto_impl_watch_lock.sh.
 #
 # Метка хоста: /root/.local/state/opencode/auto-impl-host — должна совпадать
 # с вариантом поля host на борде ("imac"/"macbook";hk/gcp зарезервированы).
@@ -78,13 +81,37 @@ set -uo pipefail
 REPO=/root/workspace/memo
 STATE=/root/.local/state/opencode
 LOG="$STATE/auto-impl-watch.log"
-LOCK=/tmp/auto-impl-watch.lock
+LOCK="${AUTO_IMPL_LOCK:-/tmp/auto-impl-watch.lock}"   # AUTO_IMPL_LOCK: верификационный шов, обязателен для --check-lock (#539 §6.3)
 INTERVAL="${AUTO_IMPL_INTERVAL:-180}"
 TIEBREAK_WAIT=6   # сек: окно, в котором второй наблюдатель успевает перезаписать поле host
 
+# --check-lock (#539 §6.2): выполнить только страж лока и выйти до цикла
+# сканирования. Пишет ТОЛЬКО в настроенный $LOCK (поэтому AUTO_IMPL_LOCK
+# обязателен — «просто проверка» не смеет трогать прод-лок), решение печатает
+# маркером на stdout: SELF-MATCH / STALE / DUPLICATE. Коды возврата: 0 — старт
+# разрешён (лок отсутствовал/затух/самосовпадение, перезаписан); 3 — живой
+# двойник (лок нетронут); 2 — неправильное употребление; 1 — прочая ошибка.
+if [ "${1:-}" = "--check-lock" ]; then
+    if [ -z "${AUTO_IMPL_LOCK:-}" ]; then
+        echo "check-lock: AUTO_IMPL_LOCK is required (refusing the default production lock)" >&2
+        exit 2
+    fi
+    if [ ! -d /proc ]; then
+        echo "check-lock: /proc unavailable (Linux required)" >&2
+        exit 2
+    fi
+    CHECK_LOCK=1
+else
+    if [ $# -gt 0 ]; then
+        echo "usage: $0 [--check-lock]" >&2
+        exit 2
+    fi
+    CHECK_LOCK=0
+fi
+
 cd "$REPO" || exit 1
 mkdir -p "$STATE"
-exec >>"$LOG" 2>&1
+if [ "$CHECK_LOCK" = 0 ]; then exec >>"$LOG" 2>&1; fi   # check-lock печатает на stdout (#539 §6.2)
 
 # Stale-lock guard (2026-10-04, #349 frozen in In IMPL for 5 days): a plain
 # container restart keeps /tmp but restarts the PID namespace, so the old lock
@@ -92,17 +119,33 @@ exec >>"$LOG" 2>&1
 # kill -0 check made the freshly started watcher exit with a silent
 # "already running" (3rd case 2026-10-03 21:51; earlier 09-25, 09-27).
 # The lock counts as live only when /proc/<pid>/cmdline IS this watcher
-# script; a reused PID of any other process — including the entrypoint
+# script AND the pid is not ours: lock_pid == $$ can only be a marker left by
+# a previous incarnation in an earlier pid-namespace epoch (this instance has
+# not written the lock yet), so it is stale and is replaced below — both
+# #539 incidents (2026-10-22 and 2026-11-13) were exactly that pid-10
+# self-match. A reused PID of any other process — including the entrypoint
 # wrapper, whose cmdline merely mentions the script — falls through and the
-# stale lock is replaced below.
+# stale lock is replaced below as well. Lock content must be a bare pid;
+# garbage falls to the stale branch. The guard must stay at script top level:
+# $$ is the top-level pid only there.
 lock_pid="$(cat "$LOCK" 2>/dev/null || true)"
-if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null \
+case "$lock_pid" in ''|*[!0-9]*) lock_pid= ;; esac
+if [ -n "$lock_pid" ] && [ "$lock_pid" != "$$" ] \
+   && kill -0 "$lock_pid" 2>/dev/null \
    && tr '\0' '\n' < "/proc/$lock_pid/cmdline" 2>/dev/null \
       | grep -Fxq "$REPO/.opencode/scripts/auto_impl_watch.sh"; then
     echo "$(date -Is) watcher already running (pid $lock_pid)"
+    if [ "$CHECK_LOCK" = 1 ]; then echo "DUPLICATE"; exit 3; fi
     exit 1
 fi
 echo $$ > "$LOCK"
+if [ "$CHECK_LOCK" = 1 ]; then
+    if [ -n "$lock_pid" ] && [ "$lock_pid" = "$$" ]; then echo "SELF-MATCH"; else echo "STALE"; fi
+    exit 0
+fi
+if [ -n "$lock_pid" ] && [ "$lock_pid" = "$$" ]; then
+    echo "$(date -Is) stale lock replaced (self-match pid $lock_pid)"
+fi
 trap 'rm -f "$LOCK"' EXIT
 
 HOST_LABEL=$(cat "$STATE/auto-impl-host" 2>/dev/null || hostname)

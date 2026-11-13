@@ -156,9 +156,16 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/call/status"): "public callcheck poll (#593 §Эндпоинты) — one-time handle authority; confirmed issues the client session",
     ("POST", "/api/v1/auth/call/dev-done"): "public dev imitation (#593 §Эндпоинты) — resolver-gated (404 unless dev transport), handle authority",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
-    ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
-    ("PUT", "/api/v1/my"): "own profile (#262)",
-    ("POST", "/api/v1/my/portrait"): "own portrait (#262)",
+    ("GET", "/api/v1/my"): "whoami (#584 §4.1) — either session, account data + role list",
+    # Staff branches (#584 §4.3; the GH #262 profile re-homed): the branch
+    # guards admit by role/section composition, rows are keyed by the
+    # session user — per-user, not master-scoped.
+    ("GET", "/api/v1/my/master"): "own profile, master branch (#584 §4.3) — per-user",
+    ("PUT", "/api/v1/my/master"): "own profile write, master branch (#584 §4.3)",
+    ("POST", "/api/v1/my/master/avatar"): "own avatar upload, master branch (#262/#584 §4.3)",
+    ("GET", "/api/v1/my/admin"): "own profile, admin branch (#584 §4.3) — per-user",
+    ("PUT", "/api/v1/my/admin"): "own profile write, admin branch (#584 §4.3)",
+    ("POST", "/api/v1/my/admin/avatar"): "own avatar upload, admin branch (#262/#584 §4.3)",
     # Client cabinet (#499 §4.3/§5, #513 reads; ADR-015 #584 moved the
     # surface under the /my/client/* branch): the router binds
     # require_client_session (memo_client_session, role=client) —

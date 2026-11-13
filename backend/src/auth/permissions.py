@@ -367,6 +367,65 @@ async def require_any_session(request: Request) -> WhoamiIdentities:
     )
 
 
+# ─── #584 (spec §4.3) — staff branch guards /my/master + /my/admin ─────────────
+
+
+async def _require_staff_session(request: Request) -> AuthedUser:
+    """Staff-branch session core: resolve the STAFF cookie into a staff
+    principal.
+
+    Mirrors :func:`require_client_session` (the twin barrier on the other
+    audience): only ``SESSION_COOKIE`` is read AND the resolved role must
+    be a staff role — a client token cross-presented under the staff
+    cookie name resolves, then fails the role barrier with the SAME 401
+    ``AUTH_UNAUTHORIZED`` as no cookie at all (spec §4.3: «нет валидной
+    куки сотрудника → 401 единым конвертом»).
+    """
+    authed = await resolve_authed(request.cookies.get(SESSION_COOKIE))
+    if authed is None or authed.role not in (
+        UserRole.ADMIN.value,
+        UserRole.MASTER.value,
+    ):
+        raise _unauthorized()
+    return authed
+
+
+async def require_admin_branch(
+    authed: AuthedUser = Depends(_require_staff_session),
+) -> AuthedUser:
+    """/my/admin admission: role ``admin`` — exactly the whoami list.
+
+    Spec §4.3: branch admission is IN EXACTLY the whoami composition
+    («допуск ветки — в точности состав списка „кто я"») — ``"admin"`` is
+    in the staff-side list iff the account role is admin (the audience
+    filter already passed in the core above), so the direct role check
+    IS the list membership. Valid staff cookie, wrong branch → 403.
+    """
+    if authed.role != UserRole.ADMIN.value:
+        raise _forbidden()
+    return authed
+
+
+async def require_master_branch(
+    authed: AuthedUser = Depends(_require_staff_session),
+) -> AuthedUser:
+    """/my/master admission: role ``master`` OR a master section.
+
+    The whoami composition via the SAME :func:`_has_master_section`
+    probe (existence, regardless of ``is_active`` — a distribution-off
+    section still qualifies): ``"master"`` enters the whoami list iff
+    the role is master or the section exists. The section-less
+    role-master keeps the branch; a non-master without a section gets
+    403 — including a pure admin («роль master, секции нет» and
+    «админ без мастер-секции» both pinned by spec §9).
+    """
+    if authed.role != UserRole.MASTER.value and not await _has_master_section(
+        authed
+    ):
+        raise _forbidden()
+    return authed
+
+
 def require_permission(perm: str) -> Callable[..., Awaitable[AuthedUser]]:
     """Dependency factory: ``require_session`` + the permission matcher.
 

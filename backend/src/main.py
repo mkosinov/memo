@@ -20,7 +20,8 @@ from src.api.v1.clients import router as clients_router
 from src.api.v1.locations import router as locations_router
 from src.api.v1.masters import router as masters_router
 from src.api.v1.materials import router as materials_router
-from src.api.v1.my import router as my_router
+from src.api.v1.my import admin_router as my_admin_router
+from src.api.v1.my import master_router as my_master_router
 from src.api.v1.my_client import router as my_client_router
 from src.api.v1.my_whoami import router as my_whoami_router
 from src.api.v1.payments import router as payments_router
@@ -277,8 +278,15 @@ def create_app() -> FastAPI:
     # require_session dependency must NOT apply here (it would 401 a
     # client-only request and double-stage the audit actor).
     app.include_router(my_whoami_router, prefix="/api/v1/my")
-    # GH #262 — own-data profile (session-guarded, no permission token).
-    app.include_router(my_router, prefix="/api/v1/my")
+    # GH #584 (spec §4.3) — the staff branches /my/master + /my/admin: the
+    # former flat /my profile router (GH #262) re-homed as ONE branch
+    # router on TWO STATIC prefixes (a dynamic path parameter is banned —
+    # it would shadow the sibling branches; static prefixes make the
+    # mount order irrelevant and an unknown branch 404s naturally).
+    # Branch admission == the whoami role composition: /my/admin ← role
+    # admin; /my/master ← role master OR a master section.
+    app.include_router(my_master_router, prefix="/api/v1/my/master")
+    app.include_router(my_admin_router, prefix="/api/v1/my/admin")
     # GH #584 (spec §4.2) — the client branch /my/client/*: the cabinet
     # bootstrap (#499 §4.3), booking (#499 §5) and the #513 reads, merged
     # into ONE branch router behind require_client_session (a SEPARATE

@@ -75,15 +75,20 @@ def _is_auth_depend(call: Any) -> bool:
       of ``require_session`` (identity check; authenticates the client
       principal, the role barrier is part of the guard);
     * ``require_any_session`` (#584 spec §4.1/§6) — the combined whoami
-      guard (either cookie audience; 401 on an empty role list).
+      guard (either cookie audience; 401 on an empty role list);
+    * ``require_admin_branch`` / ``require_master_branch`` (#584 spec
+      §4.3) — the staff-branch admission guards (staff session + branch
+      composition; authenticating dependencies of /my/master, /my/admin).
 
     ``verify_fetch_metadata`` is deliberately NOT an auth dependency — it
     only rejects cross-site browser fetches and authenticates nobody.
     """
     from src.auth.permissions import (
         require_admin,
+        require_admin_branch,
         require_any_session,
         require_client_session,
+        require_master_branch,
     )
 
     if (
@@ -91,6 +96,8 @@ def _is_auth_depend(call: Any) -> bool:
         or call is require_admin
         or call is require_client_session
         or call is require_any_session
+        or call is require_admin_branch
+        or call is require_master_branch
     ):
         return True
     return getattr(call, "__qualname__", "").startswith("require_permission")

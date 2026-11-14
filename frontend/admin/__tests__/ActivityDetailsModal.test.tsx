@@ -1712,7 +1712,7 @@ describe('create mode — footer «Создать» button (GH #598, re-domed fr
     expect(btn).toBeEnabled();
   });
 
-  it('gates «Создать»: empty datetime, bad duration, capacity < 1 each block the button', () => {
+  it('gates «Создать»: empty datetime, bad duration, capacity outside 0–99 each block the button', () => {
     renderCreateModal();
     const btn = screen.getByTestId('btn-create-activity');
     fillValidForm();
@@ -1732,12 +1732,15 @@ describe('create mode — footer «Создать» button (GH #598, re-domed fr
     fireEvent.change(screen.getByTestId('create-duration'), { target: { value: '01:30' } });
     expect(btn).toBeEnabled();
 
-    // Вместимость: пусто / 0 / -1 → блок; 1 → ок (GH #280: путь «пусто → 0» исчез)
+    // Вместимость 0–99 явно (GH #551): пусто / −1 / 100 → блок; 0 =
+    // «запись закрыта» — легальное значение, активирует кнопку
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '' } });
     expect(btn).toBeDisabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
-    expect(btn).toBeDisabled();
+    expect(btn).toBeEnabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '-1' } });
+    expect(btn).toBeDisabled();
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '100' } });
     expect(btn).toBeDisabled();
     fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '1' } });
     expect(btn).toBeEnabled();

@@ -220,10 +220,14 @@ export function ActivityForm({
             <label className="text-xs font-medium text-ink-mid block mb-1" htmlFor="settings-capacity">
               Вместимость
             </label>
+            {/* GH #551: границы 0–99 (0 = «запись закрыта» — легальное значение,
+                прежний min 1 снят); состояние поля number | '' — пустое никогда
+                не превращается в 0 (гейт живёт во вкладках-обёртках). */}
             <input
               id="settings-capacity"
               type="number"
-              min={1}
+              min={0}
+              max={99}
               className={inputClass}
               style={inputStyle}
               value={values.capacity}

@@ -4,7 +4,7 @@
  * вместимости §4.1–§4.2, мульти-отправка §4.3). Тестируем обёртку: префилл
  * даты-времени из слота (со снапом к сетке), автозаполнение
  * длительности/вместимости из справочников, гейты «Создать» (дата-время
- * непусто, ЧЧ:ММ > 0, вместимость ≥ 1), мультивыбор локаций (автозаполнение
+ * непусто, ЧЧ:ММ > 0, вместимость 0–99 явно — GH #551), мультивыбор локаций (автозаполнение
  * при ровно 1, скрытие поля и подсказки aria-live при 2+, блок зала без
  * умолчания), отбрасывание отсутствующих id при рефетче, префилл-ид по
  * прибытии списка, мульти-отправку addActivities: порядок входов = порядок
@@ -251,11 +251,73 @@ describe('CreateActivityTab (create-режим общего ActivityForm, GH #28
     toggleLocation('Лофт');
     expect(screen.getByTestId('create-capacity')).toHaveValue(6);
 
-    // зал без умолчания при ровно 1 → 0 → блок до ручного ввода (#280), поля видны
+    // зал без умолчания при ровно 1 → поле ПУСТОЕ → блок до ручного ввода
+    // (GH #551: канон #595 «missing OR 0 = нет умолчания» действует и в
+    // одиночном режиме — молчаливый 0 = «запись закрыта» не подставляется;
+    // jest-dom отображает пустой number-input как null)
     toggleLocation('Студия');
     toggleLocation('Мансарда');
-    expect(screen.getByTestId('create-capacity')).toHaveValue(0);
+    expect(screen.getByTestId('create-capacity')).toHaveValue(null);
     expect(screen.queryByTestId('create-capacity-hint')).not.toBeInTheDocument();
+  });
+
+  // ─── GH #551: вместимость 0–99 в одиночном режиме ──────────────────────────
+  // 0 = «запись закрыта» — легальное значение (backend Tasks 1–2, 466b26d4);
+  // пустое поле НИКОГДА не шлёт 0 — ввод явный, канон #595 rev.3.
+
+  it('GH #551: input allows 0–99 (min=0, max=99 on create-capacity)', () => {
+    renderTab();
+    const input = screen.getByTestId('create-capacity');
+    expect(input).toHaveAttribute('min', '0');
+    expect(input).toHaveAttribute('max', '99');
+  });
+
+  it('GH #551: explicit 0 and 99 activate «Создать»; empty, 100 and −1 block (single mode)', () => {
+    renderTab();
+    fillValidForm(); // локация l1 → умолчание 6, кнопка активна
+    expectCanSave(true);
+
+    // 0 = «запись закрыта» — легальное явное значение
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
+    expectCanSave(true);
+
+    // пустое поле блокирует (пустое НЕ шлёт 0 молча)
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '' } });
+    expectCanSave(false);
+
+    // 100 — вне диапазона 0–99
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '100' } });
+    expectCanSave(false);
+
+    // −1 — вне диапазона 0–99
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '-1' } });
+    expectCanSave(false);
+
+    // возврат в диапазон активирует
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '99' } });
+    expectCanSave(true);
+  });
+
+  it('GH #551: single-mode hall with defaultCapacity 0 or missing autofills EMPTY — «Создать» blocked until manual input', () => {
+    renderTab();
+    pickInCombobox('create-master', 'm1');
+    pickInCombobox('create-service', 's1');
+
+    // Ангар: defaultCapacity 0 → умолчания нет (канон #595) → поле ПУСТОЕ
+    // (jest-dom отображает пустой number-input как null)
+    toggleLocation('Ангар');
+    expect(screen.getByTestId('create-capacity')).toHaveValue(null);
+    expectCanSave(false);
+
+    // ручной ввод (в т.ч. явный 0 = «запись закрыта») снимает блок
+    fireEvent.change(screen.getByTestId('create-capacity'), { target: { value: '0' } });
+    expectCanSave(true);
+
+    // Мансарда: поле defaultCapacity отсутствует → тот же канон
+    toggleLocation('Ангар');
+    toggleLocation('Мансарда');
+    expect(screen.getByTestId('create-capacity')).toHaveValue(null);
+    expectCanSave(false);
   });
 
   it('shows the selected service tariffs under the create-service-tariffs anchor', () => {

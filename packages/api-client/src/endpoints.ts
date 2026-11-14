@@ -14,6 +14,10 @@ import {
   type PositionCreate,
   type PositionUpdate,
   type PositionPatch,
+  SpecialtyResponseSchema,
+  type SpecialtyResponse,
+  type SpecialtyCreate,
+  type SpecialtyPatch,
   LocationResponseSchema,
   type LocationResponse,
   ServiceResponseSchema,
@@ -81,6 +85,7 @@ import {
   type PasswordSetupValidateResponse,
   StaffListResponseSchema,
   PositionListResponseSchema,
+  SpecialtyListResponseSchema,
   MasterViewListResponseSchema,
   LocationListResponseSchema,
   TagListResponseSchema,
@@ -88,6 +93,7 @@ import {
   ServiceListResponseSchema,
   StaffAllResponseSchema,
   PositionAllResponseSchema,
+  SpecialtyAllResponseSchema,
   MasterViewAllResponseSchema,
   LocationAllResponseSchema,
   LocationPublicListResponseSchema,
@@ -365,6 +371,75 @@ export async function resolveDeletePosition(id: string, payload: ResolveDeletePo
   const body: ResolveDeletePositionPayload = { expected: payload.expected };
   if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
   await api(`/api/v1/positions/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
+}
+
+// ─── Specialties (GH #599 — studio direction dictionary) ───────────────────
+// Mirror of the positions surface minus the position-only extras: no GET
+// /{id}, no PUT (rename is PATCH), no system rows. The list has NO sort_by —
+// the order is fixed server-side (title ASC, id ASC).
+
+export async function getSpecialties(params?: ListParams): Promise<PaginatedResponse<SpecialtyResponse>> {
+  return api(`/api/v1/specialties${listQuery(params)}`, SpecialtyListResponseSchema);
+}
+
+export async function createSpecialty(data: SpecialtyCreate): Promise<SpecialtyResponse> {
+  return api('/api/v1/specialties', SpecialtyResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// PATCH is the rename surface (title only).
+export async function patchSpecialty(
+  id: string,
+  data: SpecialtyPatch,
+): Promise<SpecialtyResponse> {
+  return api(`/api/v1/specialties/${id}`, SpecialtyResponseSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+// Execute a hard delete (GH #324 family contract, the positions transport).
+// The commit body carries the MANDATORY {expected} snapshot — the payload
+// param defaults to the leaf-clean {expected: {}} (the T6 pattern).
+// Dependency semantics (unlike positions): `services` is a VISIBLE BLOCKING
+// dep (occupied by any service incl. archived → 409 has_dependencies, never
+// resolvable); `staff_specialties` is auto-cascade (the materials pattern) —
+// a staff-held direction commits with {"resolutions": {}} and the cards
+// survive. A free row is a leaf.
+export interface DeleteSpecialtyPayload {
+  expected: Record<string, string[]>;
+}
+
+export async function deleteSpecialty(id: string, payload: DeleteSpecialtyPayload = { expected: {} }): Promise<void> {
+  await api(`/api/v1/specialties/${id}`, z.any(), {
+    method: 'DELETE',
+    body: JSON.stringify({ expected: payload.expected }),
+  });
+}
+
+// Dry-run preview (GH #324 family, mirror of positions): DELETE ?dry_run=true
+// without body. 204 No Content → free/staff-held-only row; 409 → ApiError
+// with .dependencies tree (the blocking services node «Услуга» — no
+// resolution is ever offered for it).
+export async function dryRunDeleteSpecialty(id: string): Promise<void> {
+  await api(`/api/v1/specialties/${id}?dry_run=true`, z.any(), { method: 'DELETE' });
+}
+
+// Execute a hard delete (GH #324 family) — body contract mirrors positions:
+// {expected, resolutions?}. `expected` is MANDATORY; the staff-held path
+// carries {expected: {}} + {"resolutions": {}} (auto-cascade), the free row
+// {expected: {}}.
+export interface ResolveDeleteSpecialtyPayload {
+  expected: Record<string, string[]>;
+  resolutions?: Record<string, string>;
+}
+
+export async function resolveDeleteSpecialty(id: string, payload: ResolveDeleteSpecialtyPayload): Promise<void> {
+  const body: ResolveDeleteSpecialtyPayload = { expected: payload.expected };
+  if (payload.resolutions !== undefined) body.resolutions = payload.resolutions;
+  await api(`/api/v1/specialties/${id}`, z.any(), { method: 'DELETE', body: JSON.stringify(body) });
 }
 
 // ─── Locations ─────────────────────────────────────────────────────────────
@@ -1262,6 +1337,12 @@ export async function getAllStaff(params?: AllParams): Promise<StaffResponse[]> 
 // Plain dictionary — no archive status, no params (GH #205 bare-array contract).
 export async function getAllPositions(): Promise<PositionResponse[]> {
   return api('/api/v1/positions/all', PositionAllResponseSchema);
+}
+
+// GH #599: same plain-dictionary shape — the dropdown source for service
+// forms and staff checkboxes (BARE_LIST_MAX_ROWS guard lives server-side).
+export async function getAllSpecialties(): Promise<SpecialtyResponse[]> {
+  return api('/api/v1/specialties/all', SpecialtyAllResponseSchema);
 }
 
 export async function getAllLocations(params?: AllParams): Promise<LocationResponse[]> {

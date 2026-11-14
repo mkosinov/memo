@@ -18,6 +18,9 @@ import {
   PositionCreateSchema,
   PositionUpdateSchema,
   PositionPatchSchema,
+  SpecialtyResponseSchema,
+  SpecialtyCreateSchema,
+  SpecialtyPatchSchema,
   MasterViewResponseSchema,
   type MasterViewResponse,
   LocationResponseSchema,
@@ -433,7 +436,11 @@ describe('Strict response fields (#480 §3.3)', () => {
 // ─── StaffResponse (GH #266 — composite staff card) ─────────────────────────
 
 const validStaffMasterSection = {
-  specialty: 'живопись, керамика',
+  specialty: 'живопись, керамика', // GH #599: display string — titles joined «, » alphabetically
+  specialty_ids: [ // GH #599: the id set rides along in the SAME title order
+    '5f8a1c2d-000a-4000-8000-00000000000a',
+    '5f8a1c2d-000b-4000-8000-00000000000b',
+  ],
   color: '#5B8C7A',
   archived: false,
   created_at: '2024-01-15T10:00:00Z',
@@ -470,6 +477,10 @@ describe('StaffResponseSchema', () => {
     expect(result.id).toBe(validStaff.id);
     expect(result.first_name).toBe('Анна');
     expect(result.master?.specialty).toBe('живопись, керамика');
+    expect(result.master?.specialty_ids).toEqual([
+      '5f8a1c2d-000a-4000-8000-00000000000a',
+      '5f8a1c2d-000b-4000-8000-00000000000b',
+    ]);
     expect(result.master?.color).toBe('#5B8C7A');
     expect(result.master?.archived).toBe(false);
     expect(result.position_ids).toEqual(['master', '5f8a1c2d-0007-4000-8000-000000000007']);
@@ -678,11 +689,11 @@ describe('StaffCreateSchema', () => {
       last_name: 'Иванова',
       avatar_url: null,
       sort_order: 0,
-      master: { specialty: 'живопись', color: '#5B8C7A' },
+      master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A' },
       position_ids: ['master'],
       create_user: { phone: '+79991234567' },
     });
-    expect(result.master?.specialty).toBe('живопись');
+    expect(result.master?.specialty_ids).toEqual(['5f8a1c2d-000a-4000-8000-00000000000a']);
     expect(result.create_user).toEqual({ phone: '+79991234567' });
   });
 
@@ -706,13 +717,13 @@ describe('StaffCreateSchema', () => {
     ).toThrow();
   });
 
-  it('master section deliberately accepts empty strings (service-level SPECIALTY_REQUIRED/COLOR_REQUIRED)', () => {
+  it('master section deliberately accepts an empty id list (service-level SPECIALTY_REQUIRED)', () => {
     const result = StaffCreateSchema.parse({
       first_name: 'И',
       last_name: 'П',
-      master: { specialty: '', color: '' },
+      master: { specialty_ids: [], color: '' },
     });
-    expect(result.master?.specialty).toBe('');
+    expect(result.master?.specialty_ids).toEqual([]);
   });
 
   it('rejects a stray is_active (backend extra="forbid")', () => {
@@ -726,7 +737,7 @@ describe('StaffCreateSchema', () => {
       StaffCreateSchema.parse({
         first_name: 'И',
         last_name: 'П',
-        master: { specialty: 'живопись', color: '#5B8C7A', no_such: true },
+        master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A', no_such: true },
       }),
     ).toThrow();
   });
@@ -735,7 +746,7 @@ describe('StaffCreateSchema', () => {
     const result = StaffCreateSchema.parse({
       first_name: 'И',
       last_name: 'П',
-      master: { specialty: 'живопись', color: '#5B8C7A', archived: true },
+      master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A', archived: true },
     });
     expect(result.master?.archived).toBe(true);
   });
@@ -744,7 +755,7 @@ describe('StaffCreateSchema', () => {
     const result = StaffCreateSchema.parse({
       first_name: 'И',
       last_name: 'П',
-      master: { specialty: 'живопись', color: '#5B8C7A' },
+      master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#5B8C7A' },
     });
     expect(result.master?.archived).toBeUndefined();
   });
@@ -817,10 +828,10 @@ describe('StaffUpdateSchema', () => {
       last_name: 'Иванов',
       avatar_url: null,
       sort_order: 2,
-      master: { specialty: 'керамика', color: '#AABBCC' },
+      master: { specialty_ids: ['5f8a1c2d-000b-4000-8000-00000000000b'], color: '#AABBCC' },
       position_ids: ['admin'],
     });
-    expect(result.master?.specialty).toBe('керамика');
+    expect(result.master?.specialty_ids).toEqual(['5f8a1c2d-000b-4000-8000-00000000000b']);
     expect(result.position_ids).toEqual(['admin']);
   });
 
@@ -881,8 +892,10 @@ describe('StaffPatchSchema', () => {
     expect(StaffPatchSchema.parse({}).master).toBeUndefined();
     expect(StaffPatchSchema.parse({ master: null }).master).toBeNull();
     expect(
-      StaffPatchSchema.parse({ master: { specialty: 'с', color: '#111111' } }).master,
-    ).toEqual({ specialty: 'с', color: '#111111' });
+      StaffPatchSchema.parse({
+        master: { specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#111111' },
+      }).master,
+    ).toEqual({ specialty_ids: ['5f8a1c2d-000a-4000-8000-00000000000a'], color: '#111111' });
   });
 });
 
@@ -1059,6 +1072,94 @@ describe('PositionPatchSchema', () => {
   });
 });
 
+// ─── SpecialtyResponse (GH #599 — studio direction dictionary) ──────────────
+// Mirror of the positions dictionary minus the system-row machinery: every
+// specialty is user-defined (uuid id, no is_system, no PUT — rename is PATCH).
+
+const validSpecialty = {
+  id: '5f8a1c2d-000a-4000-8000-00000000000a',
+  title: 'Живопись',
+  created_at: '2024-01-15T10:00:00Z',
+  updated_at: '2024-06-01T12:00:00Z',
+};
+
+describe('SpecialtyResponseSchema', () => {
+  it('parses a dictionary row (uuid id)', () => {
+    const result = SpecialtyResponseSchema.parse(validSpecialty);
+    expect(result.id).toBe('5f8a1c2d-000a-4000-8000-00000000000a');
+    expect(result.title).toBe('Живопись');
+  });
+
+  it('rejects missing required field', () => {
+    const { title: _title, ...without } = validSpecialty;
+    expect(() => SpecialtyResponseSchema.parse(without)).toThrow();
+  });
+
+  it('dictionary has NO archived field (not archive-aware)', () => {
+    // Response schemas are non-strict by convention (stray keys are dropped);
+    // the CONTRACT is that the backend never emits archived for specialties.
+    const result = SpecialtyResponseSchema.parse({ ...validSpecialty, archived: false });
+    expect(result).not.toHaveProperty('archived');
+  });
+
+  it('dictionary has NO is_system field (every row is user-defined — unlike positions)', () => {
+    const result = SpecialtyResponseSchema.parse({ ...validSpecialty, is_system: false });
+    expect(result).not.toHaveProperty('is_system');
+  });
+});
+
+describe('SpecialtyCreateSchema', () => {
+  it('parses a canonical title payload', () => {
+    const result = SpecialtyCreateSchema.parse({ title: 'Керамика' });
+    expect(result.title).toBe('Керамика');
+  });
+
+  it('rejects an empty title (bounds: 1–100)', () => {
+    expect(() => SpecialtyCreateSchema.parse({ title: '' })).toThrow();
+  });
+
+  it('rejects a title longer than 100 chars (bounds: 1–100)', () => {
+    expect(() => SpecialtyCreateSchema.parse({ title: 'ж'.repeat(101) })).toThrow();
+  });
+
+  it('accepts exactly 100 chars (upper bound inclusive)', () => {
+    expect(SpecialtyCreateSchema.parse({ title: 'ж'.repeat(100) }).title).toHaveLength(100);
+  });
+
+  it('rejects a missing title', () => {
+    expect(() => SpecialtyCreateSchema.parse({})).toThrow();
+  });
+
+  it('rejects a non-string title', () => {
+    expect(() => SpecialtyCreateSchema.parse({ title: 42 })).toThrow();
+  });
+
+  it('rejects unknown fields (strict — backend extra="forbid")', () => {
+    expect(() => SpecialtyCreateSchema.parse({ title: 'Живопись', is_system: false })).toThrow();
+  });
+});
+
+describe('SpecialtyPatchSchema', () => {
+  it('accepts a rename payload (title)', () => {
+    const result = SpecialtyPatchSchema.parse({ title: 'Гончарное дело' });
+    expect(result.title).toBe('Гончарное дело');
+  });
+
+  it('accepts an empty object (absent title = keep current)', () => {
+    const result = SpecialtyPatchSchema.parse({});
+    expect(result.title).toBeUndefined();
+  });
+
+  it('still enforces title bounds on a partial payload', () => {
+    expect(() => SpecialtyPatchSchema.parse({ title: '' })).toThrow();
+    expect(() => SpecialtyPatchSchema.parse({ title: 'ж'.repeat(101) })).toThrow();
+  });
+
+  it('keeps strictness on partial (unknown fields still rejected)', () => {
+    expect(() => SpecialtyPatchSchema.parse({ is_system: true })).toThrow();
+  });
+});
+
 // ─── LocationResponse ──────────────────────────────────────────────────────
 
 const validLocation = {
@@ -1179,7 +1280,8 @@ const validService = {
   title: 'Мастер-класс по живописи',
   description: 'Научитесь писать маслом',
   image_url: 'https://example.com/painting.jpg',
-  specialty: 'живопись',
+  specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a', // GH #599: the dictionary reference
+  specialty: 'живопись', // GH #599: read-only display string from the link (kept)
   min_age: 6,
   max_age: 99,
   duration: 180,
@@ -1197,6 +1299,8 @@ describe('ServiceResponseSchema', () => {
     const result = ServiceResponseSchema.parse(validService);
     expect(result.id).toBe('service-1');
     expect(result.title).toBe('Мастер-класс по живописи');
+    expect(result.specialty_id).toBe('5f8a1c2d-000a-4000-8000-00000000000a');
+    expect(result.specialty).toBe('живопись');
     expect(result.min_age).toBe(6);
     expect(result.max_age).toBe(99);
     expect(result.duration).toBe(180);
@@ -2105,6 +2209,7 @@ describe('Type exports', () => {
     const s: z.input<typeof ServiceCreateSchema> = {
       title: 'Рисование',
       duration: 120,
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a', // GH #599: required reference
     };
     const parsed = ServiceCreateSchema.parse(s);
     expect(parsed.title).toBe('Рисование');
@@ -2116,7 +2221,7 @@ describe('Type exports', () => {
       title: 'Обновлённое название',
       description: '',
       image_url: '',
-      specialty: '',
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
       min_age: 0,
       max_age: 18,
       duration: 60,
@@ -2233,6 +2338,7 @@ describe('TariffCreateSchema', () => {
 
 const validServiceCreate = {
   title: 'Мастер-класс по глине',
+  specialty_id: '5f8a1c2d-000b-4000-8000-00000000000b', // GH #599: the direction reference (required)
   duration: 90,
 };
 
@@ -2243,7 +2349,7 @@ describe('ServiceCreateSchema', () => {
     expect(result.duration).toBe(90);
     expect(result.description).toBe('');
     expect(result.image_url).toBe('');
-    expect(result.specialty).toBe('');
+    expect(result.specialty_id).toBe('5f8a1c2d-000b-4000-8000-00000000000b');
     expect(result.min_age).toBe(0);
     expect(result.max_age).toBe(18);
     expect(result.record_info).toBe('');
@@ -2251,12 +2357,17 @@ describe('ServiceCreateSchema', () => {
     expect(result.tag_ids).toEqual([]);
   });
 
+  it('specialty_id is REQUIRED (GH #599 — no default; a service must reference a direction)', () => {
+    const { specialty_id: _id, ...without } = validServiceCreate;
+    expect(() => ServiceCreateSchema.parse(without)).toThrow();
+  });
+
   it('parses with all fields provided', () => {
     const data = {
       title: 'Рисование маслом',
       description: 'Учимся рисовать',
       image_url: 'https://example.com/img.jpg',
-      specialty: 'живопись',
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
       min_age: 6,
       max_age: 14,
       duration: 180,
@@ -2320,6 +2431,7 @@ describe('ServiceUpdateSchema', () => {
   it('accepts a full canonical update payload', () => {
     const result = ServiceUpdateSchema.parse({
       title: 'Новое название',
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
       duration: 90,
     });
     expect(result.title).toBe('Новое название');
@@ -2327,7 +2439,12 @@ describe('ServiceUpdateSchema', () => {
 
   it('rejects a stray is_active (backend 422 parity, extra="forbid")', () => {
     expect(() =>
-      ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90, is_active: true }),
+      ServiceUpdateSchema.parse({
+        title: 'Новое название',
+        specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
+        duration: 90,
+        is_active: true,
+      }),
     ).toThrow();
   });
 
@@ -2336,7 +2453,11 @@ describe('ServiceUpdateSchema', () => {
   });
 
   it('inherits materials from ServiceCreate and defaults to [] (GH #223)', () => {
-    const result = ServiceUpdateSchema.parse({ title: 'Новое название', duration: 90 });
+    const result = ServiceUpdateSchema.parse({
+      title: 'Новое название',
+      specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
+      duration: 90,
+    });
     expect(result.materials).toEqual([]);
   });
 
@@ -2344,6 +2465,7 @@ describe('ServiceUpdateSchema', () => {
     expect(() =>
       ServiceUpdateSchema.parse({
         title: 'Новое название',
+        specialty_id: '5f8a1c2d-000a-4000-8000-00000000000a',
         duration: 90,
         materials: [{ material_id: 'material-1' }],
         bogus: true,

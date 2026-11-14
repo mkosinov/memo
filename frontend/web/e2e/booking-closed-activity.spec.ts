@@ -57,18 +57,16 @@ test.describe('#551 US-1 web — запись на закрытое заняти
       await panel.getByRole('button', { name: 'Записаться' }).click();
       const resp = await refused;
       expect(resp.status()).toBe(409);
-      // The stable, language-independent contract: the guard's code. (The
-      // user-facing string is the SERVER message shown verbatim — today the
-      // English guard text; the web unit-test canon models it as the RU
-      // «Недостаточно мест» from ERROR_MESSAGES. Reported as a concern in
-      // the task report — #551 spec marks this row «Без изменений», so the
-      // e2e pins the refusal itself, not the leaked wording.)
+      // The stable, language-independent contract: the guard's code.
       const refusal = (await resp.json()) as { detail?: { code?: string } };
       expect(refusal.detail?.code).toBe('ACTIVITY_AT_CAPACITY');
 
-      // ASSERT UI: the refusal block is shown with a retry (US-3 shape).
+      // ASSERT UI: the refusal block shows the registry canon — the guard
+      // now raises ERROR_MESSAGES[ACTIVITY_AT_CAPACITY] («мест нет»), and
+      // the web renders the structured server message verbatim.
       const errorBlock = page.locator('[data-testid="booking-error"]');
       await expect(errorBlock).toBeVisible();
+      await expect(errorBlock).toContainText('Недостаточно мест');
       await expect(
         errorBlock.getByRole('button', { name: 'Отправить еще раз' }),
       ).toBeVisible();

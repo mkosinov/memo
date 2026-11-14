@@ -83,3 +83,7 @@ async def test_check_activity_capacity_raises_409_when_capacity_zero(db_session,
         await check_activity_capacity(db_session, sample_activity_zero_capacity.id, seats=1)
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ACTIVITY_AT_CAPACITY"
+    # GH #551 follow-up: the refusal message is the registry canon
+    # (ERROR_MESSAGES, «Недостаточно мест») — the web shows the structured
+    # server message verbatim, so a raw English f-string leaks to clients.
+    assert exc_info.value.detail["message"] == "Недостаточно мест"

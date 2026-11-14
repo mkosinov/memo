@@ -69,3 +69,17 @@ async def test_check_activity_capacity_raises_409_when_full(db_session, sample_a
         await check_activity_capacity(db_session, sample_activity_at_capacity.id, seats=1)
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ACTIVITY_AT_CAPACITY"
+
+
+@pytest.mark.asyncio
+async def test_check_activity_capacity_raises_409_when_capacity_zero(db_session, sample_activity_zero_capacity):
+    """GH #551 (US-1): capacity=0 = «запись закрыта» — the guard rejects
+    the very first seat (0 occupied + 1 > 0) even with no records at all."""
+    from fastapi import HTTPException
+
+    from src.domain.record_visits import check_activity_capacity
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_activity_capacity(db_session, sample_activity_zero_capacity.id, seats=1)
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ACTIVITY_AT_CAPACITY"

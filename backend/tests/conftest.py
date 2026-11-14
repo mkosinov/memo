@@ -993,6 +993,41 @@ async def sample_activity_at_capacity(api_client, db_session):
 
 
 @pytest.fixture
+async def sample_activity_zero_capacity(api_client, db_session):
+    """Create an Activity with capacity=0 and NO records (GH #551, US-1:
+    «0 = запись закрыта» — booking is closed even with zero occupied seats).
+
+    Then check_activity_capacity(seats=1) should raise 409 instantly.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.models.activity import Activity
+
+    master = api_client.post("/api/v1/staff", json={
+        "first_name": "Zero", "last_name": "Master",
+        "master": {"specialty": "живопись", "color": "#5B8C7A"},
+    }).json()
+    service = api_client.post("/api/v1/services", json={
+        "title": "Zero Service", "description": "Test", "image_url": "https://example.com/t.jpg",
+        "specialty": "живопись", "min_age": 6, "max_age": 99, "duration": 90, "record_info": "test",
+    }).json()
+    location = api_client.post("/api/v1/locations", json={
+        "title": "Zero Studio", "address": "Zero Address", "capacity": 20,
+    }).json()
+    act_resp = api_client.post("/api/v1/activities", json={
+        "master_id": master["id"], "service_id": service["id"],
+        "location_id": location["id"],
+        "start": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "duration": 90, "capacity": 0, "is_private": False,
+    })
+    assert act_resp.status_code == 201
+    activity_id = act_resp.json()["id"]
+
+    activity = await db_session.get(Activity, activity_id)
+    return activity
+
+
+@pytest.fixture
 async def sample_visit(api_client, db_session):
     """Create a single active Visit ORM object with its parent Record + Activity.
 

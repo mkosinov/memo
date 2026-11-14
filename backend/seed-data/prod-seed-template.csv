@@ -1,0 +1,36 @@
+locations
+;title;short_title;address;description;capacity;location_hint;record_info;image_url;yandex_map_url;review_url;sort_order;tags;is_public
+;Примерная мастерская;Пример;Учебный адрес, 1;;12;;;;;;0;пример;True
+
+services
+;title;description;image_url;specialty;min_age;max_age;duration;record_info;tags
+;Линогравюра для примера;Демонстрационная услуга;;Графика;8;;90;;пример
+
+materials
+;title;description
+;Учебный материал;Материал только для примера
+
+service_materials
+;service_title;material_title;note
+;Линогравюра для примера;Учебный материал;Для демонстрации связи
+
+tariffs
+;service_title;title;description;price;audience
+;Линогравюра для примера;Обычный;Демонстрационный тариф;1000;all
+
+staff
+;first_name;last_name;sort_order;avatar_url;positions;master_specialty;master_color;master_is_active;master_tags
+;Алексей;Примеров;0;;"Мастер;Администратор";"Графика;Моделирование";#456789;True;пример
+
+positions
+;title
+;Мастер
+;Администратор
+
+tags
+;title
+;пример
+
+specialty
+;Моделирование
+;Графика

@@ -27,7 +27,7 @@ The API is default-deny; only this allowlist works anonymously (constant `PUBLIC
 - Audience URL namespaces (`/public/*`, `/my`, `/my/{role}`) are codified in **ADR-015** (`docs/decisions/015-api-url-audience-namespaces.md`): bare `/api/v1/{entity}` paths are the staff CRM; `/api/v1/public/{entity}` is the anonymous showcase namespace. The prefix alone exposes nothing — every anonymous route is still a conscious `PUBLIC_ROUTES` entry, not a side effect of the prefix.
 - `GET` dictionaries: masters, services, tags — из этого перечня уже ушли три словаря: bare фото-GET (`/api/v1/photos`, `/api/v1/photos/{id}`) закрыты #493 (staff-only, `photos:read`, anon → 401), анонимная фото-витрина — отдельный маршрут `GET /api/v1/public/photos` (ADR-015); bare занятия-GET (`/api/v1/activities`, `/api/v1/activities/{id}`) закрыты #600 (staff-only, `activities:read`, anon → 401), анонимная витрина расписания — отдельный маршрут `GET /api/v1/public/activities` (точечный публичный маршрут отложен до потребителя); bare локации-GET (`/api/v1/locations`, `/api/v1/locations/{id}`) закрыты #601 (staff-only, `locations:read`, anon → 401), анонимный словарь локаций — отдельный маршрут `GET /api/v1/public/locations` (ровно 4 поля, только неархивированные и `is_public = true`; точечный публичный маршрут отложен до потребителя)
 - `GET /api/v1/health`
-- `/api/v1/auth/*` (login / logout / me)
+- `/api/v1/auth/*` — точные строки allowlist: login / logout / password-setup (+validate) / otp / call / methods. `GET /api/v1/auth/me` удалён (#584, спека §4.5): «кто я» — `GET /api/v1/my` под комбинированным гардом (401 без валидной куки).
 - `POST /api/v1/auth/otp/request` + `POST /api/v1/auth/otp/verify` — клиентский OTP-вход (#499, спека; добавляются в `PUBLIC_ROUTES` явно — allowlist точный, не маска)
 
 `POST /api/v1/records` left this list (#479): the full creation contract is staff-only (`records:write`); a guest booking contract is a separate effort (#499).
@@ -76,8 +76,8 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Подтверждение телефона: таблица `otp_codes` — один код на телефон (ротация отправкой), код 6 цифр, TTL 5 минут, `code_hash` = HMAC-SHA-256 с серверным перцем (вне БД, сравнение за постоянное время); успешная проверка **атомарно поглощает код** (одноразовость). Лимиты — одно окно 15 минут (in-memory, паттерн счётчиков неудач входа): 5 отправок/телефон, 20/IP, 5 разных номеров/IP, 5 неудачных вводов/телефон (ротация кода бюджет попыток не сбрасывает); отказы `verify` — в IP-счётчик.
 - Эндпоинты: `POST /api/v1/auth/otp/request` — **всегда 202** на валидный номер (телефон сотрудника не отличается: код молча не отправляется и не пишется — оракула перечисления нет); `POST /api/v1/auth/otp/verify` → клиентская сессия. Обе точки — Origin-сверка против CORS-списка при наличии заголовка (несовпадение → 403).
 - Транспорт кода **fail-closed**: без настроенного транспорта — 503 `NOTIFICATION_TRANSPORT_UNAVAILABLE` в любом окружении; dev-транспорт и `dev_code` в ответе — только при точном `ENV == "development"`, сырой код в логи не пишется. Реальный транспорт — система оповещений #476.
-- Клиентская сессия: та же таблица/механика (sliding 7/30, отзыв удалением строки), **отдельная cookie** `memo_client_session` (сосуществует с `memo_session` в одном браузере); резолверы читают каждый своё имя cookie + проверяют роль — перекрёстное предъявление даёт 401. `GET /api/v1/my/client` → `{phone, name}`. Выход — общий `POST /api/v1/auth/logout`: удаляет предъявленную сессию любого вида.
-- Бронирование: `POST /api/v1/my/records` — строгая схема `MyRecordCreate` (`extra="forbid"`; из провода нет `client_id`/`visitor_id`/`price`/`custom_price`/`notify`), владелец только из сессии, цена визита сервером из `tariff_id` (обязателен, если у услуги есть тарифы — нулевая цена платной услуги недостижима; без тарифов — 0), 1–20 визитов, наследует проверки создания (404 активность, 409 вместимость), анти-спам 20 записей/40 визитов за 15 минут на учётку. Спека: `docs/specs/2026-10-20-web-client-auth-booking-design.md`.
+- Клиентская сессия: та же таблица/механика (sliding 7/30, отзыв удалением строки), **отдельная cookie** `memo_client_session` (сосуществует с `memo_staff_session` — кука сотрудника переименована с `memo_session`, #584, пара кук зеркалит аудитории — в одном браузере); резолверы читают каждый своё имя cookie + проверяют роль — перекрёстное предъявление даёт 401. `GET /api/v1/my/client` → `{phone, name}`. Выход — общий `POST /api/v1/auth/logout`: удаляет предъявленные строки (предъявлены обе куки → умирают обе сессии) и очищает **обе** куки; idempotent — совсем без куки тоже 204.
+- Бронирование: `POST /api/v1/my/client/records` (#584: прежний плоский `/my/records` переехал под ветку клиента) — строгая схема `MyRecordCreate` (`extra="forbid"`; из провода нет `client_id`/`visitor_id`/`price`/`custom_price`/`notify`), владелец только из сессии, цена визита сервером из `tariff_id` (обязателен, если у услуги есть тарифы — нулевая цена платной услуги недостижима; без тарифов — 0), 1–20 визитов, наследует проверки создания (404 активность, 409 вместимость), анти-спам 20 записей/40 визитов за 15 минут на учётку. Спека: `docs/specs/2026-10-20-web-client-auth-booking-design.md`.
 
 ## Методы авторизации клиента (#593 — спека, Gate B OK 2026-11-11; внедрение — IMPL)
 
@@ -87,8 +87,13 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 - Сессии клиента **не ротируются** при входе (решение владельца 2026-11-11): параллельные сессии уважаются, гашение — только явным выходом («Выйти из устройства» / «Выйти со всех устройств»); контраст с `auth/login` сотрудников, где логин ротирует.
 - Звонок и SMS — restricted-аутентификаторы (NIST SP 800-63B-4): принятие риска зафиксировано; путь усиления — методы-мессенджеры (Telegram/Max, слот в реестре).
 
+## «Кто я» и ветки /my (#584 — ADR-015)
+
+- `GET /api/v1/my` — универсальный «кто я» для **любой** сессии. Комбинированный гард резолвит **обе** куки, каждую **чисто** (резолв без побочной записи актёра в журнал — резолв и журналирование разделены); пустой список ролей (ни одной валидной куки) → 401. Ответ `MyWhoamiResponse` `{id, phone, email, roles}`: данные первичной учётки + список ролей (`email` клиентской учётки → `null`). Роль попадает в список только при валидной куке «своей» аудитории: `admin` — кука сотрудника + роль учётки `admin`; `master` — кука сотрудника + роль `master` **или** наличие мастер-секции; `client` — клиентская кука. Список ролей = допуск веток. Актёр журнала — **одна запись**: первичная учётка (сотрудника, если его кука валидна, иначе клиентская) со **всеми** резолвнутыми ролями списком, staff-first (см. `audit_log.md`).
+- Ветка клиента `/api/v1/my/client/*` — гард `require_client_session`; ветки сотрудника `/api/v1/my/master` и `/api/v1/my/admin` — **статические префиксы**, одни и те же обработчики (допуск — матрица в `staff.md`); настройки — под всеми тремя ветками, корневого `/my/settings` нет (`user_settings.md`). Прежний `GET /api/v1/auth/me` удалён (404): права и мастер-снапшот сотрудника — в стафф-ветках (`profile.md`).
+
 ## Sessions
-- Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_session` carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.
+- Server-side row `sessions(token, user_id, created_at, last_extended_at, idle_deadline, absolute_deadline)`; cookie `memo_staff_session` (переименована с `memo_session`, #584 ADR-015) carries only the random token: `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/`.
 - Lifetime: **sliding** — idle window 7 days (any authenticated request extends it; written at most once per hour) + **absolute cap 30 days** from creation, then a fresh login. Cookie Max-Age = the cap; the row governs validity.
 - Login rotates: any session presented in the login request is deleted before the new one is created.
 - Logout deletes the row → instant revocation. Admin force-logout = delete `sessions` rows via sqladmin or archive the user.
@@ -123,8 +128,16 @@ Two independent lines: (1) JSON-only API + CORS with credentials restricted to l
 | POST | /api/v1/auth/call/status | public | опрос проверки по одноразовому хэндлу; при 401 — клиентская сессия (#593, спека) |
 | POST | /api/v1/auth/call/dev-done | public | дев-имитация звонка для разработки/e2e: verify_origin; маршрут существует только при дев-транспорте в development (двойной гейт, как `dev_code`), иначе 404 (#593, спека) |
 | GET | /api/v1/public/photos | public | анонимная фото-витрина: forced `is_public=true`, минимальная схема `PhotoPublicResponse` (ADR-015, #493) |
+| GET | /api/v1/my | любая валидная кука (комбинированный гард) | `{id, phone, email, roles}` — «кто я», список ролей = допуск веток (#584) |
 | GET | /api/v1/my/client | клиентская сессия | `{phone, name}` — кто вошёл (#499, спека) |
-| POST | /api/v1/my/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |
+| GET | /api/v1/my/client/records | клиентская сессия | свои записи с визитами, пагинация (#513) |
+| POST | /api/v1/my/client/records | клиентская сессия | бронирование, строгая схема `MyRecordCreate`, цена из тарифа сервером (#499, спека) |
+| GET | /api/v1/my/client/photos | клиентская сессия | свои фото, пагинация (#513) |
+| GET | /api/v1/my/client/payments | клиентская сессия | свои платежи, пагинация (#513) |
+| GET / PUT | /api/v1/my/{master,admin} | кука сотрудника своей ветки | профиль + права — `MyStaffProfileResponse` (#584; ветки и допуск — `staff.md`, форма — `profile.md`) |
+| POST | /api/v1/my/{master,admin}/avatar | кука сотрудника своей ветки | загрузка аватара, бывш. `/my/portrait` (#584; контракт без изменений) |
+| GET / POST / PUT / PATCH | /api/v1/my/{master,admin,client}/settings | сессия своей ветки | настройки — см. `user_settings.md` (#584) |
+| DELETE | /api/v1/my/{master,admin,client}/settings/{settings_id} | сессия своей ветки | сброс настроек к дефолтам — см. `user_settings.md` (#584) |
 
 ## Relationships
 - User → optional 1:1 Staff (`staff_id` FK; бывш. `master_id` — реструктуризация #266: учётка привязывается к карточке сотрудника любой роли).

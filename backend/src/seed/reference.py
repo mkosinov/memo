@@ -1,4 +1,4 @@
-"""Production reference-data loader — YAML templates in ``seed-data/``.
+"""Production reference-data loader — owner-maintained CSV.
 
 Fills the *reference* tables only: tags, materials, positions, locations,
 services (+ tariffs, tag links, material links), staff (+ master extensions,
@@ -23,9 +23,9 @@ Contract:
 
 Usage (from ``backend/``)::
 
-    uv run python -m src.seed.reference --check     # validate files, no DB
-    uv run python -m src.seed.reference --dry-run   # full load, rolled back
-    uv run python -m src.seed.reference             # real load
+    uv run python -m src.seed.reference --csv <file.csv> --check
+    uv run python -m src.seed.reference --csv <file.csv> --dry-run
+    uv run python -m src.seed.reference --csv <file.csv>
 
 ``DATABASE_URL`` selects the database (same default as the dev seed).
 """
@@ -36,13 +36,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError
@@ -61,12 +62,7 @@ if TYPE_CHECKING:
     from sqlalchemy import Table
     from sqlalchemy.ext.asyncio import AsyncSession
 
-DEFAULT_DIR = Path(__file__).resolve().parents[2] / "seed-data"
-
-# Service.specialty is String(20) in the ORM; tag/location/service titles have
-# their own DB widths — the template mirrors them so a typo fails here, not on
-# INSERT.
-SPECIALTY_MAX = 20
+DEFAULT_CSV = Path(__file__).resolve().parents[2] / "seed-data" / "prod-seed-template.csv"
 
 # Built-in positions, seeded by the staff-restructuring migration under fixed
 # string ids (``master``/``admin``). Titles are that migration's defaults; the
@@ -80,8 +76,7 @@ class SeedDataError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# YAML schemas — one model per file, ``extra="forbid"`` so a mistyped key is
-# an error instead of a silently ignored line.
+# Parsed rows use the same typed models as the database writer.
 # ---------------------------------------------------------------------------
 
 
@@ -109,10 +104,7 @@ class LocationIn(_In):
     address: str | None = None
     description: str | None = None
     capacity: int = Field(ge=0)
-    # GH #601: web visibility — false hides the location from the client
-    # site only (admin keeps it fully working). CSV owners' table conversion
-    # rule (spec §2.7, canon): column «видно клиентам» — пусто/«да» → true,
-    # «нет» → false. TODO: enforce in the CSV→YAML converter when it lands.
+    # GH #601: false hides the location from the client site only.
     is_public: bool = True
     yandex_map_url: str | None = None
     review_url: str | None = None
@@ -127,7 +119,7 @@ class ServiceIn(_In):
     title: str = Field(min_length=1, max_length=200)
     description: str = ""
     image_url: str = ""
-    specialty: str = Field(min_length=1, max_length=SPECIALTY_MAX)
+    specialty: str = Field(min_length=1)
     min_age: int = Field(ge=0)
     max_age: int | None = Field(default=None, ge=0)
     duration: int = Field(gt=0)
@@ -153,10 +145,15 @@ class PositionIn(_In):
 
 
 class MasterIn(_In):
-    specialty: str = Field(min_length=1)
+    specialties: list[str] = Field(min_length=1)
     color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
     is_active: bool = True
     tags: list[str] = Field(default_factory=list)
+
+    @property
+    def specialty(self) -> str:
+        """Legacy display value while #599 is not present in this checkout."""
+        return ", ".join(self.specialties)
 
 
 class StaffIn(_In):
@@ -168,57 +165,97 @@ class StaffIn(_In):
     master: MasterIn | None = None
 
 
-class LocationsFile(_In):
-    locations: list[LocationIn] = Field(default_factory=list)
-
-
-class ServicesFile(_In):
-    services: list[ServiceIn] = Field(default_factory=list)
-
-
-class MaterialsFile(_In):
-    materials: list[MaterialIn] = Field(default_factory=list)
-
-
-class TagsFile(_In):
-    tags: list[str] = Field(default_factory=list)
-
-
-class StaffFile(_In):
-    positions: list[PositionIn] = Field(default_factory=list)
-    staff: list[StaffIn] = Field(default_factory=list)
-
-
 @dataclass
 class ReferenceData:
-    """Validated content of all template files."""
+    """Validated content of all CSV sections."""
 
     locations: list[LocationIn] = field(default_factory=list)
     services: list[ServiceIn] = field(default_factory=list)
     materials: list[MaterialIn] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    specialties: list[str] = field(default_factory=list)
     positions: list[PositionIn] = field(default_factory=list)
     staff: list[StaffIn] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
-# Loading + cross-file validation
+# CSV parsing + cross-reference validation
 # ---------------------------------------------------------------------------
 
 
-def _read_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        print(f"  ! файл {path.name} не найден — раздел пропущен")
-        return {}
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise SeedDataError(f"{path.name}: синтаксис YAML сломан — {exc}") from exc
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise SeedDataError(f"{path.name}: ожидался словарь верхнего уровня, например «locations:»")
-    return raw
+CSV_COLUMNS: dict[str, tuple[str, ...]] = {
+    "locations": (
+        "title",
+        "short_title",
+        "address",
+        "description",
+        "capacity",
+        "location_hint",
+        "record_info",
+        "image_url",
+        "yandex_map_url",
+        "review_url",
+        "sort_order",
+        "tags",
+        "is_public",
+    ),
+    "services": (
+        "title",
+        "description",
+        "image_url",
+        "specialty",
+        "min_age",
+        "max_age",
+        "duration",
+        "record_info",
+        "tags",
+    ),
+    "materials": ("title", "description"),
+    "service_materials": ("service_title", "material_title", "note"),
+    "tariffs": ("service_title", "title", "description", "price", "audience"),
+    "staff": (
+        "first_name",
+        "last_name",
+        "sort_order",
+        "avatar_url",
+        "positions",
+        "master_specialty",
+        "master_color",
+        "master_is_active",
+        "master_tags",
+    ),
+    "positions": ("title",),
+    "tags": ("title",),
+}
+CSV_SECTIONS = frozenset((*CSV_COLUMNS, "specialty"))
+REQUIRED_SECTIONS = frozenset(
+    {
+        "locations",
+        "services",
+        "materials",
+        "service_materials",
+        "tariffs",
+        "staff",
+        "positions",
+        "specialty",
+    }
+)
+_INTEGER = re.compile(r"^[+-]?\d+$")
+
+
+@dataclass(frozen=True)
+class _CsvRow:
+    section: str
+    line: int
+    cells: dict[str, str]
+
+
+@dataclass
+class _ParsedCsv:
+    sections: dict[str, list[_CsvRow]]
+    specialties: list[_CsvRow]
+    seen: set[str] = field(default_factory=set)
+    last_line: int = 0
 
 
 def _format_error(error: Mapping[str, Any]) -> str:
@@ -226,104 +263,551 @@ def _format_error(error: Mapping[str, Any]) -> str:
     value = error.get("input")
     shown = f" (значение: {value!r})"
     if len(shown) > 160:
-        # Row-level errors carry the whole YAML mapping as ``input`` — show a
-        # short prefix instead of dumping the row.
         shown = f" (значение: {str(value)[:120]!r}…)"
     return f"{location}: {error.get('msg', 'ошибка')}{shown}"
 
 
-def _load_file[ModelT: BaseModel](directory: Path, filename: str, model: type[ModelT]) -> ModelT:
-    path = directory / filename
-    raw = _read_yaml(path)
+def _validate_row[ModelT: BaseModel](
+    model: type[ModelT], values: dict[str, Any], row: _CsvRow
+) -> ModelT:
     try:
-        return model.model_validate(raw)
+        return model.model_validate(values)
     except ValidationError as exc:
-        details = "\n".join(f"  {filename}: {_format_error(e)}" for e in exc.errors())
-        raise SeedDataError(f"Файл {filename} заполнен неверно:\n{details}") from exc
+        details = "; ".join(_format_error(error) for error in exc.errors())
+        raise SeedDataError(f"строка {row.line} ({row.section}): {details}") from exc
 
 
-def _check_unique(values: list[str], what: str) -> None:
+def _trim_trailing_empty(row: list[str]) -> list[str]:
+    trimmed = list(row)
+    while len(trimmed) > 1 and not trimmed[-1].strip():
+        trimmed.pop()
+    return trimmed
+
+
+def _parse_csv(path: Path) -> _ParsedCsv:
+    if not path.is_file():
+        raise SeedDataError(f"CSV-файл не найден или это не файл: {path}")
+
+    parsed = _ParsedCsv(sections={name: [] for name in CSV_COLUMNS}, specialties=[])
+    active: str | None = None
+    columns: list[str] | None = None
+    header_width: int | None = None
+    needs_header = False
+    previous_line = 0
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as source:
+            reader = csv.reader(source, delimiter=";", strict=True)
+            while True:
+                start_line = previous_line + 1
+                try:
+                    raw = next(reader)
+                except StopIteration:
+                    break
+                except csv.Error as exc:
+                    raise SeedDataError(f"строка {start_line}: ошибка CSV: {exc}") from exc
+                previous_line = reader.line_num
+                parsed.last_line = previous_line
+
+                if not raw or not any(cell.strip() for cell in raw):
+                    continue
+
+                first = raw[0].strip()
+                is_marker = bool(first) and all(not cell.strip() for cell in raw[1:])
+                if is_marker:
+                    if needs_header and active is not None:
+                        raise SeedDataError(
+                            f"строка {start_line}: в секции {active} отсутствует шапка"
+                        )
+                    if first not in CSV_SECTIONS:
+                        raise SeedDataError(f"строка {start_line}: неизвестная секция «{first}»")
+                    if first in parsed.seen:
+                        raise SeedDataError(f"строка {start_line}: секция {first} повторяется")
+                    parsed.seen.add(first)
+                    active = first
+                    columns = None
+                    header_width = None
+                    needs_header = first != "specialty"
+                    continue
+
+                if active is None:
+                    raise SeedDataError(
+                        f"строка {start_line}: данные находятся вне секции; ожидается маркер секции"
+                    )
+                if first:
+                    raise SeedDataError(
+                        f"строка {start_line} ({active}): первая колонка должна быть пустой"
+                    )
+
+                trimmed = _trim_trailing_empty(raw)
+                if active == "specialty":
+                    if len(trimmed) < 2 or not trimmed[1].strip():
+                        raise SeedDataError(
+                            f"строка {start_line} (specialty): укажите название во второй колонке"
+                        )
+                    if any(cell.strip() for cell in trimmed[2:]):
+                        raise SeedDataError(
+                            f"строка {start_line} (specialty): допустимо только одно название "
+                            "во второй колонке"
+                        )
+                    parsed.specialties.append(
+                        _CsvRow("specialty", start_line, {"title": trimmed[1]})
+                    )
+                    continue
+
+                if needs_header:
+                    if len(trimmed) < 2:
+                        raise SeedDataError(f"строка {start_line} ({active}): пустая шапка")
+                    header = [cell.strip() for cell in trimmed[1:]]
+                    if any(not name for name in header):
+                        raise SeedDataError(
+                            f"строка {start_line} ({active}): пустое имя колонки внутри шапки"
+                        )
+                    duplicates = sorted({name for name in header if header.count(name) > 1})
+                    if duplicates:
+                        raise SeedDataError(
+                            f"строка {start_line} ({active}): повтор колонки "
+                            f"{', '.join(duplicates)}"
+                        )
+                    expected = set(CSV_COLUMNS[active])
+                    missing = [name for name in CSV_COLUMNS[active] if name not in header]
+                    if missing:
+                        raise SeedDataError(
+                            f"строка {start_line} ({active}): нет обязательных колонок: "
+                            f"{', '.join(missing)}"
+                        )
+                    for name in header:
+                        if name not in expected:
+                            print(
+                                f"  ! лишняя колонка {active}.{name} "
+                                f"(строка {start_line}) — проигнорирована"
+                            )
+                    columns = header
+                    header_width = len(raw)
+                    needs_header = False
+                    continue
+
+                assert columns is not None and header_width is not None
+                if len(raw) != header_width:
+                    raise SeedDataError(
+                        f"строка {start_line} ({active}): в строке "
+                        f"{max(len(raw) - 1, 0)} колонок данных, в шапке "
+                        f"{max(header_width - 1, 0)}"
+                    )
+                parsed.sections[active].append(
+                    _CsvRow(
+                        active,
+                        start_line,
+                        dict(zip(columns, raw[1 : len(columns) + 1], strict=True)),
+                    )
+                )
+    except UnicodeDecodeError as exc:
+        raise SeedDataError(f"CSV должен быть в UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise SeedDataError(f"Не удалось прочитать CSV-файл {path}: {exc}") from exc
+
+    if needs_header and active is not None:
+        raise SeedDataError(f"строка {parsed.last_line + 1} ({active}): отсутствует шапка секции")
+    if not parsed.seen:
+        raise SeedDataError("строка 1: CSV не содержит секций")
+    missing_sections = sorted(REQUIRED_SECTIONS - parsed.seen)
+    if missing_sections:
+        raise SeedDataError(
+            f"строка {parsed.last_line + 1}: отсутствуют обязательные секции: "
+            f"{', '.join(missing_sections)}"
+        )
+    return parsed
+
+
+def _required(row: _CsvRow, column: str) -> str:
+    value = row.cells.get(column, "").strip()
+    if not value:
+        raise SeedDataError(
+            f"строка {row.line} ({row.section}): колонка {column} не может быть пустой"
+        )
+    return value
+
+
+def _integer(row: _CsvRow, column: str, *, nullable: bool = False) -> int | None:
+    value = row.cells[column].strip()
+    if not value:
+        if nullable:
+            return None
+        raise SeedDataError(
+            f"строка {row.line} ({row.section}): колонка {column} должна содержать целое число"
+        )
+    if not _INTEGER.fullmatch(value):
+        raise SeedDataError(
+            f"строка {row.line} ({row.section}): в колонке {column} "
+            f"ожидалось целое число, получено {value!r}"
+        )
+    return int(value)
+
+
+def _boolean(row: _CsvRow, column: str, *, empty_default: bool | None = None) -> bool:
+    value = row.cells[column].strip()
+    if not value and empty_default is not None:
+        return empty_default
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    raise SeedDataError(
+        f"строка {row.line} ({row.section}): в колонке {column} ожидалось True или False"
+    )
+
+
+def _list_cell(value: str) -> list[str]:
+    return [part.strip() for part in value.split(";") if part.strip()]
+
+
+def _read_entity_sections(
+    parsed: _ParsedCsv,
+) -> tuple[ReferenceData, dict[tuple[str, str], int]]:
+    line_by_entity: dict[tuple[str, str], int] = {}
+
+    locations: list[LocationIn] = []
+    for row in parsed.sections["locations"]:
+        locations.append(
+            _validate_row(
+                LocationIn,
+                {
+                    "title": row.cells["title"],
+                    "short_title": row.cells["short_title"],
+                    "address": row.cells["address"],
+                    "description": row.cells["description"],
+                    "capacity": _integer(row, "capacity"),
+                    "location_hint": row.cells["location_hint"],
+                    "record_info": row.cells["record_info"],
+                    "image_url": row.cells["image_url"],
+                    "yandex_map_url": row.cells["yandex_map_url"],
+                    "review_url": row.cells["review_url"],
+                    "sort_order": _integer(row, "sort_order", nullable=True),
+                    "tags": _list_cell(row.cells["tags"]),
+                    "is_public": _boolean(row, "is_public"),
+                },
+                row,
+            )
+        )
+    for item, row in zip(locations, parsed.sections["locations"], strict=True):
+        line_by_entity[("locations", item.title)] = row.line
+
+    services: list[ServiceIn] = []
+    for row in parsed.sections["services"]:
+        services.append(
+            _validate_row(
+                ServiceIn,
+                {
+                    "title": row.cells["title"],
+                    "description": row.cells["description"],
+                    "image_url": row.cells["image_url"],
+                    "specialty": row.cells["specialty"],
+                    "min_age": _integer(row, "min_age"),
+                    "max_age": _integer(row, "max_age", nullable=True),
+                    "duration": _integer(row, "duration"),
+                    "record_info": row.cells["record_info"],
+                    "tags": _list_cell(row.cells["tags"]),
+                },
+                row,
+            )
+        )
+    for item, row in zip(services, parsed.sections["services"], strict=True):
+        line_by_entity[("services", item.title)] = row.line
+
+    materials = [
+        _validate_row(
+            MaterialIn,
+            {"title": row.cells["title"], "description": row.cells["description"]},
+            row,
+        )
+        for row in parsed.sections["materials"]
+    ]
+    for item, row in zip(materials, parsed.sections["materials"], strict=True):
+        line_by_entity[("materials", item.title)] = row.line
+
+    positions = [
+        _validate_row(PositionIn, {"title": row.cells["title"]}, row)
+        for row in parsed.sections["positions"]
+    ]
+    for item, row in zip(positions, parsed.sections["positions"], strict=True):
+        line_by_entity[("positions", item.title)] = row.line
+
+    tags = [_required(row, "title") for row in parsed.sections.get("tags", [])]
+    for title, row in zip(tags, parsed.sections.get("tags", []), strict=True):
+        line_by_entity[("tags", title)] = row.line
+    specialties = [_required(row, "title") for row in parsed.specialties]
+    for title, row in zip(specialties, parsed.specialties, strict=True):
+        line_by_entity[("specialty", title)] = row.line
+
+    staff: list[StaffIn] = []
+    for row in parsed.sections["staff"]:
+        specialty_names = _list_cell(row.cells["master_specialty"])
+        color = row.cells["master_color"].strip()
+        tag_names = _list_cell(row.cells["master_tags"])
+        has_master_values = any(
+            row.cells[column].strip()
+            for column in ("master_specialty", "master_color", "master_is_active", "master_tags")
+        )
+        master: MasterIn | None = None
+        if has_master_values:
+            if not specialty_names:
+                raise SeedDataError(
+                    f"строка {row.line} (staff): master_specialty обязателен для блока master"
+                )
+            if not color:
+                raise SeedDataError(
+                    f"строка {row.line} (staff): master_color обязателен для блока master"
+                )
+            master = _validate_row(
+                MasterIn,
+                {
+                    "specialties": specialty_names,
+                    "color": color,
+                    "is_active": _boolean(row, "master_is_active", empty_default=True),
+                    "tags": tag_names,
+                },
+                row,
+            )
+        person = _validate_row(
+            StaffIn,
+            {
+                "first_name": row.cells["first_name"],
+                "last_name": row.cells["last_name"],
+                "sort_order": _integer(row, "sort_order", nullable=True),
+                "avatar_url": row.cells["avatar_url"],
+                "positions": _list_cell(row.cells["positions"]),
+                "master": master,
+            },
+            row,
+        )
+        staff.append(person)
+        line_by_entity[("staff", f"{person.first_name} {person.last_name}")] = row.line
+
+    return (
+        ReferenceData(
+            locations=locations,
+            services=services,
+            materials=materials,
+            tags=tags,
+            specialties=specialties,
+            positions=positions,
+            staff=staff,
+        ),
+        line_by_entity,
+    )
+
+
+def _attach_service_children(
+    parsed: _ParsedCsv,
+    data: ReferenceData,
+    line_by_entity: dict[tuple[str, str], int],
+) -> None:
+    services = {item.title for item in data.services}
+    materials = {item.title for item in data.materials}
+    links: dict[str, list[MaterialLinkIn]] = {}
+    tariffs: dict[str, list[TariffIn]] = {}
+
+    for row in parsed.sections["service_materials"]:
+        service_title = _required(row, "service_title")
+        material_title = _required(row, "material_title")
+        if service_title not in services:
+            raise SeedDataError(
+                f"строка {row.line}: услуга «{service_title}» из service_materials "
+                "не найдена в секции services"
+            )
+        if material_title not in materials:
+            raise SeedDataError(
+                f"строка {row.line}: материал «{material_title}» не найден в секции materials"
+            )
+        item = _validate_row(
+            MaterialLinkIn,
+            {"title": material_title, "note": row.cells["note"]},
+            row,
+        )
+        links.setdefault(service_title, []).append(item)
+        line_by_entity[("service_materials", f"{service_title}\0{material_title}")] = row.line
+
+    for row in parsed.sections["tariffs"]:
+        service_title = _required(row, "service_title")
+        if service_title not in services:
+            raise SeedDataError(
+                f"строка {row.line}: услуга «{service_title}» из tariffs "
+                "не найдена в секции services"
+            )
+        item = _validate_row(
+            TariffIn,
+            {
+                "title": row.cells["title"],
+                "description": row.cells["description"],
+                "price": _integer(row, "price"),
+                "audience": row.cells["audience"],
+            },
+            row,
+        )
+        tariffs.setdefault(service_title, []).append(item)
+        line_by_entity[("tariffs", f"{service_title}\0{item.title}")] = row.line
+
+    data.services = [
+        service.model_copy(
+            update={
+                "materials": links.get(service.title, []),
+                "tariffs": tariffs.get(service.title, []),
+            }
+        )
+        for service in data.services
+    ]
+    for service in data.services:
+        _check_unique(
+            [item.title for item in service.materials],
+            f"services «{service.title}» (materials)",
+            {
+                item.title: line_by_entity[("service_materials", f"{service.title}\0{item.title}")]
+                for item in service.materials
+            },
+        )
+        _check_unique(
+            [item.title for item in service.tariffs],
+            f"services «{service.title}» (tariffs)",
+            {
+                item.title: line_by_entity[("tariffs", f"{service.title}\0{item.title}")]
+                for item in service.tariffs
+            },
+        )
+
+
+def _check_unique(values: list[str], what: str, lines: dict[str, int] | None = None) -> None:
     seen: set[str] = set()
     for value in values:
         if value in seen:
-            raise SeedDataError(f"{what}: значение «{value}» встречается дважды — уберите дубль")
+            line = lines.get(value, 0) if lines else 0
+            prefix = f"строка {line}: " if line else ""
+            raise SeedDataError(
+                f"{prefix}{what}: значение «{value}» встречается дважды — уберите дубль"
+            )
         seen.add(value)
 
 
-def _check_refs(owner: str, refs: list[str], known: set[str], source: str) -> None:
+def _check_refs(owner: str, refs: list[str], known: set[str], source: str, line: int) -> None:
     for ref in refs:
         if ref not in known:
             raise SeedDataError(
-                f"{owner}: «{ref}» не найдено в {source}. Добавьте его туда или поправьте название"
+                f"строка {line}: {owner}: «{ref}» не найдено в секции {source}. "
+                "Добавьте его туда или поправьте название"
             )
 
 
-def load_reference_data(directory: Path) -> ReferenceData:
-    """Read + validate every template file; raise :class:`SeedDataError`."""
-    if not directory.is_dir():
-        raise SeedDataError(f"Папка с шаблонами не найдена: {directory}")
+def _load_csv_data(parsed: _ParsedCsv) -> ReferenceData:
+    data, line_by_entity = _read_entity_sections(parsed)
+    _attach_service_children(parsed, data, line_by_entity)
 
-    print(f"Читаю шаблоны: {directory}")
-    tags_file = _load_file(directory, "tags.yaml", TagsFile)
-    materials_file = _load_file(directory, "materials.yaml", MaterialsFile)
-    locations_file = _load_file(directory, "locations.yaml", LocationsFile)
-    services_file = _load_file(directory, "services.yaml", ServicesFile)
-    staff_file = _load_file(directory, "staff.yaml", StaffFile)
-
-    data = ReferenceData(
-        locations=locations_file.locations,
-        services=services_file.services,
-        materials=materials_file.materials,
-        tags=tags_file.tags,
-        positions=staff_file.positions,
-        staff=staff_file.staff,
+    _check_unique(
+        data.tags,
+        "секция tags",
+        {title: line_by_entity[("tags", title)] for title in data.tags},
     )
-
-    _check_unique(data.tags, "tags.yaml")
-    _check_unique([m.title for m in data.materials], "materials.yaml")
-    _check_unique([loc.title for loc in data.locations], "locations.yaml")
-    _check_unique([s.title for s in data.services], "services.yaml")
-    _check_unique([p.title for p in data.positions], "staff.yaml (positions)")
-    _check_unique([f"{s.first_name} {s.last_name}" for s in data.staff], "staff.yaml (staff)")
-
+    _check_unique(
+        [item.title for item in data.materials],
+        "секция materials",
+        {item.title: line_by_entity[("materials", item.title)] for item in data.materials},
+    )
+    _check_unique(
+        [item.title for item in data.locations],
+        "секция locations",
+        {item.title: line_by_entity[("locations", item.title)] for item in data.locations},
+    )
+    _check_unique(
+        [item.title for item in data.services],
+        "секция services",
+        {item.title: line_by_entity[("services", item.title)] for item in data.services},
+    )
+    _check_unique(
+        [item.title for item in data.positions],
+        "секция positions",
+        {item.title: line_by_entity[("positions", item.title)] for item in data.positions},
+    )
+    _check_unique(
+        [f"{item.first_name} {item.last_name}" for item in data.staff],
+        "секция staff",
+        {
+            f"{item.first_name} {item.last_name}": line_by_entity[
+                ("staff", f"{item.first_name} {item.last_name}")
+            ]
+            for item in data.staff
+        },
+    )
     if not (data.locations or data.services or data.staff):
         raise SeedDataError(
-            "Все шаблоны пусты: нет ни локаций, ни услуг, ни сотрудников. "
-            "Проверьте папку с файлами (--dir)"
+            f"строка {parsed.last_line + 1}: нет ни локаций, ни услуг, ни сотрудников"
         )
 
     tag_titles = set(data.tags)
-    material_titles = {m.title for m in data.materials}
-
+    position_titles = {item.title for item in data.positions} | set(BUILTIN_POSITION_TITLES)
+    specialty_titles = {title.lower() for title in data.specialties}
     for location in data.locations:
-        _check_refs(f"locations.yaml «{location.title}»", location.tags, tag_titles, "tags.yaml")
-    for service in data.services:
-        _check_refs(f"services.yaml «{service.title}»", service.tags, tag_titles, "tags.yaml")
+        line = line_by_entity[("locations", location.title)]
         _check_refs(
-            f"services.yaml «{service.title}»",
-            [m.title for m in service.materials],
-            material_titles,
-            "materials.yaml",
+            f"locations «{location.title}»",
+            location.tags,
+            tag_titles,
+            "tags",
+            line,
         )
-        _check_unique(
-            [t.title for t in service.tariffs],
-            f"services.yaml «{service.title}» (тарифы)",
-        )
-    for person in data.staff:
-        if person.master is not None:
+    for service in data.services:
+        line = line_by_entity[("services", service.title)]
+        _check_refs(f"services «{service.title}»", service.tags, tag_titles, "tags", line)
+        if service.specialty.lower() not in specialty_titles:
             _check_refs(
-                f"staff.yaml «{person.first_name} {person.last_name}»",
-                person.master.tags,
-                tag_titles,
-                "tags.yaml",
+                f"services «{service.title}»",
+                [service.specialty],
+                specialty_titles,
+                "specialty",
+                line,
+            )
+    for person in data.staff:
+        identity = f"{person.first_name} {person.last_name}"
+        line = line_by_entity[("staff", identity)]
+        _check_refs(
+            f"staff «{identity}»",
+            person.positions,
+            position_titles,
+            "positions",
+            line,
+        )
+        if person.master is None:
+            continue
+        _check_refs(
+            f"staff «{identity}»",
+            person.master.tags,
+            tag_titles,
+            "tags",
+            line,
+        )
+        unknown_specialties = [
+            title for title in person.master.specialties if title.lower() not in specialty_titles
+        ]
+        if unknown_specialties:
+            _check_refs(
+                f"staff «{identity}»",
+                unknown_specialties,
+                specialty_titles,
+                "specialty",
+                line,
             )
 
     print(
         f"  локаций {len(data.locations)}, услуг {len(data.services)}, "
         f"тегов {len(data.tags)}, материалов {len(data.materials)}, "
-        f"сотрудников {len(data.staff)}, должностей {len(data.positions)}"
+        f"направлений {len(data.specialties)}, сотрудников {len(data.staff)}, "
+        f"должностей {len(data.positions)}"
     )
     return data
+
+
+def load_reference_data(csv_path: Path) -> ReferenceData:
+    """Read and validate the owner CSV without connecting to a database."""
+    if csv_path.is_dir():
+        raise SeedDataError(f"Ожидался CSV-файл, получена папка: {csv_path}")
+    print(f"Читаю CSV: {csv_path}")
+    return _load_csv_data(_parse_csv(csv_path))
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +957,7 @@ async def _apply_positions(
             continue
         if item.title in BUILTIN_POSITION_TITLES:
             raise SeedDataError(
-                f"staff.yaml (positions): «{item.title}» — системная должность, она уже есть "
+                f"positions: «{item.title}» — системная должность, она уже есть "
                 f"в базе под другим названием. Поправьте название в файле под фактическое"
             )
         position = Position(title=item.title, is_system=False)
@@ -680,7 +1164,7 @@ async def _apply_staff(
             position = positions.get(title)
             if position is None:
                 raise SeedDataError(
-                    f"staff.yaml «{who}»: должность «{title}» не найдена. "
+                    f"staff «{who}»: должность «{title}» не найдена. "
                     f"Объявите её в блоке positions или поправьте название"
                 )
             desired_positions.add(position.id)
@@ -733,8 +1217,8 @@ async def apply_reference_data(
 # ---------------------------------------------------------------------------
 
 
-async def _run(directory: Path, *, dry_run: bool) -> int:
-    data = load_reference_data(directory)
+async def _run(csv_path: Path, *, dry_run: bool) -> int:
+    data = load_reference_data(csv_path)
     database_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./memo.db")
     manager = DBManager(database_url)
     summary = Summary()
@@ -764,32 +1248,25 @@ async def _run(directory: Path, *, dry_run: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m src.seed.reference",
-        description="Загрузка справочных данных (локации, услуги, мастера…) из YAML.",
+        description="Загрузка справочных данных из CSV.",
     )
     parser.add_argument(
-        "--dir",
+        "--csv",
         type=Path,
-        default=DEFAULT_DIR,
-        help=f"папка с YAML-шаблонами (по умолчанию {DEFAULT_DIR})",
+        required=True,
+        help="CSV-файл со справочными данными",
     )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="только проверить файлы, базу не трогать",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="выполнить загрузку и откатить транзакцию",
-    )
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check", action="store_true", help="проверить CSV, базу не трогать")
+    modes.add_argument("--dry-run", action="store_true", help="загрузить и откатить транзакцию")
     args = parser.parse_args(argv)
 
     try:
         if args.check:
-            load_reference_data(args.dir)
-            print("Проверка пройдена: файлы заполнены корректно.")
+            load_reference_data(args.csv)
+            print("Проверка пройдена: CSV заполнен корректно.")
             return 0
-        return asyncio.run(_run(args.dir, dry_run=args.dry_run))
+        return asyncio.run(_run(args.csv, dry_run=args.dry_run))
     except SeedDataError as exc:
         sys.stdout.flush()  # keep the progress output above the error
         print(f"\nОШИБКА: {exc}", file=sys.stderr)

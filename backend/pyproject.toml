@@ -24,9 +24,6 @@ dependencies = [
     # GH #485 — the Telegram channel of the notification worker (spec §6,
     # MTProto user account; floor from the spec §6 requirement).
     "telethon>=1.34",
-    # Prod reference-data loader (src/seed/reference.py) reads the YAML
-    # templates in seed-data/ — declared directly, not via uvicorn's extra.
-    "pyyaml>=6.0.2",
     # GH #593 — the sms.ru callcheck provider client (src/auth/smsru_client.py):
     # the first production outbound HTTP call; per-call AsyncClient with a timeout.
     "httpx>=0.27.0",
@@ -44,8 +41,6 @@ dev = [
     # GH #306 Task 5 — типы для wtforms (sqladmin тянется к wtforms-полям):
     # гасит [import-untyped] в src/admin/setup.py честными штампами.
     "types-WTForms>=3.1.0",
-    # Stubs for the YAML templates read by src/seed/reference.py.
-    "types-PyYAML>=6.0.12",
 ]
 
 [build-system]

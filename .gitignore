@@ -42,6 +42,10 @@ coverage/
 # Seed canon dumps — contain user table data: phones, password hashes (GH #373)
 *.canon.sql
 
+# Production seed CSV may contain staff names and addresses; keep only the fake template.
+backend/seed-data/*.csv
+!backend/seed-data/prod-seed-template.csv
+
 # TypeScript
 *.tsbuildinfo
 

@@ -1,73 +1,99 @@
-# Production seed data (reference tables)
+# Предзагрузка справочников прода
 
-YAML templates for filling a fresh production database with the studio's
-reference data, plus the loader that writes them in
-(`backend/src/seed/reference.py`).
+Загрузчик читает один CSV, подготовленный владельцем, и записывает справочные
+данные в базу. CSV не содержит паролей и не должен попадать в репозиторий:
+в нём могут быть имена сотрудников, адреса и рабочие ссылки. В репозитории
+хранится только выдуманный пример в prod-seed-template.csv.
 
-This is **not** the dev/demo seed (`backend/src/seed/seed.py`). That one
-requires an empty DB and also creates demo activities, clients, records,
-visits and payments. This loader writes reference rows only, is idempotent,
-and is safe to re-run.
+Это не dev/demo-сид из backend/src/seed/seed.py. Он создаёт занятия, клиентов,
+записи, визиты и платежи. Этот загрузчик пишет только справочные записи,
+идемпотентен и безопасен для повторного запуска.
 
-## Files
+## Запуск
 
-| File | What you fill |
-|---|---|
-| `locations.yaml` | studios: title, address, capacity, hint, image, `is_public` (web visibility) |
-| `services.yaml` | services with nested tariffs, tags and material links |
-| `materials.yaml` | material/technique dictionary referenced by services |
-| `tags.yaml` | tag dictionary referenced by services, locations, masters |
-| `staff.yaml` | employees, their positions, and the master (schedule) block |
+Команды выполняются из backend:
 
-Location `is_public` conversion from the owner's CSV (column «видно клиентам»,
-spec §2.7): blank or «да» → `is_public: true`, «нет» → `is_public: false`.
+    uv run alembic upgrade head
+    uv run python -m src.seed.reference --csv seed-data/prod-seed-template.csv --check
+    uv run python -m src.seed.reference --csv /path/to/prod-seed.csv --check
+    uv run python -m src.seed.reference --csv /path/to/prod-seed.csv --dry-run
+    uv run python -m src.seed.reference --csv /path/to/prod-seed.csv
 
-Every file starts with a Russian field-by-field comment block — that is the
-authoritative guidance for filling it. Values shipped here are the current
-studio data taken from the dev seed: review them, do not assume they are
-final.
+Флаг --csv обязателен. --check только проверяет файл и не подключается к базе.
+--dry-run выполняет запись в одной транзакции и откатывает её. --check и
+--dry-run нельзя использовать вместе. Код завершения: 0 — успех, 1 — ошибка
+CSV или данных, 2 — ошибка аргументов командной строки.
 
-## Rules the loader enforces
+DATABASE_URL выбирает базу данных (по умолчанию
+sqlite+aiosqlite:///./memo.db). Первого администратора создают отдельно:
 
-- Rows are matched by natural key: `title` (dictionaries, services,
-  locations), `first_name + last_name` (staff). A re-run updates in place;
-  renaming a title creates a new row — rename via the admin UI instead.
-- Cross-references are **by title** (`tags`, `materials`, `positions`) and
-  must exist in their dictionary file / in the DB.
-- Unknown keys, wrong types, duplicate titles, `max_age < min_age`, a bad
-  colour or an over-long specialty fail validation before anything is
-  written.
-- Tag / material / position link sets are synced exactly (the file is the
-  source of truth). Tariffs present in the DB but absent from the file are
-  left untouched and reported as a warning.
-- One transaction: any error rolls the whole load back.
-- The schema is never created — run migrations first.
+    uv run python -m src.cli create-user --phone "+79990000001" --role admin
 
-## Runbook
+## Формат CSV
 
-From `backend/`:
+- Кодировка UTF-8; файл с BOM и без BOM принимается.
+- Разделитель колонок — точка с запятой. Кавычками обрамляйте значения,
+  содержащие точку с запятой, например список нескольких должностей.
+- Секция начинается отдельной строкой с названием в первой колонке.
+  Следующая строка — шапка с пустой первой колонкой; строки данных тоже
+  начинаются с пустой первой колонки.
+- Между секциями можно оставлять пустые строки. Порядок секций произвольный.
+- Секция specialty — плоский список: после строки specialty сразу идут строки
+  данных, название направления находится во второй колонке. Шапки у неё нет.
+- Все секции обязательны, кроме tags. Если tags отсутствует, у локаций,
+  услуг и мастеров загружаются пустые наборы тегов.
+- Пустые хвостовые колонки в шапке игнорируются; соответствующие пустые ячейки
+  в строках данных допускаются. Число ячеек строки должно совпадать с исходной
+  шапкой; любое другое несовпадение приводит к ошибке.
+- Лишние именованные колонки перечисляются в предупреждении и игнорируются.
+  Отсутствующая обязательная колонка, повтор секции или колонки — ошибка.
+- Ошибки указывают строку CSV, с которой начинается запись.
 
-```bash
-uv run alembic upgrade head                        # schema (once)
-uv run python -m src.seed.reference --check        # validate files, no DB
-uv run python -m src.seed.reference --dry-run      # full load, rolled back
-uv run python -m src.seed.reference                # real load
-```
+### Секции и колонки
 
-`DATABASE_URL` selects the database (default `sqlite+aiosqlite:///./memo.db`).
-The first production admin is created separately, with a password prompt:
+| Секция | Колонки после первой пустой | Правила |
+|---|---|---|
+| locations | title, short_title, address, description, capacity, location_hint, record_info, image_url, yandex_map_url, review_url, sort_order, tags, is_public | title и capacity обязательны; capacity и sort_order — целые числа; пустой sort_order означает null; is_public — True или False |
+| services | title, description, image_url, specialty, min_age, max_age, duration, record_info, tags | specialty — название из specialty; min_age и duration — целые числа; пустой max_age означает null |
+| materials | title, description | title должен быть уникальным |
+| service_materials | service_title, material_title, note | услуга и материал должны быть объявлены в этом CSV |
+| tariffs | service_title, title, description, price, audience | тариф прикрепляется к услуге по service_title; price — целое число; audience — kid, adult или all |
+| staff | first_name, last_name, sort_order, avatar_url, positions, master_specialty, master_color, master_is_active, master_tags | positions и списки направлений мастера разделяются точкой с запятой |
+| positions | title | должности сотрудников должны быть объявлены здесь; системные должности Мастер и Администратор можно не указывать |
+| specialty | без шапки | плоский список названий; совпадения ссылок проверяются без учёта регистра |
+| tags | title | необязательный справочник тегов |
 
-```bash
-uv run python -m src.cli create-user --phone "+79990000001" --role admin
-```
+Числовые поля проверяются до передачи данных моделям. Нечисловое значение или
+пустое обязательное число — ошибка; пустыми могут быть только sort_order и
+max_age. Пустая строковая ячейка передаётся как пустая строка. Булевы значения
+принимают True и False без учёта регистра.
 
-## Deliberately out of scope
+В строке сотрудника блок мастера создаётся, если заполнена любая колонка
+master_*. Тогда master_specialty и master_color обязательны, цвет должен
+соответствовать формату #RRGGBB, пустой master_is_active означает True,
+master_tags может быть пустым. Если все master_* пусты, сотрудник не
+добавляется в расписание.
 
-- **Staff accounts** (`users` rows) — created through the admin UI or
-  `create-user`; the file must never carry passwords.
-- **Photos** (`photos` table) — not loaded yet; service/location images are
-  plain `image_url` paths served by the web frontend
-  (`frontend/web/public/images/...`).
-- **Operational data** — activities, clients, records, visits, payments.
-- **Positions `master`/`admin` and the `new_record` notification template** — seeded
-  by migrations; the loader only verifies they exist.
+Теги привязываются по названиям из секции tags. Чтобы очистить теговые связи
+сущностей из CSV, оставьте их колонки пустыми: связи синхронизируются точно,
+а сами записи тегов не удаляются. Для добавления тегов одновременно заполните
+теговые колонки и секцию tags.
+
+## Гарантии загрузчика
+
+- Естественные ключи: названия справочников и услуг, пара first_name и
+  last_name для сотрудников. Повторный запуск обновляет существующие записи.
+- Дубликаты ключей, ссылки на отсутствующие услуги, материалы, направления,
+  должности или теги, max_age меньше min_age и неверный цвет отклоняются до
+  записи.
+- Наборы связей тегов, материалов и должностей синхронизируются точно.
+  Существующие тарифы, отсутствующие в CSV, остаются в базе с предупреждением.
+- Вся запись выполняется одной транзакцией; ошибка откатывает её целиком.
+- Загрузчик не создаёт схему. Перед запуском примените миграции.
+
+## Не загружается
+
+- Учётные записи и пароли сотрудников — используйте админку или create-user.
+- Фотографии — image_url и avatar_url содержат только пути к файлам.
+- Операционные данные: занятия, клиенты, записи, визиты и платежи.
+- Системные должности и шаблон уведомления new_record создаются миграциями.

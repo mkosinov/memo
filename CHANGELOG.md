@@ -60,6 +60,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 2026-11-13
 
 ### Added
+- **GH #601 — Флаг «не показывать в web» для локаций** — branch
+  `601-locations-web-visibility` (6 задач + 2 фикс-коммита
+  `fecf11fd..78cbd9b2`, base `92896269` = origin/main; 54 файла,
+  +2113/−120; спека
+  `docs/specs/2026-11-12-locations-web-visibility-601-design.md`
+  рев.4 (`43139353`), план
+  `docs/plans/2026-11-12-locations-web-visibility-601-plan.md` 6/6
+  (`ddd77447`) — оба на main, unchanged by IMPL):
+  - **Колонка is_public (T1 `fecf11fd`):** `locations.is_public` NOT
+    NULL DEFAULT true (true = видна клиентам), миграция
+    `c1d3e5f7a9b1`, schema/zod-зеркало api-client.
+  - **Публичный словарь + охрана bare GET (T2 `487e32d9`):**
+    `GET /api/v1/public/locations` по образцу #600 — полный список
+    одним массивом без пагинации (потолок `BARE_LIST_MAX_ROWS`), только
+    неархивированные с `is_public = true`, детерминированный сорт
+    `sort_order ASC, title ASC, id ASC`, схема `LocationPublicResponse`
+    ровно 4 поля (id, title, address, location_hint); bare
+    `GET /locations[/id]` под `locations:read` (аноним/клиент → 401).
+  - **Занятия скрытых/архивных локаций (T3 `e9287d09`):** серверное
+    исключение из публичной витрины занятий #600 + бронь по прямому
+    id → 404 (паритет несуществующему, предикат до валидации тарифа —
+    без бокового канала); админ-сетка и скоуп мастера не тронуты.
+  - **Админ (T4 `55912ca6`):** switch «Видно клиентам» в модалке
+    (создание и редактирование, `toggle-is-public`), бейдж «Не в web»
+    в таблице, admin-e2e US-1/US-4 (payload-ассерты PUT/POST,
+    «неизменность» админки, анонимная проба словаря, round-trip);
+    попутно закрыт латентный 422 — PUT модалки нёс `tag_ids` вне
+    `LocationUpdate` (`extra=forbid`), каждое сохранение падало (окно
+    известно с #203).
+  - **Web (T5 `cbd55c17`):** `useLocations` переведён на публичный
+    словарь (фильтр локаций + расписание web), web-e2e US-2/US-3
+    (бронь скрытого id под клиентской сессией → 404, без записи)/US-4
+    (фаза «включил → проверил»).
+  - **Сид (T6 `7d89e111`):** предзагрузка прод-справочников принимает
+    и применяет is_public из YAML, тест несёт обе полярности (US-5).
+  - **Фиксы:** allowlist-запись публичного маршрута в scope-contract
+    носителе (`94823fa9`); бейдж no-wrap на узких вьюпортах
+    (`78cbd9b2`).
+  - Tests: backend **174** (словарь/гарды/auth-контракт) + **63**
+    (витрина/бронь/scope-contract) + **66** (сид/регрессия) pass;
+    admin vitest **3171/3171** (tsc + next build чистые); admin-e2e
+    **3/3**; web-e2e **3/3** полный + **1/1** изолированный US-2;
+    api-client **584/584** (type-check + build чистые); web
+    type-check чистый; visual gate — GREEN exit 0 (1 машинная
+    проверка: бейдж на /locations mobile; 1 manual-review пункт
+    делегирован admin-e2e по дизайну спеки).
+  - Status: `docs/status/2026-11-13-locations-web-visibility-601.md`
 - **GH #600 — Публичная витрина занятий: приватные (is_private) не видны
   клиентам в web** — branch `600-activity-public-visibility` (7 задач
   `4a3f6c5d..4b21bba4`, base `ddd77447` = origin/main; 25 файлов,
@@ -156,6 +203,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     #602) → fallback pair-visual-debugging Playwright **12/12 PASS**
     (высота 612px = 0.85×720 точно в обоих режимах, инвариант вкладок
     Δ=0.0px ≤ 5px, кнопка вне скролл-тела, футер в вьюпорте).
+
+### Fixed
+- **GH #553 — Редактирование занятия: честная календарная дата вместо
+  «открытая неделя + день недели»** — branch
+  `553-activity-edit-honest-date` (5 задач `e68d73f2..46feb8fd`, base
+  `2172bd75`; 6 файлов, +702/−36; спека
+  `docs/specs/2026-10-25-activity-edit-honest-date-design.md` рев.2.1,
+  план `docs/plans/2026-11-13-activity-edit-honest-date-plan.md` — оба
+  на main, unchanged by IMPL):
+  - **start-ветка обновления (T1 `e68d73f2`):** `updateActivity`
+    принимает тот же dual time-source юнион, что `addActivity`
+    (#280) — `start` (полный floating-local ISO из datetime-поля
+    формы; в PATCH payload as-is; дата может быть вне открытой
+    недели, прошедшие даты разрешены осознанно) WINS над легаси
+    `dayIndex`+`startMinutes` (после #553 — только штампы сетки
+    WeekView/DayView/dnd; при обоих источниках `start` WINS);
+    путь промисифицирован — `Promise<void>` (`mutateAsync` +
+    catch-guard, зеркало #595), fire-and-forget потребители
+    не тронуты.
+  - **Полная дата из формы (T2 `548c86c9`):** вкладка редактирования
+    отправляет выбранную календарную дату как есть; очистка поля →
+    '' → патча нет вовсе.
+  - **Тост успеха патча даты-времени (T3 `295a2dbb`):** «Сохранено:
+    {услуга} — {дата formatDateRu}, {время}» — ТОЛЬКО для
+    `start`-патчей (info kind, канон тостов #261); остальные поля и
+    отказы молчаливы (откат оптимистики владеет ошибками).
+  - **E2E (T4 `92b00468` + T5 `46feb8fd`):** US-1 перенос занятия в
+    другую неделю (выбранная дата соблюдена), US-2 перенос в тот же
+    день, US-3 правка только времени, US-5 открытие-закрытие без
+    правок; US-4 drag-тест зелёный без правок ожиданий.
+  - Tests: vitest units зелёные (ScheduleDataContext **54/54**,
+    ActivityDetailsModal spec **107/107** вкл. 3 toast-теста,
+    соседние specs зелёные, tsc + eslint чистые); e2e
+    `activity-details-modal.spec.ts` **20/20** (два pre-existing
+    сценария 14/15 — load-флейки, зелёные изолированно); визуальный
+    гейт: check 3 passed; checks 1–2 перекрыты решением пользователя
+    2026-11-13 вариант (a) — e2e приняты как верификация (VCC спеки
+    предшествует канону статической достижимости 2026-11-12;
+    follow-up #615).
+   - Status: `docs/status/2026-11-13-activity-edit-honest-date-553.md`
 
 ## [Unreleased] — 2026-11-12
 

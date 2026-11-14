@@ -64,7 +64,7 @@ const locationId = 'loc-1';
 const mockLocation: LocationResponse = {
   id: locationId, title: 'Студия на Невском', address: 'Невский пр. 28', description: null,
   capacity: 10, yandex_map_url: null, review_url: null, record_info: null, image_url: null,
-  location_hint: null, sort_order: 0, archived: false, created_at: '', updated_at: '',
+  location_hint: null, sort_order: 0, is_public: true, archived: false, created_at: '', updated_at: '',
 };
 const otherLocation: LocationResponse = { ...mockLocation, id: 'loc-2', title: 'Гранд Отель Поляна' };
 

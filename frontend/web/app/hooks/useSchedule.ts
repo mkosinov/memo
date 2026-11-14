@@ -2,13 +2,13 @@
 
 import { useMemo, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { getPublicActivities, getMasters, getServices, getLocations } from '@memo/api-client';
+import { getPublicActivities, getMasters, getServices, getPublicLocations } from '@memo/api-client';
 import type { PaginatedResponse } from '@memo/api-client';
 import type { ScheduleIndex } from '@memo/domain';
 import { buildWebSchedule, type WebScheduleDTO } from '@/app/lib/mappers/buildSchedule';
 import { toScheduleView } from '@/app/lib/mappers/to-schedule-vm';
 import type { ScheduleView, ScheduleFiltersView } from '@/app/lib/model/view/schedule';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
 
 export interface UseScheduleResult {
   schedules: ScheduleView[];
@@ -51,8 +51,11 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
         gcTime: 600_000,
       },
       {
+        // #601: anonymous public dictionary (bare array) — hidden and
+        // archived locations are excluded server-side; the staff-guarded
+        // paginated list is gone from the web.
         queryKey: ['locations'],
-        queryFn: () => getLocations(),
+        queryFn: () => getPublicLocations(),
         staleTime: 300_000,
         gcTime: 600_000,
       },
@@ -62,11 +65,12 @@ export function useSchedule(filters: ScheduleFiltersView = {}): UseScheduleResul
   const index: ScheduleIndex<WebScheduleDTO> | null = useMemo(() => {
     if (queries.some((q) => q.isLoading || q.isError)) return null;
     const rawData = queries.map((q) => q.data);
-    // List endpoints return the paginated envelope ({items, total}) — consume .items.
+    // List endpoints return the paginated envelope ({items, total}) — consume .items;
+    // #601: the public location dictionary is a BARE array (no envelope).
     const activities = (rawData[0] as PaginatedResponse<ActivityResponse> | undefined)?.items ?? [];
     const services = (rawData[1] as PaginatedResponse<ServiceResponse> | undefined)?.items ?? [];
     const masters = (rawData[2] as PaginatedResponse<MasterViewResponse> | undefined)?.items ?? [];
-    const locations = (rawData[3] as PaginatedResponse<LocationResponse> | undefined)?.items ?? [];
+    const locations = (rawData[3] as LocationPublicResponse[] | undefined) ?? [];
     return buildWebSchedule(
       activities,
       new Map(services.map((s) => [s.id, s])),

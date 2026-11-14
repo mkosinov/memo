@@ -13,11 +13,14 @@ and is safe to re-run.
 
 | File | What you fill |
 |---|---|
-| `locations.yaml` | studios: title, address, capacity, hint, image |
+| `locations.yaml` | studios: title, address, capacity, hint, image, `is_public` (web visibility) |
 | `services.yaml` | services with nested tariffs, tags and material links |
 | `materials.yaml` | material/technique dictionary referenced by services |
 | `tags.yaml` | tag dictionary referenced by services, locations, masters |
 | `staff.yaml` | employees, their positions, and the master (schedule) block |
+
+Location `is_public` conversion from the owner's CSV (column «видно клиентам»,
+spec §2.7): blank or «да» → `is_public: true`, «нет» → `is_public: false`.
 
 Every file starts with a Russian field-by-field comment block — that is the
 authoritative guidance for filling it. Values shipped here are the current

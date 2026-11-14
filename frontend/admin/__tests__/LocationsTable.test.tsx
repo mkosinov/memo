@@ -709,4 +709,44 @@ describe('LocationsTable', () => {
     expect(callArg.id).toBe(mockLocationResponseArchived.id);
     expect((callArg.data as Record<string, unknown>).is_active).toBeUndefined();
   });
+
+  // ─── «Видно клиентам» edit payload (GH #601 Task 4) ────────────────────
+
+  it('edit submit payload carries is_public as a boolean and NO tag_ids (GH #601)', async () => {
+    const updateMutateAsync = setupUpdateMock();
+    const hidden = createMockLocationResponse({
+      id: 'loc-hidden',
+      title: 'Скрытая Студия',
+      is_public: false,
+      archived: false,
+    });
+    setupEnvelope({ items: [hidden], total: 1 });
+    renderTable();
+    expect(await screen.findByText('Скрытая Студия')).toBeInTheDocument();
+
+    // Open the edit modal on the hidden row.
+    fireEvent.click(screen.getByText('Скрытая Студия').closest('tr')!);
+
+    // Direct binding: the switch reflects the hidden state, no inversion.
+    const toggle = screen.getByRole('switch');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    // Flip «Видно клиентам» back on (US-4) and save.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalled());
+    const [callArg] = updateMutateAsync.mock.calls[0];
+    expect(callArg.id).toBe('loc-hidden');
+    const data = callArg.data as Record<string, unknown>;
+    // DoD: the canonical PUT payload carries the flag as a boolean
+    // (is_private canon) — a string would 422 the strict schema.
+    expect(data.is_public).toBe(true);
+    expect(typeof data.is_public).toBe('boolean');
+    // Latent 422 fix (found by the #601 e2e): backend LocationUpdate is
+    // extra="forbid" with NO tag_ids — sending tag_ids failed EVERY modal
+    // save with 422 "Extra inputs are not permitted".
+    expect(data).not.toHaveProperty('tag_ids');
+  });
 });

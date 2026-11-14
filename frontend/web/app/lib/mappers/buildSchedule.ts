@@ -1,6 +1,6 @@
 import { ScheduleDTO, buildSchedule, resolveById } from '@memo/domain';
 import type { ScheduleIndex } from '@memo/domain';
-import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationResponse } from '@memo/api-client';
+import type { ActivityResponse, ServiceResponse, MasterViewResponse, LocationPublicResponse } from '@memo/api-client';
 import type { TariffView } from '@/app/lib/model/view/tariff';
 
 // ─── Re-export for backward compatibility ──────────────────────────────────
@@ -42,11 +42,13 @@ function buildTagSet(serviceTags: { title: string }[]): string[] {
 
 // ─── Main builder ──────────────────────────────────────────────────────────
 
+/** #601: the location map carries PUBLIC dictionary rows — exactly the 4
+ * ADR-015 fields; this builder reads only title/address/location_hint. */
 export function buildWebSchedule(
   activities: ActivityResponse[],
   services: Map<string, ServiceResponse>,
   masters: Map<string, MasterViewResponse>,
-  locations: Map<string, LocationResponse>,
+  locations: Map<string, LocationPublicResponse>,
 ) {
   // Phase 1: Build all WebScheduleDTOs
   const dtos: WebScheduleDTO[] = [];

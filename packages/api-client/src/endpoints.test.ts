@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
-import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
 vi.mock('./client', () => ({
@@ -267,6 +267,17 @@ describe('getLocations', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 100 });
     await getLocations({ page: 2, per_page: 100 });
     expect(api).toHaveBeenCalledWith('/api/v1/locations?page=2&per_page=100', expect.anything());
+  });
+});
+
+describe('getPublicLocations (#601: /api/v1/public/locations)', () => {
+  it('calls the anonymous dictionary bare — no params, bare-array schema', async () => {
+    vi.mocked(api).mockResolvedValueOnce([]);
+    await getPublicLocations();
+    expect(vi.mocked(api)).toHaveBeenCalledWith(
+      '/api/v1/public/locations',
+      LocationPublicListResponseSchema,
+    );
   });
 });
 
@@ -1555,6 +1566,8 @@ describe('updateLocation', () => {
       record_info: '',
       image_url: '',
       location_hint: '',
+      // GH #601: the canonical PUT always carries the current flag value.
+      is_public: true,
       tag_ids: [],
     };
     await updateLocation('l-1', payload);

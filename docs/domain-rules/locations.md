@@ -9,7 +9,7 @@ A Location is a physical studio space where master classes take place.
 | title | string | ✅ | 1 | 100 | — | Название локации |
 | address | string | ❌ | — | — | null | Адрес |
 | description | string | ❌ | — | — | null | Описание |
-| capacity | integer | ✅ | 1 | 500 | — | Вместимость |
+| capacity | integer | ✅ | 0 | 99 | — | Вместимость (сервер валидирует 0–99 → 422 вне диапазона, GH #551 rev.3, 2026-11-13; прежний предел 500 отменён). **0 = «вместимость не задана»** — без операционного эффекта (бронь идёт по занятиям; скрытие/архив — отдельные механизмы) |
 | yandex_map_url | string | ❌ | — | — | null | Яндекс.Карты |
 | review_url | string | ❌ | — | — | null | Ссылка на отзыв |
 | record_info | string | ❌ | — | — | null | Информация для записи |
@@ -23,7 +23,7 @@ A Location is a physical studio space where master classes take place.
 
 ## Invariants
 - Locations can be hard-deleted via `DELETE /{id}` with the dependency-resolution mechanism; archived state via `POST /{id}/archive` (sets `archived: true`) and restored via `POST /{id}/restore`. See `_overview.md` → "Hard-delete FK dependency matrix".
-- capacity is informational — not enforced at Activity level
+- capacity 0–99 enforced server-side on every mutation (GH #551 rev.3, 2026-11-13); **0 = «вместимость не задана»** — legal, no operational effect, treated as a deliberately set value. Activity capacity carries its own 0–99 rule (0 = «запись закрыта», см. `activities.md`); when an activity copies a location's capacity, the per-path rule applies (GH #551 rev.4): autofill (single-create) and multi-create #595 copy only a value ≥ 1 («missing OR 0 counts as no default» — блок до явного ввода); the grid stamp (WeekView/DayView) legally copies 0 as set, creating a closed activity with a loud toast «… запись закрыта (у зала не задана вместимость)» (US-7, вариант C); copy-week preserves values as-is (explicit duplication).
 - `is_public = false` скрывает локацию только с сайта: её нет в публичном словаре, её занятия исключены из публичной витрины серверно, бронь занятия по прямому id → 404 (#601, поверх #600). В админе локация полностью рабочая: сетка, формы, дропдауны. Архив — другое правило: «выведена из работы», скрывает и из админа (по умолчанию). Скрытие с сайта ≠ архив.
 
 ## Business Logic
@@ -33,7 +33,7 @@ A Location is a physical studio space where master classes take place.
 - No tag_ids in Pydantic schema (missing from backend)
 
 ### Frontend
-- EntityModal: title required, capacity required min(1) max(500)
+- EntityModal: title required, capacity required min(0) max(99) (GH #551 rev.3: server range 0–99, 0 = «не задана»; the field-config is the single source — «Минимум/Максимум» messages derive from it)
 
 ## API Endpoints
 | Method | Path | Description |
@@ -65,13 +65,13 @@ The Response schema exposes `archived: bool` instead of `is_active` (inversion: 
 
 ## Acceptance Criteria
 - [ ] Title required, 1-100 chars
-- [ ] Capacity required, 1-500
+- [ ] Capacity required, 0-99 (0 = «не задана»; server 422 outside, GH #551 rev.3)
 
 ## Parity Notes
 | Backend (Pydantic) | Frontend (Zod) | Match |
 |--------------------|----------------|-------|
 | title: str (no constraints) | title: min(1).max(200) | ❌ Backend missing |
-| capacity: int (no constraints) | capacity: min(1).max(500) | ❌ Backend missing |
+| capacity: ge=0 le=99 (422; 0 = «не задана») | capacity: min(0).max(99) (write-схема; response — без границ) | ✅ (GH #551 rev.3 — сервер добавил 422-валидацию, Zod write-схема синхронизирована в том же IMPL) |
 | tag_ids: missing | tag_ids: present | ❌ Backend missing |
 
 ## Archive & delete semantics (GH #207)

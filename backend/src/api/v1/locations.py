@@ -49,6 +49,9 @@ _WRITE_GUARD = [
     Depends(require_permission("locations:write")),
     Depends(verify_fetch_metadata),
 ]
+# GH #601 Task 2 (#600 activities / #493 photos precedents): bare location
+# GETs are staff-only (locations:read) — the anonymous dictionary lives at
+# GET /api/v1/public/locations (ADR-015). /all already carried the guard.
 _READ_GUARD = [Depends(require_permission("locations:read"))]
 
 # Sort whitelist map: UI key → spec (#205 Task 3, spec §4.5; #172:
@@ -74,7 +77,8 @@ _LOCATION_SORT_KEYS: SortKeyMap = {
 # (#232 contract, #371 §4.1 shape: one model-as-query entry).
 
 
-@router.get("", response_model=PaginatedResponse[LocationResponse])
+@router.get("", response_model=PaginatedResponse[LocationResponse],
+            dependencies=_READ_GUARD)
 async def list_locations(
     service: _ServiceDep,
     session: SessionDep,
@@ -107,6 +111,10 @@ async def list_locations(
     under the default ACTIVE status stays empty), ≤100 distinct after
     dedup, garbage → 422. Inherited by ``LocationListParams`` from
     ``PaginationParams`` — same contract as the former ``#232`` sibling.
+
+    The list is STAFF-ONLY since #601 Task 2 (locations:read guard
+    above) — the anonymous dictionary lives at
+    /api/v1/public/locations (ADR-015).
     """
     # Annotated for the SortExpr union: the mixed asc() fallback joins to
     # ``list[object]`` otherwise, and ``ArchiveService.list`` takes
@@ -166,13 +174,18 @@ async def reorder_locations(
     return await service.reorder(db_session=session, ids=data.ids)
 
 
-@router.get("/{location_id}", response_model=LocationResponse)
+@router.get("/{location_id}", response_model=LocationResponse,
+            dependencies=_READ_GUARD)
 async def get_location(
     location_id: str,
     service: _ServiceDep,
     session: SessionDep,
 ) -> LocationResponse:
-    """Return a single location by ID."""
+    """Return a single location by ID.
+
+    STAFF-ONLY since #601 Task 2 (locations:read guard above) — the
+    anonymous dictionary lives at /api/v1/public/locations (ADR-015).
+    """
     location = await service.get(db_session=session, id=location_id)
     if not location:
         raise HTTPException(

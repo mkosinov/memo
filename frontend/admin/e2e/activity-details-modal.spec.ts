@@ -4,7 +4,7 @@ import { test, expect } from './fixtures/test';
 import type { APIRequestContext } from '@playwright/test';
 import { queryDBRow, queryDBRows } from './fixtures/db-query';
 import { createTestClient, createTestActivity, createTestRecord, createTestPayment, cleanup, cleanupRecord } from './fixtures/factories';
-import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog } from './fixtures/helpers';
+import { waitForScheduleReady, openModal, openAddTab, getFirstActivity, confirmDeleteDialog, clickActivityCard, closeModal } from './fixtures/helpers';
 import { searchAndSelect } from './helpers/combobox';
 
 /**
@@ -769,6 +769,344 @@ test.describe('ActivityDetailsModal — Real User Scenarios', () => {
       await cleanupRecord(request, record.id);
       await cleanup(request, `/api/v1/activities/${activity.id}`);
       await cleanup(request, `/api/v1/clients/${client.id}`);
+    }
+  });
+
+  // ── Scenario 16 (GH #553 US-1): date edit moves the activity to ANOTHER
+  //    week — the chosen calendar date is honored (pre-#553 the choice was
+  //    silently folded into the open week), the modal stays open (gate B),
+  //    the card leaves the open week only via the post-invalidation refetch
+  //    (cache-transient risk — settle on the GET activities response, not
+  //    the toast), the toast names the chosen date, and date-nav-next shows
+  //    the activity on the chosen date.
+
+  test('16. US-1: move activity to another week — modal stays open, card leaves open week on refetch, toast names date', async ({
+    page,
+    request,
+  }) => {
+    // Tuesday of the week AFTER the seed week. 14:00 is grid-aligned (30-min
+    // grid) — the instant-patch payload is exactly 2026-06-09T14:00:00.
+    const MOVE_TO = '2026-06-09T14:00';
+
+    // 1. SETUP — factory activity on the seed week (default start
+    //    2026-06-01T10:00:00). The factory picks services[0]; its API title
+    //    feeds the expected toast text (transformService: title → name).
+    const activity = await createTestActivity(request);
+    const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
+    const servicesJson = await servicesResp.json();
+    // #182: services list is paginated ({items,total,page,per_page}) — unwrap envelope
+    const services: any[] = servicesJson.items || servicesJson;
+    const service = services.find((s: any) => s.id === activity.service_id);
+    expect(service).toBeTruthy();
+
+    try {
+      // Reload to pick up the factory activity (mirrors scenarios 2/3/8/14)
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      const card = page.locator(`[data-testid="activity-${activity.id}"]`);
+      await expect(card).toBeVisible();
+
+      // 2. ACTION — open the modal on the factory card, set the date-time to
+      //    the next week's Tuesday (instant-patch fires on the change).
+      await clickActivityCard(page, card);
+
+      // Listeners BEFORE the patch fires: the PATCH itself, then the
+      // cache-transient settle — the open week's GET activities response
+      // (the optimistic patch keeps the card in the open-week cache; only
+      // the post-invalidation refetch removes it — spec §Риски).
+      const patchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'PATCH' &&
+          r.url().includes(`/api/v1/activities/${activity.id}`),
+        { timeout: 15_000 },
+      );
+      const refetchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'GET' &&
+          r.url().includes('/api/v1/activities') &&
+          r.url().includes(`date_from=${SEED_WEEK_MONDAY}`),
+        { timeout: 15_000 },
+      );
+      await page.locator('[data-testid="input-datetime"]').fill(MOVE_TO);
+
+      // 3. VERIFY UI — PATCH resolved → the success toast fires in its
+      //    .then (4.5s auto-dismiss: assert it right after the patch,
+      //    before the refetch wait). Info kind: «Сохранено: <услуга> —
+      //    <дата по-русски>, <ЧЧ:ММ>» (GH #553).
+      await patchDone;
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Сохранено' });
+      await expect(toast).toBeVisible();
+      await expect(toast).toContainText(`${service!.title} — вторник, 9 июня, 14:00`);
+
+      // The refetched open-week list no longer has the activity — the card
+      // is gone from the open week (asserted AFTER the GET landed, not off
+      // the toast alone — the cache-transient requirement).
+      await refetchDone;
+      await expect(card).toHaveCount(0);
+
+      // Gate B: the modal stays open on a date-time patch outcome.
+      await expect(page.locator('[data-testid="activity-details-modal"]')).toBeVisible();
+
+      // 4. VERIFY DB — the activity starts on the chosen date-time
+      //    (SQLite datetime format: 'YYYY-MM-DD HH:MM:SS.ffffff').
+      const row = queryDBRow(`SELECT start FROM activities WHERE id='${activity.id}'`);
+      expect(String(row!.start)).toContain('2026-06-09 14:00');
+
+      // 5. Next week via date-nav-next — the activity stands on the chosen
+      //    date: the Tuesday column (Mon-indexed day-column-1) of the
+      //    2026-06-08 week. The nested locator discriminates: the open
+      //    week's Tuesday column never contains the card.
+      await closeModal(page);
+      await page.locator('[data-testid="date-nav-next"]').click();
+      await expect(
+        page
+          .locator('[data-testid="day-column-1"]')
+          .locator(`[data-testid="activity-${activity.id}"]`),
+      ).toBeVisible();
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
+
+  // ── Scenario 17 (GH #553 US-2): a same-week day move via the form — the
+  //    honest-date change must not disturb the legacy in-week path: the
+  //    activity lands in the new day column of the SAME open week, the
+  //    toast names the chosen date, the modal stays open (gate B applies
+  //    to ANY successful date-time patch), and the DB holds the chosen
+  //    date-time.
+
+  test('17. US-2: move activity to another day of the same week — card lands in the new day column', async ({
+    page,
+    request,
+  }) => {
+    // Wednesday of the OPEN seed week at a grid-aligned time (30-min
+    // grid) — the instant-patch payload is exactly 2026-06-03T14:00:00.
+    const MOVE_TO = '2026-06-03T14:00';
+
+    // 1. SETUP — factory activity on the seed week Monday (default start
+    //    2026-06-01T10:00:00). The factory picks services[0]; its API
+    //    title feeds the expected toast text.
+    const activity = await createTestActivity(request);
+    const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
+    const servicesJson = await servicesResp.json();
+    // #182: services list is paginated ({items,total,page,per_page}) — unwrap envelope
+    const services: any[] = servicesJson.items || servicesJson;
+    const service = services.find((s: any) => s.id === activity.service_id);
+    expect(service).toBeTruthy();
+
+    try {
+      // Reload to pick up the factory activity (mirrors scenarios 2/3/8/14/16)
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      // Premise self-check: the card starts in the Monday column —
+      // otherwise the «moved to Wednesday» assertions below would be
+      // vacuous.
+      const card = page.locator(`[data-testid="activity-${activity.id}"]`);
+      await expect(
+        page
+          .locator('[data-testid="day-column-0"]')
+          .locator(`[data-testid="activity-${activity.id}"]`),
+      ).toBeVisible();
+
+      // 2. ACTION — open the modal on the factory card, set the date-time
+      //    to the same week's Wednesday (instant-patch fires on the change).
+      await clickActivityCard(page, card);
+
+      // Listeners BEFORE the patch fires: the PATCH itself, then the open
+      // week's GET activities refetch — the card's new-column position is
+      // asserted off the refetched data, not the optimistic cache entry.
+      const patchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'PATCH' &&
+          r.url().includes(`/api/v1/activities/${activity.id}`),
+        { timeout: 15_000 },
+      );
+      const refetchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'GET' &&
+          r.url().includes('/api/v1/activities') &&
+          r.url().includes(`date_from=${SEED_WEEK_MONDAY}`),
+        { timeout: 15_000 },
+      );
+      await page.locator('[data-testid="input-datetime"]').fill(MOVE_TO);
+
+      // 3. VERIFY UI — PATCH resolved → the success toast fires in its
+      //    .then (4.5s auto-dismiss: assert it right after the patch,
+      //    before the refetch wait). Info kind: «Сохранено: <услуга> —
+      //    <дата по-русски>, <ЧЧ:ММ>» naming the CHOSEN same-week date.
+      await patchDone;
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Сохранено' });
+      await expect(toast).toBeVisible();
+      await expect(toast).toContainText(`${service!.title} — среда, 3 июня, 14:00`);
+
+      // The card stands in the Wednesday column (Mon-indexed
+      // day-column-2) of the SAME open week, and is gone from Monday —
+      // asserted AFTER the GET landed.
+      await refetchDone;
+      await expect(
+        page
+          .locator('[data-testid="day-column-2"]')
+          .locator(`[data-testid="activity-${activity.id}"]`),
+      ).toBeVisible();
+      await expect(
+        page
+          .locator('[data-testid="day-column-0"]')
+          .locator(`[data-testid="activity-${activity.id}"]`),
+      ).toHaveCount(0);
+
+      // Gate B: the modal stays open on a date-time patch outcome.
+      await expect(page.locator('[data-testid="activity-details-modal"]')).toBeVisible();
+
+      // 4. VERIFY DB — the activity starts on the chosen same-week
+      //    date-time (SQLite datetime format: 'YYYY-MM-DD HH:MM:SS.ffffff').
+      const row = queryDBRow(`SELECT start FROM activities WHERE id='${activity.id}'`);
+      expect(String(row!.start)).toContain('2026-06-03 14:00');
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
+
+  // ── Scenario 18 (GH #553 US-3): a time-only edit — the date part is
+  //    preserved while the time changes (the honest-date form must not
+  //    distort a same-day time pick): the card stays in the SAME day
+  //    column through the post-invalidation refetch, the toast names the
+  //    same date with the NEW time, and the DB keeps the date, changes
+  //    the time.
+
+  test('18. US-3: edit time only — date preserved, time changed', async ({
+    page,
+    request,
+  }) => {
+    // Same Monday as the factory default, new grid-aligned time — the
+    // instant-patch payload is exactly 2026-06-01T12:30:00.
+    const MOVE_TO = '2026-06-01T12:30';
+
+    // 1. SETUP — factory activity on the seed week Monday; its API
+    //    service title feeds the expected toast text.
+    const activity = await createTestActivity(request);
+    const servicesResp = await request.get(`${BACKEND}/api/v1/services`);
+    const servicesJson = await servicesResp.json();
+    // #182: services list is paginated ({items,total,page,per_page}) — unwrap envelope
+    const services: any[] = servicesJson.items || servicesJson;
+    const service = services.find((s: any) => s.id === activity.service_id);
+    expect(service).toBeTruthy();
+
+    try {
+      // Premise self-check: the factory start is Monday 10:00 — the date
+      // this test must prove PRESERVED (assert on the DB source of
+      // truth, not the UI cache).
+      const beforeRow = queryDBRow(`SELECT start FROM activities WHERE id='${activity.id}'`);
+      expect(String(beforeRow!.start)).toContain('2026-06-01 10:00');
+
+      // Reload to pick up the factory activity (mirrors scenarios 2/3/8/14/16)
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      const card = page.locator(`[data-testid="activity-${activity.id}"]`);
+      await expect(card).toBeVisible();
+
+      // 2. ACTION — open the modal, change ONLY the time part of the
+      //    date-time field (same date; instant-patch fires on the change).
+      await clickActivityCard(page, card);
+
+      const patchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'PATCH' &&
+          r.url().includes(`/api/v1/activities/${activity.id}`),
+        { timeout: 15_000 },
+      );
+      const refetchDone = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'GET' &&
+          r.url().includes('/api/v1/activities') &&
+          r.url().includes(`date_from=${SEED_WEEK_MONDAY}`),
+        { timeout: 15_000 },
+      );
+      await page.locator('[data-testid="input-datetime"]').fill(MOVE_TO);
+
+      // 3. VERIFY UI — the toast names the SAME date with the NEW time.
+      await patchDone;
+      const toast = page.locator('[data-testid="toast-info"]').filter({ hasText: 'Сохранено' });
+      await expect(toast).toBeVisible();
+      await expect(toast).toContainText(`${service!.title} — понедельник, 1 июня, 12:30`);
+
+      // The card never leaves its Monday column — asserted AFTER the
+      // post-invalidation refetch landed (a distorted date would have
+      // moved it out of day-column-0).
+      await refetchDone;
+      await expect(
+        page
+          .locator('[data-testid="day-column-0"]')
+          .locator(`[data-testid="activity-${activity.id}"]`),
+      ).toBeVisible();
+
+      // Gate B: the modal stays open on a date-time patch outcome.
+      await expect(page.locator('[data-testid="activity-details-modal"]')).toBeVisible();
+
+      // 4. VERIFY DB — the date survived, the time changed (SQLite
+      //    datetime format: 'YYYY-MM-DD HH:MM:SS.ffffff').
+      const row = queryDBRow(`SELECT start FROM activities WHERE id='${activity.id}'`);
+      expect(String(row!.start)).toContain('2026-06-01 12:30');
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
+    }
+  });
+
+  // ── Scenario 19 (GH #553 US-5): open + close the edit form WITHOUT
+  //    changes — not a single PATCH leaves the page. Instant-patch fields
+  //    fire only on change, so the counter must stay empty across
+  //    open → settle → close → settle. Counting uses network events
+  //    (page.on('request')) — NOT route interception, which could alter
+  //    behavior.
+
+  test('19. US-5: open and close the form without changes — no PATCH request fires', async ({
+    page,
+    request,
+  }) => {
+    // 1. SETUP — factory activity on the seed week Monday.
+    const activity = await createTestActivity(request);
+
+    try {
+      // Reload to pick up the factory activity (mirrors scenarios 2/3/8/14/16)
+      await page.goto(`/schedule?date=${SEED_WEEK_MONDAY}`);
+      await page.waitForSelector('[data-testid^="activity-"]', { timeout: 15000 });
+
+      const card = page.locator(`[data-testid="activity-${activity.id}"]`);
+      await expect(card).toBeVisible();
+
+      // Network-event counter: every PATCH the page issues is recorded
+      // verbatim; page behavior is completely untouched.
+      const patchUrls: string[] = [];
+      page.on('request', (req) => {
+        if (req.method() === 'PATCH') patchUrls.push(req.url());
+      });
+
+      // 2. ACTION — open the modal, let the form settle, close it — no
+      //    field is touched.
+      await clickActivityCard(page, card);
+      await expect(page.locator('[data-testid="settings-tab"]')).toBeVisible();
+      await expect(page.locator('[data-testid="input-datetime"]')).not.toHaveValue('');
+      await closeModal(page);
+
+      // Observation window for the negative assertion (class 2): the
+      // patches are instant-on-change, so any PATCH past this point
+      // would be a genuine «fires on open/close» bug — 500ms makes
+      // «never» observable rather than «not yet».
+      await page.waitForTimeout(500);
+
+      // 3. VERIFY — zero PATCHes of any kind left the page.
+      expect(
+        patchUrls,
+        `PATCH fired on a no-change open/close: ${patchUrls.join(', ')}`,
+      ).toEqual([]);
+    } finally {
+      // CLEANUP — always runs, even if test fails
+      await cleanup(request, `/api/v1/activities/${activity.id}`);
     }
   });
 });

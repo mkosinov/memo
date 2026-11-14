@@ -9,16 +9,19 @@ use entity-specific names (``{master_id}``, ``{photo_id}``, …), so the
 contract test normalizes route path params before comparing.
 
 Exactly this list, no more, no less:
-- ``GET`` dictionaries: masters, locations, services, tags — bare
-  activity GETs left the list with #600 (staff-only, activities:read),
-  like bare photo GETs before them (#493); each keeps its anonymous
-  showcase in the ``/public`` namespace below;
+- ``GET`` dictionaries: masters, services, tags — bare location GETs
+  left the list with #601 (staff-only, locations:read), like bare
+  activity GETs before them (#600) and bare photo GETs (#493); each
+  keeps its anonymous showcase in the ``/public`` namespace below;
 - ``GET /api/v1/public/photos`` — ``photos`` is NOT anonymous: bare
   photo GETs are staff-only (``photos:read``); the showcase lives at
   ``GET /api/v1/public/photos`` (ADR-015 audience namespace);
 - ``GET /api/v1/public/activities`` — the anonymous schedule list
   (#600): bare activity GETs are staff-only (``activities:read``),
   private rows are excluded server-side;
+- ``GET /api/v1/public/locations`` — the anonymous location dictionary
+  (#601): bare location GETs are staff-only (``locations:read``),
+  archived and non-public rows are excluded server-side;
 - ``GET /api/v1/health``;
 - the auth endpoints themselves (login / logout) + the public
   password-setup pair (#348 spec §5/§7: the authority of
@@ -48,8 +51,10 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # REMOVED with the mutations, so its allowlist entry is gone too.
         # ``GET /masters/all`` carries the masters:read guard (NOT public).
         ("GET", "/api/v1/masters"),
-        ("GET", "/api/v1/locations"),
-        ("GET", "/api/v1/locations/{id}"),
+        # GH #601: bare ("GET", "/api/v1/locations") and ("GET",
+        # "/api/v1/locations/{id}") were removed from here — both routes
+        # carry the locations:read guard now; the anonymous dictionary
+        # is the /public/locations entry below (ADR-015).
         ("GET", "/api/v1/services"),
         ("GET", "/api/v1/services/{id}"),
         ("GET", "/api/v1/tags"),
@@ -64,6 +69,10 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # GH #600: the anonymous schedule list — minimal audience schema,
         # private rows excluded server-side (is_private IS NOT TRUE).
         ("GET", "/api/v1/public/activities"),
+        # GH #601: the anonymous location dictionary — minimal 4-field
+        # audience schema, archived and non-public (is_public = false)
+        # rows excluded server-side.
+        ("GET", "/api/v1/public/locations"),
         # GH #493: bare ("GET", "/api/v1/photos") and ("GET",
         # "/api/v1/photos/{id}") were removed from here — both routes carry
         # the photos:read guard now; the anonymous showcase is the

@@ -5,7 +5,7 @@
 ## Naming Convention (CRITICAL)
 
 - **`Staff`** — сотрудники (все) в коде: модель/таблица, схемы, сервисы, роуты `/api/v1/staff`, фронт (StaffTable, useStaff, StaffContext).
-- **`Master`** — только мастер-расписание: таблица `masters` (staff_id, specialty, color, is_active), FK-колонки `master_id` (activities, master_tags), `/api/v1/masters` (только чтение), ключи записей `master_name`/`master_color`, строки UI «Мастер». Слово «ведущий» в UI не появляется — «Мастер» остаётся как есть.
+- **`Master`** — только мастер-расписание: таблица `masters` (staff_id, specialties M2M `staff_specialties` — GH #599, color, is_active), FK-колонки `master_id` (activities, master_tags), `/api/v1/masters` (только чтение), ключи записей `master_name`/`master_color`, строки UI «Мастер». Слово «ведущий» в UI не появляется — «Мастер» остаётся как есть.
 - **`Position`** — должности: таблица `positions`, M2M `staff_positions`, `/api/v1/positions`. Смысл — расчёт зарплаты (будущий модуль); к расписанию и доступам не привязаны.
 - ❌ Artist, Employee, Worker, Teacher — НЕ ИСПОЛЬЗОВАТЬ.
 
@@ -34,7 +34,7 @@ Staff — карточка каждого сотрудника студии (м�
 | sort_order | int | ✅ | Порядок в списках сотрудников и мастеров |
 | is_active | bool | ✅ | Архив человека (см. флаги) |
 
-**masters** (новая; конвенция проекта — множественные имена таблиц, Python-класс `Master`, `__tablename__ = "masters"` — SSE-имя сущности не меняется): `staff_id` — PK + FK staff.id **ON DELETE CASCADE**, unique (ровно одна строка на мастера; значение = прежний id мастера); `specialty` — CSV («живопись, керамика»), **Text**, обязателен; `color` — HEX string(7), обязателен; `is_active` — распределение.
+**masters** (новая; конвенция проекта — множественные имена таблиц, Python-класс `Master`, `__tablename__ = "masters"` — SSE-имя сущности не меняется): `staff_id` — PK + FK staff.id **ON DELETE CASCADE**, unique (ровно одна строка на мастера; значение = прежний id мастера); `specialty` упразднена — CSV-строка заменена M2M `staff_specialties` (GH #599, `specialties.md`; вход `specialty_ids`, в ответах joined-строка по алфавиту; **инвариант непустоты при живой секции сохранён** — пустой набор → 422 `SPECIALTY_REQUIRED`, D5 без ослабления); `color` — HEX string(7), обязателен; `is_active` — распределение.
 
 **positions** (новая): `id` — фиксированные строки `master`/`admin` для встроенных (uuid для пользовательских); `title` — отображаемый текст, редактируется свободно; `is_system` — встроенная, удаление запрещено (422 `POSITION_IS_SYSTEM` до развилки dry_run/commit). Удаление пользовательской должности — единый флоу (спека #324): `staff_positions` — видимая зависимость («Сотрудник: N»), кольцо 5 с, коммит `{expected: {staff_positions}}`. Seed: «Мастер», «Администратор» (встроенные), «СММ» (пользовательская).
 
@@ -60,7 +60,7 @@ Staff — карточка каждого сотрудника студии (м�
 | POST | /api/v1/staff/{id}/archive | Архив с чекбоксами `{archive_master, archive_user}` (default true) |
 | POST | /api/v1/staff/{id}/restore | Возврат из архива |
 
-`PUT /reorder` не переносится с мастеров (reorderMasters никем не вызывается; `sort_order` остаётся колонкой дефолтного порядка). Сортировка списка: `sort_by` = name, specialty, color, avatar, status — **position исключена** (M2M, неоднозначно); specialty/color через LEFT JOIN на masters, пустые — в конце.
+`PUT /reorder` не переносится с мастеров (reorderMasters никем не вызывается; `sort_order` остаётся колонкой дефолтного порядка). Сортировка списка: `sort_by` = name, specialty, color, avatar, status — **position исключена** (M2M, неоднозначно); color через LEFT JOIN на masters; specialty — **отображаемая строка направлений** (корреляционный скалярный подзапрос `string_agg(title ORDER BY title, ', ')` по связям `staff_specialties` — то же выражение, что формирует ответ; GH #599, `specialties.md`), пустые (нет master-секции) — в конце.
 
 **`/api/v1/masters`** — только чтение (действующие мастера, `masters.is_active = true`; для расписания и клиентского сайта #48): GET (пагинированный), GET /all. Мутации и GET /{id} удалены (потребителей нет) — работу забирает карточка сотрудника.
 

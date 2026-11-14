@@ -551,14 +551,18 @@ async def list_public_activities_view(
     per-audience schema and FORCED visibility — the NULL-safe
     ``is_private IS NOT TRUE`` predicate excludes private rows
     server-side (a private lesson is invisible to clients, never a
-    client-side concern). Sort is pinned: ``start ASC, id ASC`` (the
-    web schedule's deterministic feed; no sort surface). Date window:
-    whole-day inclusive bounds via the shared ``day_range`` canon; when
-    ``date_from`` is absent the lower bound defaults to TODAY (the web
-    schedule never shows the past) — ``date_to`` stays open-ended when
-    absent. The typed ``?id=`` set narrowing (the pagination brick,
-    #232) ANDs with the predicate — narrowing never expands visibility:
-    a private id yields an empty page, not a leak.
+    client-side concern), and the join to ``locations`` adds the #601
+    visibility terms (``is_active`` + ``is_public`` — an activity of an
+    archived OR hidden location never leaves the server; the join is
+    1:1 on the locations PK, so it can't duplicate rows). Sort is
+    pinned: ``start ASC, id ASC`` (the web schedule's deterministic
+    feed; no sort surface). Date window: whole-day inclusive bounds
+    via the shared ``day_range`` canon; when ``date_from`` is absent
+    the lower bound defaults to TODAY (the web schedule never shows
+    the past) — ``date_to`` stays open-ended when absent. The typed
+    ``?id=`` set narrowing (the pagination brick, #232) ANDs with the
+    predicate — narrowing never expands visibility: a private id
+    yields an empty page, not a leak.
 
     The shared ``ActivityService.list`` is NOT touched (admin grid +
     master scope ride it — #600 domain rule: never reintroduce
@@ -577,7 +581,15 @@ async def list_public_activities_view(
         date_from = datetime.now(UTC).date()
     from_dt, to_dt = day_range(date_from, params.date_to)
 
-    stmt = select(Activity).where(Activity.is_private.is_not(True))
+    stmt = (
+        select(Activity)
+        .join(Location, Activity.location_id == Location.id)
+        .where(
+            Activity.is_private.is_not(True),
+            Location.is_active.is_(True),
+            Location.is_public.is_(True),
+        )
+    )
     id_pred = ids_in_predicate(Activity.id, params.id)
     if id_pred is not None:
         stmt = stmt.where(id_pred)

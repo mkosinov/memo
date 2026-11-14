@@ -49,6 +49,10 @@ class LocationBase(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int = 0
+    # GH #601: web visibility — true = shown on the client site (default),
+    # false = hidden from the site only. Inherited by Create/Update (the
+    # modal's canonical PUT carries the current flag value) and Response.
+    is_public: bool = True
 
 
 class LocationCreate(LocationBase):
@@ -90,6 +94,9 @@ class LocationPatch(BaseModel):
     image_url: str | None = None
     location_hint: str | None = None
     sort_order: int | None = None
+    # GH #601: web visibility (PATCH carries it separately — no Base
+    # inheritance). None means 'don't change'.
+    is_public: bool | None = None
 
 
 class LocationDeleteBody(BaseModel):
@@ -136,6 +143,25 @@ class LocationResponse(LocationBase):
     @property
     def archived(self) -> bool:
         return not self.is_active
+
+
+class LocationPublicResponse(BaseModel):
+    """Public location dictionary item — deliberately NOT LocationResponse (ADR-015).
+
+    Audience schema for the anonymous dictionary
+    ``GET /api/v1/public/locations`` (#601 spec §2.2): exactly the 4
+    fields the web consumes — ``address``/``location_hint`` are
+    nullable. Everything else (capacity, description, the URL trio,
+    ``is_public`` itself, timestamps) never leaves through this schema;
+    archived and hidden rows are excluded server-side on the route.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    address: str | None = None
+    location_hint: str | None = None
 
 
 class ReorderRequest(BaseModel):

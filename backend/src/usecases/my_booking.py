@@ -37,6 +37,7 @@ from sqlalchemy import select
 from src.auth.service import booking_spam_gate, register_booking
 from src.errors import ErrorCode, ErrorDetail
 from src.models.activity import Activity
+from src.models.location import Location
 from src.models.tariff import Tariff
 from src.schemas.my import MyRecordCreate, MyRecordResponse, MyVisitResponse
 from src.schemas.record import RecordCreate, VisitItem
@@ -80,11 +81,19 @@ async def create_my_record(
     # GH #600: ``is_private IS NOT TRUE`` rides the SAME query, before any
     # tariff validation — a private id is indistinguishable from a missing
     # one (404 either way, no 422-vs-404 side channel).
+    # GH #601 §2.5: the location-visibility terms join the same probe —
+    # an activity of an archived OR hidden (``is_public = false``)
+    # location is 404 exactly like a missing id (direct-id booking
+    # guard; the 1:1 PK join can't duplicate the row).
     activity = (
         await db_session.execute(
-            select(Activity).where(
+            select(Activity)
+            .join(Location, Activity.location_id == Location.id)
+            .where(
                 Activity.id == data.activity_id,
                 Activity.is_private.is_not(True),
+                Location.is_active.is_(True),
+                Location.is_public.is_(True),
             )
         )
     ).scalar_one_or_none()

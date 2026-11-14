@@ -44,6 +44,7 @@ from src.models.photo import Photo, photo_tags
 from src.models.position import Position, staff_positions
 from src.models.record import Record
 from src.models.service import Service
+from src.models.specialty import Specialty
 from src.models.staff import Staff
 from src.models.tag import Tag, visitor_tags
 from src.models.tariff import Tariff
@@ -245,9 +246,10 @@ async def _link_position(db_session, staff_id: str, position_id: str) -> None:
 
 
 class TestFKMatrixFamily:
-    def test_matrix_has_exactly_fourteen_keys(self) -> None:
+    def test_matrix_has_exactly_fifteen_keys(self) -> None:
         """8 pre-existing subjects + the 6 new ones (Visit, Payment, Photo,
-        UserSettings, Visitor, Position) — leaves carry the empty list."""
+        UserSettings, Visitor, Position) + Specialty (GH #599) — leaves
+        carry the empty list."""
         assert set(FK_MATRIX) == {
             Staff,
             Location,
@@ -263,6 +265,7 @@ class TestFKMatrixFamily:
             UserSettings,
             Visitor,
             Position,
+            Specialty,
         }
 
     @pytest.mark.parametrize("model", [Visit, Payment, UserSettings])
@@ -274,13 +277,17 @@ class TestFKMatrixFamily:
 
     def test_existing_subjects_unchanged(self) -> None:
         """The 8 pre-existing matrix rows keep their exact dep sets — the
-        #324 additions are purely additive (existing routes untouched)."""
+        #324 additions are purely additive (existing routes untouched);
+        the ONE later growth is #599: Staff gains ``staff_specialties``
+        (the card's own specialty links, the staff_positions mirror)."""
         assert {d.entity for d in FK_MATRIX[Staff]} == {
             "activities",
             "users",
             "masters",
             "master_tags",
             "staff_positions",
+            # GH #599: the card's own specialty links (master-section M2M).
+            "staff_specialties",
         }
         assert {d.entity for d in FK_MATRIX[Location]} == {
             "activities",

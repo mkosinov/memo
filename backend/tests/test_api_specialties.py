@@ -19,10 +19,13 @@ Specialty-specific rules (docs/domain-rules/specialties.md):
   ``specialties:read`` / ``specialties:write`` + ``verify_fetch_metadata``;
   the master role holds neither token → 403.
 
-Task 1 scope boundary: the delete-family REGISTRY grows its
-``services`` blocking node in Task 2 — here the route runs the unified
-fork with the leaf contract (no links → dry_run 204 / commit
-``{expected: {}}`` → 204).
+Delete-family dependency semantics (Task 2, domain rules Delete
+semantics): ``services`` is a VISIBLE BLOCKING dep
+(``allowed_actions: []``) — the counter covers ALL services incl.
+archived rows (the FK RESTRICT preview; the links are arranged at the
+DB level because the Service ORM model maps ``specialty_id`` only in
+Task 3); ``staff_specialties`` is AUTO-cascade (the materials pattern:
+commit ``{"resolutions": {}}`` unlinks staff cards, which survive).
 """
 
 import uuid as _uuid
@@ -32,7 +35,7 @@ import pytest
 from src.auth.passwords import hash_password
 from src.errors import ErrorCode
 from src.services.specialty import get_specialty_service
-from tests.conftest import insert_user, query_db
+from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
@@ -284,3 +287,200 @@ class TestSpecialtyDeleteLeaf:
             json={"resolutions": {}, "expected": {}},
         )
         assert resp.status_code == 422, resp.text
+
+
+# ─── Delete family — dependencies (Task 2) ─────────────────────────────────────
+
+
+def _link_service(specialty_id: str, *, is_active: bool = True) -> str:
+    """Direct ``services`` row + R1 ``specialty_id`` link (raw SQL — the
+    Service ORM model maps the column only in Task 3, so the link is
+    arranged at the DB level; the tags/positions-suite raw-SQL join
+    pattern). Returns the service id."""
+    sid = f"svc-{_uuid.uuid4().hex[:8]}"
+    query_db_params(
+        "INSERT INTO services (id, title, description, image_url, specialty, "
+        "min_age, max_age, duration, record_info, is_active, created_at, updated_at) "
+        "VALUES (:id, 'Мастер-класс живописи', '', '', 'Живопись', 5, NULL, 90, '', "
+        ":is_active, datetime('now'), datetime('now'))",
+        {"id": sid, "is_active": 1 if is_active else 0},
+    )
+    query_db_params(
+        "UPDATE services SET specialty_id = :specialty_id WHERE id = :id",
+        {"specialty_id": specialty_id, "id": sid},
+    )
+    return sid
+
+
+def _link_staff(specialty_id: str, first_name: str = "Иван") -> str:
+    """Direct staff row + ``staff_specialties`` link (the positions-suite
+    raw-SQL join pattern). Returns the staff id."""
+    staff_id = f"staff-{_uuid.uuid4().hex[:8]}"
+    query_db_params(
+        "INSERT INTO staff (id, first_name, last_name, sort_order, is_active, "
+        "created_at, updated_at) VALUES (:id, :first_name, 'Мастеров', 0, 1, "
+        "datetime('now'), datetime('now'))",
+        {"id": staff_id, "first_name": first_name},
+    )
+    query_db_params(
+        "INSERT INTO staff_specialties (staff_id, specialty_id) VALUES (:staff_id, :specialty_id)",
+        {"staff_id": staff_id, "specialty_id": specialty_id},
+    )
+    return staff_id
+
+
+class TestSpecialtyDeleteBlockedByServices:
+    """``services`` — the VISIBLE BLOCKING node: occupied by ANY service
+    (incl. archived — the counter is the FK RESTRICT preview over all
+    rows) → 409 ``has_dependencies`` with the «Услуга» node; no
+    auto-resolution exists."""
+
+    def test_dry_run_active_service_409_services_node(self, api_client) -> None:
+        row = _make_specialty(api_client, "Живопись")
+        svc = _link_service(row["id"], is_active=True)
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", params={"dry_run": "true"}
+        )
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        assert body["dependencies"] == [
+            {
+                "entity": "services",
+                "relation": "Услуга",
+                "count": 1,
+                "allowed_actions": [],
+                "auto": False,
+                "message": "Переназначьте услуги другому направлению или удалите их",
+            }
+        ]
+        # Preview only — the specialty and the link are untouched.
+        assert query_db(f"SELECT * FROM specialties WHERE id='{row['id']}'")
+        assert query_db(f"SELECT * FROM services WHERE id='{svc}' AND specialty_id='{row['id']}'")
+
+    def test_dry_run_archived_service_only_409(self, api_client) -> None:
+        """Archived rows count too: a service may not live without a
+        direction, so the RESTRICT preview covers ALL services."""
+        row = _make_specialty(api_client, "Живопись")
+        _link_service(row["id"], is_active=False)
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", params={"dry_run": "true"}
+        )
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        assert body["dependencies"][0]["entity"] == "services"
+        assert body["dependencies"][0]["count"] == 1
+
+    def test_dry_run_counter_includes_archived(self, api_client) -> None:
+        """1 active + 2 archived → the node counts 3 (ALL services)."""
+        row = _make_specialty(api_client, "Живопись")
+        _link_service(row["id"], is_active=True)
+        _link_service(row["id"], is_active=False)
+        _link_service(row["id"], is_active=False)
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", params={"dry_run": "true"}
+        )
+        assert resp.status_code == 409, resp.text
+        services_nodes = [d for d in resp.json()["dependencies"] if d["entity"] == "services"]
+        assert len(services_nodes) == 1
+        assert services_nodes[0]["count"] == 3
+
+    def test_commit_busy_service_fail_closed_409_stale(self, api_client) -> None:
+        """A service the caller never confirmed (empty ``expected``)
+        blocks the commit: 409 ``stale_dependencies`` BEFORE the FK
+        RESTRICT could turn the hard delete into an IntegrityError (the
+        (Service, "activities") race-gate mirror)."""
+        row = _make_specialty(api_client, "Живопись")
+        svc = _link_service(row["id"], is_active=True)
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", json={"resolutions": {}, "expected": {}}
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "stale_dependencies"
+        assert query_db(f"SELECT * FROM specialties WHERE id='{row['id']}'")
+        assert query_db(f"SELECT * FROM services WHERE id='{svc}' AND specialty_id='{row['id']}'")
+
+
+class TestSpecialtyDeleteStaffAutoCascade:
+    """``staff_specialties`` — AUTO-cascade (the materials pattern): the
+    preview shows the node, commit ``{"resolutions": {}}`` unlinks the
+    staff cards (which survive) and deletes the dictionary row."""
+
+    def test_dry_run_staff_links_preview_tree(self, api_client) -> None:
+        row = _make_specialty(api_client, "Керамика")
+        _link_staff(row["id"], "Ольга")
+        _link_staff(row["id"], "Пётр")
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", params={"dry_run": "true"}
+        )
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["detail"] == "has_dependencies"
+        assert body["dependencies"] == [
+            {
+                "entity": "staff_specialties",
+                "relation": "Сотрудник",
+                "count": 2,
+                "allowed_actions": ["cascade"],
+                "auto": True,
+            }
+        ]
+        assert query_db(f"SELECT * FROM specialties WHERE id='{row['id']}'")
+
+    def test_commit_resolutions_empty_unlinks_and_deletes(self, api_client) -> None:
+        """DoD state «only staff»: commit ``{"resolutions": {}}`` → the
+        join rows are stripped (both holders unlinked, CARDS survive),
+        the specialty row is gone → 204."""
+        row = _make_specialty(api_client, "Керамика")
+        holder1 = _link_staff(row["id"], "Ольга")
+        holder2 = _link_staff(row["id"], "Пётр")
+
+        resp = api_client.request(
+            "DELETE",
+            f"{SPECIALTIES_URL}/{row['id']}",
+            json={
+                "resolutions": {},
+                "expected": {"staff_specialties": [holder1, holder2]},
+            },
+        )
+        assert resp.status_code == 204, resp.text
+        assert query_db(f"SELECT * FROM specialties WHERE id='{row['id']}'") == []
+        assert query_db(f"SELECT * FROM staff_specialties WHERE specialty_id='{row['id']}'") == []
+        for sid in (holder1, holder2):
+            assert query_db(f"SELECT * FROM staff WHERE id='{sid}'")
+
+    def test_commit_expected_empty_ok_auto_never_verified(self, api_client) -> None:
+        """Auto deps never participate in the ``expected`` check — the
+        empty-snapshot commit (a leaf-shaped body) still executes."""
+        row = _make_specialty(api_client, "Керамика")
+        holder = _link_staff(row["id"], "Мария")
+
+        resp = api_client.request(
+            "DELETE",
+            f"{SPECIALTIES_URL}/{row['id']}",
+            json={"resolutions": {}, "expected": {}},
+        )
+        assert resp.status_code == 204, resp.text
+        assert query_db(f"SELECT * FROM specialties WHERE id='{row['id']}'") == []
+        assert query_db(f"SELECT * FROM staff WHERE id='{holder}'")
+
+    def test_dry_run_mixed_tree_blocked_node_first(self, api_client) -> None:
+        """Both deps present → both nodes, the BLOCKING one first (the
+        Staff activities-first convention: what stops the delete leads
+        the tree)."""
+        row = _make_specialty(api_client, "Живопись")
+        _link_service(row["id"], is_active=True)
+        _link_staff(row["id"], "Ольга")
+
+        resp = api_client.request(
+            "DELETE", f"{SPECIALTIES_URL}/{row['id']}", params={"dry_run": "true"}
+        )
+        assert resp.status_code == 409, resp.text
+        deps = resp.json()["dependencies"]
+        assert [d["entity"] for d in deps] == ["services", "staff_specialties"]

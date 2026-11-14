@@ -13,10 +13,11 @@ create/rename → 409 ``SPECIALTY_TITLE_TAKEN`` (domain error raised by
 both the UX-fast precheck and the authoritative ``IntegrityError``
 catch; rename to the row's own case-variant succeeds).
 
-Task 1 scope boundary: the ``services`` blocking node of the dependency
-tree arrives with Task 2 — the fork below already runs the unified
-contract, so a free row previews 204 / commits ``{expected: {}}`` → 204
-and staff links cascade (auto).
+Task 2 scope: the delete-family REGISTRY carries both dependency rows
+— ``services`` (visible BLOCKING, counter over all services incl.
+archived) and ``staff_specialties`` (auto-cascade) — so a free row
+previews 204 / commits ``{expected: {}}`` → 204, staff links cascade
+(auto), and an occupied row 409s with the tree.
 """
 
 from functools import lru_cache
@@ -190,10 +191,9 @@ async def delete_specialty(
 
     Dependency semantics (domain rules Delete semantics): ``services``
     is a visible BLOCKING dep (occupied by any service, archived ones
-    counted — FK RESTRICT; the node lands with Task 2's registry
-    entry); ``staff_specialties`` is auto-cascade (the materials
-    pattern) — commit ``{"resolutions": {}}`` unlinks staff cards,
-    which survive. A free row is a leaf.
+    counted — FK RESTRICT); ``staff_specialties`` is auto-cascade (the
+    materials pattern) — commit ``{"resolutions": {}}`` unlinks staff
+    cards, which survive. A free row is a leaf.
 
     * ``?dry_run=true`` — PURE preview: busy → 409 ``has_dependencies``
       + tree; free → 204 WITHOUT deleting.

@@ -70,11 +70,12 @@ The matrix is hand-verified against the FK shapes in ``src/models/``:
   * ``Position`` (GH #324) — ``staff_positions`` cascade NON-auto
     «Сотрудник»: the POSITION's side of the #266 edge (the same join is
     auto in FK_MATRIX[Staff] — the perspective rule); staff cards survive.
-  * ``Specialty`` (GH #599 Task 1) — ``staff_specialties`` cascade AUTO:
-    the dictionary's side of the #599 M2M edge (the materials pattern —
-    link rows die, staff cards survive). The ``services`` blocking node
-    (FK RESTRICT, counter over ALL services incl. archived) arrives with
-    Task 2 together with the Service-model FK edge.
+  * ``Specialty`` (GH #599) — ``services`` VISIBLE BLOCKING
+    (``allowed_actions: []``, counter over ALL services incl. archived —
+    the FK RESTRICT preview; read via a lightweight core table until the
+    Service model maps ``specialty_id`` in the wave's Task 3) +
+    ``staff_specialties`` cascade AUTO (the materials pattern — link
+    rows die, staff cards survive).
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import column, delete, func, select, table, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.session import Session
@@ -188,6 +189,12 @@ class FKDependency:
 # Keys are entity MODEL classes; Task 10's ``resolve_delete`` dispatches on these.
 
 _BLOCK_MESSAGE = "Удалите активности вручную или архивируйте"
+
+# GH #599 Task 2: the Specialty → services block. Archiving a service
+# does NOT free the direction (the FK survives ``is_active=False``), so
+# the only ways out are reassigning or deleting the services — the
+# wording deliberately offers no «архивируйте».
+_SPEC_SERVICES_BLOCK_MESSAGE = "Переназначьте услуги другому направлению или удалите их"
 
 FK_MATRIX: dict[type[Base], list[FKDependency]] = {
     Staff: [
@@ -580,15 +587,29 @@ FK_MATRIX: dict[type[Base], list[FKDependency]] = {
         ),
     ],
     Specialty: [
+        # GH #599 Task 2: ``services`` — the VISIBLE BLOCKING node
+        # (``allowed_actions: []``, no auto-resolution): a service may
+        # not live without a direction (FK RESTRICT), so the preview
+        # counts ALL services incl. ARCHIVED rows (``is_active`` is
+        # deliberately not filtered — the RESTRICT mirror over every
+        # row). The counter/id-collector read the R1
+        # ``services.specialty_id`` column through a lightweight core
+        # table: the Service ORM model maps the column only in Task 3
+        # (guard side 1 permits the row — a matrix row without a
+        # metadata edge is legal).
+        FKDependency(
+            entity="services",
+            relation="Услуга",
+            nullable=False,
+            action="block",
+            auto=False,
+            allowed_actions=[],
+            message=_SPEC_SERVICES_BLOCK_MESSAGE,
+        ),
         # GH #599 Task 1: the dictionary's side of the staff_specialties
         # edge — AUTO-cascade (the materials pattern: stripping links is
         # a side effect of deleting the dictionary row; staff cards
-        # survive; commit carries ``{"resolutions": {}}``). The
-        # ``services`` blocking node (allowed_actions: [], counter over
-        # ALL services incl. archived) lands with Task 2 together with
-        # its Service-model FK edge — until the model maps
-        # ``services.specialty_id`` the schema→matrix guard sees no edge
-        # to declare.
+        # survive; commit carries ``{"resolutions": {}}``).
         FKDependency(
             entity="staff_specialties",
             relation="Сотрудник",
@@ -993,6 +1014,31 @@ async def _count_spec_staff_specialties(s: AsyncSession, entity_id: str) -> _Cou
     return r.scalar_one(), None
 
 
+# GH #599 Task 2: lightweight core view of the R1 ``services.specialty_id``
+# column — the Service ORM model maps it only in Task 3, but the Specialty
+# counters/id-collectors must read it NOW (the column exists at the DB
+# level since R1; the tests' alembic-created schema carries it).
+_specialty_services_fk = table(
+    "services",
+    column("id"),
+    column("specialty_id"),
+)
+
+
+async def _count_spec_services(s: AsyncSession, entity_id: str) -> _CountResult:
+    """Specialty → services: ALL rows pointing at the specialty via
+    ``specialty_id`` — the FK RESTRICT preview. Archived rows COUNT
+    (``is_active`` deliberately not filtered: archiving a service never
+    frees the direction, so the preview must match what RESTRICT would
+    reject — every row)."""
+    r = await s.execute(
+        select(func.count())
+        .select_from(_specialty_services_fk)
+        .where(_specialty_services_fk.c.specialty_id == entity_id)
+    )
+    return r.scalar_one(), None
+
+
 _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Staff, "activities"): _count_m_activities,
     (Staff, "users"): _count_m_users,
@@ -1036,6 +1082,7 @@ _COUNTERS: dict[tuple[type[Base], str], _CounterFn] = {
     (Visitor, "visitor_tags"): _count_v_visitor_tags,
     (Position, "staff_positions"): _count_pos_staff_positions,
     (Specialty, "staff_specialties"): _count_spec_staff_specialties,
+    (Specialty, "services"): _count_spec_services,
 }
 
 
@@ -1721,6 +1768,20 @@ async def _ids_spec_staff_specialties(s: AsyncSession, entity_id: str) -> list[s
     return list(r.scalars().all())
 
 
+async def _ids_spec_services(s: AsyncSession, entity_id: str) -> list[str]:
+    """Specialty → services: ids of ALL rows linked via ``specialty_id``
+    (non-auto dep — the S5 race-gate mirror of (Service, "activities"),
+    GH #345 §4.3): a service switched onto the specialty mid-window makes
+    the commit ``stale_dependencies`` BEFORE the FK RESTRICT could turn
+    the hard delete into an IntegrityError."""
+    r = await s.execute(
+        select(_specialty_services_fk.c.id).where(
+            _specialty_services_fk.c.specialty_id == entity_id
+        )
+    )
+    return list(r.scalars().all())
+
+
 # ─── GH #345 §4.3: archivable-family id-collectors ─────────────────────────────
 # Manual pairs (no factory — join paths are heterogeneous): the staff
 # activities reach through the ``masters`` extension string
@@ -1790,6 +1851,7 @@ _ID_COLLECTORS: dict[tuple[type[Base], str], _IdsFn] = {
     (Visitor, "visitor_tags"): _ids_v_visitor_tags,
     (Position, "staff_positions"): _ids_pos_staff_positions,
     (Specialty, "staff_specialties"): _ids_spec_staff_specialties,
+    (Specialty, "services"): _ids_spec_services,
     # GH #345 §4.3: the archivable family — non-auto deps only (the S5
     # race gate: an activity/record/visitor appearing mid-window must be
     # caught by the expected-subset check, not fall through as blocked).

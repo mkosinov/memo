@@ -227,11 +227,13 @@ class TestFKMatrixMaterial:
 
 
 class TestFKMatrixMaster:
-    def test_has_exactly_five_deps(self) -> None:
+    def test_has_exactly_six_deps(self) -> None:
         """GH #266: staff deps = activities(block) + users/masters/master_tags/
-        staff_positions (auto-cascades; masters is the 1:0..1 extension row)."""
+        staff_positions (auto-cascades; masters is the 1:0..1 extension row);
+        GH #599 adds staff_specialties (the card's own specialty links)."""
         assert {dep.entity for dep in FK_MATRIX[Staff]} == {
             "activities", "users", "masters", "master_tags", "staff_positions",
+            "staff_specialties",
         }
 
     def test_activities_blocks(self) -> None:

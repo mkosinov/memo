@@ -123,12 +123,14 @@ class TestModelImports:
             "Service", "ServiceMaterial", "Tariff", "Tag",
             "Activity", "Client", "Visitor", "Photo", "Record", "Visit", "Payment",
             "Material", "UserSettings", "AuditLog",
+            "Specialty",  # GH #599 — the specialties dictionary
             "OtpCode",  # #499 §4.1 — re-exported from src.auth.otp
             "AuthCall", "AuthCallAttempt",  # #593 §Хранение — re-exported from src.auth.callcheck
             "ArchiveStatus", "Channel", "RecordStatus", "UserRole",
             "service_tags", "activity_tags", "photo_tags",
             "master_tags", "location_tags", "client_tags", "visitor_tags", "record_tags",
             "staff_positions",
+            "staff_specialties",  # GH #599 — the staff ↔ specialty M2M
         ]
         assert sorted(__all__) == sorted(expected)
 

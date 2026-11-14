@@ -24,13 +24,15 @@ scenario level:
 - the scenario is ``@transactional`` and delegates to the CORE, never to
   the decorated ``resolve_delete`` (rule 5);
 - BOTH execution branches publish ONE batch with the SAME grid:
-  {"staff", "users", "masters", "master_tags", "staff_positions"} — the
-  core dispatches EVERY matrix handler regardless of dep count (spec
-  §2.7 — «extra invalidations are cheap/correct», the executor idiom),
-  and byte-parity with today's ``resolve_delete`` holds on both; the
-  bare-clean branch hard-deletes just the row, the resolutions branch
-  wipes the auto-cascade family (users / masters / master_tags /
-  staff_positions; the tag and position DICTIONARY rows survive);
+  {"staff", "users", "masters", "master_tags", "staff_positions",
+  "staff_specialties"} (GH #599 adds the card's own specialty links) —
+  the core dispatches EVERY matrix handler regardless of dep count
+  (spec §2.7 — «extra invalidations are cheap/correct», the executor
+  idiom), and byte-parity with today's ``resolve_delete`` holds on
+  both; the bare-clean branch hard-deletes just the row, the
+  resolutions branch wipes the auto-cascade family (users / masters /
+  master_tags / staff_positions / staff_specialties; the tag, position
+  and specialty DICTIONARY rows survive);
 - activities still block (``BlockingDepsError``; nothing deleted, no
   event batch);
 - atomicity: a mid-cascade failure rolls back EVERYTHING and publishes
@@ -392,6 +394,7 @@ async def test_grid_bare_clean(db_session, subscriber) -> None:
     assert len(events) == 1, f"ONE event batch expected, got {events}"
     assert events[0][0] == {
         "staff", "users", "masters", "master_tags", "staff_positions",
+        "staff_specialties",
     }, f"bare-clean grid: {events}"
     assert events[0][1] is None  # direct scenario call — no origin envelope
 
@@ -401,7 +404,8 @@ async def test_grid_full_cascade_marks_every_dispatched_dep(
 ) -> None:
     """Resolutions branch: the core sows ``mark_changed(dep.entity)`` for
     every dispatched handler → {"staff"} + {users, masters, master_tags,
-    staff_positions} — byte-parity with today's executor grid."""
+    staff_positions, staff_specialties} — byte-parity with today's
+    executor grid."""
     from src.usecases.staff import delete_staff
 
     staff = await _add_staff(db_session)
@@ -422,6 +426,7 @@ async def test_grid_full_cascade_marks_every_dispatched_dep(
     assert len(events) == 1, f"ONE event batch expected, got {events}"
     assert events[0][0] == {
         "staff", "users", "masters", "master_tags", "staff_positions",
+        "staff_specialties",
     }, f"full-cascade grid: {events}"
 
 

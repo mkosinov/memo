@@ -140,7 +140,15 @@ class TestRoundtrip:
 class TestOrmParity:
     def test_metadata_matches_migrated_schema(self, upgraded_url: str) -> None:
         """Every Base.metadata table exists after upgrade head with exactly
-        the declared column names — the model side of the no-drift contract."""
+        the declared column names — the model side of the no-drift contract.
+
+        GH #599 transition window: ``services.specialty_id`` lives at the
+        DB level since R1, but the Service ORM model maps the column only
+        in the wave's Task 3 — until then that one column is the
+        whitelisted DB-only drift (both directions stay exact otherwise).
+        """
+        # GH #599: DB-only columns awaiting their Task-3 model mapping.
+        db_only_whitelist = {"services": {"specialty_id"}}
         engine = create_engine(upgraded_url)
         try:
             inspector = sa.inspect(engine)
@@ -151,10 +159,12 @@ class TestOrmParity:
                 )
                 reflected = {c["name"] for c in inspector.get_columns(table.name)}
                 declared = {c.name for c in table.columns}
-                assert reflected == declared, (
+                extra_db = reflected - declared - db_only_whitelist.get(table.name, set())
+                extra_model = declared - reflected
+                assert not extra_db and not extra_model, (
                     f"{table.name}: migration/model column drift —"
-                    f" only-in-db={sorted(reflected - declared)},"
-                    f" only-in-model={sorted(declared - reflected)}"
+                    f" only-in-db={sorted(extra_db)},"
+                    f" only-in-model={sorted(extra_model)}"
                 )
         finally:
             engine.dispose()

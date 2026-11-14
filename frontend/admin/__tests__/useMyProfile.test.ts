@@ -44,8 +44,11 @@ import {
   changePassword,
 } from '@memo/api-client';
 import { useAuth } from '@/contexts/AuthContext';
-import type { MyProfileUpdate } from '@memo/api-client';
-import { mockMyStaffProfileMaster } from './helpers/mockData';
+import type { MyProfileUpdate, MyStaffProfile } from '@memo/api-client';
+import {
+  mockMyStaffProfileMaster,
+  mockMyStaffProfileStaffNoMaster,
+} from './helpers/mockData';
 
 const mockGetMyStaffProfile = vi.mocked(getMyStaffProfile);
 const mockUpdateMyStaffProfile = vi.mocked(updateMyStaffProfile);
@@ -104,6 +107,45 @@ describe('useMyProfile (query)', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockGetMyStaffProfile).toHaveBeenCalledWith('admin');
+  });
+
+  it('keeps the previous profile through a branch flip (no undefined interim — the mydata form must not unmount mid-edit)', async () => {
+    // #584 S3 regression shape: login derives branch=admin (role-based
+    // guess), the first refresh re-derives 'master' from whoami for a
+    // combined admin+master — the profile query key swaps mid-session.
+    // MyDataModal renders a loading card while `profile` is undefined,
+    // UNMOUNTING the form and destroying unsaved edits (the observed bug:
+    // the save PUT travels with an empty body). The interim between the
+    // key swap and the new fetch's resolution must keep serving the
+    // previous branch's data (same account, same rows — §4.4).
+    mockBranch('admin');
+    mockGetMyStaffProfile.mockResolvedValueOnce(mockMyStaffProfileStaffNoMaster);
+    const { wrapper } = createQueryClientWrapper();
+
+    const { result, rerender } = renderHook(() => useMyProfile(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(mockMyStaffProfileStaffNoMaster);
+
+    // Flip the branch with the master-branch fetch PENDING (deferred; the
+    // holder object dodges TS's closure narrowing of a plain let).
+    const deferral: { resolve?: (v: MyStaffProfile) => void } = {};
+    mockGetMyStaffProfile.mockImplementationOnce(
+      () =>
+        new Promise<MyStaffProfile>((resolve) => {
+          deferral.resolve = resolve;
+        }),
+    );
+    mockBranch('master');
+    rerender();
+
+    // The interim: the admin-branch profile stays defined — never undefined.
+    expect(result.current.data).toEqual(mockMyStaffProfileStaffNoMaster);
+    expect(result.current.isFetching).toBe(true);
+
+    // The master-branch data lands once the fetch resolves.
+    deferral.resolve?.(mockMyStaffProfileMaster);
+    await waitFor(() => expect(result.current.data).toEqual(mockMyStaffProfileMaster));
+    expect(mockGetMyStaffProfile).toHaveBeenLastCalledWith('master');
   });
 
   it('stays disabled (no fetch) while the branch is unresolved (auth loading)', async () => {

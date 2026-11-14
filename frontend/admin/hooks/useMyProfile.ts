@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   getMyStaffProfile,
   updateMyStaffProfile,
@@ -50,6 +50,15 @@ export function useMyProfile() {
     // Auth still loading → no branch to address yet; the query idles until
     // the whoami chain resolves it.
     enabled: branch !== null,
+    // #584 branch-flip guard: login derives the branch from the role alone;
+    // the first refresh re-derives it from whoami (a combined admin+master
+    // flips admin→master) and the key swaps mid-session. Without the
+    // placeholder the interim renders `data: undefined`, MyDataModal swaps
+    // to its loading card, the form UNMOUNTS and the user's unsaved edits
+    // are destroyed (the S3 regression: the save PUT traveled with an
+    // empty body). Both branches serve the same account/rows (§4.4), so
+    // serving the previous branch's data through the swap is honest.
+    placeholderData: keepPreviousData,
   });
 }
 

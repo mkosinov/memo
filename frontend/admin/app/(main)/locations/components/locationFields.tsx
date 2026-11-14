@@ -52,7 +52,9 @@ export const LOCATION_FIELDS: LocationFieldConfig[] = [
   { type: 'text', key: 'short_title', label: 'Короткое название', placeholder: 'Например: Гранд' },
   { type: 'text', key: 'address', label: 'Адрес', placeholder: 'ул. Тверская, д. 1' },
   { type: 'textarea', key: 'description', label: 'Описание', rows: 3, placeholder: 'Описание локации...' },
-  { type: 'number', key: 'capacity', label: 'Вместимость', required: true, min: 1, max: 500, suffix: 'чел.' },
+  // GH #551 rev.3: 0–99 mirrors the server bounds (0 = «вместимость не
+  // задана»); «Минимум/Максимум» messages derive from this config (LocationModal).
+  { type: 'number', key: 'capacity', label: 'Вместимость', required: true, min: 0, max: 99, suffix: 'чел.' },
   { type: 'text', key: 'location_hint', label: 'Подсказка', placeholder: 'Как найти, проход и т.д.' },
   { type: 'text', key: 'record_info', label: 'Информация для записи', placeholder: 'Инструкция для клиента' },
   { type: 'text', key: 'yandex_map_url', label: 'Яндекс.Карты', placeholder: 'https://yandex.ru/maps/...' },

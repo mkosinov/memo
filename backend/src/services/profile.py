@@ -153,10 +153,14 @@ class ProfileService:
     async def _specialty_titles(
         self, db_session: AsyncSession, staff_id: str
     ) -> list[str]:
-        """The card's linked direction titles, alphabetical (GH #599 R3
-        mechanical rewire — was the CSV split on ``masters.specialty``).
+        """The card's linked direction titles, alphabetical (GH #599 §4.6).
 
-        # TODO(#599) Task 5: full /my polish (tests + comments) lands there.
+        ONE query over ``staff_specialties`` ⨝ ``specialties`` ordered by
+        ``title`` — the same codepoint sort that builds the master-section
+        display string (spec §4.4; SQLite BINARY ordering). The response
+        FORM is unchanged from the CSV era: ``list[str] | None``, the
+        titles of the CURRENT links (a dictionary rename changes what a
+        later GET shows — the /my view is live, unlike audit snapshots).
         """
         from src.models.specialty import Specialty, staff_specialties
 
@@ -329,9 +333,10 @@ class ProfileService:
 
         ``specialties`` arrives pre-fetched (the caller's links read —
         alphabetical titles): the ``masters.specialty`` CSV column is
-        gone (GH #599 R3) and the /my view reads the M2M instead.
-        # TODO(#599) Task 5: this is the minimal mechanical rewire; the
-        # full /my polish (schema comments + dedicated tests) lands there.
+        gone (GH #599) and the /my view reads the M2M instead. The
+        write side stays one-way — ``MyProfileUpdate.specialties`` is
+        accepted-but-ignored (D5: the set is owned by the admin staff
+        routes; pinned by ``test_specialties_ignored_on_write``).
         """
         return MyProfileResponse(
             role=user.role,

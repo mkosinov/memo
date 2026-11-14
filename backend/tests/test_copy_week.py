@@ -9,9 +9,11 @@ Pipeline contract under test (spec §5, plan Task 2):
   * source window [week_start−7 .. −1], target [week_start .. +6] via day_range;
   * filters: is_private / archived location → skipped_filtered; location not
     in the request list → silently out (no counter — spec §4);
-  * remap of archived masters: first active master with a non-empty CSV
-    specialty intersection in canonical board order (sort_order, first_name, id);
-    no replacement → skipped_no_master;
+  * remap of archived masters: first active master with a non-empty
+    specialty LINK-ID intersection in canonical board order (sort_order,
+    first_name, id; GH #599 — «пересечение по id связей» over
+    ``staff_specialties``, never title text); no replacement →
+    skipped_no_master;
   * dedup key (master_id, service_id, start+7d, duration) vs target rows AND
     in-run set → skipped_duplicates;
   * cap: > 100 rows to insert → 422 COPY_WEEK_SOURCE_TOO_LARGE (after dedup);

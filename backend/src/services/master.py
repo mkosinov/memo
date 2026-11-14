@@ -267,16 +267,24 @@ class MasterService:
 
     async def _validate_specialty_ids(
         self, db_session: AsyncSession, specialty_ids: Sequence[str]
-    ) -> None:
+    ) -> dict[str, str]:
         """Every sent specialty id must exist (the ``_validate_position_ids``
-        pattern — SPECIALTY_NOT_FOUND else, never a raw FK IntegrityError)."""
+        pattern — SPECIALTY_NOT_FOUND else, never a raw FK IntegrityError).
+
+        Returns ``{id: title}`` for the validated set — the writer reuses
+        it to feed the audit-snapshot glue (GH #599 Task 5: one query
+        serves validation AND the journaled display titles).
+        """
         unique_ids = set(specialty_ids)
         rows = await db_session.execute(
-            select(Specialty.id).where(Specialty.id.in_(unique_ids))
+            select(Specialty.id, Specialty.title).where(Specialty.id.in_(unique_ids))
         )
-        found = set(rows.scalars().all())
-        for missing in sorted(unique_ids - found):
+        found: dict[str, str] = {
+            spec_id: title for spec_id, title in rows.all()
+        }
+        for missing in sorted(unique_ids - found.keys()):
             raise SpecialtyNotFoundError(missing)
+        return found
 
     async def _replace_specialty_links(
         self, db_session: AsyncSession, staff_id: str, specialty_ids: Sequence[str]
@@ -331,7 +339,7 @@ class MasterService:
         deduped = list(dict.fromkeys(str(sid) for sid in specialty_ids))
         if len(deduped) > SPECIALTY_SET_LIMIT:
             raise SpecialtySetTooLongError(SPECIALTY_SET_LIMIT)
-        await self._validate_specialty_ids(db_session, deduped)
+        found_titles = await self._validate_specialty_ids(db_session, deduped)
         ext = (
             await db_session.execute(select(Master).where(Master.staff_id == staff_id))
         ).scalar_one_or_none()
@@ -348,6 +356,13 @@ class MasterService:
             if archived is not None:
                 ext.is_active = not archived
         await self._replace_specialty_links(db_session, staff_id, deduped)
+        # GH #599 Task 5 (spec §4.6): audit-snapshot glue — the journaled
+        # direction display string + id set ride the row as PLAIN
+        # attributes (see ``Master``): the masters signature reads them
+        # without a lazy load; the id rides NEXT to the string, so a
+        # dictionary rename never rewrites a historical row's meaning.
+        ext.specialty = ", ".join(sorted(found_titles.values()))
+        ext.specialty_ids = list(deduped)
         mark_changed("masters")
         return ext
 

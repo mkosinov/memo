@@ -228,6 +228,76 @@ class TestUpsertExtensionCreate:
             emitter.reset_accumulation(token)
 
 
+# ─── upsert_extension — audit-snapshot glue (GH #599 Task 5) ─────────────────
+
+
+class TestUpsertExtensionAuditGlue:
+    """The writer feeds the masters journal signature (spec §4.6).
+
+    ``specialty`` (display string) and ``specialty_ids`` are PLAIN
+    instance attributes — the audit getattr walk reads them without a
+    lazy load; a row the writer never fed snapshots its columns only
+    (missing attrs stay inert).
+    """
+
+    async def test_upsert_feeds_display_string_and_ids(
+        self, db_session: AsyncSession
+    ) -> None:
+        from src.services.master import get_master_service
+
+        staff = await _add_staff(db_session)
+        # Linked NOT alphabetically — the fed display string sorts.
+        spec_a = await _link_specialty(db_session, staff.id, "Керамика")
+        spec_b = await _link_specialty(db_session, staff.id, "Живопись")
+
+        ext = await get_master_service().upsert_extension(
+            db_session, staff.id, [spec_b, spec_a], "#5B8C7A"
+        )
+
+        assert ext.specialty == "Живопись, Керамика"
+        assert ext.specialty_ids == [spec_b, spec_a]
+
+    async def test_snapshot_pairs_carry_title_with_ids(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The composed after-snapshot carries the titles together with
+        the ids — id next to the string (a rename never rewrites the
+        historical meaning)."""
+        from src.events.audit import snapshot_pairs_after
+        from src.services.master import get_master_service
+
+        staff = await _add_staff(db_session)
+        spec_a = await _link_specialty(db_session, staff.id, "Живопись")
+        spec_b = await _link_specialty(db_session, staff.id, "Керамика")
+
+        ext = await get_master_service().upsert_extension(
+            db_session, staff.id, [spec_a, spec_b], "#5B8C7A"
+        )
+
+        assert snapshot_pairs_after("masters", ext) == {
+            "staff_id": [None, staff.id],
+            "specialty": [None, "Живопись, Керамика"],
+            "specialty_ids": [None, [spec_a, spec_b]],
+            "color": [None, "#5B8C7A"],
+        }
+
+    async def test_unfed_row_snapshots_columns_only(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A raw row (never touched by the writer) snapshots its real
+        columns — the glue attrs read as None and are skipped (no dead
+        attributes, no lazy loads)."""
+        from src.events.audit import snapshot_pairs_after
+
+        staff = await _add_staff(db_session)
+        ext = await _add_master(db_session, staff.id)
+
+        assert snapshot_pairs_after("masters", ext) == {
+            "staff_id": [None, staff.id],
+            "color": [None, "#5B8C7A"],
+        }
+
+
 # ─── upsert_extension — update branch ───────────────────────────────────────
 
 

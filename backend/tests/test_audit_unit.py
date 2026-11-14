@@ -181,6 +181,20 @@ class TestEntitySignatures:
             ("record_id", "amount", "method")
         assert audit.entity_snapshot_fields("nonexistent") == ()
 
+    def test_masters_snapshot_carries_specialty_title_with_ids(self) -> None:
+        """GH #599 Task 5 (spec §4.6): the masters snapshot carries the
+        linked direction TITLES together with ``specialty_ids`` — the id
+        rides NEXT to the string, so a dictionary rename never rewrites
+        the historical meaning of a journaled row. The attrs are fed by
+        the master-section writer (``MasterService.upsert_extension``);
+        on rows it never touched the getattr walk stays inert (None →
+        skipped, no dead-attribute reads, no lazy loads)."""
+        sig = audit.ENTITY_SIGNATURES["masters"]
+        assert sig.label_fields == ("specialty",)
+        assert audit.entity_snapshot_fields("masters") == (
+            "staff_id", "specialty", "specialty_ids", "color",
+        )
+
     def test_titles_are_russian_headers(self) -> None:
         assert audit.ENTITY_SIGNATURES["clients"].title == "Клиент"
         assert audit.ENTITY_SIGNATURES["payments"].title == "Платёж"
@@ -266,6 +280,14 @@ class TestDerivedLabels:
 
     def test_derive_entity_label_unknown_entity_is_none(self) -> None:
         assert audit.derive_entity_label("nope", {"a": 1}) is None
+
+    def test_masters_label_from_specialty_display_string(self, audit_ctx) -> None:
+        """GH #599 Task 5: the masters label is the section's direction
+        display string (the pre-#599 ``specialty`` CSV shape restored
+        over the M2M — titles joined «, » alphabetically)."""
+        audit.mark_audit(entity="masters", action="update", entity_id="m-1",
+                         changes={"specialty": [None, "Живопись, Керамика"]})
+        assert audit.pending_rows()[0]["entity_label"] == "Мастер Живопись, Керамика"
 
 
 class TestDrawRows:

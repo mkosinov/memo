@@ -185,13 +185,19 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
     ),
     "masters": EntitySignature(
         title="Мастер",
-        # GH #599 R3 mechanical edit: the ``masters.specialty`` column is
-        # dropped — the label falls back to the card names until the
-        # snapshot carries the linked titles alongside ``specialty_ids``.
-        # TODO(#599) Task 5: audit snapshots carry the dictionary titles
-        # (+ ids) over the M2M; until then no dead attribute is read.
-        label_fields=(),
-        snapshot_fields=("staff_id", "color"),
+        # GH #599 Task 5 (spec §4.6): the journaled direction set lives
+        # in the ``staff_specialties`` M2M — the label/snapshot fields
+        # name the WRITER-FED plain attributes (``MasterService
+        # .upsert_extension`` attaches ``specialty`` = the display
+        # string and ``specialty_ids`` = the id list onto the row; the
+        # non-``Mapped`` attrs on ``Master`` are never columns). The
+        # getattr walk reads them with NO lazy load; a row the writer
+        # never fed keeps the class-level ``None`` and snapshots its
+        # real columns only (inert skip — no dead-attribute reads).
+        # The id rides NEXT to the string: a dictionary rename never
+        # rewrites the historical meaning of a journaled row.
+        label_fields=("specialty",),
+        snapshot_fields=("staff_id", "specialty", "specialty_ids", "color"),
         titled_label=True,
     ),
     # NB: no `tariffs`/`user_profiles` entries — not canonical #239 entities

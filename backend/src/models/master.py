@@ -38,6 +38,12 @@ class Master(Base):
 
     __tablename__ = "masters"
 
+    # Plain (never mapped) annotated instance attributes are allowed on
+    # this class: the audit-snapshot glue below deliberately uses a
+    # non-Mapped annotation, and SQLAlchemy's declarative strictness
+    # would otherwise reject it (MappedAnnotationError).
+    __allow_unmapped__ = True
+
     staff_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("staff.id", ondelete="CASCADE"), primary_key=True,
     )
@@ -50,6 +56,18 @@ class Master(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now,
     )
+
+    # GH #599 Task 5 (spec §4.6): audit-snapshot glue — PLAIN instance
+    # attributes fed by the master-section writer
+    # (``MasterService.upsert_extension``), never mapped columns (the
+    # non-``Mapped`` annotation + ``__allow_unmapped__`` above keep
+    # SQLAlchemy out). The audit signature's getattr walk reads the
+    # section's direction display string + id set off them WITHOUT a
+    # lazy load; a row the writer never fed keeps the class-level
+    # ``None`` and snapshots its real columns only (inert skip — no
+    # dead-attribute reads).
+    specialty: str | None = None
+    specialty_ids: list[str] | None = None
 
     staff: Mapped[Staff] = relationship(back_populates="master")
     tags: Mapped[list[Tag]] = relationship(

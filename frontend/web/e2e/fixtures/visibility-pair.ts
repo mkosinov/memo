@@ -16,7 +16,9 @@
  *   «600-E2E-PRIVATE» → is_private = 1 (must be invisible + unbookable)
  * FK columns (master_id/location_id) are copied from an existing activity
  * row — the admin factory's «first seed entity» discipline, minus the
- * API round-trip (the private half has no admin-API factory here).
+ * API round-trip (the private half has no admin-API factory here). The
+ * service direction is a dictionary reference (GH #599): find-or-create
+ * «живопись» → ``specialty_id`` (ensureSpecialtyId).
  *
  * Slot: tomorrow 12:00 UTC when it still lies inside THIS ISO week
  * (Mon..Sun), else today 23:30 — always future-or-today and inside the
@@ -28,7 +30,7 @@
  * resolve inside test bodies only.
  */
 import { randomUUID } from 'crypto';
-import { queryDB, queryDBRow } from './db-query';
+import { queryDB, queryDBRows, queryDBRow } from './db-query';
 
 /** Unmistakable service titles — the specs select on these substrings. */
 export const PUBLIC_TITLE = '600-E2E-PUBLIC';
@@ -47,6 +49,29 @@ export interface VisibilityPair {
 }
 
 const esc = (value: string): string => value.replace(/'/g, "''");
+
+/**
+ * Resolve the direction dictionary id for a title (GH #599): the service
+ * INSERTs no longer carry the dropped ``specialty`` column — the service
+ * gets its direction via ``specialty_id`` (find-or-create against
+ * ``specialties``, the seeded «живопись» row is reused).
+ *
+ * Case-insensitive match IN JS: sqlite3 CLI's ``lower()`` is ASCII-only,
+ * Cyrillic titles never fold in SQL — fetch the small dictionary and
+ * compare here.
+ */
+export function ensureSpecialtyId(title: string): string {
+  const rows = queryDBRows('SELECT id, title FROM specialties');
+  const wanted = title.trim().toLowerCase();
+  const hit = rows.find((row) => String(row.title).trim().toLowerCase() === wanted);
+  if (hit) return String(hit.id);
+  const id = randomUUID();
+  queryDB(
+    `INSERT INTO specialties (id, title, created_at, updated_at) VALUES ` +
+      `('${id}', '${esc(title.trim())}', datetime('now'), datetime('now'))`,
+  );
+  return id;
+}
 
 /**
  * The current-week future slot: tomorrow at 12:00 UTC while tomorrow is
@@ -94,11 +119,14 @@ export function seedVisibilityPair(): VisibilityPair {
   };
 
   const insertService = (id: string, title: string): void => {
+    // GH #599: ``specialty`` is gone — the direction rides the
+    // ``specialty_id`` dictionary reference (ensureSpecialtyId).
+    const specialtyId = esc(ensureSpecialtyId('живопись'));
     queryDB(
-      `INSERT INTO services (id, title, description, image_url, specialty, ` +
+      `INSERT INTO services (id, title, description, image_url, specialty_id, ` +
         `min_age, max_age, duration, record_info, is_active, created_at, updated_at) VALUES ` +
-        `('${id}', '${title}', 'E2E #600', '/images/card-watercolor.jpg', 'живопись', ` +
-        `6, NULL, 90, '', 1, datetime('now'), datetime('now'))`,
+        `('${id}', '${title}', 'E2E #600', '/images/card-watercolor.jpg', ` +
+        `'${specialtyId}', 6, NULL, 90, '', 1, datetime('now'), datetime('now'))`,
     );
   };
   insertService(pair.publicServiceId, PUBLIC_TITLE);

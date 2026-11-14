@@ -21,8 +21,11 @@ vi.mock('@/contexts/schedule/GridSettingsContext', () => ({
   useGridSettings: vi.fn(),
 }));
 
+// US-7 rev.4: shared spy — the stamp-handler tests assert the toast text
+const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
+
 vi.mock('@/contexts/UIContext', () => ({
-  useUI: () => ({ showToast: vi.fn() }),
+  useUI: () => ({ showToast: showToastMock }),
 }));
 
 vi.mock('@/contexts/UserSettingsContext', () => ({
@@ -58,6 +61,8 @@ vi.mock('@/app/components/schedule/DayColumn', () => ({
   DayColumn: (props: {
     dayIndex: number;
     columnId?: string;
+    stampReady?: boolean;
+    onCreateActivity?: (dayIndex: number, startMinutes: number) => void;
     onOpenCreateModal?: (dayIndex: number, startMinutes: number) => void;
   }) => (
     <div
@@ -66,7 +71,13 @@ vi.mock('@/app/components/schedule/DayColumn', () => ({
           ? `day-view-column-${props.columnId}`
           : `day-column-${props.dayIndex}`
       }
-      onClick={() => props.onOpenCreateModal?.(0, 600)}
+      onClick={() =>
+        // Stamp-armed slot click mirrors DayColumn's real dispatch: the stamp
+        // handler fires instead of the create modal (US-7 rev.4 tests)
+        props.stampReady && props.onCreateActivity
+          ? props.onCreateActivity(props.dayIndex, 600)
+          : props.onOpenCreateModal?.(props.dayIndex, 600)
+      }
     />
   ),
 }));
@@ -475,6 +486,69 @@ describe('DayView', () => {
       expect(screen.getByTestId('schedule-empty-hint')).toHaveTextContent(
         'Нет занятий на этот день',
       );
+    });
+  });
+
+  describe('stamp click handler (US-7 rev.4 — громкий тост при capacity 0)', () => {
+    // Штамп готов: мастер m1, услуга s1 («Картина маслом», 150 мин), зал «Альпика»
+    const stampReady = { masterId: 'm1', serviceId: 's1', locations: new Set(['alpika']), ready: true };
+    const baseCtx = {
+      loading: false,
+      error: null,
+      selectedDay: new Date(2026, 5, 15),
+    };
+
+    it('defaultCapacity 0: занятие создаётся с capacity 0, тост поясняет «запись закрыта»', () => {
+      const addActivity = vi.fn();
+      renderDayView({
+        ...baseCtx,
+        addActivity,
+        stamp: stampReady,
+        locations: [{ id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж', defaultCapacity: 0 }],
+      });
+
+      fireEvent.click(screen.getByTestId('day-view-column-m1'));
+
+      // Вариант C: значение копируется как есть — 0 легален («запись закрыта»)
+      expect(addActivity).toHaveBeenCalledTimes(1);
+      expect(addActivity).toHaveBeenCalledWith(
+        expect.objectContaining({ capacity: 0, locationId: 'alpika', serviceId: 's1' }),
+      );
+      expect(showToastMock).toHaveBeenCalledWith(
+        'Создано: Картина маслом — 10:00 — запись закрыта (у зала «Альпика» не задана вместимость)',
+      );
+    });
+
+    it('defaultCapacity отсутствует: ?? 0 → тот же громкий тост', () => {
+      const addActivity = vi.fn();
+      renderDayView({
+        ...baseCtx,
+        addActivity,
+        stamp: stampReady,
+        locations: [{ id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж' }],
+      });
+
+      fireEvent.click(screen.getByTestId('day-view-column-m1'));
+
+      expect(addActivity).toHaveBeenCalledWith(expect.objectContaining({ capacity: 0 }));
+      expect(showToastMock).toHaveBeenCalledWith(
+        'Создано: Картина маслом — 10:00 — запись закрыта (у зала «Альпика» не задана вместимость)',
+      );
+    });
+
+    it('defaultCapacity ≥ 1: прежний тост без предупреждения', () => {
+      const addActivity = vi.fn();
+      renderDayView({
+        ...baseCtx,
+        addActivity,
+        stamp: stampReady,
+        locations: [{ id: 'alpika', title: 'Альпика', address: 'Альпика, 1 этаж', defaultCapacity: 8 }],
+      });
+
+      fireEvent.click(screen.getByTestId('day-view-column-m1'));
+
+      expect(addActivity).toHaveBeenCalledWith(expect.objectContaining({ capacity: 8 }));
+      expect(showToastMock).toHaveBeenCalledWith('Создано: Картина маслом — 10:00');
     });
   });
 

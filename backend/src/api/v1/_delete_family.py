@@ -1,6 +1,7 @@
 """Shared DELETE-route helpers — the #324 family contract transport.
 
-The six delete-family routes (visits/payments/photos/user-settings/
+The six delete-family routes (visits/payments/photos/settings (branch
+mounted at /my/{master,admin,client}/settings, #584; former user-settings)/
 visitors/positions, GH #324 §4) share the exact transport of the
 records/tags deferred-delete contract (#285 rev7-rev9 / #318 D2):
 

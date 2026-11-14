@@ -29,7 +29,8 @@ Exactly this list, no more, no less:
   session-guarded ``GET /api/v1/my`` whoami.
 
 NOT here: ``GET /api/v1/events`` (SSE, GH #239) — it gets a session guard
-in T7; user-settings — own-only since #247; and ``POST /api/v1/records``
+in T7; the settings branches (``/my/{master,admin,client}/settings``, #584;
+former user-settings) — own-only since #247; and ``POST /api/v1/records``
 — the anonymous full-contract booking is CLOSED (GH #479 Изменение 5:
 ``records:write`` guard; guest booking itself is #499).
 

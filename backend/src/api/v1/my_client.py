@@ -82,7 +82,8 @@ async def get_my_records(
     db_session: SessionDep,
     params: Annotated[PaginationParams, Query()],
 ) -> PaginatedResponse[MyRecordItem]:
-    """Own records with visits (spec §«Контракт API → GET /my/records»).
+    """Own records with visits (spec §«Контракт API → GET /my/records»;
+    route now GET /my/client/records, #584).
 
     The owner is the session's client card; the input is the bare
     ``PaginationParams`` brick (``page``/``per_page`` + the machine
@@ -142,7 +143,7 @@ async def get_my_photos(
     params: Annotated[PaginationParams, Query()],
 ) -> PaginatedResponse[MyPhotoItem]:
     """All the client's photos regardless of publicity (spec §«Контракт
-    API → GET /my/photos»).
+    API → GET /my/photos»; route now GET /my/client/photos, #584).
 
     The owner is the session's client card; the input is the bare
     ``PaginationParams`` brick (``?id=`` narrowing ANDs with the owner
@@ -161,7 +162,7 @@ async def get_my_payments(
     params: Annotated[PaginationParams, Query()],
 ) -> PaginatedResponse[MyPaymentItem]:
     """Payments of the client's records (spec §«Контракт API →
-    GET /my/payments»).
+    GET /my/payments»; route now GET /my/client/payments, #584).
 
     Ownership is THROUGH the record (a payment is "mine" iff its record
     belongs to the session's client); each item carries the brief

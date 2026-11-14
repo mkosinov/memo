@@ -3001,7 +3001,7 @@ describe('MyPhotoItemSchema (GH #513 — GET /my/client/photos items)', () => {
   });
 });
 
-describe('MyPaymentItemSchema (GH #513 — GET /my/payments items)', () => {
+describe('MyPaymentItemSchema (GH #513 — GET /my/client/payments items)', () => {
   const validItem = {
     id: 'pay-1',
     amount: 4500,

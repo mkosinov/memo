@@ -69,8 +69,9 @@ async function api<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
-    // Cookie sessions (GH #247 spec §4.1): the memo_session cookie rides along
-    // on every request so the backend can resolve the session user.
+    // Cookie sessions (GH #247 spec §4.1): the session cookies
+    // (memo_staff_session / memo_client_session, #584) ride along on every
+    // request so the backend can resolve the session user.
     credentials: 'include',
     // AFTER the spread on purpose: a caller's explicit signal must never be
     // overridden by the timeout ceiling (GH #330).

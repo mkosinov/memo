@@ -17,7 +17,7 @@ import type { MyPaymentRowView } from "@/app/lib/model/view/my-payments";
 
 // ── Contract factories (exact GET /my/* items[] shapes) ─────────────────────
 
-/** GET /my/records items[] row (#513). Backend serializes date/time columns
+/** GET /my/client/records items[] row (#513; route branch #584). Backend serializes date/time columns
  *  as ISO strings ("2026-06-16" / "15:00:00"). */
 export function myRecordItem(overrides: Partial<MyRecordItem> = {}): MyRecordItem {
   return {
@@ -34,7 +34,7 @@ export function myRecordItem(overrides: Partial<MyRecordItem> = {}): MyRecordIte
   };
 }
 
-/** GET /my/photos items[] row (#513): no owner ids (the requester IS the
+/** GET /my/client/photos items[] row (#513; route branch #584): no owner ids (the requester IS the
  *  client), tags resolved to plain names, is_public drives the badge. */
 export function myPhotoItem(overrides: Partial<MyPhotoItem> = {}): MyPhotoItem {
   return {
@@ -47,7 +47,7 @@ export function myPhotoItem(overrides: Partial<MyPhotoItem> = {}): MyPhotoItem {
   };
 }
 
-/** GET /my/payments items[] row (#513): the record context is ALWAYS
+/** GET /my/client/payments items[] row (#513; route branch #584): the record context is ALWAYS
  *  present (payments ride records); method is nullable by model. */
 export function myPaymentItem(overrides: Partial<MyPaymentItem> = {}): MyPaymentItem {
   return {

@@ -93,8 +93,8 @@ def _insert_staff_card(staff_id: str, first: str, last: str) -> None:
         f"1, datetime('now'), datetime('now'))"
     )
     query_db(
-        f"INSERT INTO masters (staff_id, specialty, color, is_active, "
-        f"created_at, updated_at) VALUES ('{staff_id}', 'живопись', "
+        f"INSERT INTO masters (staff_id, color, is_active, "
+        f"created_at, updated_at) VALUES ('{staff_id}', "
         f"'#5B8C7A', 1, datetime('now'), datetime('now'))"
     )
     query_db(
@@ -266,8 +266,8 @@ def _seed_record_chain() -> None:
         "INSERT INTO staff (id, first_name, last_name, sort_order, is_active, "
         "created_at, updated_at) VALUES ('m-aud', 'А', 'Б', 0, 1, "
         "datetime('now'), datetime('now'))",
-        "INSERT INTO masters (staff_id, specialty, color, is_active, "
-        "created_at, updated_at) VALUES ('m-aud', 'живопись', '#5B8C7A', 1, "
+        "INSERT INTO masters (staff_id, color, is_active, "
+        "created_at, updated_at) VALUES ('m-aud', '#5B8C7A', 1, "
         "datetime('now'), datetime('now'))",
         "INSERT INTO specialties (id, title, created_at, updated_at) "
         "VALUES ('spec-aud', 'Живопись', datetime('now'), datetime('now'))",
@@ -698,12 +698,23 @@ class TestStaffCompositeAudit:
         )
         from src.usecases.staff import create_staff
 
+        # GH #599: the section needs a real dictionary id (D5 hard-replace).
+        from tests.conftest import query_db
+
+        spec_uuid = str(_uuid.uuid4())
+        query_db(
+            "INSERT INTO specialties (id, title, created_at, updated_at) "
+            f"VALUES ('{spec_uuid}', 'Живопись', datetime('now'), "
+            "datetime('now'))"
+        )
         card = await create_staff(
             db_session=db_session,
             data=StaffCreate(
                 first_name="Пётр",
                 last_name="Петров",
-                master=MasterSection(specialty="живопись", color="#000000"),
+                master=MasterSection(
+                    specialty_ids=[spec_uuid], color="#000000"
+                ),
                 create_user=CreateUserSection(
                     phone="+79990005551"
                 ),

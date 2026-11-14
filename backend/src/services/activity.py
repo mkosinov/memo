@@ -37,7 +37,7 @@ from src.services.decorators import transactional
 from src.services.generic import GenericService
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
     from uuid import UUID
 
     from pydantic import BaseModel
@@ -52,16 +52,32 @@ if TYPE_CHECKING:
 COPY_WEEK_MAX_INSERTS = 100
 
 
-def _split_specialty(specialty: str | None) -> set[str]:
-    """CSV specialty («живопись, керамика») → lowercase set of names.
+async def _master_specialty_names(
+    db_session: AsyncSession, staff_ids: Collection[str]
+) -> dict[str, set[str]]:
+    """Master-extension rows → {staff_id: lowered linked direction titles}.
 
-    Comparison helper for the archived-master remap (spec §5.3): «analogous
-    specialty» = non-empty intersection of the two CSV lists (split by ",",
-    strip, case-insensitive).
+    GH #599 R3 mechanical rewire of the former ``_split_specialty`` CSV
+    helper (``masters.specialty`` is dropped — the remap compares the
+    ``staff_specialties`` links instead; same case-insensitive title
+    semantics, ONE batched query per copy run).
+    # TODO(#599) Task 5: the remap moves to id-set intersection over
+    # the links (activities.md §10) — this title bridge keeps the
+    # behavior byte-equal until then.
     """
-    if not specialty:
-        return set()
-    return {part.strip().lower() for part in specialty.split(",") if part.strip()}
+    from src.models.specialty import Specialty, staff_specialties
+
+    if not staff_ids:
+        return {}
+    rows = await db_session.execute(
+        select(staff_specialties.c.staff_id, Specialty.title)
+        .join(Specialty, Specialty.id == staff_specialties.c.specialty_id)
+        .where(staff_specialties.c.staff_id.in_(list(staff_ids)))
+    )
+    names: dict[str, set[str]] = {sid: set() for sid in staff_ids}
+    for staff_id, title in rows.all():
+        names[staff_id].add(title.strip().lower())
+    return names
 
 
 async def check_master_active(
@@ -403,6 +419,14 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
         candidates: list[tuple[Activity, str]] = []  # (source row, final master_id)
         run_keys: set[tuple[str, str, object, int]] = set()
 
+        # GH #599 R3: direction sets per master off the M2M links (ONE
+        # batched query — the CSV column is gone; see
+        # ``_master_specialty_names``).
+        remap_ids = {m.staff_id for m, _s in board} | {
+            m.staff_id for _a, m, _l in source_rows if m is not None
+        }
+        specialty_names = await _master_specialty_names(db_session, remap_ids)
+
         for activity, master, location in source_rows:
             # ── 4. Filters — spec §5.1 order: private → archived → list ──
             if activity.is_private:
@@ -418,11 +442,13 @@ class ActivityService(GenericService[ActivityCreate, ActivityUpdate, ActivityRes
             final_master_id = activity.master_id
             if master is None or not master.is_active:
                 source_specialty = (
-                    _split_specialty(master.specialty) if master is not None else set()
+                    specialty_names.get(master.staff_id, set())
+                    if master is not None
+                    else set()
                 )
                 replacement = None
                 for board_master, _ in board:
-                    if source_specialty & _split_specialty(board_master.specialty):
+                    if source_specialty & specialty_names.get(board_master.staff_id, set()):
                         replacement = board_master.staff_id
                         break
                 if replacement is None:

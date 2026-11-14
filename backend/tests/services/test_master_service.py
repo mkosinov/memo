@@ -18,6 +18,7 @@ copy until the Task 3 demolition):
 
 from __future__ import annotations
 
+import uuid as _uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -64,12 +65,51 @@ async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
 
 
 async def _add_master(db_session: Any, staff_id: str, **kwargs: Any) -> Master:
-    defaults: dict[str, Any] = {"specialty": "живопись", "color": "#5B8C7A"}
+    # GH #599: color/flag only — the directions live in the M2M (raw seed).
+    defaults: dict[str, Any] = {"color": "#5B8C7A"}
     defaults.update(kwargs)
     ext = Master(staff_id=staff_id, **defaults)
     db_session.add(ext)
     await db_session.flush()
     return ext
+
+
+async def _link_specialty(db_session: Any, staff_id: str, title: str) -> str:
+    """Seed a direction link directly (raw-ORM idiom, find-or-create)."""
+    from sqlalchemy import func as sa_func
+
+    from src.models.specialty import staff_specialties
+
+    spec = (
+        await db_session.execute(
+            select(Specialty).where(sa_func.lower(Specialty.title) == title.lower())
+        )
+    ).scalar_one_or_none()
+    if spec is None:
+        spec = Specialty(title=title)
+        db_session.add(spec)
+        await db_session.flush()
+    await db_session.execute(
+        staff_specialties.insert().values(staff_id=staff_id, specialty_id=spec.id)
+    )
+    await db_session.flush()
+    return spec.id
+
+
+async def _linked_ids(db_session: Any, staff_id: str) -> list[str]:
+    from src.models.specialty import staff_specialties
+
+    return list(
+        (
+            await db_session.execute(
+                select(staff_specialties.c.specialty_id).where(
+                    staff_specialties.c.staff_id == staff_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
 
 async def _add_activity(db_session: Any, master_id: str) -> Activity:
@@ -139,23 +179,23 @@ def test_no_method_is_transactional() -> None:
 
 
 class TestUpsertExtensionCreate:
-    async def test_creates_active_row_with_stripped_values(self, db_session: AsyncSession) -> None:
+    async def test_creates_active_row_links_and_stripped_color(
+        self, db_session: AsyncSession
+    ) -> None:
         from src.services.master import get_master_service
 
         staff = await _add_staff(db_session)
+        spec_id = (await _t3_spec(db_session)).id
 
         ext = await get_master_service().upsert_extension(
-            db_session, staff.id, "  живопись  ", "  #5B8C7A  "
+            db_session, staff.id, [spec_id, spec_id], "  #5B8C7A  "
         )
 
         assert ext.staff_id == staff.id
-        assert ext.specialty == "живопись"  # stripped
         assert ext.color == "#5B8C7A"  # stripped
         assert ext.is_active is True  # new row starts active
-        row = (
-            await db_session.execute(select(Master).where(Master.staff_id == staff.id))
-        ).scalar_one()
-        assert row.specialty == "живопись"
+        # duplicates collapsed to ONE link row (set semantics)
+        assert await _linked_ids(db_session, staff.id) == [spec_id]
 
     async def test_create_archived_true_row_inactive(self, db_session: AsyncSession) -> None:
         """T8: ``archived=True`` on create → ``is_active = not archived``."""
@@ -163,8 +203,9 @@ class TestUpsertExtensionCreate:
 
         staff = await _add_staff(db_session)
 
+        spec = await _t3_spec(db_session)
         ext = await get_master_service().upsert_extension(
-            db_session, staff.id, "керамика", "#AABBCC", True
+            db_session, staff.id, [spec.id], "#AABBCC", True
         )
 
         assert ext.is_active is False
@@ -176,10 +217,13 @@ class TestUpsertExtensionCreate:
 
         staff = await _add_staff(db_session)
 
+        spec = await _t3_spec(db_session)
         token = emitter.start_accumulation(set())
         try:
-            await get_master_service().upsert_extension(db_session, staff.id, "живопись", "#5B8C7A")
-            assert emitter.accumulated() == {"masters"}
+            await get_master_service().upsert_extension(
+                db_session, staff.id, [spec.id], "#5B8C7A"
+            )
+            assert emitter.accumulated() == {"masters", "staff_specialties"}
         finally:
             emitter.reset_accumulation(token)
 
@@ -194,12 +238,12 @@ class TestUpsertExtensionUpdate:
         staff = await _add_staff(db_session)
         ext = await _add_master(db_session, staff.id)
 
+        spec = await _t3_spec(db_session)
         updated = await get_master_service().upsert_extension(
-            db_session, staff.id, "керамика", "#112233", False
+            db_session, staff.id, [spec.id], "#112233", False
         )
 
         assert updated is ext  # same ORM row mutated
-        assert ext.specialty == "керамика"
         assert ext.color == "#112233"
         count = (
             (await db_session.execute(select(Master).where(Master.staff_id == staff.id)))
@@ -219,11 +263,12 @@ class TestUpsertExtensionUpdate:
         await _add_master(db_session, staff_active.id, is_active=True)
         await _add_master(db_session, staff_archived.id, is_active=False)
 
+        spec = await _t3_spec(db_session)
         await get_master_service().upsert_extension(
-            db_session, staff_active.id, "живопись", "#5B8C7A", None
+            db_session, staff_active.id, [spec.id], "#5B8C7A", None
         )
         await get_master_service().upsert_extension(
-            db_session, staff_archived.id, "живопись", "#5B8C7A", None
+            db_session, staff_archived.id, [spec.id], "#5B8C7A", None
         )
 
         flags = dict(
@@ -246,8 +291,9 @@ class TestUpsertExtensionUpdate:
         staff = await _add_staff(db_session)
         await _add_master(db_session, staff.id, is_active=False)
 
+        spec = await _t3_spec(db_session)
         ext = await get_master_service().upsert_extension(
-            db_session, staff.id, "живопись", "#5B8C7A", False
+            db_session, staff.id, [spec.id], "#5B8C7A", False
         )
 
         assert ext.is_active is True
@@ -257,23 +303,78 @@ class TestUpsertExtensionUpdate:
 
 
 class TestUpsertExtensionValidation:
-    async def test_blank_specialty_raises(self, db_session: AsyncSession) -> None:
+    async def test_empty_specialty_set_raises(self, db_session: AsyncSession) -> None:
+        """D5 (GH #599): a live section must carry ≥1 direction id."""
         from src.domain.errors import SpecialtyRequiredError
         from src.services.master import get_master_service
 
         staff = await _add_staff(db_session)
 
         with pytest.raises(SpecialtyRequiredError):
-            await get_master_service().upsert_extension(db_session, staff.id, "   ", "#5B8C7A")
+            await get_master_service().upsert_extension(
+                db_session, staff.id, [], "#5B8C7A"
+            )
 
     async def test_blank_color_raises(self, db_session: AsyncSession) -> None:
         from src.domain.errors import ColorRequiredError
         from src.services.master import get_master_service
 
         staff = await _add_staff(db_session)
+        spec = await _t3_spec(db_session)
 
         with pytest.raises(ColorRequiredError):
-            await get_master_service().upsert_extension(db_session, staff.id, "живопись", "   ")
+            await get_master_service().upsert_extension(
+                db_session, staff.id, [spec.id], "   "
+            )
+
+    async def test_unknown_specialty_id_raises(self, db_session: AsyncSession) -> None:
+        from src.domain.errors import SpecialtyNotFoundError
+        from src.services.master import get_master_service
+
+        staff = await _add_staff(db_session)
+
+        with pytest.raises(SpecialtyNotFoundError):
+            await get_master_service().upsert_extension(
+                db_session, staff.id, [str(_uuid.uuid4())], "#5B8C7A"
+            )
+
+    async def test_over_limit_raises(self, db_session: AsyncSession) -> None:
+        """51 distinct ids → 422 (write-amplification guard, §4.4)."""
+        from src.domain.errors import SpecialtySetTooLongError
+        from src.services.master import get_master_service
+
+        staff = await _add_staff(db_session)
+        ids = [str(_uuid.uuid4()) for _ in range(51)]
+
+        with pytest.raises(SpecialtySetTooLongError):
+            await get_master_service().upsert_extension(
+                db_session, staff.id, ids, "#5B8C7A"
+            )
+
+    async def test_duplicates_deduped_before_limit(
+        self, db_session: AsyncSession
+    ) -> None:
+        """60 ids over only 30 distinct → UNDER the limit (dedup first)."""
+        from src.models.specialty import staff_specialties
+        from src.services.master import get_master_service
+
+        staff = await _add_staff(db_session)
+        rows = [Specialty(title=f"Направление {i}") for i in range(30)]
+        db_session.add_all(rows)
+        await db_session.flush()
+        ids = [row.id for row in rows] * 2  # 60 sent, 30 distinct
+
+        await get_master_service().upsert_extension(
+            db_session, staff.id, ids, "#5B8C7A"
+        )
+        links = (
+            await db_session.execute(
+                select(staff_specialties.c.specialty_id).where(
+                    staff_specialties.c.staff_id == staff.id
+                )
+            )
+        ).scalars().all()
+        assert sorted(links) == sorted({i for i in ids})
 
 
 # ─── remove_extension — D7 domain block ─────────────────────────────────────
@@ -312,7 +413,8 @@ class TestRemoveExtension:
         token = emitter.start_accumulation(set())
         try:
             await get_master_service().remove_extension(db_session, staff.id)
-            assert emitter.accumulated() == {"masters"}
+            # GH #599: removal clears the row AND the direction links.
+            assert emitter.accumulated() == {"masters", "staff_specialties"}
         finally:
             emitter.reset_accumulation(token)
 
@@ -445,7 +547,10 @@ class TestUpsertDoesNotCommit:
         await db_session.commit()  # persist the fixture — rollback below must
         staff_id = staff.id  # only undo the service call
 
-        await get_master_service().upsert_extension(db_session, staff_id, "живопись", "#5B8C7A")
+        spec = await _t3_spec(db_session)
+        await get_master_service().upsert_extension(
+            db_session, staff_id, [spec.id], "#5B8C7A"
+        )
         await db_session.rollback()
 
         assert (

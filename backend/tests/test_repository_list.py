@@ -180,7 +180,7 @@ async def test_list_custom_count_excludes_order_by(db_session) -> None:
     # GH #266: activities.master_id now targets masters.staff_id — the
     # extension row must exist for the FK to hold.
     from src.models.master import Master
-    db_session.add(Master(staff_id=b_master.id, specialty="живопись", color="#000000"))
+    db_session.add(Master(staff_id=b_master.id, color="#000000"))
     await db_session.flush()
     db_session.add(
         Activity(

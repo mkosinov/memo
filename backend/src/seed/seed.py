@@ -344,7 +344,16 @@ _MASTER_EXTENSIONS: list[tuple[str, dict[str, str]]] = [
 
 
 async def _seed_masters(session: AsyncSession, ids: _SeedIds) -> None:
-    """Seed staff cards, positions, master extensions and links (#266)."""
+    """Seed staff cards, positions, master extensions and links (#266).
+
+    GH #599 R3 (mechanical interim — the seed rework is Task 7): the
+    extension rows carry color only (the ``specialty`` CSV column is
+    dropped); the ``specialty`` aliases of ``_MASTER_EXTENSIONS`` become
+    ``staff_specialties`` links in ``_seed_specialties`` (the dictionary
+    rows and their registry ids land there, AFTER this call).
+    # TODO(#599) Task 7: the fuller dictionary seed (incl. a
+    # non-alphabetical multi-direction card per §6) replaces this wiring.
+    """
     for alias, fields in _STAFF_RAW:
         staff = Staff(id=_new_id(), **fields)
         ids.put("staff", alias, staff.id)
@@ -354,9 +363,12 @@ async def _seed_masters(session: AsyncSession, ids: _SeedIds) -> None:
     session.add(Position(id="master", title="Мастер", is_system=True))
     session.add(Position(id="admin", title="Администратор", is_system=True))
     session.add(Position(id="smm", title="СММ", is_system=False))
-    # master extension rows: staff alias → registry id
+    # master extension rows: staff alias → registry id (color only —
+    # the direction aliases above become M2M links later in the flow)
     for alias, ext_fields in _MASTER_EXTENSIONS:
-        session.add(Master(staff_id=ids.get("staff", alias), **ext_fields))
+        session.add(
+            Master(staff_id=ids.get("staff", alias), color=ext_fields["color"])
+        )
     # FK=ON (#207 §11.3 idiom): flush parents before the Core link inserts
     # below — the Core inserts bypass the unit-of-work ordering.
     await session.flush()
@@ -397,11 +409,29 @@ _SPECIALTY_RAW: list[tuple[str, str]] = [
 
 async def _seed_specialties(session: AsyncSession, ids: _SeedIds) -> None:
     """Seed the specialties dictionary (GH #599) — the service direction
-    references resolve through the alias registry."""
+    references resolve through the alias registry.
+
+    GH #599 R3 (mechanical interim): also links the seeded master
+    sections to their direction rows here (``_MASTER_EXTENSIONS``'s
+    ``specialty`` aliases → ``staff_specialties`` rows; the staff cards
+    were flushed by ``_seed_masters`` — FK=ON idiom holds).
+    # TODO(#599) Task 7: the fuller dictionary seed (incl. the
+    # non-alphabetical multi-direction card per §6) replaces this wiring.
+    """
+    from src.models.specialty import staff_specialties
+
     for alias, title in _SPECIALTY_RAW:
         specialty = Specialty(id=_new_id(), title=title)
         ids.put("specialties", alias, specialty.id)
         session.add(specialty)
+    await session.flush()
+    for alias, ext_fields in _MASTER_EXTENSIONS:
+        await session.execute(
+            staff_specialties.insert().values(
+                staff_id=ids.get("staff", alias),
+                specialty_id=ids.get("specialties", ext_fields["specialty"]),
+            )
+        )
 
 
 _SERVICE_RAW: list[tuple[str, dict[str, str | int | None]]] = [

@@ -457,8 +457,8 @@ class TestAutoCollectEndToEnd:
             f"INSERT INTO staff (id, first_name, last_name, sort_order, is_active, "
             f"created_at, updated_at) VALUES ('{master}', 'А', 'Б', 0, 1, "
             f"datetime('now'), datetime('now'))",
-            f"INSERT INTO masters (staff_id, specialty, color, is_active, "
-            f"created_at, updated_at) VALUES ('{master}', 'живопись', "
+            f"INSERT INTO masters (staff_id, color, is_active, "
+            f"created_at, updated_at) VALUES ('{master}', "
             f"'#5B8C7A', 1, datetime('now'), datetime('now'))",
             "INSERT INTO specialties (id, title, created_at, updated_at) "
             "VALUES ('spec-scen', 'Живопись', datetime('now'), datetime('now'))",

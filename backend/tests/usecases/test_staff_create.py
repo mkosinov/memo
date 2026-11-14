@@ -57,6 +57,35 @@ async def _add_position(db_session: Any, **kwargs: Any) -> Position:
     return position
 
 
+async def _section(
+    db_session: Any, *titles: str, color: str = "#5B8C7A", archived: Any = None
+) -> dict[str, Any]:
+    """GH #599: a master-section payload over REAL dictionary rows
+    (find-or-create by title, case-insensitive)."""
+    from sqlalchemy import func as sa_func
+
+    from src.models.specialty import Specialty
+
+    ids: list[str] = []
+    for title in titles:
+        row = (
+            await db_session.execute(
+                select(Specialty).where(
+                    sa_func.lower(Specialty.title) == title.lower()
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = Specialty(title=title)
+            db_session.add(row)
+            await db_session.flush()
+        ids.append(row.id)
+    payload: dict[str, Any] = {"specialty_ids": ids, "color": color}
+    if archived is not None:
+        payload["archived"] = archived
+    return payload
+
+
 def _create_payload(**overrides: Any) -> StaffCreate:
     return StaffCreate(first_name="Ольга", last_name="Иванова", **overrides)
 
@@ -175,11 +204,11 @@ async def test_with_master_section_creates_active_extension(db_session) -> None:
     from src.usecases.staff import create_staff
 
     created = await create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "керамика", "color": "#FF0000"},
+        master=await _section(db_session, "Керамика", color="#FF0000"),
     ))
 
     assert created.master is not None
-    assert created.master.specialty == "керамика"
+    assert created.master.specialty == "Керамика"
     assert created.master.color == "#FF0000"
     assert created.master.archived is False
     ext = (await db_session.execute(
@@ -193,7 +222,7 @@ async def test_with_archived_section_creates_inactive_extension(db_session) -> N
     from src.usecases.staff import create_staff
 
     created = await create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "с", "color": "#112233", "archived": True},
+        master=await _section(db_session, "с", color="#112233", archived=True),
     ))
 
     ext = (await db_session.execute(
@@ -232,7 +261,7 @@ async def test_with_user_creates_linked_passwordless_account(db_session) -> None
 
     phone = f"+7999{_uuid.uuid4().hex[:7]}"
     created = await create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "живопись", "color": "#5B8C7A"},
+        master=await _section(db_session, "живопись"),
         create_user={"phone": phone},
     ))
 
@@ -347,7 +376,7 @@ async def test_blank_specialty_raises(db_session) -> None:
 
     with pytest.raises(SpecialtyRequiredError):
         await create_staff(db_session=db_session, data=_create_payload(
-            master={"specialty": "   ", "color": "#FF0000"},
+            master={"specialty_ids": [], "color": "#FF0000"},
         ))
 
 
@@ -356,7 +385,7 @@ async def test_blank_color_raises(db_session) -> None:
 
     with pytest.raises(ColorRequiredError):
         await create_staff(db_session=db_session, data=_create_payload(
-            master={"specialty": "живопись", "color": "  "},
+            master=await _section(db_session, "живопись", color="  "),
         ))
 
 
@@ -419,12 +448,13 @@ async def test_grid_plain_card_is_staff_only(db_session, subscriber) -> None:
 
 async def test_grid_full_composite(db_session, subscriber) -> None:
     """Section + positions + user → exactly {staff, masters,
-    staff_positions, users} — byte-parity with today's conditional marks."""
+    staff_specialties, staff_positions, users} — parity with today's
+    conditional marks (the section write replaces the direction links)."""
     from src.usecases.staff import create_staff
 
     await _add_position(db_session, id="master", title="Мастер", is_system=True)
     created = await create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "живопись", "color": "#5B8C7A"},
+        master=await _section(db_session, "живопись"),
         position_ids=["master"],
         create_user={
             "phone": f"+7999{_uuid.uuid4().hex[:7]}",
@@ -434,22 +464,24 @@ async def test_grid_full_composite(db_session, subscriber) -> None:
 
     events = _drain(subscriber)
     assert len(events) == 1, f"ONE event batch expected, got {events}"
-    assert events[0][0] == {"staff", "masters", "staff_positions", "users"}
+    assert events[0][0] == {"staff", "masters", "staff_specialties",
+                            "staff_positions", "users"}
 
 
 async def test_grid_empty_positions_not_marked(db_session, subscriber) -> None:
     """Card + section WITHOUT positions: empty position list is NOT a
-    change → no staff_positions mark (parity with today's `if
-    data.position_ids`)."""
+    change → no staff_positions mark (parity with the `if
+    data.position_ids` branch); the section write marks masters +
+    staff_specialties (GH #599)."""
     from src.usecases.staff import create_staff
 
     created = await create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "живопись", "color": "#5B8C7A"},
+        master=await _section(db_session, "живопись"),
     ))
     assert created is not None
 
     events = _drain(subscriber)
-    assert events[0][0] == {"staff", "masters"}
+    assert events[0][0] == {"staff", "masters", "staff_specialties"}
 
 
 async def test_grid_failure_publishes_nothing(db_session, subscriber) -> None:
@@ -457,7 +489,7 @@ async def test_grid_failure_publishes_nothing(db_session, subscriber) -> None:
 
     with pytest.raises(PositionNotFoundError):
         await create_staff(db_session=db_session, data=_create_payload(
-            master={"specialty": "живопись", "color": "#5B8C7A"},
+            master=await _section(db_session, "живопись"),
             position_ids=["ghost-id"],
         ))
 
@@ -505,7 +537,7 @@ async def test_step_order_card_section_positions_user(
 
     await _add_position(db_session, id="master", title="Мастер", is_system=True)
     await staff_module.create_staff(db_session=db_session, data=_create_payload(
-        master={"specialty": "живопись", "color": "#5B8C7A"},
+        master=await _section(db_session, "живопись"),
         position_ids=["master"],
         create_user={
             "phone": f"+7999{_uuid.uuid4().hex[:7]}",
@@ -550,7 +582,7 @@ async def test_atomicity_user_boom_rolls_back_everything(
         await staff_module.create_staff(
             db_session=db_session,
             data=_create_payload(
-                master={"specialty": "живопись", "color": "#5B8C7A"},
+                master=await _section(db_session, "живопись"),
                 position_ids=["master"],
                 create_user={
                     "phone": f"+7999{_uuid.uuid4().hex[:7]}",

@@ -60,6 +60,7 @@ __all__ = [
     "SortKeySpec",
     "apply_sort",
     "services_specialty_join",
+    "staff_specialty_aggregate",
 ]
 
 #: Type alias for SQLAlchemy order-by expression elements. Two honest
@@ -163,3 +164,69 @@ def services_specialty_join(stmt: _AnySelect) -> _AnySelect:
     from src.models.specialty import Specialty
 
     return stmt.outerjoin(Specialty, Service.specialty_id == Specialty.id)
+
+
+
+# ─── GH #599 Task 4: aggregate (scalar-subquery) sort keys ────────────────────
+#
+# The staff ``specialty`` key orders by the DISPLAY STRING — the linked
+# dictionary titles joined «, » alphabetically. On a M2M that string is
+# per-row aggregated, so the key is a CORRELATED SCALAR SUBQUERY over
+# ``staff_specialties`` (spec §4.5): NOT a GROUP BY over the outer query
+# — the expression stays a plain ORDER BY term, fully compatible with
+# ``apply_sort`` (direction + ``always_nulls_last`` wrap it) and the
+# pagination/tie-break mechanics. NULL (no links — no master section)
+# falls to the end via the key's nulls policy.
+#
+# Dialects: ``string_agg(x, ', ' ORDER BY x)`` is the SAME spelling on
+# PostgreSQL (native) and SQLite ≥ 3.44 (ordered aggregates; string_agg
+# is the group_concat alias). The ORDER BY rides inside the aggregate
+# parens as a literal fragment of the separator argument — SQLAlchemy
+# has no structural API for in-aggregate ordering, and its ``WITHIN
+# GROUP`` spelling is invalid for string_agg on BOTH engines (PG
+# rejects it — string_agg is not an ordered-set aggregate). The
+# fragment is pinned by unit tests on both dialects
+# (tests/domain/test_sorting.py).
+
+
+def staff_specialty_aggregate() -> SortExpr:
+    """The staff ``specialty`` sort key — the DISPLAY string itself
+    (GH #599 §4.5): a correlated scalar subquery aggregating the linked
+    dictionary titles::
+
+        (SELECT string_agg(specialties.title, ', ' ORDER BY title)
+           FROM staff_specialties
+           JOIN specialties ON specialties.id = staff_specialties.specialty_id
+          WHERE staff_specialties.staff_id = staff.id)
+
+    NOT a GROUP BY over the outer query — a scalar subquery composes
+    with ``apply_sort`` (direction + NULLS LAST wrap the whole
+    expression) and with pagination/tie-break, and the row count is
+    untouched. No master-section links → the aggregate over an empty
+    set is NULL → the key's ``always_nulls_last`` policy puts the card
+    last in BOTH directions.
+
+    Same string the response carries: the serializer joins the titles
+    in Python with the identical alphabetical order (codepoint sort —
+    SQLite's BINARY collation on UTF-8 agrees with it). Fresh
+    expression per call — callers bake it into ``SortKeySpec`` maps at
+    module import.
+    """
+    from sqlalchemy import func, select, text
+
+    from src.models.specialty import Specialty, staff_specialties
+    from src.models.staff import Staff
+
+    return (
+        select(
+            func.string_agg(Specialty.title, text("', ' ORDER BY title")),
+        )
+        .select_from(
+            staff_specialties.join(
+                Specialty, Specialty.id == staff_specialties.c.specialty_id
+            )
+        )
+        .where(staff_specialties.c.staff_id == Staff.id)
+        .correlate(Staff)
+        .scalar_subquery()
+    )

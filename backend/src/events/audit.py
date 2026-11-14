@@ -185,8 +185,13 @@ ENTITY_SIGNATURES: dict[str, EntitySignature] = {
     ),
     "masters": EntitySignature(
         title="Мастер",
-        label_fields=("specialty",),
-        snapshot_fields=("staff_id", "specialty", "color"),
+        # GH #599 R3 mechanical edit: the ``masters.specialty`` column is
+        # dropped — the label falls back to the card names until the
+        # snapshot carries the linked titles alongside ``specialty_ids``.
+        # TODO(#599) Task 5: audit snapshots carry the dictionary titles
+        # (+ ids) over the M2M; until then no dead attribute is read.
+        label_fields=(),
+        snapshot_fields=("staff_id", "color"),
         titled_label=True,
     ),
     # NB: no `tariffs`/`user_profiles` entries — not canonical #239 entities

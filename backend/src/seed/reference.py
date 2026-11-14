@@ -62,6 +62,7 @@ from src.models import (
 from src.models.enums import TariffAudience
 from src.models.position import staff_positions
 from src.models.service_material import ServiceMaterial
+from src.models.specialty import staff_specialties
 from src.models.tag import location_tags, master_tags, service_tags
 
 if TYPE_CHECKING:
@@ -679,6 +680,12 @@ async def _apply_staff(
         for person in (await session.scalars(select(Staff))).all()
     }
     masters = {m.staff_id: m for m in (await session.scalars(select(Master))).all()}
+    # GH #599 R3: the master-section directions resolve against the
+    # specialties dictionary (case-insensitive; the services pattern).
+    specialties = {
+        row.title.lower(): row
+        for row in (await session.scalars(select(Specialty))).all()
+    }
     staff_stats = summary.bucket("Сотрудники")
     master_stats = summary.bucket("Мастера")
     for index, item in enumerate(rows):
@@ -716,8 +723,13 @@ async def _apply_staff(
 
         if item.master is None:
             continue
+        # GH #599 R3 mechanical edit (TODO(#599) Task 7 — the loader
+        # moves to the ``specialties: [titles]`` list key and the old
+        # CSV ``specialty`` key becomes a load error, spec §6): the
+        # masters row carries color/flag only; the YAML ``specialty``
+        # CSV line resolves case-insensitively into ``staff_specialties``
+        # links against the dictionary (the services.yaml pattern).
         master_fields: dict[str, Any] = {
-            "specialty": item.master.specialty,
             "color": item.master.color,
             "is_active": item.master.is_active,
         }
@@ -732,6 +744,27 @@ async def _apply_staff(
         else:
             master_stats.unchanged += 1
         await session.flush()
+        desired_specialties: set[str] = set()
+        for title in item.master.specialty.split(","):
+            title = title.strip()
+            if not title:
+                continue
+            specialty = specialties.get(title.lower())
+            if specialty is None:
+                raise SeedDataError(
+                    f"staff.yaml «{who}»: направление «{title}» "
+                    f"не найдено в справочнике. Объявите его в specialties "
+                    f"или поправьте название"
+                )
+            desired_specialties.add(specialty.id)
+        await _sync_links(
+            session,
+            staff_specialties,
+            "staff_id",
+            "specialty_id",
+            row.id,
+            desired_specialties,
+        )
         await _sync_links(
             session,
             master_tags,

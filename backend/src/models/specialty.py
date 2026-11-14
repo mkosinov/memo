@@ -70,13 +70,16 @@ class Specialty(AbstractModel):
 
     title: Mapped[str] = mapped_column(String(100))
 
-    # The Staff-side ``specialties`` relationship (back_populates pair)
-    # arrives with the master-section migration (Task 4); until then the
-    # association is one-directional from the dictionary side.
+    # The Staff-side ``specialties`` relationship (back_populates pair —
+    # the master-section M2M, GH #599 Task 4): the links are written by
+    # the master-section path (``MasterService``, Core inserts — the
+    # ``replace_positions`` precedent) and read through the Staff-side
+    # relationship (``selectinload`` on staff lists / the masters view).
     # ``passive_deletes=True``: join rows die at the DB level (ON DELETE
     # CASCADE on both FKs) — SQLAlchemy must not load the collection to
     # strip it first.
     staff: Mapped[list[Staff]] = relationship(
         secondary=staff_specialties,
+        back_populates="specialties",
         passive_deletes=True,
     )

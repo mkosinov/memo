@@ -79,7 +79,7 @@ async def _insert_visited_tariff_graph(
     location = Location(title="L", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
-    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     await db_session.flush()
     activity = Activity(
         master_id=staff.id, service_id=service.id, location_id=location.id,

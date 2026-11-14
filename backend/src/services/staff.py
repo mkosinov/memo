@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, not_, select
+from sqlalchemy.orm import selectinload
 
 from src.domain.errors import PositionNotFoundError
 from src.events.emitter import mark_changed
@@ -46,6 +47,7 @@ from src.repositories.generic import get_archive_repository
 from src.repositories.search import SearchField, ids_in_predicate
 from src.schemas.common import PaginatedResponse
 from src.schemas.staff import (
+    MasterSectionView,
     StaffAccountView,
     StaffCreate,
     StaffResponse,
@@ -53,6 +55,7 @@ from src.schemas.staff import (
 )
 from src.services.decorators import transactional
 from src.services.generic import ArchiveService
+from src.services.master import format_specialty_display
 from src.util.utc import utc_now
 
 if TYPE_CHECKING:
@@ -179,8 +182,6 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
         has_user: bool = False,
         account: StaffAccountView | None = None,
     ) -> StaffResponse:
-        from src.schemas.staff import MasterSectionView
-
         # Explicit construction (NOT from_attributes on the ORM object): the
         # schema field ``master`` collides with the lazy ``Staff.master``
         # relationship — attribute access would trigger a greenlet-less
@@ -198,9 +199,23 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             created_at=staff.created_at,
             updated_at=staff.updated_at,
         )
-        response.master = (
-            MasterSectionView.model_validate(ext) if ext is not None else None
-        )
+        if ext is not None:
+            # GH #599: the section carries the display string (titles
+            # joined «, » alphabetically) + the ids in the SAME title
+            # order — both from the eager-loaded ``staff.specialties``
+            # (the callers bake the selectinload; a lazy load would
+            # raise under async SQLAlchemy).
+            ordered = sorted(staff.specialties, key=lambda s: s.title)
+            response.master = MasterSectionView(
+                specialty=format_specialty_display(staff.specialties),
+                specialty_ids=[s.id for s in ordered],
+                color=ext.color,
+                is_active=ext.is_active,
+                created_at=ext.created_at,
+                updated_at=ext.updated_at,
+            )
+        else:
+            response.master = None
         response.position_ids = position_ids
         return response
 
@@ -231,7 +246,19 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
     async def get(
         self, db_session: AsyncSession, id: str
     ) -> StaffResponse | None:
-        staff = await self._repository.get(db_session, self._model, id)
+        # GH #599: explicit select with the specialty-links selectinload —
+        # ``_to_response`` reads ``staff.specialties`` and a lazy load
+        # would raise under async SQLAlchemy.
+        staff = (
+            await db_session.execute(
+                select(Staff)
+                .where(Staff.id == id)
+                # populate_existing: the section writes go through CORE
+                # link inserts — an identity-map Staff must not keep a
+                # stale ``specialties`` collection from an earlier read.
+                .options(selectinload(Staff.specialties)).execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if staff is None:
             return None
         ext = (await _master_extensions(db_session, [id])).get(id)
@@ -264,6 +291,8 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             status = ArchiveStatus.ACTIVE
         # ``self._repository`` is narrowed to ``ArchiveRepository`` at the
         # ``ArchiveService`` class level (annotation-only) — no cast.
+        # GH #599: the options carry the specialty-links selectinload —
+        # the section display string needs them on every row (no N+1).
         staff_rows, total = await self._repository.list(
             db_session,
             self._model,
@@ -275,6 +304,7 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
             order_by=order_by,
             limit=per_page,
             offset=(page - 1) * per_page,
+            options=[selectinload(Staff.specialties)],
         )
         items = await self._assemble(db_session, staff_rows)
         return PaginatedResponse(
@@ -295,7 +325,11 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
 
         if status is None:
             status = ArchiveStatus.ACTIVE
-        stmt = self._list_stmt(status=status, **filters)
+        stmt = (
+            self._list_stmt(status=status, **filters)
+            .options(selectinload(Staff.specialties))
+            .execution_options(populate_existing=True)
+        )
         if order_by is not None:
             stmt = stmt.order_by(*order_by)
         result = await db_session.execute(stmt.limit(BARE_LIST_MAX_ROWS + 1))
@@ -336,7 +370,16 @@ class StaffService(ArchiveService[StaffCreate, StaffUpdate, StaffResponse]):
 
         if status is None:
             status = ArchiveStatus.ACTIVE
-        stmt = select(Staff).outerjoin(Master, Master.staff_id == Staff.id)
+        stmt = (
+            select(Staff)
+            .outerjoin(Master, Master.staff_id == Staff.id)
+            # GH #599: the specialty links ride their own selectinload
+            # (the sort key is the correlated string_agg subquery — it
+            # needs no join here; the section string still needs the
+            # links, one batched query per page). populate_existing —
+            # see ``get``: never a stale identity-map collection.
+            .options(selectinload(Staff.specialties)).execution_options(populate_existing=True)
+        )
         if status == ArchiveStatus.ACTIVE:
             stmt = stmt.where(Staff.is_active)
         elif status == ArchiveStatus.ARCHIVED:

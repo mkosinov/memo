@@ -157,7 +157,10 @@ def _guard_specialty_id(api_client) -> str:
     resp = api_client.post("/api/v1/specialties", json={"title": "Живопись"})
     if resp.status_code == 409:  # already created within this test
         resp = api_client.get("/api/v1/specialties/all")
-        return next(r["id"] for r in resp.json() if r["title"] == "Живопись")
+        # case-insensitive: the section adapter seeds the lowercase variant
+        return next(
+            r["id"] for r in resp.json() if r["title"].lower() == "живопись"
+        )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
 

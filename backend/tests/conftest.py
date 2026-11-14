@@ -124,6 +124,77 @@ ADMIN_PHONE = "+79990000001"
 ADMIN_PASSWORD = "admin12345"
 
 
+class _LegacySpecialtySectionAdapter:
+    """GH #599 Task 4 test adapter over the authenticated TestClient.
+
+    Legacy staff master-section payloads carrying ``specialty`` (a title
+    or CSV of titles) are translated to ``specialty_ids`` — find-or-create
+    against ``/api/v1/specialties`` (the ``SeedLoader._specialty_id``
+    precedent from the services side). Payloads already on the new
+    contract (``specialty_ids``) pass through UNTOUCHED — the dedicated
+    new-contract tests exercise the raw API. Per-test instance: the
+    title→id cache dies with the client (reset_db truncates between
+    tests — a cross-test cache would hold stale ids).
+    """
+
+    def __init__(self, client: TestClient) -> None:
+        self._client = client
+        self._by_title: dict[str, str] = {}
+
+    def _id_for(self, title: str) -> str:
+        key = title.strip().lower()
+        if key not in self._by_title:
+            listed = self._client.get("/api/v1/specialties/all")
+            assert listed.status_code == 200, listed.text
+            for row in listed.json():
+                self._by_title.setdefault(row["title"].lower(), row["id"])
+        if key not in self._by_title:
+            created = self._client.post(
+                "/api/v1/specialties", json={"title": title.strip()}
+            )
+            assert created.status_code == 201, created.text
+            self._by_title[key] = created.json()["id"]
+        return self._by_title[key]
+
+    def _translate(self, url: str, json_body: object) -> object:
+        if not (
+            isinstance(json_body, dict)
+            and url.startswith("/api/v1/staff")
+            and isinstance(json_body.get("master"), dict)
+        ):
+            return json_body
+        section = json_body["master"]
+        if "specialty" in section and "specialty_ids" not in section:
+            # Copy-on-translate: the caller's dicts are often SHARED
+            # module-level constants (``MASTER_SECTION``) — in-place
+            # mutation would leak stale ids into later tests.
+            section = dict(section)
+            titles = str(section.pop("specialty")).split(",")
+            section["specialty_ids"] = [
+                self._id_for(t) for t in (title.strip() for title in titles) if t
+            ]
+            json_body = {**json_body, "master": section}
+        return json_body
+
+    def post(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.post(url, **kwargs)  # type: ignore[arg-type]
+
+    def put(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.put(url, **kwargs)  # type: ignore[arg-type]
+
+    def patch(self, url: str, **kwargs: object):
+        if "json" in kwargs:
+            kwargs["json"] = self._translate(url, kwargs["json"])
+        return self._client.patch(url, **kwargs)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+
 @pytest.fixture
 def api_client(app, db_engine, _admin_hash):
     """Function-scoped TestClient, pre-authenticated as the fixture admin.
@@ -134,6 +205,11 @@ def api_client(app, db_engine, _admin_hash):
     scope), then this fixture direct-INSERTs the admin user and logs in
     via ``POST /api/v1/auth/login`` — the yielded client's cookie jar
     holds the admin ``memo_session`` for the whole test.
+
+    GH #599: the yielded client WRAPS the raw TestClient in the legacy
+    specialty-section adapter — old ``master={"specialty": ...}``
+    payloads keep working across the suite; every non-staff call and
+    every new-contract payload is untouched.
 
     Routers are still open, so existing tests notice only the extra users
     row. The ~20–40 ms per-test login cost is reviewer-verified
@@ -156,7 +232,7 @@ def api_client(app, db_engine, _admin_hash):
         json={"phone": ADMIN_PHONE, "password": ADMIN_PASSWORD},
     )
     assert resp.status_code == 200, f"api_client admin login failed: {resp.text}"
-    yield c
+    yield _LegacySpecialtySectionAdapter(c)
 
 
 # ─── Database Reset ─────────────────────────────────────────────────────────────
@@ -1162,9 +1238,9 @@ def insert_master_user(
     )
     if with_masters_row:
         query_db_params(
-            "INSERT OR IGNORE INTO masters (staff_id, specialty, color, "
+            "INSERT OR IGNORE INTO masters (staff_id, color, "
             "is_active, created_at, updated_at) "
-            "VALUES (:id, 'живопись', '#5B8C7A', 1, "
+            "VALUES (:id, '#5B8C7A', 1, "
             "datetime('now'), datetime('now'))",
             {"id": staff_id},
         )

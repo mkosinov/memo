@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.models.activity import Activity
 from src.models.location import Location
@@ -57,27 +57,58 @@ async def _make_master(
     specialty: str = "живопись",
     with_master_row: bool = True,
 ) -> str:
-    """Insert a Staff card (+ masters extension) and return its id (master_id)."""
+    """Insert a Staff card (+ masters extension) and return its id (master_id).
+
+    GH #599 R3: ``specialty`` (a CSV of titles, case-insensitive) is
+    linked via ``staff_specialties`` — find-or-create per title, the
+    pre-dictionary helper contract preserved.
+    """
+    from src.models.specialty import staff_specialties
+
     staff = Staff(first_name=first_name, last_name="Тестов", sort_order=sort_order)
     db_session.add(staff)
     await db_session.flush()
     if with_master_row:
         db_session.add(
             Master(
-                staff_id=staff.id, specialty=specialty,
+                staff_id=staff.id,
                 color="#5B8C7A", is_active=is_active,
             )
         )
+        await db_session.flush()
+        for raw in specialty.split(","):
+            title = raw.strip()
+            if not title:
+                continue
+            # Case-insensitive find (the dictionary unique index is
+            # lower(title) — «Живопись» and «живопись» are ONE row).
+            spec = (
+                await db_session.execute(
+                    select(Specialty).where(
+                        func.lower(Specialty.title) == title.lower()
+                    )
+                )
+            ).scalar_one_or_none()
+            if spec is None:
+                spec = Specialty(title=title)
+                db_session.add(spec)
+                await db_session.flush()
+            await db_session.execute(
+                staff_specialties.insert().values(
+                    staff_id=staff.id, specialty_id=spec.id
+                )
+            )
         await db_session.flush()
     return staff.id
 
 
 async def _make_service(db_session, *, is_active: bool = True) -> Service:
     # GH #599: the direction is a dictionary reference (find-or-create —
-    # the seeded services all point at the same «Живопись» row).
+    # case-insensitive: ``_make_master`` may have seeded the lowercase
+    # variant of the same title; lower(title) is one dictionary row).
     spec = (
         await db_session.execute(
-            select(Specialty).where(Specialty.title == "Живопись")
+            select(Specialty).where(func.lower(Specialty.title) == "живопись")
         )
     ).scalar_one_or_none()
     if spec is None:

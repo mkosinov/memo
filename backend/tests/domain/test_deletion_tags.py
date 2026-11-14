@@ -123,7 +123,7 @@ async def _add_visitor(db_session, client: Client, name: str = "Петя") -> Vi
 
 async def _add_activity(db_session, *, service: Service) -> Activity:
     staff = await _add_staff(db_session)
-    db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     location = await _add_location(db_session)
     await db_session.flush()
     activity = Activity(
@@ -219,7 +219,7 @@ class TestCollectDependenciesTag:
         await _link(db_session, activity_tags, "activity_id", activity.id, tag_id)
 
         staff = await _add_staff(db_session)
-        db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
+        db_session.add(Master(staff_id=staff.id, color="#000000"))
         await db_session.flush()
         await _link(db_session, master_tags, "master_id", staff.id, tag_id)
 
@@ -325,7 +325,7 @@ class TestTagItemLabels:
         the staff card (node id = staff_id), two-table join."""
         tag_id = await _flush_tag(db_session, "t")
         staff = await _add_staff(db_session)  # Иван Петров
-        db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
+        db_session.add(Master(staff_id=staff.id, color="#000000"))
         await db_session.flush()
         await _link(db_session, master_tags, "master_id", staff.id, tag_id)
         await db_session.commit()
@@ -428,7 +428,7 @@ class TestTagResolveDelete:
         activity_service = await _add_service(db_session, "Другая")
         activity = await _add_activity(db_session, service=activity_service)
         staff = await _add_staff(db_session)
-        db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
+        db_session.add(Master(staff_id=staff.id, color="#000000"))
         location = await _add_location(db_session)
         client = await _add_client(db_session)
         visitor = await _add_visitor(db_session, client)

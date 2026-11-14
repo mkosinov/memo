@@ -143,7 +143,6 @@ async def _seed_world(
     await db_session.flush()
     master = Master(
         staff_id=staff.id,
-        specialty=ext_kwargs.get("specialty", "живопись"),
         color=ext_kwargs.get("color", "#5B8C7A"),
     )
     db_session.add(master)

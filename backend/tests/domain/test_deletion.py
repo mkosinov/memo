@@ -113,7 +113,7 @@ async def _add_master_tag_links(db_session, master: Staff, n: int) -> None:
 async def _ensure_extension(db_session, staff_id: str) -> Master:
     ext = await db_session.get(Master, staff_id)
     if ext is None:
-        ext = Master(staff_id=staff_id, specialty="живопись", color="#000000")
+        ext = Master(staff_id=staff_id, color="#000000")
         db_session.add(ext)
         await db_session.flush()
     return ext

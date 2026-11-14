@@ -37,6 +37,10 @@ LEGACY_REVISION = "c1d3e5f7a9b1"
 # legacy-column drop — chains after it, GH #599 Task 3).
 R1_REVISION = "a5c7e9b1d3f4"
 
+# R2 (services side, Task 3) — R3 (masters.specialty drop, Task 4)
+# chains after it.
+R2_REVISION = "b8d2e6f4a9c1"
+
 from alembic.script import ScriptDirectory  # noqa: E402
 
 HEAD_REVISION = ScriptDirectory(str(BACKEND_DIR / "alembic")).get_current_head()
@@ -291,5 +295,68 @@ def test_r2_upgrade_fails_on_legacy_service_rows_not_null(tmp_path: Path) -> Non
                 text("SELECT id FROM services WHERE id = 'svc-legacy'")
             ).scalar_one_or_none()
             assert surviving == "svc-legacy"
+    finally:
+        engine.dispose()
+
+
+# ─── GH #599 Task 4 — R3: drop masters.specialty ────────────────────────────────
+
+
+def test_r3_upgrade_drops_masters_specialty(tmp_path: Path) -> None:
+    """upgrade → head on an EMPTY DB: the legacy CSV column is GONE from
+    ``masters``; the extension keeps staff_id/color/is_active (+ the
+    timestamps); the M2M (R1) and the services side (R2) are untouched."""
+    db_path = tmp_path / "specialty_r3.db"
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    command.upgrade(_cfg(db_path), "head")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            rows = [tuple(r) for r in conn.execute(text("SELECT version_num FROM alembic_version"))]
+            assert rows == [(HEAD_REVISION,)]
+
+            cols = {r[1] for r in conn.execute(text("PRAGMA table_info('masters')"))}
+            assert "specialty" not in cols, "masters.specialty must be dropped at head"
+            assert cols == {"staff_id", "color", "is_active", "created_at", "updated_at"}
+
+            # R1/R2 structures survive untouched.
+            tables = {
+                r[0]
+                for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+            }
+            assert {"specialties", "staff_specialties"} <= tables
+            svc_cols = {r[1] for r in conn.execute(text("PRAGMA table_info('services')"))}
+            assert "specialty" not in svc_cols and "specialty_id" in svc_cols
+    finally:
+        engine.dispose()
+
+
+def test_r3_downgrade_restores_empty_text_column(tmp_path: Path) -> None:
+    """downgrade head → R2: the legacy text column returns (EMPTY — data
+    is not restored, dev-only convenience, spec §4.1) and is nullable;
+    a second upgrade returns to head (roundtrip green)."""
+    db_path = tmp_path / "specialty_r3_down.db"
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    cfg = _cfg(db_path)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, R2_REVISION)
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            cols = {r[1]: r[3] for r in conn.execute(text("PRAGMA table_info('masters')"))}
+            assert "specialty" in cols, "downgrade must return the legacy text column"
+            assert cols["specialty"] == 0, "the restored column is nullable (no data)"
+    finally:
+        engine.dispose()
+
+    # And back up — green on the empty base.
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            cols = {r[1] for r in conn.execute(text("PRAGMA table_info('masters')"))}
+            assert "specialty" not in cols
     finally:
         engine.dispose()

@@ -54,14 +54,6 @@ _PROFILE_FIELDS = (
 )
 
 
-def _split_specialties_csv(csv: str) -> list[str]:
-    """«живопись, керамика» → ``["живопись", "керамика"]``.
-
-    Whitespace-tolerant; empty segments dropped (no phantom values).
-    """
-    return [part.strip() for part in csv.split(",") if part.strip()]
-
-
 def _normalize_series_number(value: str) -> str:
     """Trim + collapse inner whitespace runs (spec §3.1)."""
     return " ".join(value.split())
@@ -158,6 +150,24 @@ class ProfileService:
             setattr(profile, field, value)
         return profile
 
+    async def _specialty_titles(
+        self, db_session: AsyncSession, staff_id: str
+    ) -> list[str]:
+        """The card's linked direction titles, alphabetical (GH #599 R3
+        mechanical rewire — was the CSV split on ``masters.specialty``).
+
+        # TODO(#599) Task 5: full /my polish (tests + comments) lands there.
+        """
+        from src.models.specialty import Specialty, staff_specialties
+
+        rows = await db_session.execute(
+            select(Specialty.title)
+            .join(staff_specialties, Specialty.id == staff_specialties.c.specialty_id)
+            .where(staff_specialties.c.staff_id == staff_id)
+            .order_by(Specialty.title)
+        )
+        return list(rows.scalars().all())
+
     async def get(
         self, db_session: AsyncSession, user_id: str
     ) -> MyProfileResponse:
@@ -165,7 +175,12 @@ class ProfileService:
         user, staff, master, profile = await self._context(
             db_session, user_id
         )
-        return self._to_response(user, staff, master, profile)
+        specialties = (
+            await self._specialty_titles(db_session, staff.id)
+            if master is not None and staff is not None
+            else None
+        )
+        return self._to_response(user, staff, master, profile, specialties)
 
     async def _apply_update(
         self, db_session: AsyncSession, user_id: str, payload: dict[str, object]
@@ -265,7 +280,12 @@ class ProfileService:
 
         # Re-read the freshly written halves for the response (the ORM
         # objects are in the identity map — plain attribute reads suffice).
-        return self._to_response(user, staff, master, profile)
+        specialties = (
+            await self._specialty_titles(db_session, staff.id)
+            if master is not None and staff is not None
+            else None
+        )
+        return self._to_response(user, staff, master, profile, specialties)
 
     @transactional
     async def set_avatar(
@@ -303,8 +323,16 @@ class ProfileService:
         staff: Staff | None,
         master: Master | None,
         profile: UserProfile | None,
+        specialties: list[str] | None,
     ) -> MyProfileResponse:
-        """Assemble the flat §4 shape from the four source rows."""
+        """Assemble the flat §4 shape from the four source rows.
+
+        ``specialties`` arrives pre-fetched (the caller's links read —
+        alphabetical titles): the ``masters.specialty`` CSV column is
+        gone (GH #599 R3) and the /my view reads the M2M instead.
+        # TODO(#599) Task 5: this is the minimal mechanical rewire; the
+        # full /my polish (schema comments + dedicated tests) lands there.
+        """
         return MyProfileResponse(
             role=user.role,
             has_staff=staff is not None,
@@ -312,11 +340,7 @@ class ProfileService:
             first_name=staff.first_name if staff is not None else None,
             last_name=staff.last_name if staff is not None else None,
             avatar_url=staff.avatar_url if staff is not None else None,
-            specialties=(
-                _split_specialties_csv(master.specialty)
-                if master is not None
-                else None
-            ),
+            specialties=specialties if master is not None else None,
             patronymic=profile.patronymic if profile is not None else None,
             birth_date=profile.birth_date if profile is not None else None,
             residence_address=(

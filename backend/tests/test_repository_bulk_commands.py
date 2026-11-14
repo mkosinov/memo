@@ -77,7 +77,6 @@ async def _activity(db_session, **overrides) -> Activity:
     staff_id = overrides.get("staff_id") or _mk_staff(db_session)
     master = overrides.get("master") or Master(
         staff_id=staff_id,
-        specialty="живопись",
         color="#000000",
     )
     db_session.add(master)

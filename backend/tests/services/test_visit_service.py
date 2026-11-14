@@ -417,7 +417,7 @@ async def _seed_visitor_with_visits(db_session):
     location = Location(title="VvLoc", capacity=20)
     db_session.add_all([staff, service, location])
     await db_session.flush()
-    db_session.add(Master(staff_id=staff.id, specialty="s", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     await db_session.flush()
     activity = Activity(
         master_id=staff.id,

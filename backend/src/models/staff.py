@@ -17,6 +17,7 @@ from src.models.abstract import AbstractModelSoftDelete
 if TYPE_CHECKING:
     from src.models.master import Master
     from src.models.position import Position
+    from src.models.specialty import Specialty
     from src.models.tag import Tag
 
 
@@ -39,6 +40,18 @@ class Staff(AbstractModelSoftDelete):
     )
     positions: Mapped[list[Position]] = relationship(
         secondary="staff_positions", back_populates="staff",
+    )
+    # GH #599: the master-section directions (M2M ``staff_specialties``,
+    # the staff_positions mirror). The links live on the CARD but are
+    # owned by the master-section write path (MasterService) and are
+    # cleared when the section is removed («без секции направлений нет»);
+    # ``passive_deletes=True`` — join rows die at the DB level (ON DELETE
+    # CASCADE on both FKs), SQLAlchemy must not load the collection to
+    # strip it first.
+    specialties: Mapped[list[Specialty]] = relationship(
+        secondary="staff_specialties",
+        back_populates="staff",
+        passive_deletes=True,
     )
     # Tags travel with the master extension (master_tags), not the person;
     # kept accessible from the card for parity with the old Master model.

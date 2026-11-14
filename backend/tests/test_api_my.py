@@ -377,10 +377,14 @@ class TestPutMyProfile:
             "/api/v1/my", json={"specialties": ["керамика", "скетчинг"]}
         )
         assert resp.status_code == 200, resp.text
-        rows = query_db(
-            f"SELECT specialty FROM masters WHERE staff_id = '{staff_id}'"
+        # GH #599: the directions are the staff_specialties links (the
+        # masters CSV column is gone); PUT /my specialties stays IGNORED.
+        links = query_db(
+            "SELECT s.title FROM staff_specialties ss"
+            " JOIN specialties s ON s.id = ss.specialty_id"
+            f" WHERE ss.staff_id = '{staff_id}' ORDER BY s.title"
         )
-        assert rows[0]["specialty"] == "живопись, керамика"
+        assert [r["title"] for r in links] == ["живопись", "керамика"]
         assert client.get("/api/v1/my").json()["specialties"] == [
             "живопись", "керамика",
         ]

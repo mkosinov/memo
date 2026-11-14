@@ -92,7 +92,8 @@ async def _add_staff(db_session: Any, **kwargs: Any) -> Staff:
 
 
 async def _add_master_ext(db_session: Any, staff_id: str, **kwargs: Any) -> Master:
-    defaults: dict[str, Any] = {"specialty": "живопись", "color": "#5B8C7A"}
+    # GH #599: color/flag only (directions live in the staff_specialties M2M).
+    defaults: dict[str, Any] = {"color": "#5B8C7A"}
     defaults.update(kwargs)
     ext = Master(staff_id=staff_id, **defaults)
     db_session.add(ext)

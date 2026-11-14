@@ -75,12 +75,32 @@ async def _add_position(db_session: Any, **kwargs: Any) -> Position:
 
 
 async def _add_master_ext(db_session: Any, staff_id: str, **kwargs: Any) -> Master:
-    defaults: dict[str, Any] = {"specialty": "живопись", "color": "#5B8C7A"}
+    """GH #599 R3: the extension row carries color only; the direction
+    links (when a test needs them) go through ``_add_specialty``."""
+    defaults: dict[str, Any] = {"color": "#5B8C7A"}
     defaults.update(kwargs)
     ext = Master(staff_id=staff_id, **defaults)
     db_session.add(ext)
     await db_session.flush()
     return ext
+
+
+async def _add_specialty(db_session: Any, title: str = "Живопись") -> str:
+    """GH #599: a real dictionary row id for the section's specialty_ids."""
+    from sqlalchemy import func as sa_func
+
+    from src.models.specialty import Specialty
+
+    row = (
+        await db_session.execute(
+            select(Specialty).where(sa_func.lower(Specialty.title) == title.lower())
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = Specialty(title=title)
+        db_session.add(row)
+        await db_session.flush()
+    return row.id
 
 
 async def _add_user(db_session: Any, staff_id: str, **kwargs: Any) -> User:
@@ -94,6 +114,19 @@ async def _add_user(db_session: Any, staff_id: str, **kwargs: Any) -> User:
     db_session.add(user)
     await db_session.flush()
     return user
+
+
+async def _link_specialty(db_session: Any, staff_id: str, title: str) -> None:
+    """Link a direction to the card (GH #599 raw-ORM seed idiom)."""
+    from src.models.specialty import staff_specialties
+
+    specialty_id = await _add_specialty(db_session, title)
+    await db_session.execute(
+        staff_specialties.insert().values(
+            staff_id=staff_id, specialty_id=specialty_id
+        )
+    )
+    await db_session.flush()
 
 
 async def _link_position(db_session: Any, staff_id: str, position_id: str) -> None:
@@ -178,21 +211,23 @@ async def test_update_section_upsert_then_change(db_session) -> None:
         db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
-            master={"specialty": "живопись", "color": "#111111"},
+            master={"specialty_ids": [await _add_specialty(db_session)],
+                    "color": "#111111"},
         ),
     )
     assert added is not None and added.master is not None
-    assert added.master.specialty == "живопись"
+    assert added.master.specialty == "Живопись"
 
     changed = await update_staff(
         db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
-            master={"specialty": "керамика", "color": "#222222"},
+            master={"specialty_ids": [await _add_specialty(db_session, "Керамика")],
+                    "color": "#222222"},
         ),
     )
     assert changed is not None and changed.master is not None
-    assert changed.master.specialty == "керамика"
+    assert changed.master.specialty == "Керамика"
     assert changed.master.color == "#222222"
     exts = (await db_session.execute(
         select(Master).where(Master.staff_id == staff.id)
@@ -354,6 +389,7 @@ async def test_patch_sent_fields_only_keeps_sections(db_session) -> None:
     pos = await _add_position(db_session)
     staff = await _add_staff(db_session, first_name="Ольга")
     await _add_master_ext(db_session, staff.id)
+    await _link_specialty(db_session, staff.id, "Живопись")
     await _link_position(db_session, staff.id, pos.id)
 
     patched = await patch_staff(
@@ -363,7 +399,7 @@ async def test_patch_sent_fields_only_keeps_sections(db_session) -> None:
     assert patched.first_name == "Патч"
     assert patched.last_name == "Б"  # unsent → kept
     assert patched.master is not None  # kept
-    assert patched.master.specialty == "живопись"
+    assert patched.master.specialty == "Живопись"
     assert patched.position_ids == [pos.id]  # kept
 
 
@@ -409,13 +445,14 @@ async def test_patch_absent_master_keeps_section(db_session) -> None:
 
     staff = await _add_staff(db_session)
     await _add_master_ext(db_session, staff.id)
+    await _link_specialty(db_session, staff.id, "Живопись")
 
     patched = await patch_staff(
         db_session=db_session, id=staff.id, data=StaffPatch(first_name="В"),
     )
     assert patched is not None
     assert patched.master is not None
-    assert patched.master.specialty == "живопись"
+    assert patched.master.specialty == "Живопись"
 
 
 async def test_patch_null_master_removes_section(db_session) -> None:
@@ -437,14 +474,15 @@ async def test_patch_master_payload_upserts(db_session) -> None:
     from src.usecases.staff import patch_staff
 
     staff = await _add_staff(db_session)
-    await _add_master_ext(db_session, staff.id, specialty="старая", color="#111111")
+    await _add_master_ext(db_session, staff.id, color="#111111")
 
     patched = await patch_staff(
         db_session=db_session, id=staff.id,
-        data=StaffPatch(master={"specialty": "новая", "color": "#222222"}),
+        data=StaffPatch(master={"specialty_ids": [await _add_specialty(db_session, "Новая")],
+                                "color": "#222222"}),
     )
     assert patched is not None and patched.master is not None
-    assert patched.master.specialty == "новая"
+    assert patched.master.specialty == "Новая"
     assert patched.master.color == "#222222"
 
 
@@ -546,7 +584,8 @@ async def test_update_grid_full_replacement(db_session, subscriber) -> None:
         db_session=db_session, id=staff.id,
         data=StaffUpdate(
             first_name="А", last_name="Б",
-            master={"specialty": "живопись", "color": "#111111"},
+            master={"specialty_ids": [await _add_specialty(db_session)],
+                    "color": "#111111"},
             position_ids=[pos.id],
         ),
     )
@@ -554,7 +593,7 @@ async def test_update_grid_full_replacement(db_session, subscriber) -> None:
 
     events = _drain(subscriber)
     assert len(events) == 1
-    assert events[0][0] == {"staff", "masters", "staff_positions"}
+    assert events[0][0] == {"staff", "masters", "staff_specialties", "staff_positions"}
 
 
 async def test_patch_grid_card_only_is_staff(db_session, subscriber) -> None:
@@ -626,7 +665,8 @@ async def test_update_atomicity_position_boom_keeps_pre_state(
             db_session=db_session, id=staff_id,
             data=StaffUpdate(
                 first_name="После", last_name="Б",
-                master={"specialty": "живопись", "color": "#111111"},
+                master={"specialty_ids": [await _add_specialty(db_session)],
+                    "color": "#111111"},
                 position_ids=[],
             ),
         )
@@ -668,7 +708,8 @@ async def test_patch_atomicity_section_boom_keeps_pre_state(
             db_session=db_session, id=staff_id,
             data=StaffPatch(
                 first_name="После",
-                master={"specialty": "живопись", "color": "#111111"},
+                master={"specialty_ids": [await _add_specialty(db_session)],
+                    "color": "#111111"},
             ),
         )
 

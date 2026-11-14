@@ -168,14 +168,17 @@ def test_upgrade_head_preserves_legacy_staff_data(tmp_path: Path) -> None:
 
         # Step 2 — one masters row per former master, INCLUDING the archived
         # one and the «администратор» (is_active carried over verbatim, D3).
+        # GH #599 R3: the free-text ``specialty`` column is dropped at head
+        # (structure-only, no data conversion — the dev base is reseeded);
+        # the rows themselves survive the walk.
         assert rows(
-            "SELECT staff_id, specialty, color, is_active FROM masters"
+            "SELECT staff_id, color, is_active FROM masters"
             " ORDER BY staff_id"
         ) == [
-            ("a1", "", "#222222", 1),
-            ("m1", "живопись", "#5B8C7A", 1),
-            ("m2", "керамика", "#6B7E9C", 1),
-            ("m9", "живопись", "#111111", 0),
+            ("a1", "#222222", 1),
+            ("m1", "#5B8C7A", 1),
+            ("m2", "#6B7E9C", 1),
+            ("m9", "#111111", 0),
         ]
 
         # Steps 3–4 — dictionary populated on a data-bearing DB; links follow

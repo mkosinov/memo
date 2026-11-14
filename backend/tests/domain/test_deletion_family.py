@@ -126,7 +126,7 @@ async def _add_visitor(db_session, client: Client, name: str = "Петя") -> Vi
 
 async def _add_activity(db_session, *, service: Service) -> Activity:
     staff = await _add_staff(db_session)
-    db_session.add(Master(staff_id=staff.id, specialty="живопись", color="#000000"))
+    db_session.add(Master(staff_id=staff.id, color="#000000"))
     location = await _add_location(db_session)
     await db_session.flush()
     activity = Activity(

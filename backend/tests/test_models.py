@@ -78,12 +78,12 @@ def _create_all_and_session(engine):
 
 
 def _mk_master(session: Session, *, first_name: str = "A", last_name: str = "B",
-               specialty: str = "живопись", color: str = "#000000") -> str:
+               color: str = "#000000") -> str:
     """GH #266: create Staff card + masters extension; return the shared id."""
     staff = Staff(first_name=first_name, last_name=last_name)
     session.add(staff)
     session.flush()
-    session.add(Master(staff_id=staff.id, specialty=specialty, color=color))
+    session.add(Master(staff_id=staff.id, color=color))
     session.flush()
     return staff.id
 
@@ -183,8 +183,9 @@ class TestModelCrud:
 
     def test_master_crud(self, session: Session):
         """GH #266: the card (Staff) + the schedule extension (Master) —
-        one id shared by both, names on the card, specialty/color on the
-        extension."""
+        one id shared by both, names on the card, color on the
+        extension (GH #599: the directions live in the staff_specialties
+        M2M, not on the extension row)."""
         from src.models import Master
         staff = Staff(
             first_name="Anna",
@@ -193,7 +194,7 @@ class TestModelCrud:
         )
         session.add(staff)
         session.flush()
-        session.add(Master(staff_id=staff.id, specialty="живопись", color="#FF5733"))
+        session.add(Master(staff_id=staff.id, color="#FF5733"))
         session.flush()
 
         card = session.get(Staff, staff.id)
@@ -203,7 +204,6 @@ class TestModelCrud:
         assert card.is_active is True
         ext = session.get(Master, staff.id)
         assert ext.staff_id == staff.id
-        assert ext.specialty == "живопись"
         assert ext.color == "#FF5733"
         assert ext.is_active is True
 

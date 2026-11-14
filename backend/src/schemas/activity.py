@@ -45,13 +45,18 @@ class ActivityBase(BaseModel):
 class ActivityCreate(ActivityBase):
     """Request schema for creating a new activity."""
 
-    pass
+    # GH #551 (user decision 2026-11-13): capacity 0–99 on every write
+    # path; 0 = «запись закрыта». Deliberately NOT on ActivityBase —
+    # ActivityResponse inherits it and read schemas stay unbounded so
+    # legacy out-of-range rows keep parsing.
+    capacity: int = Field(ge=0, le=99)
 
 
 class ActivityUpdate(ActivityBase):
     """Request schema for updating an activity (full replacement via PUT)."""
 
-    pass
+    # Same 0–99 range as ActivityCreate (GH #551); read schemas unbounded.
+    capacity: int = Field(ge=0, le=99)
 
 
 class ActivityPatch(BaseModel):
@@ -62,7 +67,8 @@ class ActivityPatch(BaseModel):
     location_id: str | None = None
     start: datetime | None = None
     duration: int | None = None  # minutes
-    capacity: int | None = None
+    # GH #551: 0–99 when sent; absent key leaves the stored value alone.
+    capacity: int | None = Field(default=None, ge=0, le=99)
     is_private: bool | None = None
     comment: str | None = None
     record_info: str | None = None

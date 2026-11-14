@@ -59,20 +59,6 @@ async def _t3_spec(db_session) -> Specialty:
     return row
 
 
-async def _t3_spec(db_session) -> Specialty:
-    """GH #599: one direction row per test world (find-or-create by title)."""
-    row = (
-        await db_session.execute(
-            select(Specialty).where(Specialty.title == "Живопись")
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        row = Specialty(title="Живопись")
-        db_session.add(row)
-        await db_session.flush()
-    return row
-
-
 async def _world(db_session) -> Activity:
     """Insert Staff + master extension + Service + Location + Activity."""
     staff = Staff(first_name="М", last_name="Л")

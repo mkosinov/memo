@@ -16,22 +16,22 @@ pytestmark = pytest.mark.api
 
 @pytest.fixture
 def me(api_client) -> str:
-    """The api_client session user's id."""
-    resp = api_client.get("/api/v1/auth/me")
+    """The api_client session user's id (whoami — #584 §4.1)."""
+    resp = api_client.get("/api/v1/my")
     assert resp.status_code == 200, resp.text
-    return resp.json()["user"]["id"]
+    return resp.json()["id"]
 
 
 class TestUserSettingsPatchArchivedVisibility:
-    """PATCH /api/v1/user-settings with the GH #267 visibility toggles."""
+    """PATCH /api/v1/my/admin/settings with the GH #267 visibility toggles."""
 
     def test_patch_show_archived_masters_false(self, api_client, me) -> None:
         """PATCH show_archived_masters=false flips it; other fields unchanged."""
         delete_settings_row(me)  # §5.5 anomaly pattern
-        api_client.post("/api/v1/user-settings", json={"user_id": me})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
 
         response = api_client.patch(
-            "/api/v1/user-settings", json={"show_archived_masters": False}
+            "/api/v1/my/admin/settings", json={"show_archived_masters": False}
         )
         assert response.status_code == 200
         body = response.json()
@@ -41,10 +41,10 @@ class TestUserSettingsPatchArchivedVisibility:
     def test_patch_show_archived_locations_true(self, api_client, me) -> None:
         """PATCH show_archived_locations=true flips it; other fields unchanged."""
         delete_settings_row(me)
-        api_client.post("/api/v1/user-settings", json={"user_id": me})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
 
         response = api_client.patch(
-            "/api/v1/user-settings", json={"show_archived_locations": True}
+            "/api/v1/my/admin/settings", json={"show_archived_locations": True}
         )
         assert response.status_code == 200
         body = response.json()
@@ -54,9 +54,9 @@ class TestUserSettingsPatchArchivedVisibility:
     def test_patch_without_toggles_noop(self, api_client, me) -> None:
         """PATCH without the toggle fields leaves both defaults intact."""
         delete_settings_row(me)
-        api_client.post("/api/v1/user-settings", json={"user_id": me})
+        api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
 
-        response = api_client.patch("/api/v1/user-settings", json={"theme": "dark"})
+        response = api_client.patch("/api/v1/my/admin/settings", json={"theme": "dark"})
         assert response.status_code == 200
         body = response.json()
         assert body["show_archived_masters"] is True

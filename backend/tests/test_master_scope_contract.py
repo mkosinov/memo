@@ -137,7 +137,8 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     # ── Auth surface: resolves the session itself, no scope needed ──
     ("POST", "/api/v1/auth/login"): "auth surface (anonymous by design)",
     ("POST", "/api/v1/auth/logout"): "auth surface (own session teardown)",
-    ("GET", "/api/v1/auth/me"): "auth surface (returns own principal + permissions)",
+    # ADR-015 (#584, spec §4.5): ("GET", "/api/v1/auth/me") was removed
+    # with the route — the own-principal surface is the /my entries above.
     ("POST", "/api/v1/auth/change-password"): "auth surface (own password, require_session)",
     # ── Public password setup (#348 §5/§7): anonymous by design — the
     #    authority is the one-time token; no session, no master scope. ──
@@ -157,22 +158,46 @@ ALLOWED_UNSCOPED: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/call/status"): "public callcheck poll (#593 §Эндпоинты) — one-time handle authority; confirmed issues the client session",
     ("POST", "/api/v1/auth/call/dev-done"): "public dev imitation (#593 §Эндпоинты) — resolver-gated (404 unless dev transport), handle authority",
     # ── Own-data endpoints: per-user rows keyed by the session user ──
-    ("GET", "/api/v1/my"): "own profile (#262) — per-user, not master-scoped",
-    ("PUT", "/api/v1/my"): "own profile (#262)",
-    ("POST", "/api/v1/my/portrait"): "own portrait (#262)",
-    # Client cabinet (#499 §4.3/§5, #513 reads): the routers bind
+    ("GET", "/api/v1/my"): "whoami (#584 §4.1) — either session, account data + role list",
+    # Staff branches (#584 §4.3; the GH #262 profile re-homed): the branch
+    # guards admit by role/section composition, rows are keyed by the
+    # session user — per-user, not master-scoped.
+    ("GET", "/api/v1/my/master"): "own profile, master branch (#584 §4.3) — per-user",
+    ("PUT", "/api/v1/my/master"): "own profile write, master branch (#584 §4.3)",
+    ("POST", "/api/v1/my/master/avatar"): "own avatar upload, master branch (#262/#584 §4.3)",
+    ("GET", "/api/v1/my/admin"): "own profile, admin branch (#584 §4.3) — per-user",
+    ("PUT", "/api/v1/my/admin"): "own profile write, admin branch (#584 §4.3)",
+    ("POST", "/api/v1/my/admin/avatar"): "own avatar upload, admin branch (#262/#584 §4.3)",
+    # Client cabinet (#499 §4.3/§5, #513 reads; ADR-015 #584 moved the
+    # surface under the /my/client/* branch): the router binds
     # require_client_session (memo_client_session, role=client) —
     # own-card data/booking/reads, per-user, not master-scoped.
     ("GET", "/api/v1/my/client"): "client cabinet (#499 §4.3) — client session, own card",
-    ("POST", "/api/v1/my/records"): "client booking (#499 §5) — client session, own-card booking",
-    ("GET", "/api/v1/my/records"): "client cabinet read (#513) — client session, own records",
-    ("GET", "/api/v1/my/photos"): "client cabinet read (#513) — client session, own photos",
-    ("GET", "/api/v1/my/payments"): "client cabinet read (#513) — client session, payments of own records",
-    ("GET", "/api/v1/user-settings"): "own settings — per-user",
-    ("POST", "/api/v1/user-settings"): "own settings — per-user",
-    ("PUT", "/api/v1/user-settings"): "own settings — per-user",
-    ("PATCH", "/api/v1/user-settings"): "own settings — per-user",
-    ("DELETE", "/api/v1/user-settings/{id}"): "own settings — per-user",
+    ("POST", "/api/v1/my/client/records"): "client booking (#499 §5) — client session, own-card booking",
+    ("GET", "/api/v1/my/client/records"): "client cabinet read (#513) — client session, own records",
+    ("GET", "/api/v1/my/client/photos"): "client cabinet read (#513) — client session, own photos",
+    ("GET", "/api/v1/my/client/payments"): "client cabinet read (#513) — client session, payments of own records",
+    # ── Own settings under the «my» branches (#584 §4.4; the former
+    #    /api/v1/user-settings island re-homed): rows are keyed by the
+    #    session user — per-user, not master-scoped. The master branch
+    #    is the master's own surface; the admin branch guard 403s a
+    #    non-admin master; the client branch is the client session's
+    #    own surface (a staff cookie is 401 there). ──
+    ("GET", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("POST", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("PUT", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("PATCH", "/api/v1/my/master/settings"): "own settings, master branch (#584 §4.4) — per-user",
+    ("DELETE", "/api/v1/my/master/settings/{id}"): "own settings, master branch (#584 §4.4) — per-user",
+    ("GET", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403 for a non-admin master",
+    ("POST", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("PUT", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("PATCH", "/api/v1/my/admin/settings"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("DELETE", "/api/v1/my/admin/settings/{id}"): "own settings, admin branch (#584 §4.4) — branch guard 403",
+    ("GET", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("POST", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("PUT", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("PATCH", "/api/v1/my/client/settings"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
+    ("DELETE", "/api/v1/my/client/settings/{id}"): "own settings, client branch (#584 §4.4) — client session only, 401 for staff",
     # ── Admin-only surfaces: master holds NO permission token for these
     #    (ROLE_PERMISSIONS has no staff/positions/materials/:write entries)
     #    → the permission gate answers 403 before scope would ever run.

@@ -148,7 +148,7 @@ def real_user():
 @pytest.fixture
 def actor(real_user):
     """Open the actor contextvar around a test."""
-    token = audit.set_actor(user_id=real_user["id"], role="admin")
+    token = audit.set_actor(user_id=real_user["id"], roles=["admin"])
     yield real_user
     audit.reset_actor(token)
 
@@ -161,12 +161,12 @@ class TestResolveAuthedActor:
         from src.auth.permissions import SESSION_COOKIE, resolve_authed
 
         token = api_client.cookies.get(SESSION_COOKIE)
-        assert token, "api_client must hold a memo_session cookie"
+        assert token, "api_client must hold a memo_staff_session cookie"
         authed = await resolve_authed(token)
         assert authed is not None
 
         staged = audit.current_actor()
-        assert staged == audit.AuditActor(user_id=authed.id, role="admin")
+        assert staged == audit.AuditActor(user_id=authed.id, roles=("admin",))
 
     async def test_unknown_token_stages_no_actor(self) -> None:
         from src.auth.permissions import resolve_authed

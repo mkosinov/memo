@@ -133,7 +133,7 @@ def api_client(app, db_engine, _admin_hash):
     the first truncate. Instead: truncate runs first (autouse, same
     scope), then this fixture direct-INSERTs the admin user and logs in
     via ``POST /api/v1/auth/login`` — the yielded client's cookie jar
-    holds the admin ``memo_session`` for the whole test.
+    holds the admin ``memo_staff_session`` for the whole test.
 
     Routers are still open, so existing tests notice only the extra users
     row. The ~20–40 ms per-test login cost is reviewer-verified
@@ -223,7 +223,7 @@ def login_as(app):
     with ``hash_password`` — the ``_user`` pattern), then::
 
         other = login_as(phone, password)
-        other.get("/api/v1/auth/me")
+        other.get("/api/v1/my")
 
     No ``with`` block: the client must outlive the factory call, and the
     app lifespan is a no-op in testing (hub.drain only), so a plain

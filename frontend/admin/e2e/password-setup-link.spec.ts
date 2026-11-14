@@ -36,18 +36,22 @@ function uniquePhone(): string {
 }
 
 /** A passwordless staff card + account + a live setup link (admin corridor).
- *  Returns the card id, the account id, the phone and the RAW link token. */
+ *  Returns the card id, the account id, the phone, the card's last name
+ *  (the #584 profile wire carries names, not card ids) and the RAW link
+ *  token. */
 async function createAccountWithLink(request: APIRequestContext): Promise<{
   staffId: string;
   userId: string;
   phone: string;
+  lastName: string;
   token: string;
 }> {
   const phone = uniquePhone();
+  const lastName = `Установов${Date.now()}`;
   const createResp = await request.post(`${BACKEND}/api/v1/staff`, {
     data: {
       first_name: 'Ссылкин',
-      last_name: `Установов${Date.now()}`,
+      last_name: lastName,
       avatar_url: '',
       sort_order: 999,
       master: null,
@@ -64,7 +68,7 @@ async function createAccountWithLink(request: APIRequestContext): Promise<{
   expect(linkResp.status()).toBe(200);
   const link = await linkResp.json();
 
-  return { staffId: staff.id, userId: accountId, phone, token: link.token };
+  return { staffId: staff.id, userId: accountId, phone, lastName, token: link.token };
 }
 
 /** A cookie-less API context for login probes (never rotates the shared
@@ -109,7 +113,7 @@ async function installPasswordViaLink(
 
 test.describe('#348 S2 — install password by link, then log in', () => {
   test('validate passes → form → install → success page → login with the new password', async ({ browser, request }) => {
-    const { staffId, userId, phone, token } = await createAccountWithLink(request);
+    const { staffId, userId, phone, lastName, token } = await createAccountWithLink(request);
     const { ctx, page } = await anonContext(browser);
     try {
       await page.goto(`/password-setup#token=${token}`);
@@ -155,10 +159,26 @@ test.describe('#348 S2 — install password by link, then log in', () => {
       await expect(page.locator('[data-testid="menubar"]')).toBeVisible({ timeout: 30_000 });
 
       // The page's own session is the employee's (not the admin's). The
-      // /auth/me wire keeps the legacy `master_id` field (== staff card id).
-      const me = await page.request.get(`${BACKEND}/api/v1/auth/me`);
-      expect(me.status()).toBe(200);
-      expect((await me.json())?.user?.master_id).toBe(staffId);
+      // #584 wires: the whoami answers with the account + its single
+      // staff role (the passwordless composite create with no master
+      // section and no positions resolves the role to admin — GH #263
+      // D10 fallback), and the ADMIN-branch profile carries the LINKED
+      // CARD's names (the /auth/me master_id field is gone with the
+      // endpoint — the card link itself is pinned by the names below,
+      // unique to this throwaway card). The master branch is foreign to
+      // this account: 403 (#584 §4.3 branch admission).
+      const who = await page.request.get(`${BACKEND}/api/v1/my`);
+      expect(who.status()).toBe(200);
+      const whoBody = await who.json();
+      expect(whoBody?.phone).toBe(phone);
+      expect(whoBody?.roles).toEqual(['admin']);
+      const profile = await page.request.get(`${BACKEND}/api/v1/my/admin`);
+      expect(profile.status()).toBe(200);
+      const prof = await profile.json();
+      expect(prof?.first_name).toBe('Ссылкин');
+      expect(prof?.last_name).toBe(lastName);
+      const foreignBranch = await page.request.get(`${BACKEND}/api/v1/my/master`);
+      expect(foreignBranch.status()).toBe(403);
     } finally {
       await ctx.close();
       try { queryDBRow(`DELETE FROM password_setup_tokens WHERE user_id='${userId}'`); } catch { /* best-effort */ }

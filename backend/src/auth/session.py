@@ -1,6 +1,6 @@
 """Session ORM model + lifetime constants — GH #247 §3.3.
 
-Server-side session rows; the ``memo_session`` cookie carries only the random
+Server-side session rows; the ``memo_staff_session`` cookie carries only the random
 token. Sliding lifetime: idle window 7 days (extended at most once per hour)
 capped absolutely at 30 days from creation. Rows are hard-deleted on
 logout/expiry — no soft-delete flag. Multiple concurrent sessions per user

@@ -32,7 +32,11 @@ from src.models.master import Master
 from src.models.staff import Staff
 from src.models.user import User
 from src.models.user_profile import UserProfile
-from src.schemas.my import MyProfileResponse, MyProfileUpdate
+from src.schemas.my import (
+    MyMasterSection,
+    MyProfileResponse,
+    MyProfileUpdate,
+)
 from src.services.decorators import transactional
 
 if TYPE_CHECKING:
@@ -68,7 +72,8 @@ def _normalize_series_number(value: str) -> str:
 
 
 class ProfileService:
-    """Composite staff-card + private-profile service for ``/api/v1/my``."""
+    """Composite staff-card + private-profile service for the staff
+    branches ``/api/v1/my/{master|admin}`` (#584 §4.3)."""
 
     # GH #262 spec §4/D10: the transactional emit reuses the EXISTING
     # ``staff`` entity (the card changed) — deliberately NOT a new
@@ -83,8 +88,8 @@ class ProfileService:
 
         ``staff``/``master`` resolve to ``None`` when absent OR archived —
         for ``/my`` an archived card is ``has_staff=false`` (editing gate;
-        the own-name display rule for the user block lives in /auth/me,
-        spec §4 Display rule).
+        the own-name display rule for the user block lives in the login
+        response builder ``_build_me_response``, spec §4 Display rule).
         """
         user = await self._get_user(db_session, user_id)
 
@@ -166,6 +171,27 @@ class ProfileService:
             db_session, user_id
         )
         return self._to_response(user, staff, master, profile)
+
+    async def get_master_section(
+        self, db_session: AsyncSession, user_id: str
+    ) -> MyMasterSection | None:
+        """The ACTIVE master-section projection for the master branch (#584
+        spec §4.3).
+
+        Same ``_context`` semantics as the flat profile (an archived card
+        or an archived section → ``None`` — display parity with
+        ``has_master``); the router composes it into
+        ``MyStaffProfileResponse`` only on the master branch.
+        """
+        _user, _staff, master, _profile = await self._context(
+            db_session, user_id
+        )
+        if master is None:
+            return None
+        return MyMasterSection(
+            specialties=_split_specialties_csv(master.specialty),
+            color=master.color,
+        )
 
     async def _apply_update(
         self, db_session: AsyncSession, user_id: str, payload: dict[str, object]

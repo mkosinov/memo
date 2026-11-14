@@ -122,9 +122,13 @@ test.describe('GH #319 С1 — settings row exists before first login', () => {
       //    the popup toggle (visual) + the patchUserSettings write into
       //    the pre-guaranteed row — WITHOUT any preliminary creation
       //    (the C1 guarantee: PATCH 200, never 404 SETTIGS_NOT_FOUND).
+      //    #584 §4.4: the settings router moved under the staff branches
+      //    (own-only; the createTestStaff default card has no master
+      //    section → the account role is admin → the ADMIN branch is the
+      //    app's computed branch for this user).
       await loginAsUser(page, phone, E2E_PASSWORD);
       await toggleTheme(page);
-      const patch = await page.request.patch(`${BACKEND}/api/v1/user-settings`, {
+      const patch = await page.request.patch(`${BACKEND}/api/v1/my/admin/settings`, {
         data: { theme: 'dark' },
       });
       expect(patch.status()).toBe(200);
@@ -169,7 +173,8 @@ test.describe('GH #319 С3 — DELETE resets settings to defaults', () => {
 
       // 2. ACTION — change the theme (patchUserSettings corridor). DB row
       //    becomes dark; its id is captured for the recreate check.
-      const patch = await page.request.patch(`${BACKEND}/api/v1/user-settings`, {
+      //    (#584 §4.4: the branch path — same account, admin branch.)
+      const patch = await page.request.patch(`${BACKEND}/api/v1/my/admin/settings`, {
         data: { theme: 'dark' },
       });
       expect(patch.status()).toBe(200);
@@ -180,7 +185,7 @@ test.describe('GH #319 С3 — DELETE resets settings to defaults', () => {
       // 3. ACTION — DELETE the row via the API (page.request shares the
       //    logged-in user's session → own row → 204; #324 delete-family
       //    contract: a leaf commit carries {expected: {}}).
-      const del = await page.request.delete(`${BACKEND}/api/v1/user-settings/${settingsId}`, {
+      const del = await page.request.delete(`${BACKEND}/api/v1/my/admin/settings/${settingsId}`, {
         data: { expected: {} },
       });
       expect(del.status()).toBe(204);
@@ -189,7 +194,7 @@ test.describe('GH #319 С3 — DELETE resets settings to defaults', () => {
       // 4. ACTION/VERIFY — next read (reload) → defaults (light) back;
       //    capture the get-or-create GET's body directly.
       const getDone = page.waitForResponse(
-        (resp) => resp.url().includes('/api/v1/user-settings')
+        (resp) => resp.url().includes('/api/v1/my/admin/settings')
           && resp.request().method() === 'GET'
           && resp.status() === 200,
         { timeout: 30_000 },

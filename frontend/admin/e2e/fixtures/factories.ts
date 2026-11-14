@@ -660,12 +660,18 @@ export async function cleanup(api: APIRequestContext, path: string) {
   }
   // GH #324 delete-family subjects — the same unified contract (bare DELETE
   // → 422, resolutions-only retry → 422): route to the dry-run-then-commit
-  // cleaner instead of the generic path below.
+  // cleaner instead of the generic path below. Settings ride the #584
+  // branch paths (/api/v1/my/{master,admin,client}/settings/{id} — the
+  // same family transport mounted under the branch prefixes); the former
+  // flat /api/v1/user-settings/{id} no longer exists.
   if (
-    /^\/api\/v1\/(photos|visitors|positions|visits|payments|user-settings)\/[^/?]+$/.test(
+    /^\/api\/v1\/(photos|visitors|positions|visits|payments)\/[^/?]+$/.test(
       path,
     )
   ) {
+    return cleanupFamilySubject(api, path);
+  }
+  if (/^\/api\/v1\/my\/(master|admin|client)\/settings\/[^/?]+$/.test(path)) {
     return cleanupFamilySubject(api, path);
   }
   // GH #345 archivable family (staff/clients/services/locations/materials)

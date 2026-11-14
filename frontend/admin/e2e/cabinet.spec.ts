@@ -243,8 +243,9 @@ test.describe('S2 — change password', () => {
 // ===========================================================================
 test.describe('S3 — edit name + portrait, specialty read-only', () => {
   test('name + portrait update plate and staff table; specialty read-only and unchanged', async ({ page, request }) => {
-    // Heaviest scenario in the file: login + open menu + GET /my + name edit +
-    // portrait upload (POST /my/portrait) + save (PUT /my) + plate refresh +
+    // Heaviest scenario in the file: login + open menu + whoami (GET /my) +
+    // branch profile (GET /my/admin) + name edit + avatar upload
+    // (POST /my/admin/avatar) + save (PUT /my/admin) + plate refresh +
     // a second-page navigation to /staff. On a cold shard stack the route
     // compiles alone can eat the default 60s, so give this one headroom (the
     // scenario is cohesive per spec §7.3 — the staff-table check is binding).

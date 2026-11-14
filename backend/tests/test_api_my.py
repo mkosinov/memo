@@ -1,8 +1,16 @@
-"""GH #262 Task 1 — GET/PUT /api/v1/my (self-service «Мои данные»).
+"""GH #262 Task 1 — the staff profile, on the #584 branch paths.
+
+The flat ``MyProfileResponse`` contract (GH #262 §4) re-homed by #584
+spec §4.3: writes/reads live under ``/api/v1/my/master`` (this module's
+master-role users) and ``/api/v1/my/admin`` (the cardless/sectionless
+admin tests); the response grew the account half
+(``user_id``/``phone``/``email``/``permissions`` + the master-branch
+section/snapshot) — pinned exhaustively in
+``test_api_my_staff_branches.py``; here the profile HALF is the subject.
 
 Covers the plan RED list (spec §3.1/§4, D3/D7, domain-rules/profile.md):
 
-* GET flat profile exactly per §4 (role, has_staff, has_master, card
+* profile flat shape exactly per §4 (role, has_staff, has_master, card
   names/avatar, specialties array from the master-section CSV, private
   fields);
 * ``has_staff=false`` for a user without a card OR with an archived card
@@ -33,6 +41,11 @@ pytestmark = pytest.mark.api
 
 MY_PASSWORD = "my-pass-123"
 
+#: #584 §4.3 branch mounts (master-role tests ↔ master branch, the
+#: cardless/sectionless admin tests ↔ admin branch).
+MASTER_URL = "/api/v1/my/master"
+ADMIN_URL = "/api/v1/my/admin"
+
 #: Private half of the flat profile (spec §3.1) — must never appear as a
 #: key in any public serializer.
 PRIVATE_KEYS = {
@@ -55,6 +68,12 @@ _FULL_PROFILE_SHAPE = {
     "avatar_url",
     "specialties",
     *PRIVATE_KEYS,
+}
+
+#: The #584 staff response = the flat profile + the account half; the
+#: master-branch section/snapshot keys ride along (``MyStaffProfileResponse``).
+STAFF_PROFILE_SHAPE = _FULL_PROFILE_SHAPE | {
+    "user_id", "phone", "email", "permissions", "master_section", "master",
 }
 
 
@@ -138,12 +157,17 @@ def _make_cardless_user(login_as, _my_hash, *, role: str = "admin"):
 
 
 def _user_id(client) -> str:
-    me = client.get("/api/v1/auth/me")
+    me = client.get("/api/v1/my")
     assert me.status_code == 200, me.text
-    return me.json()["user"]["id"]
+    return me.json()["id"]
 
 
-# ─── GET /api/v1/my ────────────────────────────────────────────────────────────
+# ─── profile shape (GET on the #584 staff branches) ────────────────────────────
+#
+# The profile read is the branch GET now (#584 §4.3 re-homed the GH #262
+# surface); the response grew the account half — the full staff-shape key
+# set is pinned here once, the account-half values in
+# ``test_api_my_staff_branches.py``.
 
 
 class TestGetMyProfile:
@@ -152,7 +176,7 @@ class TestGetMyProfile:
     ) -> None:
         """Exact §4 response: card names, specialties array, private fields."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={
+        resp = client.put(MASTER_URL, json={
             "patronymic": "Петровна",
             "birth_date": "1990-05-01",
             "residence_address": "ул. Ленина, 1",
@@ -164,9 +188,9 @@ class TestGetMyProfile:
         })
         assert resp.status_code == 200, resp.text
 
-        body = client.get("/api/v1/my").json()
-        assert set(body.keys()) == _FULL_PROFILE_SHAPE
-        assert body == {
+        body = client.get(MASTER_URL).json()
+        assert set(body.keys()) == STAFF_PROFILE_SHAPE
+        assert {key: body[key] for key in _FULL_PROFILE_SHAPE} == {
             "role": "master",
             "has_staff": True,
             "has_master": True,
@@ -185,14 +209,14 @@ class TestGetMyProfile:
         }
 
     def test_requires_session(self, anon) -> None:
-        assert anon.get("/api/v1/my").status_code == 401
+        assert anon.get(MASTER_URL).status_code == 401
 
     def test_cardless_user(
         self, api_client, login_as, _my_hash
     ) -> None:
         """No card → has_staff/has_master false, public half all null."""
         client = _make_cardless_user(login_as, _my_hash)
-        body = client.get("/api/v1/my").json()
+        body = client.get(ADMIN_URL).json()
         assert body["role"] == "admin"
         assert body["has_staff"] is False
         assert body["has_master"] is False
@@ -209,7 +233,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, archive_card=True
         )
-        body = client.get("/api/v1/my").json()
+        body = client.get(MASTER_URL).json()
         assert body["has_staff"] is False
         assert body["has_master"] is False
         assert body["first_name"] is None
@@ -224,7 +248,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, with_master=False, role="admin"
         )
-        body = client.get("/api/v1/my").json()
+        body = client.get(ADMIN_URL).json()
         assert body["has_staff"] is True
         assert body["has_master"] is False
         assert body["first_name"] == "Мария"
@@ -237,7 +261,7 @@ class TestGetMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, archive_section=True
         )
-        body = client.get("/api/v1/my").json()
+        body = client.get(MASTER_URL).json()
         assert body["has_staff"] is True
         assert body["has_master"] is False
         assert body["specialties"] is None
@@ -248,7 +272,7 @@ class TestGetMyProfile:
     ) -> None:
         """Lazy creation: GET (and only a private-field PUT) never seeds rows."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        client.get("/api/v1/my")
+        client.get(MASTER_URL)
         rows = query_db("SELECT COUNT(*) AS n FROM user_profiles")
         assert rows[0]["n"] == 0
 
@@ -261,17 +285,17 @@ class TestGetMyProfile:
         user_id = _user_id(client)
         query_db(f"DELETE FROM users WHERE id = '{user_id}'")
 
-        resp = client.get("/api/v1/my")
+        resp = client.get(MASTER_URL)
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == "AUTH_UNAUTHORIZED"
 
 
-# ─── PUT /api/v1/my ────────────────────────────────────────────────────────────
+# ─── PUT on the staff branches (#584 §4.3) ────────────────────────────────────
 
 
 class TestPutMyProfile:
     def test_requires_session(self, anon) -> None:
-        resp = anon.put("/api/v1/my", json={"patronymic": "X"})
+        resp = anon.put(MASTER_URL, json={"patronymic": "X"})
         assert resp.status_code == 401
 
     def test_cross_site_fetch_rejected(
@@ -280,7 +304,7 @@ class TestPutMyProfile:
         """PUT carries verify_fetch_metadata: Sec-Fetch-Site: cross-site → 403."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my",
+            MASTER_URL,
             json={"patronymic": "X"},
             headers={"sec-fetch-site": "cross-site"},
         )
@@ -290,8 +314,8 @@ class TestPutMyProfile:
         self, api_client, login_as, _my_hash
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        client.put("/api/v1/my", json={"patronymic": "Петровна"})
-        resp = client.put("/api/v1/my", json={"birth_place": "Москва"})
+        client.put(MASTER_URL, json={"patronymic": "Петровна"})
+        resp = client.put(MASTER_URL, json={"birth_place": "Москва"})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["patronymic"] == "Петровна"  # omitted → kept
@@ -301,11 +325,11 @@ class TestPutMyProfile:
         self, api_client, login_as, _my_hash
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        client.put("/api/v1/my", json={
+        client.put(MASTER_URL, json={
             "patronymic": "Петровна",
             "residence_address": "ул. Ленина, 1",
         })
-        resp = client.put("/api/v1/my", json={"patronymic": None})
+        resp = client.put(MASTER_URL, json={"patronymic": None})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["patronymic"] is None  # explicit null → cleared
@@ -317,15 +341,15 @@ class TestPutMyProfile:
         """Explicit null on a NOT-NULL card column → 422 (null clears only
         nullable columns)."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={"first_name": None})
+        resp = client.put(MASTER_URL, json={"first_name": None})
         assert resp.status_code == 422
-        assert client.get("/api/v1/my").json()["first_name"] == "Мария"
+        assert client.get(MASTER_URL).json()["first_name"] == "Мария"
 
     def test_names_required_when_present_empty(
         self, api_client, login_as, _my_hash
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={"last_name": ""})
+        resp = client.put(MASTER_URL, json={"last_name": ""})
         assert resp.status_code == 422
 
     def test_names_written_to_staff_card(
@@ -333,7 +357,7 @@ class TestPutMyProfile:
     ) -> None:
         client, staff_id = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my", json={"first_name": "Жанна", "last_name": "Петрова"}
+            MASTER_URL, json={"first_name": "Жанна", "last_name": "Петрова"}
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["first_name"] == "Жанна"
@@ -348,7 +372,7 @@ class TestPutMyProfile:
         """D7: no card → name writes ignored, private fields fully usable."""
         client = _make_cardless_user(login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my",
+            ADMIN_URL,
             json={"first_name": "Жанна", "last_name": "Петрова", "patronymic": "Сергеевна"},
         )
         assert resp.status_code == 200, resp.text
@@ -364,7 +388,7 @@ class TestPutMyProfile:
         client, _sid = _make_staff_user(
             api_client, login_as, _my_hash, archive_card=True
         )
-        resp = client.put("/api/v1/my", json={"first_name": "Жанна"})
+        resp = client.put(MASTER_URL, json={"first_name": "Жанна"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["first_name"] is None
 
@@ -374,14 +398,14 @@ class TestPutMyProfile:
         """Read-only: the admin owns specialty (#266 D5)."""
         client, staff_id = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my", json={"specialties": ["керамика", "скетчинг"]}
+            MASTER_URL, json={"specialties": ["керамика", "скетчинг"]}
         )
         assert resp.status_code == 200, resp.text
         rows = query_db(
             f"SELECT specialty FROM masters WHERE staff_id = '{staff_id}'"
         )
         assert rows[0]["specialty"] == "живопись, керамика"
-        assert client.get("/api/v1/my").json()["specialties"] == [
+        assert client.get(MASTER_URL).json()["specialties"] == [
             "живопись", "керамика",
         ]
 
@@ -389,7 +413,7 @@ class TestPutMyProfile:
         self, api_client, login_as, _my_hash
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={"patronymic": "Сергеевна"})
+        resp = client.put(MASTER_URL, json={"patronymic": "Сергеевна"})
         assert resp.status_code == 200, resp.text
         user_id = _user_id(client)
         rows = query_db(
@@ -402,7 +426,7 @@ class TestPutMyProfile:
         self, api_client, login_as, _my_hash
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={})
+        resp = client.put(MASTER_URL, json={})
         assert resp.status_code == 200, resp.text
         rows = query_db("SELECT COUNT(*) AS n FROM user_profiles")
         assert rows[0]["n"] == 0
@@ -413,7 +437,7 @@ class TestPutMyProfile:
         """Trim + collapse inner whitespace runs on save (spec §3.1)."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my", json={"passport_series_number": "  4510   123456 "}
+            MASTER_URL, json={"passport_series_number": "  4510   123456 "}
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["passport_series_number"] == "4510 123456"
@@ -424,14 +448,14 @@ class TestPutMyProfile:
         """avatar_url rides the staff card: value writes, null clears."""
         client, staff_id = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.put(
-            "/api/v1/my", json={"avatar_url": "/api/v1/files/avatar/x.jpg"}
+            MASTER_URL, json={"avatar_url": "/api/v1/files/avatar/x.jpg"}
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["avatar_url"] == "/api/v1/files/avatar/x.jpg"
         card = api_client.get(f"/api/v1/staff/{staff_id}").json()
         assert card["avatar_url"] == "/api/v1/files/avatar/x.jpg"
 
-        resp = client.put("/api/v1/my", json={"avatar_url": None})
+        resp = client.put(MASTER_URL, json={"avatar_url": None})
         assert resp.status_code == 200, resp.text
         assert resp.json()["avatar_url"] is None
 
@@ -440,7 +464,7 @@ class TestPutMyProfile:
     ) -> None:
         """A failed PUT persists NOTHING: no staff change, no profile row."""
         client, staff_id = _make_staff_user(api_client, login_as, _my_hash)
-        resp = client.put("/api/v1/my", json={
+        resp = client.put(MASTER_URL, json={
             "first_name": "Жанна",          # valid card write
             "patronymic": "Петровна",       # valid private write
             "last_name": None,              # invalid → whole tx rolls back
@@ -452,7 +476,7 @@ class TestPutMyProfile:
         assert rows[0]["first_name"] == "Мария"
         rows = query_db("SELECT COUNT(*) AS n FROM user_profiles")
         assert rows[0]["n"] == 0
-        assert client.get("/api/v1/my").json()["patronymic"] is None
+        assert client.get(MASTER_URL).json()["patronymic"] is None
 
 
     def test_single_transaction_injected_failure_rolls_back_everything(
@@ -475,7 +499,7 @@ class TestPutMyProfile:
 
         monkeypatch.setattr(profile_module.ProfileService, "_to_response", _boom)
 
-        resp = client.put("/api/v1/my", json={
+        resp = client.put(MASTER_URL, json={
             "first_name": "Жанна", "patronymic": "Петровна",
         })
         assert resp.status_code == 500
@@ -496,7 +520,7 @@ class TestSseEmit:
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         _drain(subscriber)  # discard setup events (card/section writes)
-        resp = client.put("/api/v1/my", json={"first_name": "Жанна"})
+        resp = client.put(MASTER_URL, json={"first_name": "Жанна"})
         assert resp.status_code == 200, resp.text
 
         events = _drain(subscriber)
@@ -511,7 +535,7 @@ class TestSseEmit:
         private half changed (spec §4: the method emits the staff event)."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         _drain(subscriber)  # discard setup events (card/section writes)
-        resp = client.put("/api/v1/my", json={"patronymic": "Петровна"})
+        resp = client.put(MASTER_URL, json={"patronymic": "Петровна"})
         assert resp.status_code == 200, resp.text
 
         events = _drain(subscriber)
@@ -525,7 +549,7 @@ class TestSseEmit:
     ) -> None:
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         _drain(subscriber)  # discard setup events (card/section writes)
-        client.get("/api/v1/my")
+        client.get(MASTER_URL)
         assert _drain(subscriber) == []
 
 
@@ -548,7 +572,7 @@ class TestPublicBoundary:
     ) -> None:
         """Anonymous GET /masters: no private field key anywhere (S4)."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        client.put("/api/v1/my", json={
+        client.put(MASTER_URL, json={
             "patronymic": "Петровна",
             "passport_series_number": "4510 123456",
             "registration_address": "ул. Тверская, 5",
@@ -564,7 +588,7 @@ class TestPublicBoundary:
     ) -> None:
         """Guarded GET /staff (admin) carries the card, never the profile."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        client.put("/api/v1/my", json={"patronymic": "Петровна"})
+        client.put(MASTER_URL, json={"patronymic": "Петровна"})
         resp = api_client.get("/api/v1/staff")
         assert resp.status_code == 200, resp.text
         keys: set = set()
@@ -576,7 +600,7 @@ class TestPublicBoundary:
 
 
 class TestUserSettingsDeleteFamilyShortSet:
-    """DELETE /api/v1/user-settings/{id} — the leaf SHORT-form contract
+    """DELETE /api/v1/my/admin/settings/{id} — the leaf SHORT-form contract
     (GH #324 §10: bare 422, dry_run 204, commit ``{expected: {}}``, 404
     of both kinds) + the settings entity extra: own-only 403 on a
     foreign row (the probe-read + ownership gate — spec §4.2).
@@ -603,9 +627,9 @@ class TestUserSettingsDeleteFamilyShortSet:
         (the ``test_api_user_settings.py`` §5.5 anomaly pattern), then
         POST is a clean 201 again.
         """
-        me = api_client.get("/api/v1/auth/me").json()["user"]["id"]
+        me = api_client.get("/api/v1/my").json()["id"]
         delete_settings_row(me)
-        resp = api_client.post("/api/v1/user-settings", json={"user_id": me})
+        resp = api_client.post("/api/v1/my/admin/settings", json={"user_id": me})
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -614,28 +638,28 @@ class TestUserSettingsDeleteFamilyShortSet:
         survives."""
         settings = self._own_row(api_client)
 
-        resp = api_client.delete(f"/api/v1/user-settings/{settings['id']}")
+        resp = api_client.delete(f"/api/v1/my/admin/settings/{settings['id']}")
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["detail"] == "expected_state_required"
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_dry_run_returns_204_row_alive(self, api_client) -> None:
         """§4.4: a leaf previews empty → 204 WITHOUT deleting."""
         settings = self._own_row(api_client)
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings['id']}",
             params={"dry_run": "true"},
         )
 
         assert resp.status_code == 204, resp.text
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_commit_unknown_id_with_body_returns_404(self, api_client) -> None:
         """§4.2: cannot-exist id WITH body → 404 (probe after the form)."""
         resp = api_client.request(
-            "DELETE", "/api/v1/user-settings/00000000-0000-0000-0000-000000000000",
+            "DELETE", "/api/v1/my/admin/settings/00000000-0000-0000-0000-000000000000",
             json={"expected": {}},
         )
         assert resp.status_code == 404, resp.text
@@ -650,12 +674,12 @@ class TestUserSettingsDeleteFamilyShortSet:
         settings = self._own_row(api_client)
 
         resp = api_client.request(
-            "DELETE", f"/api/v1/user-settings/{settings['id']}",
+            "DELETE", f"/api/v1/my/admin/settings/{settings['id']}",
             json={"expected": {}},
         )
 
         assert resp.status_code == 204, resp.text
-        recreated = api_client.get("/api/v1/user-settings")
+        recreated = api_client.get("/api/v1/my/admin/settings")
         assert recreated.status_code == 200
         assert recreated.json()["id"] != settings["id"]
 
@@ -664,10 +688,14 @@ class TestUserSettingsDeleteFamilyShortSet:
     ) -> None:
         """§4.2: the settings entity extra — a REAL second user hitting
         the admin's row gets 403 AUTH_FORBIDDEN in BOTH branches (the
-        probe-read + ownership gate runs first); the row survives."""
+        probe-read + ownership gate runs first); the row survives.
+
+        #584 §4.4: the foreign user (_make_staff_user → a master) rides
+        HIS master branch — admitted there, then stopped by the
+        ownership gate (not by the branch guard)."""
         settings = self._own_row(api_client)  # admin's own row
         other, _sid = _make_staff_user(api_client, login_as, _my_hash)
-        url = f"/api/v1/user-settings/{settings['id']}"
+        url = f"/api/v1/my/master/settings/{settings['id']}"
 
         for resp in (
             other.request("DELETE", url, params={"dry_run": "true"}),
@@ -676,11 +704,11 @@ class TestUserSettingsDeleteFamilyShortSet:
             assert resp.status_code == 403, resp.text
             assert resp.json()["detail"]["code"] == "AUTH_FORBIDDEN"
         # The owner's row survives the foreign attempts.
-        assert api_client.get("/api/v1/user-settings").status_code == 200
+        assert api_client.get("/api/v1/my/admin/settings").status_code == 200
 
     def test_no_session_401_before_form(self, anon) -> None:
-        """The router-level session guard fires before any delete-family
+        """The router-level branch guard fires before any delete-family
         work: an anonymous bare DELETE gets 401 (never a form 422 — the
         contract never widens access)."""
-        resp = anon.delete("/api/v1/user-settings/00000000-0000-0000-0000-000000000000")
+        resp = anon.delete("/api/v1/my/admin/settings/00000000-0000-0000-0000-000000000000")
         assert resp.status_code == 401, resp.text

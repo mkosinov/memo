@@ -113,11 +113,14 @@ import {
   type AuditLogAuthorResponse,
   AuditLogAuthorResponseSchema,
   type AuthMe,
-  MyProfileSchema,
-  type MyProfile,
   type MyProfileUpdate,
-  PortraitResponseSchema,
-  type PortraitResponse,
+  MyWhoamiSchema,
+  type MyWhoami,
+  MyStaffProfileSchema,
+  type MyStaffProfile,
+  AvatarResponseSchema,
+  type AvatarResponse,
+  type StaffBranch,
   type ChangePassword,
   type VisitStatus,
   type ArchiveStatus,
@@ -1327,17 +1330,10 @@ export async function logout(): Promise<void> {
   await api('/api/v1/auth/logout', z.any(), { method: 'POST' });
 }
 
-// Guest bootstrap contract (spec §4.1): a 401 here means "no session" —
-// resolved to null, not thrown, so AuthContext can distinguish guest from
-// error. /auth/* 401s also never trigger the unauthorized handler (client.ts).
-export async function getMe(): Promise<AuthMe | null> {
-  try {
-    return await api('/api/v1/auth/me', AuthMeSchema);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401) return null;
-    throw e;
-  }
-}
+// #584 §4.5/§5: getMe() is REMOVED — /auth/me is deleted from the backend.
+// The guest bootstrap is now the whoami chain: getMyWhoami() →
+// getMyStaffProfile(branch) (see the section below). AuthMeSchema stays
+// for the login response only.
 
 // POST /auth/change-password (GH #262 spec §4): wrong current password →
 // 401 AUTH_INVALID_CREDENTIALS, policy breach → 422 PASSWORD_POLICY; 204
@@ -1349,27 +1345,53 @@ export async function changePassword(data: ChangePassword): Promise<void> {
   });
 }
 
-// ─── My profile (GH #262 spec §4 — own data, session-guarded) ─────────────
+// ─── «Кто я» + staff branches (#584 spec §4.1/§4.3) ───────────────────────
+// GET /api/v1/my is the audience-neutral whoami; the staff profile lives
+// under STATIC branch prefixes — a dynamic {branch} path parameter is
+// forbidden by the spec (it would shadow GET /my/client and the settings
+// branches by registration order). The branch is the audience address,
+// never different data: same account, same rows.
 
-export async function getMyProfile(): Promise<MyProfile> {
-  return api('/api/v1/my', MyProfileSchema);
+// Guest bootstrap probe (spec §5): a 401 here means "no session" —
+// resolved to null, not thrown, so AuthContext can distinguish guest from
+// error. The 401 also never triggers the unauthorized handler (client.ts:
+// the exact-path GET /api/v1/my exception — NOT a /my prefix).
+export async function getMyWhoami(): Promise<MyWhoami | null> {
+  try {
+    return await api('/api/v1/my', MyWhoamiSchema);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) return null;
+    throw e;
+  }
+}
+
+// Branch profile + permissions (GH #262 §4 own data + the account half
+// that moved from /auth/me). The master branch additionally carries the
+// master section and its snapshot; the admin branch leaves them null.
+export async function getMyStaffProfile(branch: StaffBranch): Promise<MyStaffProfile> {
+  return api(`/api/v1/my/${branch}`, MyStaffProfileSchema);
 }
 
 // Partial update: only sent keys apply, explicit null clears a nullable
-// field (domain-rules/profile.md). Returns the full flat profile.
-export async function updateMyProfile(data: MyProfileUpdate): Promise<MyProfile> {
-  return api('/api/v1/my', MyProfileSchema, {
+// field (domain-rules/profile.md). Returns the full branch profile.
+export async function updateMyStaffProfile(
+  branch: StaffBranch,
+  data: MyProfileUpdate,
+): Promise<MyStaffProfile> {
+  return api(`/api/v1/my/${branch}`, MyStaffProfileSchema, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-// Multipart portrait upload — the browser sets the boundary Content-Type
-// itself (client.ts skips the JSON default for FormData bodies).
-export async function uploadPortrait(file: File): Promise<PortraitResponse> {
+// Multipart avatar upload — the former /my/portrait, renamed by #584
+// (decision 2026-11-13); the upload contract is unchanged (5 MB,
+// JPEG/PNG/WebP). The browser sets the boundary Content-Type itself
+// (client.ts skips the JSON default for FormData bodies).
+export async function uploadAvatar(branch: StaffBranch, file: File): Promise<AvatarResponse> {
   const form = new FormData();
   form.append('file', file);
-  return api('/api/v1/my/portrait', PortraitResponseSchema, {
+  return api(`/api/v1/my/${branch}/avatar`, AvatarResponseSchema, {
     method: 'POST',
     body: form,
   });
@@ -1437,18 +1459,20 @@ export async function getMyClient(): Promise<MyClient> {
   return api('/api/v1/my/client', MyClientSchema);
 }
 
-// Client booking (spec §5): 201 MyRecordResponse; 404 unknown activity, 409
-// capacity, 422 PHONE_INVALID/TARIFF_REQUIRED/TARIFF_NOT_FOUND, 429 soft
-// anti-spam (20 records / 40 visits per 15 min). Logout stays the existing
+// Client booking (spec §5; #584 §4.2 moved the branch under /my/client):
+// 201 MyRecordResponse; 404 unknown activity, 409 capacity, 422
+// PHONE_INVALID/TARIFF_REQUIRED/TARIFF_NOT_FOUND, 429 soft anti-spam
+// (20 records / 40 visits per 15 min). Logout stays the existing
 // POST /auth/logout — it revokes whichever session cookie is presented.
 export async function createMyRecord(data: MyRecordCreate): Promise<MyRecordResponse> {
-  return api('/api/v1/my/records', MyRecordResponseSchema, {
+  return api('/api/v1/my/client/records', MyRecordResponseSchema, {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-// ─── Client cabinet read (GH #513 — the three «my» lists) ─────────────────
+// ─── Client cabinet read (GH #513 — the three «my» lists; #584 §4.2 moved
+// them under /my/client/*) ──────────────────────────────────────────────
 // Own-scoped reads behind the client session cookie (memo_client_session —
 // the same transport, client.ts includes credentials). The query is the
 // bare pagination brick: page/per_page + the machine ?id= narrowing
@@ -1474,33 +1498,40 @@ function myListQuery(params?: MyListParams): string {
 // Own records with visits (fixed sort: activity start DESC, id ASC).
 // 401 AUTH_UNAUTHORIZED without a client session; 422 on bad pagination.
 export async function listMyRecords(params?: MyListParams): Promise<PaginatedResponse<MyRecordItem>> {
-  return api(`/api/v1/my/records${myListQuery(params)}`, MyRecordListResponseSchema);
+  return api(`/api/v1/my/client/records${myListQuery(params)}`, MyRecordListResponseSchema);
 }
 
 // All the client's photos regardless of publicity (fixed sort:
 // created_at DESC, id ASC); tags arrive resolved to names (string[]).
 export async function listMyPhotos(params?: MyListParams): Promise<PaginatedResponse<MyPhotoItem>> {
-  return api(`/api/v1/my/photos${myListQuery(params)}`, MyPhotoListResponseSchema);
+  return api(`/api/v1/my/client/photos${myListQuery(params)}`, MyPhotoListResponseSchema);
 }
 
 // Payments of the client's records (ownership is THROUGH the record;
 // fixed sort: created_at DESC, id ASC); each item carries the always-
 // present record context {id, activity_date, service_title}.
 export async function listMyPayments(params?: MyListParams): Promise<PaginatedResponse<MyPaymentItem>> {
-  return api(`/api/v1/my/payments${myListQuery(params)}`, MyPaymentListResponseSchema);
+  return api(`/api/v1/my/client/payments${myListQuery(params)}`, MyPaymentListResponseSchema);
 }
 
-// ─── User Settings ────────────────────────────────────────────────────
-// Own-only since GH #247 §3.8: the server derives the user from the session —
-// no user_id query parameter anywhere.
+// ─── User Settings (#584 §4.4 — under the staff branches) ──────────────
+// Own-only since GH #247 §3.8: the server derives the user from the session
+// — no user_id query parameter anywhere. The staff instance mounts under
+// BOTH /my/master/settings and /my/admin/settings — same account, same
+// rows; the branch is the audience address. The client instance
+// (/my/client/settings) is a ready backend surface WITHOUT api-client
+// methods: they arrive together with a consumer (spec §4.4).
 
-export async function getUserSettings(): Promise<UserSettingsResponse> {
-  return api('/api/v1/user-settings', UserSettingsResponseSchema);
+export async function getUserSettings(branch: StaffBranch): Promise<UserSettingsResponse> {
+  return api(`/api/v1/my/${branch}/settings`, UserSettingsResponseSchema);
 }
 
-export async function updateUserSettings(data: UserSettingsUpdate): Promise<UserSettingsResponse> {
+export async function updateUserSettings(
+  branch: StaffBranch,
+  data: UserSettingsUpdate,
+): Promise<UserSettingsResponse> {
   return api(
-    '/api/v1/user-settings',
+    `/api/v1/my/${branch}/settings`,
     UserSettingsResponseSchema,
     {
       method: 'PUT',
@@ -1511,10 +1542,11 @@ export async function updateUserSettings(data: UserSettingsUpdate): Promise<User
 
 // PATCH for partial updates — only send the changed fields.
 export async function patchUserSettings(
+  branch: StaffBranch,
   data: Partial<UserSettingsUpdate>,
 ): Promise<UserSettingsResponse> {
   return api(
-    '/api/v1/user-settings',
+    `/api/v1/my/${branch}/settings`,
     UserSettingsResponseSchema,
     {
       method: 'PATCH',

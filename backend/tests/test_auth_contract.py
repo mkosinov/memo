@@ -12,7 +12,7 @@ and enforces, for every ``APIRoute`` under ``/api/v1``:
 * a guarded route is NOT allowlisted (GH #600 Task 2): the walk above is
   blind to «guarded AND allowlisted» — both clauses pass it — so a second
   assert pins that a permission guard always ships with its allowlist
-  pruning (sole exception: ``GET /api/v1/auth/me``, 401-by-design probe).
+  pruning (no exceptions since #584 — the former /auth/me probe is gone).
 
 Path normalization (the ``src/auth/public.py`` docstring convention): real
 routers use entity-specific param names (``{master_id}``, ``{photo_id}``, …)
@@ -73,17 +73,31 @@ def _is_auth_depend(call: Any) -> bool:
       check; a role guard, still an authenticating dependency;
     * ``require_client_session`` (#499 spec §3) — the client-cookie twin
       of ``require_session`` (identity check; authenticates the client
-      principal, the role barrier is part of the guard).
+      principal, the role barrier is part of the guard);
+    * ``require_any_session`` (#584 spec §4.1/§6) — the combined whoami
+      guard (either cookie audience; 401 on an empty role list);
+    * ``require_admin_branch`` / ``require_master_branch`` (#584 spec
+      §4.3) — the staff-branch admission guards (staff session + branch
+      composition; authenticating dependencies of /my/master, /my/admin).
 
     ``verify_fetch_metadata`` is deliberately NOT an auth dependency — it
     only rejects cross-site browser fetches and authenticates nobody.
     """
-    from src.auth.permissions import require_admin, require_client_session
+    from src.auth.permissions import (
+        require_admin,
+        require_admin_branch,
+        require_any_session,
+        require_client_session,
+        require_master_branch,
+    )
 
     if (
         call is require_session
         or call is require_admin
         or call is require_client_session
+        or call is require_any_session
+        or call is require_admin_branch
+        or call is require_master_branch
     ):
         return True
     return getattr(call, "__qualname__", "").startswith("require_permission")
@@ -142,11 +156,9 @@ def _route_methods(route: Any) -> set[str]:
 class TestDefaultDenyContract:
     #: Guarded routes deliberately ALSO allowlisted: anonymous hits the
     #: guard's 401 — the entry documents the surface, it opens nothing.
-    #: /auth/me is the session probe (the SPA calls it before login and
-    #: EXPECTS 401, not 404, when unauthenticated).
-    _GUARDED_AND_PUBLIC_OK: frozenset[tuple[str, str]] = frozenset({
-        ("GET", "/api/v1/auth/me"),
-    })
+    #: EMPTY since #584 (spec §4.5): the sole former exception — the
+    #: /auth/me 401-by-design probe — died with the route itself.
+    _GUARDED_AND_PUBLIC_OK: frozenset[tuple[str, str]] = frozenset()
 
     def test_every_api_v1_route_is_guarded_or_allowlisted(self, app) -> None:
         """No /api/v1 APIRoute may be both dependency-free and off-allowlist."""

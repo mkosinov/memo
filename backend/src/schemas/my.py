@@ -1,6 +1,8 @@
 """Pydantic schemas for the self-service «Мои данные» profile (GH #262).
 
-``GET/PUT /api/v1/my`` — one flat shape for both (spec §4):
+The flat profile body — the request of and half the response for the
+staff-branch ``PUT`` and the base of ``MyStaffProfileResponse``
+(#584 §4.3 mounted the surface under ``/api/v1/my/{master|admin}``):
 
 * public half from the staff card (``first_name``/``last_name``/
   ``avatar_url``) and the master-section CSV (``specialties`` as an
@@ -24,6 +26,25 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.visit_status import VisitStatus  # noqa: TC001 — runtime pydantic model field
 from src.models.enums import PaymentMethod  # noqa: TC001 — runtime pydantic model field
+from src.schemas.auth import MasterSnapshot  # noqa: TC001 — runtime pydantic model field
+
+
+class MyWhoamiResponse(BaseModel):
+    """``GET /api/v1/my`` — «кто я» (#584, spec §4.1).
+
+    Account data of the PRIMARY identity (the staff account when its
+    cookie resolved, else the client one) plus the full resolved role
+    list — a role enters the list only via a valid cookie of its own
+    audience: ``admin`` (staff cookie, role admin), ``master`` (staff
+    cookie, role master OR a master section), ``client`` (client
+    cookie). Order is not guaranteed. Client accounts carry no email →
+    ``null``. No password/lock fields, no internal card links.
+    """
+
+    id: str
+    phone: str
+    email: str | None = None
+    roles: list[str]
 
 
 class MyProfileResponse(BaseModel):
@@ -49,8 +70,47 @@ class MyProfileResponse(BaseModel):
     registration_address: str | None = None
 
 
-class PortraitResponse(BaseModel):
-    """POST /my/portrait success body (GH #262 Task 2, spec §4)."""
+class MyMasterSection(BaseModel):
+    """The ``masters`` extension projection for the master branch (#584 §4.3).
+
+    Minimal display view of the ACTIVE section: the specialty CSV split
+    the same way the flat profile splits it, plus the schedule color. No
+    timestamps, no ``staff_id`` link, no ``archived`` (an archived
+    section is simply absent — display parity with ``has_master``).
+    """
+
+    specialties: list[str]
+    color: str
+
+
+class MyStaffProfileResponse(MyProfileResponse):
+    """``GET/PUT /api/v1/my/master|/api/v1/my/admin`` body (#584, spec §4.3).
+
+    The flat ``MyProfileResponse`` plus the account half that used to
+    live in ``/auth/me``: ``user_id`` / ``phone`` / ``email`` /
+    ``permissions`` (assembled by reusing the login ``_build_me_response``
+    builder — login itself unchanged). The master-branch-only additions
+    default to ``None`` and are only filled by the master branch:
+
+    * ``master_section`` — the active ``masters`` section projection;
+    * ``master`` — the login-shaped card snapshot (``MasterSnapshot``,
+      archive-independent Display rule) the admin shell renders.
+    """
+
+    user_id: str
+    phone: str
+    email: str | None = None
+    permissions: list[str]
+    master_section: MyMasterSection | None = None
+    master: MasterSnapshot | None = None
+
+
+class AvatarResponse(BaseModel):
+    """``POST /my/{branch}/avatar`` success body (GH #262 Task 2, spec §4.3).
+
+    Formerly ``PortraitResponse`` (the /portrait → /avatar rename, #584
+    decision 2026-11-13) — the upload contract itself is unchanged.
+    """
 
     avatar_url: str
 
@@ -68,7 +128,7 @@ class MyClientResponse(BaseModel):
     name: str | None = None
 
 
-# ─── #499 §5 — client booking: POST /api/v1/my/records ─────────────────────────
+# ─── #499 §5 — client booking: POST /api/v1/my/client/records ──────────────
 
 # Wire bounds mirror the existing VisitItem (records schema): no explicit
 # string/age limits there, so none are invented here — the strictness of
@@ -94,7 +154,7 @@ class MyVisitCreate(BaseModel):
 
 
 class MyRecordCreate(BaseModel):
-    """``POST /api/v1/my/records`` body (#499 §5) — the strict booking wire.
+    """``POST /api/v1/my/client/records`` body (#499 §5) — the strict booking wire.
 
     From the wire there is deliberately NO ``client_id`` / ``visitor_id`` /
     ``price`` / ``custom_price`` / ``notify`` / ``status``: the owner comes
@@ -141,11 +201,11 @@ class MyRecordResponse(BaseModel):
     visits: list[MyVisitResponse]
 
 
-# ─── #513 — client cabinet read: GET /api/v1/my/records ────────────────────────
+# ─── #513 — client cabinet read: GET /api/v1/my/client/records ─────────────
 
 
 class MyVisitItem(BaseModel):
-    """One visit inside ``GET /api/v1/my/records`` items (spec §«Контракт API»).
+    """One visit inside ``GET /api/v1/my/client/records`` items (spec §«Контракт API»).
 
     Per-endpoint visit shape — deliberately NOT ``VisitResponse``: no
     ``tariff_id``/``visitor_id``/``record_id``/``custom_price``/timestamps
@@ -163,7 +223,7 @@ class MyVisitItem(BaseModel):
 
 
 class MyRecordItem(BaseModel):
-    """``items[]`` element of ``GET /api/v1/my/records`` (spec §«Контракт API»).
+    """``items[]`` element of ``GET /api/v1/my/client/records`` (spec §«Контракт API»).
 
     ``activity_date``/``activity_start``/``activity_end`` are computed
     from the record's activity (the model stores only start + duration
@@ -185,11 +245,11 @@ class MyRecordItem(BaseModel):
     visits: list[MyVisitItem]
 
 
-# ─── #513 — client cabinet read: GET /api/v1/my/photos ────────────────────────
+# ─── #513 — client cabinet read: GET /api/v1/my/client/photos ──────────────
 
 
 class MyPhotoItem(BaseModel):
-    """``items[]`` element of ``GET /api/v1/my/photos`` (spec §«Контракт API»).
+    """``items[]`` element of ``GET /api/v1/my/client/photos`` (spec §«Контракт API»).
 
     Per-endpoint photo shape — deliberately NOT ``PhotoResponse``: no
     ``client_id``/``client_name`` (the requester IS the client),
@@ -206,7 +266,7 @@ class MyPhotoItem(BaseModel):
     created_at: datetime
 
 
-# ─── #513 — client cabinet read: GET /api/v1/my/payments ───────────────────────
+# ─── #513 — client cabinet read: GET /api/v1/my/client/payments ────────────
 
 
 class MyPaymentRecordContext(BaseModel):
@@ -225,7 +285,7 @@ class MyPaymentRecordContext(BaseModel):
 
 
 class MyPaymentItem(BaseModel):
-    """``items[]`` element of ``GET /api/v1/my/payments`` (spec §«Контракт API»).
+    """``items[]`` element of ``GET /api/v1/my/client/payments`` (spec §«Контракт API»).
 
     Ownership is THROUGH the record (a payment is "mine" iff its record
     belongs to the session's client). ``method`` is nullable by model

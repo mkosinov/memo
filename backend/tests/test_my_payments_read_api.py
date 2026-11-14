@@ -1,7 +1,8 @@
-"""GH #513 — client cabinet read: GET /api/v1/my/payments contract.
+"""GH #513 — client cabinet read: GET /api/v1/my/client/payments contract.
 
-The third /my read endpoint (spec §«Контракт API → GET
-/api/v1/my/payments»): payments of the client's records — ownership is
+The third cabinet read endpoint (spec §«Контракт API → GET
+/my/payments», moved under the client branch ``/my/client/*`` by
+ADR-015/#584 — contract unchanged): payments of the client's records — ownership is
 THROUGH the record (a payment is "mine" iff its record belongs to the
 session's client card). Each item carries a brief record context
 (``{id, activity_date, service_title}``) that is ALWAYS present: a
@@ -37,7 +38,7 @@ from tests.conftest import insert_user, query_db, query_db_params
 
 pytestmark = pytest.mark.api
 
-MY_URL = "/api/v1/my/payments"
+MY_URL = "/api/v1/my/client/payments"
 
 
 # ─── helpers (conftest direct-SQL pattern, test_my_records_read_api) ───────────
@@ -332,7 +333,7 @@ class TestGuards:
     def test_staff_token_in_client_cookie_401(self, api_client) -> None:
         """A LIVE staff session token copied into the client cookie name
         resolves, then fails the role barrier — the same single 401."""
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token, "fixture admin session missing"
         api_client.cookies.clear()
         api_client.cookies.set("memo_client_session", staff_token)

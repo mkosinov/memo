@@ -16,7 +16,7 @@ from src.events import audit
 @pytest.fixture
 def actor_ctx():
     """Open an actor contextvar; return the reset function."""
-    token = audit.set_actor(user_id="u-1", role="admin")
+    token = audit.set_actor(user_id="u-1", roles=["admin"])
     yield
     audit.reset_actor(token)
 
@@ -34,8 +34,8 @@ class TestActorContextvar:
         assert audit.current_actor() is None
 
     def test_set_and_reset(self) -> None:
-        token = audit.set_actor(user_id="u-1", role="master")
-        assert audit.current_actor() == audit.AuditActor(user_id="u-1", role="master")
+        token = audit.set_actor(user_id="u-1", roles=["master"])
+        assert audit.current_actor() == audit.AuditActor(user_id="u-1", roles=("master",))
         audit.reset_actor(token)
         assert audit.current_actor() is None
 

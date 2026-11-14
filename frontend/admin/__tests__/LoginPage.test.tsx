@@ -7,7 +7,8 @@ vi.mock('@memo/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memo/api-client')>();
   return {
     ...actual,
-    getMe: vi.fn(),
+    getMyWhoami: vi.fn(),
+    getMyStaffProfile: vi.fn(),
     login: vi.fn(),
   };
 });
@@ -20,14 +21,24 @@ vi.mock('next/navigation', () => ({
   usePathname: () => window.location.pathname,
 }));
 
-import { getMe, login } from '@memo/api-client';
-import type { AuthMe } from '@memo/api-client';
+import { getMyWhoami, getMyStaffProfile, login } from '@memo/api-client';
+import type { AuthMe, MyWhoami } from '@memo/api-client';
+import { mockMyStaffProfileStaffNoMaster } from './helpers/mockData';
 import LoginPage from '../app/login/page';
 import { UIProvider } from '../contexts/UIContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
-const mockGetMe = vi.mocked(getMe);
+const mockGetMyWhoami = vi.mocked(getMyWhoami);
+const mockGetMyStaffProfile = vi.mocked(getMyStaffProfile);
 const mockLogin = vi.mocked(login);
+
+// Bootstrap chain fixtures (#584 §5): whoami → branch profile.
+const whoamiAdmin: MyWhoami = {
+  id: 'user-uuid-1',
+  phone: '+79990000001',
+  email: null,
+  roles: ['admin'],
+};
 
 const mockAuthMe: AuthMe = {
   user: {
@@ -95,7 +106,7 @@ function clickSubmit() {
 describe('LoginPage', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/login');
-    mockGetMe.mockResolvedValue(null);
+    mockGetMyWhoami.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -111,7 +122,8 @@ describe('LoginPage', () => {
   });
 
   it('redirects to / when already authenticated', async () => {
-    mockGetMe.mockResolvedValue(mockAuthMe);
+    mockGetMyWhoami.mockResolvedValue(whoamiAdmin);
+    mockGetMyStaffProfile.mockResolvedValue(mockMyStaffProfileStaffNoMaster);
     renderLogin();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
@@ -119,14 +131,15 @@ describe('LoginPage', () => {
   });
 
   it('derives already-authenticated redirect from AuthContext (no second /me call)', async () => {
-    // The page itself never calls getMe: only the AuthProvider bootstrap does
-    // (review #2 — one /me per load, not two).
-    mockGetMe.mockResolvedValue(mockAuthMe);
+    // The page itself never calls getMyWhoami: only the AuthProvider bootstrap does
+    // (review #2 — one chain per load, not two).
+    mockGetMyWhoami.mockResolvedValue(whoamiAdmin);
+    mockGetMyStaffProfile.mockResolvedValue(mockMyStaffProfileStaffNoMaster);
     renderLogin();
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
     });
-    expect(mockGetMe).toHaveBeenCalledTimes(1);
+    expect(mockGetMyWhoami).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an off-site returnTo (open-redirect hardening) and falls back to /', async () => {
@@ -216,7 +229,7 @@ describe('LoginPage', () => {
 describe('LoginPage — phone widget (GH #414, spec §Экран входа)', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/login');
-    mockGetMe.mockResolvedValue(null);
+    mockGetMyWhoami.mockResolvedValue(null);
   });
 
   afterEach(() => {

@@ -11,17 +11,20 @@ Covered:
   ``name`` from the linked client card via ``users.client_id``, ``null``
   when the account has no card;
 - cross-presentation 401: the client resolver reads ONLY
-  ``memo_client_session`` (a staff ``memo_session`` jar is invisible) and
+  ``memo_client_session`` (a staff ``memo_staff_session`` jar is
+  invisible) and
   requires ``role=client`` (a staff token copied into the client cookie
-  name is still 401); conversely the staff surface (``/auth/me``) does
-  not read ``memo_client_session``;
+  name is still 401); conversely the staff branches (``/my/admin``,
+  ``/my/master``) do not read ``memo_client_session``;
 - garbage cookie / archived user → 401 (shared resolve core);
 - spec §3 invariant: archiving the CLIENT CARD keeps the account link
   (``users.client_id``) and the cabinet working — the owner is the
   account, the card is data;
 - the shared ``POST /api/v1/auth/logout`` revokes whichever session kind
   is presented (client / staff / both), stays idempotent with no cookie,
-  and a client-only logout never touches the staff session row.
+  and a client-only logout never touches the staff session row;
+- ADR-015 (#584): the pre-branch flat ``/my/{records,photos,payments}``
+  paths are 404-retired (route absence, probed under a live session).
 
 Spec: docs/specs/2026-10-20-web-client-auth-booking-design.md §3, §4.3
 Domain rules: docs/domain-rules/auth.md («Клиентская аутентификация (#499)», Sessions)
@@ -156,7 +159,7 @@ class TestMyClient:
 
 class TestCrossPresentation:
     def test_staff_session_jar_not_read_401(self, api_client) -> None:
-        """api_client holds a LIVE staff ``memo_session`` — the client
+        """api_client holds a LIVE staff ``memo_staff_session`` — the client
         resolver must not see it (cookie-name separation)."""
         resp = api_client.get(MY_CLIENT_URL)  # admin jar, no client cookie
         assert resp.status_code == 401
@@ -165,7 +168,7 @@ class TestCrossPresentation:
     def test_staff_token_in_client_cookie_401(self, api_client) -> None:
         """A staff session token COPIED into the client cookie name resolves
         (same table) but fails the ``role=client`` barrier → 401."""
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token, "api_client fixture must arrive logged in"
         _jar_with_client_cookie(api_client, staff_token)
         resp = api_client.get(MY_CLIENT_URL)
@@ -175,10 +178,11 @@ class TestCrossPresentation:
     def test_client_cookie_invisible_to_staff_surface_401(
         self, api_client, client_token,
     ) -> None:
-        """A client session presented to a staff endpoint (``/auth/me`` reads
-        only ``memo_session``) is invisible → 401."""
+        """A client session presented to a staff branch (``/my/admin``
+        reads only ``memo_staff_session``) is invisible → 401 (#584 §9: the
+        client cookie never crosses into a staff branch)."""
         _jar_with_client_cookie(api_client, client_token)
-        resp = api_client.get("/api/v1/auth/me")
+        resp = api_client.get("/api/v1/my/admin")
         assert resp.status_code == 401
         assert resp.json()["detail"]["code"] == ErrorCode.AUTH_UNAUTHORIZED.value
 
@@ -205,6 +209,36 @@ class TestClientCardArchiveInvariant:
             f"SELECT client_id FROM users WHERE id = '{client_account['id']}'"
         )
         assert rows[0]["client_id"] is not None, "archive must not unlink the card"
+
+
+# ─── ADR-015 (#584): the flat cabinet paths are retired ────────────────────────
+
+
+class TestFlatPathsRetired:
+    """The pre-#584 flat ``/api/v1/my/{records,photos,payments}`` paths
+    are GONE — the cabinet lives under ``/api/v1/my/client/*``.
+
+    Probed WITH a live client session: the 404 must come from route
+    ABSENCE, not from a guard refusing the request (a 401 here would
+    mean the old path still exists behind the guard).
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/v1/my/records"),
+            ("POST", "/api/v1/my/records"),
+            ("GET", "/api/v1/my/photos"),
+            ("GET", "/api/v1/my/payments"),
+        ],
+    )
+    def test_old_flat_path_404_under_client_session(
+        self, client_jar, method: str, path: str,
+    ) -> None:
+        resp = client_jar.request(method, path, json={})
+        assert resp.status_code == 404, (
+            f"{method} {path} must be retired (404), got {resp.status_code}"
+        )
 
 
 # ─── shared logout: any session kind, idempotent ───────────────────────────────
@@ -239,7 +273,7 @@ class TestLogoutBothKinds:
         leaves an unrelated staff row alone. Contrast with a full
         ``revoke_user_sessions`` sweep — logout is per-token.
         """
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token
         _jar_with_client_cookie(api_client, client_token)
 
@@ -254,13 +288,13 @@ class TestLogoutBothKinds:
         # Re-present the still-live staff token — the row, not the jar,
         # governs validity.
         api_client.cookies.clear()
-        api_client.cookies.set("memo_session", staff_token)
-        assert api_client.get("/api/v1/auth/me").status_code == 200
+        api_client.cookies.set("memo_staff_session", staff_token)
+        assert api_client.get("/api/v1/my").status_code == 200
 
     def test_both_cookies_revokes_both(self, api_client, client_token) -> None:
         """#499 spec §4.2: whichever cookie is presented, that session is
         revoked — both presented → both rows die."""
-        staff_token = api_client.cookies.get("memo_session")
+        staff_token = api_client.cookies.get("memo_staff_session")
         assert staff_token
         api_client.cookies.set("memo_client_session", client_token)
 
@@ -274,8 +308,8 @@ class TestLogoutBothKinds:
         api_client.cookies.set("memo_client_session", client_token)
         assert api_client.get(MY_CLIENT_URL).status_code == 401
         api_client.cookies.clear()
-        api_client.cookies.set("memo_session", staff_token)
-        assert api_client.get("/api/v1/auth/me").status_code == 401
+        api_client.cookies.set("memo_staff_session", staff_token)
+        assert api_client.get("/api/v1/my").status_code == 401
 
     def test_logout_without_cookies_204_idempotent(self, api_client) -> None:
         api_client.cookies.clear()

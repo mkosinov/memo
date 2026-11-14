@@ -1,7 +1,9 @@
-"""GH #262 Task 2 — POST /api/v1/my/portrait + public avatar serving.
+"""GH #262 Task 2 — avatar upload on the #584 staff branches + public serving.
 
-Covers the plan RED list (spec §3.4, D5/D8; domain-rules/profile.md
-«Avatar files»):
+``POST /api/v1/my/{master|admin}/avatar`` (the former ``/my/portrait``,
+renamed by #584 decision 2026-11-13; ``AvatarResponse`` — the upload
+CONTRACT is unchanged). Covers the plan RED list (spec §3.4, D5/D8;
+domain-rules/profile.md «Avatar files»):
 
 * Content-Length precheck: >5 MB → 413 FILE_TOO_LARGE BEFORE reading the
   body (oversized junk with INVALID magic must still yield 413 — proof
@@ -18,8 +20,11 @@ Covers the plan RED list (spec §3.4, D5/D8; domain-rules/profile.md
 * no session → 401;
 * ``GET /api/v1/files/avatar/<uuid>.jpg`` public 200 with
   ``X-Content-Type-Options: nosniff``; encoded traversal → 404;
-* upload without a staff card → 422 (portrait is card-bound);
+* upload without a staff card → 422 (avatar is card-bound);
 * SSE: successful upload emits the EXISTING ``staff`` entity.
+
+The branch admission matrix (who may call which branch) lives in
+``test_api_my_staff_branches.py``; the per-branch CSRF pins too.
 """
 
 from __future__ import annotations
@@ -38,6 +43,10 @@ from tests.conftest import query_db
 pytestmark = pytest.mark.api
 
 MY_PASSWORD = "my-pass-123"
+
+MASTER_AVATAR_URL = "/api/v1/my/master/avatar"
+ADMIN_AVATAR_URL = "/api/v1/my/admin/avatar"
+MASTER_PROFILE_URL = "/api/v1/my/master"
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -129,9 +138,10 @@ def _make_cardless_user(login_as, _my_hash, *, role: str = "admin"):
     return login_as(phone, MY_PASSWORD)
 
 
-def _upload(client, data: bytes, filename: str = "portrait.jpg"):
+def _upload(client, data: bytes, filename: str = "avatar.jpg",
+            url: str = MASTER_AVATAR_URL):
     return client.post(
-        "/api/v1/my/portrait",
+        url,
         files={"file": (filename, data, "application/octet-stream")},
     )
 
@@ -199,9 +209,9 @@ class TestMagicByteTyping:
     @pytest.mark.parametrize(
         ("data", "filename", "ext"),
         [
-            (JPEG, "portrait.jpg", "jpg"),
-            (PNG, "portrait.png", "png"),
-            (WEBP, "portrait.webp", "webp"),
+            (JPEG, "avatar.jpg", "jpg"),
+            (PNG, "avatar.png", "png"),
+            (WEBP, "avatar.webp", "webp"),
         ],
     )
     def test_all_types_accepted(
@@ -233,8 +243,9 @@ class TestSuccessPath:
         assert resp.status_code == 200, resp.text
         avatar_url = resp.json()["avatar_url"]
         assert _staff_avatar(staff_id) == avatar_url
-        # /my reflects the new avatar too.
-        assert client.get("/api/v1/my").json()["avatar_url"] == avatar_url
+        # /my reflects the new avatar too (#584: GET /my is whoami now —
+        # the profile shape rides the no-op PUT mirror).
+        assert client.get(MASTER_PROFILE_URL).json()["avatar_url"] == avatar_url
 
     def test_second_upload_deletes_previous_own_file(
         self, api_client, login_as, _my_hash
@@ -287,7 +298,7 @@ class TestSuccessPath:
 class TestGuards:
     def test_no_session_401(self, anon) -> None:
         resp = anon.post(
-            "/api/v1/my/portrait",
+            MASTER_AVATAR_URL,
             files={"file": ("p.jpg", JPEG, "application/octet-stream")},
         )
         assert resp.status_code == 401
@@ -298,16 +309,20 @@ class TestGuards:
         """Mutating multipart route carries verify_fetch_metadata."""
         client, _sid = _make_staff_user(api_client, login_as, _my_hash)
         resp = client.post(
-            "/api/v1/my/portrait",
+            MASTER_AVATAR_URL,
             files={"file": ("p.jpg", JPEG, "application/octet-stream")},
             headers={"sec-fetch-site": "cross-site"},
         )
         assert resp.status_code == 403
 
     def test_cardless_user_422(self, login_as, _my_hash) -> None:
-        """Portrait is card-bound: no staff card → 422, modal hides it."""
+        """Avatar is card-bound: no staff card → 422, modal hides it.
+
+        The cardless fixture user is an admin — the ADMIN branch is the
+        one they may call (the wrong-branch 403s live in
+        ``test_api_my_staff_branches.py``)."""
         client = _make_cardless_user(login_as, _my_hash)
-        resp = _upload(client, JPEG)
+        resp = _upload(client, JPEG, url=ADMIN_AVATAR_URL)
         assert resp.status_code == 422, resp.text
         assert _stored_files() == []
 

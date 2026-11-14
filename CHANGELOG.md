@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — 2026-11-14
+
+### Added
+- **GH #584 — Волна ADR-015 (/my-namespace): комбинированный guard, whoami
+  с обеими персонами, ветки /my/client|master|admin, /my/settings,
+  упразднение /auth/me** — branch `584-adr015-my-namespace` (15 коммитов
+  `4e76bab0..42cabd88`, base `55e3004a` = main на момент лендинга плана;
+  109 файлов, +4199/−1268; спека
+  `docs/specs/2026-11-12-adr015-my-namespace-584-design.md` рев.5, план
+  `docs/plans/2026-11-12-adr015-my-namespace-584-plan.md` и ADR-015
+  (`docs/decisions/015-api-url-audience-namespaces.md`, clause 3 +
+  amendments) — на main до старта волны, unchanged by IMPL):
+  - **whoami + комбинированный guard (T1 `4e76bab0`+`eab47e03`):** чистый
+    резолв обеих персон (клиентская сессия + стафф) с guard-конвертом;
+    новый `GET /api/v1/my`.
+  - **Клиентский кабинет (T2 `89a967ed`+`2adfd369`):** слит под
+    `/api/v1/my/client/*`, плоские `/my/*` пути вычищены.
+  - **Стафф-ветки (T3 `7876c8ea`):** `/my/master` + `/my/admin` —
+    branch-гарды (чужая ветка → 403), `MyStaffProfileResponse`,
+    `/portrait`→`/avatar`.
+  - **Настройки под ветками (T4 `7dcf44dc`):**
+    `/my/{master,admin,client}/settings` (тот же аккаунт, те же строки),
+    остров `/api/v1/user-settings` снесён (404), CSRF-пины per mutation
+    route.
+  - **Упразднение /auth/me (T5 `47a4aeff`):** 404; потребители переехали
+    на whoami / стафф-ветки / тело login.
+  - **Кука стаффа (T6 `27bf4bcb`):** `memo_session` →
+    `memo_staff_session`; пины «новое имя в login-issues-only» и «старое
+    имя анонимно даже с живым токеном».
+  - **api-client (T7 `09ff8f70`):** `getMyWhoami` + стафф-ветки.
+  - **Admin bootstrap (T8 `63fd987c`):** цепочка `getMyWhoami` →
+    `getMyStaffProfile(branch)`.
+  - **E2E (T9 `1c71e050`+`b39bd98d`):** ренейм куки, пути настроек,
+    whoami-провода + спека сценария 5 «две куки» (spec §7); регресс-фикс
+    `keepPreviousData` на branch profile query — смена ветки
+    (login role-guess → whoami) больше не теряет несохранённые правки
+    формы.
+  - **Дом-правила и чистка (T10 `759867e3`+`468c0ae1`+`42cabd88`):**
+    auth/profile/staff/user_settings/audit_log под /my-namespace + свип
+    ретро-имён + e2e cleanup matcher настроек под ветками.
+  - Tests: полный backend pytest **4245p/0f/92s** (последний полный прогон
+    на задаче куки; дальше — таргет-зелень задач + ревью-свипы),
+    api-client vitest **595/595** + tsc чист, admin vitest **3175/3175** +
+    tsc + build чисты, e2e — admin-спеки **31/31**, web **20/20** (вкл.
+    новую спеку сценария 5), полная репродукция 2-шардами **522 pass**
+    (2 пре-экзистинг флейка зелёные в изоляции; CI-шарды арбитрят на PR);
+    lint_budget exit 0, mypy 0; visual gate — §7 N/A, скрипт exit 0.
+    Приёмка — все DoD-строки плана закрыты (per-task ревью + финальный
+    full-feature ревью; находки — фиксы `468c0ae1`/`42cabd88`).
+
 ## [Unreleased] — 2026-11-13
 
 ### Added

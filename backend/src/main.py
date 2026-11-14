@@ -20,9 +20,10 @@ from src.api.v1.clients import router as clients_router
 from src.api.v1.locations import router as locations_router
 from src.api.v1.masters import router as masters_router
 from src.api.v1.materials import router as materials_router
-from src.api.v1.my import router as my_router
+from src.api.v1.my import admin_router as my_admin_router
+from src.api.v1.my import master_router as my_master_router
 from src.api.v1.my_client import router as my_client_router
-from src.api.v1.my_reads import router as my_reads_router
+from src.api.v1.my_whoami import router as my_whoami_router
 from src.api.v1.payments import router as payments_router
 from src.api.v1.photos import router as photos_router
 from src.api.v1.position import router as position_router
@@ -32,7 +33,11 @@ from src.api.v1.services import router as services_router
 from src.api.v1.staff import router as staff_router
 from src.api.v1.system import router as system_router
 from src.api.v1.tags import router as tags_router
-from src.api.v1.user_settings import router as user_settings_router
+from src.api.v1.user_settings import (
+    admin_settings_router,
+    client_settings_router,
+    master_settings_router,
+)
 from src.api.v1.users import router as users_router
 from src.api.v1.visitors import router as visitors_router
 from src.api.v1.visits import router as visits_router
@@ -267,24 +272,45 @@ def create_app() -> FastAPI:
     app.include_router(visits_router, prefix="/api/v1/visits")
     app.include_router(payments_router, prefix="/api/v1/payments")
     app.include_router(materials_router, prefix="/api/v1/materials")
-    app.include_router(user_settings_router, prefix="/api/v1/user-settings")
+    # GH #584 (spec §4.4) — settings under the branches: the former
+    # /api/v1/user-settings island re-homes as ONE settings router on
+    # THREE STATIC prefixes (no root /my/settings): the staff instance
+    # answers the SAME account/rows on both staff branches (the branch
+    # is the audience address, not other data), the client instance is
+    # a ready surface behind require_client_session (no consumer yet).
+    # The old flat mount is retired (404).
+    app.include_router(master_settings_router, prefix="/api/v1/my/master/settings")
+    app.include_router(admin_settings_router, prefix="/api/v1/my/admin/settings")
+    app.include_router(client_settings_router, prefix="/api/v1/my/client/settings")
     # GH #348 — users vertical: admin-side phone edit + password-link issue.
     app.include_router(users_router, prefix="/api/v1/users")
     # GH #344 — audit journal reading (admin-only, spec §6).
     app.include_router(audit_logs_router, prefix="/api/v1/audit-logs")
-    # GH #262 — own-data profile (session-guarded, no permission token).
-    app.include_router(my_router, prefix="/api/v1/my")
-    # GH #499 (spec §4.3) — client-cabinet own-data behind
-    # require_client_session (a SEPARATE router: the staff /my binds
-    # require_session router-wide, which would 401 every client session).
+    # GH #584 (spec §4.1) — «кто я»: the combined whoami guard (either
+    # session cookie). Its own router — the profile router's
+    # require_session dependency must NOT apply here (it would 401 a
+    # client-only request and double-stage the audit actor).
+    app.include_router(my_whoami_router, prefix="/api/v1/my")
+    # GH #584 (spec §4.3) — the staff branches /my/master + /my/admin: the
+    # former flat /my profile router (GH #262) re-homed as ONE branch
+    # router on TWO STATIC prefixes (a dynamic path parameter is banned —
+    # it would shadow the sibling branches; static prefixes make the
+    # mount order irrelevant and an unknown branch 404s naturally).
+    # Branch admission == the whoami role composition: /my/admin ← role
+    # admin; /my/master ← role master OR a master section.
+    app.include_router(my_master_router, prefix="/api/v1/my/master")
+    app.include_router(my_admin_router, prefix="/api/v1/my/admin")
+    # GH #584 (spec §4.2) — the client branch /my/client/*: the cabinet
+    # bootstrap (#499 §4.3), booking (#499 §5) and the #513 reads, merged
+    # into ONE branch router behind require_client_session (a SEPARATE
+    # router: the staff /my binds require_session router-wide, which
+    # would 401 every client session).
     app.include_router(my_client_router, prefix="/api/v1/my")
-    # GH #513 — client-cabinet read lists (records, photos, payments),
-    # behind the same client session guard as my_client above.
-    app.include_router(my_reads_router, prefix="/api/v1/my")
     app.include_router(system_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")  # GH #239 — GET /api/v1/events (SSE)
-    # GH #247 — login / logout / me are PUBLIC_ROUTES by design (spec §3.6);
-    # the router itself carries no blanket guards.
+    # GH #247 — login / logout are PUBLIC_ROUTES by design (spec §3.6);
+    # the router itself carries no blanket guards (the former /me probe
+    # was removed — #584 ADR-015 §4.5).
     app.include_router(auth_router, prefix="/api/v1/auth")
 
     # GH #262 Task 2 — public avatar serving (spec §3.4): StaticFiles

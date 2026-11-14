@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import * as endpointsModule from './endpoints';
-import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMe, getMyProfile, updateMyProfile, uploadPortrait, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
+import { getMasters, getAllMasters, getStaff, getStaffById, getAllStaff, createStaff, updateStaff, patchStaff, archiveStaff, restoreStaff, resolveDeleteStaff, getPositions, getAllPositions, getPosition, createPosition, updatePosition, patchPosition, deletePosition, getLocations, getPublicLocations, getServices, getActivities, getPublicActivities, getActivity, createActivity, updateActivity, dryRunDeleteActivity, deleteActivityWithExpected, copyWeek, getPhotos, getPublicPhotos, getClientsPaged, getRecords, getRecordsView, getClientById, getPayments, getPaymentTotals, createRecord, updateRecord, dryRunDeleteRecord, patchRecord, createPayment, updatePayment, deletePayment, createVisitor, updateVisitor, patchVisitor, deleteVisitor, dryRunDeleteVisitor, resolveDeleteVisitor, getClientByPhone, updateVisitStatus, deleteVisit, getTags, createService, updateService, createLocation, updateLocation, getClientsWithStats, updateClient, patchClient, reorderLocations, patchLocation, patchMaterial, patchService, patchUserSettings, getUserSettings, updateUserSettings, getMaterials, getTag, getVisitors, archiveLocation, restoreLocation, resolveDeleteLocation, archiveService, restoreService, resolveDeleteService, archiveMaterial, restoreMaterial, resolveDeleteMaterial, archiveClient, restoreClient, resolveDeleteClient, resolveDeleteRecord, dryRunDeleteTag, resolveDeleteTag, dryRunDeletePhoto, resolveDeletePhoto, dryRunDeletePosition, resolveDeletePosition, deletePhoto, dryRunDeleteStaff, dryRunDeleteClient, dryRunDeleteService, dryRunDeleteLocation, dryRunDeleteMaterial, getAllLocations, getAllServices, getAllMaterials, getAllTags, login, logout, getMyWhoami, getMyStaffProfile, updateMyStaffProfile, uploadAvatar, changePassword, requestOtpCode, verifyOtpCode, getMyClient, createMyRecord, listMyRecords, listMyPhotos, listMyPayments, getAuditLogs, getAuditLogAuthors, patchUser, issuePasswordLink, validatePasswordSetup, passwordSetup, getAuthMethods, initiateCallAuth, callAuthStatus } from './endpoints';
 import { ServiceCreateSchema, LocationCreateSchema, ActivityResponseSchema, ActivityPublicListResponseSchema, PhotoListResponseSchema, PhotoPublicListResponseSchema, LocationPublicListResponseSchema, ClientListResponseSchema, ClientResponseSchema, RecordViewListResponseSchema, MyRecordListResponseSchema, MyPhotoListResponseSchema, MyPaymentListResponseSchema, VisitStatusSchema, ArchiveStatusSchema, type ServiceUpdate, type LocationUpdate, type ClientUpdate, type RecordCreate, type RecordUpdate, type VisitStatus, type ArchiveStatus } from './schemas';
 
 // Mock the api function from client
@@ -1628,11 +1628,11 @@ describe('patchService', () => {
 });
 
 describe('patchUserSettings', () => {
-  it('calls PATCH /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
+  it('calls PATCH /api/v1/my/:branch/settings without user_id (session-derived, GH #247 §3.8)', async () => {
     vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
-    await patchUserSettings({ language: 'en' });
+    await patchUserSettings('admin', { language: 'en' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/user-settings',
+      '/api/v1/my/admin/settings',
       expect.anything(),
       expect.objectContaining({
         method: 'PATCH',
@@ -1640,22 +1640,32 @@ describe('patchUserSettings', () => {
       }),
     );
   });
+
+  it('rides the master branch equally (same account, same rows — #584 §4.4)', async () => {
+    vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
+    await patchUserSettings('master', { language: 'en' });
+    expect(api).toHaveBeenCalledWith(
+      '/api/v1/my/master/settings',
+      expect.anything(),
+      expect.objectContaining({ method: 'PATCH' }),
+    );
+  });
 });
 
 describe('getUserSettings', () => {
-  it('calls GET /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
+  it('calls GET /api/v1/my/:branch/settings without user_id (session-derived, GH #247 §3.8)', async () => {
     vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
-    await getUserSettings();
-    expect(api).toHaveBeenCalledWith('/api/v1/user-settings', expect.anything());
+    await getUserSettings('master');
+    expect(api).toHaveBeenCalledWith('/api/v1/my/master/settings', expect.anything());
   });
 });
 
 describe('updateUserSettings', () => {
-  it('calls PUT /api/v1/user-settings without user_id (session-derived, GH #247 §3.8)', async () => {
+  it('calls PUT /api/v1/my/:branch/settings without user_id (session-derived, GH #247 §3.8)', async () => {
     vi.mocked(api).mockResolvedValue({ user_id: 'u-1' });
-    await updateUserSettings({ theme: 'dark' });
+    await updateUserSettings('admin', { theme: 'dark' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/user-settings',
+      '/api/v1/my/admin/settings',
       expect.anything(),
       expect.objectContaining({
         method: 'PUT',
@@ -1684,6 +1694,20 @@ describe('user-settings removed client methods (GH #319)', () => {
 // Server endpoints keep the full contract.
 describe('removed bare deleteX client methods (GH #345)', () => {
   it.each(['deleteStaff', 'deleteClient', 'deleteService', 'deleteLocation', 'deleteMaterial'])(
+    'no longer exports %s',
+    (name) => {
+      expect(name in endpointsModule).toBe(false);
+    },
+  );
+});
+
+// #584 §4.5/§5: /auth/me is deleted and the flat /my profile surface moved
+// to the staff branches — getMe/getMyProfile/updateMyProfile/uploadPortrait
+// are replaced by getMyWhoami → getMyStaffProfile/updateMyStaffProfile/
+// uploadAvatar (branch forms). No client methods for /my/client/settings:
+// they arrive together with a consumer (spec §4.4).
+describe('removed methods (#584: /my-namespace)', () => {
+  it.each(['getMe', 'getMyProfile', 'updateMyProfile', 'uploadPortrait'])(
     'no longer exports %s',
     (name) => {
       expect(name in endpointsModule).toBe(false);
@@ -1723,44 +1747,47 @@ describe('logout', () => {
   });
 });
 
-describe('getMe', () => {
-  it('calls GET /api/v1/auth/me and returns parsed body', async () => {
-    const me = {
-      user: { id: 'u-1', phone: '+79990000001', role: 'admin', master_id: null, email: null },
-      permissions: ['*'],
-    };
-    vi.mocked(api).mockResolvedValue(me);
-    await expect(getMe()).resolves.toEqual(me);
-    expect(api).toHaveBeenCalledWith('/api/v1/auth/me', expect.anything());
+describe('getMyWhoami (#584 §4.1)', () => {
+  it('calls GET /api/v1/my and returns the parsed whoami', async () => {
+    const whoami = { id: 'u-1', phone: '+79990000001', email: null, roles: ['admin'] };
+    vi.mocked(api).mockResolvedValue(whoami);
+    await expect(getMyWhoami()).resolves.toEqual(whoami);
+    expect(api).toHaveBeenCalledWith('/api/v1/my', expect.anything());
   });
 
-  it('resolves a 401 to null (guest bootstrap contract, spec §4.1)', async () => {
+  it('resolves a 401 to null (guest bootstrap contract, as getMe did)', async () => {
     vi.mocked(api).mockRejectedValue(new ApiError(401, 'No session', 'AUTH_UNAUTHORIZED'));
-    await expect(getMe()).resolves.toBeNull();
+    await expect(getMyWhoami()).resolves.toBeNull();
   });
 
   it('rethrows non-401 ApiErrors', async () => {
     vi.mocked(api).mockRejectedValue(new ApiError(500, 'Server error'));
-    await expect(getMe()).rejects.toThrow(ApiError);
+    await expect(getMyWhoami()).rejects.toThrow(ApiError);
   });
 });
 
-// ─── My profile (GH #262 spec §4 — own data, session-guarded) ─────────────
+// ─── Staff branches (#584 spec §4.3 — static /my/{master|admin} prefixes) ──
 
-describe('getMyProfile', () => {
-  it('calls GET /api/v1/my', async () => {
+describe('getMyStaffProfile', () => {
+  it('calls GET /api/v1/my/:branch', async () => {
     vi.mocked(api).mockResolvedValue({ role: 'admin', has_staff: false, has_master: false });
-    await getMyProfile();
-    expect(api).toHaveBeenCalledWith('/api/v1/my', expect.anything());
+    await getMyStaffProfile('master');
+    expect(api).toHaveBeenCalledWith('/api/v1/my/master', expect.anything());
+  });
+
+  it('rides the admin branch equally (same handlers, two static prefixes)', async () => {
+    vi.mocked(api).mockResolvedValue({ role: 'admin', has_staff: false, has_master: false });
+    await getMyStaffProfile('admin');
+    expect(api).toHaveBeenCalledWith('/api/v1/my/admin', expect.anything());
   });
 });
 
-describe('updateMyProfile', () => {
-  it('calls PUT /api/v1/my with JSON body', async () => {
+describe('updateMyStaffProfile', () => {
+  it('calls PUT /api/v1/my/:branch with the JSON body', async () => {
     vi.mocked(api).mockResolvedValue({ role: 'admin', has_staff: false, has_master: false });
-    await updateMyProfile({ patronymic: 'Сергеевна' });
+    await updateMyStaffProfile('master', { patronymic: 'Сергеевна' });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my',
+      '/api/v1/my/master',
       expect.anything(),
       {
         method: 'PUT',
@@ -1770,13 +1797,13 @@ describe('updateMyProfile', () => {
   });
 });
 
-describe('uploadPortrait', () => {
-  it('calls POST /api/v1/my/portrait with multipart FormData (field "file")', async () => {
+describe('uploadAvatar', () => {
+  it('calls POST /api/v1/my/:branch/avatar with multipart FormData (field "file")', async () => {
     vi.mocked(api).mockResolvedValue({ avatar_url: '/api/v1/files/avatar/x.png' });
     const file = new File([new Uint8Array([1, 2, 3])], 'portrait.png', { type: 'image/png' });
-    await uploadPortrait(file);
+    await uploadAvatar('master', file);
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/portrait',
+      '/api/v1/my/master/avatar',
       expect.anything(),
       expect.objectContaining({
         method: 'POST',
@@ -1906,7 +1933,7 @@ describe('getMyClient', () => {
 });
 
 describe('createMyRecord', () => {
-  it('calls POST /api/v1/my/records with the booking body', async () => {
+  it('calls POST /api/v1/my/client/records with the booking body (#584 §4.2)', async () => {
     vi.mocked(api).mockResolvedValue({
       id: 'r-1',
       activity_id: 'a-1',
@@ -1920,7 +1947,7 @@ describe('createMyRecord', () => {
       visits: [{ name: 'Мария', age: 30, tariff_id: 't-1' }],
     });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/records',
+      '/api/v1/my/client/records',
       expect.anything(),
       {
         method: 'POST',
@@ -1937,17 +1964,17 @@ describe('createMyRecord', () => {
 // ─── Client cabinet read (GH #513 — the three «my» lists) ──────────────────
 
 describe('listMyRecords', () => {
-  it('calls GET /api/v1/my/records without params', async () => {
+  it('calls GET /api/v1/my/client/records without params (#584 §4.2)', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await listMyRecords();
-    expect(api).toHaveBeenCalledWith('/api/v1/my/records', MyRecordListResponseSchema);
+    expect(api).toHaveBeenCalledWith('/api/v1/my/client/records', MyRecordListResponseSchema);
   });
 
   it('serializes pagination params', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 3, per_page: 50 });
     await listMyRecords({ page: 3, per_page: 50 });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/records?page=3&per_page=50',
+      '/api/v1/my/client/records?page=3&per_page=50',
       MyRecordListResponseSchema,
     );
   });
@@ -1956,24 +1983,24 @@ describe('listMyRecords', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 2, page: 1, per_page: 20 });
     await listMyRecords({ id: ['r-1', 'r-2'] });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/records?id=r-1&id=r-2',
+      '/api/v1/my/client/records?id=r-1&id=r-2',
       MyRecordListResponseSchema,
     );
   });
 });
 
 describe('listMyPhotos', () => {
-  it('calls GET /api/v1/my/photos without params', async () => {
+  it('calls GET /api/v1/my/client/photos without params (#584 §4.2)', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await listMyPhotos();
-    expect(api).toHaveBeenCalledWith('/api/v1/my/photos', MyPhotoListResponseSchema);
+    expect(api).toHaveBeenCalledWith('/api/v1/my/client/photos', MyPhotoListResponseSchema);
   });
 
   it('serializes pagination params', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 100 });
     await listMyPhotos({ page: 2, per_page: 100 });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/photos?page=2&per_page=100',
+      '/api/v1/my/client/photos?page=2&per_page=100',
       MyPhotoListResponseSchema,
     );
   });
@@ -1982,24 +2009,24 @@ describe('listMyPhotos', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 1, page: 1, per_page: 20 });
     await listMyPhotos({ id: ['p-1'] });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/photos?id=p-1',
+      '/api/v1/my/client/photos?id=p-1',
       MyPhotoListResponseSchema,
     );
   });
 });
 
 describe('listMyPayments', () => {
-  it('calls GET /api/v1/my/payments without params', async () => {
+  it('calls GET /api/v1/my/client/payments without params (#584 §4.2)', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 });
     await listMyPayments();
-    expect(api).toHaveBeenCalledWith('/api/v1/my/payments', MyPaymentListResponseSchema);
+    expect(api).toHaveBeenCalledWith('/api/v1/my/client/payments', MyPaymentListResponseSchema);
   });
 
   it('serializes pagination params', async () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 0, page: 2, per_page: 50 });
     await listMyPayments({ page: 2, per_page: 50 });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/payments?page=2&per_page=50',
+      '/api/v1/my/client/payments?page=2&per_page=50',
       MyPaymentListResponseSchema,
     );
   });
@@ -2008,7 +2035,7 @@ describe('listMyPayments', () => {
     vi.mocked(api).mockResolvedValue({ items: [], total: 2, page: 1, per_page: 20 });
     await listMyPayments({ id: ['pay-1', 'pay-2'] });
     expect(api).toHaveBeenCalledWith(
-      '/api/v1/my/payments?id=pay-1&id=pay-2',
+      '/api/v1/my/client/payments?id=pay-1&id=pay-2',
       MyPaymentListResponseSchema,
     );
   });

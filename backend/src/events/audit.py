@@ -10,12 +10,14 @@ one commit for action + journal; a method error rolls both back together.
 
 Components:
 
-* **Actor** — ``{user_id, role}`` request contextvar set by the shared
-  ``resolve_authed`` core (spec §4.1): both the strict guard and the
-  lenient optional resolver put it there; no extra DB hits. The author
-  comes ONLY from the server session — never from request data. Rule:
-  no actor → no journal insertion (seeds, CLI, session-less fixtures,
-  anonymous record creation are not journaled, spec §12).
+* **Actor** — ``{user_id, roles}`` request contextvar staged by the
+  resolvers (spec §4.1): the classic ``resolve_authed`` puts its
+  single-role 1-tuple there, the #584 combined whoami guard stages the
+  primary account with the FULL resolved role list; no extra DB hits.
+  The author comes ONLY from the server session — never from request
+  data. Rule: no actor → no journal insertion (seeds, CLI,
+  session-less fixtures, anonymous record creation are not journaled,
+  spec §12).
 
 * **Accumulator** — the list of raw row dicts staged by
   :func:`mark_audit` (explicit marks per spec §4.3) and
@@ -239,18 +241,32 @@ _AUTO_FLAG = "_auto"
 
 @dataclass(frozen=True)
 class AuditActor:
-    """The journaling author — snapshot of the session principal (§4.1)."""
+    """The journaling author — snapshot of the session principal (§4.1).
+
+    #584 (decision 2026-11-13): the actor record carries the FULL list of
+    resolved roles (``roles``), not only the winning one — the combined
+    whoami guard stages one record for the primary account with every
+    role its cookies resolved. The single-role guards stage a 1-tuple.
+    Order is staff-first (the journal row's ``user_role`` snapshot takes
+    ``roles[0]`` — the primary role).
+    """
 
     user_id: str
-    role: str
+    roles: tuple[str, ...]
 
 
 # ─── Actor contextvar (set by the shared resolve_authed core, §4.1) ───────────
 
 
-def set_actor(user_id: str, role: str) -> contextvars.Token[AuditActor | None]:
-    """Stage the request-scoped audit actor (role snapshotted at action time)."""
-    return _actor.set(AuditActor(user_id=user_id, role=role))
+def set_actor(
+    user_id: str, roles: Sequence[str]
+) -> contextvars.Token[AuditActor | None]:
+    """Stage the request-scoped audit actor (roles snapshotted at action time).
+
+    ``roles`` is the full resolved role list (staff-first); the classic
+    single-role guards pass one role — ``set_actor(user_id, [role])``.
+    """
+    return _actor.set(AuditActor(user_id=user_id, roles=tuple(roles)))
 
 
 def reset_actor(token: contextvars.Token[AuditActor | None]) -> None:
@@ -261,6 +277,21 @@ def reset_actor(token: contextvars.Token[AuditActor | None]) -> None:
 def current_actor() -> AuditActor | None:
     """The staged actor; ``None`` when the request has no session principal."""
     return _actor.get()
+
+
+def _actor_role_snapshot(actor: AuditActor | None) -> str | None:
+    """The journal row's ``user_role`` — the actor's PRIMARY role (#584).
+
+    The column is a single String(20) role snapshot; the actor record now
+    carries the full resolved list (staff-first), and the row takes its
+    first entry — the primary account's winning role. Single-role guards
+    (every journal-writing path today: mutations never run under the
+    whoami-only combined guard) stage a 1-tuple, so their rows are
+    byte-identical with the pre-#584 behavior.
+    """
+    if actor is None or not actor.roles:
+        return None
+    return actor.roles[0]
 
 
 # ─── Accumulator (token ownership, mirrors emitter.start/reset_accumulation) ──
@@ -480,7 +511,7 @@ def mark_audit(
     rows.append(
         {
             "user_id": actor.user_id if actor else None,
-            "user_role": actor.role if actor else None,
+            "user_role": _actor_role_snapshot(actor),
             "action": action,
             "entity": entity,
             "entity_id": entity_id,
@@ -537,7 +568,7 @@ def stage_auto(
     rows.append(
         {
             "user_id": actor.user_id if actor else None,
-            "user_role": actor.role if actor else None,
+            "user_role": _actor_role_snapshot(actor),
             "action": action,
             "entity": entity,
             "entity_id": entity_id,

@@ -56,7 +56,8 @@ class UserSettingsUpdate(BaseModel):
 
 
 class UserSettingsPatch(BaseModel):
-    """Request schema for partial update (PATCH /api/v1/user-settings).
+    """Request schema for partial update (PATCH — the settings branch
+    routes, #584 §4.4).
     
     All fields optional. None means 'don't change'.
     This is the semantically correct schema for PATCH (partial update).

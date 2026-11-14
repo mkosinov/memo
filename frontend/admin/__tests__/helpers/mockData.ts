@@ -19,6 +19,7 @@ import type {
   TariffResponse,
   PositionResponse,
   MyProfile,
+  MyStaffProfile,
   AuditLogResponse,
   AuditLogAuthorResponse,
 } from '@memo/api-client';
@@ -493,6 +494,49 @@ export function createMockMyProfile(
 ): MyProfile {
   return {
     ...mockMyProfileMaster,
+    ...overrides,
+  };
+}
+
+// ─── MyStaffProfile (#584 §4.3 — GET/PUT /api/v1/my/{branch}) ────────────────
+// The branch profile = the flat MyProfile PLUS the account half that moved
+// from /auth/me (user_id/phone/email/permissions) and the master-branch
+// additions (master_section + master snapshot; null in the admin branch —
+// the backend serializes the None defaults).
+
+/** A master with a linked staff card — the full master-branch profile. */
+export const mockMyStaffProfileMaster: MyStaffProfile = {
+  ...mockMyProfileMaster,
+  user_id: 'user-uuid-1',
+  phone: '+79990000001',
+  email: null,
+  permissions: ['*'],
+  master_section: { specialties: ['живопись', 'графика'], color: '#004D56' },
+  master: { first_name: 'Ольга', last_name: 'Середа', avatar_url: '/api/v1/files/avatar/o.png' },
+};
+
+/** A staff member WITHOUT a master section — the admin-branch shape. */
+export const mockMyStaffProfileStaffNoMaster: MyStaffProfile = {
+  ...mockMyStaffProfileMaster,
+  ...mockMyProfileStaffNoMaster,
+  master_section: null,
+  master: null,
+};
+
+/** A user with no staff card (D7/S6) — names/specialties/portrait hidden. */
+export const mockMyStaffProfileNoCard: MyStaffProfile = {
+  ...mockMyStaffProfileMaster,
+  ...mockMyProfileNoCard,
+  master_section: null,
+  master: null,
+};
+
+/** Factory for creating MyStaffProfile objects with overrides. */
+export function createMockMyStaffProfile(
+  overrides: Partial<MyStaffProfile> = {},
+): MyStaffProfile {
+  return {
+    ...mockMyStaffProfileMaster,
     ...overrides,
   };
 }

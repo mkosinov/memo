@@ -23,8 +23,8 @@ schema or route drift turns red in the SAME PR:
    FastAPI ≥0.141 ``_IncludedRouter`` mounts resolved via
    ``effective_candidates()``), every ``DELETE /api/v1/.../{id}`` maps by
    its static prefix onto a matrix subject (normalization incl. the
-   hyphenated ``/api/v1/user-settings/{id}`` mount and the own-scoped
-   ``/api/v1/my/settings/{id}`` alias → ``UserSettings``); the subject
+   branch mounts ``/api/v1/my/{master,admin,client}/settings/{id}`` →
+   ``UserSettings``, GH #584 §4.4); the subject
    must be an ``FK_MATRIX`` key — leaves carry the empty list. A new
    DELETE route without a matrix key → red.
 
@@ -118,8 +118,9 @@ class TestSchemaToMatrix:
 
 #: Static path under ``/api/v1`` (up to the first ``{param}`` segment) →
 #: the ``FK_MATRIX`` subject owning the DELETE route. Normalization covers
-#: the hyphenated ``user-settings`` mount AND the own-scoped ``my/settings``
-#: alias (spec §7) — both are ``UserSettings``.
+#: the settings BRANCH mounts (GH #584 §4.4: the former ``user-settings``
+#: island re-homed; no root ``/my/settings`` exists) —
+#: ``my/{master,admin,client}/settings`` are all ``UserSettings``.
 _PREFIX_TO_SUBJECT: dict[str, type[Base]] = {
     "staff": Staff,
     "positions": Position,
@@ -134,14 +135,16 @@ _PREFIX_TO_SUBJECT: dict[str, type[Base]] = {
     "visits": Visit,
     "payments": Payment,
     "materials": Material,
-    "user-settings": UserSettings,
-    "my/settings": UserSettings,
+    "my/master/settings": UserSettings,
+    "my/admin/settings": UserSettings,
+    "my/client/settings": UserSettings,
 }
 
 
 def _static_prefix(path: str) -> str:
-    """``/api/v1/staff/{staff_id}`` → ``staff``; ``/api/v1/my/settings/{id}``
-    → ``my/settings``; a param-less path stays whole (``records``)."""
+    """``/api/v1/staff/{staff_id}`` → ``staff``;
+    ``/api/v1/my/master/settings/{id}`` → ``my/master/settings``; a
+    param-less path stays whole (``records``)."""
     stripped = path.removeprefix("/api/v1/")
     head, sep, _ = stripped.partition("/{")
     return head if sep else stripped

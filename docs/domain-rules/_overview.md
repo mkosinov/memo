@@ -79,7 +79,7 @@ The legacy code enum with values `pending / confirmed / cancelled / no_show` (ba
 | Delete semantics | Entities |
 |---|---|
 | **Hard-delete with resolutions** + archive endpoints (`POST /archive`, `POST /restore`) | Staff, Location, Service, Material, Client |
-| **Hard-delete** (row physically removed) | Tag, Photo, Visitor, Activity, Record, UserSettings |
+| **Hard-delete** (row physically removed) | Tag, Photo, Visitor, Activity, Record, UserSettings, Specialty |
 | Already hard-delete (untouched) | Payment, Visit |
 | Stays as-is (implicit soft-delete, out of scope) | User, Tariff (carry `is_active`, used e.g. in `admin/setup.py:35`) |
 
@@ -123,7 +123,7 @@ Model/DB → is_active: bool column (UNCHANGED — no migration, no rename)
 - **Photo / UserSettings / Visitor / Position (#324 — wired, этапы 2+3 #346):** **Photo** — зависимая: `photo_tags` (видимая, cascade; фото без тегов ведёт себя как лист); **UserSettings** — лист: `{expected: {}}` (own-only роут, UI-удаления нет); **Visitor** — `visits` (видимая, cascade — визиты умирают вместе с посетителем, решение юзера 21.09: без анонимизации) + `visitor_tags` (auto); **Position** — `staff_positions` (видимая, cascade — должность снимается у сотрудников; системная → 422 `POSITION_IS_SYSTEM` до развилки dry_run/commit). Каскадное удаление визитов пересчитывает статус/места затронутых записей теми же функциями, что одиночное удаление визита — включая клиент-каскад через общий путь (решение юзера 21.09). Единый транспорт шести рутов — форма → probe → guard → развилка (`_delete_family.py`, `DeleteBody`); тест-страж «схема ↔ матрица» + «роуты ↔ матрица» закрепляет декларации (`test_delete_matrix_guard.py`, спека #324 §7).
 - **Archive-aware entities (staff/location/service/material/client)** — **deletion goes to the SAME unified flow (user decision 20.09, supersedes the 17.09 #285 §5 exclusion): dry_run + dialog (choices + «archive instead») + 5s ring + `expected`, bare DELETE → 422, execute-if-clean abolished** — wiring lands in a dedicated follow-up issue. **Archiving itself stays OUT of the scheme: reversible via restore, no preview, no ring.**
 
-The `Expected?` column marks the relations whose ids a **deferred** commit carries in `expected` (per-entity id-sets of the confirmed tree); archive-aware entities are never deferred, so their rows are `—`. Deferred entities in this matrix: records, activities, and tags (#318); + visits/payments/photos/user_settings/visitors/positions (#324); + staff/locations/services/clients (#345 — material is a leaf `{expected: {}}`) — **трекер #346 завершён полностью** (этап 1 = теги #318; этапы 2+3 = #324; этап 4 = архивируемые #345).
+The `Expected?` column marks the relations whose ids a **deferred** commit carries in `expected` (per-entity id-sets of the confirmed tree); archive-aware entities are never deferred, so their rows are `—`. Deferred entities in this matrix: records, activities, and tags (#318); + visits/payments/photos/user_settings/visitors/positions (#324); + staff/locations/services/clients (#345 — material is a leaf `{expected: {}}`); + specialties (#599) — **трекер #346 завершён полностью** (этап 1 = теги #318; этапы 2+3 = #324; этап 4 = архивируемые #345).
 
 | Entity → Relation | Nullable? | Action | Expected? | User choice? |
 |---|---|---|---|---|
@@ -160,6 +160,8 @@ The `Expected?` column marks the relations whose ids a **deferred** commit carri
 | Tag → **visitor_tags** (join, #318) | NOT NULL PK | **cascade** (NOT auto) | `visitor_tags` parent ids | choice: `["cascade"]` |
 | Tag → **record_tags** (join, #318) | NOT NULL PK | **cascade** (NOT auto) | `record_tags` parent ids | choice: `["cascade"]` |
 | Tag → **photo_tags** (join, #318) | NOT NULL PK | **cascade** (NOT auto) | `photo_tags` parent ids | choice: `["cascade"]` |
+| Specialty → **services** (specialty_id, #599) | NOT NULL (R2) | **block** | — | N/A — `allowed_actions: []`; счётчик по всем услугам вкл. архивные (узел «Услуги: N»); S5-сверка id-набора (без items) |
+| Specialty → **staff_specialties** (join, #599) | NOT NULL PK | **cascade** (auto) | — | auto |
 
 **Key rules:**
 
